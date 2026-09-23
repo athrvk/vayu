@@ -130,6 +130,24 @@ describe("hovering an editable token", () => {
 		expect(within(dialog).getByDisplayValue("••••••••")).toBeInTheDocument();
 		expect(document.body.textContent).not.toContain("sk_live_abcdef");
 	});
+
+	/**
+	 * Mounting a fresh `VariablePopover` per open used to key this trigger by
+	 * the open, so opening from a hover replaced the very node the pointer was
+	 * resting on. A DOM node destroyed and recreated under a live pointer is
+	 * reported by the browser as that node being left and a new one entered,
+	 * which retriggered `handleMouseEnter`/`handleMouseLeave` and produced a
+	 * hover-open/close loop - the token's background flashing rather than
+	 * settling. Mutation check: reintroduce a `key` on the popover this
+	 * component renders and this fails.
+	 */
+	it("never replaces the token's own DOM node across a hover-open", () => {
+		const { container } = renderToken();
+		const before = wrapperOf(container);
+		hover(container);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		expect(wrapperOf(container)).toBe(before);
+	});
 });
 
 /**

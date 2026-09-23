@@ -152,8 +152,12 @@ export const TIMING = {
 	 * cancel this timer the instant the pointer is confirmed over the popover's
 	 * content, so the grace only has to outlast the *travel*, not the whole
 	 * visit - a shorter number here costs nothing once the pointer arrives.
+	 * 350ms, the first number tried, was reported still too short live in the
+	 * app - travel time is also however long the reader's hand actually takes,
+	 * not just the geometric distance, so this errs generous rather than
+	 * re-guessing a second unmeasured number.
 	 */
-	VARIABLE_POPOVER_LEAVE_GRACE_MS: 350,
+	VARIABLE_POPOVER_LEAVE_GRACE_MS: 600,
 
 	/** Engine health poll interval while the app is open. */
 	HEALTH_CHECK_INTERVAL_MS: 30_000,

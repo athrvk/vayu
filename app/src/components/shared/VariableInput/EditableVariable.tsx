@@ -66,7 +66,7 @@ export interface EditableVariableProps {
 const POPOVER_CONTENT_SELECTOR = '[data-slot="popover-content"]';
 
 /** How the popover currently open over this token got there. */
-type OpenMode = { reason: "hover" | "keyboard"; key: number } | null;
+type OpenMode = { reason: "hover" | "keyboard" } | null;
 
 export default function EditableVariable({
 	name,
@@ -92,7 +92,6 @@ export default function EditableVariable({
 		: undefined;
 
 	const [openMode, setOpenMode] = useState<OpenMode>(null);
-	const nextKey = useRef(0);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -102,7 +101,7 @@ export default function EditableVariable({
 	const openWith = useCallback(
 		(reason: "hover" | "keyboard") => {
 			clearCloseTimer();
-			setOpenMode({ reason, key: ++nextKey.current });
+			setOpenMode({ reason });
 		},
 		[clearCloseTimer]
 	);
@@ -152,13 +151,13 @@ export default function EditableVariable({
 	 * just moved into, to click its value field or read a shadowed definition.
 	 *
 	 * Delegated on `document`, permanently, rather than a per-open effect that
-	 * looks the content up once it is open: `VariablePopover` mounts a fresh
-	 * instance per open (`key={openMode?.key}`), and Radix's own content does
-	 * not necessarily exist in the DOM yet by the time this component's own
-	 * effect runs after that state change - a real race, not a hypothetical
-	 * one. `mouseover`/`mouseout` bubble (unlike `mouseenter`/`mouseleave`), so
-	 * a listener attached once, before any token ever opens, still catches
-	 * every entry and exit of whichever content is on screen at the time.
+	 * looks the content up once it is open: Radix portals that content in on
+	 * its own schedule, which does not necessarily land in the DOM by the time
+	 * this component's own effect runs after the state change that opened it -
+	 * a real race, not a hypothetical one. `mouseover`/`mouseout` bubble
+	 * (unlike `mouseenter`/`mouseleave`), so a listener attached once, before
+	 * any token ever opens, still catches every entry and exit of whichever
+	 * content is on screen at the time.
 	 */
 	useEffect(() => {
 		const isInContent = (node: EventTarget | null): boolean =>
@@ -220,13 +219,14 @@ export default function EditableVariable({
 
 	return (
 		<VariablePopover
-			// A new instance per open, so `defaultOpen`/`focusOnOpen` - both read
-			// only at mount - carry the right answer for *this* open rather than
-			// the previous one's. `onMouseEnter`/`onMouseLeave` are forwarded onto
-			// the same trigger span regardless of which instance is mounted, so
-			// hover tracking survives the remount even though the DOM node itself
-			// does not.
-			key={openMode?.key ?? "closed"}
+			// One persistent instance for the token's whole life (issue #1220
+			// leave-grace flicker): mounting a fresh one per open, keyed to force
+			// a remount, replaced this exact trigger's DOM node while the pointer
+			// was resting on it. The browser reports that as the old node being
+			// left and the new one entered, which retriggered `handleMouseEnter`/
+			// `handleMouseLeave` and produced a hover-open/close loop - visible as
+			// the token's background repeatedly flashing rather than settling.
+			// `open`/`focusOnOpen` below drive this same instance instead.
 			tabIndex={tabIndex}
 			name={name}
 			varInfo={varInfo}
@@ -236,23 +236,20 @@ export default function EditableVariable({
 			disabled={disabled}
 			origins={origins}
 			writableScopes={writableScopes}
-			defaultOpen={openMode !== null}
+			open={openMode !== null}
 			focusOnOpen={openMode?.reason === "keyboard"}
-			onBeforeOpen={(source) => {
-				// A click never opens by itself any more - it places a caret
-				// instead (`VariableInput/index.tsx`'s `handleContainerClick`),
-				// which needs the click to keep bubbling rather than being
-				// swallowed here. A keyboard open, and the right-click menu's
-				// "Edit variable" (`source: "menu"`), are both a deliberate,
-				// explicit request to edit - not an incidental gesture like
-				// hover or a plain click - so both need a *focused* instance,
-				// which this "closed" one is not: the gesture is answered by
-				// mounting a fresh one instead of opening this one.
-				if (source === "keyboard" || source === "menu") openWith("keyboard");
-				return false;
-			}}
 			onOpenChange={(open) => {
-				if (!open) setOpenMode(null);
+				if (open) {
+					// Only reachable from this trigger's own Enter/Space, or the
+					// right-click menu's "Edit variable" dispatching a marked
+					// click (`lib/context-menu.ts`) - hover drives `openMode`
+					// directly and never reaches here. Both are a deliberate,
+					// explicit request with no hover state behind them, so both
+					// need a focused open, the same as the keyboard chord.
+					if (openMode === null) openWith("keyboard");
+					return;
+				}
+				setOpenMode(null);
 			}}
 			onMouseEnter={handleMouseEnter}
 			onMouseLeave={handleMouseLeave}

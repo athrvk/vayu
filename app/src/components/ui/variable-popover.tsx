@@ -48,7 +48,7 @@
  * a scope that cannot be written is a Create button that does nothing.
  */
 
-import { useState, useRef, useMemo, useId } from "react";
+import { useState, useRef, useMemo, useId, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { DialogCancelButton } from "./dialog-cancel-button";
@@ -183,18 +183,33 @@ export interface VariablePopoverProps {
 	/**
 	 * Open on mount, for a host that has already decided to open it (issue
 	 * #1220): a `{{token}}` in a Monaco editor has no DOM node to click, so the
-	 * editor mounts this over the token's screen rectangle already open.
-	 *
-	 * Deliberately `defaultOpen` and not a controlled `open`: opening seeds the
-	 * edit buffer from `varInfo`, and the initial state below does that for free.
-	 * A controlled prop would need an effect to re-seed on every external open,
-	 * which is the effect that used to reset the buffer under a user mid-type.
+	 * editor mounts this over the token's screen rectangle already open - a
+	 * fresh instance per open, since there is no persistent trigger element to
+	 * drive a controlled `open` on instead.
 	 */
 	defaultOpen?: boolean;
 	/**
+	 * Drives `isOpen` from outside instead of `defaultOpen`'s once-at-mount
+	 * value (issue #1220 hover redesign) - for a host with a real, persistent
+	 * trigger element, like `EditableVariable`'s token, that needs to open the
+	 * *same* instance for more than one reason (a hover with no focus, a
+	 * keyboard chord with one). Mounting a fresh instance per open instead, as
+	 * Monaco's anchor does, replaces that element's own DOM node - invisible for
+	 * an anchor with nothing else on screen, but for a real, hoverable token it
+	 * is a live node destroyed and recreated under the pointer, which the
+	 * browser reports as a leave-then-enter of two different elements. That
+	 * retriggers whatever hover logic is watching, which is how a hover-driven
+	 * remount produced a flicker loop rather than one clean open.
+	 *
+	 * Left undefined, `isOpen` falls back to `defaultOpen`'s local state,
+	 * unchanged from before this prop existed.
+	 */
+	open?: boolean;
+	/**
 	 * Told whenever the popover opens or closes, after the save this component
 	 * already does on close. A host that positioned the trigger itself uses it
-	 * to unmount and to put focus back where it came from.
+	 * to unmount and to put focus back where it came from - or, with `open`
+	 * above, to notice a request to open the same instance it already owns.
 	 */
 	onOpenChange?: (open: boolean) => void;
 	/**
@@ -206,22 +221,6 @@ export interface VariablePopoverProps {
 	 * keyboard user who cannot reach what opened is no better off than before.
 	 */
 	focusOnOpen?: boolean;
-	/**
-	 * Lets a host answer, per gesture, whether *this* mounted instance should
-	 * open at all - returning `false` suppresses the built-in open and the host
-	 * is expected to have done something else about it (issue #1220 hover
-	 * redesign).
-	 *
-	 * The token this component renders is a persistent, always-focusable
-	 * element, but a host that opens differently depending on *how* the token
-	 * was reached - unfocused on hover, focused on a keyboard chord - cannot
-	 * express that with one static `focusOnOpen`: the same trigger has to
-	 * decide, at the moment of the gesture, which correctly-configured instance
-	 * should actually become the open one (`EditableVariable` mounts a fresh
-	 * instance per open, keyed by that decision). Undefined behaves exactly as
-	 * before every source opens this instance.
-	 */
-	onBeforeOpen?: (source: "click" | "keyboard" | "menu") => boolean;
 	/**
 	 * Forwarded straight onto the trigger span (issue #1220 hover redesign): a
 	 * host driving its own hover-open/close timers off this exact token needs
@@ -247,32 +246,50 @@ export function VariablePopover({
 	writableScopes,
 	tabIndex = 0,
 	defaultOpen = false,
+	open,
 	onOpenChange,
 	focusOnOpen = false,
-	onBeforeOpen,
 	onMouseEnter,
 	onMouseLeave,
 }: VariablePopoverProps) {
-	const [isOpen, setIsOpen] = useState(defaultOpen);
+	/*
+	 * Uncontrolled unless a host passes `open` (see that prop's own comment):
+	 * `isOpen` then tracks the prop directly, and `setIsOpen` becomes a no-op
+	 * for the host's own state to drive on the next render via `onOpenChange`
+	 * instead of writing here twice.
+	 */
+	const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+	const isOpen = open ?? uncontrolledOpen;
+	const setIsOpen = (next: boolean) => {
+		if (open === undefined) setUncontrolledOpen(next);
+	};
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
 	const pendingCancelRef = useRef(false);
 
 	/**
-	 * Opening seeds the edit buffer from the variable, and closing drops the
-	 * reveal so a secret is masked again next time.
+	 * Seeds the edit buffer on the transition into open, wherever it came from -
+	 * this component's own trigger, or a controlled `open` a host flipped
+	 * directly (a hover that never touches the trigger at all).
 	 *
-	 * Both belong to the open/close *event*, not to a render: seeding from an
-	 * effect keyed on `isOpen` re-ran whenever the parent handed down a fresh
-	 * `varInfo` object, which reset `editValue` under a user mid-type (the
-	 * reason the effect carried an `exhaustive-deps` suppression).
+	 * Gated on the edge (`isOpen` true, `wasOpen` false) rather than run on every
+	 * `isOpen`/`varInfo` change: an effect that re-seeded whenever the parent
+	 * handed down a fresh `varInfo` object reset `editValue` under a user
+	 * mid-type. The guard makes that impossible - `varInfo` changing while
+	 * already open never re-enters the body - which is what lets one effect
+	 * cover every path safely instead of each host reseeding by hand.
 	 */
-	const openPopover = () => {
-		if (varInfo) {
+	const wasOpenRef = useRef(isOpen);
+	useEffect(() => {
+		if (isOpen && !wasOpenRef.current && varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
+		wasOpenRef.current = isOpen;
+	}, [isOpen, varInfo]);
+
+	const openPopover = () => {
 		setIsOpen(true);
 		onOpenChange?.(true);
 	};
@@ -474,20 +491,18 @@ export function VariablePopover({
 				/*
 				 * A click dispatched by the "Edit variable" menu command
 				 * (`lib/context-menu.ts`) carries this sentinel instead of an
-				 * ordinary click count. It is a deliberate, explicit action like
-				 * the keyboard chord - not an incidental pointer gesture - so it
-				 * is offered to `onBeforeOpen` under its own source rather than
-				 * skipping the check: a host that mounts a focused instance for
-				 * "keyboard" (`EditableVariable`) does the same for "menu".
+				 * ordinary click count - a deliberate, explicit request to open,
+				 * unlike an ordinary pointer click, which places a caret in the
+				 * underlying text instead (`VariableInput/index.tsx`) and must
+				 * open nothing here.
 				 */
-				const source = e.detail === MENU_TRIGGERED_CLICK_DETAIL ? "menu" : "click";
-				if (onBeforeOpen?.(source) === false) {
+				if (e.detail !== MENU_TRIGGERED_CLICK_DETAIL) {
 					/*
 					 * `PopoverTrigger asChild` composes Radix's own click-to-toggle
 					 * handler with this one (`composeEventHandlers`), which still
-					 * runs unless the event's default was prevented - so returning
-					 * here alone would suppress nothing: Radix's own handler would
-					 * open the popover anyway, through the controlled `open` prop.
+					 * runs unless the event's default was prevented - so an ordinary
+					 * click would otherwise open the popover through Radix's own
+					 * handler regardless of anything decided here.
 					 */
 					e.preventDefault();
 					return;
@@ -502,7 +517,6 @@ export function VariablePopover({
 					// where it would otherwise type a space.
 					e.preventDefault();
 					e.stopPropagation();
-					if (onBeforeOpen?.("keyboard") === false) return;
 					openPopover();
 				}
 			}}
