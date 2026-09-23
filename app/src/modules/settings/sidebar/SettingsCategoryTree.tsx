@@ -213,7 +213,7 @@ export default function SettingsCategoryTree() {
 					</>
 				) : (
 					<>
-						<SectionHeading>App Settings</SectionHeading>
+						<SectionHeading>App settings</SectionHeading>
 						<div className="space-y-1 mb-4">
 							{APP_SETTINGS_PANELS.map((panel) => renderCategory(panel.id))}
 						</div>
@@ -221,7 +221,7 @@ export default function SettingsCategoryTree() {
 						{/* Engine Settings Section - depends on the engine `/config` query, so
 					    its loading/error states are scoped here. App Settings above always
 					    render (client-side), so Settings stays usable when the engine is down. */}
-						<SectionHeading icon={Settings}>Engine Settings</SectionHeading>
+						<SectionHeading icon={Settings}>Engine settings</SectionHeading>
 						{isLoading ? (
 							<div className="space-y-2 px-3">
 								<Skeleton className="h-9 w-full" />

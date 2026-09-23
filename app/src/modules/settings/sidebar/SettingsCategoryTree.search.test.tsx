@@ -85,8 +85,8 @@ describe("settings search", () => {
 	it("shows both catalogue sections until something is typed", () => {
 		renderTree();
 
-		expect(screen.getByText("App Settings")).toBeInTheDocument();
-		expect(screen.getByText("Engine Settings")).toBeInTheDocument();
+		expect(screen.getByText("App settings")).toBeInTheDocument();
+		expect(screen.getByText("Engine settings")).toBeInTheDocument();
 		// Mutation check: an empty query must mean "not searching", not "no
 		// matches" - the sections are what the drawer shows by default.
 		expect(screen.queryByText(/result/)).not.toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("settings search", () => {
 
 		expect(screen.getByText("Cache Size")).toBeInTheDocument();
 		expect(screen.getByText("1 result")).toBeInTheDocument();
-		expect(screen.queryByText("App Settings")).not.toBeInTheDocument();
+		expect(screen.queryByText("App settings")).not.toBeInTheDocument();
 		// The subtitle names the owning category and the engine key, so two
 		// similarly-named settings are told apart before the click.
 		expect(screen.getByText(/Data & retention · dbCacheSize/)).toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("settings search", () => {
 	/*
 	 * The bug this file did not catch the first time: the index held the seven
 	 * *panel* titles and the engine entries, so the words printed on the
-	 * Appearance panel - Theme Mode, Color Scheme, the font pickers - matched
+	 * Appearance panel - Theme mode, Color scheme, the font pickers - matched
 	 * nothing at all. These run against the real catalogue, not a fixture,
 	 * because a fixture would have passed then too.
 	 */
@@ -171,11 +171,11 @@ describe("settings search", () => {
 		 * anywhere on the block they find.
 		 */
 		it.each([
-			["theme", "Theme Mode", "appearance", "theme-mode"],
-			["color", "Color Scheme", "appearance", "color-scheme"],
+			["theme", "Theme mode", "appearance", "theme-mode"],
+			["color", "Color scheme", "appearance", "color-scheme"],
 			["font", "Font", "appearance", "ui-font"],
 			["interface", "Font", "appearance", "ui-font"],
-			["dark mode", "Theme Mode", "appearance", "theme-mode"],
+			["dark mode", "Theme mode", "appearance", "theme-mode"],
 			["auto-save", "Auto-save", "general", "auto-save"],
 			["notification", "Position", "notifications", "toast-position"],
 			["severity", "Show", "notifications", "toast-severity"],
@@ -189,11 +189,11 @@ describe("settings search", () => {
 		it("selects the panel and names the block to reveal", () => {
 			renderTree();
 			fireEvent.change(search(), { target: { value: "theme" } });
-			fireEvent.click(screen.getAllByText("Theme Mode")[0]);
+			fireEvent.click(screen.getAllByText("Theme mode")[0]);
 
 			const state = useSettingsStore.getState();
 			expect(state.selectedCategory).toBe("appearance");
-			// The anchor the Appearance panel renders on the Theme Mode card. A
+			// The anchor the Appearance panel renders on the Theme mode card. A
 			// result that only selected the panel would drop the user at the top
 			// of a screen and leave them to scan it.
 			expect(state.highlightedKey).toBe("theme-mode");
@@ -217,6 +217,6 @@ describe("settings search", () => {
 		expect(screen.getByText(/No settings match/)).toBeInTheDocument();
 
 		fireEvent.click(screen.getByLabelText("Clear search"));
-		expect(screen.getByText("App Settings")).toBeInTheDocument();
+		expect(screen.getByText("App settings")).toBeInTheDocument();
 	});
 });

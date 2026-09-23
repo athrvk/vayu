@@ -180,13 +180,13 @@ describe("the restart-required banner", () => {
 		expect(useEngineStore.getState().pendingRestart).toBe(false);
 	});
 
-	it("shows the Restart Required chip on the entry from the flag alone", () => {
+	it("shows the Restart required chip on the entry from the flag alone", () => {
 		renderSettings();
-		expect(screen.getByText("Restart Required")).not.toBeNull();
+		expect(screen.getByText("Restart required")).not.toBeNull();
 
 		cleanup();
 		configEntries = [labelSaysSoButTheFlagDoesNot];
 		renderSettings();
-		expect(screen.queryByText("Restart Required")).toBeNull();
+		expect(screen.queryByText("Restart required")).toBeNull();
 	});
 });

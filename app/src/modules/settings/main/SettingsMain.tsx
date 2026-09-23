@@ -172,8 +172,8 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						<LabelSwap
-							label={isRestarting ? "Restarting..." : "Restart Engine"}
-							states={["Restart Engine", "Restarting..."]}
+							label={isRestarting ? "Restarting…" : "Restart engine"}
+							states={["Restart engine", "Restarting…"]}
 						/>
 					</Button>
 				</div>
@@ -675,7 +675,7 @@ export default function SettingsMain() {
 								{needsRestart && (
 									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold border border-warning/30 bg-warning/15 text-warning-text">
 										<RefreshCw className="w-2.5 h-2.5" />
-										Restart Required
+										Restart required
 									</span>
 								)}
 								{isPendingRestart && (
@@ -882,7 +882,7 @@ export default function SettingsMain() {
 								className="size-icon mr-1.5"
 								data-icon-motion={ICON_MOTION.spinBack}
 							/>
-							Reset to Defaults
+							Reset to defaults
 						</Button>
 						<Button
 							size="sm"
@@ -899,7 +899,7 @@ export default function SettingsMain() {
 									data-icon-motion={ICON_MOTION.press}
 								/>
 							)}
-							Save Changes
+							Save changes
 						</Button>
 					</div>
 				</div>
