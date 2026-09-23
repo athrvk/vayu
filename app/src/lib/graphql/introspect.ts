@@ -158,7 +158,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 	} catch (e) {
 		throw new IntrospectionError(
 			"network",
-			`Could not reach the endpoint: ${e instanceof Error ? e.message : String(e)}`
+			`Couldn't reach the endpoint: ${e instanceof Error ? e.message : String(e)}`
 		);
 	}
 
@@ -218,7 +218,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 		// surfaced as a raw library message about `__schema`.
 		throw new IntrospectionError(
 			"parse",
-			`The introspection result could not be read as a schema: ${e instanceof Error ? e.message : String(e)}`
+			`Couldn't read the introspection result as a schema: ${e instanceof Error ? e.message : String(e)}`
 		);
 	}
 }
