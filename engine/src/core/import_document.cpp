@@ -788,6 +788,9 @@ struct PostmanCounts {
     // (-1)` stands in for "every port".
     json client_certificates = json::array ();
     std::map<std::pair<std::string, int>, std::string> client_certificate_signatures;
+    // The requests each per-request counter grew on, by tally kind - see
+    // `pm_request_named`.
+    std::map<std::string, std::vector<std::string>> named;
 };
 
 /**
@@ -1419,6 +1422,45 @@ void pm_certificate (const json* cert, const std::string& url, PostmanCounts& co
     counts.client_certificates.push_back (std::move (entry));
 }
 
+/// The counters `pm_request` can grow for one request, by tally kind.
+constexpr auto PM_REQUEST_COUNTERS =
+std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
+{ "file_body", &PostmanCounts::skipped_file_body },
+{ "unsupported_method", &PostmanCounts::skipped_unsupported_method },
+{ "unsupported_auth", &PostmanCounts::skipped_unsupported_auth },
+{ "oauth2_dropped_field", &PostmanCounts::oauth2_dropped_field },
+{ "path_variables", &PostmanCounts::skipped_path_variables },
+{ "url_without_raw", &PostmanCounts::skipped_url_without_raw },
+{ "invalid_percent_encoding", &PostmanCounts::invalid_percent_encoding },
+{ "disabled_body", &PostmanCounts::disabled_body },
+{ "certificate", &PostmanCounts::skipped_certificate },
+{ "proxy_config", &PostmanCounts::skipped_proxy },
+{ "non_executable_auth", &PostmanCounts::non_executable },
+});
+
+json pm_request (const json* item, PostmanCounts& counts);
+
+/**
+ * `pm_request`, noting the request's name against every counter it grew, so
+ * the preview can say which request to finish by hand. A diff of the counters
+ * around the call rather than a name threaded into every helper that counts.
+ */
+json pm_request_named (const json* item, PostmanCounts& counts) {
+    std::array<int, PM_REQUEST_COUNTERS.size ()> before{};
+    for (std::size_t i = 0; i < PM_REQUEST_COUNTERS.size (); ++i) {
+        before.at (i) = counts.*(PM_REQUEST_COUNTERS.at (i).second);
+    }
+    json request           = pm_request (item, counts);
+    const std::string name = as_string (&request.at ("name"));
+    for (std::size_t i = 0; i < PM_REQUEST_COUNTERS.size (); ++i) {
+        const auto& [kind, counter] = PM_REQUEST_COUNTERS.at (i);
+        if (counts.*counter > before.at (i)) {
+            counts.named[kind].push_back (name);
+        }
+    }
+    return request;
+}
+
 json pm_request (const json* item, PostmanCounts& counts) {
     const json* declared   = as_record (prop (item, "request"));
     const json empty       = json::object ();
@@ -1505,7 +1547,7 @@ json pm_folder (const json* node, PostmanCounts& counts) {
                 counts.folders += 1;
                 children.push_back (pm_folder (entry, counts));
             } else if (truthy (prop (entry, "request"))) {
-                requests.push_back (pm_request (entry, counts));
+                requests.push_back (pm_request_named (entry, counts));
             }
         }
     }
@@ -1571,16 +1613,23 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("disabled_body", counts.disabled_body);
     tally.add ("certificate", counts.skipped_certificate);
     tally.add ("proxy_config", counts.skipped_proxy);
+    for (const auto& [kind, names] : counts.named) {
+        tally.name_requests (kind, names);
+    }
 
     json meta;
-    meta["format"]              = format;
-    meta["requestCount"]        = counts.requests;
-    meta["folderCount"]         = counts.folders;
-    meta["environmentCount"]    = 0;
-    meta["globalCount"]         = 0;
-    meta["exampleCount"]        = count_examples (collections);
-    meta["skipped"]             = tally.items ();
-    meta["nonExecutableAuth"]   = counts.non_executable;
+    meta["format"]            = format;
+    meta["requestCount"]      = counts.requests;
+    meta["folderCount"]       = counts.folders;
+    meta["environmentCount"]  = 0;
+    meta["globalCount"]       = 0;
+    meta["exampleCount"]      = count_examples (collections);
+    meta["skipped"]           = tally.items ();
+    meta["nonExecutableAuth"] = counts.non_executable;
+    if (const auto named = counts.named.find ("non_executable_auth");
+    named != counts.named.end ()) {
+        meta["nonExecutableAuthRequests"] = named->second;
+    }
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
     return json{ { "collections", std::move (collections) },
@@ -2093,15 +2142,36 @@ class InsomniaTree {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
         } else if (type_is (child, "request")) {
-            requests.push_back (build_request (child, path_variables));
-        } else if (type_is (child, "grpc_request")) {
-            tally_.add ("grpc");
-        } else if (type_is (child, "websocket_request")) {
-            tally_.add ("websocket");
-        } else if (type_is (child, "api_spec")) {
-            tally_.add ("api_spec");
-        } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
-            tally_.add ("unit_test");
+            const int file_bodies           = counts_.file_body;
+            const int path_variables_before = counts_.skipped_path_variables;
+            const int non_executable_before = counts_.non_executable;
+            json request           = build_request (child, path_variables);
+            const std::string name = as_string (&request.at ("name"));
+            if (counts_.file_body > file_bodies) {
+                named_["file_body"].push_back (name);
+            }
+            if (counts_.skipped_path_variables > path_variables_before) {
+                named_["path_variables"].push_back (name);
+            }
+            if (counts_.non_executable > non_executable_before) {
+                named_["non_executable_auth"].push_back (name);
+            }
+            requests.push_back (std::move (request));
+        } else {
+            // What Vayu has no request shape for is still named, so the
+            // preview can say which one did not come across.
+            const json name = resource_name (child, "Untitled");
+            tally_.set_subject (as_string (&name));
+            if (type_is (child, "grpc_request")) {
+                tally_.add ("grpc");
+            } else if (type_is (child, "websocket_request")) {
+                tally_.add ("websocket");
+            } else if (type_is (child, "api_spec")) {
+                tally_.add ("api_spec");
+            } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
+                tally_.add ("unit_test");
+            }
+            tally_.set_subject ({});
         }
     }
 
@@ -2192,6 +2262,22 @@ class InsomniaTree {
     InsomniaCounts counts_;
     ImportTally tally_;
     std::set<std::string> visited_;
+    // The requests a per-request counter grew on, by tally kind.
+    std::map<std::string, std::vector<std::string>> named_;
+
+    public:
+    /// Names the counted kinds after the walk - see `ImportTally::name_requests`.
+    void name_counted () {
+        for (const auto& [kind, names] : named_) {
+            tally_.name_requests (kind, names);
+        }
+    }
+
+    /// The requests whose auth is stored but not sent, by name.
+    [[nodiscard]] std::vector<std::string> non_executable_named () const {
+        const auto named = named_.find ("non_executable_auth");
+        return named == named_.end () ? std::vector<std::string>{} : named->second;
+    }
 };
 
 json parse_insomnia (const json& parsed, const ImportOptions& options) {
@@ -2208,6 +2294,7 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
 
     tree.tally ().add ("file_body", tree.counts ().file_body);
     tree.tally ().add ("path_variables", tree.counts ().skipped_path_variables);
+    tree.name_counted ();
 
     json meta;
     meta["format"]           = "Insomnia Export v4";
@@ -2217,9 +2304,12 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     meta["globalCount"]      = 0;
     // Insomnia v4 exports carry no saved responses - the format has no concept
     // of one, so this is 0 by absence rather than by drop.
-    meta["exampleCount"]        = 0;
-    meta["skipped"]             = tree.tally ().items ();
-    meta["nonExecutableAuth"]   = tree.counts ().non_executable;
+    meta["exampleCount"]      = 0;
+    meta["skipped"]           = tree.tally ().items ();
+    meta["nonExecutableAuth"] = tree.counts ().non_executable;
+    if (std::vector<std::string> named = tree.non_executable_named (); !named.empty ()) {
+        meta["nonExecutableAuthRequests"] = std::move (named);
+    }
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
     return json{ { "collections", std::move (collections) },
@@ -3357,6 +3447,7 @@ walk::Dialect dialect) {
     ImportTree tree (document, tally);
     const std::vector<SpecRequestDraft> drafts = import_drafts_of (document, tally);
     for (const SpecRequestDraft& entry : drafts) {
+        tally.set_subject (entry.draft.name);
         json request = draft_request (entry, tally);
         if (std::optional<json> auth = operation_auth_override (
             entry.security.has_value () ? &*entry.security : nullptr,
@@ -3371,6 +3462,7 @@ walk::Dialect dialect) {
         }
         tree.place (std::move (request), entry);
     }
+    tally.set_subject ({});
     tree.place_carried_requests ();
 
     const json* info         = as_record (prop (&document, "info"));
