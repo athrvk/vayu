@@ -54,7 +54,7 @@ export function validateStartConcurrencyFloor(
 		return "Start must be a number of connections, and at least 1.";
 	}
 	if (startConcurrency < 1) {
-		return `Start (${startConcurrency}) must be at least 1, since the run climbs from it and cannot climb from nothing. The engine rejects a lower start rather than raising it for you.`;
+		return `Start (${startConcurrency}) must be at least 1, since the run climbs from it and can't climb from nothing. The engine rejects a lower start rather than raising it for you.`;
 	}
 	return null;
 }
@@ -97,7 +97,7 @@ export function validateCapacityRange(
 ): string | null {
 	if (mode !== "capacity") return null;
 	if (startConcurrency >= concurrency) {
-		return `The search starts at ${startConcurrency} and stops at ${concurrency}, so it has only one level to measure and cannot find a limit. Lower the start or raise the ceiling.`;
+		return `The search starts at ${startConcurrency} and stops at ${concurrency}, so it has only one level to measure and can't find a limit. Lower the start or raise the ceiling.`;
 	}
 	return null;
 }

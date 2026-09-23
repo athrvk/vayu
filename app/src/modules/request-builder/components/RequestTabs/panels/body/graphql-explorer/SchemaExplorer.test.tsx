@@ -123,7 +123,7 @@ describe("the tree", () => {
 		fireEvent.click(
 			rowNamed("Subscription (not executable)")!.querySelector("[data-tree-toggle]")!
 		);
-		expect(rowNamed("postAdded")!.getAttribute("title")).toContain("cannot be run here");
+		expect(rowNamed("postAdded")!.getAttribute("title")).toContain("can't be run here");
 	});
 
 	it("hands the activated row to the caller rather than editing anything itself", () => {
