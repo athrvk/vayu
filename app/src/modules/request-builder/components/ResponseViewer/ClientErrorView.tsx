@@ -44,7 +44,7 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
  */
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
-		"The server accepted the connection but didn't answer in time. Raise Default Request Timeout in Settings › Network & connectivity, or check the server.",
+		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Default Request Timeout in Settings › Network & connectivity, or check the server.",
 	CONNECTION_FAILED:
 		"Nothing answered at that address. Check the URL, and that the server is running.",
 	DNS_ERROR:

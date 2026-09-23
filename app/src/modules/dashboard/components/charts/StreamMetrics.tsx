@@ -76,8 +76,11 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 			) : stream.capped > 0 ? (
 				<p className="text-label text-muted-foreground">
 					{fmtCount(stream.capped)} of {fmtCount(stream.completions)}{" "}
-					{pluralize(stream.completions, "stream")} were ended by a cap; the rest were
-					closed by the server.
+					{pluralize(stream.completions, "stream")}{" "}
+					{pluralize(stream.capped, "was", "were")} ended by a cap
+					{stream.capped < stream.completions
+						? "; the rest were closed by the server."
+						: "."}
 				</p>
 			) : (
 				<p className="text-label text-muted-foreground">

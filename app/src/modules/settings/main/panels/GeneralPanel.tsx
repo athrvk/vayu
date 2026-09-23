@@ -16,6 +16,7 @@
 
 import { useState, useEffect } from "react";
 import { FolderOpen, Save, Database, RotateCcw, Loader2 } from "lucide-react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import {
 	Card,
 	CardContent,
@@ -111,7 +112,7 @@ export default function GeneralPanel() {
 			showToast(
 				failed === 0
 					? "Run history cleared"
-					: `Couldn't delete ${failed} of ${runs.length} runs`,
+					: `Couldn't delete ${failed} of ${runs.length} ${pluralize(runs.length, "run")}`,
 				failed === 0 ? "success" : "error"
 			);
 		} finally {

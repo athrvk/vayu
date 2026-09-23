@@ -70,8 +70,7 @@ export default function RunMetadata({
 						)}
 						{configuration.duration && (
 							<span className="text-muted-foreground">
-								(for {configuration.duration}{" "}
-								{pluralize(Number(configuration.duration), "second")})
+								(for {configuration.duration})
 							</span>
 						)}
 					</div>

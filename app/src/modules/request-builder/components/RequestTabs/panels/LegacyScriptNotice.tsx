@@ -37,8 +37,8 @@ interface LegacyScriptNoticeProps {
 }
 
 const VARIANT_LABEL: Record<InheritedScriptVariant, string> = {
-	pre: "Pre-request script",
-	post: "Post-request script",
+	pre: "pre-request script",
+	post: "post-request script",
 };
 
 export default function LegacyScriptNotice({ variant, script }: LegacyScriptNoticeProps) {
