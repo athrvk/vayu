@@ -741,7 +741,7 @@ export function useTreeDnd({
 				return;
 			}
 			if (!grandparentId) {
-				setAnnouncement(`${entity.name} cannot move out of ${nameOf(owner)}`);
+				setAnnouncement(`${entity.name} can't move out of ${nameOf(owner)}`);
 				return;
 			}
 			applyPlacement(

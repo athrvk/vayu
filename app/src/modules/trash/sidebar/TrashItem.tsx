@@ -10,6 +10,7 @@ import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { Button, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { formatRelativeTime } from "@/lib/format-time";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { TrashEntry } from "@/types";
 
 interface TrashItemProps {
@@ -21,21 +22,21 @@ interface TrashItemProps {
 }
 
 /**
- * What a delete took with it, as a phrase - "and 3 requests", "and 2 folders,
- * 11 requests" - or nothing at all when the entry stood alone.
+ * What a delete took with it, as a phrase - "and 3 requests", "and 2
+ * collections, 11 requests" - or nothing at all when the entry stood alone.
  *
  * The counts are the engine's, over the cohort that single delete stamped, and
  * they are the one thing a trash row says that the tree could never have shown:
- * a folder in the trash looks exactly like an empty one otherwise, and
+ * a collection in the trash looks exactly like an empty one otherwise, and
  * restoring it is a different-sized act depending on the answer.
  */
 function cascadeSummary(entry: TrashEntry): string | null {
 	const parts: string[] = [];
 	if (entry.collections > 0) {
-		parts.push(`${entry.collections} ${entry.collections === 1 ? "folder" : "folders"}`);
+		parts.push(`${entry.collections} ${pluralize(entry.collections, "collection")}`);
 	}
 	if (entry.requests > 0) {
-		parts.push(`${entry.requests} ${entry.requests === 1 ? "request" : "requests"}`);
+		parts.push(`${entry.requests} ${pluralize(entry.requests, "request")}`);
 	}
 	return parts.length > 0 ? `with ${parts.join(", ")}` : null;
 }

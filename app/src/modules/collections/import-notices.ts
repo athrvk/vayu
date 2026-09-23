@@ -24,6 +24,7 @@
  */
 
 import type { ImportMeta, SkippedItem } from "@/services/importers/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export type NoticeTier = "action" | "note";
 
@@ -299,12 +300,10 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 	}
 	// An OpenAPI upload imports as a file row with nothing attached (#425).
 	if (meta.unattachedFileParts > 0) {
+		const n = meta.unattachedFileParts;
 		notices.push({
 			tier: "action",
-			text:
-				meta.unattachedFileParts === 1
-					? "1 file field needs a file"
-					: `${meta.unattachedFileParts} file fields need files`,
+			text: `${n} ${pluralize(n, "file field")} ${pluralize(n, "needs", "need")} ${pluralize(n, "a file", "files")}`,
 		});
 	}
 	if (meta.nonExecutableAuth > 0) {
@@ -314,9 +313,7 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 			text:
 				meta.nonExecutableAuthRequests && meta.nonExecutableAuthRequests.length > 0
 					? named(phrase, meta.nonExecutableAuthRequests)
-					: meta.nonExecutableAuth === 1
-						? `1 request's ${phrase}`
-						: `${meta.nonExecutableAuth} requests' ${phrase}`,
+					: `${meta.nonExecutableAuth} ${pluralize(meta.nonExecutableAuth, "request's", "requests'")} ${phrase}`,
 		});
 	}
 	// Path grouping builds a tree the document never spelled out (#710); a

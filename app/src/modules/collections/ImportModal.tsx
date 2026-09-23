@@ -65,6 +65,7 @@ import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
@@ -1314,7 +1315,7 @@ function NoticeList({
 }
 
 function varCountLabel(n: number): string {
-	return `${n} ${n === 1 ? "variable" : "variables"}`;
+	return `${n} ${pluralize(n, "variable")}`;
 }
 
 function TreeNode({

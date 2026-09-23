@@ -153,19 +153,19 @@ describe("the list", () => {
 	});
 
 	it("says what the delete took with it, so a restore's size is visible", () => {
-		// A folder in the trash is indistinguishable from an empty one without
-		// this - and restoring it is a very different act at 11 requests.
+		// A collection in the trash is indistinguishable from an empty one
+		// without this - and restoring it is a very different act at 11 requests.
 		state.items = [collectionEntry({ collections: 2, requests: 11 })];
 		renderTrash();
 
-		expect(screen.getByText(/with 2 folders, 11 requests/)).toBeInTheDocument();
+		expect(screen.getByText(/with 2 collections, 11 requests/)).toBeInTheDocument();
 	});
 
 	it("does not pluralise a single child", () => {
 		state.items = [collectionEntry({ collections: 1, requests: 1 })];
 		renderTrash();
 
-		expect(screen.getByText(/with 1 folder, 1 request$/)).toBeInTheDocument();
+		expect(screen.getByText(/with 1 collection, 1 request$/)).toBeInTheDocument();
 	});
 
 	it("states the retention window it read from the engine's config", () => {
