@@ -405,12 +405,14 @@ Because it is the engine's, an agent can ask for the same document over MCP
 (`export_spec`) rather than only through this dialog.
 
 **Which of two things happens depends on whether the collection is bound**, and
-the dialog says which before you download.
+the dialog says which before you download. A bound collection also asks **how
+much to write** - see [Values only, or all edits](#values-only-or-all-edits).
 
 ### A bound collection exports its own document, updated
 
 The document Vayu stored is the one that comes back out - parsed, changed where
-Vayu has something to say, and otherwise left exactly as it was:
+Vayu has something to say, and otherwise left exactly as it was. What follows is
+the default, **Values only**; **All edits** is the section after it.
 
 - **Operations follow the collection.** An operation the document declares that
   no request here claims is removed, and a path left with no operations goes with
@@ -444,7 +446,7 @@ Vayu has something to say, and otherwise left exactly as it was:
   document a value the API never stated. Where the document declares no such
   response at all, the status is not documented from it either - a response the
   contract dropped is not one an export puts back. Each of these is counted in
-  the dialog. It is why exporting a collection you imported and did not edit
+  the export's notes. It is why exporting a collection you imported and did not edit
   gives you back the document you imported - not one with examples it never had.
 - **Everything else survives.** Vendor extensions, `info`, `tags`, `security`,
   components nothing references - all of it is carried through, because export
@@ -457,7 +459,7 @@ Vayu has something to say, and otherwise left exactly as it was:
 - **What the export cannot write, it counts.** This direction writes parameters
   and examples, so a request body, a Params or Headers row the operation
   declares no parameter for, and a request whose method or path you changed after
-  it was matched are each counted in the dialog rather than left to a diff of
+  it was matched are each counted in the export's notes rather than left to a diff of
   the file. The values that do have a home still land - in the operation the
   document declares. A parameter declared by `$ref`, or one the path declares
   for every method under it, is a home: the row is not counted as undeclared,
@@ -477,19 +479,44 @@ overwrite them with values from somewhere else. A sub-collection bound to the
 **same** document is part of this export, because its requests describe these
 very operations - stopping there would remove them as operations nothing claims.
 
-A **Swagger 2.0** document is the one partial case, and it is stated as one:
-operations nothing claims are still removed, but nothing is written *into* an
-operation. 2.0 states parameters and examples in a different vocabulary, and
-half a translation is a file that is neither dialect.
+A **Swagger 2.0** document is the one partial case of **Values only**, and it
+is stated as one: operations nothing claims are still removed, but nothing is
+written *into* an operation. **All edits** writes 2.0's own vocabulary.
 
 If the stored document cannot be read at all, the export stops and says so. It
 does not fall back to the skeleton below - that would silently replace the
 document you meant to update with one that drops everything Vayu does not model.
 
+### Values only, or all edits
+
+An imported spec is usually somebody's contract, and a request you edited in
+Vayu is one client's view of it - so by default the export keeps the contract
+and writes only examples and values into what it already declares. When the
+file should be what you see in Vayu instead, pick **All edits** in the
+dialog. It writes, into the document's own dialect (Swagger 2.0 included):
+
+- each request's name and description, a parameter for every Params or Headers
+  row the operation does not declare, its body (as the example of the declared
+  media type, or a new one), its auth where the operation does not already state
+  it (reusing a scheme the document declares for the same credential), and its
+  saved responses;
+- a new operation for every request the document never declared - one you added
+  in Vayu - filed under its folder's tag;
+- the collection's name, description, base URL and auth at the top of the
+  document;
+- and, as `x-vayu-*` extensions, everything else: scripts and elements at every
+  level, folders and their variables and auth, settings, and the rows exactly as
+  typed (see [Everything Vayu holds](#everything-vayu-holds-travels-with-it)).
+
+It still patches rather than rebuilds - schemas, `$ref`s and everything Vayu does
+not model stay as they were - and it writes nothing a request did not change:
+exporting a collection you imported and did not edit gives back the same
+standard members either way, plus the extensions.
+
 ### A free-form collection exports a skeleton
 
 A collection that was never a spec has no document to update, so it gets a new
-one - **a starting point, not a contract**, and the dialog says exactly that.
+one - **a starting point, not a contract** - and the dialog calls it one.
 Everything in it is something the collection actually holds:
 
 - `info.title` is the collection's name. Its `version` is a placeholder
@@ -510,29 +537,36 @@ Everything in it is something the collection actually holds:
   required path parameter. A token inside a longer segment is left as it is:
   OpenAPI has no syntax for part of a segment.
 - **Folders become tags.** A request nested under a folder is tagged with the
-  full folder path (`Pets/Actions`), which is also declared once at the
-  document's top level. A folder nested more than one level flattens into a
-  single tag on the way back in - `folderStrategy: tags` regroups by tag name
-  flat, never by the original nesting - and that is counted.
+  full folder path (`Pets/Actions`), declared once at the document's top level
+  with the folder's description. The nesting itself, and each folder's
+  variables, auth and scripts, travel as an extension, so a re-import rebuilds
+  the tree as it was.
 - **Auth becomes `securitySchemes` and `security`, for the modes OpenAPI can
   name.** Basic, bearer, an API key in a header or query parameter, and OAuth 2
   with the flow the request actually uses each get a scheme in
   `components.securitySchemes` and a `security` requirement naming it - at the
   document root for the collection's own auth, on the operation only where a
-  request's auth differs from it. A request explicitly set to no auth gets an
-  empty `security: []`; one left to inherit gets no override at all, which is
-  exactly what inheriting a document's default security means. A mode OpenAPI
-  has no scheme for (digest, AWS, NTLM, a custom one) is counted instead.
+  request's auth differs from it. A request left to inherit is resolved the way
+  sending it resolves it - through its folders first - so a request under a
+  folder with its own API key states that API key. A request explicitly set to
+  no auth gets an empty `security: []`; one that inherits the collection's gets
+  no override at all. A mode OpenAPI has no scheme for (digest, AWS, NTLM) gets
+  no `security`, and travels as an extension.
 - **Rows are declared, not interpreted - and say whether they are toggled on.**
   Every Params and Headers row becomes a parameter, disabled ones included - the
   endpoint accepts them either way - and none of them is marked `required`,
   because a toggle is what this request sends, not what the API demands. The
   toggle itself is stated explicitly as `x-vayu-enabled`, since neither a value
   nor its absence says so on its own: a disabled row can carry a value and an
-  enabled one can carry none. `Authorization` and `Content-Type` are left out,
-  the two an import also drops. OpenAPI allows only one Parameter Object per
-  name and location, so two rows sharing both write only the first - the rest
-  are counted, never a second entry the specification forbids.
+  enabled one can carry none. `Authorization` and `Content-Type` are not
+  parameters in OpenAPI (they are `security` and the body's media type), and
+  only one Parameter Object may share a name and location - those rows travel
+  as typed in the extension instead.
+- **Bodies are written as another tool can send them.** JSON as JSON, GraphQL
+  as the `{query, variables}` envelope a GraphQL server receives, XML and text
+  as the text they are, a form as its fields (a file part as `format: binary`)
+  with the enabled values as the example - under the media type your
+  `Content-Type` row names, when it names one.
 - **No schema Vayu did not see.** A request or response body is described only
   where there is a body to read a shape off, and what is written is the shape of
   that one example - types, nothing more - carrying a `description` that says so.
@@ -542,39 +576,48 @@ Everything in it is something the collection actually holds:
   from something that would not parse - and read back the same way, byte for
   byte, rather than re-quoted into a JSON string.
 
+### Everything Vayu holds travels with it
+
+OpenAPI describes an API; a collection also holds how you send to it. So the
+document carries two extensions another tool ignores and Vayu reads back:
+`x-vayu-request` on each operation (the request's name, URL, every row exactly
+as typed, its body in its own mode, auth as set, settings, folder and saved
+responses) and `x-vayu-collection` at the top (the collection's variables, auth
+and data contract, every folder with its description, variables, auth and
+scripts, and any request no operation can hold - one with no path, or a second
+request on a method and path another already has). Importing the exported file
+gives you the collection you exported: the same tree, the same tabs, the same
+values.
+
+**Secrets are the one thing left behind.** A token, password, API-key value,
+client secret or a variable you marked secret is exported empty, and the dialog
+says how many. A value that is just a `{{variable}}` reference is kept - it
+names where the secret lives without being one. A form's file part keeps its
+name but not the path of the file on your machine.
+
+If a document with these extensions is edited by hand and a piece no longer
+makes sense, the import skips that piece, keeps what the rest of the document
+says, and lists it in the import summary.
+
 ### What the counts mean
 
-Both directions state what they could not carry, and the zeros are part of the
-statement: a request whose URL states no path, two requests that reduce to the
-same method and path (the first wins), an example whose media type was never
-recorded, an example stored only in part (the response is written, the body is
-not, in both of those last two). Nothing is dropped quietly.
+The dialog lists only what you would act on or miss, and only when it happened:
+the requests exported (always shown, because none exported is news), secrets
+exported empty, requests other tools will not see (no path of their own, or a
+second request on a method and path another already claimed - Vayu re-imports
+them), examples included, and examples written without a body (no recorded
+media type, or stored only in part).
 
-A bound export states four more things, because it is editing a document
-somebody else wrote: the examples it left alone (already declared there, or
-sampled off a schema when the document was imported), the `$ref` responses and
-`$ref` parameters it did not write into, and the edits this direction has no way
-to express - a request body, a row the operation declares no parameter for, and
-a request whose method or path is no longer the operation it is stamped as.
+A bound export on **Values only** also lists what that mode leaves out: new
+requests not added, requests whose operation the spec no longer declares,
+request bodies and added parameters not written, and examples already in the
+spec. **All edits** lists the new requests it added instead. Both list the
+unused operations removed.
 
-A free-form export states eight things of its own, because a collection holds
-more than OpenAPI has names for: the auth it could not turn into a
-`securityScheme`, a collection variable besides `baseUrl` (a
-document has nowhere else to declare one), a folder nested more than one level
-(flattened to a single tag), a body in a mode this direction has no media type
-for (GraphQL today), a form body's field values (only the names are declared),
-a request holding a non-default execution setting (redirects, TLS verification,
-HTTP version, streaming - OpenAPI describes an API, not how to send to it), an
-example's header besides `Content-Type`, and a Params or Headers row sharing a
-key and location with one already declared (only the first is written). A
-request's or the collection's own elements - a pre- or post-request script
-included - are not one of the eight: they carry through under `x-vayu-elements`,
-a vendor extension key beside `x-vayu-enabled` (issue #1518), rather than
-being dropped. A bound export writes it too, onto an operation the document
-already declares; nothing is written into a Swagger 2.0 document either way.
-A request's mock response mode is the same story under its own key,
-`x-vayu-mock` (issue #1649): a `fixed` or `random` choice carries through
-instead of every mock route reverting to `first` on re-import.
+The export's notes carry every count, zeros included, and more than the dialog
+shows - examples sampled off a schema at import, `$ref` responses and
+parameters left as they were, requests no longer matching the operation they
+are stamped as. MCP's `export_spec` returns them in full.
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

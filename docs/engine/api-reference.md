@@ -2356,7 +2356,8 @@ document is lossless - and has no document to read.
 
 A collection back out as an OpenAPI document - its own bound document updated,
 or a skeleton describing its requests when it binds none. Which of the two runs
-is a fact about the collection rather than a parameter.
+is a fact about the collection rather than a parameter; *how much* a bound export
+writes is the caller's choice (`mode`, below).
 
 **Reads only.** Nothing is stored and the collection is left exactly as it is; a
 POST because the answer is a document rather than a resource, and because the
@@ -2366,7 +2367,8 @@ body carries the format.
 ```json
 {
   "collectionId": "col_9a1f...",   // Required
-  "format": "json"                 // Optional - "json" (default) or "yaml"
+  "format": "json",                // Optional - "json" (default) or "yaml"
+  "mode": "contract"               // Optional - "contract" (default) or "full"
 }
 ```
 
@@ -2406,15 +2408,10 @@ of the export, because its requests describe the very operations being patched.
     "rowsNotDeclared": 1,
     "operationsEdited": 0,
     "vocabularyNotWritten": false,
-    "authDropped": 0,
-    "scriptsDropped": 0,
-    "variablesDropped": 0,
-    "foldersFlattened": 0,
-    "bodiesDropped": 0,
-    "formValuesDropped": 0,
-    "settingsDropped": 0,
-    "exampleHeadersDropped": 0,
-    "duplicateParameterRowsDropped": 0
+    "secretsOmitted": 2,
+    "requestsOnlyInExtension": 0,
+    "operationsAdded": 0,
+    "boundMode": "contract"         // "" for a skeleton
   }
 }
 ```
@@ -2422,6 +2419,26 @@ of the export, because its requests describe the very operations being patched.
 Every count is present, zeros included: "0 requests with no operation" is how a
 bound export states that it carried everything, and a body that omitted its
 zeros would read as complete whether or not it was.
+
+**`mode` - what a bound export may write.** `contract`, the default, treats the
+stored document as the API's contract and writes only what the next three
+paragraphs describe. `full` writes everything the collection holds, into the
+document's own dialect (Swagger 2.0 included): each request's name (as
+`summary`, only where it differs from the name an import would read) and
+description, a parameter for every Params or Headers row the operation does not
+declare (2.0's `type` and `x-example` in a 2.0 document), the body as the media
+type's `example` (2.0: an `in: body` or `formData` parameter, added only where
+the operation declares none), the auth wherever the operation does not already
+state it (a scheme the document declares with the same credential is reused,
+otherwise one is added), saved examples (2.0: the response's `examples` map), a
+new operation for every request the document never declared (`operationsAdded`;
+a new operation in 3.0 or 2.0 with no saved example gets a `default` response,
+which those dialects require), the collection's name, description, base URL and
+auth at the root, and the `x-vayu-*` extensions below. It still never rebuilds:
+schemas, `$ref`s and every member Vayu does not model stay as they were, and a
+request nobody edited writes nothing new into the standard members - an
+unedited export in `full` differs from the stored document only by its
+`x-vayu-*` keys. A skeleton ignores `mode`. Anything else is a `400`.
 
 **A bound export patches the stored bytes, never rebuilds them.** Operations no
 request claims are removed (and a path left with no operations goes with them),
@@ -2451,8 +2468,8 @@ whose members are stored in another order than the document writes them is the
 same example. An export of a spec-origin collection nobody edited is therefore
 the document it was bound to, structurally unchanged.
 
-**The edits it cannot express are counted, not silent.** The bound direction
-writes parameters and examples: a request body is `bodiesNotWritten`, a Params
+**In `contract` mode, the edits it does not write are counted, not silent.**
+It writes parameters and examples: a request body is `bodiesNotWritten`, a Params
 or Headers row the operation declares no parameter for is `rowsNotDeclared`
 (`Authorization` and `Content-Type` excepted - OpenAPI states them as `security`
 and as the body's media type), and a request whose method or path no longer
@@ -2463,10 +2480,9 @@ its name is read through the reference, so a row that has a home is never
 counted as one the document has no place for, and `sharedParametersLeft` is what
 says its *value* was not written.
 
-A **Swagger 2.0** document is the one partial case, reported as
-`vocabularyNotWritten`: operations nothing claims are still removed, but nothing
-is written *into* an operation, because 2.0 states parameters and examples in a
-vocabulary Vayu does not write.
+A **Swagger 2.0** document is the one partial case of `contract` mode, reported
+as `vocabularyNotWritten`: operations nothing claims are still removed, but
+nothing is written *into* an operation. `full` writes 2.0's own vocabulary.
 
 **A skeleton invents nothing.** `{{variable}}` tokens are written as they stand
 in paths (resolving them would export one machine's environment as though the
@@ -2485,31 +2501,50 @@ own, so it is written as the text it is and read back the same way, byte for
 byte, rather than re-quoted into a JSON string.
 
 **It carries what OpenAPI can name, for the modes it has names for** (#1441).
-A folder becomes a `tag` named by its full path, declared once at the document
-root and on every operation under it - a folder nested more than one level
-flattens to a single tag, counted as `foldersFlattened`, since
-`folderStrategy: tags` regroups by tag name flat. Auth becomes
-`components.securitySchemes` plus a `security` requirement - basic and bearer
-as `http`, an API key as `apiKey`, OAuth 2 as `oauth2` with the flow the
-request uses - at the document root for the collection's own auth and on the
-operation only where a request's differs from it; an explicit no-auth request
-is `security: []`, one left to inherit gets no override, and a mode with no
-OpenAPI name (`digest`, `aws`, `ntlm`, an unrecognized one) is
-`authDropped`. What is left with nowhere to go is counted rather than
-guessed at: `variablesDropped`
-(a collection variable besides `baseUrl`), `bodiesDropped` (a body in a mode
-this direction has no media type for - GraphQL today), `formValuesDropped` (a
-form body's field values, its names still declared), `settingsDropped` (a
-non-default redirect, TLS, HTTP-version or streaming setting), and
-`exampleHeadersDropped` (a stored example's header besides `Content-Type`).
-A Params or Headers row sharing a key and location with an earlier row would
-produce two Parameter Objects for the same name+location, which OpenAPI
-forbids - only the first is written and the rest are counted as
-`duplicateParameterRowsDropped`. `scriptsDropped` stays in the response - a
-zero is a statement too - but now always reads `0`: a request's or the
-collection's `elements` (scripts included) round-trip through
-`x-vayu-elements` instead (issue #1518, below), so nothing about them is
-dropped any more.
+A folder becomes a `tag` named by its full path (`Users/Admin`), described by
+the folder's own description and declared once at the document root and on
+every operation under it. Auth becomes `components.securitySchemes` plus a
+`security` requirement - basic and bearer as `http`, an API key as `apiKey`,
+OAuth 2 as `oauth2` with the flow the request uses - at the document root for
+the collection's own auth and on the operation only where a request's differs
+from it. An `inherit` request is resolved the way `POST /compose` resolves it,
+through its folders (the nearest one with a credential, `noauth` ending the
+walk), so a request under a folder with its own auth states that folder's
+scheme; an explicit no-auth request is `security: []`, one left to inherit gets
+no override, and a mode with no OpenAPI name (`digest`, `aws`, `ntlm`) gets no
+`security` at all. A body is written as the example another tool can send: JSON
+and JSON-RPC as JSON, GraphQL as the `{query, variables}` envelope a
+GraphQL-over-HTTP server receives, XML and text as the text they are, a form as
+its fields (file parts `format: binary`) with the enabled text values as the
+example - filed under the media type an enabled `Content-Type` row names
+(`application/vnd.api+json`) rather than the mode's generic one. What the
+standard members cannot state exactly travels in `x-vayu-request` and
+`x-vayu-collection` (below), so every one of these reads back as it was.
+
+**`x-vayu-request` and `x-vayu-collection` carry the rest of the collection**
+(`core/vayu_extensions.hpp`). A skeleton writes them always, a `full` bound
+export too; `contract` mode writes neither. On an operation, `x-vayu-request`
+holds the request as the UI does: `name`, `method`, `url` (verbatim, `{{...}}`
+and all), `order`, the `folder` path it is filed under, every Params and Headers
+row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
+all), the body in its own mode, the auth exactly as set (`inherit` included),
+the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
+`verifySSL`, `stream`), every saved example with its headers, and the mock mode
+with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
+collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
+folder (`path`, `description`, `variables`, `auth`, `elements`, empty folders
+included), and the `requests` no operation can hold - a URL with no path, or a
+second request on a method and path another already claimed - counted as
+`requestsOnlyInExtension` (and under `requestsWithoutPath` /
+`duplicateOperations`, which say why). Another tool ignores both keys; Vayu's
+importer reads them back (see [`POST /import/parse`](#post-importparse)).
+
+**Secrets never leave.** Every token, password, API-key value, client secret,
+AWS key and variable marked secret, at every level either key writes, is
+written as `""` and counted as `secretsOmitted` - except a value that is one
+`{{variable}}` reference and nothing else, which names where the secret lives
+without being one. A form's file part keeps its name and declared file name,
+never the local path it was read from.
 
 **`x-vayu-elements`** carries a request's or the collection's whole `elements`
 array verbatim, the same vendor-extension convention `x-vayu-enabled` already
@@ -2517,9 +2552,9 @@ established - never a standard OpenAPI field, so writing it is never
 "rewriting the user's contract". A skeleton export writes it on every
 operation and at the document root whenever the corresponding `elements` array
 is non-empty; a bound export writes it on an operation the document already
-declares (gated on `dialect.writable`, the same gate every other bound
-field this reference names above relies on - nothing is written into a
-Swagger 2.0 document's operations at all). The importer reads it back
+declares - in `contract` mode only into a 3.x document (nothing is written into
+a Swagger 2.0 document's operations at all), in `full` mode into either, and at
+the root. The importer reads it back
 verbatim, validated against the live element registry - a document hand-edited
 into an invalid array is not applied and is counted under `elements_invalid`
 in `meta.skipped` (see [`POST /import/parse`](#post-importparse)) rather than
@@ -2539,8 +2574,8 @@ usual rule) the chosen example was written under, resolved by value rather
 than assumed - a target this export could not itself write (a truncated body,
 no recorded media type, a response the document does not declare) is the same
 "nothing to name" case as the mode staying `"first"`, and gets no key either.
-Gated on `dialect.writable` exactly like `x-vayu-elements`: nothing is written
-into a Swagger 2.0 document's operations at all. The importer reads it back
+Gated like `x-vayu-elements`: `contract` mode writes nothing into a Swagger
+2.0 document's operations. The importer reads it back
 next to `x-vayu-elements`, matching `example` against the imported example
 that carries the same OpenAPI `examples` map key (the engine-side-only
 `specExampleKey` provenance field, issue #1457) and setting
@@ -2551,8 +2586,8 @@ does - counted as `mock_example_missing` in `meta.skipped` and left on
 not there. Not read on the sync/diff path, for the same reason
 `x-vayu-elements` is not.
 
-**Errors:** `400` for a missing or empty `collectionId`, or a `format` other
-than `json`/`yaml`. `404` when the collection does not exist. `409` when the
+**Errors:** `400` for a missing or empty `collectionId`, a `format` other than
+`json`/`yaml`, or a `mode` other than `contract`/`full`. `404` when the collection does not exist. `409` when the
 collection's binding names a document that is not stored, or when the stored
 bytes will not read as an OpenAPI object - the export refuses rather than
 falling back to a skeleton, which would silently replace the document the caller
@@ -2974,7 +3009,8 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
 `unmapped_body`, `unresolved_base_url`, `unsupported_auth`, `path_variables`,
-`url_without_raw`, `variable_metadata`, `elements_invalid`. Not every kind is a
+`url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
+`vayu_extension_invalid`. Not every kind is a
 loss: `default_response`, `path_variables` and `url_without_raw` count a mapping
 the import made rather than something it dropped (see
 `docs/app/import-collections/postman.md`). An import that loses something and
@@ -2989,6 +3025,22 @@ first-encountered order. `meta.folderStrategy`
 (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
 folders, since a document that declares no operation tags gets a tree it never
 spelled out.
+
+**A document Vayu exported reads back as the collection it came from.** An
+operation's `x-vayu-request` and the root's `x-vayu-collection` (see
+[`POST /specs/export`](#post-specsexport)) are applied over what the standard
+members produced: the request's name, method, URL, rows, body, auth, settings
+and saved examples, and the collection's variables, auth, data contract and
+whole folder tree. With `x-vayu-collection` present the document states its own
+tree, so folders nest as it says, each request is filed under its
+`x-vayu-request.folder` in its stored order, a request with none stays on the
+root (no folder named after its path, and no `folderStrategy`), and the
+`requests` no operation could hold are created too. A document is a file anyone
+can edit, so none of it is trusted: every piece is checked against what the
+write routes accept before it replaces anything, and a piece that fails is
+dropped, counted as `vayu_extension_invalid`, and leaves the standard reading in
+place - never a refused import. Neither key is read on the sync/diff path, for
+the reason `x-vayu-elements` is not.
 
 **Errors:**
 - `400` `Invalid 'content': must be the document's text`, and

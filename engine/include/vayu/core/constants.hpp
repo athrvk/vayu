@@ -881,6 +881,22 @@ constexpr const char* ORIGIN_USER   = "user";
 } // namespace request_example
 
 /**
+ * @brief Bounds on a declared data contract (issue #599), stated here rather
+ * than left implicit - read by the collection write route and by the import of
+ * an exported collection's own contract (`vayu_extensions.hpp`).
+ *
+ * A column name is a `{{data.<name>}}` token's identifier and a header cell of a
+ * CSV, so 256 characters is far past anything a real file carries; 1024 columns
+ * likewise. They exist so a malformed or hostile payload cannot store a blob
+ * that every later reader has to walk - the schema is read on every plan
+ * resolution that refuses a data token.
+ */
+namespace data_schema {
+constexpr size_t MAX_COLUMNS      = 1024;
+constexpr size_t MAX_COLUMN_CHARS = 256;
+} // namespace data_schema
+
+/**
  * @brief OpenAPI document bounds (issue #637).
  */
 namespace spec_document {

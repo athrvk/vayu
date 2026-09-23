@@ -59,15 +59,10 @@ function notes(overrides: Partial<ExportNotes> = {}): ExportNotes {
 		rowsNotDeclared: 0,
 		operationsEdited: 0,
 		vocabularyNotWritten: false,
-		authDropped: 0,
-		scriptsDropped: 0,
-		variablesDropped: 0,
-		foldersFlattened: 0,
-		bodiesDropped: 0,
-		formValuesDropped: 0,
-		settingsDropped: 0,
-		exampleHeadersDropped: 0,
-		duplicateParameterRowsDropped: 0,
+		secretsOmitted: 0,
+		requestsOnlyInExtension: 0,
+		operationsAdded: 0,
+		boundMode: "contract",
 		...overrides,
 	};
 }
@@ -81,7 +76,7 @@ function answer(overrides: Partial<SpecExportResponse> = {}): SpecExportResponse
 	};
 }
 
-function collection(): Collection {
+function collection(overrides: Partial<Collection> = {}): Collection {
 	return {
 		id: "col_1",
 		name: "Petstore",
@@ -92,6 +87,7 @@ function collection(): Collection {
 		elements: [],
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
+		...overrides,
 	};
 }
 
@@ -121,9 +117,16 @@ function captureDownload() {
 	};
 }
 
-function open() {
-	render(withQueryClient(<ExportSpecDialog collection={collection()} onOpenChange={vi.fn()} />));
+function open(overrides: Partial<Collection> = {}) {
+	render(
+		withQueryClient(
+			<ExportSpecDialog collection={collection(overrides)} onOpenChange={vi.fn()} />
+		)
+	);
 }
+
+/** A collection bound to a stored document - the one kind asked how much to write. */
+const BOUND: Partial<Collection> = { openapi: { specId: "spec_1", specHash: "h", syncedAt: 1 } };
 
 /**
  * The one question both in-flight indicators answer (issue #1311): the
@@ -154,16 +157,33 @@ describe("ExportSpecDialog", () => {
 	it("says it is updating the collection's own document, and names what it left out", async () => {
 		open();
 
-		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
+		expect(await screen.findByText(/values updated/)).toBeTruthy();
 		expect(screen.getByText(/OpenAPI 3.0.3/)).toBeTruthy();
 		// The counts are one list item each, and each item mixes an element with
 		// text - so they are read as text content rather than matched node by node.
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
-		expect(lines).toContain("1 operation removed - nothing here claims it");
-		expect(lines).toContain(
-			"1 request with no operation identity - not written, bind the collection to give them one"
+		expect(lines).toEqual([
+			"1 request exported",
+			"1 new request not added - choose All edits",
+			"1 unused operation removed",
+		]);
+	});
+
+	it("lists only the counts that happened, but always the headline", async () => {
+		exportSpec.mockResolvedValue(
+			answer({
+				notes: notes({
+					requestsExported: 0,
+					requestsWithoutOperation: 0,
+					operationsRemoved: 0,
+				}),
+			})
 		);
-		expect(lines).toContain("1 request exported as an operation");
+		open();
+
+		await screen.findByText(/values updated/);
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toEqual(["0 requests exported"]);
 	});
 
 	it("names what a bound export could not write in, singular and plural alike", async () => {
@@ -176,27 +196,38 @@ describe("ExportSpecDialog", () => {
 					bodiesNotWritten: 3,
 					rowsNotDeclared: 1,
 					operationsEdited: 1,
+					operationsNotInDocument: 1,
+					examplesWithoutMediaType: 1,
+					examplesTruncated: 1,
 				}),
 			})
 		);
 		open();
 
-		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
+		expect(await screen.findByText(/values updated/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
-		expect(lines).toContain("2 examples already declared in the document - nothing to write");
-		expect(lines).toContain(
-			"1 example the import sampled from a schema - not written back as the contract's own"
+		expect(lines).toContain("2 examples already in the spec");
+		expect(lines).toContain("3 request bodies not written");
+		expect(lines).toContain("1 added parameter not written");
+		expect(lines).toContain("1 request no longer in the spec - skipped");
+		// Two reasons, one outcome for the reader: the status is there, the body is not.
+		expect(lines).toContain("2 examples without a body");
+		// $ref internals and import-time samples lose nothing the user made; the
+		// engine's notes still carry them for MCP.
+		expect(lines.some((line) => /\$ref|sampled|stamped/.test(line ?? ""))).toBe(false);
+	});
+
+	it("tells a Swagger 2.0 contract export that values need All edits", async () => {
+		exportSpec.mockResolvedValue(
+			answer({ notes: notes({ dialect: "Swagger 2.0", vocabularyNotWritten: true }) })
 		);
-		expect(lines).toContain(
-			"1 $ref response left as it is - a reference takes no siblings, and the component it names is shared"
-		);
-		expect(lines).toContain(
-			"3 requests whose body is not written - this direction writes parameters and examples"
-		);
-		expect(lines).toContain("1 row the operation declares no parameter for - not written");
-		expect(lines).toContain(
-			"1 request no longer matching the operation it is stamped as - values land in the operation the document declares"
-		);
+		open(BOUND);
+
+		expect(
+			await screen.findByText(
+				"Swagger 2.0: values are not updated in this mode. Choose All edits to write them."
+			)
+		).toBeTruthy();
 	});
 
 	it("downloads the document under the name the engine gave it, in the chosen format", async () => {
@@ -205,7 +236,7 @@ describe("ExportSpecDialog", () => {
 
 		// The summary appearing is what says the read is in - Download is disabled
 		// until then, and a click on a disabled button is not a download.
-		await screen.findByText(/own document, updated/);
+		await screen.findByText(/values updated/);
 		fireEvent.click(screen.getByRole("button", { name: "Download" }));
 		const json = await download.read();
 		expect(json.fileName).toBe("petstore.openapi.json");
@@ -217,7 +248,11 @@ describe("ExportSpecDialog", () => {
 		);
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
 		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
-		expect(exportSpec.mock.calls[1][0]).toEqual({ collectionId: "col_1", format: "yaml" });
+		expect(exportSpec.mock.calls[1][0]).toEqual({
+			collectionId: "col_1",
+			format: "yaml",
+			mode: "contract",
+		});
 		// The other format is a second read, not a re-render: the in-flight
 		// indicator going away is what says its answer is the one Download holds.
 		await waitFor(() => expect(assembling()).toBeNull());
@@ -241,60 +276,67 @@ describe("ExportSpecDialog", () => {
 		);
 		open();
 
-		expect(await screen.findByText(/A skeleton document/)).toBeTruthy();
-		expect(screen.getByText(/starting point, not a contract/)).toBeTruthy();
+		expect(await screen.findByText(/New OpenAPI document/)).toBeTruthy();
+		expect(screen.getByText(/A starting point/)).toBeTruthy();
 		expect(screen.getByText(/OpenAPI 3.1.0/)).toBeTruthy();
 	});
 
-	it("names what a free-form export could not carry, singular and plural alike", async () => {
+	it("names what a free-form export carries only as an extension, and the secrets it left out", async () => {
 		exportSpec.mockResolvedValue(
 			answer({
 				notes: notes({
 					direction: "skeleton",
 					dialect: "OpenAPI 3.1.0",
-					operationsRemoved: 0,
+					boundMode: "",
+					operationsRemoved: 1,
 					requestsWithoutOperation: 0,
-					authDropped: 1,
-					scriptsDropped: 2,
-					variablesDropped: 3,
-					foldersFlattened: 1,
-					bodiesDropped: 1,
-					formValuesDropped: 1,
-					settingsDropped: 1,
-					exampleHeadersDropped: 2,
-					duplicateParameterRowsDropped: 1,
+					requestsOnlyInExtension: 1,
+					secretsOmitted: 3,
 				}),
 			})
 		);
 		open();
 
-		expect(await screen.findByText(/A skeleton document/)).toBeTruthy();
+		expect(await screen.findByText(/New OpenAPI document/)).toBeTruthy();
+		expect(screen.getByText(/so Vayu can re-import it/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
-		expect(lines).toContain(
-			"1 row sharing a key and location with an earlier row - only the first is declared"
+		expect(lines).toContain("1 request not visible to other tools");
+		expect(lines).toContain("3 secrets exported empty");
+		// A skeleton has no document of its own: nothing was removed from one,
+		// even when the notes carry a stray count.
+		expect(lines.some((line) => line?.includes("removed"))).toBe(false);
+	});
+
+	it("asks a bound collection how much to write, and keeps the contract by default", async () => {
+		open(BOUND);
+		await screen.findByText(/values updated/);
+		expect(exportSpec.mock.calls[0][0].mode).toBe("contract");
+
+		exportSpec.mockResolvedValue(
+			answer({ notes: notes({ boundMode: "full", operationsAdded: 2, secretsOmitted: 1 }) })
 		);
-		expect(lines).toContain(
-			"1 request whose auth OpenAPI has no securityScheme for - not written"
-		);
-		expect(lines).toContain(
-			"2 requests carrying a pre- or post-request script - OpenAPI has no operation-scoped hook for one"
-		);
-		expect(lines).toContain(
-			"3 collection variables besides baseUrl - a document has nowhere else to declare one"
-		);
-		expect(lines).toContain(
-			"1 request whose folder nests more than one level - written as a single flat tag"
-		);
-		expect(lines).toContain(
-			"1 request whose body is in a mode this direction has no media type for"
-		);
-		expect(lines).toContain(
-			"1 request whose form body declares field names but not their values"
-		);
-		expect(lines).toContain(
-			"1 request carrying a non-default execution setting - redirects, TLS, HTTP version, streaming"
-		);
-		expect(lines).toContain("2 examples carrying a header besides Content-Type - not written");
+		// The hint under the toggle says what the chosen mode does.
+		expect(screen.getByText(/The spec's structure stays as it is/)).toBeTruthy();
+		fireEvent.click(screen.getByRole("radio", { name: "All edits" }));
+		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
+		expect(exportSpec.mock.calls[1][0]).toEqual({
+			collectionId: "col_1",
+			format: "json",
+			mode: "full",
+		});
+		expect(await screen.findByText(/all edits applied/)).toBeTruthy();
+		expect(screen.getByText(/new requests included/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain("2 new requests added");
+		expect(lines).toContain("1 secret exported empty");
+		// The contract mode's "not added" line says nothing about this one.
+		expect(lines.some((line) => line?.includes("not added"))).toBe(false);
+	});
+
+	it("does not ask a free-form collection how much to write", async () => {
+		open();
+		await screen.findByText(/values updated/);
+		expect(screen.queryByRole("radio", { name: "All edits" })).toBeNull();
 	});
 
 	it("shows the engine's own sentence when there is no document, and downloads nothing", async () => {
@@ -317,7 +359,7 @@ describe("ExportSpecDialog", () => {
 	it("keeps the summary on screen while the other format assembles", async () => {
 		const download = captureDownload();
 		open();
-		await screen.findByText(/own document, updated/);
+		await screen.findByText(/values updated/);
 
 		const yaml = deferred();
 		exportSpec.mockReturnValue(yaml.promise);
@@ -328,7 +370,7 @@ describe("ExportSpecDialog", () => {
 		// collection, which the serialisation does not change, so it stays - and
 		// the read says so beside the toggle instead.
 		await waitFor(() => expect(assembling()).not.toBeNull());
-		expect(screen.getByText(/own document, updated/)).toBeTruthy();
+		expect(screen.getByText(/values updated/)).toBeTruthy();
 		expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
 		// What is held under it is still JSON's text, so neither button may act
 		// on it: a Copy here would put JSON on the clipboard under a YAML toggle.
@@ -353,22 +395,19 @@ describe("ExportSpecDialog", () => {
 		// the arriving card would push the dialog's edges away from.
 		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
 		expect(placeholder.className).toContain("surface-sunken");
-		// A heading bar, two for the paragraph that wraps under it, and a row per
-		// count. The skeleton direction lists one more row than the bound
-		// direction since issue #1465 (fifteen vs fourteen), and the placeholder
-		// holds the larger of the two so neither answer grows the dialog when it
-		// lands. jsdom measures no heights, so the row counts those heights come
-		// from are what a test can hold.
-		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(18);
+		// A heading bar, one for the sentence under it, and a typical answer's
+		// rows. jsdom measures no heights, so the row count those heights come
+		// from is what a test can hold.
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(6);
 
 		first.settle(answer());
-		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
+		expect(await screen.findByText(/values updated/)).toBeTruthy();
 		expect(assembling()).toBeNull();
 	});
 
 	it("does not leave the previous format's summary under an error", async () => {
 		open();
-		await screen.findByText(/own document, updated/);
+		await screen.findByText(/values updated/);
 
 		exportSpec.mockRejectedValue(new Error("The stored document could not be read"));
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
@@ -377,7 +416,7 @@ describe("ExportSpecDialog", () => {
 		// that failed: what is on screen has to be the format on the toggle, and
 		// there is nothing to download for it.
 		expect(await screen.findByText("The document could not be assembled")).toBeTruthy();
-		expect(screen.queryByText(/own document, updated/)).toBeNull();
+		expect(screen.queryByText(/values updated/)).toBeNull();
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true
 		);
@@ -386,7 +425,7 @@ describe("ExportSpecDialog", () => {
 	it("asks for each format once, so toggling back is free", async () => {
 		open();
 
-		await screen.findByText(/own document, updated/);
+		await screen.findByText(/values updated/);
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
 		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
 		fireEvent.click(screen.getByRole("radio", { name: "JSON" }));

@@ -537,6 +537,7 @@ add_library(vayu_core STATIC
     src/core/openapi_document.cpp
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
+    src/core/vayu_extensions.cpp
     src/core/path_template.cpp
     src/core/spec_binding.cpp
     src/core/spec_diff.cpp

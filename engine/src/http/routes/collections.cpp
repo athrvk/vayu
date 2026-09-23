@@ -10,6 +10,7 @@
  * @brief Collection management routes
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -95,17 +96,8 @@ const std::string& self_id) {
     return max_order + 1;
 }
 
-/**
- * Bounds on a declared data contract, stated here rather than left implicit.
- *
- * A column name is a `{{data.<name>}}` token's identifier and a header cell of a
- * CSV, so 256 characters is far past anything a real file carries; 1024 columns
- * likewise. They exist so a malformed or hostile payload cannot store a blob
- * that every later reader has to walk - the schema is read on every plan
- * resolution that refuses a data token.
- */
-constexpr size_t MAX_DATA_SCHEMA_COLUMNS      = 1024;
-constexpr size_t MAX_DATA_SCHEMA_COLUMN_CHARS = 256;
+using vayu::core::constants::data_schema::MAX_COLUMN_CHARS;
+using vayu::core::constants::data_schema::MAX_COLUMNS;
 
 /**
  * Contents-validation for `dataSchema`, run after `apply_json_field` has settled
@@ -126,10 +118,10 @@ static RouteResult validate_data_schema (const nlohmann::json& schema) {
         if (!columns.is_array ()) {
             return route_error (400, "Invalid 'dataSchema.columns': must be an array of strings");
         }
-        if (columns.size () > MAX_DATA_SCHEMA_COLUMNS) {
+        if (columns.size () > MAX_COLUMNS) {
             return route_error (400,
             "Invalid 'dataSchema.columns': " + std::to_string (columns.size ()) +
-            " columns, over the limit of " + std::to_string (MAX_DATA_SCHEMA_COLUMNS));
+            " columns, over the limit of " + std::to_string (MAX_COLUMNS));
         }
         std::unordered_set<std::string> seen;
         for (const auto& column : columns) {
@@ -142,10 +134,10 @@ static RouteResult validate_data_schema (const nlohmann::json& schema) {
                 return route_error (400,
                 "Invalid 'dataSchema.columns': a column name cannot be empty");
             }
-            if (name.size () > MAX_DATA_SCHEMA_COLUMN_CHARS) {
+            if (name.size () > MAX_COLUMN_CHARS) {
                 return route_error (400,
                 "Invalid 'dataSchema.columns': a column name is longer than " +
-                std::to_string (MAX_DATA_SCHEMA_COLUMN_CHARS) + " characters");
+                std::to_string (MAX_COLUMN_CHARS) + " characters");
             }
             if (!seen.insert (name).second) {
                 return route_error (400,

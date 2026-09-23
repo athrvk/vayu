@@ -6,9 +6,12 @@
  */
 
 import type {
+	CollectionDataSchema,
 	HttpMethod,
+	HttpVersion,
 	ImportApplyClientCertificate,
 	KeyValueEntry,
+	MockResponseMode,
 	RequestBody,
 	RequestAuth,
 	SpecOperation,
@@ -259,6 +262,14 @@ export interface SkippedItem {
 		 */
 		| "mock_example_missing"
 		/**
+		 * A piece of an `x-vayu-request` or `x-vayu-collection` (an OpenAPI
+		 * document a Vayu export wrote) that failed its check once the document
+		 * was hand-edited - a body in no mode Vayu has, a row with no key.
+		 * Dropped and counted, and the request keeps what the standard members
+		 * said, rather than a malformed piece reaching a write route.
+		 */
+		| "vayu_extension_invalid"
+		/**
 		 * A `.jmx` test plan's own class name, for one this parser has no mapping
 		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
 		 * third-party plugin adds more), so this is not a closed set the way every
@@ -389,6 +400,14 @@ export interface RequestDraft {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	/**
+	 * The rest of the Settings tab, when the source states it - a Vayu export
+	 * does (`x-vayu-request.settings`), and absent means "engine default" for
+	 * the same reason as the two above.
+	 */
+	verifySSL?: boolean;
+	httpVersion?: HttpVersion;
+	stream?: boolean;
+	/**
 	 * Saved example responses, in the order the source listed them - which the
 	 * engine stores as their `order`, because "the first example" is what a mock
 	 * server will answer with. Optional: a parser that has no concept of
@@ -402,6 +421,13 @@ export interface RequestDraft {
 	 * identity a re-fetch could never match.
 	 */
 	specOperation?: SpecOperation;
+	/**
+	 * Which saved example a mock answers with, when the source states it
+	 * (`x-vayu-mock` / `x-vayu-request`, issue #1649). `mockExampleIndex` names
+	 * the `"fixed"` target by position in {@link examples}: no id exists yet.
+	 */
+	mockResponseMode?: MockResponseMode;
+	mockExampleIndex?: number;
 }
 
 /**
@@ -435,6 +461,8 @@ export interface CollectionDraft {
 	auth: Exclude<RequestAuth, { mode: "inherit" }>; // collections never inherit
 	/** See {@link RequestDraft.elements}. */
 	elements: unknown[];
+	/** The data contract, when the source states one - a Vayu export does. */
+	dataSchema?: CollectionDataSchema;
 	children: CollectionDraft[];
 	requests: RequestDraft[];
 	/**

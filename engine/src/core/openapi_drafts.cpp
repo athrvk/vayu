@@ -673,6 +673,47 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
 /// needs the same rule for the same reason.
 std::string example_body_text (const json& value);
 
+/// The media object of an XML type in a 3.x `content` map (`application/xml`,
+/// `text/xml`, or any `+xml` suffix), or `nullptr`.
+const json* find_xml_media (const json& content) {
+    for (auto entry = content.begin (); entry != content.end (); ++entry) {
+        const std::string key = vayu::utils::ascii_lower (entry.key ());
+        if (key == "application/xml" || key == "text/xml" ||
+        (key.size () >= 4 && key.compare (key.size () - 4, 4, "+xml") == 0)) {
+            return as_record (&entry.value ());
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * A `text/plain` or XML request body (3.x), its `example` as the text it is -
+ * never parsed or sampled - or nothing when @p content declares neither.
+ *
+ * The `example` is the whole reason a skeleton export writes these media
+ * types at all (issue #1441): reading only `mode` back left the content
+ * behind on every round trip. Vayu has an `xml` mode, which the export writes
+ * as `application/xml`.
+ */
+std::optional<DraftBody> text_body_v3 (const json& content) {
+    DraftBody body;
+    const json* media = nullptr;
+    if (const json* text_media = prop (&content, "text/plain"); truthy (text_media)) {
+        body.mode = "text";
+        media     = text_media;
+    } else if (const json* xml_media = find_xml_media (content); xml_media != nullptr) {
+        body.mode = "xml";
+        media     = xml_media;
+    } else {
+        return std::nullopt;
+    }
+    if (const json* example = prop (media, "example");
+    example != nullptr && !example->is_null ()) {
+        body.content = example_body_text (*example);
+    }
+    return body;
+}
+
 /// An operation's `requestBody` → the request's body (3.x).
 DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally* tally) {
     DraftBody body;
@@ -701,16 +742,8 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         body.content = example_body_text (sample);
         return body;
     }
-    if (const json* text_media = prop (content, "text/plain"); truthy (text_media)) {
-        body.mode = "text";
-        // The `example` is the whole reason a skeleton export writes this
-        // media type at all (issue #1441) - reading only `mode` back left a
-        // text body's content behind on every round trip.
-        if (const json* example = prop (text_media, "example");
-        example != nullptr && !example->is_null ()) {
-            body.content = example_body_text (*example);
-        }
-        return body;
+    if (std::optional<DraftBody> text = text_body_v3 (*content)) {
+        return std::move (*text);
     }
     for (const char* type : { "application/x-www-form-urlencoded", "multipart/form-data" }) {
         const json* declared = prop (content, type);
@@ -1173,6 +1206,30 @@ DraftRequest& draft) {
 }
 
 /**
+ * The operation members only an import reads - its own `security` and the
+ * `x-vayu-*` extensions a Vayu export writes - copied verbatim onto @p entry.
+ * None of them reaches `DraftRequest`, which is what the sync diff compares:
+ * a re-fetched document must never overwrite what a user edited locally.
+ */
+void read_import_only_members (const json* operation, SpecRequestDraft& entry) {
+    if (const json* security = prop (operation, "security"); security != nullptr) {
+        entry.security = *security;
+    }
+    if (const json* elements = prop (operation, "x-vayu-elements");
+    elements != nullptr && elements->is_array ()) {
+        entry.elements = *elements;
+    }
+    if (const json* mock = prop (operation, "x-vayu-mock");
+    mock != nullptr && mock->is_object ()) {
+        entry.mock = *mock;
+    }
+    if (const json* request = prop (operation, "x-vayu-request");
+    request != nullptr && request->is_object ()) {
+        entry.vayu_request = *request;
+    }
+}
+
+/**
  * The drafts, for either caller: the sync diff, which wants the operations a
  * document *declares*, and the import, which wants a request for every
  * operation it *writes* plus a tally of what it had to drop.
@@ -1202,17 +1259,7 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         SpecRequestDraft entry;
         std::tie (entry.folder, entry.folder_from_tag) =
         folder_of (prop (operation, "tags"), path);
-        if (const json* security = prop (operation, "security"); security != nullptr) {
-            entry.security = *security;
-        }
-        if (const json* elements = prop (operation, "x-vayu-elements");
-        elements != nullptr && elements->is_array ()) {
-            entry.elements = *elements;
-        }
-        if (const json* mock = prop (operation, "x-vayu-mock");
-        mock != nullptr && mock->is_object ()) {
-            entry.mock = *mock;
-        }
+        read_import_only_members (operation, entry);
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);

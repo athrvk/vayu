@@ -949,6 +949,91 @@ TEST (ImportParse, DropsAndCountsAnInvalidXVayuElementsArray) {
     EXPECT_TRUE (counted);
 }
 
+/// The document root's own `x-vayu-elements` is the collection's - a skeleton
+/// export writes a collection's scripts there. It used to be written and never
+/// read, so every re-import lost them.
+TEST (ImportParse, ReadsRootXVayuElementsIntoTheCollection) {
+    const ImportParse parsed = parse_import (R"json({"openapi":"3.1.0","info":{"title":"T"},
+        "x-vayu-elements":[{"id":"el_1","kind":"script.pre","enabled":true,
+        "config":{"script":"console.log(1)"}}],
+        "paths":{}})json",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& root = parsed.result.at ("collections")[0];
+    ASSERT_TRUE (root.contains ("elements"));
+    EXPECT_EQ (root.at ("elements")[0].at ("kind"), "script.pre");
+}
+
+/// An XML request body imports as Vayu's own `xml` mode with the example as
+/// its text - a skeleton export writes an `xml` body exactly this way, and it
+/// used to come back as no body at all (`unmapped_body`).
+TEST (ImportParse, ReadsAnXmlRequestBodyAsTheXmlMode) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+        "paths":{"/soap":{"post":{"responses":{},
+        "requestBody":{"content":{"application/xml":{"example":"<a>1</a>"}}}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("body").at ("mode"), "xml");
+    EXPECT_EQ (request.at ("body").at ("content"), "<a>1</a>");
+    EXPECT_TRUE (parsed.result.at ("meta").at ("skipped").empty ());
+}
+
+/// An `x-vayu-request` piece that fails its check is dropped and counted, and
+/// the request keeps what the standard members said - a hand-edited vendor
+/// key never refuses the import or reaches a write route malformed.
+TEST (ImportParse, DropsAndCountsAnXVayuRequestPieceThatFailsItsCheck) {
+    const ImportParse parsed = parse_import (R"json({"openapi":"3.1.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{},
+          "parameters":[{"name":"X-Trace","in":"header","schema":{"type":"string"},"example":"1"}],
+          "x-vayu-request":{"headers":"not rows","body":{"mode":"telepathy"},
+                            "settings":{"httpVersion":"http9"},"name":"Listed pets"}}}}})json",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("name"), "Listed pets");
+    EXPECT_EQ (request.at ("headers")[0].at ("key"), "X-Trace");
+    EXPECT_EQ (request.at ("body").at ("mode"), "none");
+    EXPECT_FALSE (request.contains ("httpVersion"));
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("vayu_extension_invalid"),
+    3);
+}
+
+/// A document carrying `x-vayu-collection` states its own tree: folders nest
+/// as `folders` says, a request goes where its `x-vayu-request.folder` says,
+/// and one with no folder stays on the root instead of landing in a folder
+/// named after its path.
+TEST (ImportParse, BuildsTheFolderTreeTheDocumentStates) {
+    const ImportParse parsed = parse_import (R"json({"openapi":"3.1.0","info":{"title":"T"},
+        "x-vayu-collection":{"folders":[
+            {"path":["Pets"],"description":"All pets","auth":{"mode":"noauth"}},
+            {"path":["Pets","Actions"],"variables":{"v":{"value":"1","enabled":true}}},
+            {"path":["Empty"]}]},
+        "paths":{
+          "/pets/feed":{"post":{"tags":["Pets/Actions"],"responses":{},
+            "x-vayu-request":{"folder":["Pets","Actions"]}}},
+          "/health":{"get":{"responses":{}}}}})json",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& root = parsed.result.at ("collections")[0];
+    ASSERT_EQ (root.at ("requests").size (), 1);
+    EXPECT_EQ (root.at ("requests")[0].at ("url"), "{{baseUrl}}/health");
+    ASSERT_EQ (root.at ("children").size (), 2);
+    const nlohmann::ordered_json& pets = root.at ("children")[0];
+    EXPECT_EQ (pets.at ("name"), "Pets");
+    EXPECT_EQ (pets.at ("description"), "All pets");
+    EXPECT_EQ (pets.at ("auth").at ("mode"), "noauth");
+    ASSERT_EQ (pets.at ("children").size (), 1);
+    const nlohmann::ordered_json& actions = pets.at ("children")[0];
+    EXPECT_EQ (actions.at ("name"), "Actions");
+    EXPECT_EQ (actions.at ("variables").at ("v").at ("value"), "1");
+    ASSERT_EQ (actions.at ("requests").size (), 1);
+    EXPECT_EQ (root.at ("children")[1].at ("name"), "Empty");
+    EXPECT_FALSE (parsed.result.at ("meta").contains ("folderStrategy"));
+}
+
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
     const ImportParse v30 =
     parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});

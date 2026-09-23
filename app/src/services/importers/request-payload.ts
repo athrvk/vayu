@@ -44,6 +44,9 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		// tests, and "absent" is the state the engine's field appliers read.
 		...(r.followRedirects !== undefined ? { followRedirects: r.followRedirects } : {}),
 		...(r.maxRedirects !== undefined ? { maxRedirects: r.maxRedirects } : {}),
+		...(r.verifySSL !== undefined ? { verifySSL: r.verifySSL } : {}),
+		...(r.httpVersion !== undefined ? { httpVersion: r.httpVersion } : {}),
+		...(r.stream !== undefined ? { stream: r.stream } : {}),
 		// Saved example responses ride nested on their request rather than as a
 		// section of their own: nothing references them, so they need no temp id,
 		// and the engine writes them in the same transaction. Spread for the same
@@ -55,5 +58,10 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		// of a spec operation must not send `specOperation: null`, which the engine
 		// reads as "clear it" rather than "never had one".
 		...(r.specOperation !== undefined ? { specOperation: r.specOperation } : {}),
+		// A mock choice the source stated (issue #1649) - which the engine's own
+		// flattener has always carried and this one did not, so an import
+		// through the dialog reverted every mock route to "first".
+		...(r.mockResponseMode !== undefined ? { mockResponseMode: r.mockResponseMode } : {}),
+		...(r.mockExampleIndex !== undefined ? { mockExampleIndex: r.mockExampleIndex } : {}),
 	};
 }

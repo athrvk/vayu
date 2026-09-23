@@ -15,6 +15,7 @@ import type {
 	ResponseSchemaIndex,
 	SpecOperation,
 	MethodSource,
+	MockResponseMode,
 	Request,
 	Environment,
 	Run,
@@ -1454,6 +1455,8 @@ export interface ImportApplyCollection {
 	 * temp id and stores the real one, and `specTempId` is never persisted.
 	 */
 	openapi?: { specTempId: string };
+	/** The collection's data contract, when the source states one (a Vayu export does). */
+	dataSchema?: CollectionDataSchema;
 }
 
 /**
@@ -1509,11 +1512,21 @@ export interface ImportApplyRequestItem {
 	/** Omitted unless the imported file states them; the engine then applies its own defaults. */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	verifySSL?: boolean;
+	httpVersion?: HttpVersion;
+	stream?: boolean;
 	order?: number;
 	/** Omitted unless the source file carried saved responses for this request. */
 	examples?: ImportApplyExample[];
 	/** Omitted unless the source was a spec that named this request's operation. */
 	specOperation?: SpecOperation;
+	/** Omitted unless the source states which saved example a mock answers with. */
+	mockResponseMode?: MockResponseMode;
+	/**
+	 * The `"fixed"` target, by position among this item's own `examples` - no
+	 * id exists yet for a row this import has not created (issue #1649).
+	 */
+	mockExampleIndex?: number;
 }
 
 export interface ImportApplyEnvironment {
@@ -1987,7 +2000,17 @@ export interface SpecExportRequest {
 	collectionId: string;
 	/** Defaults to `json` engine-side. */
 	format?: ExportFormat;
+	/** What a bound export may write. Defaults to `contract`; a skeleton ignores it. */
+	mode?: ExportMode;
 }
+
+/**
+ * What a bound export may write into the document it updates - the user's
+ * choice in the export dialog. `contract` keeps the document as the API's
+ * contract (examples and parameter values only); `full` writes every edit the
+ * collection holds, new operations included, into the document's own dialect.
+ */
+export type ExportMode = "contract" | "full";
 
 /**
  * What the export could not carry, and what it changed.
@@ -2019,25 +2042,21 @@ export interface ExportNotes {
 	operationsEdited: number;
 	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
 	vocabularyNotWritten: boolean;
-	// --- Skeleton-only: what a free-form export cannot carry (issue #1441) ---
-	/** Requests (plus the collection, once) whose auth OpenAPI has no `securityScheme` for. */
-	authDropped: number;
-	/** Requests (plus the collection, once) carrying a pre- or post-request script. */
-	scriptsDropped: number;
-	/** Collection variables besides `baseUrl`, which a document has nowhere to declare. */
-	variablesDropped: number;
-	/** Requests whose folder is nested more than one level - written as one flat tag. */
-	foldersFlattened: number;
-	/** Requests carrying a body in a mode a skeleton has no media type for (GraphQL today). */
-	bodiesDropped: number;
-	/** Requests whose form body has field values - only the field names are declared. */
-	formValuesDropped: number;
-	/** Requests carrying a non-default execution setting (redirects, TLS, HTTP version, streaming). */
-	settingsDropped: number;
-	/** Stored examples carrying a header besides `Content-Type`. */
-	exampleHeadersDropped: number;
-	/** Params or Headers rows sharing a key and location with an earlier row - only the first is written. */
-	duplicateParameterRowsDropped: number;
+	/**
+	 * Secret values exported as `""` - tokens, passwords, API-key values,
+	 * client secrets, variables marked secret. A pure `{{variable}}` is kept.
+	 */
+	secretsOmitted: number;
+	/**
+	 * Requests only `x-vayu-collection` carries - no path, or a method and path
+	 * another request already claimed. Vayu re-imports them; another tool does
+	 * not see them.
+	 */
+	requestsOnlyInExtension: number;
+	/** Operations a `full` bound export added for requests the document never declared. */
+	operationsAdded: number;
+	/** Which bound mode ran; `""` for a skeleton. */
+	boundMode: ExportMode | "";
 }
 
 export interface SpecExportResponse {

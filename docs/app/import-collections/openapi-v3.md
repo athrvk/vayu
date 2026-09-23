@@ -75,6 +75,8 @@ The fallback applies **per operation**, so a partly tagged document gets both ru
 
 Which rule ran is reported as `meta.folderStrategy` (`"tags"`, `"paths"` or `"mixed"`), and the import preview states it whenever paths were involved: a folder tree the document never spelled out must not read as one it did.
 
+**A document Vayu exported states its own tree.** When the root carries `x-vayu-collection`, neither rule runs: folders nest exactly as its `folders` list says (empty ones included, each with its description, variables, auth and elements), every request is filed under the path its operation's `x-vayu-request.folder` names, in its stored order, and a request with no folder stays on the root. No `folderStrategy` is reported, because nothing was inferred. Each operation's `x-vayu-request` then replaces what the standard members produced - name, method, URL, rows, body, auth, settings, saved examples - piece by piece, each checked before it is applied and counted as `vayu_extension_invalid` when it fails (`core/vayu_extensions.hpp`; see [the export](../openapi.md#everything-vayu-holds-travels-with-it)).
+
 **`trace` operations:** OpenAPI 3's Path Item Object also defines `trace`, which is **not** in `HTTP_METHODS` because `HttpMethod` (`types/domain.ts`) has no `"TRACE"` - Vayu cannot execute one. A `trace` operation is therefore not built, is **not** counted in `requestCount`, and is counted as an `unsupported_method` `SkippedItem` so the preview says so. `UNSUPPORTED_METHODS` in `import_document.cpp` is the list; `trace` is its only member, since a path item defines exactly the eight methods.
 
 Key internal functions: `buildOperation` (per-operation `RequestDraft`), `OperationFolders` / `path_folder_name` (`openapi_drafts.cpp`, folder routing - shared with the v2 parser), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and `walk::resolve_ref` (`openapi_drafts.cpp`) for `$ref` resolution - shared with the v2 parser, which built the identical closure by hand until issue #649.
@@ -208,7 +210,8 @@ Why optional value-less parameters import **disabled** (issues #622, #658): the 
 | `content` media type | Vayu `RequestBody` | How content is produced |
 |----------------------|--------------------|-------------------------|
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
-| `text/plain` | `{ mode: "text", content: "" }` | empty string (the schema is not sampled for text bodies) |
+| `text/plain` | `{ mode: "text", content }` | the media object's `example` as the text it is, else empty (the schema is not sampled for text bodies) |
+| `application/xml`, `text/xml`, or any `+xml` type | `{ mode: "xml", content }` | the same: the `example` as the text it is, else empty - a Vayu skeleton export writes an `xml` body exactly this way |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
 | no `content`, or none of the above | `{ mode: "none" }` | |

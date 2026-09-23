@@ -1532,6 +1532,10 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"request whose fixed mock example is no longer in the document, so it mocks the first example instead",
 		"requests whose fixed mock example is no longer in the document, so they mock the first example instead",
 	],
+	vayu_extension_invalid: [
+		"hand-edited Vayu detail (a request's rows, body, auth or settings, or a folder) that no longer made sense - the document's own reading was kept",
+		"hand-edited Vayu details (a request's rows, body, auth or settings, or a folder) that no longer made sense - the document's own reading was kept",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {

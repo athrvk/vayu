@@ -2490,7 +2490,8 @@
                     "params": [],
                     "headers": [],
                     "body": {
-                      "mode": "none"
+                      "mode": "xml",
+                      "content": ""
                     },
                     "auth": {
                       "mode": "inherit"
@@ -2589,10 +2590,6 @@
               "count": 1
             },
             {
-              "kind": "unmapped_body",
-              "count": 1
-            },
-            {
               "kind": "malformed_spec",
               "count": 1
             },
@@ -2685,9 +2682,10 @@
             "params": [],
             "headers": [],
             "body": {
-              "mode": "none"
+              "mode": "xml",
+              "content": ""
             },
-            "bodyType": "none",
+            "bodyType": "xml",
             "auth": {
               "mode": "inherit"
             },
@@ -2970,6 +2968,305 @@
           {
             "tempId": "s1",
             "content": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Forms\",\"description\":\"Swagger form bodies\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"schemes\":[\"https\"],\"consumes\":[\"multipart/form-data\"],\"securityDefinitions\":{\"key\":{\"type\":\"apiKey\",\"name\":\"X-Key\",\"in\":\"query\"}},\"paths\":{\"/upload\":{\"post\":{\"operationId\":\"upload\",\"tags\":[\"files\"],\"parameters\":[{\"name\":\"file\",\"in\":\"formData\",\"type\":\"file\"},{\"name\":\"label\",\"in\":\"formData\",\"type\":\"string\"},{\"name\":\"q\",\"in\":\"query\",\"type\":\"string\",\"default\":\"all\"}],\"responses\":{\"201\":{\"description\":\"Created\",\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}}}}}},\"tags\":[{\"name\":\"files\",\"description\":\"Uploads\"}]}"
+          }
+        ],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "vayu-skeleton-export",
+      "document": "{\n  \"openapi\": \"3.1.0\",\n  \"info\": {\n    \"title\": \"Vayu export\",\n    \"version\": \"0.0.0\",\n    \"description\": \"Round trip\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"{baseUrl}\",\n      \"variables\": {\n        \"baseUrl\": {\n          \"default\": \"https://api.example.com\"\n        }\n      }\n    }\n  ],\n  \"tags\": [\n    {\n      \"name\": \"Pets\",\n      \"description\": \"All pets\"\n    }\n  ],\n  \"security\": [\n    {\n      \"bearerAuth\": []\n    }\n  ],\n  \"components\": {\n    \"securitySchemes\": {\n      \"bearerAuth\": {\n        \"type\": \"http\",\n        \"scheme\": \"bearer\"\n      }\n    }\n  },\n  \"x-vayu-collection\": {\n    \"variables\": {\n      \"baseUrl\": {\n        \"enabled\": true,\n        \"value\": \"https://api.example.com\"\n      },\n      \"key\": {\n        \"enabled\": true,\n        \"secret\": true,\n        \"value\": \"\"\n      }\n    },\n    \"auth\": {\n      \"mode\": \"bearer\",\n      \"token\": \"{{token}}\"\n    },\n    \"dataSchema\": {\n      \"columns\": [\n        \"user\"\n      ]\n    },\n    \"folders\": [\n      {\n        \"path\": [\n          \"Pets\"\n        ],\n        \"description\": \"All pets\",\n        \"auth\": {\n          \"mode\": \"noauth\"\n        }\n      },\n      {\n        \"path\": [\n          \"Pets\",\n          \"Deep\"\n        ],\n        \"auth\": {\n          \"mode\": \"none\"\n        }\n      }\n    ],\n    \"requests\": [\n      {\n        \"name\": \"Home\",\n        \"method\": \"GET\",\n        \"url\": \"{{baseUrl}}\",\n        \"order\": 0,\n        \"auth\": {\n          \"mode\": \"inherit\"\n        },\n        \"mockResponseMode\": \"random\"\n      }\n    ]\n  },\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"summary\": \"List pets\",\n        \"parameters\": [\n          {\n            \"name\": \"limit\",\n            \"in\": \"query\",\n            \"schema\": {\n              \"type\": \"string\"\n            },\n            \"example\": \"5\",\n            \"x-vayu-enabled\": true\n          }\n        ],\n        \"security\": [],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"id\": {\n                      \"type\": \"integer\"\n                    }\n                  },\n                  \"description\": \"Shape derived from an example body, not a declared schema.\"\n                },\n                \"example\": {\n                  \"id\": 1\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"gone\"\n          }\n        },\n        \"x-vayu-request\": {\n          \"name\": \"List pets\",\n          \"method\": \"GET\",\n          \"url\": \"{{baseUrl}}/pets?limit=5\",\n          \"order\": 0,\n          \"folder\": [\n            \"Pets\"\n          ],\n          \"params\": [\n            {\n              \"enabled\": true,\n              \"key\": \"limit\",\n              \"value\": \"5\"\n            }\n          ],\n          \"headers\": [\n            {\n              \"enabled\": false,\n              \"key\": \"Authorization\",\n              \"value\": \"Token {{t}}\"\n            }\n          ],\n          \"auth\": {\n            \"mode\": \"inherit\"\n          },\n          \"settings\": {\n            \"followRedirects\": false,\n            \"maxRedirects\": 2,\n            \"httpVersion\": \"http2\",\n            \"verifySSL\": false,\n            \"stream\": true\n          },\n          \"examples\": [\n            {\n              \"name\": \"ok\",\n              \"status\": 200,\n              \"contentType\": \"application/json\",\n              \"headers\": [\n                {\n                  \"enabled\": true,\n                  \"key\": \"Content-Type\",\n                  \"value\": \"application/json\"\n                }\n              ],\n              \"body\": \"{\\\"id\\\":1}\"\n            },\n            {\n              \"name\": \"gone\",\n              \"status\": 404,\n              \"contentType\": \"\",\n              \"headers\": [],\n              \"body\": \"\"\n            }\n          ],\n          \"mockResponseMode\": \"fixed\",\n          \"mockExample\": 1\n        },\n        \"tags\": [\n          \"Pets\"\n        ]\n      }\n    }\n  }\n}\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "bearer",
+              "token": "{{token}}"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "noauth"
+                },
+                "children": [
+                  {
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [],
+                    "description": "",
+                    "name": "Deep",
+                    "requests": [],
+                    "variables": {}
+                  }
+                ],
+                "description": "All pets",
+                "name": "Pets",
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "examples": [
+                      {
+                        "body": "{\"id\":1}",
+                        "contentType": "application/json",
+                        "headers": [
+                          {
+                            "enabled": true,
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "name": "ok",
+                        "status": 200
+                      },
+                      {
+                        "body": "",
+                        "contentType": "",
+                        "headers": [],
+                        "name": "gone",
+                        "status": 404
+                      }
+                    ],
+                    "followRedirects": false,
+                    "headers": [
+                      {
+                        "enabled": false,
+                        "key": "Authorization",
+                        "value": "Token {{t}}"
+                      }
+                    ],
+                    "httpVersion": "http2",
+                    "maxRedirects": 2,
+                    "method": "GET",
+                    "mockExampleIndex": 1,
+                    "mockResponseMode": "fixed",
+                    "name": "List pets",
+                    "params": [
+                      {
+                        "enabled": true,
+                        "key": "limit",
+                        "value": "5"
+                      }
+                    ],
+                    "specOperation": {
+                      "method": "GET",
+                      "path": "/pets"
+                    },
+                    "stream": true,
+                    "url": "{{baseUrl}}/pets?limit=5",
+                    "verifySSL": false
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "dataSchema": {
+              "columns": [
+                "user"
+              ]
+            },
+            "description": "Round trip",
+            "name": "Vayu export",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "mockResponseMode": "random",
+                "name": "Home",
+                "params": [],
+                "url": "{{baseUrl}}"
+              }
+            ],
+            "spec": {
+              "content": "{\n  \"openapi\": \"3.1.0\",\n  \"info\": {\n    \"title\": \"Vayu export\",\n    \"version\": \"0.0.0\",\n    \"description\": \"Round trip\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"{baseUrl}\",\n      \"variables\": {\n        \"baseUrl\": {\n          \"default\": \"https://api.example.com\"\n        }\n      }\n    }\n  ],\n  \"tags\": [\n    {\n      \"name\": \"Pets\",\n      \"description\": \"All pets\"\n    }\n  ],\n  \"security\": [\n    {\n      \"bearerAuth\": []\n    }\n  ],\n  \"components\": {\n    \"securitySchemes\": {\n      \"bearerAuth\": {\n        \"type\": \"http\",\n        \"scheme\": \"bearer\"\n      }\n    }\n  },\n  \"x-vayu-collection\": {\n    \"variables\": {\n      \"baseUrl\": {\n        \"enabled\": true,\n        \"value\": \"https://api.example.com\"\n      },\n      \"key\": {\n        \"enabled\": true,\n        \"secret\": true,\n        \"value\": \"\"\n      }\n    },\n    \"auth\": {\n      \"mode\": \"bearer\",\n      \"token\": \"{{token}}\"\n    },\n    \"dataSchema\": {\n      \"columns\": [\n        \"user\"\n      ]\n    },\n    \"folders\": [\n      {\n        \"path\": [\n          \"Pets\"\n        ],\n        \"description\": \"All pets\",\n        \"auth\": {\n          \"mode\": \"noauth\"\n        }\n      },\n      {\n        \"path\": [\n          \"Pets\",\n          \"Deep\"\n        ],\n        \"auth\": {\n          \"mode\": \"none\"\n        }\n      }\n    ],\n    \"requests\": [\n      {\n        \"name\": \"Home\",\n        \"method\": \"GET\",\n        \"url\": \"{{baseUrl}}\",\n        \"order\": 0,\n        \"auth\": {\n          \"mode\": \"inherit\"\n        },\n        \"mockResponseMode\": \"random\"\n      }\n    ]\n  },\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"summary\": \"List pets\",\n        \"parameters\": [\n          {\n            \"name\": \"limit\",\n            \"in\": \"query\",\n            \"schema\": {\n              \"type\": \"string\"\n            },\n            \"example\": \"5\",\n            \"x-vayu-enabled\": true\n          }\n        ],\n        \"security\": [],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"id\": {\n                      \"type\": \"integer\"\n                    }\n                  },\n                  \"description\": \"Shape derived from an example body, not a declared schema.\"\n                },\n                \"example\": {\n                  \"id\": 1\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"gone\"\n          }\n        },\n        \"x-vayu-request\": {\n          \"name\": \"List pets\",\n          \"method\": \"GET\",\n          \"url\": \"{{baseUrl}}/pets?limit=5\",\n          \"order\": 0,\n          \"folder\": [\n            \"Pets\"\n          ],\n          \"params\": [\n            {\n              \"enabled\": true,\n              \"key\": \"limit\",\n              \"value\": \"5\"\n            }\n          ],\n          \"headers\": [\n            {\n              \"enabled\": false,\n              \"key\": \"Authorization\",\n              \"value\": \"Token {{t}}\"\n            }\n          ],\n          \"auth\": {\n            \"mode\": \"inherit\"\n          },\n          \"settings\": {\n            \"followRedirects\": false,\n            \"maxRedirects\": 2,\n            \"httpVersion\": \"http2\",\n            \"verifySSL\": false,\n            \"stream\": true\n          },\n          \"examples\": [\n            {\n              \"name\": \"ok\",\n              \"status\": 200,\n              \"contentType\": \"application/json\",\n              \"headers\": [\n                {\n                  \"enabled\": true,\n                  \"key\": \"Content-Type\",\n                  \"value\": \"application/json\"\n                }\n              ],\n              \"body\": \"{\\\"id\\\":1}\"\n            },\n            {\n              \"name\": \"gone\",\n              \"status\": 404,\n              \"contentType\": \"\",\n              \"headers\": [],\n              \"body\": \"\"\n            }\n          ],\n          \"mockResponseMode\": \"fixed\",\n          \"mockExample\": 1\n        },\n        \"tags\": [\n          \"Pets\"\n        ]\n      }\n    }\n  }\n}\n"
+            },
+            "variables": {
+              "baseUrl": {
+                "enabled": true,
+                "value": "https://api.example.com"
+              },
+              "key": {
+                "enabled": true,
+                "secret": true,
+                "value": ""
+              }
+            }
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 2,
+          "folderCount": 2,
+          "format": "OpenAPI 3.1",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 1,
+          "skipped": [],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "Vayu export",
+            "description": "Round trip",
+            "variables": {
+              "baseUrl": {
+                "enabled": true,
+                "value": "https://api.example.com"
+              },
+              "key": {
+                "enabled": true,
+                "secret": true,
+                "value": ""
+              }
+            },
+            "auth": {
+              "mode": "bearer",
+              "token": "{{token}}"
+            },
+            "dataSchema": {
+              "columns": [
+                "user"
+              ]
+            },
+            "openapi": {
+              "specTempId": "s1"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "Pets",
+            "description": "All pets",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "noauth"
+            }
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c2",
+            "name": "Deep",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Home",
+            "description": "",
+            "method": "GET",
+            "url": "{{baseUrl}}",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "mockResponseMode": "random",
+            "order": 0
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c2",
+            "name": "List pets",
+            "description": "",
+            "method": "GET",
+            "url": "{{baseUrl}}/pets?limit=5",
+            "params": [
+              {
+                "enabled": true,
+                "key": "limit",
+                "value": "5"
+              }
+            ],
+            "headers": [
+              {
+                "enabled": false,
+                "key": "Authorization",
+                "value": "Token {{t}}"
+              }
+            ],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "followRedirects": false,
+            "maxRedirects": 2,
+            "verifySSL": false,
+            "httpVersion": "http2",
+            "stream": true,
+            "examples": [
+              {
+                "body": "{\"id\":1}",
+                "contentType": "application/json",
+                "headers": [
+                  {
+                    "enabled": true,
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "name": "ok",
+                "status": 200
+              },
+              {
+                "body": "",
+                "contentType": "",
+                "headers": [],
+                "name": "gone",
+                "status": 404
+              }
+            ],
+            "specOperation": {
+              "method": "GET",
+              "path": "/pets"
+            },
+            "mockResponseMode": "fixed",
+            "mockExampleIndex": 1,
+            "order": 0
+          }
+        ],
+        "environments": [],
+        "specs": [
+          {
+            "tempId": "s1",
+            "content": "{\n  \"openapi\": \"3.1.0\",\n  \"info\": {\n    \"title\": \"Vayu export\",\n    \"version\": \"0.0.0\",\n    \"description\": \"Round trip\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"{baseUrl}\",\n      \"variables\": {\n        \"baseUrl\": {\n          \"default\": \"https://api.example.com\"\n        }\n      }\n    }\n  ],\n  \"tags\": [\n    {\n      \"name\": \"Pets\",\n      \"description\": \"All pets\"\n    }\n  ],\n  \"security\": [\n    {\n      \"bearerAuth\": []\n    }\n  ],\n  \"components\": {\n    \"securitySchemes\": {\n      \"bearerAuth\": {\n        \"type\": \"http\",\n        \"scheme\": \"bearer\"\n      }\n    }\n  },\n  \"x-vayu-collection\": {\n    \"variables\": {\n      \"baseUrl\": {\n        \"enabled\": true,\n        \"value\": \"https://api.example.com\"\n      },\n      \"key\": {\n        \"enabled\": true,\n        \"secret\": true,\n        \"value\": \"\"\n      }\n    },\n    \"auth\": {\n      \"mode\": \"bearer\",\n      \"token\": \"{{token}}\"\n    },\n    \"dataSchema\": {\n      \"columns\": [\n        \"user\"\n      ]\n    },\n    \"folders\": [\n      {\n        \"path\": [\n          \"Pets\"\n        ],\n        \"description\": \"All pets\",\n        \"auth\": {\n          \"mode\": \"noauth\"\n        }\n      },\n      {\n        \"path\": [\n          \"Pets\",\n          \"Deep\"\n        ],\n        \"auth\": {\n          \"mode\": \"none\"\n        }\n      }\n    ],\n    \"requests\": [\n      {\n        \"name\": \"Home\",\n        \"method\": \"GET\",\n        \"url\": \"{{baseUrl}}\",\n        \"order\": 0,\n        \"auth\": {\n          \"mode\": \"inherit\"\n        },\n        \"mockResponseMode\": \"random\"\n      }\n    ]\n  },\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"summary\": \"List pets\",\n        \"parameters\": [\n          {\n            \"name\": \"limit\",\n            \"in\": \"query\",\n            \"schema\": {\n              \"type\": \"string\"\n            },\n            \"example\": \"5\",\n            \"x-vayu-enabled\": true\n          }\n        ],\n        \"security\": [],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"id\": {\n                      \"type\": \"integer\"\n                    }\n                  },\n                  \"description\": \"Shape derived from an example body, not a declared schema.\"\n                },\n                \"example\": {\n                  \"id\": 1\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"gone\"\n          }\n        },\n        \"x-vayu-request\": {\n          \"name\": \"List pets\",\n          \"method\": \"GET\",\n          \"url\": \"{{baseUrl}}/pets?limit=5\",\n          \"order\": 0,\n          \"folder\": [\n            \"Pets\"\n          ],\n          \"params\": [\n            {\n              \"enabled\": true,\n              \"key\": \"limit\",\n              \"value\": \"5\"\n            }\n          ],\n          \"headers\": [\n            {\n              \"enabled\": false,\n              \"key\": \"Authorization\",\n              \"value\": \"Token {{t}}\"\n            }\n          ],\n          \"auth\": {\n            \"mode\": \"inherit\"\n          },\n          \"settings\": {\n            \"followRedirects\": false,\n            \"maxRedirects\": 2,\n            \"httpVersion\": \"http2\",\n            \"verifySSL\": false,\n            \"stream\": true\n          },\n          \"examples\": [\n            {\n              \"name\": \"ok\",\n              \"status\": 200,\n              \"contentType\": \"application/json\",\n              \"headers\": [\n                {\n                  \"enabled\": true,\n                  \"key\": \"Content-Type\",\n                  \"value\": \"application/json\"\n                }\n              ],\n              \"body\": \"{\\\"id\\\":1}\"\n            },\n            {\n              \"name\": \"gone\",\n              \"status\": 404,\n              \"contentType\": \"\",\n              \"headers\": [],\n              \"body\": \"\"\n            }\n          ],\n          \"mockResponseMode\": \"fixed\",\n          \"mockExample\": 1\n        },\n        \"tags\": [\n          \"Pets\"\n        ]\n      }\n    }\n  }\n}\n"
           }
         ],
         "clientCertificates": []

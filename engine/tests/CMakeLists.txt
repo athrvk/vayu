@@ -160,6 +160,7 @@ add_executable(vayu_tests
     spec_diff_test.cpp
     openapi_export_test.cpp
     spec_export_route_test.cpp
+    vayu_extensions_test.cpp
     workspace_backup_test.cpp
     trash_test.cpp
     spec_coverage_test.cpp

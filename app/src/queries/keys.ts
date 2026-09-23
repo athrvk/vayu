@@ -200,8 +200,8 @@ export const queryKeys = {
 		 * indefinitely. See `useSpecExportQuery` for why that is a key rather
 		 * than a `staleTime`.
 		 */
-		export: (collectionId: string, format: string, opened: number) =>
-			[...queryKeys.specs.all, "export", collectionId, format, opened] as const,
+		export: (collectionId: string, format: string, mode: string, opened: number) =>
+			[...queryKeys.specs.all, "export", collectionId, format, mode, opened] as const,
 	},
 
 	// Environments

@@ -27,8 +27,10 @@
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
+#include "vayu/types.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -2854,15 +2856,386 @@ json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally&
     return auth;
 }
 
-json parse_openapi (const json& document,
-const std::string& raw,
-const ImportSource& source,
-walk::Dialect dialect) {
-    ImportTally tally;
-    const bool v3 = dialect == walk::Dialect::V3;
+// ---------------------------------------------------------------------------
+// `x-vayu-request` / `x-vayu-collection` (core/vayu_extensions.hpp)
+// ---------------------------------------------------------------------------
 
+namespace ext = vayu::core::vayu_ext;
+
+/// A form body's file parts as an import writes one: named, no file attached
+/// yet - the export never carries the path it was read from.
+json with_unattached_files (json body) {
+    const auto fields = body.find ("fields");
+    if (fields == body.end () || !fields->is_array ()) {
+        return body;
+    }
+    for (json& field : *fields) {
+        if (field.value ("type", "") == "file") {
+            // `imported_file_part` spells "no file" as `src: ""`; a part the
+            // export wrote had no `src` at all, which says the same thing.
+            const bool had_src = field.contains ("src");
+            field              = imported_file_part (field, "", nullptr);
+            if (!had_src) {
+                field.erase ("src");
+            }
+        }
+    }
+    return body;
+}
+
+/**
+ * One piece of an `x-vayu-request` object applied to @p request when it
+ * passes @p check, counted as `vayu_extension_invalid` when it does not - the
+ * standard reading stays in place either way.
+ */
+template <typename Check, typename Apply>
+void apply_piece (const json& object, const char* key, ImportTally& tally, Check check, Apply apply) {
+    const auto found = object.find (key);
+    if (found == object.end ()) {
+        return;
+    }
+    if (std::optional<json> checked = check (*found)) {
+        apply (std::move (*checked));
+    } else {
+        tally.add (ext::INVALID_KIND);
+    }
+}
+
+/// A non-empty string, for `name` / `url` / `description`.
+std::optional<json> string_piece (const json& value) {
+    if (!value.is_string () || value.get_ref<const std::string&> ().empty ()) {
+        return std::nullopt;
+    }
+    return std::make_optional (value);
+}
+
+/// A method `POST /import/apply` accepts - upper case, as an export writes it.
+std::optional<json> method_piece (const json& value) {
+    if (!value.is_string () || !vayu::parse_method (value.get<std::string> ())) {
+        return std::nullopt;
+    }
+    return std::make_optional (value);
+}
+
+/**
+ * Which saved example a mock answers with, applied only once the examples it
+ * indexes are settled: `fixed` needs a `mockExample` that names one of them.
+ */
+void apply_vayu_mock (const json& object, json& request, ImportTally& tally) {
+    const auto mode = object.find ("mockResponseMode");
+    if (mode == object.end ()) {
+        return;
+    }
+    request.erase ("mockResponseMode");
+    request.erase ("mockExampleIndex");
+    if (*mode == "random") {
+        request["mockResponseMode"] = "random";
+        return;
+    }
+    if (*mode != "fixed") {
+        if (*mode != "first") {
+            tally.add (ext::INVALID_KIND);
+        }
+        return;
+    }
+    const auto index     = object.find ("mockExample");
+    const json* examples = prop (&request, "examples");
+    if (index == object.end () || !index->is_number_unsigned () ||
+    examples == nullptr || index->get<size_t> () >= examples->size ()) {
+        tally.add ("mock_example_missing");
+        return;
+    }
+    request["mockResponseMode"] = "fixed";
+    request["mockExampleIndex"] = *index;
+}
+
+/**
+ * Everything an `x-vayu-request` object states, applied over the request the
+ * standard members produced - each piece checked first (`vayu_extensions.hpp`).
+ * Examples replace the documented responses wholesale: the stored rows are
+ * what the UI showed, and a response the document documents besides them was
+ * written *from* them.
+ */
+void apply_vayu_request (const json& object, json& request, ImportTally& tally) {
+    const auto set = [&request] (const char* key) {
+        return [&request, key] (json value) { request[key] = std::move (value); };
+    };
+    apply_piece (object, "name", tally, string_piece, set ("name"));
+    apply_piece (object, "description", tally, string_piece, set ("description"));
+    apply_piece (object, "method", tally, method_piece, set ("method"));
+    apply_piece (object, "url", tally, string_piece, set ("url"));
+    apply_piece (object, "params", tally, ext::rows_of, set ("params"));
+    apply_piece (object, "headers", tally, ext::rows_of, set ("headers"));
+    apply_piece (object, "body", tally, ext::body_of, [&request] (json body) {
+        request["body"] = with_unattached_files (std::move (body));
+    });
+    apply_piece (
+    object, "auth", tally,
+    [] (const json& value) { return ext::auth_of (value, /*collection=*/false); },
+    set ("auth"));
+    apply_piece (object, "settings", tally, ext::settings_of, [&request] (json settings) {
+        for (auto& [key, value] : settings.items ()) {
+            request[key] = value;
+        }
+    });
+    apply_piece (object, "examples", tally, ext::examples_of, [&request] (json examples) {
+        request.erase ("mockResponseMode");
+        request.erase ("mockExampleIndex");
+        if (examples.empty ()) {
+            request.erase ("examples");
+        } else {
+            request["examples"] = std::move (examples);
+        }
+    });
+    apply_vayu_mock (object, request, tally);
+}
+
+/// The folder path an `x-vayu-request` files its request under, `[]` for the
+/// root. A path that fails its check files it on the root, counted.
+json vayu_folder_of (const std::optional<json>& object, ImportTally& tally) {
+    json folder = json::array ();
+    if (!object) {
+        return folder;
+    }
+    apply_piece (*object, "folder", tally, ext::folder_path_of,
+    [&folder] (json path) { folder = std::move (path); });
+    return folder;
+}
+
+/// The request's position among its folder's, from `x-vayu-request.order`.
+int vayu_order_of (const std::optional<json>& object) {
+    if (!object) {
+        return 0;
+    }
+    const auto order = object->find ("order");
+    return order != object->end () && order->is_number_integer () ? order->get<int> () : 0;
+}
+
+/**
+ * A request `x-vayu-collection.requests` carries whole - one no operation could
+ * hold - or nothing when it states no method or URL to build one from.
+ */
+std::optional<json> standalone_request (const json& object, ImportTally& tally) {
+    if (!object.is_object () || !method_piece (object.value ("method", json ())) ||
+    !string_piece (object.value ("url", json ()))) {
+        tally.add (ext::INVALID_KIND);
+        return std::nullopt;
+    }
+    json request{ { "name", object.value ("name", json ("")) }, { "description", "" },
+        { "method", "GET" }, { "url", "" }, { "params", json::array () },
+        { "headers", json::array () }, { "body", json{ { "mode", "none" } } },
+        { "auth", json{ { "mode", "inherit" } } } };
+    if (!request.at ("name").is_string () ||
+    request.at ("name").get_ref<const std::string&> ().empty ()) {
+        request["name"] = object.at ("url");
+    }
+    apply_vayu_request (object, request, tally);
+    if (const json* elements = prop (&object, "elements");
+    elements != nullptr && elements->is_array () && !elements->empty ()) {
+        if (Registry::instance ().validate (*elements, ElementOwner::Request)) {
+            tally.add ("elements_invalid");
+        } else {
+            request["elements"] = *elements;
+        }
+    }
+    return std::make_optional (std::move (request));
+}
+
+/**
+ * The folder tree `x-vayu-collection.folders` states, with every request filed
+ * where its `x-vayu-request.folder` says - the collection's own nesting, where
+ * the standard members can only say one flat tag per operation. A request
+ * naming a folder the list lacks gets that folder made for it.
+ */
+class VayuFolderTree {
+    public:
+    VayuFolderTree (const json& folders, ImportTally& tally) : tally_ (tally) {
+        if (!folders.is_array ()) {
+            tally_.add (ext::INVALID_KIND);
+            return;
+        }
+        for (const json& folder : folders) {
+            const std::optional<json> path = folder.is_object () ?
+            ext::folder_path_of (folder.value ("path", json ())) :
+            std::nullopt;
+            if (!path) {
+                tally_.add (ext::INVALID_KIND);
+                continue;
+            }
+            json& node = ensure (*path);
+            read_folder (folder, node);
+        }
+    }
+
+    /// Files @p request under @p path (`[]` is the root), at @p order.
+    void place (json request, const json& path, int order) {
+        auto& list = path.empty () ? root_requests_ : requests_[key_of (path)];
+        if (!path.empty ()) {
+            ensure (path);
+        }
+        list.emplace_back (order, std::move (request));
+    }
+
+    /// The root's own requests, in their stored order.
+    [[nodiscard]] json root_requests () {
+        return sorted (root_requests_);
+    }
+
+    /// The folders directly under the root, each with its whole subtree.
+    [[nodiscard]] json children () {
+        // Deepest first, so a folder's children are complete before it is
+        // moved into its parent.
+        std::vector<std::string> by_depth = order_;
+        std::stable_sort (by_depth.begin (), by_depth.end (),
+        [this] (const std::string& a, const std::string& b) {
+            return depth_.at (a) > depth_.at (b);
+        });
+        for (const std::string& key : by_depth) {
+            json& node               = nodes_.at (key);
+            node["requests"]         = sorted (requests_[key]);
+            const std::string parent = parent_.at (key);
+            if (!parent.empty ()) {
+                child_lists_[parent].push_back (key);
+            }
+        }
+        json roots = json::array ();
+        for (const std::string& key : order_) {
+            json& node = nodes_.at (key);
+            for (const std::string& child : child_lists_[key]) {
+                node["children"].push_back (std::move (nodes_.at (child)));
+            }
+        }
+        for (const std::string& key : order_) {
+            if (parent_.at (key).empty ()) {
+                roots.push_back (std::move (nodes_.at (key)));
+            }
+        }
+        return roots;
+    }
+
+    [[nodiscard]] size_t count () const {
+        return order_.size ();
+    }
+
+    private:
+    static std::string key_of (const json& path) {
+        std::string key;
+        for (const json& segment : path) {
+            key += segment.get<std::string> ();
+            key += '\0';
+        }
+        return key;
+    }
+
+    /// The node for @p path, made - parents first - when it does not exist yet.
+    json& ensure (const json& path) {
+        const std::string key = key_of (path);
+        if (const auto found = nodes_.find (key); found != nodes_.end ()) {
+            return found->second;
+        }
+        std::string parent;
+        if (path.size () > 1) {
+            json parent_path = path;
+            parent_path.erase (parent_path.size () - 1);
+            ensure (parent_path);
+            parent = key_of (parent_path);
+        }
+        json node;
+        node["name"]        = path.back ();
+        node["description"] = "";
+        node["variables"]   = json::object ();
+        node["auth"]        = json{ { "mode", "none" } };
+        node["children"]    = json::array ();
+        node["requests"]    = json::array ();
+        order_.push_back (key);
+        parent_[key] = parent;
+        depth_[key]  = path.size ();
+        return nodes_.emplace (key, std::move (node)).first->second;
+    }
+
+    void read_folder (const json& folder, json& node) {
+        apply_piece (folder, "description", tally_, string_piece,
+        [&node] (json value) { node["description"] = std::move (value); });
+        apply_piece (folder, "variables", tally_, ext::variables_of,
+        [&node] (json value) { node["variables"] = std::move (value); });
+        apply_piece (
+        folder, "auth", tally_,
+        [] (
+        const json& value) { return ext::auth_of (value, /*collection=*/true); },
+        [&node] (json value) { node["auth"] = std::move (value); });
+        if (const json* elements = prop (&folder, "elements");
+        elements != nullptr && elements->is_array () && !elements->empty ()) {
+            if (Registry::instance ().validate (*elements, ElementOwner::Collection)) {
+                tally_.add ("elements_invalid");
+            } else {
+                node["elements"] = *elements;
+            }
+        }
+    }
+
+    static json sorted (std::vector<std::pair<int, json>>& list) {
+        std::stable_sort (list.begin (), list.end (),
+        [] (const auto& a, const auto& b) { return a.first < b.first; });
+        json out = json::array ();
+        for (auto& [order, request] : list) {
+            out.push_back (std::move (request));
+        }
+        return out;
+    }
+
+    ImportTally& tally_;
+    std::vector<std::string> order_;
+    std::map<std::string, json> nodes_;
+    std::map<std::string, std::string> parent_;
+    std::map<std::string, size_t> depth_;
+    std::map<std::string, std::vector<std::string>> child_lists_;
+    std::map<std::string, std::vector<std::pair<int, json>>> requests_;
+    std::vector<std::pair<int, json>> root_requests_;
+};
+
+/**
+ * The collection-level half of `x-vayu-collection` applied to the imported
+ * root: its variables (which already hold `baseUrl`), auth and data contract.
+ */
+void apply_vayu_collection (const json& object, json& root, ImportTally& tally) {
+    apply_piece (object, "variables", tally, ext::variables_of,
+    [&root] (json value) { root["variables"] = std::move (value); });
+    apply_piece (
+    object, "auth", tally,
+    [] (const json& value) { return ext::auth_of (value, /*collection=*/true); },
+    [&root] (json value) { root["auth"] = std::move (value); });
+    apply_piece (object, "dataSchema", tally, ext::data_schema_of,
+    [&root] (json value) { root["dataSchema"] = std::move (value); });
+}
+
+/**
+ * The collection's own `x-vayu-elements` (issue #1518), which a skeleton
+ * export writes at the document root - validated the way an operation's are
+ * in `draft_request`, against the collection owner's rules, and counted as
+ * `elements_invalid` rather than applied when it fails.
+ */
+std::optional<json> collection_elements (const json& document, ImportTally& tally) {
+    const json* elements = prop (&document, "x-vayu-elements");
+    if (elements == nullptr || !elements->is_array () || elements->empty ()) {
+        return std::nullopt;
+    }
+    if (Registry::instance ().validate (*elements, ElementOwner::Collection)) {
+        tally.add ("elements_invalid");
+        return std::nullopt;
+    }
+    return std::make_optional (*elements);
+}
+
+/// Where a document's requests are based, and the schemes its auth is built
+/// from - the half of `parse_openapi` the two dialects state differently.
+struct DocumentBase {
     std::string base_url;
     const json* schemes = nullptr;
+};
+
+DocumentBase
+document_base (const json& document, bool v3, const ImportSource& source, ImportTally& tally) {
+    DocumentBase base;
     if (v3) {
         const json* servers = prop (&document, "servers");
         if (servers != nullptr && servers->is_array () && servers->size () > 1) {
@@ -2870,45 +3243,135 @@ walk::Dialect dialect) {
             // environment an import can create (issue #1444).
             tally.add ("servers_dropped", static_cast<int> (servers->size () - 1));
         }
-        base_url = resolve_server_url (array_at (servers, 0), source.source_url, tally);
-        schemes = as_record (
+        base.base_url =
+        resolve_server_url (array_at (servers, 0), source.source_url, tally);
+        base.schemes = as_record (
         prop (as_record (prop (&document, "components")), "securitySchemes"));
-    } else {
-        // 2.0 states its base as three fields rather than a server URL. A
-        // `basePath` of exactly `/` adds nothing, and a document with no `host`
-        // has no base at all - `{{baseUrl}}` is then simply not a variable, and
-        // every request's URL starts with the token unresolved, which is what
-        // the renderer did too.
-        const std::string* wire_scheme =
-        as_str (array_at (prop (&document, "schemes"), 0));
-        const std::string* declared_base = as_str (prop (&document, "basePath"));
-        const std::string base_path =
-        declared_base != nullptr && *declared_base != "/" ? *declared_base :
-                                                            std::string ();
-        if (const std::string* host = as_str (prop (&document, "host"));
-        host != nullptr && !host->empty ()) {
-            base_url = (wire_scheme == nullptr ? "https" : *wire_scheme) +
-            "://" + *host + base_path;
+        return base;
+    }
+    // 2.0 states its base as three fields rather than a server URL. A
+    // `basePath` of exactly `/` adds nothing, and a document with no `host`
+    // has no base at all - `{{baseUrl}}` is then simply not a variable, and
+    // every request's URL starts with the token unresolved, which is what
+    // the renderer did too.
+    const std::string* wire_scheme = as_str (array_at (prop (&document, "schemes"), 0));
+    const std::string* declared_base = as_str (prop (&document, "basePath"));
+    const std::string base_path =
+    declared_base != nullptr && *declared_base != "/" ? *declared_base : std::string ();
+    if (const std::string* host = as_str (prop (&document, "host"));
+    host != nullptr && !host->empty ()) {
+        base.base_url =
+        (wire_scheme == nullptr ? "https" : *wire_scheme) + "://" + *host + base_path;
+    }
+    base.schemes = as_record (prop (&document, "securityDefinitions"));
+    return base;
+}
+
+/**
+ * Where an OpenAPI import files its requests. A document a Vayu export wrote
+ * states its own tree (`x-vayu-collection`); any other is grouped by tag, then
+ * by path (issue #710).
+ */
+class ImportTree {
+    public:
+    ImportTree (const json& document, ImportTally& tally)
+    : vayu_collection_ (as_record (prop (&document, ext::COLLECTION_KEY))),
+      folders_ (prop (&document, "tags")), tally_ (tally) {
+        if (vayu_collection_ != nullptr) {
+            vayu_tree_.emplace (vayu_collection_->value ("folders", json::array ()), tally);
         }
-        schemes = as_record (prop (&document, "securityDefinitions"));
     }
 
-    const PrimaryScheme scheme = primary_scheme (schemes, prop (&document, "security"));
+    void place (json request, const SpecRequestDraft& entry) {
+        if (vayu_tree_) {
+            vayu_tree_->place (std::move (request),
+            vayu_folder_of (entry.vayu_request, tally_),
+            vayu_order_of (entry.vayu_request));
+        } else {
+            folders_.place (std::move (request), entry.folder, entry.folder_from_tag);
+        }
+    }
 
-    OperationFolders folders (prop (&document, "tags"));
+    /// The requests `x-vayu-collection` carries whole - the ones no
+    /// operation could hold (no path, or a method and path another request
+    /// claimed first).
+    void place_carried_requests () {
+        const json* extra =
+        vayu_collection_ == nullptr ? nullptr : prop (vayu_collection_, "requests");
+        if (!vayu_tree_ || extra == nullptr) {
+            return;
+        }
+        if (!extra->is_array ()) {
+            tally_.add (ext::INVALID_KIND);
+            return;
+        }
+        for (const json& object : *extra) {
+            if (std::optional<json> request = standalone_request (object, tally_)) {
+                vayu_tree_->place (std::move (*request),
+                vayu_folder_of (std::make_optional (object), tally_),
+                vayu_order_of (std::make_optional (object)));
+            }
+        }
+    }
+
+    /// The root's folders and own requests, and - for a Vayu-written
+    /// document - its variables, auth and data contract.
+    void fill_root (json& root) {
+        if (vayu_tree_) {
+            apply_vayu_collection (*vayu_collection_, root, tally_);
+            root["children"] = vayu_tree_->children ();
+            root["requests"] = vayu_tree_->root_requests ();
+            return;
+        }
+        root["children"] = folders_.children ();
+        root["requests"] = folders_.root_requests ();
+    }
+
+    [[nodiscard]] int count () const {
+        return static_cast<int> (vayu_tree_ ? vayu_tree_->count () : folders_.count ());
+    }
+
+    /// Which rule produced the folders - empty for a tree the document
+    /// states itself, which needs no explaining.
+    [[nodiscard]] std::string strategy () const {
+        return vayu_tree_ ? std::string () : folders_.strategy ();
+    }
+
+    private:
+    const json* vayu_collection_;
+    OperationFolders folders_;
+    std::optional<VayuFolderTree> vayu_tree_;
+    ImportTally& tally_;
+};
+
+json parse_openapi (const json& document,
+const std::string& raw,
+const ImportSource& source,
+walk::Dialect dialect) {
+    ImportTally tally;
+    const bool v3           = dialect == walk::Dialect::V3;
+    const DocumentBase base = document_base (document, v3, source, tally);
+    const PrimaryScheme scheme =
+    primary_scheme (base.schemes, prop (&document, "security"));
+
+    ImportTree tree (document, tally);
     const std::vector<SpecRequestDraft> drafts = import_drafts_of (document, tally);
     for (const SpecRequestDraft& entry : drafts) {
         json request = draft_request (entry, tally);
         if (std::optional<json> auth = operation_auth_override (
-            entry.security.has_value () ? &*entry.security : nullptr, schemes,
-            scheme, v3, tally);
+            entry.security.has_value () ? &*entry.security : nullptr,
+            base.schemes, scheme, v3, tally);
         auth.has_value ()) {
             // Overrides `draft_request`'s default `inherit` - the request's
             // own `security` named something the collection's does not.
             request["auth"] = std::move (*auth);
         }
-        folders.place (std::move (request), entry.folder, entry.folder_from_tag);
+        if (entry.vayu_request) {
+            apply_vayu_request (*entry.vayu_request, request, tally);
+        }
+        tree.place (std::move (request), entry);
     }
+    tree.place_carried_requests ();
 
     const json* info         = as_record (prop (&document, "info"));
     const std::string* title = as_str (prop (info, "title"));
@@ -2917,12 +3380,14 @@ walk::Dialect dialect) {
     json root;
     root["name"]        = title == nullptr ? "Imported API" : *title;
     root["description"] = about == nullptr ? "" : *about;
-    root["variables"]   = base_url.empty () ?
+    root["variables"]   = base.base_url.empty () ?
       json::object () :
-      json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
+      json{ { "baseUrl", { { "value", base.base_url }, { "enabled", true } } } };
     root["auth"]        = collection_primary_auth (scheme, v3, tally);
-    root["children"]    = folders.children ();
-    root["requests"]    = folders.root_requests ();
+    if (std::optional<json> elements = collection_elements (document, tally)) {
+        root["elements"] = std::move (*elements);
+    }
+    tree.fill_root (root);
     // The document itself, so the import can store it and bind this collection
     // to it in the same atomic call (#637). `raw` and not a re-serialization:
     // the engine hashes the bytes it stores, and a sync compares against that
@@ -2936,8 +3401,8 @@ walk::Dialect dialect) {
     json meta;
     meta["format"]       = walk::dialect_format_name (document, dialect);
     meta["requestCount"] = static_cast<int> (drafts.size ());
-    meta["folderCount"]  = static_cast<int> (folders.count ());
-    if (const std::string strategy = folders.strategy (); !strategy.empty ()) {
+    meta["folderCount"]  = tree.count ();
+    if (const std::string strategy = tree.strategy (); !strategy.empty ()) {
         meta["folderStrategy"] = strategy;
     }
     // A document has no environment or globals concept.
@@ -3071,8 +3536,9 @@ int order) {
     item["body"]             = draft.at ("body");
     item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
     item["auth"] = draft.at ("auth");
-    for (const char* optional : { "followRedirects", "maxRedirects", "verifySSL", "examples",
-         "specOperation", "elements", "mockResponseMode", "mockExampleIndex" }) {
+    for (const char* optional : { "followRedirects", "maxRedirects",
+         "verifySSL", "httpVersion", "stream", "examples", "specOperation",
+         "elements", "mockResponseMode", "mockExampleIndex" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;
@@ -3126,6 +3592,7 @@ json& specs) {
     collection["variables"] = draft.at ("variables");
     collection["auth"]      = draft.at ("auth");
     carry (draft, collection, "elements");
+    carry (draft, collection, "dataSchema");
     if (!spec_temp_id.empty ()) {
         collection["openapi"] = json{ { "specTempId", spec_temp_id } };
     }

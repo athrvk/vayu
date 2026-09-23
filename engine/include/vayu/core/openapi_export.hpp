@@ -53,6 +53,21 @@ namespace vayu::core {
 /** The serialization the caller asked for. */
 enum class ExportFormat : std::uint8_t { Json, Yaml };
 
+/**
+ * What a bound export may write into the document it updates - the user's
+ * choice, made in the export dialog.
+ *
+ * - `Contract` (the default) treats the document as the API's contract: it
+ *   removes operations nothing here claims and writes examples and parameter
+ *   values into the operations it declares, and changes nothing else - a
+ *   request somebody edited in Vayu is one client's view, not a new contract.
+ * - `Full` writes everything the collection holds, the way a skeleton does:
+ *   names and descriptions, new parameters, bodies, auth, settings, scripts,
+ *   folders, variables, and an operation for every request the document never
+ *   declared - into the document's own dialect, 2.0 included.
+ */
+enum class BoundMode : std::uint8_t { Contract, Full };
+
 /** One Params or Headers row, as the exporter reads it. */
 struct ExportKeyValue {
     std::string key;
@@ -141,6 +156,9 @@ struct ExportExample {
      * says which entry to write into instead of adding a new one.
      */
     std::optional<std::string> spec_example_key = std::nullopt;
+    /// The stored headers verbatim - carried in `x-vayu-request.examples`,
+    /// never as the Response Object's `headers` (see `has_extra_headers`).
+    nlohmann::json headers = nlohmann::json::array ();
 };
 
 /** The identity a request carries, when it carries one (`spec_operation`). */
@@ -172,8 +190,6 @@ struct ExportRequest {
     /// The request's own auth, `inherit` included - a skeleton export reads
     /// this to say whether the request overrides the collection's.
     ExportAuth auth;
-    std::string pre_request_script;
-    std::string post_request_script;
     // Execution settings, mirroring `db::Request`'s own defaults so a request
     // written before these existed compares as "nothing customized".
     bool follow_redirects    = true;
@@ -187,9 +203,7 @@ struct ExportRequest {
     std::vector<std::string> folder_path;
     /**
      * The request's own `elements` array verbatim (issue #1518), scripts
-     * included - `pre_request_script`/`post_request_script` above stay
-     * derived from it (kept for the drop-count precedent this field
-     * replaces), this is what actually reaches `x-vayu-elements`.
+     * included - what reaches `x-vayu-elements`.
      *
      * Appended last, never inserted among the fields above: several tests
      * build an `ExportRequest` by positional aggregate initialization, and a
@@ -213,6 +227,35 @@ struct ExportRequest {
      * key ends up naming it.
      */
     std::optional<size_t> mock_example_index = std::nullopt;
+    /**
+     * The stored columns as the UI holds them, for `x-vayu-request`
+     * (`vayu_extensions.hpp`): every Params and Headers row verbatim
+     * (`Authorization` / `Content-Type` rows and duplicates included, which no
+     * Parameter Object can state), the body in its own mode, and the auth
+     * exactly as set - `inherit` included, where @ref auth above holds what
+     * that `inherit` resolves to. Secrets are blanked on the way out, not here.
+     */
+    nlohmann::json stored_params  = nlohmann::json::array ();
+    nlohmann::json stored_headers = nlohmann::json::array ();
+    nlohmann::json stored_body    = nlohmann::json::object ();
+    nlohmann::json stored_auth    = nlohmann::json::object ();
+    /// The request's position among its folder's requests, so a re-import
+    /// lists them as the sidebar did rather than in document path order.
+    int order = 0;
+};
+
+/**
+ * One folder (sub-collection) under the exported root - everything its
+ * editor holds, for `x-vayu-collection.folders`. OpenAPI's only grouping is a
+ * flat tag, which names a folder and nothing else about it.
+ */
+struct ExportFolder {
+    /// Folder names from directly under the root down to this one.
+    std::vector<std::string> path;
+    std::string description;
+    nlohmann::json variables = nlohmann::json::object ();
+    nlohmann::json auth      = nlohmann::json::object ();
+    nlohmann::json elements  = nlohmann::json::array ();
 };
 
 /** What a skeleton names the API after. */
@@ -220,16 +263,10 @@ struct ExportCollection {
     std::string name;
     std::string description;
     ExportAuth auth;
-    std::string pre_request_script;
-    std::string post_request_script;
     /// The collection's own `baseUrl` variable value, empty when it has none
     /// - a skeleton needs it to declare a server variable default rather than
     /// exporting a token that means nothing outside this machine.
     std::string base_url_value;
-    /// Collection variables besides `baseUrl`, which OpenAPI has nowhere to
-    /// declare (a document's variables are server variables, scoped to the
-    /// URL, not arbitrary named values).
-    int other_variables = 0;
     /**
      * The collection's own `elements` array verbatim (issue #1518) - see
      * `ExportRequest::elements`.
@@ -238,6 +275,14 @@ struct ExportCollection {
      * initialization elsewhere must keep working unshifted.
      */
     nlohmann::json elements = nlohmann::json::array ();
+    /// The stored variables (`baseUrl` included), auth and data contract
+    /// verbatim, for `x-vayu-collection` - secrets blanked on the way out.
+    nlohmann::json stored_variables = nlohmann::json::object ();
+    nlohmann::json stored_auth      = nlohmann::json::object ();
+    nlohmann::json data_schema      = nlohmann::json::object ();
+    /// Every folder under the root, parents before children, siblings in
+    /// their stored order - empty folders included.
+    std::vector<ExportFolder> folders;
 };
 
 /**
@@ -350,46 +395,37 @@ struct ExportNotes {
      */
     bool vocabulary_not_written = false;
 
-    // --- Skeleton-only: what a free-form export cannot carry (issue #1441) --
+    // --- What only the `x-vayu-*` extensions carry (vayu_extensions.hpp) ---
 
     /**
-     * Requests (plus the collection itself, once) whose auth is a mode
-     * OpenAPI has no `securityScheme` for (`digest`, `aws`, `ntlm`, `hawk`,
-     * an unrecognized custom mode) or an unresolved `inherit` with nothing to
-     * inherit from. Every other mode - `none`, `basic`, `bearer`, `apikey`,
-     * `oauth2` - is written as `security` / `securitySchemes`.
+     * Secret values written as `""`: tokens, passwords, API-key values, client
+     * secrets and variables marked secret, at every level the export writes.
+     * A value that is one `{{variable}}` reference is not a secret and is kept.
+     * This is the one thing an export of a collection deliberately leaves
+     * behind - a document is a file that gets shared.
      */
-    int auth_dropped = 0;
-    /// Requests (plus the collection, once) carrying a pre- or post-request
-    /// script - not written. OpenAPI has no operation-scoped script hook.
-    int scripts_dropped = 0;
-    /// Collection variables besides `baseUrl`, which every request's `{{...}}`
-    /// tokens already carry portably - there is nowhere in a document to
-    /// declare an arbitrary named value that is not part of a server URL.
-    int variables_dropped = 0;
-    /// Requests whose folder is nested more than one level deep. Written as a
-    /// single tag named by the full path (`Pets/Actions`), which re-imports as
-    /// one flat folder rather than the original nesting.
-    int folders_flattened = 0;
-    /// Requests carrying a body in a mode a skeleton has no media type for
-    /// (`graphql` today) - not written, the operation keeps its path,
-    /// parameters and responses.
-    int bodies_dropped = 0;
-    /// Requests whose body is `form-data` or `x-www-form-urlencoded` with at
-    /// least one field - the field *names* are declared as schema properties,
-    /// the values are one machine's data, not part of the contract.
-    int form_values_dropped = 0;
-    /// Requests carrying a non-default execution setting (redirects, TLS
-    /// verification, HTTP version, streaming) - OpenAPI describes an API, not
-    /// how a client should send to it.
-    int settings_dropped = 0;
-    /// Stored examples carrying a header besides `Content-Type` - not written.
-    int example_headers_dropped = 0;
-    /// Params or Headers rows sharing a key and location with an earlier row -
-    /// OpenAPI allows only one Parameter Object per name+location, so only the
-    /// first is written and the rest are dropped rather than producing an
-    /// invalid document with two entries for the same name.
-    int duplicate_parameter_rows_dropped = 0;
+    int secrets_omitted = 0;
+    /**
+     * Requests carried only in `x-vayu-collection.requests`: their URL states no
+     * path, or a request before them already claimed the same method and path,
+     * so no operation can hold them. Vayu re-imports them; another tool does not
+     * see them. Counted within `requests_without_path` / `duplicate_operations`
+     * too, which say *why*.
+     */
+    int requests_only_in_extension = 0;
+    /**
+     * Operations the "write everything" bound export added for requests the
+     * document never declared (`BoundMode::Full`) - the requests
+     * `requests_without_operation` counts in the contract-keeping mode.
+     */
+    int operations_added = 0;
+    /**
+     * Which bound mode ran: `contract` keeps the document as the contract and
+     * writes only examples and values into what it declares; `full` writes
+     * everything the collection holds. Empty for a skeleton, which has no
+     * document to keep.
+     */
+    std::string bound_mode;
 };
 
 /**
@@ -426,7 +462,8 @@ struct ExportOutcome {
 [[nodiscard]] ExportOutcome export_openapi (const ExportCollection& collection,
 const std::vector<ExportRequest>& requests,
 const std::optional<std::string>& spec_content,
-ExportFormat format);
+ExportFormat format,
+BoundMode bound_mode = BoundMode::Contract);
 
 /** `ExportNotes` as the route answers with it - every count, zeros included. */
 [[nodiscard]] nlohmann::json export_notes_json (const ExportNotes& notes);
