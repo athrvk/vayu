@@ -598,7 +598,7 @@ describe("the launcher sections", () => {
 
 		const footer = document.querySelector('[data-slot="command-footer"]')!;
 		expect(footer).toBeInTheDocument();
-		expect(footer.textContent).toContain("navigate");
+		expect(footer.textContent).toContain("Navigate");
 		// Inside `CommandList` the hints would scroll away with the results
 		// they describe - which is the whole reason the band exists (#773).
 		expect(footer.closest('[data-slot="command-list"]')).toBeNull();
