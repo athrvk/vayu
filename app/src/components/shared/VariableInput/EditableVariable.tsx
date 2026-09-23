@@ -120,7 +120,7 @@ export default function EditableVariable({
 			const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
 			if (content && content.contains(document.activeElement)) return;
 			setOpenMode(null);
-		}, TIMING.TOOLTIP_DELAY_MS);
+		}, TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 	}, [clearCloseTimer]);
 
 	const handleMouseEnter = useCallback(() => {

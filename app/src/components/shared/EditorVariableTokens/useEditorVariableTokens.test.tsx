@@ -298,7 +298,7 @@ describe("useEditorVariableTokens", () => {
 					stub.handlers.move?.({
 						target: { position: { lineNumber: 1, column: 1 } },
 					} as unknown as Monaco.editor.IEditorMouseEvent);
-					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+					vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 				});
 				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 			});
@@ -313,11 +313,11 @@ describe("useEditorVariableTokens", () => {
 					stub.handlers.move?.({
 						target: { position: { lineNumber: 1, column: 1 } },
 					} as unknown as Monaco.editor.IEditorMouseEvent);
-					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS / 2);
+					vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS / 2);
 					stub.handlers.move?.({
 						target: { position: { lineNumber: 1, column: 8 } },
 					} as unknown as Monaco.editor.IEditorMouseEvent);
-					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+					vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 				});
 				expect(closeTokenEditor).not.toHaveBeenCalled();
 			});
@@ -331,7 +331,7 @@ describe("useEditorVariableTokens", () => {
 				act(() => stub.handlers.leave?.());
 				expect(closeTokenEditor).not.toHaveBeenCalled();
 
-				act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+				act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
 				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 			});
 

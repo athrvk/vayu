@@ -276,7 +276,7 @@ export function useEditorVariableTokens({
 			stillCurrent.hoverContentCleanup?.();
 			stillCurrent.hoverContentCleanup = undefined;
 			live.current.tokens?.closeTokenEditor();
-		}, TIMING.TOOLTIP_DELAY_MS);
+		}, TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 	}, []);
 
 	/**

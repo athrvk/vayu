@@ -181,7 +181,7 @@ describe("no accidental writes or focus theft from a hover", () => {
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 
 		leave(container);
-		act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
 
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 		// Mutation check: this is `VariablePopover`'s existing
@@ -205,7 +205,7 @@ describe("no accidental writes or focus theft from a hover", () => {
 		// bubbles there for it to catch.
 		fireEvent.mouseOver(popoverContent());
 
-		act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS * 3));
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS * 3));
 
 		// Mutation check: close on the token's own leave with no grace at all,
 		// and this closes before the popover content is ever reached.
@@ -220,7 +220,7 @@ describe("no accidental writes or focus theft from a hover", () => {
 		fireEvent.mouseOver(content);
 		fireEvent.mouseOut(content, { relatedTarget: document.body });
 
-		act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
 
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
@@ -231,7 +231,7 @@ describe("no accidental writes or focus theft from a hover", () => {
 		screen.getByDisplayValue("mrc_8813").focus();
 		leave(container);
 
-		act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
 
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 	});

@@ -524,6 +524,20 @@ export function VariablePopover({
 						e.preventDefault();
 					}
 				}}
+				onEscapeKeyDown={() => {
+					/*
+					 * Radix's `DismissableLayer` closes on Escape through a
+					 * document-level listener that runs before this component's own
+					 * `<Input>` ever sees the key (capture beats the input's bubble
+					 * handler) - so the flag set there arrived too late, and Radix's
+					 * own call to `onOpenChange(false)` (`handleOpenChange` below)
+					 * ran its auto-save check first, committing whatever was typed.
+					 * Setting it here, in the callback Radix itself invokes as part
+					 * of that same dismissal, guarantees it lands before
+					 * `handleOpenChange` reads it, however either handler races.
+					 */
+					pendingCancelRef.current = true;
+				}}
 				onOpenAutoFocus={(e) => {
 					// See `focusOnOpen`: a token over a live input must not take the
 					// caret with it, and a token opened by a chord must be reachable.

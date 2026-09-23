@@ -136,6 +136,25 @@ export const TIMING = {
 	 */
 	TOOLTIP_DELAY_MS: 150,
 
+	/**
+	 * How long a hover-opened `{{variable}}` popover stays up after the pointer
+	 * leaves the token, before closing (issue #1220 hover redesign).
+	 *
+	 * This used to reuse `TOOLTIP_DELAY_MS`, on the reasoning that one named
+	 * constant beats a second one for a closely related purpose - but the two
+	 * delays answer different questions. Opening is "has the pointer paused
+	 * long enough to mean it", which 150ms already answers well. Closing is
+	 * "has the pointer had long enough to physically travel from the token to
+	 * the popover's own content", which is real mouse-travel distance and time,
+	 * not intent - and 150ms was too short: a popover a token's own height or
+	 * two away closed before an ordinary mouse movement covered the gap,
+	 * because `useEditorVariableTokens.ts` and `EditableVariable.tsx` both
+	 * cancel this timer the instant the pointer is confirmed over the popover's
+	 * content, so the grace only has to outlast the *travel*, not the whole
+	 * visit - a shorter number here costs nothing once the pointer arrives.
+	 */
+	VARIABLE_POPOVER_LEAVE_GRACE_MS: 350,
+
 	/** Engine health poll interval while the app is open. */
 	HEALTH_CHECK_INTERVAL_MS: 30_000,
 

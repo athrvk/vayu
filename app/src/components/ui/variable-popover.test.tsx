@@ -961,6 +961,25 @@ describe("the commit key never reaches what closing refocuses", () => {
 		expect(fireEvent.keyDown(reopened, { key: "Escape" })).toBe(false);
 	});
 
+	/*
+	 * Radix's `DismissableLayer` closes the popover on Escape through its own
+	 * `onEscapeKeyDown`/`onOpenChange` sequence, which - being wired to the
+	 * `<Popover>` itself - runs independently of whatever this field's own
+	 * `onKeyDown` does. A version of this component that set `pendingCancelRef`
+	 * only from the field's handler raced that sequence and lost: the flag was
+	 * still false when Radix's own `onOpenChange(false)` ran the auto-save
+	 * check, so Escape committed the edit it exists to discard.
+	 */
+	it("discards an edit on Escape rather than committing it", () => {
+		const { onValueChange } = renderPopover();
+		const field = within(open()).getByLabelText("Value of merchantId");
+		fireEvent.change(field, { target: { value: "mrc_9000" } });
+
+		fireEvent.keyDown(field, { key: "Escape" });
+
+		expect(onValueChange).not.toHaveBeenCalled();
+	});
+
 	it("prevents Enter's and Escape's default in manual mode", () => {
 		renderPopover({ saveMode: "manual" });
 		const field = within(open()).getByLabelText("Value of merchantId");
