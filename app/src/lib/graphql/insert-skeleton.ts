@@ -600,7 +600,7 @@ export function insertField(
 	const fullPath = request.rootPath ?? [
 		{ parentTypeName: request.parentTypeName, fieldName: request.fieldName },
 	];
-	if (fullPath.length === 0) return { refused: true, reason: "This row cannot be inserted." };
+	if (fullPath.length === 0) return { refused: true, reason: "This row can't be inserted." };
 
 	const analysis = enclosingSets(schema, text, cursor);
 	const chain = analysis?.chain ?? [];
@@ -1058,7 +1058,7 @@ export function insertionForNode(
 		const subject = node.argumentOwner?.fieldName ?? node.name;
 		return {
 			refused: true,
-			reason: `Subscriptions cannot be run here. Vayu sends one request and reads one response, so ${subject} is shown for reference only.`,
+			reason: `Subscriptions can't be run here. Vayu sends one request and reads one response, so ${subject} is shown for reference only.`,
 		};
 	}
 

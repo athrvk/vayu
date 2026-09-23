@@ -222,7 +222,7 @@ export default function ResponseBody({
 						<span>Binary data</span>
 					</div>
 					<p className="text-sm text-muted-foreground">
-						Binary content cannot be displayed. Download to view.
+						Binary content can't be displayed. Download to view.
 					</p>
 				</div>
 			</div>

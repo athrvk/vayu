@@ -79,7 +79,7 @@ export function ValidationChip({ validation, className }: ValidationChipProps) {
 			)}
 			title={
 				partial
-					? "Matched the schema, but part of it uses keywords this validator cannot evaluate."
+					? "Matched the schema, but part of it uses keywords this validator can't evaluate."
 					: "This response matches the schema its spec declares."
 			}
 		>
