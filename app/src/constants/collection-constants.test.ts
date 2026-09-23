@@ -6,9 +6,10 @@
  */
 
 /**
- * "Folder" is the user-facing word (issue #1689) - the tree row's icon is a
- * folder glyph, and the menu action is "Add Folder", so a default name that
- * still said "Sub Collection" was the one place the old word survived.
+ * "Collection" is the user-facing word, for a nested one as much as a root one
+ * (the UX writing pass, docs/ux-writing.md - "Folder" doesn't appear in the
+ * tree's own menus or icons any more either), so a default name that still
+ * said "Sub Collection" was the one place the old word survived (issue #1689).
  */
 
 import { describe, it, expect } from "vitest";
@@ -19,7 +20,7 @@ import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "./collection";
 describe("collection naming constants", () => {
 	it('DEFAULT_FOLDER_NAME contains no "Sub Collection"', () => {
 		expect(DEFAULT_FOLDER_NAME).not.toMatch(/sub ?collection/i);
-		expect(DEFAULT_FOLDER_NAME).toBe("New Folder");
+		expect(DEFAULT_FOLDER_NAME).toBe("New Collection");
 	});
 
 	it("DEFAULT_COLLECTION_NAME is unaffected", () => {
