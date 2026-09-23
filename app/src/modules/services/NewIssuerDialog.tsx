@@ -270,7 +270,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 					    is - a toast would take the message away from the form the
 					    user has to correct. */}
 					{engineError && (
-						<Callout severity="blocking" title="Could not start the issuer">
+						<Callout severity="blocking" title="Couldn't start the issuer">
 							{engineError instanceof Error ? engineError.message : "Unknown error"}
 						</Callout>
 					)}

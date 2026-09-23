@@ -143,7 +143,7 @@ export default function MockServerView() {
 										showToast(
 											e instanceof Error
 												? e.message
-												: "Could not stop the mock server",
+												: "Couldn't stop the mock server",
 											"error"
 										),
 								})

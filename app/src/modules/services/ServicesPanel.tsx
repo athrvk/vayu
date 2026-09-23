@@ -285,7 +285,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 												showToast(
 													error instanceof Error
 														? error.message
-														: "Could not stop the inbox",
+														: "Couldn't stop the inbox",
 													"error"
 												),
 										}),
@@ -369,7 +369,7 @@ function IssuerRow({
 			{
 				onError: (error) =>
 					showToast(
-						error instanceof Error ? error.message : "Could not update the issuer",
+						error instanceof Error ? error.message : "Couldn't update the issuer",
 						"error"
 					),
 			}
@@ -417,7 +417,7 @@ function IssuerRow({
 									showToast(
 										error instanceof Error
 											? error.message
-											: "Could not stop the issuer",
+											: "Couldn't stop the issuer",
 										"error"
 									),
 							}),
@@ -628,7 +628,7 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 								showToast(
 									error instanceof Error
 										? error.message
-										: "Could not stop the mock server",
+										: "Couldn't stop the mock server",
 									"error"
 								),
 						}),
@@ -720,7 +720,7 @@ export default function ServicesPanel() {
 				},
 				onError: (error) =>
 					showToast(
-						error instanceof Error ? error.message : "Could not start the inbox",
+						error instanceof Error ? error.message : "Couldn't start the inbox",
 						"error"
 					),
 			}
