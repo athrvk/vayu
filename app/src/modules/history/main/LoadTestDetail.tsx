@@ -38,6 +38,7 @@ import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore, useLayoutStore } from "@/stores";
@@ -83,10 +84,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// composed out of nodes it would have to flatten.
 	const virtualUsers = report.scenario?.virtualUsers;
 	const sequenceLabel = isScenarioLoad
-		? `${scenarioSteps.length} step${scenarioSteps.length === 1 ? "" : "s"} per iteration` +
+		? `${scenarioSteps.length} ${pluralize(scenarioSteps.length, "step")} per iteration` +
 			(virtualUsers === undefined
 				? ""
-				: ` - ${virtualUsers} virtual user${virtualUsers === 1 ? "" : "s"}`)
+				: ` - ${virtualUsers} ${pluralize(virtualUsers, "virtual user")}`)
 		: "";
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview

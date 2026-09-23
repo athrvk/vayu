@@ -31,6 +31,7 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { formatNumber } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
 
 export interface ScenarioStepsTabProps {
@@ -179,7 +180,7 @@ export default function ScenarioStepsTab({
 													step.tests.failed
 												)} failed across ${formatNumber(
 													step.tests.sampled
-												)} sampled response${step.tests.sampled === 1 ? "" : "s"}`}
+												)} sampled ${pluralize(step.tests.sampled, "response")}`}
 											>
 												{formatNumber(step.tests.passed)}
 												{step.tests.failed > 0 && (

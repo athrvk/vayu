@@ -35,6 +35,7 @@
  * precisely so this module stays pure.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { DataFileError } from "./errors";
 import { isBlankRow, parseDelimited } from "./tabular";
 
@@ -146,7 +147,7 @@ function parseTabular(text: string, delimiter: string, warnings: string[]): Pars
 			// Loud, because both directions lose data silently: a short row
 			// leaves a token unbound, and a long one drops cells nobody can see.
 			throw new DataFileError(
-				`Row ${i} has ${cells.length} ${cells.length === 1 ? "value" : "values"} but the header names ${columns.length} ${columns.length === 1 ? "column" : "columns"}.`
+				`Row ${i} has ${cells.length} ${pluralize(cells.length, "value")} but the header names ${columns.length} ${pluralize(columns.length, "column")}.`
 			);
 		}
 		const row: DataFileRow = {};
@@ -157,7 +158,7 @@ function parseTabular(text: string, delimiter: string, warnings: string[]): Pars
 	}
 
 	if (blanks > 0) {
-		warnings.push(`Skipped ${blanks} blank ${blanks === 1 ? "line" : "lines"}.`);
+		warnings.push(`Skipped ${blanks} blank ${pluralize(blanks, "line")}.`);
 	}
 	warnings.push(
 		`Values are read as text - "007" stays "007". Use a JSON or JSONL file for numbers and booleans.`
@@ -218,13 +219,13 @@ function warnAboutUnevenColumns(columns: string[], rows: DataFileRow[], warnings
 
 	for (const { column, missing } of uneven.slice(0, UNEVEN_COLUMNS_NAMED)) {
 		warnings.push(
-			`Column "${column}" is missing from ${missing} of ${rows.length} ${rows.length === 1 ? "row" : "rows"} - a {{data.${column}}} token will fail on those iterations.`
+			`Column "${column}" is missing from ${missing} of ${rows.length} ${pluralize(rows.length, "row")} - a {{data.${column}}} token will fail on those iterations.`
 		);
 	}
 	const rest = uneven.length - UNEVEN_COLUMNS_NAMED;
 	if (rest > 0) {
 		warnings.push(
-			`${rest} more ${rest === 1 ? "column is" : "columns are"} missing from some rows.`
+			`${rest} more ${pluralize(rest, "column")} ${rest === 1 ? "is" : "are"} missing from some rows.`
 		);
 	}
 }
@@ -291,7 +292,7 @@ function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
 	});
 
 	if (blanks > 0) {
-		warnings.push(`Skipped ${blanks} blank ${blanks === 1 ? "line" : "lines"}.`);
+		warnings.push(`Skipped ${blanks} blank ${pluralize(blanks, "line")}.`);
 	}
 	const columns = columnsOf(rows);
 	warnAboutUnevenColumns(columns, rows, warnings);

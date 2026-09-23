@@ -26,6 +26,8 @@
  * preview, and a run with a mismatched file is still the user's to start.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
+
 /** Both directions of a file-versus-contract comparison. */
 export interface DataSchemaDiff {
 	/** Declared columns the file does not carry. */
@@ -69,12 +71,12 @@ export function describeDataSchemaDiff(declared: string[], actual: string[]): st
 	const messages: string[] = [];
 	if (missing.length > 0) {
 		messages.push(
-			`The file is missing ${missing.length === 1 ? "a declared column" : `${missing.length} declared columns`}: ${list(missing)}. A {{data.${missing[0]}}} token has nothing to bind to.`
+			`The file is missing ${missing.length === 1 ? "a" : missing.length} declared ${pluralize(missing.length, "column")}: ${list(missing)}. A {{data.${missing[0]}}} token has nothing to bind to.`
 		);
 	}
 	if (undeclared.length > 0) {
 		messages.push(
-			`The file carries ${undeclared.length === 1 ? "a column" : `${undeclared.length} columns`} the contract does not declare: ${list(undeclared)}. Re-declare from this file if it is the one you meant.`
+			`The file carries ${undeclared.length === 1 ? "a" : undeclared.length} ${pluralize(undeclared.length, "column")} the contract does not declare: ${list(undeclared)}. Re-declare from this file if it is the one you meant.`
 		);
 	}
 	return messages;

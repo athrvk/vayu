@@ -17,6 +17,7 @@
  * refuses it up front rather than turning a typo into a failed request.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { MockIssuer, MockIssuerFailureMode } from "@/types";
 
 export const FAILURE_MODE_LABELS: Record<MockIssuerFailureMode, string> = {
@@ -44,7 +45,7 @@ export function failureModeSummary(issuer: MockIssuer): string {
 	parts.push(
 		issuer.clientCount === 0
 			? "any client id accepted"
-			: `${issuer.clientCount} client${issuer.clientCount === 1 ? "" : "s"} configured`
+			: `${issuer.clientCount} ${pluralize(issuer.clientCount, "client")} configured`
 	);
 	if (issuer.issueRefreshTokens) parts.push("refresh tokens issued");
 	return `${parts.join(" · ")}.`;

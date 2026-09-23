@@ -12,7 +12,7 @@
  * pane, and so the component file keeps exporting only a component.
  */
 
-import { formatDuration } from "@/modules/dashboard/utils/format";
+import { formatDuration, pluralize } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types";
 
 export interface AuthRefreshNote {
@@ -42,7 +42,7 @@ export function authRefreshNote(auth: RunReport["auth"]): AuthRefreshNote | null
 	}
 	if (failures > 0) {
 		parts.push(
-			`${failures} refresh ${failures === 1 ? "failure" : "failures"}` +
+			`${failures} refresh ${pluralize(failures, "failure")}` +
 				(auth.lastError ? ` - ${auth.lastError}` : "")
 		);
 	}
