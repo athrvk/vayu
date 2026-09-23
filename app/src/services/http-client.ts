@@ -103,18 +103,19 @@ function abortError(): Error {
  * shows, shared by the plain request path and the streaming one.
  *
  * Every branch carries the original as `cause`. The messages here are written
- * for a user - "Request timeout" says nothing about which socket gave up - so
- * without the chain the underlying failure is not recoverable from what was
- * thrown, which is what `preserve-caught-error` is about.
+ * for a user - "Couldn't reach the engine in time" says nothing about which
+ * socket gave up - so without the chain the underlying failure is not
+ * recoverable from what was thrown, which is what `preserve-caught-error` is
+ * about.
  */
 function asTransportError(error: unknown): Error {
 	if (error instanceof Error) {
 		if (error.name === "AbortError") {
-			return new Error("Request timeout", { cause: error });
+			return new Error("Couldn't reach the engine in time.", { cause: error });
 		}
-		return new Error(`Network error: ${error.message}`, { cause: error });
+		return new Error(`Couldn't reach the engine (${error.message}).`, { cause: error });
 	}
-	return new Error("Unknown error occurred", { cause: error });
+	return new Error("Couldn't reach the engine (unknown error).", { cause: error });
 }
 
 /**
@@ -245,7 +246,7 @@ class HttpClient {
 	 * a dialog closing while an awaited helper sits in the loop on its behalf - has
 	 * no way to reach that, and the engine goes on downloading megabytes for
 	 * nobody. An abort through this raises an `AbortError`, kept distinct from the
-	 * idle stall's `Request timeout`: both end in an `AbortController`, and a
+	 * idle stall's timeout message: both end in an `AbortController`, and a
 	 * deliberate cancel reported as a timeout is a banner about a failure nobody
 	 * had.
 	 */
