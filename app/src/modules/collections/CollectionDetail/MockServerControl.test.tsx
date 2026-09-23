@@ -14,7 +14,7 @@
  * This is the only surface that can *start* a mock, because it is the only one
  * that has a collection. What it has to get right is which mock it is talking
  * about: the engine's list is every mock in the process, and a header showing a
- * different collection's URL - or offering "Run mock server" beside one that is
+ * different collection's URL - or offering "Start mock server" beside one that is
  * already running - is worse than showing nothing.
  *
  * The transport is mocked and the real query hooks run, so starting and
@@ -111,7 +111,7 @@ describe("the collection header's mock-server control", () => {
 	it("offers to start one, and starts it for this collection", async () => {
 		renderControl();
 
-		fireEvent.click(await screen.findByRole("button", { name: /run mock server/i }));
+		fireEvent.click(await screen.findByRole("button", { name: /start mock server/i }));
 		await waitFor(() =>
 			expect(startMockServer).toHaveBeenCalledWith({ collectionId: "col_1" })
 		);
@@ -128,7 +128,7 @@ describe("the collection header's mock-server control", () => {
 		);
 		renderControl();
 
-		fireEvent.click(await screen.findByRole("button", { name: /run mock server/i }));
+		fireEvent.click(await screen.findByRole("button", { name: /start mock server/i }));
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]?.message).toMatch(/no requests to serve/i)
 		);
@@ -139,7 +139,9 @@ describe("the collection header's mock-server control", () => {
 		renderControl();
 
 		expect(await screen.findByText("http://127.0.0.1:43100")).toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: /run mock server/i })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /start mock server/i })
+		).not.toBeInTheDocument();
 		// The count that explains a mock answering 501: reported, not left to be
 		// discovered one request at a time.
 		expect(screen.getByText(/3 routes, 1 without an example/i)).toBeInTheDocument();
@@ -159,7 +161,9 @@ describe("the collection header's mock-server control", () => {
 		listMockServers.mockResolvedValue([mock({ collectionId: "col_2" })]);
 		renderControl("col_1");
 
-		expect(await screen.findByRole("button", { name: /run mock server/i })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: /start mock server/i })
+		).toBeInTheDocument();
 		expect(screen.queryByText("http://127.0.0.1:43100")).not.toBeInTheDocument();
 	});
 
@@ -174,7 +178,9 @@ describe("the collection header's mock-server control", () => {
 		await waitFor(() => expect(stopMockServer).toHaveBeenCalledWith("mock_a"));
 		// The record dies with the listener, so the header goes back to offering
 		// a start rather than a stopped chip.
-		expect(await screen.findByRole("button", { name: /run mock server/i })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: /start mock server/i })
+		).toBeInTheDocument();
 	});
 });
 
@@ -282,7 +288,7 @@ describe("the mock server options dialog", () => {
 		// from.
 		startMockServer.mockRejectedValue(new Error("has no requests to serve"));
 		renderControl();
-		fireEvent.click(await screen.findByRole("button", { name: /run mock server/i }));
+		fireEvent.click(await screen.findByRole("button", { name: /start mock server/i }));
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]?.message).toMatch(/no requests to serve/i)
 		);

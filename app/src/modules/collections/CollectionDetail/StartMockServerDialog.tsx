@@ -156,7 +156,7 @@ export function StartMockServerDialog({
 					    or the server budget - shown where the form is rather than as a
 					    toast behind an open dialog. */}
 					{error && (
-						<Callout severity="blocking" title="Could not start the mock server">
+						<Callout severity="blocking" title="Couldn't start the mock server">
 							{error.message}
 						</Callout>
 					)}
