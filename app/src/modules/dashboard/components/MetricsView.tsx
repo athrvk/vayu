@@ -614,6 +614,7 @@ function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
 		<span>
 			<span className="text-muted-foreground">{k}</span>{" "}
 			<span className="text-foreground font-semibold">{fmt(v, 0)}</span>
+			<span className="text-muted-foreground">ms</span>
 		</span>
 	);
 }

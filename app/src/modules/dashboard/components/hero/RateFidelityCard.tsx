@@ -47,7 +47,7 @@ export function RateFidelityCard({
 	const fillColor = fidelityFillColor(achievement);
 
 	return (
-		<HeroCardShell label="Rate Fidelity" tip={TOOLTIPS.rateFidelity}>
+		<HeroCardShell label="Rate fidelity" tip={TOOLTIPS.rateFidelity}>
 			<HeroValue value={fmt(achievement, 1)} unit="%" color={textColor} />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				target <span className="text-foreground font-semibold">{fmt(targetRps, 1)}</span> ·
