@@ -160,10 +160,6 @@ function hoverAt(stub: ReturnType<typeof stubEditor>, column: number | null) {
 			target: { position: column === null ? null : { lineNumber: 1, column } },
 		} as unknown as Monaco.editor.IEditorMouseEvent);
 		vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
-		// The listener `trackHoverContent` attaches is scheduled a tick after the
-		// open, via a real (non-fake) `setTimeout(0)` macrotask boundary - flushed
-		// by letting fake timers past it too.
-		vi.advanceTimersByTime(0);
 	});
 }
 
@@ -320,6 +316,45 @@ describe("useEditorVariableTokens", () => {
 					vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 				});
 				expect(closeTokenEditor).not.toHaveBeenCalled();
+			});
+
+			/**
+			 * `onContentMouseEnter`/`onContentMouseLeave` on the open request are
+			 * this hook's own half of the leave-grace hardening (issue #1220):
+			 * `EditorVariableTokensProvider` wires them straight onto the popover's
+			 * content as ordinary React props, so calling them here is standing in
+			 * for the pointer actually reaching (or leaving) that content - this
+			 * hook itself no longer reaches for the DOM node at all.
+			 */
+			it("cancels the close once the pointer is confirmed on the popover's own content", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => {
+					stub.handlers.move?.({
+						target: { position: { lineNumber: 1, column: 1 } },
+					} as unknown as Monaco.editor.IEditorMouseEvent);
+				});
+				const request = openTokenEditor.mock.calls[0][0];
+				act(() => request.onContentMouseEnter());
+				act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+				// Mutation check: drop the `clearTimeout` this calls and this fails.
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+			});
+
+			it("restarts the grace once the pointer leaves the popover's own content", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				const request = openTokenEditor.mock.calls[0][0];
+				act(() => request.onContentMouseLeave());
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+				act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 			});
 
 			it("takes the grace, not an immediate close, when the pointer leaves the editor entirely", () => {

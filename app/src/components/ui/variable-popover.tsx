@@ -231,6 +231,23 @@ export interface VariablePopoverProps {
 	 */
 	onMouseEnter?: () => void;
 	onMouseLeave?: () => void;
+	/**
+	 * Told when the pointer enters or leaves the popover's *content*, once it
+	 * renders (issue #1220 leave-grace hardening) - ordinary React props on
+	 * `PopoverContent` itself, wired below. A host with a leave-grace timer for
+	 * a hover-opened popover needs to know when the pointer has actually
+	 * reached the content, to cancel a pending close, and when it has left the
+	 * content again, to restart one.
+	 *
+	 * `PopoverContent` is rendered directly in this component's own JSX, so
+	 * these fire as part of the very same commit that creates the content's DOM
+	 * node - there is no "has the node mounted yet" race to route around, the
+	 * way a host reaching for the node from outside (a `document.querySelector`
+	 * after a `setTimeout`, or a document-level `mouseover`/`mouseout`
+	 * delegation) would have to.
+	 */
+	onContentMouseEnter?: () => void;
+	onContentMouseLeave?: () => void;
 }
 
 export function VariablePopover({
@@ -251,6 +268,8 @@ export function VariablePopover({
 	focusOnOpen = false,
 	onMouseEnter,
 	onMouseLeave,
+	onContentMouseEnter,
+	onContentMouseLeave,
 }: VariablePopoverProps) {
 	/*
 	 * Uncontrolled unless a host passes `open` (see that prop's own comment):
@@ -533,6 +552,8 @@ export function VariablePopover({
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
+				onMouseEnter={onContentMouseEnter}
+				onMouseLeave={onContentMouseLeave}
 				onPointerDownOutside={(e) => {
 					if (saveMode === "manual") {
 						e.preventDefault();

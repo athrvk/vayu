@@ -148,13 +148,6 @@ interface Installation {
 	/** Counting down the leave-grace before a hover-opened popover closes. */
 	hoverCloseTimer?: ReturnType<typeof setTimeout>;
 	/**
-	 * Detaches the listeners below, if any are attached. The popover's content
-	 * is portalled outside this editor's DOM, so telling the grace timer "the
-	 * pointer is over it now" takes a listener on that content itself, attached
-	 * once it actually mounts (a tick after `openTokenEditor` is called).
-	 */
-	hoverContentCleanup?: () => void;
-	/**
 	 * The spans `paint` last found, read back by `hoverAt` instead of scanning
 	 * again. A per-character mouse move used to re-scan the one line under the
 	 * pointer; a script's spans are not line-local (a `replaceIn(...)` argument
@@ -241,8 +234,6 @@ export function useEditorVariableTokens({
 		current.hoverTimer = undefined;
 		clearTimeout(current.hoverCloseTimer);
 		current.hoverCloseTimer = undefined;
-		current.hoverContentCleanup?.();
-		current.hoverContentCleanup = undefined;
 		if (current.hoverOpenKey !== undefined) {
 			current.hoverOpenKey = undefined;
 			live.current.tokens?.closeTokenEditor();
@@ -273,36 +264,9 @@ export function useEditorVariableTokens({
 			if (!stillCurrent || stillCurrent.hoverOpenKey === undefined) return;
 			stillCurrent.hoverOpenKey = undefined;
 			stillCurrent.hovered = undefined;
-			stillCurrent.hoverContentCleanup?.();
-			stillCurrent.hoverContentCleanup = undefined;
 			live.current.tokens?.closeTokenEditor();
 		}, TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 	}, []);
-
-	/**
-	 * Watch the hover-opened popover's own content for the pointer entering or
-	 * leaving it, once it has actually mounted - a tick after `openTokenEditor`
-	 * is called, since the state update that renders it has not committed yet
-	 * inside the same callback.
-	 */
-	const trackHoverContent = useCallback(
-		(current: Installation, key: string) => {
-			setTimeout(() => {
-				if (installation.current !== current || current.hoverOpenKey !== key) return;
-				const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
-				if (!content) return;
-				const onEnter = () => clearTimeout(current.hoverCloseTimer);
-				const onLeave = () => scheduleHoverClose();
-				content.addEventListener("mouseenter", onEnter);
-				content.addEventListener("mouseleave", onLeave);
-				current.hoverContentCleanup = () => {
-					content.removeEventListener("mouseenter", onEnter);
-					content.removeEventListener("mouseleave", onLeave);
-				};
-			}, 0);
-		},
-		[scheduleHoverClose]
-	);
 
 	/**
 	 * The pointer moved: show what is under it, hide anything else.
@@ -373,11 +337,17 @@ export function useEditorVariableTokens({
 					// runs if the popover took focus at some point, so an untouched
 					// hover closing never yanks focus off another field.
 					onClose: () => editor.focus(),
+					// Cancel the leave-grace once the pointer is confirmed on the
+					// content, and restart it once the pointer leaves the content
+					// again - ordinary props on `VariablePopover`'s own content, wired
+					// through the provider, rather than this hook reaching for the
+					// node itself once it exists.
+					onContentMouseEnter: () => clearTimeout(current.hoverCloseTimer),
+					onContentMouseLeave: () => scheduleHoverClose(),
 				});
-				trackHoverContent(current, key);
 			}, TIMING.TOOLTIP_DELAY_MS);
 		},
-		[hideHover, scheduleHoverClose, trackHoverContent]
+		[hideHover, scheduleHoverClose]
 	);
 
 	/** Open the popover over a token, if there is anything behind it to edit. */

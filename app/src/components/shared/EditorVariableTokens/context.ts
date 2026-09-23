@@ -56,6 +56,18 @@ export interface TokenEditRequest {
 	 * still opens the way it always did.
 	 */
 	focus?: boolean;
+	/**
+	 * Told when the pointer enters or leaves the popover's own content, once it
+	 * renders (issue #1220 leave-grace hardening). Only a hover open supplies
+	 * these - a keyboard-opened popover has no leave-grace timer for them to
+	 * cancel or restart - and the provider wires them directly onto
+	 * `VariablePopover`'s `onContentMouseEnter`/`onContentMouseLeave`, which are
+	 * ordinary React props on the element that renders the content: no polling
+	 * for the node to exist, no risk of finding a different popover's content
+	 * still mid-exit-animation elsewhere in the document.
+	 */
+	onContentMouseEnter?: () => void;
+	onContentMouseLeave?: () => void;
 }
 
 /** A token the pointer is resting on, for the shared tooltip to answer. */

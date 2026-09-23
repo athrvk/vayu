@@ -134,51 +134,20 @@ export default function EditableVariable({
 		if (openMode?.reason === "hover") scheduleClose();
 	}, [openMode, clearHoverTimer, scheduleClose]);
 
-	/*
-	 * What the permanent listener below reads - kept in a ref rather than a
-	 * dependency, because the listener is attached once for the component's
-	 * life (see its own comment) and must not go stale between renders.
+	/**
+	 * The pointer reaching the popover's own content, and leaving it again -
+	 * plain React props on `VariablePopover`, which forwards them straight onto
+	 * `PopoverContent` (issue #1220 leave-grace hardening). This used to be a
+	 * `document`-level `mouseover`/`mouseout` delegation, because the content is
+	 * portalled outside this token's subtree and a per-open effect reaching for
+	 * it by `querySelector` could run before Radix had actually mounted it - a
+	 * real race, not a hypothetical one. Props on the element Radix itself
+	 * renders have no such window: React attaches them in the same commit that
+	 * creates the node, portal or not.
 	 */
-	const openModeRef = useRef(openMode);
-	useEffect(() => {
-		openModeRef.current = openMode;
-	}, [openMode]);
-
-	/*
-	 * The popover's own content is portalled well outside this token's subtree,
-	 * so the grace period has to be told directly when the pointer is over it -
-	 * a leave off the token alone would otherwise close the popover the reader
-	 * just moved into, to click its value field or read a shadowed definition.
-	 *
-	 * Delegated on `document`, permanently, rather than a per-open effect that
-	 * looks the content up once it is open: Radix portals that content in on
-	 * its own schedule, which does not necessarily land in the DOM by the time
-	 * this component's own effect runs after the state change that opened it -
-	 * a real race, not a hypothetical one. `mouseover`/`mouseout` bubble
-	 * (unlike `mouseenter`/`mouseleave`), so a listener attached once, before
-	 * any token ever opens, still catches every entry and exit of whichever
-	 * content is on screen at the time.
-	 */
-	useEffect(() => {
-		const isInContent = (node: EventTarget | null): boolean =>
-			node instanceof Element && node.closest(POPOVER_CONTENT_SELECTOR) !== null;
-		const onMouseOver = (e: MouseEvent) => {
-			if (isInContent(e.target)) clearCloseTimer();
-		};
-		const onMouseOut = (e: MouseEvent) => {
-			// Only the moment of actually leaving the content - not a move
-			// between two elements both inside it, which fires the same event.
-			if (isInContent(e.target) && !isInContent(e.relatedTarget)) {
-				if (openModeRef.current?.reason === "hover") scheduleClose();
-			}
-		};
-		document.addEventListener("mouseover", onMouseOver);
-		document.addEventListener("mouseout", onMouseOut);
-		return () => {
-			document.removeEventListener("mouseover", onMouseOver);
-			document.removeEventListener("mouseout", onMouseOut);
-		};
-	}, [clearCloseTimer, scheduleClose]);
+	const handleContentMouseLeave = useCallback(() => {
+		if (openMode?.reason === "hover") scheduleClose();
+	}, [openMode, scheduleClose]);
 
 	useEffect(
 		() => () => {
@@ -253,6 +222,8 @@ export default function EditableVariable({
 			}}
 			onMouseEnter={handleMouseEnter}
 			onMouseLeave={handleMouseLeave}
+			onContentMouseEnter={clearCloseTimer}
+			onContentMouseLeave={handleContentMouseLeave}
 			trigger={token}
 			triggerClassName={cn(
 				"inline cursor-pointer transition-colors rounded-md",

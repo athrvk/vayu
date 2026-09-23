@@ -256,6 +256,8 @@ export function EditorVariableTokensProvider({
 						onOpenChange={(open) => {
 							if (!open) close();
 						}}
+						onContentMouseEnter={active.onContentMouseEnter}
+						onContentMouseLeave={active.onContentMouseLeave}
 						// Never a Tab stop: the popover it opens took focus, and the
 						// anchor itself is an invisible box over Monaco's canvas. It
 						// still carries a name - `VariablePopover` gives its trigger
