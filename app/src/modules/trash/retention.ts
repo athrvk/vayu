@@ -34,7 +34,7 @@ export function retentionDaysFrom(entries: ConfigEntry[] | undefined): number | 
  */
 export function retentionCopy(retentionDays: number | null): string | null {
 	if (retentionDays === null) return null;
-	if (retentionDays <= 0) return "Items are kept here until you delete them.";
-	if (retentionDays === 1) return "Items are deleted for good a day after they land here.";
-	return `Items are deleted for good ${retentionDays} days after they land here.`;
+	if (retentionDays <= 0) return "Items are kept here until you permanently delete them.";
+	if (retentionDays === 1) return "Items are permanently deleted a day after they land here.";
+	return `Items are permanently deleted ${retentionDays} days after they land here.`;
 }

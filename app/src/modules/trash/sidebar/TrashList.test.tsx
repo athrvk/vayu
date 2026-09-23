@@ -173,7 +173,7 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(
-			screen.getByText("Items are deleted for good 30 days after they land here.")
+			screen.getByText("Items are permanently deleted 30 days after they land here.")
 		).toBeInTheDocument();
 	});
 
@@ -182,7 +182,7 @@ describe("the list", () => {
 		state.items = [collectionEntry()];
 		renderTrash();
 
-		expect(screen.queryByText(/deleted for good/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/permanently deleted/)).not.toBeInTheDocument();
 	});
 
 	it("offers the empty state rather than a bare panel", () => {

@@ -107,7 +107,7 @@ export default function TrashItem({
 						onClick={() => onRestore(entry)}
 						disabled={busy}
 						aria-label={`Restore ${entry.name}`}
-						title="Put this back where it came from"
+						title="Restore"
 					>
 						{isRestoring ? (
 							<Loader2 className="size-icon-sm animate-spin" />
