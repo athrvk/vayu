@@ -163,7 +163,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			get().completeSaveThenIdle(context.id);
 			return "saved";
 		} catch (error) {
-			get().failSave(error instanceof Error ? error.message : "Save failed");
+			get().failSave(error instanceof Error ? error.message : "Couldn't save");
 			return "failed";
 		}
 	};

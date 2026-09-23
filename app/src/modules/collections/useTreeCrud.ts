@@ -147,7 +147,8 @@ export function useTreeCrud({
 
 	/**
 	 * Report a failed mutation through the same channel the rename path already
-	 * uses - `failSave` puts "Save failed" in the Dock.
+	 * uses - `failSave` raises a toast, the one channel every failure in the
+	 * app goes through.
 	 *
 	 * Rename was the only handler here that caught anything. Create and delete
 	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
