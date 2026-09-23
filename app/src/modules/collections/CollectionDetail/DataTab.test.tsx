@@ -301,7 +301,7 @@ describe("the remembered file", () => {
 		// name is struck through and the picker is still usable.
 		const name = screen.getByText("gone.csv");
 		expect(name.className).toContain("line-through");
-		expect(screen.queryByText(/Could not read the data file/i)).toBeNull();
+		expect(screen.queryByText(/Couldn't read the data file/i)).toBeNull();
 		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
 		expect(screen.getByRole("button", { name: /re-declare/i })).toBeTruthy();
 	});

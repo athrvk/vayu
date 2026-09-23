@@ -433,10 +433,10 @@ export default function RunCollectionDialog({
 				<DialogBody className="space-y-4 py-2">
 					<div className="flex items-center justify-between gap-4">
 						<Label htmlFor="run-collection-recursive" className="leading-snug">
-							Include sub-folders
+							Include nested collections
 							<span className="block text-xs font-normal text-muted-foreground">
-								Descend into nested collections. Each sub-folder runs before this
-								folder&apos;s own requests, top to bottom as the sidebar shows them.
+								Descend into nested collections. Each one runs before its
+								parent&apos;s own requests, top to bottom as the sidebar shows them.
 							</span>
 						</Label>
 						<Switch
@@ -760,7 +760,7 @@ export default function RunCollectionDialog({
 					/>
 
 					{error && (
-						<Callout severity="blocking" title="Could not start the run">
+						<Callout severity="blocking" title="Couldn't start the run">
 							{error instanceof Error ? error.message : "The engine refused it."}
 						</Callout>
 					)}

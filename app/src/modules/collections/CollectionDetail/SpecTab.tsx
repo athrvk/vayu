@@ -221,7 +221,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				path: window.electronAPI?.getFilePath(file) ?? "",
 			});
 		};
-		reader.onerror = () => setPickError("Could not read that file.");
+		reader.onerror = () => setPickError("Couldn't read that file.");
 		reader.readAsText(file);
 	};
 
@@ -615,7 +615,7 @@ function BoundSpec({
 				</dl>
 				{failed && (
 					<FieldError>
-						The stored document could not be read - its source and fetch time are
+						Couldn&apos;t read the stored document - its source and fetch time are
 						unknown until the engine answers.
 					</FieldError>
 				)}

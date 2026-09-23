@@ -185,12 +185,12 @@ export default function DataFilePicker({
 				refuse(
 					e instanceof DataFileError
 						? e.message
-						: `Could not read the file: ${(e as Error).message}`
+						: `Couldn't read the file: ${(e as Error).message}`
 				);
 			}
 		};
 		reader.onerror = () => {
-			refuse("Could not read the file.");
+			refuse("Couldn't read the file.");
 		};
 		reader.readAsArrayBuffer(file);
 	};
@@ -272,7 +272,7 @@ export default function DataFilePicker({
 			/>
 
 			{error && (
-				<Callout severity="blocking" title="Could not read the data file">
+				<Callout severity="blocking" title="Couldn't read the data file">
 					{error}
 				</Callout>
 			)}
