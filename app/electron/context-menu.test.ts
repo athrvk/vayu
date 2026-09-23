@@ -214,7 +214,7 @@ describe("menuTemplateFor - links", () => {
 			noClipboard
 		);
 
-		expect(labels(items)).toEqual(["Copy Link", "Open in Browser"]);
+		expect(labels(items)).toEqual(["Copy link", "Open in browser"]);
 		const last = items.length - 1;
 		expect(items[last - 1]).toMatchObject({
 			command: { type: "copy-link", url: "https://vayu.sh/docs" },
@@ -232,7 +232,7 @@ describe("menuTemplateFor - links", () => {
 			noClipboard
 		);
 
-		expect(labels(items)).toEqual(["Copy Link", "Open in Browser"]);
+		expect(labels(items)).toEqual(["Copy link", "Open in browser"]);
 		expect(items[0]).not.toEqual({ kind: "separator" });
 	});
 

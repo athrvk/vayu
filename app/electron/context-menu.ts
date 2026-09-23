@@ -209,12 +209,12 @@ export async function menuTemplateFor(
 			? [
 					{
 						kind: "command",
-						label: "Copy Link",
+						label: "Copy link",
 						command: { type: "copy-link", url: params.linkURL },
 					},
 					{
 						kind: "command",
-						label: "Open in Browser",
+						label: "Open in browser",
 						command: { type: "open-link", url: params.linkURL },
 					},
 				]
