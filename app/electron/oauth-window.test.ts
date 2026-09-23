@@ -109,7 +109,7 @@ describe("a failed authorize load settles the flow", () => {
 		await w.failLoad(loadError(-105, "ERR_NAME_NOT_RESOLVED (-105) loading 'https://…'"));
 
 		expect(await answer(flow)).toEqual({
-			error: "Could not load authorization page: ERR_NAME_NOT_RESOLVED (-105) loading 'https://…'",
+			error: "Couldn't load the authorization page: ERR_NAME_NOT_RESOLVED (-105) loading 'https://…'",
 		});
 		expect(w.destroy).toHaveBeenCalledTimes(1); // no hidden window survives
 	});
@@ -122,7 +122,7 @@ describe("a failed authorize load settles the flow", () => {
 		flow.onLoadFailure(-102, "ERR_CONNECTION_REFUSED");
 
 		expect(await answer(flow)).toEqual({
-			error: "Could not load authorization page: ERR_CONNECTION_REFUSED",
+			error: "Couldn't load the authorization page: ERR_CONNECTION_REFUSED",
 		});
 		expect(w.destroy).toHaveBeenCalledTimes(1);
 	});
@@ -135,7 +135,7 @@ describe("a failed authorize load settles the flow", () => {
 		await w.failLoad(undefined);
 
 		expect(await answer(flow)).toEqual({
-			error: "Could not load authorization page: unknown error",
+			error: "Couldn't load the authorization page: unknown error",
 		});
 	});
 });

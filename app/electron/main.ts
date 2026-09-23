@@ -855,8 +855,8 @@ async function startEngine() {
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
-			"Failed to Start Engine",
-			`The Vayu engine failed to start:\n\n${error}\n\nPlease check the logs for more details.`
+			"Couldn't start the engine",
+			`${error}\n\nCheck the logs for details.`
 		);
 		app.quit();
 	}

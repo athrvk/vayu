@@ -370,7 +370,7 @@ export class EngineNotReadyError extends Error {
 /** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
 function describeSpawnFailure(failure: SpawnFailure): string {
 	if (failure.kind === "error") {
-		return `The engine process could not be started: ${failure.message}`;
+		return `Couldn't start the engine process: ${failure.message}`;
 	}
 
 	// A signal means something killed it; a code means it decided to leave. Only

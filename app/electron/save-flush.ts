@@ -176,9 +176,9 @@ export function buildFlushFailurePrompt(
 ): FlushFailurePrompt {
 	const verb = gesture === "quit" ? "Quit" : "Close";
 	const lost = result === null ? null : result.failed + result.pending;
-	const subject = lost === null ? "Some edits" : lost === 1 ? "One edit" : `${lost} edits`;
+	const subject = lost === null ? "some edits" : lost === 1 ? "one edit" : `${lost} edits`;
 	return {
-		message: `${subject} could not be saved - the engine is not responding.`,
+		message: `Couldn't save ${subject} - the engine isn't responding.`,
 		detail:
 			`${verb === "Quit" ? "Quitting" : "Closing"} anyway discards ` +
 			`${lost === 1 ? "it" : "them"}. Keep working to try again once the engine answers.`,
