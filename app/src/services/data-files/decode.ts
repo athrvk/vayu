@@ -58,7 +58,7 @@ export function decodeDataFile(bytes: ArrayBuffer): DecodedDataFile {
 	const text = new TextDecoder("utf-8").decode(bytes);
 	if (text.includes(REPLACEMENT_CHARACTER)) {
 		throw new DataFileError(
-			"The file is not UTF-8 - some bytes could not be decoded, and the values they belong to would be sent with question marks in them. Re-save it as UTF-8 (or as UTF-16 with a byte-order mark) and pick it again."
+			"Couldn't read this file - it isn't UTF-8, so some bytes can't be decoded, and the values they belong to would be sent with question marks in them. Re-save it as UTF-8 (or as UTF-16 with a byte-order mark) and pick it again."
 		);
 	}
 	return { text, encoding: "UTF-8" };

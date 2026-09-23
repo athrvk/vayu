@@ -147,7 +147,7 @@ describe("the file's encoding", () => {
 		pick(new File([latin1], "latin1.csv"));
 
 		await waitFor(() =>
-			expect(onError).toHaveBeenCalledWith(expect.stringMatching(/not UTF-8/))
+			expect(onError).toHaveBeenCalledWith(expect.stringMatching(/isn't UTF-8/))
 		);
 		expect(onSelect).toHaveBeenCalledWith(null);
 	});

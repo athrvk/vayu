@@ -70,7 +70,7 @@ describe("decodeDataFile", () => {
 		// UTF-8 decode silently produces a replacement character.
 		const latin1 = new Uint8Array([0x5a, 0x6f, 0xeb]).buffer as ArrayBuffer;
 		expect(() => decodeDataFile(latin1)).toThrow(DataFileError);
-		expect(() => decodeDataFile(latin1)).toThrow(/not UTF-8/);
+		expect(() => decodeDataFile(latin1)).toThrow(/isn't UTF-8/);
 	});
 
 	it("keeps a UTF-8 file whose bytes merely look unusual", () => {
