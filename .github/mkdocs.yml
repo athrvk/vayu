@@ -112,6 +112,7 @@ nav:
       - Overview: app/architecture.md
       - UI Components: app/COMPONENTS.md
       - Design System: design-system.md
+      - UX Writing: ux-writing.md
       - State Management: app/state-management.md
       - Talking to the Engine: app/api-integration.md
       - Variables: app/variable-resolution.md

@@ -269,6 +269,7 @@ cadence is the proxy that proves it was.
 | Doc                                 | Update it when you change…                                   |
 | ----------------------------------- | ------------------------------------------------------------ |
 | `docs/design-system.md`             | Any token value, colour rule, radius, or shared UI primitive |
+| `docs/ux-writing.md`                | Voice, error-message templates, terminology, or any user-facing string convention |
 | `docs/app/COMPONENTS.md`            | Adding or moving a module / shared component                 |
 | `docs/app/architecture.md`          | Renderer-side structural decisions                           |
 | `docs/app/state-management.md`      | Adding a store, changing query keys or cache policy          |
