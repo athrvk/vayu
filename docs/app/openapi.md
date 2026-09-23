@@ -406,13 +406,13 @@ Because it is the engine's, an agent can ask for the same document over MCP
 
 **Which of two things happens depends on whether the collection is bound**, and
 the dialog says which before you download. A bound collection also asks **how
-much to write** - see [Keep the contract, or write everything](#keep-the-contract-or-write-everything).
+much to write** - see [Values only, or all edits](#values-only-or-all-edits).
 
 ### A bound collection exports its own document, updated
 
 The document Vayu stored is the one that comes back out - parsed, changed where
 Vayu has something to say, and otherwise left exactly as it was. What follows is
-the default, **Keep contract**; **Write everything** is the section after it.
+the default, **Values only**; **All edits** is the section after it.
 
 - **Operations follow the collection.** An operation the document declares that
   no request here claims is removed, and a path left with no operations goes with
@@ -446,7 +446,7 @@ the default, **Keep contract**; **Write everything** is the section after it.
   document a value the API never stated. Where the document declares no such
   response at all, the status is not documented from it either - a response the
   contract dropped is not one an export puts back. Each of these is counted in
-  the dialog. It is why exporting a collection you imported and did not edit
+  the export's notes. It is why exporting a collection you imported and did not edit
   gives you back the document you imported - not one with examples it never had.
 - **Everything else survives.** Vendor extensions, `info`, `tags`, `security`,
   components nothing references - all of it is carried through, because export
@@ -459,7 +459,7 @@ the default, **Keep contract**; **Write everything** is the section after it.
 - **What the export cannot write, it counts.** This direction writes parameters
   and examples, so a request body, a Params or Headers row the operation
   declares no parameter for, and a request whose method or path you changed after
-  it was matched are each counted in the dialog rather than left to a diff of
+  it was matched are each counted in the export's notes rather than left to a diff of
   the file. The values that do have a home still land - in the operation the
   document declares. A parameter declared by `$ref`, or one the path declares
   for every method under it, is a home: the row is not counted as undeclared,
@@ -479,20 +479,20 @@ overwrite them with values from somewhere else. A sub-collection bound to the
 **same** document is part of this export, because its requests describe these
 very operations - stopping there would remove them as operations nothing claims.
 
-A **Swagger 2.0** document is the one partial case of **Keep contract**, and it
+A **Swagger 2.0** document is the one partial case of **Values only**, and it
 is stated as one: operations nothing claims are still removed, but nothing is
-written *into* an operation. **Write everything** writes 2.0's own vocabulary.
+written *into* an operation. **All edits** writes 2.0's own vocabulary.
 
 If the stored document cannot be read at all, the export stops and says so. It
 does not fall back to the skeleton below - that would silently replace the
 document you meant to update with one that drops everything Vayu does not model.
 
-### Keep the contract, or write everything
+### Values only, or all edits
 
 An imported spec is usually somebody's contract, and a request you edited in
 Vayu is one client's view of it - so by default the export keeps the contract
 and writes only examples and values into what it already declares. When the
-file should be what you see in Vayu instead, pick **Write everything** in the
+file should be what you see in Vayu instead, pick **All edits** in the
 dialog. It writes, into the document's own dialect (Swagger 2.0 included):
 
 - each request's name and description, a parameter for every Params or Headers
@@ -516,7 +516,7 @@ standard members either way, plus the extensions.
 ### A free-form collection exports a skeleton
 
 A collection that was never a spec has no document to update, so it gets a new
-one - **a starting point, not a contract**, and the dialog says exactly that.
+one - **a starting point, not a contract** - and the dialog calls it one.
 Everything in it is something the collection actually holds:
 
 - `info.title` is the collection's name. Its `version` is a placeholder
@@ -601,24 +601,23 @@ says, and lists it in the import summary.
 
 ### What the counts mean
 
-Both directions state what they could not carry, and the zeros are part of the
-statement: a request whose URL states no path, two requests that reduce to the
-same method and path (the first wins), an example whose media type was never
-recorded, an example stored only in part (the response is written, the body is
-not, in both of those last two). Nothing is dropped quietly.
+The dialog lists only what you would act on or miss, and only when it happened:
+the requests exported (always shown, because none exported is news), secrets
+exported empty, requests other tools will not see (no path of their own, or a
+second request on a method and path another already claimed - Vayu re-imports
+them), examples included, and examples written without a body (no recorded
+media type, or stored only in part).
 
-A bound export states four more things, because it is editing a document
-somebody else wrote: the examples it left alone (already declared there, or
-sampled off a schema when the document was imported), the `$ref` responses and
-`$ref` parameters it did not write into, and the edits this direction has no way
-to express - a request body, a row the operation declares no parameter for, and
-a request whose method or path is no longer the operation it is stamped as.
+A bound export on **Values only** also lists what that mode leaves out: new
+requests not added, requests whose operation the spec no longer declares,
+request bodies and added parameters not written, and examples already in the
+spec. **All edits** lists the new requests it added instead. Both list the
+unused operations removed.
 
-A free-form export - and a bound one set to **Write everything** - states what
-only the extensions carry and what was left behind: the requests no operation
-can hold (Vayu re-imports them; another tool does not see them), and the
-secrets exported empty. **Write everything** also counts the operations it
-added for requests the document never declared.
+The export's notes carry every count, zeros included, and more than the dialog
+shows - examples sampled off a schema at import, `$ref` responses and
+parameters left as they were, requests no longer matching the operation they
+are stamped as. MCP's `export_spec` returns them in full.
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

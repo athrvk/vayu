@@ -13,9 +13,8 @@
  * and the user has to know which one they are about to perform *before* the file
  * lands in their downloads folder. A bound collection updates its own document;
  * a free-form one gets a skeleton, which is a starting point and not a contract.
- * Both statements are on screen, and so is everything the export could not
- * carry - a request with no operation identity, an operation removed because
- * nothing here claims it, an example whose media type nobody recorded.
+ * Both statements are on screen, and so is what the export could not carry
+ * that a user would miss - a new request left out, a secret exported empty.
  *
  * **The assembly is the engine's** (`POST /specs/export`). It used to be three
  * reads and ~900 lines here: the subtree's requests, every request's examples,
@@ -29,10 +28,10 @@
  * such bridge, and the export does not need one.
  *
  * **A bound collection also asks how much to write.** Its document is usually
- * somebody's contract, so the default keeps it - examples and parameter values
- * only - and "Write everything" puts every edit the collection holds into it,
- * new operations included. A free-form collection has no contract to keep and
- * is not asked.
+ * somebody's contract, so the default, "Values only", writes examples and
+ * parameter values and leaves its structure alone; "All edits" puts every edit
+ * the collection holds into it, new requests included. A free-form collection
+ * has no contract to keep and is not asked.
  *
  * Mounted only while open, like `RunCollectionDialog`: the mount is the reset,
  * and the read costs nothing for a dialog nobody opened.
@@ -119,57 +118,65 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 				<DialogHeader>
 					<DialogTitle>Export as OpenAPI</DialogTitle>
 					<DialogDescription>
-						{collection.name} as an OpenAPI document, assembled from what is stored -
-						nothing is sent anywhere.
+						Save {collection.name} as an OpenAPI file. Nothing leaves your machine.
 					</DialogDescription>
 				</DialogHeader>
 
 				<DialogBody className="space-y-3">
-					<div className="flex flex-wrap items-center gap-3">
+					<div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3">
 						<span className="text-xs text-muted-foreground">Format</span>
-						<ToggleGroup
-							value={format}
-							// Radix clears the value when the active item is pressed
-							// again; a format has no "off".
-							onValueChange={(next) => next && setFormat(next as ExportFormat)}
-							size="sm"
-							aria-label="Export format"
-						>
-							<ToggleGroupItem value="json">JSON</ToggleGroupItem>
-							<ToggleGroupItem value="yaml">YAML</ToggleGroupItem>
-						</ToggleGroup>
+						<div className="flex items-center gap-3">
+							<ToggleGroup
+								value={format}
+								// Radix clears the value when the active item is pressed
+								// again; a format has no "off".
+								onValueChange={(next) => next && setFormat(next as ExportFormat)}
+								size="sm"
+								aria-label="Export format"
+							>
+								<ToggleGroupItem value="json">JSON</ToggleGroupItem>
+								<ToggleGroupItem value="yaml">YAML</ToggleGroupItem>
+							</ToggleGroup>
+							{/*
+							 * A large spec spends real time being read and patched, and a
+							 * dialog that showed nothing would read as one that had
+							 * finished with nothing to say. Beside the toggle, because the
+							 * toggle is what set it going and the card below stays where
+							 * it is.
+							 */}
+							{reassembling && (
+								<span
+									role="status"
+									aria-label="Assembling the document"
+									className="text-muted-foreground"
+								>
+									<Loader2
+										className="size-icon-sm animate-spin"
+										aria-hidden="true"
+									/>
+								</span>
+							)}
+						</div>
 						{bound && (
 							<>
-								<span className="text-xs text-muted-foreground">Write</span>
+								<span className="text-xs text-muted-foreground">Changes</span>
 								<ToggleGroup
 									value={mode}
 									// A mode has no "off" either.
 									onValueChange={(next) => next && setMode(next as ExportMode)}
 									size="sm"
-									aria-label="What to write into the document"
+									aria-label="Changes to write"
+									className="justify-self-start"
 								>
-									<ToggleGroupItem value="contract">
-										Keep contract
-									</ToggleGroupItem>
-									<ToggleGroupItem value="full">Write everything</ToggleGroupItem>
+									<ToggleGroupItem value="contract">Values only</ToggleGroupItem>
+									<ToggleGroupItem value="full">All edits</ToggleGroupItem>
 								</ToggleGroup>
+								<p className="col-start-2 -mt-2 text-label text-muted-foreground">
+									{mode === "full"
+										? "Writes every change made in Vayu, new requests included."
+										: "Updates values and examples. The spec's structure stays as it is."}
+								</p>
 							</>
-						)}
-						{/*
-						 * A large spec spends real time being read and patched, and a
-						 * dialog that showed nothing would read as one that had
-						 * finished with nothing to say. Beside the toggle, because the
-						 * toggle is what set it going and the card below stays where
-						 * it is.
-						 */}
-						{reassembling && (
-							<span
-								role="status"
-								aria-label="Assembling the document"
-								className="text-muted-foreground"
-							>
-								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
-							</span>
 						)}
 					</div>
 
@@ -235,12 +242,11 @@ function errorText(error: unknown): string {
  * moves the top edge as well as the bottom, and the whole window reads as
  * flickering.
  *
- * Which direction ran is not known until the answer lands, so the placeholder
- * holds the longest list: a bound export keeping its contract, at fourteen
- * rows. The paragraph above them is two bars because the sentence it stands
- * for wraps at this width in every direction.
+ * The summary lists only the counts that are not zero, so its height varies;
+ * the placeholder holds a typical answer - a heading, a sentence and a few
+ * lines - rather than the longest one, which almost no export reaches.
  */
-const PLACEHOLDER_ROWS = 14;
+const PLACEHOLDER_ROWS = 4;
 
 function SummarySkeleton() {
 	return (
@@ -251,11 +257,10 @@ function SummarySkeleton() {
 		>
 			<div className="space-y-2" aria-hidden="true">
 				<Skeleton className="h-4 w-2/3 rounded-md" />
-				<Skeleton className="h-3 w-full rounded-md" />
 				<Skeleton className="h-3 w-4/5 rounded-md" />
 				<div className="space-y-1.5 pt-1">
 					{Array.from({ length: PLACEHOLDER_ROWS }, (_, row) => (
-						<Skeleton key={row} className="h-3 w-full rounded-md" />
+						<Skeleton key={row} className="h-3 w-1/2 rounded-md" />
 					))}
 				</div>
 			</div>
@@ -264,34 +269,34 @@ function SummarySkeleton() {
 }
 
 /** The heading and the sentence under it, for each of the three answers. */
-function describe(notes: ExportNotes): { title: string; body: string } {
+function describe(notes: ExportNotes): { title: string; body?: string } {
 	if (notes.direction === "skeleton") {
 		return {
-			title: "A skeleton document",
-			body: "A starting point, not a contract: it describes the requests that are here, with no schema Vayu did not read off an example body. Everything else the collection holds - folders, scripts, settings, variables - rides along as x-vayu extensions, which Vayu reads back and other tools ignore.",
+			title: "New OpenAPI document",
+			body: "A starting point. Folders, scripts and variables are included so Vayu can re-import it.",
 		};
 	}
 	if (notes.boundMode === "full") {
 		return {
-			title: "This collection's own document, with every edit written in",
-			body: "Names, rows, bodies, auth and new requests are written into the document, in its own dialect; its schemas and everything Vayu does not model stay as they were, and the rest of the collection rides along as x-vayu extensions.",
+			title: "Your spec, all edits applied",
+			body: "Schemas and anything Vayu does not edit are left as they were.",
 		};
 	}
-	return {
-		title: "This collection's own document, updated",
-		body: "Everything Vayu does not model - vendor extensions, unreferenced components, tags - is carried through untouched, and the dialect is left as it was.",
-	};
+	// The hint under the toggle already says what this mode does.
+	return { title: "Your spec, values updated" };
 }
 
 /**
  * What the export is about to write, and what it could not carry.
  *
- * Every count is shown, zeros included - "0 requests with no operation" is how a
- * bound export states that it carried everything, and a summary that hid its
- * zeros would read as complete whether or not it was.
+ * Only the counts a user can act on or would miss, and only when they are not
+ * zero; the headline count is always shown, because "0 requests exported" is
+ * the one zero that is news. The engine's notes carry more (shared `$ref`
+ * parameters, schema-sampled examples), which the MCP tool still reports.
  */
 function ExportSummary({ notes }: { notes: ExportNotes }) {
-	const contract = notes.direction === "document" && notes.boundMode !== "full";
+	const bound = notes.direction === "document";
+	const contract = bound && notes.boundMode !== "full";
 	const { title, body } = describe(notes);
 	return (
 		<div className="enter-fade rounded-md border border-rule surface-sunken p-3 space-y-2">
@@ -300,127 +305,98 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 				{title}
 				<span className="font-normal text-muted-foreground">({notes.dialect})</span>
 			</p>
-			<p className="text-label text-muted-foreground">{body}</p>
+			{body && <p className="text-label text-muted-foreground">{body}</p>}
 			<ul className="text-label text-muted-foreground space-y-0.5">
-				<Line
-					count={notes.requestsExported}
-					label="request"
-					suffix="exported as an operation"
-				/>
+				<Line always count={notes.requestsExported} label="request" suffix="exported" />
 				{contract ? (
 					<>
 						<Line
 							count={notes.requestsWithoutOperation}
-							label="request"
-							suffix="with no operation identity - not written; choose Write everything to add it"
+							label="new request"
+							suffix="not added - choose All edits"
 						/>
 						<Line
 							count={notes.operationsNotInDocument}
 							label="request"
-							suffix="naming an operation this document no longer declares - not written"
+							suffix="no longer in the spec - skipped"
 						/>
 						<Line
 							count={notes.bodiesNotWritten}
-							label="request"
-							suffix="whose body is not written - this mode writes parameters and examples"
+							label="request body"
+							plural="request bodies"
+							suffix="not written"
 						/>
 						<Line
 							count={notes.rowsNotDeclared}
-							label="row"
-							suffix="the operation declares no parameter for - not written"
+							label="added parameter"
+							suffix="not written"
 						/>
 					</>
 				) : (
 					<>
-						{notes.direction === "document" && (
+						{bound && (
 							<Line
 								count={notes.operationsAdded}
-								label="operation"
-								suffix="added for a request the document never declared"
+								label="new request"
+								suffix="added"
 							/>
 						)}
+						<Line count={notes.secretsOmitted} label="secret" suffix="exported empty" />
 						<Line
 							count={notes.requestsOnlyInExtension}
 							label="request"
-							suffix="with no path of its own, or sharing one another request claimed - carried only in the x-vayu extension"
-						/>
-						<Line
-							count={notes.secretsOmitted}
-							label="secret"
-							suffix="left out - tokens, passwords and secret variables are exported empty"
+							suffix="not visible to other tools"
 						/>
 					</>
 				)}
-				{notes.direction === "document" && (
-					<>
-						<Line
-							count={notes.operationsRemoved}
-							label="operation"
-							suffix="removed - nothing here claims it"
-						/>
-						<Line
-							count={notes.sharedParametersLeft}
-							label="shared $ref parameter"
-							suffix="left as it is - it belongs to every operation that names it"
-						/>
-						<Line
-							count={notes.referencedResponsesLeft}
-							label="$ref response"
-							suffix="left as it is - a reference takes no siblings, and the component it names is shared"
-						/>
-						<Line
-							count={notes.operationsEdited}
-							label="request"
-							suffix="no longer matching the operation it is stamped as - values land in the operation the document declares"
-						/>
-					</>
+				{bound && (
+					<Line
+						count={notes.operationsRemoved}
+						label="unused operation"
+						suffix="removed"
+					/>
 				)}
+				<Line count={notes.examplesWritten} label="example" suffix="included" />
 				<Line
-					count={notes.examplesWritten}
+					count={notes.examplesWithoutMediaType + notes.examplesTruncated}
 					label="example"
-					suffix="written as a response"
+					suffix="without a body"
 				/>
-				<Line
-					count={notes.examplesWithoutMediaType}
-					label="example"
-					suffix="with no recorded media type - the response is written, the body is not"
-				/>
-				<Line
-					count={notes.examplesTruncated}
-					label="example"
-					suffix="stored only in part - the response is written, the truncated body is not"
-				/>
-				{notes.direction === "document" && (
-					<>
-						<Line
-							count={notes.examplesAlreadyDeclared}
-							label="example"
-							suffix="already declared in the document - nothing to write"
-						/>
-						<Line
-							count={notes.examplesSampledAtImport}
-							label="example"
-							suffix="the import sampled from a schema - not written back as the contract's own"
-						/>
-					</>
+				{bound && (
+					<Line
+						count={notes.examplesAlreadyDeclared}
+						label="example"
+						suffix="already in the spec"
+					/>
 				)}
 			</ul>
-			{notes.vocabularyNotWritten && (
+			{contract && notes.vocabularyNotWritten && (
 				<p className="text-label text-muted-foreground">
-					{notes.dialect} states parameters and examples in a vocabulary Vayu writes only
-					when asked to write everything. Operations nothing here claims are still
-					removed, but nothing is written into the ones that stay.
+					{notes.dialect}: values are not updated in this mode. Choose All edits to write
+					them.
 				</p>
 			)}
 		</div>
 	);
 }
 
-function Line({ count, label, suffix }: { count: number; label: string; suffix: string }) {
+function Line({
+	count,
+	label,
+	suffix,
+	plural = `${label}s`,
+	always = false,
+}: {
+	count: number;
+	label: string;
+	plural?: string;
+	suffix: string;
+	always?: boolean;
+}) {
+	if (count === 0 && !always) return null;
 	return (
 		<li>
-			<span className="text-foreground">{count}</span> {label}
-			{count === 1 ? "" : "s"} {suffix}
+			<span className="text-foreground">{count}</span> {count === 1 ? label : plural} {suffix}
 		</li>
 	);
 }
