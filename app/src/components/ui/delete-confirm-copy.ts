@@ -41,6 +41,6 @@ export function deleteConfirmCopy(
 	const suffix = scope === "cascade" ? " and everything inside it" : "";
 	return {
 		title: `Delete ${subject}?`,
-		description: `${subject}${suffix} is removed permanently. This cannot be undone.`,
+		description: `${subject}${suffix} is removed permanently. This can't be undone.`,
 	};
 }

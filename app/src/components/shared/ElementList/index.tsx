@@ -445,7 +445,8 @@ function ElementRow({
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${title}?`}
-				description={`This removes "${title}" and its configuration. This cannot be undone.`}
+				confirmLabel="Delete element"
+				description={`This removes "${title}" and its configuration. This can't be undone.`}
 				onConfirm={() => {
 					setConfirmingDelete(false);
 					onRemove();

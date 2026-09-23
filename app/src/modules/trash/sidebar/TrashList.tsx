@@ -263,7 +263,7 @@ export default function TrashList() {
 					title="Empty trash?"
 					description={`All ${entries.length} ${
 						entries.length === 1 ? "item" : "items"
-					} in the trash are removed permanently. This cannot be undone.`}
+					} in the trash are removed permanently. This can't be undone.`}
 					confirmLabel="Empty trash"
 					onConfirm={() => void handleEmptyTrash()}
 					isDeleting={isEmptying}

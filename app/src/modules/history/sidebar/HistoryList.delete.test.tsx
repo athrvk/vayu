@@ -129,7 +129,7 @@ async function openDeleteDialog() {
 async function confirmDelete() {
 	const confirm = screen
 		.getAllByRole("button")
-		.find((b) => /^delete$/i.test(b.textContent?.trim() ?? ""));
+		.find((b) => /^delete run$/i.test(b.textContent?.trim() ?? ""));
 	expect(confirm).toBeDefined();
 	confirm!.click();
 }

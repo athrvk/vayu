@@ -469,11 +469,12 @@ export default function HistoryList() {
 					open={!!deleteConfirmRunId}
 					onOpenChange={(open) => !open && setDeleteConfirmRunId(null)}
 					title="Delete run?"
+					confirmLabel="Delete run"
 					description={
 						<>
 							{deleteConfirmStopsRun
-								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
-								: "This run is removed permanently. This cannot be undone."}
+								? "This run is still in progress - deleting it stops it first, then removes it permanently. This can't be undone."
+								: "This run is removed permanently. This can't be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

@@ -396,7 +396,7 @@ export default function InboxView() {
 				title="Clear captures?"
 				description={`All ${captures.length} recorded ${
 					captures.length === 1 ? "request" : "requests"
-				} in this inbox are removed. This cannot be undone.`}
+				} in this inbox are removed. This can't be undone.`}
 				confirmLabel="Clear"
 				onConfirm={() =>
 					clearCaptures.mutate(inbox.inboxId, {

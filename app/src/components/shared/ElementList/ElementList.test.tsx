@@ -473,7 +473,7 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 		expect(onChange).not.toHaveBeenCalled();
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "Delete element" }));
 		expect(onChange).toHaveBeenCalledWith([]);
 	});
 
