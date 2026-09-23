@@ -130,7 +130,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (
 				<Card className="enter-fade">
 					<CardHeader>
-						<CardTitle>Status Code Distribution</CardTitle>
+						<CardTitle>Status code distribution</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -180,13 +180,13 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2 text-destructive-text">
 							<AlertCircle className="w-5 h-5" />
-							Error Summary
+							Error summary
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-3">
 						<div className="flex justify-between items-center p-3 bg-destructive/10 border border-destructive/20">
 							<span className="text-sm font-medium text-destructive-text">
-								Total Errors
+								Total errors
 							</span>
 							<span className="text-lg font-bold text-destructive-text">
 								{formatNumber(report.errors.total)} (
@@ -197,7 +197,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 						{report.errors.types && Object.entries(report.errors.types).length > 0 && (
 							<div className="space-y-2">
 								<p className="text-xs font-medium text-muted-foreground">
-									By Error Type
+									By error type
 								</p>
 								{Object.entries(report.errors.types).map(([errorType, count]) => (
 									<div
@@ -219,7 +219,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 							Object.entries(report.errors.byStatusCode).length > 0 && (
 								<div className="space-y-2">
 									<p className="text-xs font-medium text-muted-foreground">
-										By Status Code
+										By status code
 									</p>
 									{Object.entries(report.errors.byStatusCode).map(
 										([code, count]) => (
@@ -229,7 +229,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 											>
 												<span className="font-mono">
 													{code === "0"
-														? "Network/Connection"
+														? "Network/connection"
 														: `HTTP ${code}`}
 												</span>
 												<span className="font-medium">

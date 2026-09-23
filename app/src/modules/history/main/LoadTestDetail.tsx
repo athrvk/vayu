@@ -344,7 +344,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						    this tile against the 3.0 icon bar - it clears it in both
 						    themes, and there is no violet semantic token to move it to. */}
 							<TrendingUp className="size-icon text-purple-500" />
-							<span className="text-xs text-muted-foreground">P99 Latency</span>
+							<span className="text-xs text-muted-foreground">P99 latency</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
 							{formatNumber(report.latency.p99)}ms
@@ -353,7 +353,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<Activity className="size-icon text-primary" />
-							<span className="text-xs text-muted-foreground">Total Requests</span>
+							<span className="text-xs text-muted-foreground">Total requests</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
 							{formatNumber(report.summary.totalRequests)}
@@ -362,7 +362,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<CheckCircle className="size-icon text-status-success-text" />
-							<span className="text-xs text-muted-foreground">Success Rate</span>
+							<span className="text-xs text-muted-foreground">Success rate</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
 							{successRate.toFixed(1)}%
@@ -398,7 +398,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					)}
 					<TabsTrigger value="samples">
 						<Activity className="size-icon-sm" />
-						<TabLabel>Sampled Requests</TabLabel>
+						<TabLabel>Sampled requests</TabLabel>
 					</TabsTrigger>
 				</TabsList>
 

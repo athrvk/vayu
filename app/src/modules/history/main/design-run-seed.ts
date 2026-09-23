@@ -87,7 +87,7 @@ export interface DesignRunSeed {
 	/**
 	 * True when the engine truncated this run's stored request body
 	 * (`maxTraceBodyBytes`), on the trace or on the config snapshot itself -
-	 * both are capped at the same limit. "Save this run to the request" must
+	 * both are capped at the same limit. "Save to request" must
 	 * not write a possibly-incomplete body back - see {@link applyRunToRequest}.
 	 */
 	requestBodyTruncated?: boolean;

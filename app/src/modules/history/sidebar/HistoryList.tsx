@@ -60,7 +60,7 @@ import { Eyebrow } from "@/components/ui/eyebrow";
  */
 function deleteRunErrorMessage(error: unknown): string {
 	if (error instanceof ApiError && error.statusCode === 409) {
-		return "This run is still stopping - try deleting it again in a moment";
+		return "Couldn't delete this run yet - it's still stopping. Try again in a moment.";
 	}
 	return error instanceof Error ? `Couldn't delete run: ${error.message}` : "Couldn't delete run";
 }
@@ -257,7 +257,7 @@ export default function HistoryList() {
 							type="text"
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							placeholder="Search runs by api..."
+							placeholder="Search runs by API…"
 							className="pl-10 w-full"
 						/>
 					</div>
@@ -271,10 +271,10 @@ export default function HistoryList() {
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Types</SelectItem>
-								<SelectItem value="load">Load Test</SelectItem>
-								<SelectItem value="design">Design Mode</SelectItem>
-								<SelectItem value="scenario">Collection Run</SelectItem>
+								<SelectItem value="all">All types</SelectItem>
+								<SelectItem value="load">Load test</SelectItem>
+								<SelectItem value="design">Design mode</SelectItem>
+								<SelectItem value="scenario">Collection run</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -286,7 +286,7 @@ export default function HistoryList() {
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Status</SelectItem>
+								<SelectItem value="all">All status</SelectItem>
 								<SelectItem value="pending">Pending</SelectItem>
 								<SelectItem value="running">Running</SelectItem>
 								<SelectItem value="completed">Completed</SelectItem>

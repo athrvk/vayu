@@ -337,7 +337,7 @@ export default function RunItem({
 						<AlertTriangle
 							className="size-icon-sm shrink-0 text-warning-text"
 							role="img"
-							aria-label="This run has warnings - see its report"
+							aria-label="This run has warnings - see its report."
 						/>
 					)}
 					{/*

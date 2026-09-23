@@ -386,7 +386,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		return (
 			<ErrorState
 				title="Couldn't load this run's request"
-				detail={detail ?? "The request behind this run could not be fetched."}
+				detail={detail ?? "The request behind this run couldn't be fetched."}
 				onRetry={() => void refetchRequest()}
 			/>
 		);
@@ -438,7 +438,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 								className="size-icon-sm mr-1.5"
 								data-icon-motion={ICON_MOTION.press}
 							/>
-							Save this run to the request
+							Save to request
 						</Button>
 					)}
 				</div>
