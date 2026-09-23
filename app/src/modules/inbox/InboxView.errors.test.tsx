@@ -222,7 +222,7 @@ describe("the inbox tab's copy control", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
 		await waitFor(() =>
-			expect(firstToast()).toMatchObject({ variant: "error", message: "Could not copy" })
+			expect(firstToast()).toMatchObject({ variant: "error", message: "Couldn't copy" })
 		);
 	});
 

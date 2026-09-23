@@ -107,7 +107,7 @@ describe("useCopy", () => {
 		writeText.mockRejectedValue(new Error("Write permission denied"));
 		const { result } = renderHook(() => useCopy());
 		await act(() => result.current.copy("x", "Inbox URL"));
-		expect(toastTexts()).toEqual(["error:Could not copy: Write permission denied"]);
+		expect(toastTexts()).toEqual(["error:Couldn't copy: Write permission denied"]);
 	});
 
 	it("leaves `copied` false and still reports the failure in icon mode", async () => {
@@ -117,13 +117,13 @@ describe("useCopy", () => {
 		// The whole point: no check appears, and the reason is on screen anyway.
 		// An icon button has no failure glyph, so the failure toasts in both modes.
 		expect(result.current.copied).toBe(false);
-		expect(toastTexts()).toEqual(["error:Could not copy: Document is not focused"]);
+		expect(toastTexts()).toEqual(["error:Couldn't copy: Document is not focused"]);
 	});
 
 	it("reports a rejection that is not an Error", async () => {
 		writeText.mockRejectedValue("nope");
 		const { result } = renderHook(() => useCopy());
 		await act(() => result.current.copy("x", "Snippet"));
-		await waitFor(() => expect(toastTexts()).toEqual(["error:Could not copy"]));
+		await waitFor(() => expect(toastTexts()).toEqual(["error:Couldn't copy"]));
 	});
 });

@@ -96,7 +96,7 @@ export function useCopy(options: UseCopyOptions = {}): UseCopyResult {
 				}
 			} catch (error) {
 				showToast(
-					error instanceof Error ? `Could not copy: ${error.message}` : "Could not copy",
+					error instanceof Error ? `Couldn't copy: ${error.message}` : "Couldn't copy",
 					"error"
 				);
 			}

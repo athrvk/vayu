@@ -78,7 +78,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				closeEngineStartWindow();
 				const reason = result.error ?? "unknown error";
 				showToast({
-					message: `Failed to restart engine: ${reason}`,
+					message: `Couldn't restart the engine: ${reason}`,
 					variant: "error",
 				});
 				// A restart is slow enough to walk away from, and this is its
@@ -86,7 +86,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				// user who stayed.
 				systemNotify.post({
 					kind: NOTIFY_KINDS.engineRestartFailed,
-					title: "The engine could not be restarted",
+					title: "Couldn't restart the engine",
 					body: reason,
 				});
 				return;
