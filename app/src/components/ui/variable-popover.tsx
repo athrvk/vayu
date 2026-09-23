@@ -436,7 +436,7 @@ export function VariablePopover({
 		<span
 			role="button"
 			tabIndex={disabled ? -1 : tabIndex}
-			className={triggerClassName}
+			className={cn("inline", triggerClassName)}
 			onClick={(e) => {
 				if (disabled) return;
 				e.stopPropagation(); // Prevent input blur
@@ -452,7 +452,6 @@ export function VariablePopover({
 					openPopover();
 				}
 			}}
-			style={{ display: "inline" }}
 		>
 			{trigger}
 		</span>
