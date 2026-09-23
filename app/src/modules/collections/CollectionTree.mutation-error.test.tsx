@@ -87,7 +87,7 @@ describe("CollectionTree when a mutation rejects", () => {
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
 
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete request$/ }));
 
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
 		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
@@ -114,7 +114,7 @@ describe("CollectionTree when a mutation rejects", () => {
 		const row = document.querySelector<HTMLElement>('[data-request-id="r1"]')!;
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete request$/ }));
 
 		await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith("r1"));
 		expect(useSaveStore.getState().status).not.toBe("error");

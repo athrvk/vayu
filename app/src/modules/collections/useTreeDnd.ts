@@ -709,7 +709,7 @@ export function useTreeDnd({
 							? folders[folders.length - 1]
 							: undefined;
 				if (!into) {
-					setAnnouncement(`No folder above ${entity.name} to move it into`);
+					setAnnouncement(`No collection above ${entity.name} to move it into`);
 					return;
 				}
 				const size =

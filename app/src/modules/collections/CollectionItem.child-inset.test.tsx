@@ -110,10 +110,10 @@ function childRowPaddingLeft(depth: number): string {
 describe.each([0, 2])("a folder at depth %i", (depth) => {
 	const expected = `${8 + (depth + 1) * INDENT_STEP}px`;
 
-	it("starts its 'Empty folder' line where a request row starts", () => {
+	it("starts its 'Empty collection' line where a request row starts", () => {
 		renderEmptyFolder(depth);
 
-		const placeholder = screen.getByText("Empty folder");
+		const placeholder = screen.getByText("Empty collection");
 		expect(placeholder.style.paddingLeft).toBe(expected);
 		expect(placeholder.style.paddingLeft).toBe(childRowPaddingLeft(depth));
 	});
@@ -130,7 +130,7 @@ describe.each([0, 2])("a folder at depth %i", (depth) => {
 			)
 		);
 
-		const form = screen.getByPlaceholderText("Folder name").closest("div") as HTMLElement;
+		const form = screen.getByPlaceholderText("Collection name").closest("div") as HTMLElement;
 		expect(form.style.paddingLeft).toBe(expected);
 		expect(form.style.paddingLeft).toBe(childRowPaddingLeft(depth));
 	});
@@ -143,7 +143,9 @@ describe("an empty folder's row", () => {
 		const row = container.querySelector('[role="treeitem"]') as HTMLElement;
 		const describedBy = row.getAttribute("aria-describedby");
 		expect(describedBy).toBeTruthy();
-		expect(document.getElementById(describedBy as string)?.textContent).toBe("Empty folder");
+		expect(document.getElementById(describedBy as string)?.textContent).toBe(
+			"Empty collection"
+		);
 	});
 
 	it("drops the description once the folder has a row to announce", () => {
@@ -160,6 +162,6 @@ describe("an empty folder's row", () => {
 
 		const row = container.querySelector('[role="treeitem"]') as HTMLElement;
 		expect(row.getAttribute("aria-describedby")).toBeNull();
-		expect(screen.queryByText("Empty folder")).not.toBeInTheDocument();
+		expect(screen.queryByText("Empty collection")).not.toBeInTheDocument();
 	});
 });

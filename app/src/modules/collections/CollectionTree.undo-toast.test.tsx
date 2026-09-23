@@ -95,7 +95,7 @@ async function askToDeleteCollection(name: string) {
 		pointerType: "mouse",
 	});
 	fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-	fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+	fireEvent.click(await screen.findByRole("button", { name: /^Delete collection$/ }));
 }
 
 /** The options object handed to the last `showToast` call. */
@@ -233,7 +233,7 @@ describe("deleting from the tree", () => {
 			}
 		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete request$/ }));
 
 		await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith("r-root"));
 		// Gone while it is in the trash.
@@ -264,7 +264,7 @@ describe("deleting from the tree", () => {
 			}
 		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete request$/ }));
 		await waitFor(() => expect(deleteRequest).toHaveBeenCalled());
 
 		lastToast().action.onClick();

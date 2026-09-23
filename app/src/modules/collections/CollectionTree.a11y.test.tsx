@@ -211,7 +211,7 @@ describe("the Delete key", () => {
 
 		// The hook preventDefaults Delete either way, so without the row's hidden
 		// control the key was swallowed and nothing at all happened.
-		expect(await screen.findByText("Delete collection?")).toBeInTheDocument();
+		expect(await screen.findByText('Delete "Billing"?')).toBeInTheDocument();
 		expect(screen.getByText(/"Billing" and all its requests/)).toBeInTheDocument();
 	});
 
@@ -222,7 +222,7 @@ describe("the Delete key", () => {
 
 		fireEvent.keyDown(row, { key: "Delete" });
 
-		expect(await screen.findByText("Delete request?")).toBeInTheDocument();
+		expect(await screen.findByText('Delete "Ping"?')).toBeInTheDocument();
 	});
 });
 
@@ -300,11 +300,16 @@ describe("a delete never strands focus", () => {
 	 * and then the removal itself, because the row goes when the refetch lands
 	 * rather than when the dialog closes, and focus follows the row (#1234).
 	 */
-	async function deleteFromKeyboard(row: HTMLElement, title: string, removeRow: () => void) {
+	async function deleteFromKeyboard(
+		row: HTMLElement,
+		title: string,
+		confirmLabel: string,
+		removeRow: () => void
+	) {
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
 		expect(await screen.findByText(title)).toBeInTheDocument();
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		fireEvent.click(screen.getByRole("button", { name: confirmLabel }));
 		await waitFor(() => expect(screen.queryByText(title)).toBeNull());
 		removeRow();
 	}
@@ -314,8 +319,11 @@ describe("a delete never strands focus", () => {
 
 		// "Billing" is followed in Acme's group by the "Ping" request: the next
 		// row at its own level, not the next row in the document.
-		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?", () =>
-			removeCollection("billing")
+		await deleteFromKeyboard(
+			collectionRow("billing"),
+			'Delete "Billing"?',
+			"Delete collection",
+			() => removeCollection("billing")
 		);
 
 		expect(document.activeElement).toBe(requestRow("r-ping"));
@@ -326,7 +334,7 @@ describe("a delete never strands focus", () => {
 
 		// "Ping" is last in Acme's group - the row after it belongs to the other
 		// root, whose set this delete does not touch.
-		await deleteFromKeyboard(requestRow("r-ping"), "Delete request?", () =>
+		await deleteFromKeyboard(requestRow("r-ping"), 'Delete "Ping"?', "Delete request", () =>
 			removeRequest("r-ping")
 		);
 
@@ -336,8 +344,11 @@ describe("a delete never strands focus", () => {
 	it("puts the tree's tab stop on the row it focused", async () => {
 		renderTree();
 
-		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?", () =>
-			removeCollection("billing")
+		await deleteFromKeyboard(
+			collectionRow("billing"),
+			'Delete "Billing"?',
+			"Delete collection",
+			() => removeCollection("billing")
 		);
 
 		// Focus without the roving stop is a row the next Tab cannot return to.
@@ -350,11 +361,16 @@ describe("a delete never strands focus", () => {
 		requests = new Map();
 		renderTree();
 
-		await deleteFromKeyboard(collectionRow("solo"), "Delete collection?", () => {
-			collections = [];
-			requests = new Map();
-			rerenderTree();
-		});
+		await deleteFromKeyboard(
+			collectionRow("solo"),
+			'Delete "Solo"?',
+			"Delete collection",
+			() => {
+				collections = [];
+				requests = new Map();
+				rerenderTree();
+			}
+		);
 
 		// One row, so there is no root before or after it and no parent either:
 		// the only shape the tree's own rule answers `null` for, and `<body>` is
@@ -368,7 +384,7 @@ describe("a delete never strands focus", () => {
 		const row = collectionRow("billing");
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
-		expect(await screen.findByText("Delete collection?")).toBeInTheDocument();
+		expect(await screen.findByText('Delete "Billing"?')).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 

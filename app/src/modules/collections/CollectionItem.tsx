@@ -171,7 +171,7 @@ export default function CollectionItem({
 	const indentPx = rowInsetPx(depth);
 
 	/**
-	 * Everything inside this row's group - the "Empty folder" placeholder, the
+	 * Everything inside this row's group - the "Empty collection" placeholder, the
 	 * new-subfolder form - takes the left edge a child row takes, so one level
 	 * shows one left edge whether it holds rows, a message, or a half-typed name.
 	 */
@@ -409,7 +409,7 @@ export default function CollectionItem({
 									if (isCommitEnter(e)) onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
-								placeholder="Folder name"
+								placeholder="Collection name"
 								className="flex-1 h-7 text-sm"
 								disabled={isCreatingSubfolder}
 								autoFocus
@@ -454,7 +454,7 @@ export default function CollectionItem({
 							className="py-2 pr-3 text-xs text-muted-foreground"
 							style={{ paddingLeft: childIndentPx }}
 						>
-							Empty folder
+							Empty collection
 						</div>
 					)}
 					{requests.map((request, index) => (

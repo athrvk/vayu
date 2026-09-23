@@ -201,7 +201,7 @@ export function useTreeCrud({
 				name: newCollectionName.trim(),
 			});
 		} catch (error) {
-			reportFailure(error, "Failed to create collection");
+			reportFailure(error, "Couldn't create the collection");
 			return; // Keep the form open with the typed name so it can be retried.
 		}
 		handleCancelNewCollectionForm();
@@ -224,7 +224,7 @@ export function useTreeCrud({
 					parentId: parentId,
 				});
 			} catch (error) {
-				reportFailure(error, "Failed to create folder");
+				reportFailure(error, "Couldn't create the collection");
 				return;
 			}
 			handleCancelSubfolder();
@@ -253,7 +253,7 @@ export function useTreeCrud({
 					url: "",
 				});
 			} catch (error) {
-				reportFailure(error, "Failed to create request");
+				reportFailure(error, "Couldn't create the request");
 				return;
 			}
 
@@ -315,7 +315,7 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Failed to rename collection");
+				failSave(error instanceof Error ? error.message : "Couldn't rename the collection");
 			}
 		},
 		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
@@ -359,7 +359,7 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Failed to rename request");
+				failSave(error instanceof Error ? error.message : "Couldn't rename the request");
 			}
 		},
 		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
@@ -402,7 +402,7 @@ export function useTreeCrud({
 				});
 				openTab({ type: "request", entityId: copy.id });
 			} catch (error) {
-				reportFailure(error, "Failed to duplicate request");
+				reportFailure(error, "Couldn't duplicate the request");
 			}
 		},
 		[createRequestMutation, openTab, reportFailure, showToast]
@@ -583,7 +583,7 @@ export function useTreeCrud({
 				closeTabsForEntities(affected);
 				offerUndo(collectionId, name, "collection", restoreClientState);
 			} catch (error) {
-				reportFailure(error, "Failed to delete collection");
+				reportFailure(error, "Couldn't delete the collection");
 				return;
 			} finally {
 				// Only now: the dialog stays up, with its confirm button spinning,
@@ -605,8 +605,8 @@ export function useTreeCrud({
 				if (failedCount > 0) {
 					showToast(
 						failedCount === 1
-							? "A mock server for the deleted collection could not be stopped."
-							: `${failedCount} mock servers for the deleted collection could not be stopped.`,
+							? "Couldn't stop a mock server for the deleted collection."
+							: `Couldn't stop ${failedCount} mock servers for the deleted collection.`,
 						"error"
 					);
 				}
@@ -635,7 +635,7 @@ export function useTreeCrud({
 				closeTabsForEntities([requestId]);
 				offerUndo(requestId, name, "request", restoreClientState);
 			} catch (error) {
-				reportFailure(error, "Failed to delete request");
+				reportFailure(error, "Couldn't delete the request");
 			} finally {
 				setDeleteConfirm(null);
 				setDeletingRequestId(null);
@@ -695,12 +695,12 @@ export function useTreeCrud({
 				onSelect: () => handleRenameCollection(collection),
 			},
 			{
-				label: "Add Request",
+				label: "Add request",
 				icon: Plus,
 				onSelect: () => void handleCreateRequest(collection.id),
 			},
 			{
-				label: "Add Folder",
+				label: "Add collection",
 				icon: FolderPlus,
 				onSelect: () => {
 					expandCollection(collection.id);

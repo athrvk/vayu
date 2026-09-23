@@ -55,8 +55,8 @@ export default function CollectionTree() {
 	// TanStack Query hooks
 	// isError as well as isLoading. The query is destructured with `= []`, so a
 	// failed fetch is indistinguishable from an empty workspace unless it is
-	// asked about - and the empty state's "Add your first collection" would
-	// invite a duplicate of collections that already exist.
+	// asked about - and the empty state's "Add a collection" would invite a
+	// duplicate of collections that already exist.
 	const {
 		data: collections = [],
 		isLoading: isLoadingCollections,
@@ -320,7 +320,7 @@ export default function CollectionTree() {
 									onClick={panel.openNewCollectionForm}
 									className="text-primary"
 								>
-									Add your first collection
+									Add a collection
 								</Button>
 							}
 						/>
@@ -385,10 +385,11 @@ export default function CollectionTree() {
 				<DeleteConfirmDialog
 					open={!!panel.deleteConfirm}
 					onOpenChange={(open) => !open && panel.dismissDeleteConfirm()}
-					title={
+					title={`Delete "${panel.deleteConfirm?.name}"?`}
+					confirmLabel={
 						panel.deleteConfirm?.type === "collection"
-							? "Delete collection?"
-							: "Delete request?"
+							? "Delete collection"
+							: "Delete request"
 					}
 					description={
 						<>

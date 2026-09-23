@@ -121,7 +121,7 @@ async function askToDelete(collectionName: string) {
 	fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
 }
 
-const confirmButton = () => screen.findByRole("button", { name: /^Delete$/ });
+const confirmButton = () => screen.findByRole("button", { name: /^Delete collection$/ });
 const cancelButton = () => screen.queryByRole("button", { name: /^Cancel$/ });
 
 beforeEach(() => {

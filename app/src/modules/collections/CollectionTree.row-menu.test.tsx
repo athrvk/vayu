@@ -94,7 +94,7 @@ describe("the three keys that open a row's menu", () => {
 		// The menu-only actions the issue names: none of them has a chord, so
 		// this menu is the whole keyboard path to them.
 		expect(screen.getByRole("menuitem", { name: /Run collection/ })).toBeInTheDocument();
-		expect(screen.getByRole("menuitem", { name: /Add Request/ })).toBeInTheDocument();
+		expect(screen.getByRole("menuitem", { name: /Add request/ })).toBeInTheDocument();
 		expect(screen.getByRole("menuitem", { name: /Export as OpenAPI/ })).toBeInTheDocument();
 	});
 

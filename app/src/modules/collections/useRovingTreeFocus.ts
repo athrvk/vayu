@@ -180,7 +180,7 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 					if (expanded === "false") click("[data-tree-toggle]");
 					else if (expanded === "true") {
 						// Expanded: move to the *first child*, and nowhere at all if
-						// there is none. An empty folder renders an "Empty folder"
+						// there is none. An empty folder renders an "Empty collection"
 						// div rather than a treeitem, so the next row in document
 						// order is its sibling and stepping to it was an ArrowDown
 						// wearing ArrowRight's key (#931 review). Parentage decides,
