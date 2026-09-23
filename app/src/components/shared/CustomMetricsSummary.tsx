@@ -21,6 +21,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types/domain";
 
 /** Trailing zeros are noise on a value the script recorded as a whole number. */
@@ -52,7 +53,7 @@ export function CustomMetricsSummary({ customMetrics, className }: CustomMetrics
 
 						switch (metric.type) {
 							case "trend":
-								detail = `${metric.count} sample${metric.count === 1 ? "" : "s"}`;
+								detail = `${metric.count} ${pluralize(metric.count, "sample")}`;
 								value = [
 									`p50 ${formatValue(metric.p50 ?? 0)}`,
 									`p95 ${formatValue(metric.p95 ?? 0)}`,

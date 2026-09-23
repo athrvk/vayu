@@ -50,6 +50,7 @@ import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
 import { useRevealStore } from "@/lib/graphql/reveal-store";
 import { formatRelativeTime } from "@/lib/format-time";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
@@ -120,7 +121,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 				<p className="text-label text-muted-foreground m-0 mb-1">
 					{operations.length === 0
 						? "No operation in this document"
-						: `${operations.length} ${operations.length === 1 ? "operation" : "operations"}`}
+						: `${operations.length} ${pluralize(operations.length, "operation")}`}
 				</p>
 				<ul className="list-none p-0 m-0 space-y-0.5">
 					{operations.map((operation, index) => (
