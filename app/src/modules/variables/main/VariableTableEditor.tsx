@@ -208,10 +208,10 @@ const EDITOR_CONFIGS = {
 	globals: {
 		icon: Globe as LucideIcon,
 		iconColor: "text-scope-global",
-		title: "Global Variables",
-		subtitle: "Global Variables",
+		title: "Global variables",
+		subtitle: "Global scope",
 		infoText:
-			"Global variables are available in all requests (lowest priority). They can be overridden by environment and collection variables.",
+			"Variables in this scope are available in all requests (lowest priority). Overridden by environment and collection scopes.",
 		infoBg: "bg-scope-global/10",
 		infoTextColor: "text-scope-global",
 		infoBorder: "border-scope-global/20",
@@ -222,9 +222,9 @@ const EDITOR_CONFIGS = {
 		icon: Cloud as LucideIcon,
 		iconColor: "text-scope-environment",
 		title: (name: string) => name,
-		subtitle: "Environment Variables",
+		subtitle: "Environment scope",
 		infoText:
-			"Environment variables override global variables but can be overridden by collection variables.",
+			"Variables in this scope override the global scope but are overridden by collection scope.",
 		infoBg: "bg-scope-environment/10",
 		infoTextColor: "text-scope-environment",
 		infoBorder: "border-scope-environment/20",
@@ -235,9 +235,9 @@ const EDITOR_CONFIGS = {
 		icon: Folder as LucideIcon,
 		iconColor: "text-scope-collection",
 		title: (name: string) => name,
-		subtitle: "Collection Variables",
+		subtitle: "Collection scope",
 		infoText:
-			"Collection variables have the highest priority and override both global and environment variables.",
+			"Variables in this scope have the highest priority and override both global and environment scopes.",
 		infoBg: "bg-scope-collection/10",
 		infoTextColor: "text-scope-collection",
 		infoBorder: "border-scope-collection/20",
@@ -730,7 +730,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		return (
 			<ErrorState
 				variant="inline"
-				title={`Failed to load ${type === "globals" ? "globals" : type === "environment" ? "environment" : "collection"}`}
+				title={`Couldn't load the ${type === "globals" ? "variables" : type === "environment" ? "environment" : "collection"}`}
 			/>
 		);
 	}
@@ -800,6 +800,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					name={environment.name}
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
+					confirmLabel="Delete environment"
 				/>
 			)}
 

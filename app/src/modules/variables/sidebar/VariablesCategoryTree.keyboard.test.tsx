@@ -364,7 +364,7 @@ describe("a delete never strands focus", () => {
 	/** Delete on the row, then Confirm, waiting for the dialog to actually go. */
 	async function deleteFromKeyboard(target: HTMLElement) {
 		press(target, "Delete");
-		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete environment" }));
 		await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull());
 	}
 
