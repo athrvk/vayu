@@ -113,8 +113,9 @@ export default function InheritedElementsNotice({
 			caption="Runs before your own"
 			summary={
 				<p className="m-0 text-xs leading-relaxed text-foreground">
-					{source.length === 1 ? "A collection" : `${source.length} elements`} will run
-					before your own.
+					{source.length === 1
+						? "1 element is inherited from a collection."
+						: `${source.length} elements are inherited from collections.`}
 				</p>
 			}
 		>

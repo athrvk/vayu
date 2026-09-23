@@ -509,10 +509,10 @@ export default function LoadTestConfigDialog({
 				key: "pre-script",
 				severity: "warning",
 				node: (
-					<Callout severity="warning" title="Pre-request script will not run">
+					<Callout severity="warning" title="Pre-request Script won't run">
 						Running JS per request would cap throughput, so the load engine skips it
-						unless Scripts below is set to All inline. Your test script still runs once
-						afterwards, against sampled responses.
+						unless Scripts below is set to All inline. Your Post-response Script still
+						runs once afterwards, against sampled responses.
 					</Callout>
 				),
 			});
@@ -684,7 +684,7 @@ export default function LoadTestConfigDialog({
 							type="text"
 							value={comment}
 							onChange={(e) => setComment(e.target.value)}
-							placeholder="What are you testing?"
+							placeholder="Checkout after the cache change"
 							className="h-9 text-sm"
 						/>
 					</div>
@@ -751,7 +751,7 @@ export default function LoadTestConfigDialog({
 											? "Give up after"
 											: "Duration"
 								}
-								unit="sec"
+								unit="s"
 								value={duration}
 								onChange={num(setDuration)}
 								min={limits.DURATION_S.MIN}
@@ -776,7 +776,7 @@ export default function LoadTestConfigDialog({
 							<NumberField
 								id="lt-step-duration"
 								label="Hold each level for"
-								unit="sec"
+								unit="s"
 								value={stepDuration}
 								onChange={num(setStepDuration)}
 								min={limits.STEP_DURATION_S.MIN}
@@ -805,7 +805,7 @@ export default function LoadTestConfigDialog({
 							<NumberField
 								id="lt-ramp"
 								label="Ramp duration"
-								unit="sec"
+								unit="s"
 								value={rampDuration}
 								onChange={num(setRampDuration)}
 								min={limits.RAMP_DURATION_S.MIN}
@@ -827,7 +827,7 @@ export default function LoadTestConfigDialog({
 								<NumberField
 									id="lt-stream-duration"
 									label="Stop each stream after"
-									unit="sec"
+									unit="s"
 									value={streamDuration}
 									onChange={num(setStreamDuration)}
 									min={limits.STREAM_DURATION_S.MIN}
@@ -836,7 +836,7 @@ export default function LoadTestConfigDialog({
 								/>
 								<NumberField
 									id="lt-stream-events"
-									label="or after this many events"
+									label="Or after this many events"
 									value={streamMaxEvents}
 									onChange={num(setStreamMaxEvents)}
 									min={limits.STREAM_MAX_EVENTS.MIN}
@@ -1273,10 +1273,10 @@ export default function LoadTestConfigDialog({
 					<DisabledHint
 						reason={
 							isStarting
-								? "Starting the run"
+								? "Starting the run…"
 								: blockingError !== null
-									? "Fix the highlighted setting above"
-									: oauthGated && "The OAuth2 token check above has not passed"
+									? "Fix the highlighted setting above."
+									: oauthGated && "The OAuth 2.0 token check above hasn't passed."
 						}
 					>
 						<Button

@@ -29,7 +29,7 @@
  * the warning line below the toggle, and the Settings tab's own badge - not to
  * remove the control and leave the trust store as the only way out. The row
  * says which of the two the reader probably wants: trusting the authority in
- * Settings > Network & connectivity keeps verification on everywhere.
+ * Settings › Network & connectivity keeps verification on everywhere.
  *
  * **The rows are the app-settings rows** (issue #702). This tab used to
  * hand-roll a toggle arrangement, a number field and a labelled dropdown that
@@ -183,7 +183,7 @@ export default function SettingsPanel() {
 						<>
 							Off skips the certificate check entirely - hostname included - so an
 							internal or self-signed host answers instead of failing. To keep
-							verification on, add the authority under Settings &gt; Network &amp;
+							verification on, add the authority under Settings › Network &amp;
 							connectivity instead.
 						</>
 					}
@@ -200,7 +200,7 @@ export default function SettingsPanel() {
 						<AlertTriangle className="size-icon-sm mt-0.5 shrink-0" />
 						<span>
 							This request accepts any certificate. A machine in the middle can read
-							and rewrite it - Send, load tests and streams alike.
+							and rewrite it - Send, load tests, and streams alike.
 						</span>
 					</div>
 				)}
@@ -234,9 +234,9 @@ export default function SettingsPanel() {
 			 */}
 			{request.stream && (
 				<p className="enter-fade text-xs text-muted-foreground">
-					Scripts run, split around the transfer: Pre-request before the stream opens, and
-					Tests once after it ends, reading the whole stream as{" "}
-					<code>pm.response.events</code>. Results appear when the stream finishes, not
+					Scripts run, split around the transfer: the Pre-request Script before the stream
+					opens, and the Post-response Script once after it ends, reading the whole stream
+					as <code>pm.response.events</code>. Results appear when the stream finishes, not
 					when Send returns.
 				</p>
 			)}

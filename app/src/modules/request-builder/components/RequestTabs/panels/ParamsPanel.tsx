@@ -73,7 +73,7 @@ export default function ParamsPanel() {
 
 	return (
 		<BulkEditor
-			label="Query Parameters"
+			label="Query parameters"
 			format={() => formatParamsToText(request.params)}
 			// Parsed here rather than in BulkEditor, because applying params also
 			// means rewriting the URL - a params rule, not a bulk-edit one. A commit

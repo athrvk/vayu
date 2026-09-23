@@ -75,7 +75,7 @@ export default function InfoPanel() {
 					onChange={(e) => updateField("name", e.target.value)}
 					onBlur={commitName}
 					aria-label="Request name"
-					placeholder="Name this request…"
+					placeholder="Get user by ID"
 					className="text-sm font-medium"
 				/>
 			</div>
@@ -94,7 +94,7 @@ export default function InfoPanel() {
 					 */
 					keepSourceOpen={saveStatus === "error"}
 					aria-label="Request description"
-					emptyHint="Add a description… Markdown is rendered when you click away."
+					emptyHint="Add a description. Markdown renders when you click away."
 				/>
 			</div>
 		</div>

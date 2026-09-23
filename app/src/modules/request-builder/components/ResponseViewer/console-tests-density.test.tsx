@@ -100,7 +100,7 @@ describe("the two console sections", () => {
 		expect(sections.length).toBeGreaterThanOrEqual(2);
 
 		const pre = sections.find((s) => s.textContent?.includes("Pre-request Script"));
-		const test = sections.find((s) => s.textContent?.includes("Test Script"));
+		const test = sections.find((s) => s.textContent?.includes("Post-response Script"));
 		expect(pre).toBeTruthy();
 		expect(test).toBeTruthy();
 
@@ -137,7 +137,7 @@ describe("the two console sections", () => {
 	it("labels an error by the script that raised it", () => {
 		render(<ConsoleOutput logs={[]} errors={{ pre: "boom", post: "bang" }} />);
 		expect(screen.getByText(/pre-request script error/i)).toBeInTheDocument();
-		expect(screen.getByText(/test script error/i)).toBeInTheDocument();
+		expect(screen.getByText(/post-response script error/i)).toBeInTheDocument();
 	});
 
 	it("draws an error in destructive tokens, not the section's own tone", () => {

@@ -40,7 +40,7 @@ export const createDefaultRequestState = (
 	return {
 		id: null,
 		collectionId: null,
-		name: "Untitled Request",
+		name: "Untitled request",
 		method: "GET",
 		url: "",
 		params: [createEmptyKeyValue()],

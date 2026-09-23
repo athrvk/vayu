@@ -83,7 +83,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 	}
 
 	if (mode === "constant_rps") {
-		const shape = `Holds ${count(rps)} requests/sec for ${count(duration)}s`;
+		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
 		return `${shape} - about ${plural(rps * duration, "request")} in total.`;
 	}

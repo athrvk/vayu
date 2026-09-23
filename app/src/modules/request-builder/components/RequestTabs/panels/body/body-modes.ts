@@ -40,10 +40,10 @@ export const BODY_MODES: BodyModeOption[] = [
 	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
 	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
 	{ value: "xml", label: "XML", contentType: "application/xml" },
-	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
+	{ value: "form-data", label: "Form data", contentType: "multipart/form-data" },
 	{
 		value: "x-www-form-urlencoded",
-		label: "URL Encoded",
+		label: "URL-encoded",
 		contentType: "application/x-www-form-urlencoded",
 	},
 ];

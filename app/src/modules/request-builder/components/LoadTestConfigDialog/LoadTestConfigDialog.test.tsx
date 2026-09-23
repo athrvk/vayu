@@ -509,7 +509,7 @@ describe("notices", () => {
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 
 		const alerts = screen.getAllByText(
-			/Ramp is longer than the run|Pre-request script will not run/
+			/Ramp is longer than the run|Pre-request Script won't run/
 		);
 		expect(alerts).toHaveLength(2);
 		expect(alerts[0]).toHaveTextContent("Ramp is longer than the run");
@@ -528,7 +528,7 @@ describe("notices", () => {
 		// notice list being empty - an assertion that scanned nothing would
 		// pass whatever the callout did.
 		open({ hasPreRequestScript: true });
-		expect(screen.getByText("Pre-request script will not run")).toBeInTheDocument();
+		expect(screen.getByText("Pre-request Script won't run")).toBeInTheDocument();
 		expect(screen.queryByText(/dynamic variable/i)).toBeNull();
 	});
 
@@ -544,7 +544,7 @@ describe("notices", () => {
 	// warning is no longer true.
 	it("hides the pre-request warning once Scripts is set to All inline", () => {
 		open({ hasPreRequestScript: true });
-		expect(screen.getByText("Pre-request script will not run")).toBeInTheDocument();
+		expect(screen.getByText("Pre-request Script won't run")).toBeInTheDocument();
 
 		fireEvent.click(
 			within(screen.getByRole("radiogroup", { name: /^scripts$/i })).getByRole("radio", {
@@ -552,7 +552,7 @@ describe("notices", () => {
 			})
 		);
 
-		expect(screen.queryByText("Pre-request script will not run")).toBeNull();
+		expect(screen.queryByText("Pre-request Script won't run")).toBeNull();
 	});
 
 	it("disables Start while a blocking notice is live", () => {

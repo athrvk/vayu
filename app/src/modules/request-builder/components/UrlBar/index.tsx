@@ -252,7 +252,7 @@ export default function UrlBar() {
 							// - the button reads as name-less to the source scan even
 							// though a screen reader announces it fine. The label mirrors
 							// what's already on screen rather than adding new copy.
-							aria-label={isExecuting ? "Sending" : "Send"}
+							aria-label={isExecuting ? "Sending…" : "Send"}
 							className={cn(
 								"h-control px-4 inline-flex items-center gap-1.5 shrink-0",
 								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
@@ -280,8 +280,8 @@ export default function UrlBar() {
 							)}
 						>
 							<LabelSwap
-								label={isExecuting ? "Sending" : "Send"}
-								states={["Send", "Sending"]}
+								label={isExecuting ? "Sending…" : "Send"}
+								states={["Send", "Sending…"]}
 							/>
 						</button>
 					</Hint>
@@ -330,7 +330,7 @@ export default function UrlBar() {
 								aria-hidden="true"
 								className="size-1.5 rounded-full bg-status-success animate-pulse"
 							/>
-							View running test
+							View load test
 						</button>
 					) : (
 						<Hint chord={LOAD_TEST_CHORD} label="Start a load test">
@@ -355,7 +355,7 @@ export default function UrlBar() {
 									"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
 								)}
 							>
-								Load Test
+								Load test
 							</button>
 						</Hint>
 					))}

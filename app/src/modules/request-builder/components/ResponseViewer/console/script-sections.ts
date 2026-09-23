@@ -17,8 +17,12 @@
  * only exempts primitive-literal exports.
  */
 export const SCRIPT_SECTIONS = {
-	pre: { label: "Pre-request Script", errorLabel: "Pre-request Script Error", tone: "running" },
-	test: { label: "Test Script", errorLabel: "Test Script Error", tone: "success" },
+	pre: { label: "Pre-request Script", errorLabel: "Pre-request Script error", tone: "running" },
+	test: {
+		label: "Post-response Script",
+		errorLabel: "Post-response Script error",
+		tone: "success",
+	},
 } as const;
 
 export type ScriptKey = keyof typeof SCRIPT_SECTIONS;

@@ -90,7 +90,7 @@ describe("ResponseViewer surfaces script errors without console logs (#111)", ()
 
 		selectTab(/console/i);
 
-		expect(screen.getByText(/Pre-request Script Error/i)).toBeTruthy();
+		expect(screen.getByText(/Pre-request Script error/i)).toBeTruthy();
 		expect(screen.getByText(/ReferenceError: foo is not defined/)).toBeTruthy();
 	});
 

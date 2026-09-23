@@ -174,7 +174,7 @@ describe("the Send / Load Test group", () => {
 		// than the button's full text - see label-swap.test.tsx for the
 		// component-level assertion on the reservation itself.
 		expect(send().querySelector(".enter-fade")?.textContent?.trim()).toBe("Send");
-		expect(loadTest().textContent?.trim()).toBe("Load Test");
+		expect(loadTest().textContent?.trim()).toBe("Load test");
 	});
 
 	it("carries each shortcut in a tooltip instead", () => {
