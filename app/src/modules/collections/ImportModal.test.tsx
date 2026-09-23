@@ -63,7 +63,9 @@ describe("ImportModal", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 
-		await waitFor(() => expect(screen.getByText(/file body/i)).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText(/body not imported \(file upload\)/i)).toBeInTheDocument()
+		);
 		expect(screen.queryByText(/file_body/)).not.toBeInTheDocument();
 	});
 
@@ -92,7 +94,7 @@ describe("ImportModal", () => {
 		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 
 		await waitFor(() =>
-			expect(screen.getByText(/1 file part needs a file/i)).toBeInTheDocument()
+			expect(screen.getByText(/1 file field needs a file/i)).toBeInTheDocument()
 		);
 	});
 

@@ -48,7 +48,8 @@ import {
 } from "@/services/openapi/bound-spec-match";
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
-import { type ImportResult, type SkippedItem } from "@/services/importers/types";
+import { type ImportResult } from "@/services/importers/types";
+import { importNotices, type ImportNotice } from "./import-notices";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import {
 	applicableEntries,
@@ -1152,100 +1153,13 @@ function PreviewView({
 			)}
 			{globalCount > 0 && (
 				<p className="text-label text-muted-foreground">
-					Existing globals are kept; a variable of the same name is overwritten.
+					Same-named globals will be overwritten.
 				</p>
 			)}
-			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
-			{noticeSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-label text-muted-foreground">
-					<Info className="size-icon-sm shrink-0" />
-					{noticeSummary(meta)}
-				</p>
-			)}
+			<NoticeList notices={importNotices(meta)} />
 		</div>
 	);
 }
-
-/**
- * Skip kinds that describe what a conformant document *is*, not what the import
- * lost (issue #710).
- *
- * `default` is the only one so far: every major vendor spec declares a catch-all
- * response on every operation, so counting it as damage put "568 example
- * responses with no numeric status" in destructive red beside the single warning
- * the user could act on ("1 file part needs a file"). It is still counted and
- * still named - nothing is dropped silently - but at the severity it deserves.
- */
-const INFORMATIONAL_KINDS: ReadonlySet<SkippedItem["kind"]> = new Set([
-	"default_response",
-	// Both are Postman URL shapes the importer now maps rather than drops
-	// (issue #1443): a template plus a collection variable, or an assembled
-	// URL. The count says a shape changed, not that anything went missing.
-	"path_variables",
-	"url_without_raw",
-]);
-
-/**
- * What this file lost, in words - or `""` when it lost nothing.
- *
- * Shared by the single-file preview and every ledger row rather than written
- * twice: a batch has to state per file exactly what one file states on its own,
- * and a copy of this list is a copy that stops matching the first time a skip
- * kind is added.
- */
-function lossSummary(meta: ImportResult["meta"]): string {
-	return [
-		...meta.skipped
-			.filter((s) => !INFORMATIONAL_KINDS.has(s.kind))
-			.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
-		...(meta.nonExecutableAuth > 0 ? [`${meta.nonExecutableAuth} auth not executed`] : []),
-		// An OpenAPI upload imports as a file row with nothing attached - the user
-		// has to pick the file before the request can be sent, so the preview says
-		// how many are waiting rather than letting them be discovered one 400 at a
-		// time.
-		...(meta.unattachedFileParts > 0
-			? [
-					`${meta.unattachedFileParts} file ${
-						meta.unattachedFileParts === 1 ? "part needs" : "parts need"
-					} a file`,
-				]
-			: []),
-	].join(" · ");
-}
-
-/**
- * What this file is worth knowing about but did not lose - or `""` when there is
- * nothing to say (issue #710).
- *
- * The counterpart to {@link lossSummary}, rendered in muted type rather than
- * destructive, and shared by the same two callers for the same reason. Two things
- * land here: a spec-conformant construct that has no place in Vayu's model
- * (`default` responses), and a grouping decision the import made that the
- * document did not spell out.
- */
-function noticeSummary(meta: ImportResult["meta"]): string {
-	return [
-		...meta.skipped
-			.filter((s) => INFORMATIONAL_KINDS.has(s.kind))
-			.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
-		...(meta.folderStrategy && meta.folderStrategy !== "tags"
-			? [FOLDER_STRATEGY_NOTES[meta.folderStrategy]]
-			: []),
-	].join(" · ");
-}
-
-/**
- * How a folder tree the user is about to accept came to exist (issue #710).
- *
- * Only the two path-involving strategies say anything: folders from an
- * operation's own `tags` are the document's own structure and need no
- * explanation, while folders derived from paths are Vayu's doing and would
- * otherwise read as something the spec contained.
- */
-const FOLDER_STRATEGY_NOTES: Record<"paths" | "mixed", string> = {
-	paths: "Collections from paths - this spec declares no operation tags",
-	mixed: "Collections from tags, and from paths where an operation declared none",
-};
 
 /**
  * The batch ledger: one row per picked file (issue #666).
@@ -1291,10 +1205,6 @@ function BatchLedger({
 					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />
 				))}
 			</div>
-			<p className="text-label text-muted-foreground">
-				Each file is imported on its own, as its own collection - a file the engine refuses
-				does not undo the ones before it.
-			</p>
 		</div>
 	);
 }
@@ -1310,8 +1220,7 @@ function BatchRow({
 	// Shared with the re-import dialog, so one file is called the same thing
 	// wherever it is named.
 	const name = entryLabel(entry);
-	const loss = result ? lossSummary(result.meta) : "";
-	const notices = result ? noticeSummary(result.meta) : "";
+	const notices = result ? importNotices(result.meta) : [];
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
 			<Checkbox
@@ -1349,15 +1258,7 @@ function BatchRow({
 				<FieldError as="span" icon={FileWarning}>
 					{error}
 				</FieldError>
-				<FieldError as="span" icon={AlertTriangle}>
-					{loss}
-				</FieldError>
-				{notices && (
-					<span className="flex items-center gap-1.5 text-label text-muted-foreground">
-						<Info className="size-icon-sm shrink-0" />
-						{notices}
-					</span>
-				)}
+				<NoticeList notices={notices} as="span" />
 				{outcome && (
 					<span
 						className={`flex items-center gap-1.5 text-label ${
@@ -1377,174 +1278,43 @@ function BatchRow({
 	);
 }
 
-function varCountLabel(n: number): string {
-	return `${n} ${n === 1 ? "variable" : "variables"}`;
+/**
+ * What a file lost or changed, one line each (see `import-notices.ts`): red
+ * for what the user has to finish by hand, muted for what the import decided.
+ * `as="span"` for a host that is itself phrasing content (a ledger row's
+ * `<label>`).
+ */
+function NoticeList({
+	notices,
+	as: Tag = "div",
+}: {
+	notices: readonly ImportNotice[];
+	as?: "div" | "span";
+}) {
+	if (notices.length === 0) return null;
+	return (
+		<Tag className="block space-y-0.5">
+			{notices.map((notice, i) =>
+				notice.tier === "action" ? (
+					<FieldError key={i} as="span" icon={AlertTriangle}>
+						{notice.text}
+					</FieldError>
+				) : (
+					<span
+						key={i}
+						className="flex items-start gap-1.5 text-xs text-muted-foreground"
+					>
+						<Info className="mt-0.5 size-icon-sm shrink-0" />
+						{notice.text}
+					</span>
+				)
+			)}
+		</Tag>
+	);
 }
 
-/**
- * What a skipped item is, in words.
- *
- * The kinds are slugs - the line read "3 file_body · 1 malformed_item", which
- * names the parser's counter rather than what the user lost. `file_body` in
- * particular no longer means "a file part was dropped" (issue #393 imports
- * those): it is now only a *whole-body* file - Postman's `file` mode, an
- * Insomnia binary body - which Vayu has no shape for, so the wording has to say
- * which of the two the reader is looking at.
- */
-// `Partial`, not the exhaustive `Record` this was before issue #1518: the
-// union now also accepts an arbitrary `.jmx` class name (open-ended - there
-// is no enumerating every JMeter plugin class), which an exhaustive Record
-// cannot type at all. `skippedLabel` below falls back to the raw kind for any
-// key with no entry, which is the intended rendering for one of those.
-const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>> = {
-	websocket: ["WebSocket request", "WebSocket requests"],
-	grpc: ["gRPC request", "gRPC requests"],
-	api_spec: ["API spec document", "API spec documents"],
-	unit_test: ["unit-test block", "unit-test blocks"],
-	file_body: ["file body (not supported)", "file bodies (not supported)"],
-	malformed_item: ["malformed item", "malformed items"],
-	unsupported_method: ["unsupported method", "unsupported methods"],
-	malformed_spec: ["malformed spec section", "malformed spec sections"],
-	example_no_status: [
-		"example response with no numeric status",
-		"example responses with no numeric status",
-	],
-	// Named as the construct rather than as a loss (issue #710): `default` is
-	// valid OpenAPI on every operation of most vendor specs, so the line has to
-	// read as "here is what happened to them", not as a tally of damage. The
-	// severity comes from INFORMATIONAL_KINDS; the wording has to match it.
-	default_response: [
-		"`default` (catch-all) response - no status to serve under, not imported as an example",
-		"`default` (catch-all) responses - no status to serve under, not imported as examples",
-	],
-	// Not "external ref": the count is what the user lost, and what they lost is
-	// a schema the spec pointed at in another file (issue #649). The wording says
-	// which half failed - Vayu found the reference and could not read the file.
-	external_ref: [
-		"reference to a file Vayu couldn't read",
-		"references to files Vayu couldn't read",
-	],
-	// The operation imports; what it loses is the repeated id, so the wording
-	// says which half went (issue #715) rather than implying a dropped request.
-	duplicate_operation_id: [
-		"operation whose operationId was already used (identified by path instead)",
-		"operations whose operationId was already used (identified by path instead)",
-	],
-	webhook_operations: [
-		"webhook operation (describes what the API sends you, not a request Vayu can send)",
-		"webhook operations (describe what the API sends you, not requests Vayu can send)",
-	],
-	deprecated_operation: [
-		"deprecated operation (imported the same as a current one - Vayu has no deprecated flag)",
-		"deprecated operations (imported the same as current ones - Vayu has no deprecated flag)",
-	],
-	// The three below name what the *request* lost rather than the spec construct
-	// that was skipped (issue #719): a reader of this line is deciding what to
-	// finish by hand after the import, and "cookie parameter" alone does not say
-	// that nothing carries it.
-	cookie_param: [
-		"cookie parameter (not imported - use the cookie jar)",
-		"cookie parameters (not imported - use the cookie jar)",
-	],
-	unmapped_body: [
-		"request body in a format Vayu cannot fill in (binary, XML, image)",
-		"request bodies in a format Vayu cannot fill in (binary, XML, image)",
-	],
-	unresolved_base_url: [
-		"server URL that couldn't be resolved to a real address",
-		"server URLs that couldn't be resolved to a real address",
-	],
-	unsupported_auth: [
-		"auth scheme Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
-		"auth schemes Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
-	],
-	oauth2_dropped_field: [
-		"oauth2 detail Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
-		"oauth2 details Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
-	],
-	security_unmapped_or: [
-		"operation's security offering more than one alternative (an OR) - request kept the collection's auth",
-		"operations' security offering more than one alternative (an OR) - requests kept the collection's auth",
-	],
-	security_unmapped_and: [
-		"operation's security naming more than one scheme at once (an AND) - request kept the collection's auth",
-		"operations' security naming more than one scheme at once (an AND) - requests kept the collection's auth",
-	],
-	security_unmapped_scheme: [
-		"operation's security naming a scheme the document never declares - request kept the collection's auth",
-		"operations' security naming a scheme the document never declares - requests kept the collection's auth",
-	],
-	security_unmapped_mutualtls: [
-		"operation secured with mutualTLS, which Vayu has no mode for - request kept the collection's auth",
-		"operations secured with mutualTLS, which Vayu has no mode for - requests kept the collection's auth",
-	],
-	security_unmapped_openidconnect: [
-		"operation secured with openIdConnect, which Vayu has no mode for - request kept the collection's auth",
-		"operations secured with openIdConnect, which Vayu has no mode for - requests kept the collection's auth",
-	],
-	security_unmapped_type: [
-		"operation's security scheme of a type Vayu cannot map - request kept the collection's auth",
-		"operations' security schemes of a type Vayu cannot map - requests kept the collection's auth",
-	],
-	security_unmapped_apikey_cookie: [
-		"operation's apiKey security scheme placed in a cookie, which Vayu cannot send - request kept the collection's auth",
-		"operations' apiKey security schemes placed in a cookie, which Vayu cannot send - requests kept the collection's auth",
-	],
-	servers_dropped: [
-		"additional server URL (only the first becomes the collection's baseUrl)",
-		"additional server URLs (only the first becomes the collection's baseUrl)",
-	],
-	// Informational (see INFORMATIONAL_KINDS): the variable's value survives,
-	// so the wording says what changed rather than what was lost.
-	path_variables: [
-		"request whose path variable was turned into a collection variable",
-		"requests whose path variables were turned into collection variables",
-	],
-	url_without_raw: [
-		"URL assembled from its host and path (no raw URL in the source)",
-		"URLs assembled from their host and path (no raw URL in the source)",
-	],
-	variable_metadata: [
-		"variable's description or type, which Vayu does not store",
-		"variables' descriptions or types, which Vayu does not store",
-	],
-	disabled_body: [
-		"request body Postman had turned off - imported with no body rather than sent anyway",
-		"request bodies Postman had turned off - imported with no body rather than sent anyway",
-	],
-	certificate: [
-		"request-level client certificate that couldn't be registered (an unreadable file, or a host this import already registered a different certificate for)",
-		"request-level client certificates that couldn't be registered (an unreadable file, or a host this import already registered a different certificate for)",
-	],
-	proxy_config: [
-		"request-level proxy override (Vayu has no per-request proxy setting to import it into)",
-		"request-level proxy overrides (Vayu has no per-request proxy setting to import it into)",
-	],
-	invalid_percent_encoding: [
-		"query value with an invalid % escape, changed when rejoined into the URL",
-		"query values with an invalid % escape, changed when rejoined into the URL",
-	],
-	elements_invalid: [
-		"element that failed validation and was not imported",
-		"elements that failed validation and were not imported",
-	],
-	mock_example_missing: [
-		"request whose fixed mock example is no longer in the document, so it mocks the first example instead",
-		"requests whose fixed mock example is no longer in the document, so they mock the first example instead",
-	],
-	vayu_extension_invalid: [
-		"hand-edited Vayu detail (a request's rows, body, auth or settings, or a collection) that no longer made sense - the document's own reading was kept",
-		"hand-edited Vayu details (a request's rows, body, auth or settings, or a collection) that no longer made sense - the document's own reading was kept",
-	],
-};
-
-function skippedLabel(kind: SkippedItem["kind"], count: number): string {
-	const label = SKIPPED_LABELS[kind];
-	// A kind with no entry still says something rather than nothing - a JMeter
-	// class name (issue #1518) always lacks one, by design, and must not
-	// silently print `undefined`.
-	if (!label) return kind;
-	return count === 1 ? label[0] : label[1];
+function varCountLabel(n: number): string {
+	return `${n} ${n === 1 ? "variable" : "variables"}`;
 }
 
 function TreeNode({

@@ -1263,6 +1263,9 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);
+        if (tally != nullptr) {
+            tally->set_subject (draft.name);
+        }
         if (const json* deprecated = prop (operation, "deprecated"); deprecated != nullptr &&
         deprecated->is_boolean () && deprecated->get<bool> ()) {
             // Vayu's request model has no deprecated flag to carry the marker
@@ -1293,6 +1296,9 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         entry.operation  = std::move (walked.identity);
         drafts.push_back (std::move (entry));
     }
+    if (tally != nullptr) {
+        tally->set_subject ({});
+    }
     tally_add_count (tally, "malformed_spec", notes.malformed_spec);
     tally_add_count (tally, "unsupported_method", notes.unsupported_method);
     tally_add_count (tally, "duplicate_operation_id", notes.duplicate_operation_id);
@@ -1314,13 +1320,36 @@ void ImportTally::add (std::string_view kind, int count) {
     if (count <= 0) {
         return;
     }
-    for (auto& entry : counts_) {
-        if (entry.first == kind) {
-            entry.second += count;
-            return;
+    auto entry = std::find_if (counts_.begin (), counts_.end (),
+    [kind] (const Entry& existing) { return existing.kind == kind; });
+    if (entry == counts_.end ()) {
+        entry = counts_.insert (counts_.end (), Entry{ std::string (kind), 0, {} });
+    }
+    entry->count += count;
+    if (!subject_.empty () &&
+    std::find (entry->requests.begin (), entry->requests.end (), subject_) ==
+    entry->requests.end ()) {
+        entry->requests.push_back (subject_);
+    }
+}
+
+void ImportTally::set_subject (std::string subject) {
+    subject_ = std::move (subject);
+}
+
+void ImportTally::name_requests (std::string_view kind,
+const std::vector<std::string>& requests) {
+    auto entry = std::find_if (counts_.begin (), counts_.end (),
+    [kind] (const Entry& existing) { return existing.kind == kind; });
+    if (entry == counts_.end ()) {
+        return;
+    }
+    for (const std::string& request : requests) {
+        if (std::find (entry->requests.begin (), entry->requests.end (), request) ==
+        entry->requests.end ()) {
+            entry->requests.push_back (request);
         }
     }
-    counts_.emplace_back (kind, count);
 }
 
 nlohmann::ordered_json ImportTally::items () const {
@@ -1343,19 +1372,26 @@ nlohmann::ordered_json ImportTally::items () const {
     "path_variables", "url_without_raw", "invalid_percent_encoding",
     "variable_metadata", "disabled_body", "certificate", "proxy_config" });
 
+    const auto item_of = [] (const Entry& entry) {
+        nlohmann::ordered_json item = { { "kind", entry.kind }, { "count", entry.count } };
+        if (!entry.requests.empty ()) {
+            item["requests"] = entry.requests;
+        }
+        return item;
+    };
     nlohmann::ordered_json items = nlohmann::ordered_json::array ();
     std::unordered_set<std::string> emitted;
     for (const char* kind : ORDER) {
         for (const auto& entry : counts_) {
-            if (entry.first == kind) {
-                items.push_back ({ { "kind", entry.first }, { "count", entry.second } });
-                emitted.insert (entry.first);
+            if (entry.kind == kind) {
+                items.push_back (item_of (entry));
+                emitted.insert (entry.kind);
             }
         }
     }
     for (const auto& entry : counts_) {
-        if (emitted.insert (entry.first).second) {
-            items.push_back ({ { "kind", entry.first }, { "count", entry.second } });
+        if (emitted.insert (entry.kind).second) {
+            items.push_back (item_of (entry));
         }
     }
     return items;

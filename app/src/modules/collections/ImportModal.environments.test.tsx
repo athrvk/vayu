@@ -193,11 +193,11 @@ describe("ImportModal with a Postman globals export", () => {
 		expect(screen.queryByText(/Nothing to import/i)).toBeNull();
 	});
 
-	it("states that existing globals survive the merge", async () => {
+	it("states that only same-named globals are replaced", async () => {
 		renderModal();
 		await pasteAndPreview(globalsFile);
 
-		expect(screen.getByText(/Existing globals are kept/i)).toBeVisible();
+		expect(screen.getByText(/Same-named globals will be overwritten/i)).toBeVisible();
 	});
 
 	it("blocks Import once variables are excluded, and recovers", async () => {

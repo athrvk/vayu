@@ -54,7 +54,7 @@ That position is not load-bearing. An environment export carries neither `info` 
 
 `POST /globals` **replaces** the whole set - the engine has no merge verb (see [api-reference.md](../../engine/api-reference.md#post-globals)). Writing the imported record straight to it would delete every global the user already had, so `ImportOrchestrator.applyGlobals` reads the current set first and writes the union.
 
-On a name collision **the imported value wins**. The user explicitly asked for this file's variables, and silently keeping the old value would be the no-op outcome this import path exists to avoid. The preview states it: *"Existing globals are kept; a variable of the same name is overwritten."*
+On a name collision **the imported value wins**. The user explicitly asked for this file's variables, and silently keeping the old value would be the no-op outcome this import path exists to avoid. The preview states it: *"Same-named globals will be overwritten."*
 
 Globals are written **last**, after the bulk `POST /import/apply` has landed and its id-map has been checked. That ordering is load-bearing: it is the one write here that can destroy data the import did not create, so nothing may fail behind it. A failed apply therefore never leaves globals half-rewritten.
 

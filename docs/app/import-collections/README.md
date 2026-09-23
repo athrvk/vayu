@@ -363,8 +363,14 @@ than tallying while building them, so the number and the rows cannot disagree.
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
 "unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "path_variables" |
-"url_without_raw" | "variable_metadata", count }`.
+"url_without_raw" | "variable_metadata", count, requests? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
+`requests` names the requests a count applies to, when the walk had one in hand (every
+per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
+resources it cannot import), so the Preview can say which request to finish rather than only
+how many. How the Preview words and ranks each kind - red for what the user must finish, muted
+for what the import decided, not shown for what changes nothing sent - is
+`app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
 are shapes the source file got wrong - a Postman `item[]` entry that is not an object (see
@@ -376,9 +382,8 @@ non-representability case: an OpenAPI response keyed `2XX` (or with a junk key) 
 real response, but an example is served under one status line and there is no honest value
 to pick, so it is counted rather than guessed at. `default_response` is the same skip for the
 `default` key, on a counter of its own (issue #710) because it is conformant and declared on
-nearly every operation of a vendor spec - the Preview names it as information rather than as
-damage, which is what keeps a 568-count line from burying the one warning that needs acting
-on. `external_ref` is the fifth, and the only
+nearly every operation of a vendor spec - the Preview does not show it at all, which is what
+keeps a 568-count line from burying the one warning that needs acting on. `external_ref` is the fifth, and the only
 kind no parser produces: a `$ref` naming another file that the bundling pass could not
 read (`ref-bundler.ts`, issue #649) is counted **before** parse and stamped into
 `meta.skipped` by `parseImport`, one per reference - because each one is an operation that
@@ -410,8 +415,8 @@ which import as data and count under `nonExecutableAuth` instead. `path_variable
 `url_without_raw` are not losses: the first counts a request whose `url.variable[]` path
 segment was turned into a `{{key}}` template plus a collection variable, the second a URL
 assembled from `host[]`/`path[]` because it carried no `raw` - both are mappings the Preview
-should say happened, not damage, so like `default_response` they sort into the informational
-half of the notice list rather than the destructive one. `variable_metadata` is a collection,
+changes nothing the user sends, so like `default_response` the Preview does not show them;
+they stay counted in `meta.skipped`. `variable_metadata` is a collection,
 folder, environment or globals variable whose `description` or a meaningfully declared `type`
 (anything but `secret` or Postman's own `default` marker) was read and discarded, because
 Vayu's variable record has a field for the value and the secret flag only (see

@@ -135,7 +135,7 @@ A response `$ref` is resolved (single hop, like the parser's other refs). An `ex
 
 A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
 
-A key that is not a numeric status is **skipped and counted**: `default` as `default_response`, anything else (a `2XX` wildcard, junk) as `example_no_status`. Both document a real response, but an example is served under one status line and there is no honest value to pick. They are counted apart because `default` is conformant and near-universal - every one of Stripe's 568 operations declares one - so the preview names it as information while a malformed key stays a warning (issue #710).
+A key that is not a numeric status is **skipped and counted**: `default` as `default_response`, anything else (a `2XX` wildcard, junk) as `example_no_status`. Both document a real response, but an example is served under one status line and there is no honest value to pick. They are counted apart because `default` is conformant and near-universal - every one of Stripe's 568 operations declares one - so the preview does not show it at all, while a malformed key is a muted note (issue #710).
 | tag and path groups | `children` | `folders.children()` |
 | operations with neither | `requests` | |
 
