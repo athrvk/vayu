@@ -288,7 +288,7 @@ describe("searching", () => {
 	});
 
 	/*
-	 * The reported symptom (#1175), end to end. "theme" scores Theme Mode at
+	 * The reported symptom (#1175), end to end. "theme" scores Theme mode at
 	 * 0.99 and the request rows at 0.01-0.10, and the user saw the requests:
 	 * the sections rendered in a fixed order no score could cross. Put the
 	 * wrapper back in charge - drop the promotion in `ranking.ts` - and the
@@ -300,7 +300,7 @@ describe("searching", () => {
 
 		typeQuery("theme");
 
-		expect(visibleRows()[0]).toBe("Theme Mode");
+		expect(visibleRows()[0]).toBe("Theme mode");
 		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
 			(el) => el.textContent
 		);
