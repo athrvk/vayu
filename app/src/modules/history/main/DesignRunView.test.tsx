@@ -267,11 +267,11 @@ describe("DesignRunView - a run that failed", () => {
 
 		renderView(failed);
 
-		expect(screen.getByText(/could not get a response/i)).toBeTruthy();
+		expect(screen.getByText(/couldn.t resolve the host name/i)).toBeTruthy();
 		// The engine's own words, not a generic "request failed".
 		expect(screen.getAllByText(/could not resolve host/i).length).toBeGreaterThan(0);
 		// ClientErrorView's per-code tip - the hint the brief asks for.
-		expect(screen.getByText(/check if the domain name is correct/i)).toBeTruthy();
+		expect(screen.getByText(/check the domain for typos/i)).toBeTruthy();
 		expect(screen.getByText(/DNS_ERROR/)).toBeTruthy();
 	});
 });

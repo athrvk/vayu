@@ -649,7 +649,7 @@ describe("what it says when there is no schema", () => {
 
 	it("browses a stale schema and states its age instead of blanking", () => {
 		renderExplorer({ entry: { status: "error", fetchedAt: Date.now() - 600_000 } });
-		expect(screen.getByText(/Refresh failed/)).toBeTruthy();
+		expect(screen.getByText(/Couldn't refresh it/)).toBeTruthy();
 		expect(rows().length).toBeGreaterThan(0);
 	});
 });
@@ -682,6 +682,6 @@ describe("the header carries only what belongs to the pane", () => {
 		// Not the status badge: this line qualifies the rows the pane is showing,
 		// and it is the only thing on screen that says how much to trust them.
 		renderExplorer({ entry: { status: "error", fetchedAt: Date.now() - 600_000 } });
-		expect(screen.getByText(/Refresh failed/)).toBeTruthy();
+		expect(screen.getByText(/Couldn't refresh it/)).toBeTruthy();
 	});
 });

@@ -79,9 +79,9 @@ describe("the response pane", () => {
 		render(<ClientErrorView errorCode="PROXY_ERROR" errorMessage={DETAIL} />);
 
 		// The heading, because it is the one line a reader is guaranteed to see.
-		expect(screen.getByText("Could not reach the proxy")).toBeInTheDocument();
+		expect(screen.getByText("Couldn't reach the proxy")).toBeInTheDocument();
 		// And a hint that points at the setting rather than restating the error.
-		expect(screen.getByText(/Network & connectivity > Proxy/)).toBeInTheDocument();
+		expect(screen.getByText(/Network & connectivity › Proxy/)).toBeInTheDocument();
 	});
 
 	it("does not read as a proxy failure when it was not one", () => {
@@ -90,8 +90,8 @@ describe("the response pane", () => {
 		// like, and the test above would still pass on a shared heading.
 		render(<ClientErrorView errorCode="CONNECTION_FAILED" errorMessage="Connection refused" />);
 
-		expect(screen.getByText("Could not get a response")).toBeInTheDocument();
-		expect(screen.queryByText(/Network & connectivity > Proxy/)).not.toBeInTheDocument();
+		expect(screen.getByText("Couldn't connect to the server")).toBeInTheDocument();
+		expect(screen.queryByText(/Network & connectivity › Proxy/)).not.toBeInTheDocument();
 	});
 
 	it("names both legitimate outs for a verification failure", () => {
@@ -100,6 +100,6 @@ describe("the response pane", () => {
 		render(<ClientErrorView errorCode="SSL_ERROR" errorMessage="unable to get local issuer" />);
 
 		expect(screen.getByText(/Custom CA Certificates/)).toBeInTheDocument();
-		expect(screen.getByText(/Verify SSL/)).toBeInTheDocument();
+		expect(screen.getByText(/Verify TLS certificate/)).toBeInTheDocument();
 	});
 });

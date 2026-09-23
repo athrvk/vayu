@@ -462,7 +462,7 @@ export default function SendWithRowDialog({
 				)}
 
 				{rows.error && (
-					<Callout severity="blocking" title="Could not read the data file">
+					<Callout severity="blocking" title="Couldn't read the data file">
 						{rows.error}
 					</Callout>
 				)}

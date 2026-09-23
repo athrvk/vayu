@@ -360,7 +360,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			{schema && status === "error" && (
 				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-micro text-warning-text border-b border-border shrink-0">
 					<AlertCircle className="size-icon-sm shrink-0" />
-					{age ? `${age}. Refresh failed.` : "Refresh failed."}
+					{age ? `${age}. Couldn't refresh it.` : "Couldn't refresh the schema."}
 				</p>
 			)}
 

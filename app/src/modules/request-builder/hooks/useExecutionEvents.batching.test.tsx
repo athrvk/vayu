@@ -157,7 +157,7 @@ describe("useExecutionEvents batching", () => {
 		const s = useExecutionEventsStore.getState();
 		expect(s.events.map((e) => e.data)).toEqual(["e0", "e1"]);
 		expect(s.endReason).toBe("error");
-		expect(s.error).toContain("Lost the event stream");
+		expect(s.error).toContain("Couldn't reconnect to the event stream");
 
 		unmount();
 	});

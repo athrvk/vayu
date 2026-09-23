@@ -43,27 +43,40 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
  * behind-real-networks epic exists to end.
  */
 const ErrorHints: Record<string, string> = {
-	TIMEOUT: "Try increasing the request timeout or check if the server is responding slowly",
-	CONNECTION_FAILED: "Verify the URL and ensure the target server is running",
-	DNS_ERROR: "Check if the domain name is correct and accessible",
+	TIMEOUT:
+		"The server accepted the connection but didn't answer in time. Raise Default Request Timeout in Settings › Network & connectivity, or check the server.",
+	CONNECTION_FAILED:
+		"Nothing answered at that address. Check the URL, and that the server is running.",
+	DNS_ERROR:
+		"The host name didn't resolve. Check the domain for typos, and that your network can reach it.",
 	SSL_ERROR:
-		"The certificate was not accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings > Network & connectivity > Custom CA Certificates; to skip verification for this one request, turn off Verify SSL in the Settings tab",
+		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA Certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab.",
 	PROXY_ERROR:
-		"The proxy was the hop that failed, not the endpoint - check Settings > Network & connectivity > Proxy, and whether this proxy needs credentials in its URL",
-	INVALID_URL: "Check the URL format - it should start with http:// or https://",
-	ENGINE_ERROR: "The Vayu engine may not be running. Try restarting the application",
+		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
+	INVALID_URL: "The URL has to start with http:// or https://.",
+	ENGINE_ERROR: "Vayu's engine isn't running or didn't answer. Restart Vayu.",
 };
 
 /**
  * The headline, when the generic one would misdescribe the failure.
  *
- * "Could not get a response" is true of a proxy refusal and unhelpful about it:
+ * "Couldn't get a response" is true of a proxy refusal and unhelpful about it:
  * the reader's next move depends entirely on *which hop* said no, and the
  * heading is the one line they are guaranteed to read.
+ *
+ * `ENGINE_ERROR` is Vayu's own failure, not the network's, so it names the
+ * engine rather than borrowing the network template (docs/ux-writing.md,
+ * "Errors have three sources").
  */
 const ErrorTitles: Record<string, string> = {
-	PROXY_ERROR: "Could not reach the proxy",
-	SSL_ERROR: "Could not establish a secure connection",
+	TIMEOUT: "No response before the timeout",
+	CONNECTION_FAILED: "Couldn't connect to the server",
+	DNS_ERROR: "Couldn't resolve the host name",
+	PROXY_ERROR: "Couldn't reach the proxy",
+	SSL_ERROR: "Couldn't establish a secure connection",
+	INVALID_URL: "Couldn't parse the URL",
+	ENGINE_ERROR: "Vayu's engine didn't respond",
+	INTERNAL_ERROR: "Couldn't send the request",
 };
 
 /**
@@ -97,7 +110,7 @@ export interface ClientErrorViewProps {
 
 export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
 	const hint = errorCode ? ErrorHints[errorCode] : undefined;
-	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Could not get a response";
+	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Couldn't get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 
 	return (
@@ -110,7 +123,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				<div className="space-y-2">
 					<h3 className="text-md font-semibold text-foreground">{title}</h3>
 					<p className="text-sm text-muted-foreground">
-						{errorMessage || "The request failed before reaching the server"}
+						{errorMessage || "The request never reached the server."}
 					</p>
 				</div>
 
