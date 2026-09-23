@@ -19,7 +19,10 @@
  *
  * - **`meta.skipped` is compared as counts per kind.** The renderer emitted
  *   first-seen order out of a `Map`; `ImportTally` emits a fixed order. A
- *   counter list is a set of counters and nothing reads its order.
+ *   counter list is a set of counters and nothing reads its order. The request
+ *   names beside a count (`requests`, and `meta.nonExecutableAuthRequests`)
+ *   are the engine's addition, never the renderer's, and are pinned by
+ *   `NamesTheRequestsACountIsAbout` instead.
  * - **A request's `examples` are compared sorted by status.** A JavaScript
  *   object orders integer-like keys numerically ahead of the rest, so a
  *   document writing `responses: {404, 200}` reached the renderer as
@@ -38,6 +41,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -179,6 +183,7 @@ void sort_examples (json& collections) {
 json comparable (const nlohmann::ordered_json& result) {
     json out               = json::parse (result.dump ());
     out["meta"]["skipped"] = skip_counts (out.at ("meta").at ("skipped"));
+    out["meta"].erase ("nonExecutableAuthRequests");
     sort_examples (out.at ("collections"));
     return out;
 }
@@ -747,6 +752,57 @@ TEST (ImportParse, WebhookOperationsAreCountedNotSilentlyDropped) {
     EXPECT_EQ (parsed.result.at ("meta").at ("requestCount"), 0);
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("webhook_operations"), 2);
+}
+
+/// The item a count is about, by the name the preview shows. An OpenAPI
+/// count taken while a walk was on an operation names that operation's
+/// request, a document-level one names none, and Postman's per-request
+/// counters name the request they grew on.
+std::vector<std::string> skipped_named (const ImportParse& parsed, const std::string& kind) {
+    for (const auto& item : parsed.result.at ("meta").at ("skipped")) {
+        if (item.at ("kind") == kind) {
+            return item.contains ("requests") ?
+            item.at ("requests").get<std::vector<std::string>> () :
+            std::vector<std::string>{};
+        }
+    }
+    ADD_FAILURE () << "no " << kind << " counted";
+    return {};
+}
+
+using Names = std::vector<std::string>;
+
+TEST (ImportParse, NamesTheRequestsACountIsAbout) {
+    const ImportParse spec = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "servers":[{"url":"https://a.example.com"},{"url":"https://b.example.com"}],
+        "components":{"securitySchemes":{"k":{"type":"apiKey","in":"header","name":"X"},
+            "b":{"type":"http","scheme":"bearer"}}},
+        "paths":{"/pet/{id}/image":{"post":{"summary":"Upload an image",
+            "requestBody":{"content":{"application/octet-stream":{}}},"responses":{}}},
+          "/pet/{id}":{"get":{"summary":"Find pet by ID","security":[{"k":[]},{"b":[]}],
+            "responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (spec.ok ()) << spec.error;
+    EXPECT_EQ (skipped_named (spec, "unmapped_body"), Names{ "Upload an image" });
+    EXPECT_EQ (skipped_named (spec, "security_unmapped_or"), Names{ "Find pet by ID" });
+    // A second server is the document's, not any request's.
+    EXPECT_EQ (skipped_named (spec, "servers_dropped"), Names{});
+
+    const ImportParse postman = parse_import (R"({"info":{"name":"P",
+        "schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+        "item":[{"name":"Signed","request":{"method":"GET","url":"https://x.test",
+                 "auth":{"type":"hawk"}}},
+                {"name":"Plain","request":{"method":"GET","url":"https://x.test"}},
+                {"name":"Also signed","request":{"method":"GET","url":"https://x.test",
+                 "auth":{"type":"oauth1"}}},
+                {"name":"Digest","request":{"method":"GET","url":"https://x.test",
+                 "auth":{"type":"digest"}}}]})",
+    {}, {});
+    ASSERT_TRUE (postman.ok ()) << postman.error;
+    EXPECT_EQ (skipped_named (postman, "unsupported_auth"),
+    (Names{ "Signed", "Also signed" }));
+    EXPECT_EQ (postman.result.at ("meta").at ("nonExecutableAuthRequests").get<Names> (),
+    Names{ "Digest" });
 }
 
 /// An operation's `deprecated: true` has nowhere to land on Vayu's request

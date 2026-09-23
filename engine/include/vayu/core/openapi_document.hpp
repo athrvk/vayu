@@ -378,14 +378,35 @@ struct DraftRequest {
 class ImportTally {
     public:
     /// A no-op for @p count <= 0, so a caller may hand over a computed total.
+    /// Records the current subject (see @ref set_subject) against @p kind.
     void add (std::string_view kind, int count = 1);
 
-    /// `[{kind, count}]`, non-zero kinds only - `[]` for a parse that lost
-    /// nothing, which is what both parsers used to hardcode.
+    /**
+     * The request a walk is on, named on every kind counted until the next
+     * call; `""` for a count that belongs to the document rather than one
+     * request. A preview can then say which request to finish by hand
+     * instead of only how many.
+     */
+    void set_subject (std::string subject);
+
+    /// Names @p requests against an already counted @p kind, for a walk that
+    /// counts first and learns which requests afterwards. A no-op for a kind
+    /// never counted.
+    void name_requests (std::string_view kind, const std::vector<std::string>& requests);
+
+    /// `[{kind, count, requests?}]`, non-zero kinds only - `[]` for a parse
+    /// that lost nothing. `requests` is the distinct subjects in the order
+    /// first met, absent when no count of that kind had one.
     [[nodiscard]] nlohmann::ordered_json items () const;
 
     private:
-    std::vector<std::pair<std::string, int>> counts_;
+    struct Entry {
+        std::string kind;
+        int count = 0;
+        std::vector<std::string> requests;
+    };
+    std::vector<Entry> counts_;
+    std::string subject_;
 };
 
 /// One operation, the request an import would build for it, and where an import

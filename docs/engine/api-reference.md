@@ -2983,11 +2983,18 @@ do - see `docs/app/import-collections/jmeter.md` for the class mapping.
   "meta": {
     "format": "Postman Collection v2.1", "requestCount": 2, "folderCount": 1,
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
-    "skipped": [ { "kind": "websocket", "count": 1 } ],
+    "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0
   }
 }
 ```
+
+**`meta.skipped`** is one `{kind, count}` per kind the parse counted, in a fixed
+kind order. **`requests`**, when present, names the requests the count applies
+to, in the order the walk met them: every count an OpenAPI parse takes while on
+an operation, Postman's per-request counters, and Insomnia's file bodies and
+the resources it cannot import. A count that belongs to the document (a second
+server URL, a malformed section) has none.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a

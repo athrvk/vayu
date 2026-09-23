@@ -273,12 +273,19 @@ export interface SkippedItem {
 		 * A `.jmx` test plan's own class name, for one this parser has no mapping
 		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
 		 * third-party plugin adds more), so this is not a closed set the way every
-		 * kind above is. `skippedLabel` falls back to the class name itself for
-		 * any string here with no entry in `SKIPPED_LABELS` - "here is the class
+		 * kind above is. `import-notices.ts` falls back to the class name itself
+		 * for any string here with no entry of its own - "here is the class
 		 * JMeter used" is the whole label for one of these.
 		 */
 		| (string & Record<never, never>);
 	count: number;
+	/**
+	 * The requests the count applies to, by name, in the order the walk met
+	 * them - absent when the engine had no request in hand (a document-level
+	 * count, or a kind its walk counts in bulk). The preview names these rather
+	 * than only counting them, so the user knows which request to finish.
+	 */
+	requests?: string[];
 }
 
 /**
@@ -323,9 +330,9 @@ export interface ImportMeta {
 	 * Every entry is stamped by the engine's parse (issue #877), including
 	 * `external_ref` - that count reaches it as `ImportSource.unresolvedRefs`,
 	 * because bundling runs before detection and no parser can know it. Read by
-	 * `lossSummary` / `noticeSummary` in `ImportModal.tsx`, which split the list
-	 * on `INFORMATIONAL_KINDS`: a loss is shown in destructive type, a notice in
-	 * muted.
+	 * `importNotices` (`modules/collections/import-notices.ts`), which gives
+	 * each kind a tier: red for what the user must finish, muted for what the
+	 * import decided, and nothing for what changes nothing they send.
 	 */
 	skipped: SkippedItem[];
 	/**
@@ -333,9 +340,15 @@ export interface ImportMeta {
 	 * ntlm, the three the engine counts (`import_document.cpp`); oauth2 is not
 	 * among them, since `POST /oauth2/token` executes it. Counted rather than
 	 * skipped: the request imports and sends, only its credentials do not
-	 * travel. Shown by `lossSummary` beside the skip counts.
+	 * travel. Shown by `importNotices` beside the skip counts.
 	 */
 	nonExecutableAuth: number;
+	/**
+	 * Those requests by name, when the walk had them in hand (Postman and
+	 * Insomnia) - so the preview names the requests whose credentials will not
+	 * travel, rather than only counting them.
+	 */
+	nonExecutableAuthRequests?: string[];
 	/**
 	 * Form-data file parts that arrived without a file to send. An OpenAPI spec
 	 * documents that a field is an upload and never which file it uploads, so the

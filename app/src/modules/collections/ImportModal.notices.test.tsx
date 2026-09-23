@@ -9,16 +9,18 @@
  */
 
 /**
- * The preview separates what an import lost from what it merely did (issue #710).
+ * The preview says what the user has to finish, and little else (issue #710,
+ * then the plain-language pass over `import-notices.ts`).
  *
  * Importing Stripe's spec put "568 example responses with no numeric status" in
  * destructive red beside "1 file part needs a file" - one line naming a
  * conformant construct on every operation, the other naming the single thing the
- * user had to act on, in the same colour and the same sentence. The disclosure
- * discipline stays (nothing is dropped silently); the ranking is what changes.
+ * user had to act on, in the same colour and the same sentence. Now each line
+ * stands alone, red only when a request will not work as imported, muted when
+ * the import made a choice, and not at all when nothing the user sends changed.
  *
- * Mutation check: move `default_response` out of `INFORMATIONAL_KINDS` and the
- * first case fails - the count reappears in the destructive line.
+ * Mutation check: give `default_response` a tier in `import-notices.ts` and the
+ * first case fails - the line reappears.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -92,24 +94,42 @@ describe("the import preview's notices", () => {
 		useImportModalStore.setState({ isOpen: true });
 	});
 
-	it("names `default` responses in muted type, apart from the losses", async () => {
-		stubParse(vendorParse);
+	it("hides `default` responses, and names the request an action is about", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({
+						name: "Petstore",
+						requests: [request({ name: "Upload an image" })],
+					}),
+				],
+				meta: {
+					format: "OpenAPI 3.0",
+					skipped: [
+						{ kind: "default_response", count: 19, requests: ["Upload an image"] },
+						{ kind: "unmapped_body", count: 1, requests: ["Upload an image"] },
+						{ kind: "security_unmapped_or", count: 1, requests: ["Find pet by ID"] },
+					],
+				},
+			})
+		);
 		preview();
 
 		await waitFor(() =>
-			expect(screen.getByText(/2 `default` \(catch-all\) responses/i)).toBeInTheDocument()
+			expect(
+				screen.getByText("Upload an image: body not imported (binary file)")
+			).toBeInTheDocument()
 		);
-		expect(severityOf(/2 `default` \(catch-all\) responses/i)).toContain(
+		expect(severityOf(/Upload an image: body not imported/)).toContain("text-destructive-text");
+		// The request works with the collection's auth: a choice, not a loss.
+		expect(severityOf(/Find pet by ID: uses collection auth/)).toContain(
 			"text-muted-foreground"
 		);
-		// The wildcard key is a loss and keeps the destructive treatment, on a line
-		// of its own - the whole point is that the two do not read alike.
-		expect(severityOf(/1 example response with no numeric status/i)).toContain(
-			"text-destructive-text"
-		);
+		// Every vendor spec declares one on every operation; nothing to do.
+		expect(screen.queryByText(/default/i)).not.toBeInTheDocument();
 	});
 
-	it("names Postman's mapped URL shapes in muted type, apart from the losses", async () => {
+	it("puts each line on its own, with no joined sentence", async () => {
 		stubParse(() =>
 			result({
 				collections: [
@@ -119,7 +139,8 @@ describe("the import preview's notices", () => {
 					format: "Postman Collection v2.1",
 					skipped: [
 						{ kind: "path_variables", count: 1 },
-						{ kind: "unsupported_auth", count: 1 },
+						{ kind: "unsupported_auth", count: 2, requests: ["Get user", "Put user"] },
+						{ kind: "proxy_config", count: 1 },
 					],
 				},
 			})
@@ -129,17 +150,17 @@ describe("the import preview's notices", () => {
 		await waitFor(() =>
 			expect(
 				screen.getByText(
-					/1 request whose path variable was turned into a collection variable/i
+					"2 requests: imported without auth (Hawk, OAuth 1 and EdgeGrid are not supported) - Get user, Put user"
 				)
 			).toBeInTheDocument()
 		);
-		expect(
-			severityOf(/1 request whose path variable was turned into a collection variable/i)
-		).toContain("text-muted-foreground");
-		// An auth scheme Vayu cannot execute is a real loss and keeps the
-		// destructive treatment, on a line of its own.
-		expect(screen.getByText(/1 auth scheme Vayu cannot execute/i)).toBeInTheDocument();
-		expect(severityOf(/1 auth scheme Vayu cannot execute/i)).toContain("text-destructive-text");
+		expect(severityOf(/imported without auth/)).toContain("text-destructive-text");
+		expect(severityOf(/^1 per-request proxy setting not imported$/)).toContain(
+			"text-muted-foreground"
+		);
+		// A path variable kept as a collection variable changes nothing sent.
+		expect(screen.queryByText(/path variable/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/·.*·.*not imported/)).not.toBeInTheDocument();
 	});
 
 	it("says where the folders came from when the spec declared no operation tags", async () => {
@@ -149,7 +170,7 @@ describe("the import preview's notices", () => {
 		await waitFor(() => expect(screen.getByText(/2 folders/i)).toBeInTheDocument());
 		// Path-derived folders are Vayu's doing, not the document's, so the preview
 		// says so before the user accepts the tree.
-		expect(screen.getByText(/Folders from paths/i)).toBeInTheDocument();
+		expect(screen.getByText(/Folders grouped by URL path/i)).toBeInTheDocument();
 	});
 
 	it("says nothing about grouping when the folders are the document's own tags", async () => {
@@ -172,6 +193,6 @@ describe("the import preview's notices", () => {
 		preview();
 
 		await waitFor(() => expect(screen.getByText(/1 folders/i)).toBeInTheDocument());
-		expect(screen.queryByText(/Folders from/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/Folders grouped/i)).not.toBeInTheDocument();
 	});
 });
