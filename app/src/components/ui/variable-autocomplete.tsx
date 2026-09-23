@@ -129,7 +129,7 @@ export function VariableAutocomplete({
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
 					<CommandScrollIntoView />
-					<CommandEmpty>No variables found.</CommandEmpty>
+					<CommandEmpty>No variables found</CommandEmpty>
 					{groups.map(({ group, heading, items }) => (
 						<CommandGroup key={group} heading={heading}>
 							{items.map((suggestion) => {

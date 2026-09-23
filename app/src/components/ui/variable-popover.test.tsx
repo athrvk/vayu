@@ -242,7 +242,7 @@ describe("an undefined variable can define itself", () => {
 		expect(within(panel).getByText("undefined")).toBeInTheDocument();
 		expect(within(panel).getByRole("button", { name: "Create" })).toBeInTheDocument();
 		// The dead-end sentence is gone when there is somewhere to write.
-		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 	});
 
 	it("creates into the highest-precedence writable scope by default", () => {
@@ -288,7 +288,7 @@ describe("an undefined variable can define itself", () => {
 	it("falls back to explaining, when nothing at all is writable", () => {
 		renderPopover({ varInfo: null, resolved: false, writableScopes: [] });
 		const panel = open();
-		expect(within(panel).getByText(/Variable not defined/)).toBeInTheDocument();
+		expect(within(panel).getByText(/Not defined in any scope/)).toBeInTheDocument();
 		expect(within(panel).queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
 	});
 });
@@ -386,7 +386,7 @@ describe("the create row's keyboard model", () => {
 	it("reads as one choice out of three, not three independent toggles", () => {
 		const { panel, chip } = openCreate();
 		const group = within(panel).getByRole("radiogroup");
-		expect(group).toHaveAccessibleName("create in");
+		expect(group).toHaveAccessibleName("Create in");
 		expect(chip("Environment")).toHaveAttribute("aria-checked", "true");
 		expect(chip("Global")).toHaveAttribute("aria-checked", "false");
 		expect(chip("Global")).not.toHaveAttribute("aria-pressed");
@@ -604,7 +604,7 @@ describe("a reserved data-namespace name", () => {
 		unresolvedNamed("data.email");
 		const panel = open();
 		expect(within(panel).getByText(/Bound per iteration/)).toBeInTheDocument();
-		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 		expect(within(panel).queryByText("undefined")).not.toBeInTheDocument();
 		expect(within(panel).getByText("data")).toBeInTheDocument();
 	});
@@ -714,7 +714,7 @@ describe("a name whose only definition is switched off", () => {
 		});
 		const panel = open();
 		expect(within(panel).getByText(/every definition is switched off/)).toBeInTheDocument();
-		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 	});
 
 	it("still offers to create, and says what the offer is doing", () => {
@@ -916,7 +916,7 @@ describe("a bound data row outranks every definition", () => {
 			origins: [origin({ scope: "row", value: "alice@acme.io", winner: true })],
 		});
 		const panel = open();
-		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 		expect(within(panel).getByText(/Answered by the bound data row/)).toBeInTheDocument();
 		expect(within(panel).getByText(/carries no row/)).toBeInTheDocument();
 	});
