@@ -32,6 +32,7 @@ import { useState } from "react";
 import { HardDriveDownload, Loader2 } from "lucide-react";
 
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { apiService } from "@/services";
 import { ApiError } from "@/services/http-client";
 import { useToastStore } from "@/stores";
@@ -128,7 +129,7 @@ export function WorkspaceBackupCard() {
 							Saved {formatSize(result.sizeBytes)} at{" "}
 							{new Date(result.createdAt).toLocaleString()}
 							{result.pruned > 0 &&
-								` - removed ${result.pruned} older snapshot${result.pruned === 1 ? "" : "s"}`}
+								` - removed ${result.pruned} older ${pluralize(result.pruned, "snapshot")}`}
 						</p>
 						<p className="text-xs font-mono break-all text-foreground">{result.path}</p>
 						{/* Restoring is a manual copy with the engine stopped, so the

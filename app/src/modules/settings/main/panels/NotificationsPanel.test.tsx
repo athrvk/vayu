@@ -243,7 +243,7 @@ describe("NotificationsPanel", () => {
 				).toBeDisabled()
 			);
 			expect(
-				screen.getByText(/nothing to preview - this build cannot post/i)
+				screen.getByText(/nothing to preview - this build can't post/i)
 			).toBeInTheDocument();
 		});
 

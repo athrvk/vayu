@@ -200,7 +200,7 @@ export default function GeneralPanel() {
 						<p className="text-sm text-muted-foreground">
 							{runs.length === 0
 								? "No stored runs."
-								: `${runs.length} stored run${runs.length === 1 ? "" : "s"}.`}
+								: `${runs.length} stored ${pluralize(runs.length, "run")}.`}
 						</p>
 						<DisabledHint
 							reason={
@@ -355,7 +355,7 @@ export default function GeneralPanel() {
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
 				confirmLabel="Clear history"
-				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics are removed permanently. This can't be undone.`}
+				description={`All ${runs.length} stored ${pluralize(runs.length, "run")} and their metrics are removed permanently. This can't be undone.`}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>

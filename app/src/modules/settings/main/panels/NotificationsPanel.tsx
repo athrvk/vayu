@@ -332,7 +332,7 @@ function SystemNotificationsCard() {
 	const previewHint = previewResult
 		? PREVIEW_RESULT_HINTS[previewResult]
 		: unavailableReason
-			? "Nothing to preview - this build cannot post system notifications."
+			? "Nothing to preview - this build can't post system notifications."
 			: !enabled
 				? "Turn the setting on to preview one."
 				: "Posts a real one now.";

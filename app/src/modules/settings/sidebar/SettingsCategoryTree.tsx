@@ -27,6 +27,7 @@
  */
 
 import { useMemo } from "react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
 import { DrawerPanel, ErrorState } from "@/components/shared";
@@ -176,7 +177,7 @@ export default function SettingsCategoryTree() {
 					 * the whole point of typing.
 					 */
 					<>
-						<SectionHeading>{`${results.length} result${results.length === 1 ? "" : "s"}`}</SectionHeading>
+						<SectionHeading>{`${results.length} ${pluralize(results.length, "result")}`}</SectionHeading>
 						{results.length === 0 ? (
 							<p className="px-4 py-2 text-xs text-muted-foreground">
 								No settings match “{trimmedQuery}”.
