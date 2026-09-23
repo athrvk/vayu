@@ -79,7 +79,7 @@ function renderForm(kind: "script.pre" | "script.post" = "script.pre", id = "s1"
 	return {
 		onChange,
 		box: screen.getByTestId(
-			`code-editor-${kind === "script.pre" ? "Pre-request script" : "Test script"}`
+			`code-editor-${kind === "script.pre" ? "Pre-request script" : "Post-request script"}`
 		).parentElement!,
 	};
 }
@@ -110,7 +110,7 @@ describe("the resize handle", () => {
 		const handle = heightHandle();
 
 		expect(handle).toHaveAttribute("tabindex", "0");
-		expect(handle).toHaveAttribute("aria-label", "Test script editor height");
+		expect(handle).toHaveAttribute("aria-label", "Post-request script editor height");
 		expect(handle).toHaveAttribute("aria-valuenow", String(DEFAULT_SCRIPT_EDITOR_HEIGHT));
 		expect(handle).toHaveAttribute("aria-valuemin", String(SCRIPT_EDITOR_MIN_HEIGHT));
 		expect(handle).toHaveAttribute("aria-valuemax", String(SCRIPT_EDITOR_MAX_HEIGHT));

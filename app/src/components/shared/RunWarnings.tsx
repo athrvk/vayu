@@ -24,7 +24,7 @@ import type { RunReport } from "@/types/domain";
 // reader sees the same claim before the run and after it.
 const TITLES: Record<string, string> = {
 	unresolved_tokens: "Unresolved variables were sent",
-	pre_request_script_skipped: "Pre-request script will not run",
+	pre_request_script_skipped: "Pre-request script won't run",
 };
 
 export interface RunWarningsProps {

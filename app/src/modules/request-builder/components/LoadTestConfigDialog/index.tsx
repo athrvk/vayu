@@ -509,9 +509,9 @@ export default function LoadTestConfigDialog({
 				key: "pre-script",
 				severity: "warning",
 				node: (
-					<Callout severity="warning" title="Pre-request Script won't run">
+					<Callout severity="warning" title="Pre-request script won't run">
 						Running JS per request would cap throughput, so the load engine skips it
-						unless Scripts below is set to All inline. Your Post-response Script still
+						unless Scripts below is set to All inline. Your post-request script still
 						runs once afterwards, against sampled responses.
 					</Callout>
 				),

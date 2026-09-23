@@ -143,7 +143,7 @@ export interface CodeEditorProps {
 	value: string;
 	language: string;
 	/**
-	 * What this editor is, for a screen reader - "Request body", "Test script".
+	 * What this editor is, for a screen reader - "Request body", "Post-request script".
 	 *
 	 * Required rather than optional, and per call site rather than derived from
 	 * `language`: two editors can share a language and never the same job (the

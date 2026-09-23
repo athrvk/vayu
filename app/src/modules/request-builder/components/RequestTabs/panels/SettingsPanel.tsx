@@ -234,8 +234,8 @@ export default function SettingsPanel() {
 			 */}
 			{request.stream && (
 				<p className="enter-fade text-xs text-muted-foreground">
-					Scripts run, split around the transfer: the Pre-request Script before the stream
-					opens, and the Post-response Script once after it ends, reading the whole stream
+					Scripts run, split around the transfer: the pre-request script before the stream
+					opens, and the post-request script once after it ends, reading the whole stream
 					as <code>pm.response.events</code>. Results appear when the stream finishes, not
 					when Send returns.
 				</p>

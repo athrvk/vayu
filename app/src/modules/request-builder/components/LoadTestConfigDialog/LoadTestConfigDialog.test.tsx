@@ -310,7 +310,7 @@ describe("data rows (issue #993)", () => {
 		// selection behind, so starting would send the request with its
 		// `{{data.*}}` tokens written as they stand.
 		pick(new File(["id,name\na"], "ragged.csv"));
-		await screen.findByText(/could not read the data file/i);
+		await screen.findByText(/couldn.t read the data file/i);
 
 		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		expect(onStart).not.toHaveBeenCalled();
@@ -509,7 +509,7 @@ describe("notices", () => {
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 
 		const alerts = screen.getAllByText(
-			/Ramp is longer than the run|Pre-request Script won't run/
+			/Ramp is longer than the run|Pre-request script won't run/
 		);
 		expect(alerts).toHaveLength(2);
 		expect(alerts[0]).toHaveTextContent("Ramp is longer than the run");
@@ -528,7 +528,7 @@ describe("notices", () => {
 		// notice list being empty - an assertion that scanned nothing would
 		// pass whatever the callout did.
 		open({ hasPreRequestScript: true });
-		expect(screen.getByText("Pre-request Script won't run")).toBeInTheDocument();
+		expect(screen.getByText("Pre-request script won't run")).toBeInTheDocument();
 		expect(screen.queryByText(/dynamic variable/i)).toBeNull();
 	});
 
@@ -544,7 +544,7 @@ describe("notices", () => {
 	// warning is no longer true.
 	it("hides the pre-request warning once Scripts is set to All inline", () => {
 		open({ hasPreRequestScript: true });
-		expect(screen.getByText("Pre-request Script won't run")).toBeInTheDocument();
+		expect(screen.getByText("Pre-request script won't run")).toBeInTheDocument();
 
 		fireEvent.click(
 			within(screen.getByRole("radiogroup", { name: /^scripts$/i })).getByRole("radio", {
@@ -552,7 +552,7 @@ describe("notices", () => {
 			})
 		);
 
-		expect(screen.queryByText("Pre-request Script won't run")).toBeNull();
+		expect(screen.queryByText("Pre-request script won't run")).toBeNull();
 	});
 
 	it("disables Start while a blocking notice is live", () => {

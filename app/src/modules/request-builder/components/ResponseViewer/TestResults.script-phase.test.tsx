@@ -41,8 +41,8 @@ describe("TestResults grouped by script", () => {
 	it("puts each assertion under the script that made it", () => {
 		render(<TestResults results={[PRE_REQUEST, POST_REQUEST]} />);
 
-		expect(within(sectionFor("Pre-request Script")).getByText("token was issued")).toBeTruthy();
-		expect(within(sectionFor("Post-response Script")).getByText("status is 200")).toBeTruthy();
+		expect(within(sectionFor("Pre-request script")).getByText("token was issued")).toBeTruthy();
+		expect(within(sectionFor("Post-request script")).getByText("status is 200")).toBeTruthy();
 	});
 
 	it("names the script even when only one of them asserted", () => {
@@ -51,8 +51,8 @@ describe("TestResults grouped by script", () => {
 		// that had not arrived yet.
 		render(<TestResults results={[PRE_REQUEST]} />);
 
-		expect(sectionFor("Pre-request Script")).toBeTruthy();
-		expect(screen.queryByText("Post-response Script")).toBeNull();
+		expect(sectionFor("Pre-request script")).toBeTruthy();
+		expect(screen.queryByText("Post-request script")).toBeNull();
 	});
 
 	it("reads an assertion with no source as the test script's", () => {
@@ -61,8 +61,8 @@ describe("TestResults grouped by script", () => {
 		// That list meant "test script", so it keeps meaning it.
 		render(<TestResults results={[{ name: "status is 200", passed: true }]} />);
 
-		expect(within(sectionFor("Post-response Script")).getByText("status is 200")).toBeTruthy();
-		expect(screen.queryByText("Pre-request Script")).toBeNull();
+		expect(within(sectionFor("Post-request script")).getByText("status is 200")).toBeTruthy();
+		expect(screen.queryByText("Pre-request script")).toBeNull();
 	});
 
 	it("counts both scripts in the summary", () => {

@@ -17,10 +17,10 @@
  * only exempts primitive-literal exports.
  */
 export const SCRIPT_SECTIONS = {
-	pre: { label: "Pre-request Script", errorLabel: "Pre-request Script error", tone: "running" },
+	pre: { label: "Pre-request script", errorLabel: "Pre-request script error", tone: "running" },
 	test: {
-		label: "Post-response Script",
-		errorLabel: "Post-response Script error",
+		label: "Post-request script",
+		errorLabel: "Post-request script error",
 		tone: "success",
 	},
 } as const;

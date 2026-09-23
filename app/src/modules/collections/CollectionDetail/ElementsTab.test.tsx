@@ -132,7 +132,7 @@ const REQUIRED_KIND: ElementKindSchema = {
 const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
-	kindSchema("script.pre", "Pre-request Script", "script"),
+	kindSchema("script.pre", "Pre-request script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
 	REQUIRED_KIND,
 ];
@@ -417,7 +417,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 		renderTab(
 			makeCollection([scriptElement("e1", "script.pre", 'pm.environment.get("token");')])
 		);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 		expect(screen.getByText("token")).toBeInTheDocument();
@@ -445,7 +445,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 		renderTab(
 			makeCollection([scriptElement("e1", "script.pre", 'const e = "{{data.email}}";')])
 		);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		const chip = screen.getByText("data.email");
 		expect(chip.getAttribute("title")).toContain("declared in Acme API");
@@ -470,7 +470,7 @@ describe("ElementsTab - the token-editing provider (issue #1220 script support)"
 		renderTab(
 			makeCollection([scriptElement("e1", "script.pre", 'pm.environment.get("token");')])
 		);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		expect(screen.getByTestId("code-editor")).toHaveAttribute(
 			"data-has-token-provider",
