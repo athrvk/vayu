@@ -78,7 +78,7 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 				partition: `oauth:${computeOAuth2CacheKey(config)}`,
 			}),
 			EMBEDDED_TIMEOUT_MS,
-			"Authorization timed out"
+			"Couldn't finish authorization in time."
 		);
 		if ("error" in result) {
 			throw new InteractiveAuthError(result.error);
@@ -88,7 +88,7 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 			result.callbackUrl
 		);
 		if (status.state !== "completed") {
-			throw new InteractiveAuthError(status.error || "Authorization failed");
+			throw new InteractiveAuthError(status.error || "Couldn't complete authorization.");
 		}
 		return status.cacheKey ?? computeOAuth2CacheKey(config);
 	}
@@ -99,7 +99,7 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 	const deadline = Date.now() + POLL_TIMEOUT_MS;
 	for (;;) {
 		if (Date.now() > deadline) {
-			throw new InteractiveAuthError("Authorization timed out");
+			throw new InteractiveAuthError("Couldn't finish authorization in time.");
 		}
 		await delay(POLL_INTERVAL_MS);
 		const status = await apiService.getOAuth2AuthorizeStatus(started.attemptId);
@@ -107,10 +107,12 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 			return status.cacheKey ?? computeOAuth2CacheKey(config);
 		}
 		if (status.state === "failed") {
-			throw new InteractiveAuthError(status.error || "Authorization failed");
+			throw new InteractiveAuthError(status.error || "Couldn't complete authorization.");
 		}
 		if (status.state === "not_found") {
-			throw new InteractiveAuthError("Authorization attempt expired");
+			throw new InteractiveAuthError(
+				"Couldn't complete authorization - the attempt expired."
+			);
 		}
 	}
 }

@@ -82,7 +82,7 @@ describe("the embedded branch cannot await forever", () => {
 		bridge(() => new Promise(() => undefined));
 
 		const flow = runInteractiveAuthorization(CONFIG);
-		const settled = expect(flow).rejects.toThrow("Authorization timed out");
+		const settled = expect(flow).rejects.toThrow("Couldn't finish authorization in time.");
 
 		await vi.advanceTimersByTimeAsync(0);
 		await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
