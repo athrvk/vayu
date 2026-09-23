@@ -213,7 +213,7 @@ function ScenarioStepCard({
 								: `Open the request ${step.name} ran, with row ${rowIndex + 1} selected`
 						}
 					>
-						<ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+						<ExternalLink aria-hidden="true" className="size-icon-sm" />
 						{/* The row number is the information, so it is on the
 						    control rather than only in its name - this is the row
 						    the repro has to bind, and the picker it opens is where

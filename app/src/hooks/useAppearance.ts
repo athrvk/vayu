@@ -9,7 +9,8 @@
  * useAppearance Hook
  *
  * React face of {@link useAppearanceStore} - the renderer-only interface
- * preferences (UI font, interface scale, corner roundedness). The store owns
+ * preferences (UI font, interface scale, corner roundedness, interface
+ * density). The store owns
  * the values, the persistence and the DOM writes; this hook only re-asserts
  * them against the live DOM on mount.
  *
@@ -30,10 +31,12 @@ export function useAppearance() {
 	const fontCustom = useAppearanceStore((s) => s.fontCustom);
 	const scale = useAppearanceStore((s) => s.scale);
 	const radius = useAppearanceStore((s) => s.radius);
+	const density = useAppearanceStore((s) => s.density);
 	const setFont = useAppearanceStore((s) => s.setFont);
 	const setFontCustom = useAppearanceStore((s) => s.setFontCustom);
 	const setScale = useAppearanceStore((s) => s.setScale);
 	const setRadius = useAppearanceStore((s) => s.setRadius);
+	const setDensity = useAppearanceStore((s) => s.setDensity);
 
 	useEffect(() => {
 		// Mount-only: re-assert the persisted values against the live DOM, which
@@ -41,5 +44,16 @@ export function useAppearance() {
 		useAppearanceStore.getState().applyAll();
 	}, []);
 
-	return { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius };
+	return {
+		font,
+		setFont,
+		fontCustom,
+		setFontCustom,
+		scale,
+		setScale,
+		radius,
+		setRadius,
+		density,
+		setDensity,
+	};
 }

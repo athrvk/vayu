@@ -11,6 +11,7 @@
  * Compact 52px single-row header with status, method, URL, config info, and stop button
  */
 
+import { memo } from "react";
 import { ArrowLeft } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
@@ -25,7 +26,11 @@ function formatElapsed(ms: number): string {
 	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-export default function DashboardHeader({
+// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
+// run (up to 10 Hz), and this header's own props barely ever change. The
+// caller passes a stable onStop (useCallback) and a memoised configuration,
+// so the memo actually holds rather than just decorating the export.
+function DashboardHeader({
 	mode,
 	isStreaming,
 	isStopping,
@@ -35,7 +40,10 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
-	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
+	const closeTab = useTabsStore((s) => s.closeTab);
 	const sourceRequestId = useDashboardStore((s) => s.sourceRequestId);
 
 	const canNavigateBack = sourceRequestId != null || openTabs.length > 1;
@@ -68,12 +76,12 @@ export default function DashboardHeader({
 	const configSummary = configParts.join(" · ");
 
 	return (
-		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
+		<div className="h-band-lg flex items-center gap-3 px-5 bg-panel border-b border-rule shrink-0">
 			{/* Back button - returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
 				<TooltipIconButton
 					label="Back"
-					icon={<ArrowLeft className="w-4 h-4" />}
+					icon={<ArrowLeft className="size-icon" />}
 					onClick={navigateBack}
 					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
 				/>
@@ -81,16 +89,16 @@ export default function DashboardHeader({
 
 			{/* Status pill */}
 			{isStreaming ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
 					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
 					LIVE
 				</span>
 			) : mode === "completed" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					COMPLETED
 				</span>
 			) : mode === "stopped" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					STOPPED
 				</span>
 			) : null}
@@ -119,3 +127,5 @@ export default function DashboardHeader({
 		</div>
 	);
 }
+
+export default memo(DashboardHeader);

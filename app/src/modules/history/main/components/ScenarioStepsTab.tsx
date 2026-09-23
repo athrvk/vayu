@@ -82,7 +82,7 @@ export default function ScenarioStepsTab({
 				    display a zero next to a word like "abandoned". */}
 				{!!iterationsAbandoned && (
 					<div className="flex items-center gap-2">
-						<AlertTriangle className="w-4 h-4 shrink-0 text-status-warning-text" />
+						<AlertTriangle className="size-icon shrink-0 text-status-warning-text" />
 						<span className="text-muted-foreground">Iterations abandoned:</span>
 						<span className="text-foreground font-mono">{iterationsAbandoned}</span>
 					</div>
@@ -135,7 +135,7 @@ export default function ScenarioStepsTab({
 											</span>
 											<Badge
 												variant="outline"
-												className="font-mono text-[10px] shrink-0"
+												className="font-mono text-micro shrink-0"
 											>
 												{step.method}
 											</Badge>

@@ -20,14 +20,17 @@ import { Download, Plus, Braces, History, Radio, Search } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
+import { DemoApiTile } from "./components/DemoApiTile";
 import { FooterLinks } from "./components/FooterLinks";
 import { RecentRuns } from "./components/RecentRuns";
+import { WELCOME_COLUMN } from "./welcome-column";
 
 interface LauncherProps {
 	runs: Run[];
 	collectionCount: number;
 	onImport: () => void;
 	onNewRequest: () => void;
+	onOpenDemo: () => void;
 	onSearch: () => void;
 	onHistory: () => void;
 	onVariables: () => void;
@@ -43,15 +46,19 @@ export function Launcher({
 	collectionCount,
 	onImport,
 	onNewRequest,
+	onOpenDemo,
 	onSearch,
 	onHistory,
 	onVariables,
 	onServices,
 }: LauncherProps) {
 	return (
-		<div className="flex flex-col gap-8">
-			<section>
-				<Eyebrow className="mb-2">Start</Eyebrow>
+		// A centred column, not the full width of the tab - see WELCOME_COLUMN.
+		// `enter-fade`: this replaces `LauncherSkeleton` on mount, the same plain
+		// conditional-swap shape `FirstRunWelcome` fades in for (see its comment).
+		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
+			<section className="flex flex-col gap-2">
+				<Eyebrow>Start</Eyebrow>
 				{/* Six columns since Search joined the row: the tiles are
 				    equal-weight starting points, and a grid narrower than the
 				    count would strand one on a line of its own. */}
@@ -75,6 +82,14 @@ export function Launcher({
 					    a single tab (issue #502). */}
 					<ActionTile icon={Radio} label="Services" onClick={onServices} />
 				</div>
+				{/*
+				 * Its own row, not a seventh grid cell (issue #1694): the grid's
+				 * six tiles are icon-and-label only, with no room for "press this
+				 * chord to send it". Gone the moment a run exists - once one
+				 * does, the app has already answered the question this row asks,
+				 * so it needs no dismiss of its own.
+				 */}
+				{runs.length === 0 && <DemoApiTile onClick={onOpenDemo} />}
 			</section>
 
 			<RecentRuns runs={runs} />

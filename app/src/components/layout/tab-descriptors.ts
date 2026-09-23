@@ -24,6 +24,7 @@ import { walkAncestors } from "@/modules/collections/tree-utils";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -140,7 +141,20 @@ export function iconForTab(
  * other than the session's active one; that tab shows the unresolved
  * `{{var}}/path` instead of the concrete path. Globals, the environment and the
  * active collection all still resolve.
+ *
+ * **A dynamic variable in the URL (`{{$randomInt}}`, `{{$guid}}`, …) does not
+ * reroll the label on every render.** `resolveString` generates such a name
+ * fresh on every call (`lib/dynamic-variables.ts`'s own contract), and this
+ * hook has no memoization of its own - it recomputes on every render the strip
+ * takes, for any tab, not only when a URL actually changed (issue #1739).
+ * `stableTitleUrl` holds the last resolved value per request id, in the
+ * module-scope cache `lib/dynamic-variable-cache.ts` describes - which is also
+ * why it cannot be a `useMemo` or a `useRef` here, quite apart from the hooks
+ * lint: this is a caching layer keyed on every open tab, of which there can be
+ * any number, so it is not one hook's worth of state to begin with.
  */
+const stableTitleUrl = createStableResolve();
+
 export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	const requests = useQueries({
 		queries: tabs.map((t) => requestDetailOptions(t.type === "request" ? t.entityId : null)),
@@ -195,10 +209,15 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 			}
 			case "request": {
 				if (!request) return { label: "Request", title: "Request" };
-				const name = requestTabTitle(
-					request.name,
-					resolveString(request.url, boundRowFor(bound, tab.entityId))
-				);
+				const row = boundRowFor(bound, tab.entityId);
+				// A per-call `row` (Send-with-row) is a one-off preview of a specific
+				// row's bind, not this tab's own steady-state label, so it skips the
+				// cache and always resolves fresh - the same reasoning `resolveString`
+				// callers elsewhere apply (see `useVariableResolver`).
+				const resolvedUrl = row
+					? resolveString(request.url, row)
+					: stableTitleUrl(request.id ?? tab.entityId ?? "", request.url, resolveString);
+				const name = requestTabTitle(request.name, resolvedUrl);
 				return {
 					label: name,
 					title: `${request.method} ${name}`,

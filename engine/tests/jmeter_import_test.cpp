@@ -517,7 +517,7 @@ TEST (JmeterImport, ResponseAssertionNotBitInvertsTheMappedAssertion) {
         const nlohmann::ordered_json& config =
         first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
         EXPECT_EQ (config.at ("mode").get<std::string> (), "matches");
-        EXPECT_EQ (config.at ("text").get<std::string> (), R"(id":\s*\d+)");
+        EXPECT_EQ (config.at ("text").get<std::string> (), "id\":\\s*\\d+");
     }
 }
 
@@ -545,11 +545,14 @@ TEST (JmeterImport, ResponseAssertionOrWithMultiplePatternsIsTalliedNotAnded) {
     EXPECT_EQ (config.at ("negate").get<bool> (), false);
 }
 
-/// `HTTPsampler.Files` (a multipart file upload) has no formdata-part model
-/// to build yet (issue #1657) - counted rather than dropped with nothing
-/// said, since it is nested inside the sampler tag itself and would
-/// otherwise never reach the generic sibling-tag tally.
-TEST (JmeterImport, FileUploadArgsAreCountedRatherThanDroppedSilently) {
+/// `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) is nested inside the
+/// sampler tag itself rather than a sibling tag the generic fallback would
+/// tally on its own, so a file-only upload builds a `form-data` body row per
+/// file (issue #1657) instead of being silently dropped, and is no longer
+/// reported in `meta.skipped`. Mutation check: reverting `apply_sampler_arguments`
+/// to the pre-#1657 stopgap makes `body.mode` stay `"none"` and reddens the
+/// `has_skipped_kind` assertion the other way.
+TEST (JmeterImport, FileOnlyUploadBuildsAFormDataBodyRow) {
     const char* plan         = R"jmx(<?xml version="1.0"?>
 <jmeterTestPlan version="1.2"><hashTree>
   <TestPlan testname="Plan"/><hashTree>
@@ -572,7 +575,98 @@ TEST (JmeterImport, FileUploadArgsAreCountedRatherThanDroppedSilently) {
 )jmx";
     const ImportParse parsed = parse_import (plan, {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (has_skipped_kind (parsed.result.at ("meta"), "HTTPsampler.Files"));
+
+    const nlohmann::ordered_json& body =
+    first_request (parsed.result.at ("collections").at (0)).at ("body");
+    EXPECT_EQ (body.at ("mode").get<std::string> (), "form-data");
+    ASSERT_EQ (body.at ("fields").size (), 1u);
+    const nlohmann::ordered_json& field = body.at ("fields").at (0);
+    EXPECT_EQ (field.at ("key").get<std::string> (), "file");
+    EXPECT_EQ (field.at ("type").get<std::string> (), "file");
+    EXPECT_EQ (field.at ("src").get<std::string> (), "/tmp/a.png");
+    EXPECT_EQ (field.at ("fileName").get<std::string> (), "a.png");
+    EXPECT_EQ (field.at ("contentType").get<std::string> (), "image/png");
+    EXPECT_EQ (field.at ("unresolved").get<bool> (), true);
+}
+
+/// A sampler mixing `HTTPsampler.Files` with regular `HTTPsampler.Arguments`
+/// folds both into the same `form-data` body rather than the arguments going
+/// to query `params` the way they would with no file parts present.
+TEST (JmeterImport, FileAndArgumentMixFoldsIntoOneFormDataBody) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Upload">
+      <stringProp name="HTTPSampler.path">/upload</stringProp>
+      <stringProp name="HTTPSampler.method">POST</stringProp>
+      <elementProp name="HTTPsampler.Files" elementType="HTTPFileArgs">
+        <collectionProp name="HTTPFileArgs.files">
+          <elementProp name="/tmp/a.png" elementType="HTTPFileArg">
+            <stringProp name="File.path">/tmp/a.png</stringProp>
+            <stringProp name="File.paramname">file</stringProp>
+            <stringProp name="File.mimetype">image/png</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="caption" elementType="HTTPArgument">
+            <stringProp name="Argument.name">caption</stringProp>
+            <stringProp name="Argument.value">hello</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections").at (0));
+    EXPECT_TRUE (request.at ("params").empty ());
+    const nlohmann::ordered_json& body = request.at ("body");
+    EXPECT_EQ (body.at ("mode").get<std::string> (), "form-data");
+    ASSERT_EQ (body.at ("fields").size (), 2u);
+    EXPECT_EQ (body.at ("fields").at (0).at ("type").get<std::string> (), "file");
+    EXPECT_EQ (body.at ("fields").at (1).at ("key").get<std::string> (), "caption");
+    EXPECT_EQ (body.at ("fields").at (1).at ("value").get<std::string> (), "hello");
+    EXPECT_FALSE (body.at ("fields").at (1).contains ("type"));
+}
+
+/// A `HTTPFileArg` with no `File.paramname` names nothing a `form-data` field
+/// could key on - tallied rather than imported as a nameless row, the same
+/// "nothing dropped quietly" rule the sibling-tag fallback follows.
+TEST (JmeterImport, FileArgWithNoParamNameIsTalliedNotImported) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Upload">
+      <stringProp name="HTTPSampler.path">/upload</stringProp>
+      <stringProp name="HTTPSampler.method">POST</stringProp>
+      <elementProp name="HTTPsampler.Files" elementType="HTTPFileArgs">
+        <collectionProp name="HTTPFileArgs.files">
+          <elementProp name="/tmp/a.png" elementType="HTTPFileArg">
+            <stringProp name="File.path">/tmp/a.png</stringProp>
+            <stringProp name="File.paramname"></stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
     EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "HTTPsampler.Files"));
+    EXPECT_EQ (first_request (parsed.result.at ("collections").at (0))
+               .at ("body")
+               .at ("mode")
+               .get<std::string> (),
+    "none");
 }
 
 TEST (JmeterImport, RefusesXmlThatIsNotAJmeterPlan) {

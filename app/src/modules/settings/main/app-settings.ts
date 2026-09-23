@@ -158,6 +158,20 @@ export const APP_SETTINGS = [
 		keywords: ["radius", "corners", "square"],
 	},
 	{
+		anchor: "density",
+		panel: "appearance",
+		label: "Density",
+		searchText: "How tightly rows, cards and dialogs are spaced.",
+		keywords: ["compact", "comfortable", "spacing", "padding", "rows"],
+	},
+	{
+		anchor: "response-position",
+		panel: "appearance",
+		label: "Response position",
+		searchText: "Whether the response pane sits beside the request or below it.",
+		keywords: ["layout", "split", "stacked", "beside", "below", "response"],
+	},
+	{
 		anchor: "reduced-motion",
 		panel: "appearance",
 		label: "Reduced motion",

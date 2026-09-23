@@ -22,10 +22,11 @@
  */
 
 import { Skeleton } from "@/components/ui";
+import { WELCOME_COLUMN } from "./welcome-column";
 
 export function LauncherSkeleton() {
 	return (
-		<div className="flex flex-col gap-8" role="status" aria-label="Loading">
+		<div className={`flex flex-col gap-8 ${WELCOME_COLUMN}`} role="status" aria-label="Loading">
 			{/* Start - label + the action tile grid. Column counts and tile count
 			    both track Launcher's grid: a skeleton one tile short reflows the
 			    row the moment the real content arrives, which is the one thing a
@@ -39,7 +40,7 @@ export function LauncherSkeleton() {
 							key={i}
 							className="flex flex-col items-start gap-2 rounded-md border border-border bg-card p-3"
 						>
-							<Skeleton className="h-4 w-4 rounded-md" />
+							<Skeleton className="size-icon rounded-md" />
 							<Skeleton className="h-3 w-16 rounded-md" />
 						</div>
 					))}

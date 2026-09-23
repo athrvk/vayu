@@ -34,8 +34,13 @@ function Kbd({ className, size = "default", ...props }: KbdProps) {
 			data-slot="kbd"
 			className={cn(
 				"inline-flex items-center justify-center font-mono font-semibold text-foreground bg-muted border border-border-strong border-b-[2px] rounded-md shadow-sm leading-none align-middle",
-				size === "default" && "h-6 min-w-[24px] px-1.5 text-xs",
-				size === "sm" && "h-[18px] min-w-[18px] px-1 text-[10px]",
+				// `h-target min-w-target` (issue #1679), not `h-6 min-w-[24px]`: this
+				// doc comment already claimed a "24x24 cap" and `h-6` stopped
+				// delivering it the moment `--spacing` moved to the 3px rhythm for
+				// #1670 (18px, not 24) - the two sides of the cap now read from the
+				// same floor rather than one fixed and one drifting with density.
+				size === "default" && "h-target min-w-target px-1.5 text-xs",
+				size === "sm" && "h-[18px] min-w-[18px] px-1 text-micro",
 				className
 			)}
 			{...props}

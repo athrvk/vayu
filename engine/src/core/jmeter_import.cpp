@@ -681,25 +681,65 @@ json header_manager_rows (const pugi::xml_node& header_manager) {
     return headers;
 }
 
-/// A sampler's own `HTTPsampler.Arguments`: the raw-body case when
-/// `postBodyRaw` is set and there is exactly the one argument that shape
-/// implies, query/form rows otherwise.
-void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, json& body) {
-    // `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) - a multipart file
-    // upload - is nested inside the sampler itself rather than a sibling tag
-    // `for_each_paired_child` would tally on its own, so a file upload this
-    // parser has no formdata-part model to build yet (issue #1657) is
-    // counted here instead of being dropped with nothing said, the same
-    // "nothing dropped quietly" rule the sibling-tag fallback already follows.
-    if (const pugi::xml_node files = element_prop (el, "HTTPsampler.Files");
-    files && collection_prop (files, "HTTPFileArgs.files").first_child ()) {
-        ctx.tally.add ("HTTPsampler.Files");
+/// `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) as `form-data` parts,
+/// reusing `imported_file_part`'s shape (issue #1657) rather than a second
+/// one. Nested inside the sampler itself rather than a sibling tag
+/// `for_each_paired_child` would tally on its own, so a file arg with no
+/// usable name - nothing for the field to key on, the same "nothing dropped
+/// quietly" rule the sibling-tag fallback follows - is tallied here instead
+/// of imported as a nameless row.
+json jmeter_file_fields (Ctx& ctx, const pugi::xml_node& el) {
+    json fields                = json::array ();
+    const pugi::xml_node files = element_prop (el, "HTTPsampler.Files");
+    if (!files) {
+        return fields;
     }
+    for (const pugi::xml_node file_arg :
+    collection_prop (files, "HTTPFileArgs.files").children ("elementProp")) {
+        const std::string param_name = string_prop (file_arg, "File.paramname");
+        if (param_name.empty ()) {
+            ctx.tally.add ("HTTPsampler.Files");
+            continue;
+        }
+        const std::string mime_type = string_prop (file_arg, "File.mimetype");
+        fields.push_back (
+        imported_file_part (json{ { "key", param_name }, { "value", "" },
+                            { "description", "" }, { "enabled", true } },
+        string_prop (file_arg, "File.path"), mime_type.empty () ? nullptr : &mime_type));
+    }
+    return fields;
+}
+
+/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`: a
+/// `form-data` body when the sampler carries file parts (regular arguments,
+/// if any, fold in beside them - a file has no query-string or raw-body form
+/// to take instead), the raw-body case when `postBodyRaw` is set and there is
+/// exactly the one argument that shape implies otherwise, query/form rows in
+/// every other case.
+///
+/// `HTTPSampler.DO_MULTIPART_POST` is read nowhere here. Without file parts it
+/// would only ever decide whether an arguments-only sampler's body is
+/// query-shaped or `x-www-form-urlencoded` - a broader remapping of the
+/// existing (untouched) query/form-rows path this issue does not ask for and
+/// no fixture demonstrates a need for. A sampler that already carries file
+/// parts has no such choice to make: multipart is the only wire form a file
+/// has, flag or no flag.
+void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, json& body) {
+    json file_fields               = jmeter_file_fields (ctx, el);
     const pugi::xml_node arguments = element_prop (el, "HTTPsampler.Arguments");
+    const auto pairs               = argument_pairs (arguments);
+
+    if (!file_fields.empty ()) {
+        for (const auto& [key, value] : pairs) {
+            file_fields.push_back (json{ { "key", key }, { "value", value },
+            { "description", "" }, { "enabled", true } });
+        }
+        body = json{ { "mode", "form-data" }, { "fields", std::move (file_fields) } };
+        return;
+    }
     if (!arguments) {
         return;
     }
-    const auto pairs = argument_pairs (arguments);
     if (bool_prop (el, "HTTPSampler.postBodyRaw", false) && !pairs.empty ()) {
         body = json{ { "mode", "text" }, { "content", pairs.front ().second } };
         return;

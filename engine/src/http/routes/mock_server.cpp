@@ -746,7 +746,12 @@ const MockStartRequest& request) {
         out.ok          = false;
         out.http_status = 404;
         out.error_code  = "not_found";
-        out.error_message = "Collection '" + request.collection_id + "' not found";
+        // No display name to give instead: this collection does not exist
+        // (or was just deleted), so its id is genuinely all there is to say -
+        // the id itself is not shown, since it means nothing to a person and
+        // the 404 plus error_code already tell an API caller what happened.
+        out.error_message = "This collection could not be found - it may have "
+                            "been deleted";
         return out;
     }
 

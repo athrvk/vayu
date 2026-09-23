@@ -158,11 +158,11 @@ class AnyPathServer final : public httplib::Server {
         // job with no catch of its own. Omitting the guard here would terminate
         // the process on a throw from any of those - on the one listener that
         // may bind past loopback.
-        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.54.1",
+        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.56.0",
         "cpp-httplib moved: re-read Server::process_and_close_socket, "
         "confirm this override still mirrors it, then update this assert - "
         "or retire the mirror entirely if the release carries a public "
-        "request-setup hook (issue #1283). As of 0.54.1 it does not: "
+        "request-setup hook (issue #1283). As of 0.56.0 it does not: "
         "`set_pre_request_handler` is a `HandlerWithResponse`, which takes a "
         "`const Request&` and so cannot rewrite the path either.");
 

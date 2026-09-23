@@ -11,10 +11,10 @@
  * Displays status codes, errors, timing breakdown, sampled requests, and validation results
  */
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { Clock, XCircle } from "lucide-react";
+import { XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
@@ -34,6 +34,7 @@ import {
 	CustomMetricsSummary,
 	ThresholdVerdict,
 	TestValidationSummary,
+	Callout,
 } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
@@ -52,7 +53,10 @@ function formatTime(timestamp: number): string {
 	return `${timeStr}.${ms}`;
 }
 
-export default function RequestResponseView({ report }: RequestResponseViewProps) {
+// memo'd (#1714): `report` is a stable reference from the dashboard store
+// (`finalReport`, unchanged until a new run completes), so during a run's up
+// to 10 Hz metrics ticks this tab's content should not re-execute at all.
+function RequestResponseView({ report }: RequestResponseViewProps) {
 	const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
 
 	// Fetched only once a row is open. The captured bodies are deliberately not
@@ -352,7 +356,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																					key={i}
 																					className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
 																				>
-																					<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
+																					<XCircle className="size-icon text-status-error-text mt-0.5 shrink-0" />
 																					<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
 																						{failure}
 																					</pre>
@@ -368,17 +372,14 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 										>
 											{/* Slow Request Warning */}
 											{trace?.isSlow && (
-												<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
-													<Clock className="w-3 h-3" />
-													<span>
-														Slow request: {trace.totalMs?.toFixed(1)}ms
-														{trace.thresholdMs && (
-															<span className="text-muted-foreground ml-1">
-																(threshold: {trace.thresholdMs}ms)
-															</span>
-														)}
-													</span>
-												</div>
+												<Callout severity="warning" title="Slow request">
+													{trace.totalMs?.toFixed(1)}ms
+													{trace.thresholdMs && (
+														<span className="text-muted-foreground ml-1">
+															(threshold: {trace.thresholdMs}ms)
+														</span>
+													)}
+												</Callout>
 											)}
 
 											{/* The captured exchange (issue #174). These two blocks used
@@ -461,3 +462,5 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 		</div>
 	);
 }
+
+export default memo(RequestResponseView);

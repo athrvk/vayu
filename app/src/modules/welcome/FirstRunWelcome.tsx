@@ -14,22 +14,40 @@
  * Import leads. Nobody adopts an API client from zero; they arrive carrying
  * collections from somewhere else, so naming the formats is the useful thing to
  * say here. This is the only welcome state that carries branding.
+ *
+ * **`DemoApiTile` belongs here too, not just on the Launcher.** The
+ * Launcher's own copy was scoped to "the Launcher is the end state" (issue
+ * #1694), but a workspace this empty has no collection to hold a manually
+ * created request either - `onNewRequest` already creates one behind the
+ * scenes (see `WelcomeScreen.tsx`'s `useNewRequest`), so the demo tile's
+ * "click, then press the chord" pitch is exactly as available on this screen
+ * as it is once the Launcher takes over. Its own row for the same reason as
+ * the Launcher's: the two-tile grid above is icon-and-label only, with no
+ * room for a chord hint.
  */
 
 import { Download, Plus } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import { ActionTile } from "./components/ActionTile";
+import { DemoApiTile } from "./components/DemoApiTile";
 import { FooterLinks } from "./components/FooterLinks";
+import { WELCOME_COLUMN } from "./welcome-column";
 
 interface FirstRunWelcomeProps {
 	onImport: () => void;
 	onNewRequest: () => void;
+	onOpenDemo: () => void;
 }
 
-export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps) {
+export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRunWelcomeProps) {
 	return (
-		<div className="flex flex-col gap-8">
+		// `enter-fade`: this replaces `LauncherSkeleton` on mount, a plain
+		// conditional swap with no Radix `data-state` to key off, the shape
+		// `.enter-fade` exists for. Without it the branded pitch popped in a
+		// frame after the skeleton's own bars, while `ErrorState` - the sibling
+		// branch for the same swap - already fades (it carries the class itself).
+		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">
 					<img src={iconUrl} alt="" className="h-6 w-6" />
@@ -40,8 +58,8 @@ export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps
 				</p>
 			</div>
 
-			<section>
-				<Eyebrow className="mb-2">Start</Eyebrow>
+			<section className="flex flex-col gap-2">
+				<Eyebrow>Start</Eyebrow>
 				<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 					<ActionTile
 						icon={Download}
@@ -56,6 +74,7 @@ export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps
 						onClick={onNewRequest}
 					/>
 				</div>
+				<DemoApiTile onClick={onOpenDemo} />
 			</section>
 
 			<FooterLinks />

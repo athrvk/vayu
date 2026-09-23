@@ -33,14 +33,14 @@ import {
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
-import { MethodBadge, TruncatedText } from "@/components/shared";
+import { MethodBadge, TabBreadcrumb, TruncatedText } from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
-import { useClientSettingsStore } from "@/stores";
+import { useClientSettingsStore, useLayoutStore } from "@/stores";
 import {
 	BaselineComparison,
 	OverviewTab,
@@ -162,6 +162,15 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// answer to 401s that appear partway through an otherwise healthy run.
 	const authNote = useMemo(() => authRefreshNote(report.auth), [report.auth]);
 
+	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
+	const crumbs = useMemo(
+		() => [
+			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
+			{ id: "run", label: isScenarioLoad ? "Scenario load run" : "Load test run" },
+		],
+		[isScenarioLoad, revealDrawerView]
+	);
+
 	const successRate =
 		report.summary.totalRequests > 0
 			? ((report.summary.totalRequests - report.summary.failedRequests) /
@@ -173,6 +182,19 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		<div className="flex flex-col h-full bg-background">
 			{/* Fixed Header */}
 			<div className="border-b bg-card px-6 py-4">
+				{/*
+				 * Where this report sits (#1691). A run report opens from the History
+				 * drawer and said nothing about where it came from; "History" reveals
+				 * that list rather than toggling it, so the crumb always shows the
+				 * list it names. The run's own crumb is inert - you are already on it,
+				 * and its url and method are the bar right below.
+				 */}
+				<TabBreadcrumb
+					label="Run location"
+					crumbs={crumbs}
+					className="mb-2 bg-transparent px-0 pt-0"
+				/>
+
 				{/* Request Info Bar. A scenario load run has no single method or URL -
 				    its target is a sequence - so it says what the sequence was instead
 				    of claiming a "GET Unknown URL" that never existed. */}
@@ -214,7 +236,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				{config && (config.mode || config.comment || protocolLabel) && (
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-3 p-3 border rounded-md bg-background/50">
 						<div className="flex items-center gap-2 text-muted-foreground">
-							<Settings2 className="w-4 h-4 shrink-0" />
+							<Settings2 className="size-icon shrink-0" />
 							<span className="font-medium">Test config</span>
 						</div>
 						{config.mode && (
@@ -244,7 +266,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 											`The results below were measured over those connections.`
 										}
 									>
-										<AlertTriangle className="w-4 h-4 shrink-0" />
+										<AlertTriangle className="size-icon shrink-0" />
 										not negotiated
 									</span>
 								)}
@@ -306,9 +328,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						}`}
 					>
 						{authNote.warning ? (
-							<AlertTriangle className="w-4 h-4 shrink-0" />
+							<AlertTriangle className="size-icon shrink-0" />
 						) : (
-							<KeyRound className="w-4 h-4 shrink-0" />
+							<KeyRound className="size-icon shrink-0" />
 						)}
 						<span>{authNote.text}</span>
 					</div>
@@ -321,7 +343,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
 						    this tile against the 3.0 icon bar - it clears it in both
 						    themes, and there is no violet semantic token to move it to. */}
-							<TrendingUp className="w-4 h-4 text-purple-500" />
+							<TrendingUp className="size-icon text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
@@ -330,7 +352,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<Activity className="w-4 h-4 text-primary" />
+							<Activity className="size-icon text-primary" />
 							<span className="text-xs text-muted-foreground">Total Requests</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
@@ -339,7 +361,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<CheckCircle className="w-4 h-4 text-status-success-text" />
+							<CheckCircle className="size-icon text-status-success-text" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
@@ -355,13 +377,13 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				onValueChange={setActiveTab}
 				className="flex-1 flex flex-col min-h-0"
 			>
-				<TabsList className="mx-5 mt-3">
+				<TabsList variant="inset" className="mx-4 mt-3">
 					<TabsTrigger value="overview">
-						<BarChart3 className="w-3.5 h-3.5" />
+						<BarChart3 className="size-icon-sm" />
 						<TabLabel>Overview</TabLabel>
 					</TabsTrigger>
 					<TabsTrigger value="performance">
-						<TrendingUp className="w-3.5 h-3.5" />
+						<TrendingUp className="size-icon-sm" />
 						<TabLabel>Performance</TabLabel>
 					</TabsTrigger>
 					{/* Only for a run that has a sequence. A single-request load run
@@ -370,12 +392,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					    per-step results rows. */}
 					{isScenarioLoad && (
 						<TabsTrigger value="steps">
-							<ListOrdered className="w-3.5 h-3.5" />
+							<ListOrdered className="size-icon-sm" />
 							<TabLabel>Steps</TabLabel>
 						</TabsTrigger>
 					)}
 					<TabsTrigger value="samples">
-						<Activity className="w-3.5 h-3.5" />
+						<Activity className="size-icon-sm" />
 						<TabLabel>Sampled Requests</TabLabel>
 					</TabsTrigger>
 				</TabsList>

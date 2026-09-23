@@ -20,7 +20,7 @@ const linkClass =
 	"text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm";
 
 export function FooterLinks() {
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 
 	return (
 		<div className="flex flex-wrap items-center gap-x-4 gap-y-1">

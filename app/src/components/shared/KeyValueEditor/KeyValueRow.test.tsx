@@ -72,16 +72,27 @@ function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 
 describe("the enable checkbox", () => {
 	it("paints in the app's accent, not the browser default", () => {
+		// `Checkbox` (`ui/checkbox.tsx`) paints its checked state itself,
+		// `checked:bg-primary`/`checked:border-primary` - not `accent-color`,
+		// which does nothing once `appearance-none` removes native rendering.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
 		expect(box).toBeTruthy();
-		expect(box!.className).toMatch(/\baccent-primary\b/);
+		expect(box!.className).toMatch(/\bchecked:bg-primary\b/);
 	});
 
-	it("carries no properties a native checkbox silently ignores", () => {
-		// `rounded-md` and `border-input` need `appearance-none` to do anything.
-		// Leaving them on read as "this control is styled" when it was not.
+	it("is appearance-none, so its rounded border actually paints", () => {
+		// The inverse of this file's old guard: the radius/`border-input`
+		// classes need `appearance-none` to mean anything on a checkbox - a
+		// native one ignores both silently, which is what a 24-28px
+		// (`size-target`, issue #1679) unstyled checkbox rendered as: a flat,
+		// barely-rounded square. Asserting `appearance-none` is present is what
+		// makes the neighbouring radius/border classes meaningful rather than
+		// dead weight again.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
-		expect(box!.className).not.toMatch(/\brounded-|\bborder-input\b/);
+		expect(box!.className).toMatch(/\bappearance-none\b/);
+		// `rounded-[min(var(--radius-md),25%)]`, not a bare `rounded-md` - the
+		// radius is capped by box size, see `ui/checkbox.tsx`.
+		expect(box!.className).toMatch(/\brounded-\[min\(var\(--radius-md\),25%\)\]/);
 	});
 
 	it("still names the row it governs", () => {
@@ -206,5 +217,32 @@ describe("row density", () => {
 		 * mutation, which is the one failure a guard cannot have.
 		 */
 		expect(row().innerHTML).not.toMatch(new RegExp(String.raw`\bh-9\b`));
+	});
+});
+
+describe("the trailing spare row", () => {
+	/*
+	 * The row that exists only as somewhere to type used to paint a *checked*
+	 * accent checkbox, so a request sending one param showed three
+	 * enabled-looking ones (#1691). Unchecked would have been no better: the box
+	 * reads `item.enabled`, which is true, so a click on it would have done
+	 * nothing visible - hence no control at all until there is something to
+	 * disable.
+	 *
+	 * Mutation check: restore the unconditional `allowDisable ?` and the first
+	 * case fails.
+	 */
+	it("offers no enable checkbox until something is typed", () => {
+		const blank = row({ item: { id: "r0", key: "", value: "", enabled: true } });
+		expect(blank.querySelector('input[type="checkbox"]')).toBeNull();
+
+		// The column keeps its width, so the real control arriving shifts nothing.
+		const leading = blank.firstElementChild!.firstElementChild!;
+		expect(leading.className).toContain("size-target");
+	});
+
+	it("offers it as soon as the row holds a key", () => {
+		const typed = row({ item: { id: "r0", key: "page", value: "", enabled: true } });
+		expect(typed.querySelector('input[type="checkbox"]')).toBeTruthy();
 	});
 });

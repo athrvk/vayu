@@ -68,17 +68,36 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	}, [own, inherited.source, inherited.blockedBy]);
 
 	/*
-	 * Resolved every render, deliberately not memoised. `resolveObject` is a
-	 * fresh identity on each render of the resolver hook, so a memo keyed on it
-	 * would never hit and a memo keyed around it would go stale on an
-	 * environment switch. `TokenStatusRow` keys its query on the *string* cache
-	 * key it derives, so a new object identity costs one cheap re-derivation and
-	 * nothing else.
+	 * Memoised on the config's *text*, not on its object identity.
+	 *
+	 * This used to resolve on every render, on the grounds that a new object
+	 * identity only costs `TokenStatusRow` one cheap re-derivation of the string
+	 * cache key it queries on. That holds for a `{{scope variable}}` and fails
+	 * for a dynamic one: `{{$guid}}` in the access-token URL or the client id
+	 * resolves to something new on every call (`lib/dynamic-variables.ts`'s own
+	 * contract), so the *string* key changed too - a new query key every render,
+	 * which is a refetch loop rather than a re-derivation, and it re-hid a
+	 * revealed token each time round.
+	 *
+	 * Serialised rather than compared by identity because a resolved config is
+	 * rebuilt whenever the ancestor walk re-runs, and `resolveObject` is in the
+	 * deps because its identity is what changes on an environment switch or a
+	 * variable edit - the events that *should* produce a new value.
+	 *
+	 * A `useMemo` and not `lib/dynamic-variable-cache.ts`'s module-scope cache,
+	 * for the reason `useHostCookies` (see `relevance.ts`) keeps one: this
+	 * component creates its own resolver, so a remount brings a fresh
+	 * `resolveObject` that would miss that cache anyway.
 	 */
-	const oauthConfig: OAuth2Config | null =
-		effective.auth?.mode === "oauth2"
-			? resolveObject<OAuth2Config>(effective.auth.config)
-			: null;
+	const configText =
+		effective.auth?.mode === "oauth2" ? JSON.stringify(effective.auth.config) : null;
+	const oauthConfig: OAuth2Config | null = useMemo(
+		() =>
+			configText === null
+				? null
+				: resolveObject<OAuth2Config>(JSON.parse(configText) as OAuth2Config),
+		[configText, resolveObject]
+	);
 
 	if (isLoading) return <SectionLoading />;
 	if (!request || !own) return <SectionEmpty>No request loaded</SectionEmpty>;
@@ -90,7 +109,7 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 			<p className="text-xs text-foreground m-0">
 				Sending <span className="font-semibold text-primary">{label}</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground m-0">{effective.origin}</p>
+			<p className="text-label text-muted-foreground m-0">{effective.origin}</p>
 			{oauthConfig && <TokenStatusRow resolvedConfig={oauthConfig} />}
 		</div>
 	);

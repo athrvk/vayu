@@ -37,15 +37,17 @@
  * `overflow-y-auto` computes `overflow-x` to `auto` as well, so the scroll
  * container clips horizontally at its padding box. On the Variables screen the
  * container carries `p-4` and nothing notices. Embedded in Collection Detail it
- * carries `p-0`, the checkbox cell's left edge *is* the clip edge, and the
- * baseline focus ring - 1px wide at `outline-offset: 2px`, i.e. 3px outside the
- * border box - lost its left side. Same component, same code path; only the
- * padding differs, which is why it reproduced on one screen and not the other.
+ * carries `p-0`, the checkbox cell's left edge *is* the clip edge, and its
+ * focus ring - drawn outside the border box, whether that was the browser's
+ * own `outline-offset` on the original native checkbox or `Checkbox`'s own
+ * `focus-visible:ring-1 ring-offset-1` now - lost its left side. Same
+ * component, same code path; only the padding differs, which is why it
+ * reproduced on one screen and not the other.
  *
  * **Fixed with clearance, deliberately not with `.panel-clip`.** The design
  * system offers both (docs/design-system.md, "Clipping panels" and the
  * clearance rule), and for this control clearance is the only one that keeps it
- * consistent: the identical native checkbox appears in the request builder's
+ * consistent: the same shared `Checkbox` appears in the request builder's
  * key-value rows, where `KeyValueRow`'s `p-1` leaves the ring outset with a
  * visible gap. `.panel-clip` would have tucked this one inward, giving one
  * control two different looks depending on the screen.
@@ -82,23 +84,32 @@ vi.mock("@/queries", () => ({
 
 const sessionStore = { activeEnvironmentId: null, setActiveEnvironmentId: vi.fn() };
 
+const saveStoreState = {
+	registerContext: vi.fn(),
+	unregisterContext: vi.fn(),
+	updateContext: vi.fn(),
+	setActiveContext: vi.fn(),
+	markPendingSave: vi.fn(),
+	startSaving: vi.fn(),
+	completeSaveThenIdle: vi.fn(),
+	failSave: vi.fn(),
+	setStatus: vi.fn(),
+};
+
+const variablesStoreState = { selectedCategory: null, setSelectedCategory: vi.fn() };
+
 vi.mock("@/stores", () => ({
-	useSaveStore: () => ({
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		updateContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		markPendingSave: vi.fn(),
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: vi.fn(),
-	}),
+	// Selector-aware, not a bare `() => ({...})`: `VariableTableEditor` reads
+	// this store through per-field selectors now (issue #1714), so a mock that
+	// ignores the selector argument would hand every field the whole state
+	// object back instead of the one function it asked for.
+	useSaveStore: (selector: (state: typeof saveStoreState) => unknown) => selector(saveStoreState),
 	useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory: vi.fn() }),
+	useVariablesStore: (selector: (state: typeof variablesStoreState) => unknown) =>
+		selector(variablesStoreState),
 }));
 
 // KeyValueRow reads the builder context only to resolve `{{vars}}` for its
@@ -130,14 +141,21 @@ function collectionWith(secret: boolean): Collection {
 const collection = collectionWith(false);
 
 /**
- * Horizontal padding declared on the checkbox's own box, in Tailwind steps
- * (`px-1` and `p-1` both count as 1). The ring needs 3px, so anything below
- * step 1 (4px) clips.
+ * Horizontal padding declared on the checkbox's containing cell, in Tailwind
+ * steps (`px-1` and `p-1` both count as 1). `Checkbox` wraps its `<input>` in
+ * a plain, unpadded `<span>` (a positioning root for its overlaid checkmark
+ * icon), so the real clearance lives one hop further up than the immediate
+ * parent - the table cell or row container - which is why this walks rather
+ * than reading one level. The ring needs 3px, so anything below step 1 (4px)
+ * clips.
  */
 function horizontalPadStep(checkbox: Element): number {
-	const cls = String(checkbox.parentElement?.className ?? "");
-	const match = cls.match(/\bp[xl]?-(\d+)\b/);
-	return match ? Number(match[1]) : 0;
+	let node: Element | null = checkbox.parentElement;
+	for (let hops = 0; node && hops < 3; hops++, node = node.parentElement) {
+		const match = String(node.className ?? "").match(/\bp[xl]?-(\d+)\b/);
+		if (match) return Number(match[1]);
+	}
+	return 0;
 }
 
 /** Whether any ancestor tucks descendant rings inward. */
@@ -276,11 +294,14 @@ describe("row-enable checkbox - the rest of the control", () => {
 	});
 
 	it("paints in an app colour in both tables, never the browser default", () => {
-		// A native checkbox with no `accent-*` renders the user agent's blue,
-		// which follows neither the theme nor the accent scheme. `KeyValueRow`
-		// carries `accent-primary`; this table carries the scope colour.
+		// `Checkbox` is `appearance-none`, painting its own checked state
+		// directly (`checked:bg-*`/`checked:border-*`) rather than through the
+		// native `accent-color` a bare checkbox would need - a browser's own
+		// rendering follows neither the theme nor the accent scheme.
+		// `KeyValueRow` takes the primitive's default (`checked:bg-primary`);
+		// this table overrides it with the scope colour.
 		for (const checkbox of [renderVariablesCheckbox(true), renderKeyValueCheckbox()]) {
-			expect(String(checkbox.className)).toMatch(/\baccent-[a-z-]+\b/);
+			expect(String(checkbox.className)).toMatch(/\bchecked:bg-[a-z-]+\b/);
 		}
 	});
 });

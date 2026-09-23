@@ -804,7 +804,7 @@ declare const pm: {
 		/**
 		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists and the graphql pair.
 		 * 
-		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string (or body.raw) to replace the body, or delete it to send none. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
 		 */
 		get body(): string & {
 			/**
@@ -832,7 +832,7 @@ declare const pm: {
 			/**
 			 * The body as a string - the same text pm.request.body itself reads as, so JSON.parse(pm.request.body.raw) is the imported-script idiom that works.
 			 * 
-			 * Defined for every mode, where Postman leaves it undefined for the two form ones: a form body reading as nothing cannot be told apart from a request with no body. Assigning it is the same write as assigning the body - it parses back into the fields for x-www-form-urlencoded, and is refused for form-data.
+			 * Defined for every mode, where Postman leaves it undefined for the two form ones: a form body reading as nothing cannot be told apart from a request with no body. Assigning it reaches the wire the same way as assigning pm.request.body itself - it parses back into the fields for x-www-form-urlencoded, and is refused for form-data - but unlike that whole-object assignment, this one updates the RequestBody object in place, so pm.request.body.raw (or .length, or a hash of it) still reads the new body afterward in the same script. Prefer this spelling whenever the script needs to read the body back after changing it - parse/mutate/stringify, then sign or measure what was just written.
 			 */
 			raw: string;
 			/**

@@ -29,7 +29,13 @@ export {
 	type TabType,
 	type TabLocation,
 } from "./tabs-store";
-export { useLayoutStore, type DrawerView } from "./layout-store";
+export {
+	useLayoutStore,
+	resolveResponseArrangement,
+	type DrawerView,
+	type ResponseArrangement,
+	type ResponsePosition,
+} from "./layout-store";
 export { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 export { useAppearanceStore } from "./appearance-store";
 export { useToastStore, type Toast, type ToastVariant } from "./toast-store";

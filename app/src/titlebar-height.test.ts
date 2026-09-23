@@ -134,10 +134,16 @@ describe("title bar height", () => {
 		// drawer's header band beside it. One declaration, because the two halves
 		// meet at the drawer's resize handle and a second value is a visible step
 		// in the rule that runs across the window.
-		const declarations = [...css.matchAll(/--tabstrip-height:\s*(\d+px)\s*;/g)].map(
-			(m) => m[1]
+		//
+		// Written to resolve through the `band` floor (issue #1679 - was
+		// `calc(var(--spacing) * 8)`, which shrank this row with density; a
+		// chrome band is an anchor, not a list row), so the match is on
+		// whatever the declaration's value is, not specifically a literal -
+		// the guard is "exactly one", not "exactly one particular value".
+		const declarations = [...css.matchAll(/--tabstrip-height:\s*([^;]+);/g)].map((m) =>
+			m[1].trim()
 		);
-		expect(declarations).toEqual(["32px"]);
+		expect(declarations).toEqual(["var(--spacing-band)"]);
 		// Unlike --titlebar-height, deliberately *not* mirrored in
 		// electron/constants.ts: the frame, the Windows caption overlay and the
 		// traffic lights all size to the title row alone, so a constant there

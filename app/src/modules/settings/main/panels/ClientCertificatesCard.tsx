@@ -56,11 +56,13 @@ import {
 	CardHeader,
 	CardTitle,
 	DeleteConfirmDialog,
+	IconSwap,
 	Input,
 	Label,
 	SecretInput,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
 } from "@/components/ui";
 import {
 	useClientCertificatesQuery,
@@ -363,7 +365,7 @@ export function ClientCertificatesCard() {
 									disabled={deleteCertificate.isPending}
 									aria-label={`Remove the certificate for ${targetLabel(certificate)}`}
 								>
-									<Trash2 className="w-4 h-4" />
+									<Trash2 className="size-icon" />
 								</Button>
 							</div>
 						))}
@@ -480,24 +482,29 @@ export function ClientCertificatesCard() {
 						</div>
 
 						<div className="flex items-center justify-end gap-2">
-							<Button variant="ghost" size="sm" onClick={closeForm}>
-								Cancel
-							</Button>
+							<DialogCancelButton size="sm" onClick={closeForm} />
 							<Button
 								size="sm"
 								onClick={() => void submit()}
 								disabled={!canSubmit || createCertificate.isPending}
 							>
-								{createCertificate.isPending && (
-									<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-								)}
+								{/* Swapped, not mounted: a spinner that mounts widens
+								    the button and slides Cancel beside it. */}
+								<IconSwap
+									className="mr-1.5"
+									state={createCertificate.isPending ? "adding" : "idle"}
+									icons={{
+										idle: <Plus className="size-icon" />,
+										adding: <Loader2 className="size-icon animate-spin" />,
+									}}
+								/>
 								Add certificate
 							</Button>
 						</div>
 					</div>
 				) : (
 					<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-						<Plus className="w-4 h-4 mr-1.5" />
+						<Plus className="size-icon mr-1.5" />
 						Add certificate
 					</Button>
 				)}

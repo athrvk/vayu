@@ -81,7 +81,7 @@ describe("one size, one weight", () => {
 	 */
 	it.each(["compact", "full"] as const)("%s renders the step's weight", (variant) => {
 		const cls = badgeFor("global", variant).className;
-		expect(cls).toContain("text-[10px]");
+		expect(cls).toContain("text-micro");
 		expect(cls).toContain("font-semibold");
 		expect(cls).not.toMatch(/font-(medium|normal|light|thin|bold|extrabold|black)\b/);
 	});

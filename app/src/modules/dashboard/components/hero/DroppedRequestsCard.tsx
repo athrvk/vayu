@@ -36,11 +36,11 @@ export function DroppedRequestsCard({
 			}
 		>
 			<HeroValue value={formatNumber(dropped)} color="hsl(var(--destructive-text))" />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				of <span className="text-foreground font-semibold">{formatNumber(scheduled)}</span>{" "}
 				scheduled · <span className="text-foreground font-semibold">{pct.toFixed(1)}</span>%
 			</p>
-			<p className="text-[11px] mt-2 text-warning-text">
+			<p className="text-label mt-2 text-warning-text">
 				Server saturating - try lowering target RPS
 			</p>
 		</HeroCardShell>

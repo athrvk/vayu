@@ -450,6 +450,35 @@ describe("SpecSync", () => {
 		);
 	});
 
+	// `size-target` (issue #1679), not `size-icon`/`size-icon-sm`: a bare
+	// checkbox is its own hit target, same as `KeyValueRow`'s row-enable one.
+	// Mutation check: put the smaller class back on any of the three and this
+	// fails on that one.
+	it("gives every checkbox here its own hit target", async () => {
+		diffSpec.mockResolvedValue(
+			diffResponse({
+				changed: [changed({ name: "My pets call", fields: [field("name", true)] })],
+				removed: [
+					{ requestId: "req_1", name: "List pets", operation: LIST_PETS, safe: false },
+				],
+			})
+		);
+		renderSync();
+
+		check();
+		await screen.findByText(/the document has changed/i);
+
+		for (const label of [
+			/apply changes to my pets call/i,
+			/apply name to my pets call/i,
+			/list pets \(GET \/pets\)/i,
+		]) {
+			const box = screen.getByRole("checkbox", { name: label });
+			expect(box.className).toContain("size-target");
+			expect(box.className).not.toContain("size-icon");
+		}
+	});
+
 	it("never deletes without a confirm that names the count", async () => {
 		// The new document declares a different operation, so the bound request's
 		// operation is gone and a second one is added.
@@ -487,7 +516,7 @@ describe("SpecSync", () => {
 
 		// The confirm stands between the tick and the call.
 		expect(syncSpec).toHaveBeenCalledTimes(1);
-		expect(await screen.findByText(/1 request will be deleted/i)).toBeTruthy();
+		expect(await screen.findByText(/1 request and everything saved on it/i)).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: /apply and delete/i }));
 
 		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));

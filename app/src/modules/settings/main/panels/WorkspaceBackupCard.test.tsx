@@ -90,7 +90,7 @@ describe("WorkspaceBackupCard", () => {
 		// own open database is the footgun this feature avoids - so the steps
 		// have to be here.
 		expect(
-			screen.getByText(/quit Vayu, copy this file over the database/i)
+			screen.getByText(/quit Vayu, replace the database file shown under Storage paths/i)
 		).toBeInTheDocument();
 	});
 

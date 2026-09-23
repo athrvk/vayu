@@ -23,7 +23,6 @@ import {
 	Save,
 	RotateCcw,
 	Loader2,
-	AlertCircle,
 	ChevronRight,
 	AlertTriangle,
 	RefreshCw,
@@ -42,11 +41,17 @@ import {
 	CardTitle,
 	Skeleton,
 	Textarea,
+	ICON_MOTION,
 } from "@/components/ui";
-import { EmptyState } from "@/components/shared";
+import { EmptyState, ErrorState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
-import { DefaultValueLine, NumberSettingRow, SelectSettingRow } from "./panels/SettingControls";
+import {
+	CollapsibleText,
+	DefaultValueLine,
+	NumberSettingRow,
+	SelectSettingRow,
+} from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { APP_PANEL_COMPONENTS } from "./app-panel-components";
 import { getEngineCategory } from "../engine-categories";
@@ -129,17 +134,17 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 	const { restart, isRestarting } = useEngineRestart();
 
 	return (
-		<div className="enter-fade bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 shrink-0">
+		<div className="enter-fade bg-warning/10 border-b border-warning/30 px-6 py-3 shrink-0">
 			<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 				<div className="flex items-center gap-3">
-					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50">
-						<AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-warning/15">
+						<AlertTriangle className="size-icon text-warning-text" />
 					</div>
 					<div>
-						<p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+						<p className="text-sm font-medium text-warning-text">
 							Engine restart required
 						</p>
-						<p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+						<p className="text-xs text-warning-text/80 mt-0.5">
 							Changes to <span className="font-medium">{labels.join(", ")}</span> will
 							take effect after restarting the engine
 						</p>
@@ -150,21 +155,21 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						variant="outline"
 						size="sm"
 						onClick={onDismiss}
-						className="border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+						className="border-warning/40 hover:bg-warning/15"
 					>
-						<X className="w-4 h-4 mr-1.5" />
+						<X className="size-icon mr-1.5" />
 						Dismiss
 					</Button>
 					<Button
 						size="sm"
-						className="bg-amber-600 hover:bg-amber-700 text-white"
+						className="bg-warning hover:bg-warning/90 text-warning-foreground"
 						disabled={isRestarting}
 						onClick={() => void restart()}
 					>
 						{isRestarting ? (
-							<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+							<Loader2 className="size-icon mr-1.5 animate-spin" />
 						) : (
-							<RefreshCw className="w-4 h-4 mr-1.5" />
+							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						<LabelSwap
 							label={isRestarting ? "Restarting..." : "Restart Engine"}
@@ -178,21 +183,22 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 }
 
 export default function SettingsMain() {
-	const { selectedCategory, highlightedKey } = useSettingsStore();
-	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
-		useEngineStore();
+	const selectedCategory = useSettingsStore((s) => s.selectedCategory);
+	const highlightedKey = useSettingsStore((s) => s.highlightedKey);
+	const pendingRestart = useEngineStore((s) => s.pendingRestart);
+	const restartRequiredKeys = useEngineStore((s) => s.restartRequiredKeys);
+	const addRestartRequiredKey = useEngineStore((s) => s.addRestartRequiredKey);
+	const clearRestartRequired = useEngineStore((s) => s.clearRestartRequired);
 	const showToast = useToastStore((s) => s.showToast);
-	const {
-		startSaving,
-		completeSaveThenIdle,
-		failSave,
-		setStatus,
-		markPendingSave,
-		registerContext,
-		unregisterContext,
-		setActiveContext,
-		updateContext,
-	} = useSaveStore();
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
+	const setStatus = useSaveStore((s) => s.setStatus);
+	const markPendingSave = useSaveStore((s) => s.markPendingSave);
+	const registerContext = useSaveStore((s) => s.registerContext);
+	const unregisterContext = useSaveStore((s) => s.unregisterContext);
+	const setActiveContext = useSaveStore((s) => s.setActiveContext);
+	const updateContext = useSaveStore((s) => s.updateContext);
 	const { data: configResponse, isLoading, error } = useConfigQuery();
 	const updateConfigMutation = useUpdateConfigMutation();
 
@@ -496,15 +502,10 @@ export default function SettingsMain() {
 
 	if (error) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-destructive-text gap-4 p-8">
-				<AlertCircle className="w-12 h-12" />
-				<div className="text-center">
-					<p className="text-md font-medium">Failed to load settings</p>
-					<p className="text-sm mt-1 text-muted-foreground">
-						{error instanceof Error ? error.message : "Unknown error"}
-					</p>
-				</div>
-			</div>
+			<ErrorState
+				title="Failed to load settings"
+				detail={error instanceof Error ? error.message : "Unknown error"}
+			/>
 		);
 	}
 
@@ -663,7 +664,7 @@ export default function SettingsMain() {
 					isDependent && "ml-6",
 					isModified && !hasError && "border-primary/50",
 					hasError && "border-destructive/50",
-					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
+					isPendingRestart && "border-warning/50 bg-warning/5"
 				)}
 			>
 				<CardHeader className="pb-3">
@@ -672,7 +673,7 @@ export default function SettingsMain() {
 							<div className="flex items-center gap-2">
 								<CardTitle>{entry.label}</CardTitle>
 								{needsRestart && (
-									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold border border-warning/30 bg-warning/15 text-warning-text">
 										<RefreshCw className="w-2.5 h-2.5" />
 										Restart Required
 									</span>
@@ -692,12 +693,14 @@ export default function SettingsMain() {
 									 * distinguishable - "Pending" is the more urgent of
 									 * the pair and should not read as identical.
 									 */
-									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-semibold text-warning-text">
+									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-micro font-semibold text-warning-text">
 										Pending
 									</span>
 								)}
 							</div>
-							<CardDescription className="mt-1">{entry.description}</CardDescription>
+							<CardDescription className="mt-1">
+								<CollapsibleText text={entry.description} />
+							</CardDescription>
 							{parentEntry && dependentDisabled && (
 								<p className="enter-fade text-xs text-muted-foreground mt-1">
 									Turn on {parentEntry.label} to use this
@@ -875,7 +878,10 @@ export default function SettingsMain() {
 							onClick={handleResetToDefaults}
 							disabled={updateConfigMutation.isPending}
 						>
-							<RotateCcw className="w-4 h-4 mr-1.5" />
+							<RotateCcw
+								className="size-icon mr-1.5"
+								data-icon-motion={ICON_MOTION.spinBack}
+							/>
 							Reset to Defaults
 						</Button>
 						<Button
@@ -886,9 +892,12 @@ export default function SettingsMain() {
 							}
 						>
 							{updateConfigMutation.isPending ? (
-								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+								<Loader2 className="size-icon mr-1.5 animate-spin" />
 							) : (
-								<Save className="w-4 h-4 mr-1.5" />
+								<Save
+									className="size-icon mr-1.5"
+									data-icon-motion={ICON_MOTION.press}
+								/>
 							)}
 							Save Changes
 						</Button>
@@ -923,7 +932,7 @@ export default function SettingsMain() {
 							>
 								<ChevronRight
 									className={cn(
-										"w-4 h-4 transition-transform",
+										"size-icon transition-transform",
 										showAdvanced && "rotate-90"
 									)}
 									aria-hidden="true"

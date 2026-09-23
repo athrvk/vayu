@@ -48,7 +48,7 @@ import {
 } from "@/queries";
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button, Badge, LabelSwap } from "@/components/ui";
+import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
@@ -72,7 +72,7 @@ interface DesignRunViewProps {
 export default function DesignRunView({ run }: DesignRunViewProps) {
 	const { executeRequest: engineExecuteRequest, composeRequest: engineComposeRequest } =
 		useEngine();
-	const { activeEnvironmentId } = useSessionStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -420,9 +420,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						title={pinTooltip}
 					>
 						{setBaselineMutation.isPending ? (
-							<Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+							<Loader2 className="size-icon-sm mr-1.5 animate-spin" />
 						) : (
-							<PinIcon className="w-3.5 h-3.5 mr-1.5" />
+							<PinIcon className="size-icon-sm mr-1.5" />
 						)}
 						<LabelSwap label={pinLabel} states={["Pin", "Unpin"]} />
 					</Button>
@@ -434,7 +434,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					 */}
 					{liveRequest && (
 						<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
-							<Save className="w-3.5 h-3.5 mr-1.5" />
+							<Save
+								className="size-icon-sm mr-1.5"
+								data-icon-motion={ICON_MOTION.press}
+							/>
 							Save this run to the request
 						</Button>
 					)}

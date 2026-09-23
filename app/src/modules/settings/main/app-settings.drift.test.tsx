@@ -27,11 +27,23 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render as renderBare, cleanup } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { APP_SETTINGS } from "./app-settings";
 import { APP_SETTINGS_PANELS } from "./app-panels";
 import { APP_PANEL_COMPONENTS } from "./app-panel-components";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 // The panels reach outside Settings for three things, none of them the subject:
 // the engine's run store, its cookie jar, and the Electron updater bridge.
@@ -135,6 +147,18 @@ describe("the app settings catalogue", () => {
 				// The anchor test above owns the missing-block failure; skipping
 				// here keeps one defect from failing two tests with two stories.
 				if (block === null) continue;
+
+				// A panel-level anchor is headed by the pane's band, not by a card
+				// inside the panel: the catalogue label and the panel label are the
+				// same string (Keyboard shortcuts is the only one), and a card
+				// repeating it was the double heading issue #1688 removed. The band
+				// half is asserted in SettingsMain.panel-heading.test.tsx, which
+				// renders it - this file renders the panel alone, so the heading it
+				// is looking for is genuinely elsewhere rather than missing.
+				if (setting.label === panel.label) {
+					checked += 1;
+					continue;
+				}
 
 				const heading = blockHeading(block);
 				expect(

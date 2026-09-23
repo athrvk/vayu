@@ -671,7 +671,11 @@ logged as a warning: it means a client skipped composition.
   `POST /import/apply`, **globals last and merged** because `POST /globals`
   replaces the whole set and must not run in front of a write that can still
   fail; the app's own flattening of a previewed result is pinned to it by
-  `orchestrator.payload-conformance.test.ts`. The renderer keeps
+  `orchestrator.payload-conformance.test.ts`. A Postman parse's own
+  `clientCertificates` array rides the same `import_apply_payload` pin (#1656,
+  see the client-certificate bullet above) - the one section neither side's
+  flattening invents a `tempId` for, since nothing else in the tree references
+  one. The renderer keeps
   `ref-bundler.ts` alone, exempt with a reason: inlining referenced files is
   fetch-time assembly through `POST /import/document`, reaching the network and
   disk through channels an engine should not have.
@@ -770,7 +774,18 @@ logged as a warning: it means a client skipped composition.
   format the leg's backend accepts. mTLS works on all three platforms since
   #851; curl 8.21's Schannel client-cert path cannot use a PKCS#12 key (curl
   KNOWN_BUGS 17626 and 3145, closed #842), so a return to Schannel brings that
-  defect back.
+  defect back. **A Postman import is the one non-route writer of this registry**
+  (#1656): `pm_certificate` (`core/import_document.cpp`) resolves a request's
+  own `certificate` into a candidate at parse time using the same
+  `client_cert_rejection` check the route runs, keyed on the request's own
+  resolved host rather than `certificate.matches`; `POST /import/apply` then
+  applies each candidate through `create_client_certificate_response` itself,
+  reusing its lock and its write, best-effort and **after** the tree's own
+  transaction commits, never inside it - taking that lock from inside
+  `import_apply_response`'s own would deadlock. A candidate that route would
+  refuse (an unreadable file, a `(host, port)` collision) is silently skipped,
+  not surfaced as a `400`; see `docs/engine/api-reference.md`'s
+  `POST /import/apply` section.
 
 ## Request composition (engine-owned - POST /compose)
 

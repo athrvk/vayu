@@ -18,15 +18,19 @@
  * Radix has decided which trigger is selected.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { TIMING } from "@/config/timing";
+import { readFileSync, globSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount, TabErrorDot } from "./tabs";
 
 /** Two triggers whose labels differ enough in width for a shift to show. */
 function Fixture() {
 	return (
 		<Tabs defaultValue="one">
-			<TabsList>
+			<TabsList variant="bare">
 				<TabsTrigger value="one">
 					<TabLabel>Post-request</TabLabel>
 				</TabsTrigger>
@@ -173,7 +177,7 @@ describe("a force-mounted panel stays out of sight", () => {
 	function Forced() {
 		return (
 			<Tabs defaultValue="two">
-				<TabsList>
+				<TabsList variant="bare">
 					<TabsTrigger value="one">
 						<TabLabel>One</TabLabel>
 					</TabsTrigger>
@@ -212,9 +216,12 @@ describe("a force-mounted panel stays out of sight", () => {
 describe("counts and the error mark are different things", () => {
 	it("renders a count as an accent superscript that sets no height floor", () => {
 		render(<TabCount value={5} />);
-		const el = screen.getByText("5");
-		expect(el.tagName).toBe("SUP");
-		expect(el.className).toContain("text-primary-text");
+		// The value rides an inner span so its own text colour lives there,
+		// separate from the `sup` that carries the animated track.
+		const value = screen.getByText("5");
+		expect(value.className).toContain("text-primary-text");
+		const el = value.closest("sup")!;
+		expect(el).not.toBeNull();
 		// An h-5 Badge pill is what kept the old band at 38px.
 		expect(el.className).not.toMatch(/\bh-\d/);
 	});
@@ -226,5 +233,348 @@ describe("counts and the error mark are different things", () => {
 		const dot = screen.getByLabelText("Script error");
 		expect(dot.className).toContain("bg-status-error");
 		expect(dot.className).not.toContain("text-primary-text");
+	});
+});
+
+/*
+ * The mark's track animates open rather than staying reserved (the Params-
+ * badge report, and the later "dead space" pushback against a permanent
+ * `min-w-[1ch]` slot).
+ *
+ * `TabCount` used to be gated at each call site (`badge !== undefined &&`) and
+ * to return `null` at zero, so a count arriving *mounted a flex item* on a
+ * `shrink-0` trigger inside a `flex-nowrap` list: the trigger grew by the mark
+ * plus the trigger's own `gap-1.5`, and every trigger to its right - plus
+ * whatever else shared the row - moved. Typing one character into an empty
+ * Params table moved seven tabs and a toggle.
+ *
+ * jsdom lays nothing out, so the animated width itself is unobservable here
+ * (the same limit TabLabel's tests hit). What is observable is the mechanism:
+ * the `sup` is present in both states, its `grid-template-columns` track and
+ * cancelling margin flip between the zero and full-width classes as the value
+ * changes, and the trigger's own class list never changes.
+ *
+ * Mutation check (confirmed): restore `if (value === undefined) return null;`
+ * at the top of `TabCount` and "keeps the count's slot..." fails on the absent
+ * `sup`; swap the `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `TabCount`
+ * and "opens the track when the count arrives" fails on the inverted classes.
+ */
+describe("a count appearing does not move the tabs beside it", () => {
+	function Counted({ badge }: { badge?: number }) {
+		return (
+			<Tabs defaultValue="one">
+				<TabsList variant="inset" className="flex-nowrap">
+					<TabsTrigger value="one">
+						<TabLabel>Params</TabLabel>
+						<TabCount value={badge} />
+					</TabsTrigger>
+					<TabsTrigger value="two">
+						<TabLabel>Headers</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+				<TabsContent value="two">two</TabsContent>
+			</Tabs>
+		);
+	}
+
+	const slotOf = (tab: HTMLElement) => tab.querySelector<HTMLElement>("[data-slot='tab-count']");
+
+	it("keeps the count's slot in the DOM with nothing to count, at a zero-width track", () => {
+		render(<Counted />);
+		const slot = slotOf(screen.getByRole("tab", { name: "Params" }));
+		expect(slot, "no slot - the count will widen the trigger when it arrives").not.toBeNull();
+		expect(slot?.tagName).toBe("SUP");
+		expect(slot?.className).toContain("grid-cols-[0fr]");
+		// Cancels the trigger's gap-1.5 so an empty slot costs no width at all.
+		expect(slot?.className).toContain("-ms-1.5");
+	});
+
+	it("opens the track when the count arrives, in the count's own font", () => {
+		render(<Counted badge={3} />);
+		// `/Params/`, not `"Params"`: a count that is *showing* joins the
+		// trigger's accessible name ("Params 3"), which is the behaviour this
+		// file's other cases pin. Only the empty slot has to stay silent.
+		const slot = slotOf(screen.getByRole("tab", { name: /Params/ }))!;
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		expect(slot.className).toContain("ms-0");
+		// `ch` in `font-mono` `text-micro` is one digit of the count itself - a
+		// px literal would drift the moment the micro step moved.
+		const value = slot.querySelector("span")!;
+		expect(value.className).toContain("font-mono");
+		expect(value.className).toContain("text-micro");
+	});
+
+	it("changes the same node's track and contents when the count arrives", () => {
+		const { rerender } = render(<Counted />);
+		const params = screen.getByRole("tab", { name: "Params" });
+		const headers = screen.getByRole("tab", { name: "Headers" });
+
+		const emptySlot = slotOf(params)!;
+		expect(emptySlot.textContent).toBe("");
+		const triggerClasses = params.className;
+
+		rerender(<Counted badge={3} />);
+
+		const filledSlot = slotOf(params)!;
+		expect(params.className).toBe(triggerClasses);
+		expect(filledSlot.textContent).toBe("3");
+		// The same element, not a remount: only the track and its child changed.
+		expect(filledSlot).toBe(emptySlot);
+		expect(filledSlot.className).toContain("grid-cols-[1fr]");
+		expect(params.className).toBe(triggerClasses);
+		// Nothing was inserted before Headers, which is how the shift travelled.
+		expect(headers.querySelector("[data-slot='tab-count']")).toBeNull();
+	});
+
+	it("says nothing at all when there is nothing to count", () => {
+		render(<Counted />);
+		const params = screen.getByRole("tab", { name: "Params" });
+		// An empty slot, not a `0` and not a placeholder glyph: it must reach
+		// neither a screen reader nor the eye. `TabLabel` renders its label twice,
+		// so `textContent` is "ParamsParams" and always will be - the claim is
+		// that no digit joins it.
+		expect(params.textContent).not.toMatch(/\d/);
+		expect(screen.getByRole("tab", { name: "Params" })).toBeInTheDocument();
+	});
+
+	it("still swallows a zero rather than announcing 'there are none'", () => {
+		render(<Counted badge={0} />);
+		const slot = slotOf(screen.getByRole("tab", { name: "Params" }))!;
+		expect(slot.textContent).toBe("");
+		expect(slot.className).toContain("grid-cols-[0fr]");
+		expect(screen.getByRole("tab", { name: "Params" }).textContent).not.toMatch(/\d/);
+	});
+
+	it("gives the error dot the same track, so the Console swap is width-neutral", () => {
+		// The one call site renders the dot *instead of* the count. A bare 5px
+		// dot standing where a count's track stood moves everything to its right.
+		const { container } = render(<TabErrorDot />);
+		const slot = container.querySelector<HTMLElement>("[data-slot='tab-error-dot']")!;
+		expect(slot).not.toBeNull();
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		// A genuine mount (the dot swaps in for a `TabCount`, not a prop flip on
+		// an already-present node), so it needs a `starting:` frame to animate
+		// from - `.enter-fade`'s own reason for existing.
+		expect(slot.className).toContain("starting:grid-cols-[0fr]");
+		expect(slot.querySelector("[aria-label='Script error']")).not.toBeNull();
+	});
+});
+
+/*
+ * The strip's chrome (issue #1688). Seven call sites carried seven band
+ * recipes; the variant is where they live now, and it is required so a new
+ * strip states which of the three it is. Rendered rather than scanned: the
+ * class list goes through `cn()`, and a scan cannot see what tailwind-merge
+ * does to a caller's `className` on top of the variant.
+ *
+ * Mutation check (confirmed): swap `pane` and `inset` in VARIANT and both of
+ * the first two cases fail.
+ */
+describe("TabsList variants", () => {
+	function listFor(variant: "pane" | "inset" | "bare") {
+		const { container } = render(
+			<Tabs defaultValue="one">
+				<TabsList variant={variant}>
+					<TabsTrigger value="one">
+						<TabLabel>One</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+		const list = container.querySelector<HTMLElement>("[data-slot='tabs-list']")!;
+		expect(list).not.toBeNull();
+		return list;
+	}
+
+	it("draws the pane band: panel fill, the rule under it, and the pane's padding", () => {
+		const list = listFor("pane");
+		expect(list.className).toContain("bg-panel");
+		expect(list.className).toContain("border-b");
+		expect(list.className).toContain("border-rule");
+		expect(list.className).toContain("px-4");
+		expect(list.dataset.variant).toBe("pane");
+	});
+
+	it("insets only enough to keep the first trigger's ring off the edge", () => {
+		const list = listFor("inset");
+		expect(list.className).toContain("px-1");
+		// No band: the content around it already carries the chrome.
+		expect(list.className).not.toContain("bg-panel");
+		expect(list.className).not.toContain("border-b");
+	});
+
+	it("adds nothing at all when the parent row owns the band", () => {
+		const list = listFor("bare");
+		expect(list.className).not.toContain("bg-panel");
+		expect(list.className).not.toContain("border-b");
+		expect(list.className).not.toContain("px-4");
+		expect(list.className).not.toContain("px-1");
+	});
+
+	it("lets a call site keep its own layout classes beside the variant", () => {
+		const { container } = render(
+			<Tabs defaultValue="one">
+				<TabsList variant="pane" className="shrink-0 justify-start">
+					<TabsTrigger value="one">
+						<TabLabel>One</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+		const list = container.querySelector<HTMLElement>("[data-slot='tabs-list']")!;
+		expect(list.className).toContain("bg-panel");
+		expect(list.className).toContain("shrink-0");
+		expect(list.className).toContain("justify-start");
+	});
+});
+
+/*
+ * Every strip in the app states its chrome.
+ *
+ * Source-scanned on purpose, and this is the one claim a render cannot make:
+ * it is about the call sites, not about the primitive. The tag is matched
+ * across newlines because prettier breaks a multi-attribute JSX tag onto one
+ * line per attribute, so a single-line grep reports three false positives
+ * (`ResponseViewer`, `RequestTabs`, `CollectionDetail`) that do carry the prop.
+ */
+describe("every TabsList call site declares its variant", () => {
+	const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const files = globSync("**/*.tsx", { cwd: srcRoot }).filter((f) => !f.includes(".test."));
+
+	it("scans a real tree", () => {
+		expect(files.length).toBeGreaterThan(100);
+	});
+
+	it("finds a variant inside every opening tag", () => {
+		const tags: [file: string, tag: string][] = [];
+		for (const file of files) {
+			const source = readFileSync(join(srcRoot, file), "utf8");
+			for (const m of source.matchAll(/<TabsList\b[\s\S]*?>/g)) {
+				tags.push([relative(".", file), m[0]]);
+			}
+		}
+		// The seven strips this issue converted. A drop below that is a strip
+		// deleted or a scan that stopped seeing them.
+		expect(
+			tags.length,
+			"no TabsList call sites found - has the scan broken?"
+		).toBeGreaterThanOrEqual(7);
+		for (const [file, tag] of tags) {
+			expect(tag, `${file} renders a TabsList with no variant`).toMatch(/variant=/);
+		}
+	});
+});
+
+/*
+ * A count going away fades; it used to be cut while the track faded for it.
+ *
+ * `TabCount` emptied its live cell in the same commit that put its track back
+ * to `grid-cols-[0fr]`, so the 150ms collapse ran around a box that was
+ * already empty and the digit itself vanished in one frame. The collapse is
+ * exactly what made it easy to miss: something *was* moving, just not the
+ * part carrying the count. `useHeldValue` keeps the outgoing digit in the
+ * node for `TIMING.MARK_FADE_MS` so the opacity transition has something to
+ * animate against, and the track still collapses off the *live* value so the
+ * two halves finish together rather than back to back.
+ *
+ * jsdom runs no transitions, so what is observable is the mechanism: which
+ * value the node holds at each point in the window, and that the fade class
+ * arrives in the same commit as the zero-width track rather than after the
+ * hold.
+ *
+ * Mutation check (confirmed): drop the `useHeldValue` call and read `live`
+ * directly in the `<span>` and "holds the last count…" fails on an empty node
+ * at the first assertion after the value goes; pin `fading` to `false` and
+ * "starts the fade in the same commit…" fails on the missing `opacity-0`.
+ */
+describe("a count going away fades rather than being cut", () => {
+	const slotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-count']")!;
+	const liveCellIn = (container: HTMLElement) => slotIn(container).querySelector("span")!;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds the last count on screen for the fade, then clears it", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		expect(slotIn(container).textContent).toBe("3");
+
+		rerender(<TabCount value={undefined} />);
+		// Still "3": the fade has a populated node to take out.
+		expect(slotIn(container).textContent).toBe("3");
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 1);
+		});
+		expect(slotIn(container).textContent).toBe("3");
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(slotIn(container).textContent).toBe("");
+	});
+
+	it("starts the fade in the same commit as the track's collapse, not after the hold", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		expect(liveCellIn(container).className).toContain("opacity-100");
+
+		// A zero is the same "nothing to count" as `undefined`, by TabCount's
+		// own contract - and the same cut before this fix.
+		rerender(<TabCount value={0} />);
+
+		// The track goes immediately, off the live value...
+		expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+		// ...and the digit it is collapsing around fades with it, rather than
+		// having been gone since the first frame of that collapse.
+		expect(liveCellIn(container).className).toContain("opacity-0");
+		expect(slotIn(container).textContent).toBe("3");
+	});
+
+	it("rests at zero opacity with nothing to count, rather than transitioning back up", () => {
+		// Invisible either way behind a zero-width track - but a transition
+		// climbing an empty box back to full opacity is the same "motion with
+		// nothing behind it" this fix is about, and it makes the entry the
+		// mirror of the exit: a count arriving fades up as its track opens.
+		const { container } = render(<TabCount value={undefined} />);
+		expect(liveCellIn(container).className).toContain("opacity-0");
+		expect(liveCellIn(container).className).not.toContain("opacity-100");
+	});
+
+	it("does not fade a count that is merely replaced by another count", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		rerender(<TabCount value={4} />);
+
+		// Nothing went to nothing here, so nothing is held or faded - a count
+		// changing is a track-width change on a full node, as it always was.
+		expect(slotIn(container).textContent).toBe("4");
+		expect(slotIn(container).className).toContain("grid-cols-[1fr]");
+		expect(liveCellIn(container).className).toContain("opacity-100");
+	});
+
+	it("re-fills without waiting out a fade it started", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		rerender(<TabCount value={undefined} />);
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 50);
+		});
+
+		rerender(<TabCount value={7} />);
+		expect(slotIn(container).textContent).toBe("7");
+		expect(liveCellIn(container).className).toContain("opacity-100");
+
+		// The scheduled clear was cancelled with the fade it belonged to.
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS);
+		});
+		expect(slotIn(container).textContent).toBe("7");
 	});
 });

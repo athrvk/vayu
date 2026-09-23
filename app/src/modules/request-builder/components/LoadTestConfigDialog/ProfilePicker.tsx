@@ -97,7 +97,7 @@ export function ProfilePicker({
 						>
 							{profile.label}
 						</span>
-						<span className="text-[11px] text-muted-foreground leading-snug">
+						<span className="text-label text-muted-foreground leading-snug">
 							{profile.description}
 						</span>
 					</button>

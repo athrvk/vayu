@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
@@ -14,9 +14,16 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, Input } from "@/components/ui";
-import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
+import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
+import {
+	RowActionsMenu,
+	RowContextMenu,
+	TruncatedText,
+	DrawerSectionCount,
+} from "@/components/shared";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
 /**
@@ -50,29 +57,29 @@ export default function CollectionItem({
 		expandedCollectionIds,
 		selectedCollectionId,
 		renamingId,
-		renameValue,
 		deletingCollectionId,
 		creatingSubfolder,
-		newSubCollectionName,
+		newFolderName,
 		isCreatingSubfolder,
 		getRequestsByCollection,
 		getCollectionActions,
 		onCollectionClick,
 		onCollectionToggle,
-		onRenameChange,
 		onRenameSubmit,
 		onRenameCancel,
 		onStartRename,
 		onCollectionDeleteClick,
-		onSubCollectionNameChange,
+		onFolderNameChange,
 		onCreateSubfolder,
 		onCancelSubfolder,
 	} = useCollectionTreeContext();
 
 	const isExpanded = expandedCollectionIds.has(collection.id);
-	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
-	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
+	const folderIconClass = cn(
+		"size-icon shrink-0",
+		depth === 0 ? "text-primary" : "text-primary/70"
+	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
@@ -112,23 +119,15 @@ export default function CollectionItem({
 		creatingSubfolder !== collection.id;
 
 	const rowRef = useRef<HTMLDivElement>(null);
-	/**
-	 * Set when the rename field is about to be closed *from the keyboard*, so
-	 * focus can be put back on the row once React has unmounted the field.
-	 *
-	 * Without it F2, Escape drops the user out of the tree entirely: the field
-	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
-	 * of the document. Blur deliberately does not set it - a blur means focus has
-	 * already gone somewhere the user chose, and yanking it back would be worse
-	 * than the bug.
-	 */
-	const returnFocusToRow = useRef(false);
 
-	useEffect(() => {
-		if (isRenaming || !returnFocusToRow.current) return;
-		returnFocusToRow.current = false;
-		rowRef.current?.focus();
-	}, [isRenaming]);
+	/** The rename contract, including the focus return - see `useInlineRename`. */
+	const rename = useInlineRename({
+		active: isRenaming,
+		initialValue: collection.name,
+		onCommit: (name) => onRenameSubmit(collection.id, name),
+		onCancel: onRenameCancel,
+		getRowElement: () => rowRef.current,
+	});
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -186,9 +185,13 @@ export default function CollectionItem({
 	 * belongs to the drag slice, which mounts after the CRUD slice and would
 	 * otherwise have to be threaded backwards into it.
 	 */
-	const rowActions = dnd.moveAction
-		? [...getCollectionActions(collection), dnd.moveAction]
-		: getCollectionActions(collection);
+	// Before the destructive tail, not after it: `rowActionRows` fences the first
+	// destructive item off from the ordinary ones above, and appending past it
+	// would leave Move up / Move down below the separator that Delete owns.
+	const crudActions = getCollectionActions(collection);
+	const firstDestructive = crudActions.findIndex((a) => a.destructive);
+	const at = firstDestructive < 0 ? crudActions.length : firstDestructive;
+	const rowActions = [...crudActions.slice(0, at), ...dnd.moveActions, ...crudActions.slice(at)];
 	const menuLabel = `More actions for ${collection.name}`;
 
 	return (
@@ -277,11 +280,11 @@ export default function CollectionItem({
 						aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
 					>
 						{isDeleting ? (
-							<Loader2 className="w-[18px] h-[18px] animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : isExpanded ? (
-							<ChevronDown className="w-[18px] h-[18px]" />
+							<ChevronDown className="size-icon" />
 						) : (
-							<ChevronRight className="w-[18px] h-[18px]" />
+							<ChevronRight className="size-icon" />
 						)}
 					</button>
 					<button
@@ -297,27 +300,20 @@ export default function CollectionItem({
 						className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 						disabled={isDeleting || isRenaming}
 					>
-						<FolderIcon
-							className={cn(
-								"w-4 h-4 shrink-0",
-								depth === 0 ? "text-primary" : "text-primary/70"
-							)}
+						{/* Open-folder glyph while expanded, so the folder itself
+						    echoes the chevron - crossfaded, since a tree row's
+						    expand is the one state change the eye is following. */}
+						<IconSwap
+							state={isExpanded ? "open" : "closed"}
+							icons={{
+								closed: <Folder className={folderIconClass} />,
+								open: <FolderOpen className={folderIconClass} />,
+							}}
 						/>
 						{isRenaming ? (
 							<Input
 								type="text"
-								value={renameValue}
-								onChange={(e) => onRenameChange(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										returnFocusToRow.current = true;
-										onRenameSubmit(collection.id);
-									} else if (e.key === "Escape") {
-										returnFocusToRow.current = true;
-										onRenameCancel();
-									}
-								}}
-								onBlur={() => onRenameSubmit(collection.id)}
+								{...rename.inputProps}
 								className="flex-1 h-6 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
@@ -338,11 +334,14 @@ export default function CollectionItem({
 								>
 									{collection.name}
 								</TruncatedText>
-								{/* shrink-0: the count is short and load-bearing - the name
-							    yields first. */}
-								<span className="shrink-0 text-xs text-muted-foreground">
-									({requests.length + childCollections.length})
-								</span>
+								{/* The drawer's one count idiom, shared with the section
+								    headers in Services and Variables so a row and its
+								    section cannot drift into two idioms again (issue
+								    #1688 - Variables drew the same fact as a filled
+								    Badge one click away from this). */}
+								<DrawerSectionCount
+									value={requests.length + childCollections.length}
+								/>
 							</>
 						)}
 					</button>
@@ -400,10 +399,14 @@ export default function CollectionItem({
 						>
 							<Input
 								type="text"
-								value={newSubCollectionName}
-								onChange={(e) => onSubCollectionNameChange(e.target.value)}
+								value={newFolderName}
+								onChange={(e) => onFolderNameChange(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") onCreateSubfolder(collection.id);
+									// `isCommitEnter`, not a bare Enter (#939, #935): an
+									// IME commits its composition buffer with an
+									// ordinary Enter keydown, and mod+Enter is the
+									// Send chord, not this field's create.
+									if (isCommitEnter(e)) onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
 								placeholder="Folder name"
@@ -418,19 +421,16 @@ export default function CollectionItem({
 								className="h-7 text-xs"
 							>
 								{isCreatingSubfolder && (
-									<Loader2 className="w-3 h-3 animate-spin mr-1" />
+									<Loader2 className="size-icon-sm animate-spin mr-1" />
 								)}
 								Add
 							</Button>
-							<Button
-								variant="secondary"
+							<DialogCancelButton
 								size="sm"
 								onClick={onCancelSubfolder}
 								disabled={isCreatingSubfolder}
 								className="h-7 text-xs"
-							>
-								Cancel
-							</Button>
+							/>
 						</div>
 					)}
 

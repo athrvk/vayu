@@ -26,10 +26,22 @@
  *
  * It governs the *spatial* keys only. Home and End name a point in the value
  * model the handle announces, so they land on the same bound from either side.
+ *
+ * The drag and keyboard-repeat mechanics are `useResizeGesture`'s (issue
+ * #1715, generalized in #1738 rather than left as this component's own copy
+ * once `ScriptElementForm` needed the identical shape for a vertical drag):
+ * a pointer drag paints the panel's `style.width` - through the handle's own
+ * `parentElement`, since both the Drawer and the context bar render this
+ * handle as the direct child of the `<aside>` whose width it controls - once
+ * per animation frame and writes the store exactly once, on release. The
+ * double-click reset and a single keyboard press still write immediately;
+ * only a held key's repeat coalesces, the same way the drag's paint does.
  */
 
+import { useRef } from "react";
 import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from "@/constants/layout";
 import { cn } from "@/lib/utils";
+import { useResizeGesture } from "@/lib/resize-gesture";
 
 /** One arrow press. Enough to see, small enough to aim with. */
 const STEP = 16;
@@ -58,28 +70,24 @@ export function PanelResizeHandle({
 	// delta is inverted relative to one on the right edge.
 	const grow = side === "right" ? 1 : -1;
 
-	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
-		const startX = e.clientX;
-		const startWidth = width;
+	const handleRef = useRef<HTMLDivElement | null>(null);
+	const gesture = useResizeGesture({
+		min: PANEL_MIN_WIDTH,
+		max: PANEL_MAX_WIDTH,
+		getValue: () => width,
+		commit: setWidth,
+		paint: (value) => {
+			const panel = handleRef.current?.parentElement;
+			if (panel) panel.style.width = `${value}px`;
+		},
+	});
 
-		const onMove = (moveEvent: PointerEvent) => {
-			setWidth(startWidth + (moveEvent.clientX - startX) * grow);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
-
-	const onKeyDown = (e: React.KeyboardEvent) => {
+	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		// Arrows and Page keys are spatial: the direction they move the pointer is
 		// the direction the edge travels, so they follow `grow`.
 		const nudge = (delta: number) => {
 			e.preventDefault();
-			setWidth(width + delta * grow);
+			gesture.applyKey(e, gesture.currentValue() + delta * grow);
 		};
 
 		// Home and End are absolute against the value model this handle declares
@@ -88,7 +96,7 @@ export function PanelResizeHandle({
 		// "min 220, max 480" announced Home as the minimum while it jumped to 480.
 		const jumpTo = (target: number) => {
 			e.preventDefault();
-			setWidth(target);
+			gesture.applyKey(e, target);
 		};
 
 		switch (e.key) {
@@ -109,7 +117,7 @@ export function PanelResizeHandle({
 				// The keyboard equivalent of the double-click reset, which was
 				// otherwise the one affordance with no non-mouse route to it.
 				e.preventDefault();
-				setWidth(defaultWidth);
+				gesture.applyKey(e, defaultWidth);
 				return;
 			default:
 				return;
@@ -119,6 +127,7 @@ export function PanelResizeHandle({
 	return (
 		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- WAI-ARIA window splitter - a focusable `role="separator"` is its sanctioned interactive form, with the arrow/Page/Home/End handling in the onKeyDown just below
 		<div
+			ref={handleRef}
 			role="separator"
 			aria-orientation="vertical"
 			aria-label={label}
@@ -126,9 +135,11 @@ export function PanelResizeHandle({
 			aria-valuemin={PANEL_MIN_WIDTH}
 			aria-valuemax={PANEL_MAX_WIDTH}
 			tabIndex={0}
-			onPointerDown={startResize}
+			onPointerDown={(e) => gesture.startDrag(e, "x", grow)}
 			onDoubleClick={() => setWidth(defaultWidth)}
 			onKeyDown={onKeyDown}
+			onKeyUp={gesture.flushKey}
+			onBlur={gesture.flushKey}
 			className={cn(
 				"absolute top-0 bottom-0 w-2 cursor-col-resize transition-colors hover:bg-accent/20",
 				// The handle is a 8px strip with no content, so the focus state is

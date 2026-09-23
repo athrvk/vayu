@@ -163,9 +163,9 @@ canGoBack(useTabsStore.getState());
 canGoForward(useTabsStore.getState());
 ```
 
-#### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
+#### `layout-store.ts` - Drawer, Context Bar, & Response Position
 
-Manages the left drawer (collections/history/variables/settings), the right context bar, and request/response split ratio.
+Manages the left drawer (collections/history/variables/settings), the right context bar, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
 
 **State:**
 ```typescript
@@ -176,7 +176,10 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
   contextBarCollapsedSections: string[]  // Section ids the user collapsed (`code` by default)
-  requestSplitRatio: number              // 0–1; left/request pane fraction
+  responsePosition: ResponsePosition     // "beside" | "below" | "auto" (default beside, #1711)
+  autoResponseArrangement: "beside" | "below"  // What auto resolves to right now - written by the builder's measurement, not persisted
+  requestSplitRatioBeside: number        // 0-1; the request pane's share while the response is beside it
+  requestSplitRatioBelow: number         // 0-1; the request pane's share while the response is below it
   scriptSnippetsCollapsed: boolean       // Default a fresh script row's snippets list starts from (collapsed); each row keeps its own state after that
   scriptEditorHeights: Record<string, number>  // Height (px) of a script.pre/script.post element's editor box, keyed by the element's own id - capped at 200 entries, oldest set evicted first
   scriptEditorHeightDefault: number      // Height a script row with no entry above starts at - the last height set on any row
@@ -194,10 +197,14 @@ const {
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
   contextBarCollapsedSections, toggleContextBarSection,
-  requestSplitRatio, setRequestSplitRatio
+  responsePosition, setResponsePosition, toggleResponsePosition,
+  setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
 setDrawerWidth(300); // Clamped to [PANEL_MIN_WIDTH, PANEL_MAX_WIDTH] (constants/layout.ts)
+toggleResponsePosition(); // beside <-> below; from auto, the opposite of what auto currently shows
+setRequestSplitRatio("below", 0.6); // Into the ratio for the arrangement that was dragged, clamped 0.2..0.8
+resolveResponseArrangement(useLayoutStore.getState()); // The arrangement on screen: the setting, or auto's pick
 ```
 
 **One drawer width, not one per view.** v2 stored a width per view, so switching
@@ -206,6 +213,14 @@ migration collapses them onto a single `drawerWidth`, keeping whatever
 Collections (the default view) had. Re-introducing a per-view width re-introduces
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
+
+**`setDrawerWidth` / `setContextBarWidth` are not called per `pointermove`.**
+`PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`) holds a
+drag's live width outside the store, painting it onto the panel's own inline
+`style.width` once per animation frame, and calls the setter - the one write
+`partialize` persists - exactly once, on `pointerup`. A store write on every
+`pointermove` was a synchronous `JSON.stringify` + `localStorage.setItem` of the
+whole persisted slice 120-240 times a second (#1715).
 
 **`paletteOpen` is here, and is not persisted.** The palette lives in `Shell`
 while the things that open it - the welcome Launcher's Search tile, the title
@@ -237,8 +252,10 @@ persisted collapse list never keeps naming a section that no longer exists. It
 is a default, not a policy: once migrated, a user's own toggle on `code`
 overrides it exactly like any other section.
 
-**Persistence:** `vayu.layout` (v4, with real migrations for all three bumps -
-the one store in the app doing persistence versioning end to end)
+**Persistence:** `vayu.layout` (v6, with a real migration for every bump -
+the one store in the app doing persistence versioning end to end; v6 carries
+the old single `requestSplitRatio` forward as the Beside ratio, seeds Below
+even and keeps the position at Beside, so an upgrade re-arranges nothing)
 
 #### `session-store.ts` - Active Environment
 
@@ -843,12 +860,20 @@ three maps never held a given id.
 
 #### `appearance-store.ts` - Pre-Paint Interface Preferences
 
-The UI font, the interface scale and the corner roundedness - the three
-preferences `index.html`'s pre-paint script applies before React mounts. Seeded
-from localStorage at module load and written back one key per preference
-(`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`, `vayu-ui-radius`), *not*
-through zustand's `persist`: the pre-paint script reads those exact keys, and
-`SETTINGS_STORAGE_KEYS` clears them on "Reset app settings".
+The UI font, the interface scale, the corner roundedness and the interface
+density - the four preferences `index.html`'s pre-paint script applies before
+React mounts. Seeded from localStorage at module load and written back one
+key per preference (`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`,
+`vayu-ui-radius`, `vayu-ui-density`), *not* through zustand's `persist`: the
+pre-paint script reads those exact keys, and `SETTINGS_STORAGE_KEYS` clears
+them on "Reset app settings".
+
+Density (issue #1670) differs from the other three in mechanism: font, scale
+and radius each resolve a stored value to something `applyX` computes and
+writes with `style.setProperty`, while `applyDensity` only toggles a
+`data-density` attribute on `documentElement` - the two densities are whole
+`--spacing` values declared directly in `index.css`
+(`:root` / `[data-density="comfortable"]`), so there is nothing to compute.
 
 **State:**
 ```typescript
@@ -2703,3 +2728,5 @@ into a pane that no longer exists.
 10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId })` to scope a preview to a collection; the active environment comes from the session store and is not a parameter.
 
 11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` and `usePrefetchRuns()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load. Warm a *polled* list with a prefetch, never by mounting its hook at the root - an observer that lives for the session polls for the session (#1150).
+
+12. **Select fields, never the store.** Calling a Zustand hook with no selector (`useTabsStore()`) subscribes to the whole state object, so the component re-renders on every `set()` to that store regardless of which field changed. Call the hook with a selector for each field the component reads (`useTabsStore((s) => s.openTabs)`), and read an action through the hook's own `getState()` (e.g. `useTabsStore.getState().focusTab(...)`) inside a handler rather than selecting it in render - actions are stable references, so selecting one buys nothing and widens the read. When a component genuinely needs several fields together, wrap the selector in `useShallow` from `zustand/react/shallow` rather than returning a bare object literal, which fails Zustand's identity check and re-renders every time regardless of whether the picked fields changed; a selector that derives a fresh array or object (`.filter(...)`, `.map(...)`) has the same problem and no wrapper fixes it, so derive downstream of a field selector with `useMemo` instead. `app/src/stores/store-selectors.test.ts` scans `app/src` for all three shapes and fails on any it finds outside its allowlist (#1714).

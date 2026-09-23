@@ -91,11 +91,11 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 					)}
 				>
 					{status === "loading" ? (
-						<Loader2 className="w-3 h-3 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 					) : status === "ready" ? (
-						<CheckCircle2 className="w-3 h-3" />
+						<CheckCircle2 className="size-icon-sm" />
 					) : status === "error" ? (
-						<AlertCircle className="w-3 h-3" />
+						<AlertCircle className="size-icon-sm" />
 					) : null}
 					Schema {STATUS_LABEL[status].toLowerCase()}
 				</span>
@@ -107,17 +107,17 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 			 * not "no schema" - the editors still complete against it, and the age
 			 * is the only thing that says how much to trust it.
 			 */}
-			{age && <p className="text-[11px] text-muted-foreground m-0">Fetched {age}</p>}
+			{age && <p className="text-label text-muted-foreground m-0">Fetched {age}</p>}
 			{status === "error" && entry?.error && (
-				<p className="text-[11px] text-warning-text m-0">{entry.error.message}</p>
+				<p className="text-label text-warning-text m-0">{entry.error.message}</p>
 			)}
 
-			<p className="text-[11px] text-muted-foreground m-0 break-all">
+			<p className="text-label text-muted-foreground m-0 break-all">
 				{request.url || "No URL"}
 			</p>
 
 			<div>
-				<p className="text-[11px] text-muted-foreground m-0 mb-1">
+				<p className="text-label text-muted-foreground m-0 mb-1">
 					{operations.length === 0
 						? "No operation in this document"
 						: `${operations.length} ${operations.length === 1 ? "operation" : "operations"}`}
@@ -142,7 +142,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 									})
 								}
 								aria-label={`Go to ${operation.kind} ${operation.name ?? "(anonymous)"} in the editor`}
-								className="gap-1 px-1 py-0.5 text-[11px] font-mono hover:bg-accent"
+								className="gap-1 px-1 py-0.5 text-label font-mono hover:bg-accent"
 							>
 								<span className="text-muted-foreground">{operation.kind}</span>
 								{/* An anonymous operation is the shorthand `{ … }` form,

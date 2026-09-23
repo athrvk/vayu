@@ -29,6 +29,7 @@
 import type { ReactNode } from "react";
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 export interface ChainCardProps {
 	/** The sentence in the header - what is being inherited, and from where. */
@@ -43,14 +44,20 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 	return (
 		<div className="enter-fade rounded-md border border-primary/30 bg-primary/10">
 			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
-				<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" aria-hidden="true" />
+				{/*
+				 * `size-icon` (16px), not `size-icon-sm`: matches `Callout.tsx`'s own
+				 * leading-icon size, which is what actually centers on a `text-xs
+				 * leading-relaxed` line at `mt-px` - a 12px icon at the same offset
+				 * sits visibly above the text's vertical center instead of beside it.
+				 */}
+				<Info className="size-icon text-primary shrink-0 mt-px" aria-hidden="true" />
 				<div className="flex-1 min-w-0">{summary}</div>
 			</div>
 
 			<div className="px-3 py-2">
-				<div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
+				<Eyebrow size="xs" className="mb-1.5">
 					{caption}
-				</div>
+				</Eyebrow>
 				{children.map((row, i) => (
 					<ChainRow key={i} last={i === children.length - 1}>
 						{row}

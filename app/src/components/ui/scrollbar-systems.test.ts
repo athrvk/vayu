@@ -129,12 +129,49 @@ describe("scrollbar width", () => {
 			}
 		}
 
+		// Only width and color must be inside the guard; gutter is outside.
 		const declarations = [...rules.matchAll(/scrollbar-(?:width|color)\s*:/g)];
 		expect(declarations.length).toBeGreaterThan(0);
 		for (const d of declarations) {
 			expect(d.index).toBeGreaterThan(open);
 			expect(d.index).toBeLessThan(close);
 		}
+	});
+
+	it("reserves a gutter for scrollbars on scroll containers only, outside the @supports guard", () => {
+		const rules = css.replace(/\/\*[\s\S]*?\*\//g, (c) => " ".repeat(c.length));
+
+		// Find all occurrences - there must be exactly one scrollbar-gutter declaration.
+		const matches = [...rules.matchAll(/scrollbar-gutter\s*:\s*stable/g)];
+		expect(matches.length).toBe(1);
+
+		// The selector must be scoped to scroll containers via Tailwind utility
+		// classes, not a bare :where(*), to avoid creating gutters on hidden
+		// overflow containers (which are used for truncation and clipping).
+		const gutterRule = rules.substring(0, matches[0].index);
+		expect(gutterRule).toContain(".overflow-auto");
+		expect(gutterRule).toContain(".overflow-y-auto");
+		expect(gutterRule).toContain(".overflow-scroll");
+		expect(gutterRule).toContain(".overflow-y-scroll");
+		expect(gutterRule).not.toMatch(/:where\(\*\)\s*{[^}]*scrollbar-gutter/);
+
+		// Find the @supports block bounds.
+		const open = rules.indexOf("@supports not selector(::-webkit-scrollbar)");
+		expect(open).toBeGreaterThan(-1);
+
+		let depth = 0;
+		let close = rules.indexOf("{", open);
+		for (let i = close; i < rules.length; i++) {
+			if (rules[i] === "{") depth++;
+			else if (rules[i] === "}" && --depth === 0) {
+				close = i;
+				break;
+			}
+		}
+
+		// The gutter declaration must NOT be inside the @supports block.
+		const gutterIndex = matches[0].index;
+		expect(gutterIndex).toBeGreaterThan(close);
 	});
 
 	it("keeps the tab-strip override narrower than the baseline it overrides", () => {

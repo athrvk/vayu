@@ -23,11 +23,13 @@ Two consequences worth keeping in mind before adding anything here:
 ## Structure
 
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, state selection
-- `EmptyState.tsx` - fresh workspace; import leads, and this is the only state
-  that carries branding
+- `FirstRunWelcome.tsx` - fresh workspace; import leads, and this is the only
+  state that carries branding
 - `Launcher.tsx` - populated workspace; actions, recent runs, counts
-- `components/ActionTile.tsx`, `components/RecentRuns.tsx`,
-  `components/FooterLinks.tsx`
+- `components/ActionTile.tsx`, `components/DemoApiTile.tsx`,
+  `components/RecentRuns.tsx`, `components/FooterLinks.tsx`
+- `demo-request.ts` - the request `DemoApiTile` creates
+- `welcome-column.ts` - the one class string the three states share
 
 ## Notes
 
@@ -37,8 +39,29 @@ Two consequences worth keeping in mind before adding anything here:
 - Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel. The
   renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would
   spawn an unmanaged Electron window.
+- **The column is the state's own, not the container's** (`welcome-column.ts`,
+  #1691). The screen used to fill the tab, so at 1440px the tiles and the recent
+  runs hugged the left edge with the right two-thirds empty. `WelcomeScreen`'s
+  scroller contributes gutters only and each state carries `WELCOME_COLUMN`; a
+  skeleton in a different column from the content it stands in for would shift
+  the page the moment the queries land, which is what the skeleton exists to
+  prevent. `max-w-2xl` is the widest size on the dialog scale, for the same
+  reason that size exists: a surface whose work is reading and choosing.
 - Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
+- **The "Open Demo API" tile is a second first-run step, decided in issue
+  #1694**: it is a tile rather than a strip, and on the Launcher it retires the
+  moment a run exists (`Launcher.tsx` renders `DemoApiTile` only while
+  `runs.length === 0`) - no dismiss of its own, since the question it asks is
+  answered by then. It opens a real, pre-filled request (`demo-request.ts`)
+  through the same `useNewRequest` targeting every other "New request" entry
+  point uses, so it never disagrees with them about where the request lands.
+  **`FirstRunWelcome` carries it too**, unconditionally: the original scoping
+  to "the Launcher is the end state" missed that a workspace this empty has no
+  collection yet either, and `onNewRequest` already creates one behind the
+  scenes on this screen - the demo tile's pitch is exactly as available here
+  as once the Launcher takes over, so there is no `runs.length` gate to write
+  (this screen only renders when both `collections` and `runs` are empty).
 
 ## Usage
 

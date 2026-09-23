@@ -19,6 +19,7 @@
 
 import { fmtVitals } from "@/modules/dashboard/components/charts/uplot";
 import type { RunReport } from "@/types";
+import { Callout } from "@/components/shared";
 
 type MonitorSection = NonNullable<RunReport["monitor"]>;
 
@@ -80,11 +81,14 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 	return (
 		<div className="space-y-3">
 			{monitor.samples === 0 && monitor.failures > 0 && (
-				<p className="p-3 text-sm bg-destructive/10 border border-destructive/20 text-destructive-text">
-					Every scrape failed ({monitor.failures} of {attempts}). Nothing was recorded, so
-					there is no chart above - check that the monitor URL was reachable from the
-					engine for the life of the run.
-				</p>
+				/* Block-level, not field-level: this is a condition about the whole
+				   pane rather than a control refusing a value, so it is a Callout -
+				   see the three error levels in docs/design-system.md. */
+				<Callout severity="blocking" title="Every scrape failed">
+					{monitor.failures} of {attempts}. Nothing was recorded, so there is no chart
+					above - check that the monitor URL was reachable from the engine for the life of
+					the run.
+				</Callout>
 			)}
 
 			{monitor.samples > 0 && series.length === 0 && (

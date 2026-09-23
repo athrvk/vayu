@@ -692,6 +692,17 @@ it decays. A raw palette class here is only defensible if it comes with a
 one, which is why every theme-blind foreground found in this tree failed in
 light mode and passed in dark.
 
+**`palette-tokens.test.ts` now guards all of `modules/` and `components/`**
+(issue #1693), not just the request/response tree it was cut for. The settings
+restart banner was the last `dark:`-paired holdout, and it moved to the
+`--warning` family the "Pending" chip one card below it already used - which
+is the argument for widening: the token existed, the banner just predated it.
+Two exemptions are listed in the guard, both `text-purple-500` marking a
+*load test* (`RunItem`'s bolt, `LoadTestDetail`'s P99 arrow). That is a kind
+rather than a status, so the app's one violet token - `--status-redirect`,
+which means 3xx - would be the wrong word, and both were measured where they
+sit (4.36/4.59 and 3.50/3.66 against the 3.0 icon bar) rather than assumed.
+
 ### HTTP Method Color Tokens
 
 **Always render methods with `MethodBadge`** (`components/shared`) - never a
@@ -997,6 +1008,15 @@ Both live in `appearance-store` (source of truth `constants/appearance.ts`),
 persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
 text stays JetBrains Mono regardless.
 
+**Interface density** (issue #1670) is a fourth Interface control, next to
+Roundedness: `Default` and `Comfortable`, toggled by a `data-density`
+attribute on `documentElement` rather than a computed value, because the two
+densities are whole `--spacing` values declared in `index.css` (see Spacing
+Scale below) with nothing for a resolver function to pick between. The name
+`Comfortable` also named a discontinued interface-scale preset (a 1.1x zoom
+factor); the two are unrelated settings under different storage keys, and the
+scale preset has not been offered since the slider above replaced it.
+
 The View menu's `Ctrl`/`Cmd` `+` `-` `0` drive that same setting rather than
 Chromium's own zoom, so a keyboard zoom persists across a restart and "Actual
 Size" means 100% *because that is the default setting*, not because it bypasses
@@ -1007,7 +1027,7 @@ composes with page zoom.
 
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
-| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
+| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-label font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-hero font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-metric font-bold font-mono` |
 | View title | 20px | semibold | `text-xl font-semibold` |
@@ -1015,16 +1035,17 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge (mono) | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
-| Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
+| Micro / badge (mono) | 10–11px | mono semibold | `text-micro font-mono font-semibold` |
+| Micro / badge (UI face) | 10–11px | semibold | `text-micro font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
-**Only `text-[10px]` and `text-[11px]` may be written as arbitrary values.**
-Everything else has a named step, and `type-scale.test.ts` fails on anything
-outside that set. The two metric sizes were on that list until they became
-`--text-hero` (34px) and `--text-metric` (22px) in `index.css` - the same move
-`--text-md` made, and for the same reason: a named step arrives with its
-line-height, an arbitrary one does not.
+**No font size is written as an arbitrary value.** Every step in the table
+above has a name, and `type-scale.test.ts` fails on any `text-[Npx]` in
+`app/src`. The last two exceptions closed in #1692: 11px and 10px - the app's
+two most-used sizes, at 188 and 60 call sites - are `--text-label` and
+`--text-micro` now, joining `--text-hero` (34px) and `--text-metric` (22px)
+before them, which closed the same way for the same reason: a named step
+arrives with its line-height, an arbitrary one does not.
 
 **A step whose name is not a size word has to be registered in `cn()`.**
 `text-<x>` is either a font size or a text colour, and tailwind-merge tells the
@@ -1153,8 +1174,108 @@ interface-scale slider still multiplies everything: these are the defaults the
 register is judged on, not a ceiling on the user.
 
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
-hides icons from a scale audit and lets off-grid values (15px) creep in. Use
-`w-3 h-3` (12), `w-3.5 h-3.5` (14), `w-4 h-4` (16), `w-5 h-5` (20).
+hides icons from a scale audit and lets off-grid values (15px) creep in.
+
+**The two most common icon sizes are fixed steps, not `--spacing` multiples**
+(issue #1679, superseding the #1670 decision below). Use `size-icon` (16px,
+was `w-4 h-4` / `size-4`) and `size-icon-sm` (12px, was `w-3 h-3`) - the app's
+own legibility floor at both densities, per the Chrome, Target and Icon
+Floors table under Spacing Scale Conventions. `w-5 h-5` still rides
+`--spacing` (15/20px at Default/Comfortable): it was not part of the #1679
+fix pathway and remains density-scaled until a reason to fix it turns up.
+
+**`h-3.5 w-3.5`, `w-3.5 h-3.5` and `size-3.5` are banned outright**
+(`components/ui/icon-size-token.test.ts`, issue #1693). They were a third
+icon size with no token behind them, spelled three ways across 152 call
+sites and doing the same job as `size-icon-sm` in the same rows; all of them
+are now `size-icon-sm`, a deliberate step onto the scale from 14px to 12px
+rather than a translation. `size-icon` was wrong for them - each sits beside
+`text-sm` or smaller text, which is why it was written under the default in
+the first place.
+
+*Superseded decision (issue #1670, kept for history): the shrink applied to
+icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
+Default and `w-3 h-3` read 9px, both checked by eye against a live render.
+The owner's report on 0.32.0 reversed it: 12px and 9px glyphs read as small,
+not as dense, which is what sent `size-icon`/`size-icon-sm` back to a fixed
+floor.*
+
+### Spacing Scale Conventions
+
+Every `p-*`, `m-*`, `gap-*`, `space-*` and `h-*`/`w-*` utility resolves to
+`calc(var(--spacing) * n)` (Tailwind v4), so the one `--spacing` declaration in
+`index.css` moves every padding, margin, gap and row height in the app at
+once (issue #1670). Two densities, both in `index.css`: `Default`
+(`--spacing: 0.1875rem`, 3px/unit) and `Comfortable`
+(`[data-density="comfortable"] { --spacing: 0.25rem }`, 4px/unit - the value
+Tailwind defaulted to before this variable existed, so Comfortable is
+0.30.0's layout exactly, not an approximation of it). Set by Settings →
+Appearance → Interface → Density, owned by `appearance-store`
+(`applyDensity`), applied pre-paint.
+
+| Use | Class | Default | Comfortable |
+|-----|-------|---------|-------------|
+| Control gap | `gap-2` | 6px | 8px |
+| Group gap | `gap-3` | 9px | 12px |
+| Section gap | `gap-4` / `space-y-4` | 12px | 16px |
+| Card padding | `p-4` (`CardHeader`/`CardContent`/`CardFooter`) | 12px | 16px |
+| Dialog padding | `p-5` (`DialogContent`) | 15px | 20px |
+| Drawer row height | `h-8` | 24px | 32px |
+| Icon (menu/toolbar) | `w-3.5 h-3.5` | 10.5px | 14px |
+| Icon (panel heading) | `w-5 h-5` | 15px | 20px |
+
+`density.test.ts` reads both `--spacing` declarations directly off `index.css`
+and reds if either value changes. `spacing-scale.test.ts` guards `Card` and
+`DialogContent` specifically - the two primitives this issue tightened -
+rather than scanning the whole tree for `p-6`/`p-8`/`gap-6`/`gap-8`: several
+other `p-6`/`p-8` call sites exist outside those two primitives (page-level
+containers, and the `EmptyState`/`ErrorState` shared components) and were
+deliberately left alone as outside this issue's fix pathway. `--titlebar-height`
+stays a literal `32px`: it sizes the macOS traffic lights, a fixed platform
+constant no density setting should move.
+
+### Chrome, Target and Icon Floors
+
+**Density scales rhythm - row heights, paddings, gaps - not chrome, interactive
+targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
+must not carry below it: a chrome band is an anchor, not a list row; an
+interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
+legibility floor. Nine named steps, outside the `--spacing` multiplier,
+generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
+these. They live in a plain `@theme` block in `index.css`, deliberately not
+`@theme inline`: `inline` bakes a literal into each generated utility instead
+of a `var()` reference, which would silently disable the Comfortable override
+below.
+
+| Step | Class prefix | Default | Comfortable | Used by |
+|------|-------|---------|-------------|---------|
+| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
+| `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
+| `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
+| `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
+| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
+| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
+| `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
+
+`band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
+theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
+chrome anchor or a glyph's legibility does not become less real at a looser
+density. The wider two arrived with issue #1688, which moved the last three
+bands off arbitrary bracketed literals; a band written that way was the one
+piece of chrome in the app that could follow no token at all, and the rows still
+breathe with the density setting because their own padding and gaps ride
+`--spacing`. `header-band.test.ts` fails on any element that paints a band (a
+bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
+`control-sm` and `target` scale on their own schedule under
+`[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
+just a different curve, so a control never drops below its own floor at
+either density. `density.test.ts` and `chrome-floors.test.ts` guard both
+halves of this: the former that the nine steps are declared with these
+values and none of them is expressed as a `calc(var(--spacing) * n)`, the
+latter that the chrome bands, interactive targets and icon classes across
+`app/src` actually use them.
 
 ---
 
@@ -1238,6 +1359,20 @@ The same reasoning rules out `rounded-full` on controls - a button or dropdown
 trigger that keeps its pill shape becomes the one thing on screen ignoring the
 Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
 
+**A control that renders at more than one box size caps the token by
+proportion instead of using it bare.** `Checkbox` (`ui/checkbox.tsx`) is
+instantiated at 12-28px depending on caller (`size-icon-sm`, `size-icon`,
+`size-target`), and `--radius-md` is a fixed length - 10px at Rounded, past
+half the width of a 12-16px box. Applied bare, a checkbox at Rounded became a
+circle indistinguishable from a radio button, while the same class on the
+24-28px row-enable checkbox stayed an ordinary rounded square: one token, two
+unrelated shapes. The fix is `rounded-[min(var(--radius-md),25%)]`: Square
+(`--radius: 0`) is unaffected at every size, Rounded caps at a quarter of the
+box instead of degenerating into a circle, and the cap only ever removes
+roundness from a small instance - it never adds any to a large one. The next
+control that varies its own box size (a radio, a colour swatch) should reach
+for the same `min(token, %)` shape rather than relearning this.
+
 ---
 
 ## Animations
@@ -1277,6 +1412,7 @@ One curve pair and one duration per tier, declared once as CSS custom properties
 | `--dur-panel-in` / `--dur-panel-out` | 180ms / 130ms | Dialog - the whole view dims |
 | `--dur-menu-in` / `--dur-menu-out` | 140ms / 100ms | Popover, DropdownMenu, Select, ContextMenu |
 | `--dur-tooltip-in` / `--dur-tooltip-out` | 100ms / 80ms | Tooltip - must read near-instant |
+| `--dur-icon-nudge` / `--dur-icon-play` | 200ms / 280ms | Icon motion - a hover nudge that unwinds, a one-shot sequence (x2 for two-phase) |
 
 **Dialog** (`.dialog-panel`/`.dialog-overlay`) consumes these directly in hand-written `@keyframes` - see the comment above them for why it does not use `tw-animate-css`'s stock utility stack (a centring hack it does not need, no overlay-sync problem the others don't have).
 
@@ -1289,6 +1425,16 @@ One curve pair and one duration per tier, declared once as CSS custom properties
 **`TabsContent`** (`tabs.tsx`) is the one place `.enter-fade` sits on an element that *does* carry a Radix `data-state` - `data-[state=inactive]:hidden` toggles the native `hidden` attribute rather than mounting/unmounting, so there is no conditional-render moment for `.enter-fade` to key off in the usual sense. `@starting-style` fires on any change of display type, `none` to something else included, which is exactly what a `hidden` toggle is - so the same class still applies, and re-fires on every switch back to an already-visited tab, not just the first. A force-mounted panel (`forceMount`, e.g. Collection Detail's four draft-preserving tabs) gets the same fade for the same reason: it never truly unmounts, only its `hidden` attribute flips.
 
 **`LabelSwap`** (`app/src/components/ui/label-swap.tsx`) is for a button/badge/status label that changes text in place - "Send" → "Sending" → "Send". It solves two problems together, both of which a naive `key={label}` + `.enter-fade` on the bare text gets wrong: the text fading is not the only thing that changes (the *box* resizes too, since "Sending" is wider than "Send", and Apple's version never moves the control around it), and the fade needs the DOM node to actually remount for `@starting-style` to fire again. The fix for the first is `TabLabel`'s (`tabs.tsx`) width-reservation trick generalised to more than one word: every candidate string in `states` sits in the same CSS grid cell, `invisible` and `h-0`, so the column is sized by the widest one while only the visible text contributes height; `aria-hidden="true"` on those twins keeps a screen reader from hearing every candidate read out. The fix for the second is `key={label}` on the live span, which remounts it - and therefore replays `.enter-fade` - every time `label` changes. `states` must be the finite, enumerable set the caller already knows; it is not inferred by watching `label` over renders (that would start too narrow and still jump the first time a wider state appears), and a data-derived label (a count, a status string from a payload) has no fixed "widest" to reserve, so `LabelSwap` is the wrong fit for one.
+
+**`TabCount` / `TabErrorDot`** (`app/src/components/ui/tabs.tsx`) are the answer for the data-derived case `LabelSwap` turns away. A mark beside a tab label is a flex item on a `shrink-0` trigger inside a `flex-nowrap` list, so one that *mounts at full width* widens its trigger by its own width plus the trigger's `gap-1.5` and pushes every trigger to its right - and whatever else shares the row - along with it; typing the first character into an empty Params table moved the seven tabs after Params and the `Table` toggle past them. A hidden widest twin cannot fix it either, because a count is a number rather than one string rendered two ways.
+
+The fix is `MARK_TRACK`: a `grid-template-columns: 0fr -> 1fr` transition (the standard technique for animating an element's own contribution to a flex/grid container's size without a fixed target width - `0fr` is exactly zero, `1fr` resolves to the content's intrinsic size, and both are real track values a `transition` can interpolate between, unlike animating to `auto`). `-ms-1.5`/`ms-0` cancels and restores the trigger's `gap-1.5` in step with the track, so an empty mark costs nothing at all, not even the gap before it - an earlier version held a permanent `min-w-[1ch]` slot open instead, which stopped the jump but paid that width on every countable tab whether or not anything was ever counted, which is exactly the standing cost this replaces. `TabCount` stays mounted with empty content when there is nothing to count (per its own contract below), so a value changing is a track-width transition on an already-present node, not a fresh mount - `TabErrorDot`'s one call site swaps it in for a `TabCount` outright, so that *is* a fresh mount, and needs `starting:grid-cols-[0fr]` (`@starting-style`) for a "before" frame to animate from, the same way `.enter-fade` does for a plain conditional mount.
+
+Two consequences for call sites: render `TabCount` **unconditionally** wherever a tab can carry a count, passing `undefined` for none (gating the element is what reintroduces the jump), and render none at all on a tab that never can, so it pays no width, ever - not even a collapsed track. A count crossing 9 to 10 still grows the trigger by a digit and moves its neighbours, because `1fr` sizes to the content's actual width; that is content genuinely growing, not a defect the mechanism is meant to hide.
+
+**Holding the last content through an exit** is the one place this system spends JS on motion, and it is the other half of the `.enter-fade` limitation above. A mark whose content is conditional (`{count ? … : null}`, `{hasResults && <Badge/>}`) is removed from the tree in the same commit its state goes back to empty - so a container animating around it at that moment, `MARK_TRACK`'s `1fr -> 0fr` most often, spends its whole duration collapsing around an already-empty box while the thing that carried the meaning was cut in one frame. The container's own motion is what makes it easy to miss: something *is* moving, just not that. `useHeldValue` (`app/src/hooks/useHeldValue.ts`) separates what is true from what is drawn - the live value drives the container so the collapse starts on time, and `shown` holds the outgoing content for a beat so an opacity transition keyed off `fading` has a populated node to take out. The reference implementation is `useSaveStatusDisplay` in `app/src/components/layout/Dock.tsx`, which is the same shape specialised to the save store (it also floors how long "Saving…" stays up); `TabCount` and the response viewer's `TestsResultChip` use the general form. Two durations, because the two play the halves in a different order: the Dock's line is centred in its track, so it fades first and collapses after (`TIMING.SAVE_LINE_FADE_MS`, 200ms, matching its own `duration-200`); a mark is a digit or a four-character chip already clipped by `overflow-hidden`, so it fades *while* its track closes, one gesture at `TIMING.MARK_FADE_MS` (150ms, matching `MARK_TRACK`'s `duration-150`). It applies only where content genuinely goes to *nothing* - `LabelSwap` and `IconSwap` move between known non-empty states and need none of it.
+
+**`IconSwap`** (`app/src/components/ui/icon-swap.tsx`) is the same mechanism for a glyph instead of a word - Copy → Check, Eye → EyeOff, Play → Square, Folder → FolderOpen. Every icon in the `icons` map renders into one grid cell, the reserve twins `invisible h-0` and `aria-hidden` (every one of them, the live state's included, so the box is the same size whichever state is showing), and `key={state}` on the live cell remounts it so `.enter-fade` replays. Two glyphs of the same nominal size are still not the same width of ink, and a pair where one carries a `mr-1.5` is enough to shift the label beside it, which is what the reservation prevents. It is a *different mechanism* from `data-icon-motion` (Icon motion, below), not a variant of it: a motion animates one glyph that stays itself and is triggered by its owner's hover, a swap crossfades between two glyphs and is triggered by state. `IconSwap` puts nothing of its own on the nodes it is handed, so an icon can do both. Entry only, for `.enter-fade`'s documented reason, and a state that flips back inside one fade duration reads as a flicker rather than a crossfade - the accepted cost of staying JS-free.
 
 **`CollapsibleContent`** (`app/src/components/ui/collapsible.tsx`) is the one disclosure that animates its own height, and it does it with `tw-animate-css`'s stock `collapsible-down`/`collapsible-up` keyed off Radix's `data-state`. Radix measures the open box into `--radix-collapsible-content-height` and those keyframes already read it, so there is nothing to hand-roll: the class list is `overflow-hidden` (what makes the height clip rather than squash) plus `data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up`. The curve is borrowed the Toast way, file-local, because the generated `--animate-collapsible-*` value reads `--tw-ease` ahead of its own `ease-out`: `[--tw-ease:var(--ease-enter)]` with a `data-[state=closed]` twin swapping in `--ease-exit`. The duration stays tw-animate-css's 200ms - the three tier tokens are all about chrome arriving over the view, and inline content pushing its siblings down is not that.
 
@@ -1500,7 +1646,29 @@ see.
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**An operation that takes seconds announces its progress.** A dialog that sits
+on a spinner and a bar reports nothing to a screen reader: the bar's value is
+read on demand, never pushed. Every multi-second operation therefore puts
+`role="status" aria-live="polite"` on **the visible line that says what is
+happening** - not an off-screen copy, which is a second string to keep in step
+with the first. The import dialog (`ImportProgressView`), the export dialog and
+the collection tree's busy states all do.
+
+The counterpart rule is what stays out of the region: a polite region
+re-announces on every text change, so a figure that moves several times a second
+(`ImportProgressView`'s byte counter) is marked `aria-hidden` inside it and left
+for the eye. A counter that moves once per file is slow enough to keep.
+
+**A `role="img"` is a promise that the element has something to say.** A
+decorative glyph given the role and no label announces as an unlabelled image; a
+labelled one beside text that already says the same thing announces twice.
+`jsx-a11y` can see neither case. The mechanical half - the label - is
+`role-img-labelled.test.ts`; the other half is a judgement made at the site, and
+the run row's status glyph is where it landed on `aria-hidden` (see Status
+Badges).
 
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
@@ -1561,7 +1729,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **20 directives across 14 files**, listed
+file that provides the missing half. **21 directives across 16 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1572,11 +1740,12 @@ ceiling that comes down when a suppression goes rather than a budget to spend.
 Paths are relative to `app/src`, and the count in brackets is directive lines,
 not rule names - two of these lines silence two rules at once.
 
-- `components/layout/TabStrip.tsx` (2) - `jsx-a11y/interactive-supports-focus`
-  on the tablist, whose tab stop is the active tab;
-  `jsx-a11y/click-events-have-key-events` on the close affordance, which is
-  Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
-  here.
+- `components/layout/TabStrip.tsx` (1) - `jsx-a11y/interactive-supports-focus`
+  on the tablist, whose tab stop is the active tab.
+- `components/layout/TabItem.tsx` (1) - `jsx-a11y/click-events-have-key-events`
+  on the close affordance, which is Delete or Backspace on the focused row and
+  a `tabIndex={-1}` pointer target here (the row moved out of `TabStrip.tsx`
+  with #1714).
 - `components/layout/ActivityRail.tsx` (1) -
   `jsx-a11y/no-noninteractive-element-interactions` on the `<nav>`: roving
   `tabindex` for Up/Down between the six view buttons, the same shape
@@ -1600,6 +1769,12 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/no-static-element-interactions` on the box that widens the hit area
   around a native input, and `no-static-element-interactions` again on the
   `pointerEvents: none` overlay whose keydown delegates for the tokens inside it.
+- `components/ui/disabled-hint.tsx` (1) -
+  `jsx-a11y/no-noninteractive-tabindex` on the wrapper span that explains a
+  disabled control (issue #1690): the child it wraps is `disabled`, so it is
+  neither focusable nor able to receive a pointer event, and the wrapper's tab
+  stop is the only keyboard path to the reason - the same argument the three
+  `Dock.tsx` tooltips above are suppressed on.
 - `modules/collections/CollectionTree.tsx` (1) -
   `jsx-a11y/interactive-supports-focus`, the roving tab stop seeded by
   `useRovingTreeFocus`.
@@ -1680,6 +1855,15 @@ leave a list of names that reads as inert. The test is the same one the state
 toggle above passes - would the row still say what it is for with the control
 absent - and here the answer is no.
 
+**Every row that has actions draws them this way, Services included** (issue
+#1690). The Services drawer's rows were the last holdout - two or three
+always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
+URL truncated to make room for controls the user had not come for. They are one
+hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
+URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
+There is no exemption: the rows that keep visible controls are the two the rules
+above name - a state toggle, and a row with no job of its own.
+
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation
@@ -1687,6 +1871,14 @@ for free. Used by request rows and environment rows. It opens on a pointer and
 on a click reporting `detail === 0` - the keyboard's kind - and takes a
 `tabIndex` prop, `0` unless the row sits in a roving-tabindex tree. See Tree
 Navigation for why.
+
+**A disabled item says why on the item.** `RowAction`'s `disabledReason` draws
+the reason at the row's trailing edge - "Move up / Already first" - rather than
+in a tooltip: `DisabledHint`'s wrapper works by taking a tab stop of its own,
+and inside a menu that second stop competes with Radix's own focus management,
+which deliberately skips a disabled item. `RowActionBody` draws it, so the `⋯`
+dropdown and the right-click menu explain a gate the same way. See
+"A disabled control says why" under Component Patterns for the button case.
 
 **Right-click reaches the same actions through `RowContextMenu`** (issue
 #1360): one list, two menus. `row-actions.ts` holds the one rule about the
@@ -1740,6 +1932,26 @@ header band, body below it.
   the height is a token and not an `h-8`: `TabStrip.tsx` and `DrawerPanel.tsx`
   cannot see each other, and `titlebar-height.test.ts` holds them together.
 
+- **A group inside a view is a `DrawerSection`, and a count is the muted inline
+  count.** The frame gave the four views one shape; the groups inside a view had
+  none. Services drew muted labels with a trailing plus, Variables drew a
+  chevron, an icon, a filled `Badge` count and a plus, and the collection rows
+  wrote the same fact as inline `(2)` text one click away from that badge - two
+  count idioms in one drawer. `DrawerSection` owns the shape (the padding, the
+  muted small type, the chevron, where the count sits, where the actions sit) and
+  the **badge idiom loses**: a count beside a group name is not a status and not a
+  control, it is the least important thing in the row, and a `Badge` gives it a
+  fill, a border, a 20px floor and the weight of a chip. `DrawerSectionCount` is
+  exported for a *row* to use the same idiom, which is how the collection tree
+  stays in step without gaining a section header - its panel band already says
+  "Collections", and a section of the same name inside it would be a double
+  heading.
+- **The section's ARIA stays at the call site.** Variables' headers are
+  `role="treeitem"` rows in a roving-tabindex tree and their "+" sits outside that
+  row on purpose (the tree has no create key, so the button is the drawer's own
+  tab stop). `rowProps` and `activatorProps` are spread through rather than
+  owned, so the primitive never has to know about the tree. Guard:
+  `DrawerSection.test.tsx`.
 - **The frame owns header padding; the body is flush.** Rows run edge to edge -
   the sidebar convention, and it recovers the ~32px of row width the old inset
   cost. Rows bring their own internal padding.
@@ -1792,7 +2004,8 @@ header band, body below it.
 
 ## Drawer Row Metric
 
-**Single-line drawer rows are `h-8` (32px).** State the height; do not let it
+**Single-line drawer rows are `h-8` (24px at the default density, 32px at
+Comfortable - see Spacing Scale above).** State the height; do not let it
 fall out of the content. It previously did - a 28px chevron set the collection
 row, padding set the others - so the four drawer views ran **34 / 36 / 38 / 40px**
 and the rhythm shifted every time the user switched view, one click apart in the
@@ -1805,8 +2018,9 @@ centre; do not re-add vertical padding, which is what caused the drift.
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
-The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
-an adequate pointer target, and the row around it opens the collection.
+The disclosure chevron is `w-6 h-6` - 18px at the default density, 24px at
+Comfortable - sized to fit the row at either. That is still an adequate
+pointer target, and the row around it opens the collection.
 
 **`h-8 items-center` on the row means the activator needs `self-stretch`.** The
 two rules above interact, and the interaction is a bug the eye cannot see. A
@@ -1894,8 +2108,22 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
-Text that **wraps** (`break-words`, e.g. the run URL in `RunItem`) is neither -
-it never clips, so it needs no tooltip.
+Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
+tooltip.
+
+**A URL is the exception, and it gives way at the head.** Both treatments above
+keep the beginning of a string, which is right for a name and wrong for a URL:
+the scheme and host are what every row on one host shares, so a page of local
+runs read `http://127.0.0.1:9...` five times over for five different requests.
+`lib/truncate-url.ts` (`truncateUrl(url, max = 48)`) shortens the head and keeps
+the path tail, and `RunItem` passes its URL-titled rows through it before the
+`truncate` class ever applies - the class stays, because a character budget is
+not a promise about a narrow drawer. The full value stays in the element's
+`title` and in the row's accessible name.
+
+It is a display helper and never parses: a row can hold a value still being
+typed, a `{{variable}}` in the authority or a relative path, and `new URL()`
+throws on all three.
 
 ---
 
@@ -1928,8 +2156,17 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
 - **Alt+Arrow moves the row itself**, the keyboard half of drag-and-reorder:
   Up/Down among its siblings, Right into the folder rendered above it, Left out
   to after its parent. Alt because the tree owns the bare arrows and the app owns
-  Ctrl/Cmd; every move is announced in the live region below, and the row menu's
-  **"Move to..."** is the same move with no chord at all.
+  Ctrl/Cmd; every move is announced in the live region below.
+- **The row menu carries the same moves with no chord at all**: **Move up**,
+  **Move down** and **"Move to..."** (issue #1690). A chord has to be known
+  before it can be used, so until these existed a keyboard user who had not read
+  the shortcut list could not reorder the tree - while the element list had
+  carried Move up / Move down in its own menu all along, which made one action
+  two actions depending on the list. They call the same `moveByKeyboard` the
+  chords do (one move, one function) and are off at the ends carrying "Already
+  first" / "Already last" as a `disabledReason`, gated off the same block the
+  announcement is computed from. They sit above the row's destructive tail, since
+  the separator there belongs to Delete.
 - Every control inside a row is `tabIndex={-1}`, so those keys are the *only*
   keyboard path to row actions - do not remove one without providing another.
   Both row types must render every hidden control: a folder row without
@@ -2230,9 +2467,24 @@ the footer is a **`DialogBody`**:
 <DialogContent className="sm:max-w-xl">
   <DialogHeader>…</DialogHeader>
   <DialogBody className="space-y-4 py-2">…</DialogBody>   {/* the only scroller */}
-  <DialogFooter>…</DialogFooter>
+  <DialogFooter>
+    <DialogCancelButton onClick={() => onOpenChange(false)} />
+    <Button onClick={handleConfirm}>Run</Button>
+  </DialogFooter>
 </DialogContent>
 ```
+
+**The declining action is `DialogCancelButton`, never a `Button` you pick a
+variant for** (issue #1693). The same word carried three variants across the
+app - `outline` in five dialogs, `secondary` in three, `ghost` in three, plus
+one hand-rolled `<button>` with a copied class list - so which one a user saw
+depended on which dialog they opened. The primitive settles it on `secondary`,
+matching `DeleteConfirmDialog`, the dialog this app shows most often, and it
+deliberately does not take a `variant` prop: a call site that can choose is a
+call site that can drift. `label` renames the word ("Not now", "Keep it"),
+`size` and `className` pass through for the inline forms outside a
+`DialogFooter` that draw the same button in a denser row.
+`components/ui/dialog-cancel.test.ts` bans a `Cancel` label anywhere else.
 
 Three rules hold it together:
 
@@ -2298,7 +2550,14 @@ The width itself is a preference, not component state: `drawerWidth` and
 `contextBarWidth` live in `layout-store`, clamped to `PANEL_MIN_WIDTH` (220) and
 `PANEL_MAX_WIDTH` (480) from `app/src/constants/layout.ts`, and survive a
 restart. The request/response split is `react-resizable-panels` through
-`components/ui/resizable.tsx`, with its ratio in the same store.
+`components/ui/resizable.tsx`, with one ratio per arrangement in the same store
+(`requestSplitRatioBeside` / `requestSplitRatioBelow`, #1711): the share of the
+width a request wants beside its response is not the share of the height it
+wants above it. The builder's divider resets its arrangement to an even split
+on double-click (`ResizableHandle`'s `onReset`), the drawer handle's own
+gesture; stacked panes take a `160px` floor rather than the 20% side-by-side
+ones do, because 20% of a short window is a response pane that cannot show a
+status line and a row of body.
 
 **An editor inside a pane is not one of them.** The Body and script editors fill
 the pane they sit in - a `flex-1` box with a `min-h-40` floor and no ceiling -
@@ -2350,21 +2609,45 @@ button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
 
 ### Dock
 
-The footer is ambient status only, since #1615 moved its two switchers onto the
-rails above: `Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
-`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`. The
-height is that token rather than a bare `h-8` because the toast viewport is
-`fixed` and offsets itself above this strip by the same value - the token is what
-keeps the two from drifting apart.
+**Status in the centre, per-tab view controls on the right, and every item
+has a non-footer path.** #1615 moved the footer's two switchers onto the rails
+above and left it status-only; #1711 amends that rule to admit a right-aligned
+cluster of controls that act on the *active tab's* view. `Dock`
+(`app/src/components/layout/Dock.tsx`) is one flex row,
+`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`,
+with two equal `flex-1` gutters around the centre group so the connection light
+does not shift when the right cluster comes and goes. The height is that token
+rather than a bare `h-8` because the toast viewport is `fixed` and offsets
+itself above this strip by the same value - the token is what keeps the two
+from drifting apart.
 
-The engine connection light (a `bg-current` dot plus Starting… / Connected /
-Disconnected, on `status-success-text` when connected and `--muted-foreground`
-otherwise), a running-services button and a pending-restart button that render
-only when there is something to report, the save status, and the version
-string. **This strip is where the connection state lives** - no sidebar footer
-carries a second copy. Every item here already has a non-footer path when
-there is something to click, so the system Dock covering this strip on macOS
-costs a glance, never a click.
+The centre holds the engine connection light (a `bg-current` dot plus
+Starting… / Connected / Disconnected, on `status-success-text` when connected
+and `--muted-foreground` otherwise), a running-services button and a
+pending-restart button that render only when there is something to report, the
+save status, and the version string. **This strip is where the connection
+state lives** - no sidebar footer carries a second copy.
+
+The right cluster renders **only while the active tab is a request tab**; every
+other tab keeps the centred strip alone. Its one control is
+`ResponsePositionButton` (`app/src/components/layout/ResponsePositionButton.tsx`),
+a `TooltipIconButton` that moves the response pane from beside the request to
+below it and back, its chord in the tooltip. The icon names the destination
+(see Pane Toggles below): `PanelBottom` while the response is beside
+("Response below"), `PanelRight` while it is below ("Response beside"), swapped
+with `IconSwap`. While the setting is Auto the button shows Auto's current pick
+and a click writes an explicit choice. **Right-click picks instead of flipping**:
+a `ContextMenuRadioGroup` over Beside / Below / Auto, the same set as the
+Settings row, which is what puts Auto within reach from the strip and marks
+which setting is in force - the destination glyph by design does not say. →
+`Dock.response-position.test.tsx` (mutation-checked: without the request-tab
+gate, the settings and dashboard cases fail).
+
+The rule that lets a control sit here at all is the one both amendments kept:
+every item has a path that is not the footer (pending restart is the banner in
+Settings, save status opens the tab it names, the response position has its
+chord ⇧⌘B, its palette row and its Settings > Appearance row), so the system
+Dock covering this strip on macOS costs a glance, never a click.
 
 ### Drawer
 
@@ -2375,6 +2658,22 @@ renders nothing while `drawerOpen` is false, and it is labelled by the view
 showing ("Collections sidebar") because one landmark hosts six panels -
 collections, history, variables, services, trash and settings - and
 "Complementary" alone would not say which.
+
+**A drag does not persist per frame.** `useResizeGesture` (`lib/resize-gesture.ts`,
+issue #1738) paints the live value straight into the DOM - `PanelResizeHandle`
+onto the `<aside>`'s inline `style.width` (it is the handle's own
+`parentElement`), the script editor's own resize handle (`ScriptElementForm`,
+`components/shared/ElementList/`) onto its box's `style.height` - once per
+animation frame, and commits to the store it persists to exactly once, on
+`pointerup`. A `pointercancel` (a touch interruption, an OS overlay) reverts
+the live value to where the drag started and commits nothing. A discrete
+keyboard press or the double-click reset still commit immediately; only a
+held key's own repeats coalesce to one commit per animation frame, the same
+way a drag's paint does, so holding a key does not flood `localStorage` with
+one write per repeat. Both handles share this one hook rather than each
+carrying its own copy, after the two independently-written copies this
+started from had already drifted (only one handled keyboard Page/Home/End
+and a reset; neither handled `pointercancel`).
 
 **The Drawer wraps no view in a scroll region.** Each view supplies its own
 `DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the
@@ -2402,6 +2701,14 @@ sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
   grow a close button of its own. A control that changes address with the state
   it controls teaches a position and then abandons it, and the two copies drift
   into saying the same thing differently.
+- **A switch between two arrangements names the destination too.** The Dock's
+  response-position button draws `PanelBottom` while the response is *beside*
+  the request and `PanelRight` while it is *below*: the glyph is where a click
+  takes you, not where you are, because a glyph showing the current state
+  reads as one more status in a strip full of them. The vocabulary for that
+  arrangement is **Beside / Below / Auto** everywhere - UI strings, docs, code
+  comments - never "vertical" or "horizontal", which name opposite things in
+  Postman and in `react-resizable-panels`.
 
 ---
 
@@ -2416,9 +2723,25 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description + optional action |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action` |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
+
+**An empty state that has a create path says so** (issue #1693). Thirty-odd
+call sites had one between them before, so "No environments" and "No mock
+running" were dead ends whose only way forward was a tooltip icon button one
+row up. Twelve now carry `action={<Button variant="link">…</Button>}`, wired
+to the *same* handler that header button uses - never a second, parallel
+create path, which is what would drift. Where the surface genuinely has no
+create of its own the action points at the surface that does
+("Browse collections" from the mock pane), and where the state is one the
+user caused it undoes that ("Clear the filters", "Clear the filter"). A pane
+that is a selection prompt ("No run selected"), a not-found, a loading step
+or a wait on someone else's traffic gets none: there is nothing to offer.
+The `inline` variant takes an action for this reason - the drawer's group
+notes are inline and are where most of the dead ends were - and renders it
+under its single line, so the note stays one column wide inside an inset
+group.
 
 **`ErrorState` is deliberately not a variant of `EmptyState`.** "Nothing here
 yet" and "this failed" are different messages with different affordances, and
@@ -2435,6 +2758,108 @@ its own regression.
 
 Sentence case for titles, everywhere.
 
+### Error text has three levels, and one component each
+
+| Level | What it is | Component |
+|-------|------------|-----------|
+| Field | One control refused one value | `FieldError` |
+| Block | A condition about the form or the pane, which may stack with others | `Callout` |
+| Pane | The thing you came to look at did not load | `ErrorState` |
+
+Field-level messages were hand-written before, in `text-sm`, `text-xs` and `text-[11px]` - the
+import dialog carried all three - some with a leading glyph, some announced and most not.
+`FieldError` is one size (`text-xs`; the sizes were the order the code was written in, not a
+hierarchy) and always `role="alert"`, because a message that appears after a keystroke is a change
+nobody is looking at.
+
+`text-destructive-text` is not by itself an error message: it is also the right foreground for a
+failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
+the line where it can be drawn mechanically - the token in a literal class string on the opening
+tag of a text-bearing element (`<p>`, `<span>`, `<div>`, `<small>`, `<label>`, a list item, a table
+cell, a heading) - and every deliberate exception is named in that guard with what the red text is
+instead, rather than the rule being widened until it passes.
+
+### Tab strips: one trigger look, three band chromes
+
+The trigger has been shared for a while; the band around it was not. Seven call
+sites carried seven recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5`
+with a `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
+`px-3 py-1.5 border-b border-rule bg-muted/30` - so the same control read as a
+different piece of chrome in every pane. `TabsList` takes a **required**
+`variant`, and there is no default: a new strip says which of the three it is
+rather than inheriting whichever call site happened to be written first.
+
+| Variant | Classes | For |
+|---------|---------|-----|
+| `pane` | `border-b border-rule bg-panel px-4` | The strip *is* the pane's chrome band - dashboard, Collection Detail, the import dialog, the unified response viewer |
+| `inset` | `px-1` | A strip inside content that is already padded; the padding only keeps the first trigger's focus ring off the edge - the request strip, the load-test detail |
+| `bare` | none | The band belongs to a parent row that holds other things beside the tabs - the response pane's strip shares its row with the response's facts and its actions |
+
+`bare` is not a fourth look. It is `pane`, drawn by whoever owns the row; the
+list adds nothing so the two cannot paint two rules a pixel apart.
+
+The fill is `bg-panel` and the divider is `border-rule` with no surface class
+beside it - `bg-panel` is the `:root` default surface, the one place where the
+fallback value of `--rule` is the right answer (see "`border-rule`: let the
+surface pick the token"). Guard: `tabs.test.tsx`, both the rendered class lists
+and a scan asserting every call site in `app/src` declares a variant.
+
+### Loading
+
+Three shapes, one rule each, decided once here rather than per module
+(issue #1683/#1689) because the app had accumulated `Loader2` in 35 files,
+`ListSkeleton`/`DetailSkeleton` in about a dozen, `EmptyState`'s
+`iconClassName="animate-spin"`, and `ImportProgressView` - four idioms with
+nothing saying which one a new screen should reach for.
+
+- **First load of a list or pane is a skeleton.** `ListSkeleton` or
+  `DetailSkeleton` - the shape of the content that is about to appear, so
+  the layout does not jump when it arrives.
+- **An in-place action on an existing control is an inline spinner.**
+  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
+  a per-row purge. The control that was clicked is what shows it is working;
+  nothing else on the pane should move.
+- **A multi-step job is a progress view.** `ImportProgressView` and its kin -
+  several named steps with their own state, not a single spinner standing in
+  for all of them.
+
+A screen reaching for a fourth idiom, or for the wrong one of these three, is
+the bug this rule exists to catch.
+
+**Refreshing something already on screen is none of the three: it is a dim.**
+A skeleton and a full-pane spinner both begin by throwing away the content the
+user is reading, which is right for a first load and wrong for a re-fetch -
+re-sending a request whose response is on screen used to blank the response
+pane, so the exchange being replaced was gone from the press of Send. The rule
+is the second bullet's, read to its end: the control that was clicked shows the
+work, and *nothing else on the pane moves size or position*. So the stale
+content stays exactly where it is, the pane takes `aria-busy` and drops to
+`opacity-60` with a `transition-opacity duration-150`, and the dim lifting is
+what says the new data landed. No spinner, no bar, no reflow - anything that
+*reflows* is the thing this replaces. `ResponseViewer` (`modules/request-
+builder/`) is the pattern's call site; the loading branch there keeps the
+centred spinner for the case where there is genuinely nothing to hold on to.
+
+**One exception to "nothing moves": `SendingWave`.** A dim that never moves at
+all reads as inert rather than as a request in flight - easy to mistake for a
+stalled send on anything longer than a beat. `ResponseViewer`'s busy state
+layers a faint band (`response-wave` in `index.css`, `via-foreground/[0.08]`)
+that loops across the pane for as long as the send is open, over the dim
+rather than instead of it. The opacity is the load-bearing number: low enough
+that the stale text underneath stays legible through every pass, which is what
+keeps this from becoming the shimmer this rule is otherwise written against -
+a shimmer built to stand in for content nobody can see yet is stronger than a
+band drawn over content that is already fully there. `pointer-events-none` and
+`aria-hidden`, since it is a hint over content that is still clickable, not a
+control of its own, and `aria-busy` on the pane already carries the state for
+assistive tech. Confined to `ResponseViewer` - the pane it says something about
+is the one with the wave.
+
+**Default entity names are Title Case** ("New Collection", "New Folder"),
+even beside sentence-case headings and button labels ("No collections yet",
+"Delete forever?"). The name is a proper noun for the thing until the user
+renames it; the surrounding UI copy is not.
+
 ### Cards
 
 ```tsx
@@ -2448,23 +2873,29 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ### Section Eyebrow Label
 
 ```tsx
-<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-4">
-  Section Title
-</p>
+<Eyebrow className="mb-4">Section Title</Eyebrow>
 ```
 
-That string has one home: the `Eyebrow` primitive
+The class string behind it (`text-label font-semibold uppercase
+tracking-[0.06em] text-muted-foreground`) has one home: the `Eyebrow` primitive
 (`app/src/components/ui/eyebrow.tsx`), which is what a section label should
 render - it was extracted because the class was hand-typed in about a dozen
-components and two of them had already drifted, and `eyebrow.test.ts` fails on a
-second copy of the literal. The command palette's group headings are an
-`Eyebrow` inside the element cmdk labels the group by.
+components and two of them had already drifted. `Eyebrow` takes `size="xs"` for
+the denser 10px tier some panes run.
+
+`eyebrow.test.ts` no longer guards only a verbatim copy of that literal: since
+#1692 it fails on **any** `.tsx` under `app/src` that combines `uppercase` with
+a `tracking-` utility in one class string, which is the shape every hand-rolled
+eyebrow had. Files that genuinely need the combination for something that is not
+a section label are exempted there by name, with the reason. The command
+palette's group headings are an `Eyebrow` inside the element cmdk labels the
+group by.
 
 ### Status Badges / Pills
 
 **Live (running):**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
   LIVE
 </span>
@@ -2472,22 +2903,37 @@ second copy of the literal. The command palette's group headings are an
 
 **Completed / Stopped:**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
   COMPLETED
 </span>
 ```
 
-**Run status left-bar (RunItem):**
+**Status is never colour alone.** A badge, a chip or a glyph that encodes its
+state only as a hue says nothing to a red/green confusion, a monochrome display
+or a greyscale screenshot - and every status surface here is small, where hue is
+hardest to judge. The rule is redundancy: **shape or a word carries the state,
+and the colour agrees with it.** The LIVE pill above carries the word; the
+history row carries the shape.
+
+**Run status glyph (`RunItem`):** one lucide glyph per status, in the family's
+`-text` token (the bare token is a fill and fails AA as a small foreground - see
+"The bare token is the fill"). It replaced a bare coloured dot, which was five
+identical circles in five colours.
+
 ```tsx
-<div className={cn(
-  "absolute left-0 top-0 bottom-0 w-1",
-  status === "completed" && "bg-green-500",
-  status === "failed"    && "bg-red-500",
-  status === "running"   && "bg-blue-500",
-  status === "stopped"   && "bg-orange-500",
-  status === "pending"   && "bg-muted-foreground"
-)} />
+const STATUS_GLYPH = {
+  completed: { icon: CircleCheck,  className: "text-status-success-text" },
+  failed:    { icon: CircleX,      className: "text-status-error-text" },
+  running:   { icon: Loader2,      className: "text-status-running-text animate-spin" },
+  stopped:   { icon: CircleSlash,  className: "text-status-stopped-text" },
+  pending:   { icon: Circle,       className: "text-muted-foreground" },
+};
 ```
+
+The glyph is `aria-hidden`: the row's own accessible name states the status in
+words, so a screen reader hears it once rather than twice. A glyph that has
+something no adjacent text says takes `role="img"` **and** an `aria-label` on
+the same element instead - `role-img-labelled.test.ts` holds that half.
 
 ### Toasts
 
@@ -2586,6 +3032,81 @@ unreachable and undismissable.
 dismisses itself on a timer and always reports something the user just asked
 for, so interrupting what they are reading is the wrong trade.
 
+### Inline rename
+
+Every tree that renames a row in place does it through one hook,
+`app/src/hooks/useInlineRename.ts` - the collections tree, the variables
+sidebar's environments and the element list. The field is an ordinary `Input`
+at the row's height (`h-6 flex-1 text-sm`) replacing the row's label; the hook
+owns the behaviour:
+
+- **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
+  bare `e.key === "Enter"`. An IME commits its composition buffer with an
+  ordinary Enter keydown, and `mod+Enter` is the app's Send chord - a field
+  acting on it renamed the row *and* sent the request from one press.
+  `commit-enter.test.ts` fails on any new bare comparison outside the
+  hand-rolled activation controls it names.
+- **Escape never commits.** The cancel unmounts the field and the blur that
+  follows is the one the cancel caused, so the hook closes the editor once and
+  that blur does nothing. A blur the *user* caused still commits.
+- **The name is trimmed, and an empty one cancels** rather than erasing a name.
+  The one exception is a field whose entity has an optional name (an element
+  row falls back to its kind label), which asks for `commitEmpty`.
+- **Focus returns to the row after a keyboard close, never after a blur.** Each
+  tree is one tab stop and the field replaces the row's only focusable control,
+  so an Escape that left focus on `<body>` would drop the user out of the tree.
+  After a blur, focus has already gone where the user put it.
+
+A surface that renames something in place uses the hook rather than a fourth
+copy of those four rules.
+
+### Copy feedback
+
+A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
+
+- **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
+- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
+
+**One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
+
+**Every clipboard write goes through `useCopy`.** `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else. `clipboard-single-writer.test.ts` holds the rule to two files - the hook, and `errors/ErrorBoundary.tsx`, which runs when the tree below it has already failed and no hook is reachable.
+
+**A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
+
+### A disabled control says why: `DisabledHint`
+
+A gated control that gives no reason reads as a broken one, and the obvious fix
+does not work: `Button`'s baseline is `disabled:pointer-events-none`, so a
+`Tooltip` wrapped around a disabled button never receives the pointer events its
+trigger listens for, and a disabled button is not focusable either. Both paths to
+an explanation close at the moment there is something to explain.
+
+`DisabledHint` (`app/src/components/ui/disabled-hint.tsx`) is the wrapper that
+keeps them open - a `span` with its own `pointer-events-auto` and its own tab
+stop, holding the tooltip, with the inert control inside it:
+
+```tsx
+<DisabledHint reason={captures.length === 0 && "No captures to clear"}>
+  <Button disabled={captures.length === 0}>Clear</Button>
+</DisabledHint>
+```
+
+- **`reason` is the switch as well as the text.** Falsy renders the children
+  alone, so one expression covers both states rather than two copies of the same
+  button - which is how a hover class or an `aria-label` ends up on one of them
+  and not the other.
+- **The gate stays the child's `disabled` prop.** This adds the explanation and
+  changes nothing about what refuses the click.
+- **The reason names the state, not the remedy in full.** "No captures to
+  clear", "Already first", "No unsaved changes" - one line, present tense. A
+  sentence that needs more than that belongs beside the control, as the
+  elements list's missing-field note already is.
+- **A disabled menu item is the exception.** `RowAction`'s `disabledReason`
+  (`components/shared/row-actions.ts`) draws the reason on the item itself,
+  because a tooltip inside a menu's focus trap competes with the menu for the
+  keyboard and Radix deliberately skips a disabled item. Both menus get it at
+  once through `RowActionBody`. See Row Actions.
+
 ### Destructive Actions
 
 ```tsx
@@ -2610,11 +3131,37 @@ for, so interrupting what they are reading is the wrong trade.
 </Button>
 ```
 
+#### Reversibility
+
+Two lanes, decided once here rather than per module (issue #1683/#1689):
+
+- **Collections and requests go to Trash, with Undo.** Deleting either is
+  recoverable for the retention window Settings shows - the undo toast handles
+  the immediate "I clicked the wrong row", and Trash's own restore handles
+  everything after that.
+- **Everything else confirms and deletes permanently**: environments, history
+  runs, load-test examples, inbox listeners and their captures, certificates.
+  The owner decided this deliberately (#1683) - a second Trash lane for every
+  other entity is not coming, so a module reaching for one should reach for
+  `DeleteConfirmDialog` instead.
+- **A destructive action never runs from a single click without one of the
+  two.** A control that removes data either lands in Trash (no confirm needed
+  - it is reversible) or opens `DeleteConfirmDialog` (no Trash - it is not).
+  Wiring a mutation straight to a button's `onClick` for anything that
+  destroys data is the bug this rule exists to catch (#1689's Clear captures
+  and Empty trash were both found this way).
+- **One template writes the sentence.** `DeleteConfirmDialog` takes `name` and
+  an optional `scope` (`"default"` or `"cascade"`) and builds "Delete
+  {name}? {name} is removed permanently." itself, with a suffix for a
+  container that takes its contents with it. A call site passes `description`
+  only for prose the template cannot say - a count, a conditional clause -
+  never to restate what `name`/`scope` already produce.
+
 ### URL Bar (Flat Style)
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-label */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
 
   {/* Primary action */}
@@ -2683,7 +3230,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
+  <Eyebrow>{label}</Eyebrow>
   <div className="flex items-baseline gap-1.5 mt-0.5">
     <span
       className="text-[34px] font-bold leading-none font-mono tabular-nums"
@@ -2693,7 +3240,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
     </span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
   </div>
-  {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+  {sub && <p className="text-label text-muted-foreground mt-0.5">{sub}</p>}
   {sparkData && sparkData.length > 1 && (
     <div className="mt-2">
       <Sparkline data={sparkData} color={sparkColor || "hsl(var(--primary))"} />
@@ -2708,7 +3255,7 @@ Note: sparkline renders **below** the value row, not beside it.
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-3">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">{label}</p>
+  <Eyebrow className="mb-1.5">{label}</Eyebrow>
   <div className="flex items-baseline gap-1">
     <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
@@ -2930,6 +3477,9 @@ container gets them; there is nothing to remember and nothing to apply.
 		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 	}
 }
+:where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll) {
+	scrollbar-gutter: stable;
+}
 ::-webkit-scrollbar {
 	@apply w-1.5 h-1.5;
 }
@@ -2971,6 +3521,8 @@ sweep of the stylesheet can see it drift.
 move together or the suite reddens.
 
 Do not take a content pane below 6px: the thumb stops being a mouse target.
+
+The baseline also reserves a 6px gutter with `scrollbar-gutter: stable` on scroll containers (via Tailwind utility classes), placed outside the `@supports` guard because this property does not trigger the standard-property opt-out that affects width and color. Per CSS Overflow 4, the gutter reserves for `overflow: hidden` too, so it is scoped via CSS class selectors rather than applying globally - `overflow-hidden` is used throughout the app for text truncation and clipping, and deserves no dead 6px strip.
 
 ### Tab strips: `scrollbar-strip`
 
@@ -3059,6 +3611,125 @@ requestAnimationFrame loops, and the single `scrollIntoView` passes no
 that way: JS-driven motion is invisible to both rules and would need its own
 opt-out.
 
+### Icon motion
+
+An icon animates only as feedback for the action it is the affordance for, and
+the rules that do it are CSS, in the `Icon motion` block of
+`app/src/index.css`. There is no `motion`/framer-motion dependency and there
+will not be one: the lucide-animated registry ships a component per icon, each
+wrapping the glyph in a `div` that breaks `button-variants.ts`'s
+`[&_svg:not([class*='size-'])]:size-icon` sizing and its
+`[&_svg]:pointer-events-none`, and JS-driven motion is invisible to both
+collapse rules above. A transition or a keyframe animation is stopped by them
+for free.
+
+The policy, in five rules:
+
+1. **The owner triggers, never the icon.** A motion fires from the
+   `:hover` / `:focus-visible` of the glyph's own `[data-slot="button"]` or the
+   `.group` row that reveals it - never the SVG's own hover, which
+   `[&_svg]:pointer-events-none` has already taken away. `:focus-visible` is
+   not optional: a keyboard user gets the same feedback a mouse user does.
+2. **A glyph conveying a state never animates** - and that is a rule about
+   *placement*, not about which glyph it is. The six glyphs that usually carry
+   a state (`AlertTriangle`, `AlertCircle`, `CheckCircle2`, `XCircle`, `Clock`,
+   `Info`) animate nowhere they are the message: a status chip, a row's status
+   column, an inline warning, a panel heading. A state the user is being told
+   about is not an action they can take, and a success tick that grows under
+   the pointer invites a click on something that does nothing.
+
+   Where one of those same glyphs *is* the affordance for an action - inside a
+   `[data-slot="button"]`, a menu item, a tab trigger, a `RowAction`, or a
+   registry entry a rail draws as a button (`DRAWER_VIEWS`) - it animates like
+   any other action glyph. History's `Clock` in the Activity Rail is the case
+   this was refined for (#1707): it means "go to History", and it earned a
+   motion of its own rather than nothing. `icon-motion-status.test.ts` encodes
+   the distinction the same way, by the owner the element sits inside.
+3. **A state change animates once. Loops are reserved** for `Loader2` and live
+   indicators, where the loop is the message ("work is happening").
+4. **Every transform of an SVG child declares `transform-box: fill-box` and an
+   explicit `transform-origin`.** The initial reference box is the `view-box`,
+   so a percentage origin otherwise resolves against the whole 24x24 canvas
+   instead of the path, and a hinge lands nowhere near the hinge. Use the
+   standalone `rotate` / `translate` / `scale` properties, never `transform:`,
+   so they compose with any `transform` the element already carries - the same
+   reasoning as press feedback's `scale`.
+5. **Durations and eases come only from the `--dur-*` / `--ease-*` tokens**,
+   through `--icon-motion-duration`. That name is deliberately not
+   `--tw-duration`: a `.motion-menu` / `.motion-tooltip` ancestor sets that one
+   for `tw-animate-css`, and reading it here would let a menu's tier leak into
+   the glyph inside it. No `will-change` - a standing compositor hint on every
+   icon in a hovered row costs more than a 12px glyph's 200-560ms buys.
+
+A call site spells the name once, as `data-icon-motion` on the icon, and takes
+it from `ICON_MOTION` in `app/src/components/ui/icon-motion.ts` so a name the
+stylesheet does not implement is a compile error rather than a dead attribute.
+
+| Name | Icons | Motion | Duration | Leaves the frame |
+|------|-------|--------|----------|------------------|
+| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-icon-nudge` | yes |
+| `hands` | `Clock` | The hands polyline sweeps one full revolution about the dial centre (12,12); the dial stays | `--dur-icon-play` x2 | no |
+| `waves` | `Radio` | The four arcs travel outward and fade, inner pair then outer pair; the centre dot stays | `--dur-icon-play` x2 | yes |
+| `spread` | `Braces` | The two curves part by 1px each, outward, and close again | `--dur-icon-nudge` | no |
+| `tilt` | `FolderOpen` | Tips `-6deg` with a 4% grow about the ink's bottom-left corner (2,20) - a folder opening toward you | `--dur-icon-nudge` | yes |
+| `wiggle` | `Search` | `-8deg`, `+8deg`, back, once, about the lens centre (11,11) | `--dur-icon-play` | no |
+| `drop` | `Download` | The arrow (shaft and head) drops 2px into its tray; the tray stays | `--dur-icon-nudge` | no |
+| `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-icon-nudge` | yes |
+| `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-icon-play` | no |
+| `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-icon-play` | yes |
+| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-icon-play` x2 | yes |
+| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-icon-play` | yes |
+| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-icon-nudge` | yes |
+| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-icon-play` | no |
+| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-icon-play` x2 | no |
+| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-icon-nudge` | yes |
+| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-icon-play` x2 | no |
+| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-icon-play` x2 | no |
+| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-icon-nudge` | yes |
+| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-icon-play` | no |
+| `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-icon-play` | no |
+| `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-icon-play` | no |
+| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-icon-nudge` | no |
+| `nudge-x` | `ChevronRight`, `SlidersHorizontal` | 1px along the direction it points | `--dur-icon-nudge` | no |
+| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-icon-nudge` | no |
+| `scale` | `Play` | The whole glyph grows 10% - the last resort for a mark that is one path with no reading of its own to act out | `--dur-icon-nudge` | no |
+
+A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
+`svg`, because an inline SVG clips to its viewBox by default and the travel is
+simply cut off at every call site. The column above is the list, and
+`icon-motion.test.tsx` holds it to the stylesheet - in both directions, so a
+`visible` on a motion that stays inside is caught too.
+
+**A draw-in is measured, never guessed.** `trace` strokes its path on with
+`stroke-dasharray` and `stroke-dashoffset`, and the dash has to be at least the
+path's own length or a second dash creeps in behind the first. Measure it with
+`getTotalLength()` in a real browser, round up, and write the measurement and
+where it came from in the rule's comment. Both properties are set *inside* the
+keyframes, never on the element: a dasharray parked on the glyph is a permanent
+property that happens to look solid today.
+
+**Two glyphs that read alike may still need two names.** `spread` (`Braces`)
+and `part` (`Code2`, `Code`) are the same idea - a pair of marks parting by a
+pixel - and cannot share a rule, because lucide draws `Braces` left-bracket
+first and both code glyphs right-chevron first. Reusing one name would have
+drawn the brackets *closing*, which looks like a considered choice in a diff.
+When the reading matches but the child order does not, the second name is the
+honest answer.
+
+A sequence that genuinely needs longer than its tier - `hands`, `waves`,
+`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-icon-play) * 2)`) rather than
+introducing a literal, and says why in the rule's comment. A stagger inside a
+sequence is keyframe percentages, never `animation-delay`: the reduced-motion
+rules collapse a duration, not a delay, so a delayed step would survive them as
+a pause before an instant jump.
+
+Lucide renders its `__iconNode` children in declared order with nothing
+prepended, which is what lets a rule address `> path:nth-child(4)`. That is a
+dependency on an upstream glyph's shape, so `icon-motion.test.ts` pins the
+index against the exported `__iconNode`: a redrawn `Trash2` fails a test
+instead of animating the wrong path. The same guard holds the four rules above
+to the stylesheet - trigger selectors, `fill-box`, token-only timing.
+
 ---
 
 ## Source Files
@@ -3073,9 +3744,12 @@ opt-out.
 | `app/src/components/layout/ActivityRail.tsx` | Left-edge nav - the six view buttons the Dock used to hold, with roving tabindex |
 | `app/src/components/layout/ContextRail.tsx` | Right-edge nav - one icon per applicable context-bar section |
 | `app/src/components/layout/RailButton.tsx` | The icon button shared by both rails - edge-indicator and tile variants |
-| `app/src/components/layout/Dock.tsx` | The bottom strip - ambient status only (engine light, version, services, save state, pending restart) |
+| `app/src/components/layout/Dock.tsx` | The bottom strip - status in the centre (engine light, version, services, save state, pending restart), per-tab view controls on the right |
+| `app/src/components/layout/ResponsePositionButton.tsx` | The Dock's response-position switch - click flips Beside / Below, right-click picks Beside / Below / Auto, icon names the destination, request tabs only |
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
+| `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
+| `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

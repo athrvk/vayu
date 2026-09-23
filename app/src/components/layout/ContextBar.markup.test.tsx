@@ -150,10 +150,11 @@ describe("ContextBar - naming what a screen reader reads", () => {
 	it("gives the close button the documented icon-button box", () => {
 		renderBar();
 		const close = screen.getByRole("button", { name: "Close context bar" });
-		// The hit area used to be the 14px icon itself - the smallest target in
-		// the shell.
-		expect(close.className).toContain("h-6");
-		expect(close.className).toContain("w-6");
+		// The hit area used to be the 14px icon itself, then a hand-set h-6 w-6
+		// (issue #1681) - it now rides Button's size="icon" default, size-target,
+		// so it clears the 24x24px floor at every density instead of a literal
+		// 24px that stayed put at Comfortable.
+		expect(close.className).toContain("size-target");
 	});
 });
 

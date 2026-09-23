@@ -69,11 +69,12 @@ export interface CollectionTreeDnd {
 	isDropBlocked: (entity: TreeEntity) => boolean;
 	moveByKeyboard: (entity: TreeEntity, direction: TreeMoveDirection) => void;
 	/**
-	 * The row menu's "Move to..." entry - the discoverable path that needs no
-	 * chords. A factory rather than a handler so both row types get one action,
-	 * worded and iconed once, instead of two copies that drift.
+	 * The row menu's move entries - Move up, Move down, "Move to..." - the
+	 * discoverable path that needs no chords (#1690). A factory rather than
+	 * handlers so both row types get one list, worded, iconed and gated once,
+	 * instead of two copies that drift.
 	 */
-	moveAction: (entity: TreeEntity) => RowAction;
+	moveActions: (entity: TreeEntity) => RowAction[];
 }
 
 /**
@@ -84,16 +85,14 @@ export interface CollectionTreeDnd {
 export interface CollectionTreeCrudSlice {
 	/** Collection currently being renamed inline, if any. */
 	renamingId: string | null;
-	renameValue: string;
 	/** Request currently being renamed inline, if any. */
 	renamingRequestId: string | null;
-	renameRequestValue: string;
 	/** Rows mid-delete render dimmed and refuse input. */
 	deletingCollectionId: string | null;
 	deletingRequestId: string | null;
 	/** Collection whose "new folder" form is open, if any. */
 	creatingSubfolder: string | null;
-	newSubCollectionName: string;
+	newFolderName: string;
 	isCreatingSubfolder: boolean;
 
 	onCollectionClick: (collection: Collection) => void;
@@ -102,13 +101,17 @@ export interface CollectionTreeCrudSlice {
 	/** Actions for a collection's ⋯ menu, built where the handlers live. */
 	getCollectionActions: (collection: Collection) => RowAction[];
 
-	onRenameChange: (value: string) => void;
-	onRenameSubmit: (collectionId: string) => void;
+	/**
+	 * The draft name lives in the row's `useInlineRename`, not here: the field is
+	 * mounted by exactly one row at a time, and a second copy of it up here was
+	 * a value two layers could disagree about. Submit therefore carries the
+	 * trimmed name the hook already holds.
+	 */
+	onRenameSubmit: (collectionId: string, name: string) => void;
 	onRenameCancel: () => void;
 	onStartRename: (collection: Collection) => void;
 
-	onRequestRenameChange: (value: string) => void;
-	onRequestRenameSubmit: (requestId: string) => void;
+	onRequestRenameSubmit: (requestId: string, name: string) => void;
 	onRequestRenameCancel: () => void;
 	onStartRequestRename: (request: Request) => void;
 
@@ -121,7 +124,7 @@ export interface CollectionTreeCrudSlice {
 	onRequestDeleteClick: (requestId: string, requestName: string) => void;
 	onDuplicateRequest: (request: Request) => void;
 
-	onSubCollectionNameChange: (value: string) => void;
+	onFolderNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
 }

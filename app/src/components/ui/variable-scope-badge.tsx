@@ -55,7 +55,7 @@ export function VariableScopeBadge({
 			<Badge
 				variant="chip"
 				className={cn(
-					"h-5 px-1.5 text-[10px] border",
+					"h-5 px-1.5 text-micro border",
 					config.tint,
 					config.border,
 					className
@@ -67,7 +67,7 @@ export function VariableScopeBadge({
 	}
 
 	return (
-		<Badge variant="chip" className={cn("text-[10px] px-1.5 py-0", config.tint, className)}>
+		<Badge variant="chip" className={cn("text-micro px-1.5 py-0", config.tint, className)}>
 			{label}
 		</Badge>
 	);

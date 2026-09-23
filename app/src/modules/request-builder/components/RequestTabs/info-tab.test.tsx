@@ -77,7 +77,11 @@ const labelOf = (tab: HTMLElement) =>
 const tabNames = () => screen.getAllByRole("tab").map(labelOf);
 
 /** The count superscript, which is a sibling of the label, not part of it. */
-const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent ?? null;
+// `|| null`, not `?? null`: the count's `sup` is always in the DOM - it
+// reserves the badge's width so one appearing cannot shift the tabs beside it
+// (`MARK_SLOT` in `ui/tabs.tsx`) - and reads `""` when there is nothing to
+// show. "No count" is the empty slot, not a missing element.
+const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent || null;
 
 describe("the Info tab", () => {
 	it("is the first tab in the row", () => {

@@ -44,6 +44,7 @@ import {
 	CommandItem,
 	CommandList,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 	Input,
 	Popover,
 	PopoverContent,
@@ -53,8 +54,8 @@ import {
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { generateId } from "@/lib/id";
 import { isBlankScriptElement, missingRequiredKeys } from "@/lib/elements";
-import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
@@ -208,7 +209,6 @@ function ElementRow({
 
 	const [open, setOpen] = useState(isNew);
 	const [renaming, setRenaming] = useState(false);
-	const [nameDraft, setNameDraft] = useState(element.name ?? "");
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	// Flipped by `startRename`, consumed by `RowActionsMenu`'s
 	// `onCloseAutoFocus` below - not a `setTimeout`. `onSelect` fires while
@@ -227,11 +227,21 @@ function ElementRow({
 	const startRename = () => {
 		pendingRenameRef.current = true;
 	};
-	const commitRename = () => {
-		const trimmed = nameDraft.trim();
-		onUpdate({ ...element, name: trimmed.length > 0 ? trimmed : undefined });
-		setRenaming(false);
-	};
+	/**
+	 * `commitEmpty`: an element's name is optional, and the row falls back to the
+	 * kind label without one - so clearing the field is how a user drops a custom
+	 * name, not an edit they abandoned.
+	 */
+	const rename = useInlineRename({
+		active: renaming,
+		initialValue: element.name ?? "",
+		commitEmpty: true,
+		onCommit: (name) => {
+			onUpdate({ ...element, name: name.length > 0 ? name : undefined });
+			setRenaming(false);
+		},
+		onCancel: () => setRenaming(false),
+	});
 
 	const handleDelete = () => {
 		if (isElementBlank(element)) onRemove();
@@ -240,10 +250,31 @@ function ElementRow({
 
 	const actions: RowAction[] = [
 		{ label: "Rename", icon: Pencil, onSelect: startRename },
-		{ label: "Move up", icon: ArrowUp, onSelect: () => onMove(-1), disabled: isFirst },
-		{ label: "Move down", icon: ArrowDown, onSelect: () => onMove(1), disabled: isLast },
+		// A one-element list offers both and neither works, and until #1690 the
+		// row gave no reason for either: the reason rides the item, because a
+		// tooltip inside the menu's focus trap would fight it for the keyboard.
+		{
+			label: "Move up",
+			icon: ArrowUp,
+			onSelect: () => onMove(-1),
+			disabled: isFirst,
+			disabledReason: "Already first",
+		},
+		{
+			label: "Move down",
+			icon: ArrowDown,
+			onSelect: () => onMove(1),
+			disabled: isLast,
+			disabledReason: "Already last",
+		},
 		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
-		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+		{
+			label: "Delete",
+			icon: Trash2,
+			iconMotion: ICON_MOTION.lid,
+			onSelect: handleDelete,
+			destructive: true,
+		},
 	];
 
 	const handleRowKeyDown = (e: React.KeyboardEvent) => {
@@ -266,7 +297,16 @@ function ElementRow({
 			data-element-row={element.kind}
 		>
 			<Collapsible open={open} onOpenChange={setOpen}>
-				<div className="flex h-8 items-center gap-1 px-2">
+				{/*
+				 * `h-band` (32px, fixed), not `h-8`: the row's own Switch is
+				 * `h-target` (issue #1679), 24px at Default and 28px at
+				 * Comfortable, and `h-8` happens to equal 24px at Default too -
+				 * zero margin, the switch and the chevron button touching the
+				 * row's top and bottom edge exactly. `h-band` is the next fixed
+				 * floor up, the same relationship `ResponseBody`'s toolbar keeps
+				 * between its own `h-target`-family toggle and its `h-band` row.
+				 */}
+				<div className="flex h-band items-center gap-1 px-2">
 					<button
 						type="button"
 						aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
@@ -276,26 +316,15 @@ function ElementRow({
 						className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 					>
 						<ChevronRight
-							className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
+							className={cn("size-icon-sm transition-transform", open && "rotate-90")}
 						/>
 					</button>
 					{renaming ? (
 						<Input
 							autoFocus
-							value={nameDraft}
+							{...rename.inputProps}
 							placeholder={label}
 							className="h-6 flex-1"
-							onChange={(e) => setNameDraft(e.target.value)}
-							onBlur={commitRename}
-							onKeyDown={(e) => {
-								if (isCommitEnter(e)) {
-									e.preventDefault();
-									commitRename();
-								} else if (e.key === "Escape") {
-									e.preventDefault();
-									setRenaming(false);
-								}
-							}}
 						/>
 					) : (
 						<button
@@ -306,7 +335,7 @@ function ElementRow({
 						>
 							{Icon && (
 								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
-								<Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+								<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
 							)}
 							{/*
 							 * `shrink-0` keeps a title at its natural width instead of
@@ -377,7 +406,8 @@ function ElementRow({
 							// itself; landing it on the trigger first just to lose it
 							// again a render later would flash focus across two controls.
 							e.preventDefault();
-							setNameDraft(element.name ?? "");
+							// The draft seeds itself from `element.name` as the field
+							// opens; see `useInlineRename`.
 							setRenaming(true);
 						}}
 					/>
@@ -526,7 +556,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 			<Popover open={pickerOpen} onOpenChange={setPickerOpen}>
 				<PopoverTrigger asChild>
 					<Button variant="outline" size="sm">
-						<Plus className="h-4 w-4" />
+						<Plus className="size-icon" />
 						Add element
 					</Button>
 				</PopoverTrigger>

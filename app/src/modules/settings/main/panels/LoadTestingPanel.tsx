@@ -22,7 +22,15 @@
  */
 
 import { Coffee, Gauge, RotateCcw } from "lucide-react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import {
+	Button,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	ICON_MOTION,
+} from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import {
 	DEFAULT_LOAD_TEST_CEILINGS,
@@ -110,7 +118,10 @@ export default function LoadTestingPanel() {
 								className="shrink-0 text-xs h-7 px-2"
 								onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
 							>
-								<RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+								<RotateCcw
+									className="size-icon-sm mr-1.5"
+									data-icon-motion={ICON_MOTION.spinBack}
+								/>
 								{/* "all", because each row now carries its own Reset
 							    beside its Default line. */}
 								Reset all

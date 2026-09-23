@@ -19,6 +19,7 @@
 import { AlertTriangle, CheckCircle, CircleSlash, HelpCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ElementOutcome } from "@/types";
+import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
 
 export interface ElementOutcomesProps {
 	outcomes: readonly ElementOutcome[];
@@ -55,9 +56,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 
 	return (
 		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
-			<h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-				Elements
-			</h3>
+			<h3 className={cn(EYEBROW_XS_CLASS, "mb-1.5")}>Elements</h3>
 			<div className="space-y-1.5">
 				{outcomes.map((outcome, i) => {
 					const Icon = OUTCOME_ICON[outcome.outcome] ?? AlertTriangle;
@@ -73,7 +72,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 							<div className="flex items-center gap-2">
 								<Icon
 									className={cn(
-										"w-3.5 h-3.5 shrink-0",
+										"size-icon-sm shrink-0",
 										OUTCOME_TEXT_CLASS[outcome.outcome]
 									)}
 								/>
@@ -85,7 +84,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 								>
 									{outcome.kind}
 								</span>
-								<span className="text-[10px] text-muted-foreground">
+								<span className="text-micro text-muted-foreground">
 									{outcome.outcome}
 								</span>
 							</div>

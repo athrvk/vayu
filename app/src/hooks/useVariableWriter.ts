@@ -72,7 +72,7 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 	const { data: globalsData } = useGlobalsQuery();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
-	const { activeEnvironmentId } = useSessionStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();

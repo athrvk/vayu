@@ -81,6 +81,8 @@ import {
 	Switch,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout, NumberField } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
@@ -588,12 +590,12 @@ export default function RunCollectionDialog({
 					>
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Pass/fail budgets</span>
-							<span className="text-[11px] font-normal text-muted-foreground">
+							<span className="text-label font-normal text-muted-foreground">
 								{budgetsOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
 						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-[11px] leading-relaxed text-muted-foreground">
+							<p className="text-label leading-relaxed text-muted-foreground">
 								The run is judged against whatever you declare here and reports a
 								verdict. Leave a field blank to skip that budget; leave them all
 								blank and the run is measured but not judged, as before.
@@ -647,7 +649,7 @@ export default function RunCollectionDialog({
 									className="text-xs font-normal leading-snug"
 								>
 									Fail the run when a budget is missed
-									<span className="block text-[11px] text-muted-foreground">
+									<span className="block text-label text-muted-foreground">
 										Otherwise a missed budget is reported but the run still ends
 										Completed.
 									</span>
@@ -765,18 +767,15 @@ export default function RunCollectionDialog({
 				</DialogBody>
 
 				<DialogFooter>
-					<Button
-						variant="outline"
+					<DialogCancelButton
 						onClick={() => onOpenChange(false)}
 						disabled={startRun.isPending}
-					>
-						Cancel
-					</Button>
+					/>
 					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
 						{startRun.isPending ? (
-							<Loader2 className="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 className="size-icon mr-2 animate-spin" />
 						) : (
-							<Play className="w-4 h-4 mr-2" />
+							<Play className="size-icon mr-2" data-icon-motion={ICON_MOTION.scale} />
 						)}
 						Run
 					</Button>

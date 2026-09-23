@@ -17,7 +17,7 @@ import {
 	useConfigQuery,
 } from "@/queries";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
-import { DeleteConfirmDialog } from "@/components/ui";
+import { Button, DeleteConfirmDialog } from "@/components/ui";
 import TrashItem from "./TrashItem";
 import { retentionCopy, retentionDaysFrom } from "../retention";
 import { restoreNotice } from "../restore-notice";
@@ -42,6 +42,8 @@ export default function TrashList() {
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 	const [purgingId, setPurgingId] = useState<string | null>(null);
 	const [purgeTarget, setPurgeTarget] = useState<TrashEntry | null>(null);
+	const [confirmEmptyOpen, setConfirmEmptyOpen] = useState(false);
+	const [isEmptying, setIsEmptying] = useState(false);
 
 	const listRef = useRef<HTMLDivElement>(null);
 
@@ -97,6 +99,45 @@ export default function TrashList() {
 		}
 	};
 
+	/**
+	 * Empty trash (issue #1689): the panel-header counterpart to per-row purge.
+	 *
+	 * No bulk-purge engine route exists (checked against `engine/CLAUDE.md`'s
+	 * HTTP API contract), and the owner's #1683 decision rules out adding one for
+	 * a client-only convenience - so this loops the same per-row mutation the
+	 * rows already use, one at a time rather than in parallel: the trash and the
+	 * engine's file moves behind it are not built for concurrent purges of the
+	 * same list, and a serial loop is the one shape that is definitely safe. A
+	 * row that fails is reported and skipped, not retried, so one stuck entry
+	 * cannot block the rest.
+	 */
+	const handleEmptyTrash = async () => {
+		const targets = entries;
+		setConfirmEmptyOpen(false);
+		if (targets.length === 0) return;
+		setIsEmptying(true);
+		let failures = 0;
+		try {
+			for (const entry of targets) {
+				try {
+					await purgeMutation.mutateAsync(entry.id);
+				} catch {
+					failures++;
+				}
+			}
+		} finally {
+			setIsEmptying(false);
+		}
+		if (failures > 0) {
+			showToast(
+				failures === targets.length
+					? "Couldn't empty the trash"
+					: `Couldn't delete ${failures} of ${targets.length} items`,
+				"error"
+			);
+		}
+	};
+
 	/*
 	 * A purge dialog is controlled with no trigger, so Radix's close-focus has
 	 * nowhere to land and the row it was opened from is about to go (#1234). The
@@ -125,20 +166,24 @@ export default function TrashList() {
 		});
 	}, [capture, entries, purgeTarget]);
 
-	const purgeDescription = purgeTarget
-		? purgeTarget.kind === "collection"
-			? `"${purgeTarget.name}" and everything inside it will be removed for good. This cannot be undone.`
-			: `"${purgeTarget.name}" will be removed for good. This cannot be undone.`
-		: "";
-
 	return (
 		<DrawerPanel
 			title="Trash"
 			actions={
 				entries.length > 0 ? (
-					<span className="text-xs text-muted-foreground shrink-0">
-						{entries.length} {entries.length === 1 ? "item" : "items"}
-					</span>
+					<>
+						<span className="text-xs text-muted-foreground shrink-0">
+							{entries.length} {entries.length === 1 ? "item" : "items"}
+						</span>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setConfirmEmptyOpen(true)}
+							disabled={isEmptying}
+						>
+							Empty trash
+						</Button>
+					</>
 				) : undefined
 			}
 		>
@@ -204,11 +249,24 @@ export default function TrashList() {
 					open={!!purgeTarget}
 					onOpenChange={(open) => !open && setPurgeTarget(null)}
 					title="Delete forever?"
-					description={purgeDescription}
+					name={purgeTarget?.name}
+					scope={purgeTarget?.kind === "collection" ? "cascade" : "default"}
 					confirmLabel="Delete forever"
 					onConfirm={handleConfirmPurge}
 					onCloseAutoFocus={onCloseAutoFocus}
 					isDeleting={!!purgingId}
+				/>
+
+				<DeleteConfirmDialog
+					open={confirmEmptyOpen}
+					onOpenChange={setConfirmEmptyOpen}
+					title="Empty trash?"
+					description={`All ${entries.length} ${
+						entries.length === 1 ? "item" : "items"
+					} in the trash are removed permanently. This cannot be undone.`}
+					confirmLabel="Empty trash"
+					onConfirm={() => void handleEmptyTrash()}
+					isDeleting={isEmptying}
 				/>
 			</div>
 		</DrawerPanel>

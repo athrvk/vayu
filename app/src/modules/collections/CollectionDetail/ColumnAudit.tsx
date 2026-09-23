@@ -66,8 +66,8 @@ function ColumnChip({ column, tone }: { column: string; tone: "neutral" | "warni
 		<code
 			className={
 				tone === "warning"
-					? "rounded-sm bg-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-warning-text"
-					: "rounded-sm bg-accent px-1.5 py-0.5 font-mono text-[11px]"
+					? "rounded-sm bg-warning/10 px-1.5 py-0.5 font-mono text-label text-warning-text"
+					: "rounded-sm bg-accent px-1.5 py-0.5 font-mono text-label"
 			}
 		>
 			{column}
@@ -167,9 +167,9 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 						<Bucket label="Declared but not referenced" columns={audit.unreferenced} />
 						{audit.undeclared.length > 0 && (
 							<Callout severity="warning" title="Nothing will bind these">
-								A run leaves a token naming an undeclared column written as it
-								stands unless the file happens to carry the column anyway.
-								Re-declare from the file, or fix the token.
+								A token naming an undeclared column goes out written as it stands,
+								unless the file happens to carry the column anyway. Re-declare from
+								the file, or fix the token.
 							</Callout>
 						)}
 						{collidingColumns.length > 0 && (
@@ -180,10 +180,12 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 								row bound, the variable answers as it always did.
 							</Callout>
 						)}
-						<p className="text-[11px] text-muted-foreground">
-							{audit.inScripts.length > 0
-								? `Scripts also name ${audit.inScripts.join(", ")}. Only literal pm.iterationData.get() arguments are scanned - script usage is dynamic, so this list is best-effort.`
-								: "Only literal pm.iterationData.get() arguments are scanned - script usage is dynamic, so this list is best-effort."}
+						<p className="text-label text-muted-foreground">
+							{audit.inScripts.length > 0 &&
+								`Scripts also name ${audit.inScripts.join(", ")}. `}
+							Only literal pm.iterationData.get() arguments are scanned; a column name
+							a script computes at run time cannot be seen from here, so this list is
+							best-effort.
 						</p>
 					</>
 				)}

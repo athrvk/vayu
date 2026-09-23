@@ -40,6 +40,30 @@ export const TIMING = {
 	SAVED_STATUS_DURATION_MS: 3000,
 
 	/**
+	 * The floor on how long the Dock's "Saving…" line stays on screen before it
+	 * shows "Saved" in its place.
+	 *
+	 * A save against the local engine often lands in under 50ms, which is well
+	 * under the ~100-200ms a state needs to be legible at all - "Saving…" was
+	 * there and gone in the same frame most people would notice it, so every
+	 * save read as an instant, flickerless jump from "Unsaved changes" straight
+	 * to "Saved". 400ms sits inside the 300-600ms range general loading-state
+	 * guidance gives for "long enough to register as a state, short enough not
+	 * to read as latency".
+	 *
+	 * Deliberately a presentation concern, not a store one: `save-store.ts`'s
+	 * `status` still flips to `"saved"` the instant a save lands - every other
+	 * reader of that store (the eight `startSaving`/`completeSaveThenIdle`
+	 * callers' own tests among them) needs the truth as soon as it is known, not
+	 * a truth held back for legibility. Read in exactly one place -
+	 * `SaveStatusLine` in `layout/Dock.tsx`, the only surface that renders
+	 * `status` for a human to read - which holds the *display* on "saving" a
+	 * little past a status change it has already received, rather than delaying
+	 * the store underneath it.
+	 */
+	SAVING_MIN_VISIBLE_MS: 400,
+
+	/**
 	 * Ceiling on the backoff `useSaveManager` doubles through after a failed
 	 * auto-save. Read in exactly one place - the retry scheduled from
 	 * `performSave`'s catch - so a save that keeps failing settles into a fixed
@@ -47,8 +71,22 @@ export const TIMING = {
 	 */
 	SAVE_RETRY_MAX_DELAY_MS: 60_000,
 
-	/** Transient in-component status feedback (the response viewer's copy tick). */
-	STATUS_RESET_MS: 2000,
+	/**
+	 * How long a copy button's check stays in place of its Copy glyph.
+	 *
+	 * The one duration for the whole app's copy acknowledgement (#1686). It
+	 * replaces three that meant the same thing - 1500ms in the MCP settings
+	 * panel, 2000ms in the two update surfaces, and a transient-status constant
+	 * in the response viewer and the snippet section - and it is read only by
+	 * `useCopy`, which is now the only thing that schedules the reset.
+	 *
+	 * That third one, a general "transient in-component status" entry at the
+	 * same 2000ms, is gone with them: the copy tick was its only reader, and a
+	 * key here with no reader is the defect `timing-keys-have-readers.test.ts`
+	 * exists for. A future indicator that is not the clipboard's gets its own
+	 * name rather than borrowing this one.
+	 */
+	COPY_RESET_MS: 2000,
 
 	/**
 	 * How long a just-created row stays highlighted so the eye can find it.
@@ -56,7 +94,7 @@ export const TIMING = {
 	 * The Services drawer orders inboxes by port, so a new one lands wherever
 	 * its ephemeral port sorts - not at the end. Without the highlight the only
 	 * evidence a click did anything was a row count nobody was counting. Same
-	 * order as `STATUS_RESET_MS`: long enough to be seen after the toast pulls
+	 * order as the copy tick (`COPY_RESET_MS`): long enough to be seen after the toast pulls
 	 * the eye elsewhere, short enough that it is over before it reads as a
 	 * selection the user has to clear.
 	 */
@@ -158,6 +196,45 @@ export const TIMING = {
 
 	/** Wait after asking electron to restart the engine before refetching. */
 	ENGINE_RESTART_WAIT_MS: 1500,
+
+	/**
+	 * How long the Dock's save line takes to fade out on its way to idle, and
+	 * how long its track is held open to let that fade actually play.
+	 *
+	 * Must stay in step with the opacity transition on `layout/Dock.tsx`'s live
+	 * cell (`duration-200`) - the same pairing `TOAST_EXIT_MS` documents for
+	 * `ui/toast.tsx`, for the same reason: `useSaveStatusDisplay` still reports
+	 * the *old* status (so the text and the track's open width do not move)
+	 * for exactly this long after the store goes `idle`, which is what gives
+	 * the opacity transition a frame to animate against instead of the node's
+	 * content vanishing in the same update that starts the fade.
+	 */
+	SAVE_LINE_FADE_MS: 200,
+
+	/**
+	 * How long a tab mark keeps its last content on screen after the thing it
+	 * was counting is gone.
+	 *
+	 * The same defect `SAVE_LINE_FADE_MS` answers for the Dock's save line, at
+	 * the two marks that sit on a tab trigger: `TabCount` in `ui/tabs.tsx` and
+	 * `TestsResultChip` in the response viewer. Both empty their content the
+	 * instant there is nothing to show, while `MARK_TRACK`'s
+	 * `grid-template-columns: 1fr -> 0fr` goes on collapsing around them - so
+	 * the track shrank smoothly and the digit inside it was simply gone, a cut
+	 * masked by the container's own motion. `useHeldValue` holds the outgoing
+	 * content for this long so the opacity transition has a populated node.
+	 *
+	 * 150ms rather than `SAVE_LINE_FADE_MS`'s 200 because the two play the
+	 * motion in a different order. The Dock's line is centred in its track, so
+	 * a squeeze would eat a whole sentence from both ends; it fades first and
+	 * collapses after, two gestures back to back. A mark is a digit or a
+	 * four-character chip already clipped by `overflow-hidden`, so it fades
+	 * *while* its own track closes - one gesture, and this has to match that
+	 * track's `duration-150` for the two halves to land together. A count
+	 * changes with every keystroke in the Params table; 200 + 150 sequential
+	 * there would read as lag rather than as motion.
+	 */
+	MARK_FADE_MS: 150,
 
 	/** GraphQL editor diagnostics debounce. */
 	GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS: 250,

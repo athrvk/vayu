@@ -32,6 +32,7 @@ import { useMonacoTheme } from "@/hooks/useMonacoTheme";
 // provider, which reaches into the request builder for its writer, and a
 // `components/ui` primitive must not drag a module tree in behind it.
 import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
 import { chordKeys } from "@/lib/platform";
 import { contextProps } from "@/lib/context-menu";
@@ -128,7 +129,7 @@ const DEFAULT_OPTIONS = {
 function LeaveEditorHint() {
 	return (
 		<div className="enter-fade pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-popover px-1.5 py-1 text-popover-foreground shadow-md">
-			<span className="text-[10px] leading-none text-muted-foreground">Leave editor</span>
+			<span className="text-micro leading-none text-muted-foreground">Leave editor</span>
 			{chordKeys(LEAVE_EDITOR_CHORD).map((cap) => (
 				<Kbd key={cap} size="sm">
 					{cap}
@@ -232,15 +233,12 @@ export function CodeEditor({
 
 	if (loadFailed) {
 		return (
-			<div
-				role="alert"
-				style={{ height }}
-				className={cn(
-					"flex items-center justify-center p-3 text-xs text-destructive-text",
-					className
-				)}
-			>
-				Editor failed to load. Reopen the app to try again.
+			<div role="alert" style={{ height }} className={className}>
+				<ErrorState
+					variant="inline"
+					title="Editor failed to load. Reopen the app to try again."
+					className="h-full p-3"
+				/>
 			</div>
 		);
 	}

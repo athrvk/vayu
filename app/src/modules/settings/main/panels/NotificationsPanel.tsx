@@ -41,7 +41,9 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	DisabledHint,
 	Eyebrow,
+	ICON_MOTION,
 } from "@/components/ui";
 import { systemNotify } from "@/services/notify";
 import type { SystemNotificationOutcome } from "@/types/electron";
@@ -108,14 +110,16 @@ export default function NotificationsPanel() {
 			    preference is a row inside it. It was four cards, one per setting. */}
 			<Card>
 				<CardHeader className="pb-3">
+					{/* "Toasts", not "Notifications": the pane's band already carries
+					    the panel's name and description, so a card repeating them was
+					    two headings a few pixels apart (issue #1688). This card is one
+					    topic inside the panel, and that is what it is called - the
+					    description it used to carry now lives once, in
+					    `app-panels.ts`. */}
 					<div className="flex items-center gap-2">
 						<Bell className="w-5 h-5 text-muted-foreground" />
-						<CardTitle>Notifications</CardTitle>
+						<CardTitle>Toasts</CardTitle>
 					</div>
-					<CardDescription>
-						Where toasts appear, how long they stay, how many stack at once, and what is
-						worth interrupting you for.
-					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
 					<div data-setting-anchor={POSITION.anchor}>
@@ -134,19 +138,26 @@ export default function NotificationsPanel() {
 							dismiss follows the edge the stack sits on.
 						</p>
 						<div className="flex items-center gap-2 mt-3">
-							<Button
-								variant="outline"
-								size="sm"
-								// See the system card: two buttons print "Preview",
-								// and the accessible name is what tells them apart.
-								aria-label="Preview a toast"
-								onClick={preview}
-								disabled={previewable.length === 0}
-								className="gap-1.5"
+							<DisabledHint
+								reason={previewable.length === 0 && "Show is set to None"}
 							>
-								<Play className="w-3.5 h-3.5" />
-								Preview
-							</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									// See the system card: two buttons print "Preview",
+									// and the accessible name is what tells them apart.
+									aria-label="Preview a toast"
+									onClick={preview}
+									disabled={previewable.length === 0}
+									className="gap-1.5"
+								>
+									<Play
+										className="size-icon-sm"
+										data-icon-motion={ICON_MOTION.scale}
+									/>
+									Preview
+								</Button>
+							</DisabledHint>
 							<p className="text-xs text-muted-foreground">
 								{previewable.length === 0
 									? "Nothing to preview - Show is set to None."
@@ -364,7 +375,7 @@ function SystemNotificationsCard() {
 						disabled={previewing || unavailableReason !== null || !enabled}
 						className="gap-1.5"
 					>
-						<Play className="w-3.5 h-3.5" />
+						<Play className="size-icon-sm" data-icon-motion={ICON_MOTION.scale} />
 						Preview
 					</Button>
 					<p className="text-xs text-muted-foreground">{previewHint}</p>

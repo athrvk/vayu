@@ -30,19 +30,47 @@
  * link breaks, every one of those failures goes unreported.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, cleanup, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui";
+import { TIMING } from "@/config/timing";
+import { Dock } from "./Dock";
 import { useSaveStore, useToastStore } from "@/stores";
 
-const dock = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "Dock.tsx"), "utf8");
-const code = dock.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+// The Dock prints the app version, which Vite `define`s at build time; vitest
+// does not, so without this the component throws before it renders anything.
+vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
+
+/*
+ * Rendered, not source-scanned. These cases used to grep `Dock.tsx` for
+ * `saveStatus === "pending"` and friends, which stopped seeing anything the
+ * moment the four gated spans became one width-reserved slot driven by a
+ * lookup table - the same blind spot app/CLAUDE.md names for a class arriving
+ * in a variable. What the user is owed is the line on screen, so that is what
+ * these read.
+ */
+const renderDock = () => {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(
+		<QueryClientProvider client={client}>
+			<TooltipProvider>
+				<Dock />
+			</TooltipProvider>
+		</QueryClientProvider>
+	);
+};
+
+/** The slot's own text - nothing else lives inside it now. */
+const liveSaveLine = () =>
+	document.querySelector("[data-slot='dock-save-status']")?.textContent?.trim() ?? null;
 
 beforeEach(() => {
-	useSaveStore.setState({ status: "idle" });
+	useSaveStore.setState({ status: "idle", lastErrorMessage: null });
 	useToastStore.setState({ toasts: [] });
 });
+
+afterEach(cleanup);
 
 describe("save failure reporting", () => {
 	it("turns a failure into a toast carrying the reason", () => {
@@ -71,13 +99,20 @@ describe("save failure reporting", () => {
 		// The gap the toast alone left open: it clears itself after
 		// TIMING.TOAST_DURATION_MS.error, and nothing said "still unsaved"
 		// after that. This line is what a failure looks like once it has.
-		expect(code).toMatch(/saveStatus === "error"/);
-		expect(code).toMatch(/Not saved/);
+		useSaveStore.setState({ status: "error", lastErrorMessage: "database is locked" });
+		renderDock();
+		expect(liveSaveLine()).toBe("Not saved");
 	});
 
 	it("keeps the Dock reporting the states that are not failures", () => {
-		expect(code).toMatch(/saveStatus === "saving"/);
-		expect(code).toMatch(/saveStatus === "saved"/);
+		useSaveStore.setState({ status: "saving" });
+		renderDock();
+		expect(liveSaveLine()).toBe("Saving…");
+
+		cleanup();
+		useSaveStore.setState({ status: "saved" });
+		renderDock();
+		expect(liveSaveLine()).toBe("Saved");
 	});
 });
 
@@ -91,12 +126,14 @@ describe("save failure reporting", () => {
  */
 describe("unsaved work is visible", () => {
 	it("renders the pending status the save pipeline writes", () => {
-		expect(code).toMatch(/saveStatus === "pending"/);
-		expect(code).toMatch(/Unsaved changes/);
+		useSaveStore.setState({ status: "pending" });
+		renderDock();
+		expect(liveSaveLine()).toBe("Unsaved changes");
 	});
 
-	it("scanned a real Dock, not an empty string", () => {
-		expect(code.length).toBeGreaterThan(1000);
+	it("says nothing at all once the save has settled", () => {
+		renderDock();
+		expect(liveSaveLine()).toBe("");
 	});
 
 	it("is reachable from the store the editors actually call", () => {
@@ -111,5 +148,259 @@ describe("unsaved work is visible", () => {
 		// by nothing; deleting them left `status` as its whole public surface.
 		expect(Object.keys(useSaveStore.getState())).not.toContain("lastSavedAt");
 		expect(Object.keys(useSaveStore.getState())).not.toContain("pendingSaveId");
+	});
+});
+
+/*
+ * The save line does not jump the strip around it, and costs nothing while
+ * idle.
+ *
+ * The four lines used to be four `{status === "x" && …}` children of the Dock's
+ * ambient group. That group is centred in the strip by two equal `flex-1`
+ * gutters, so its own width decides where it starts and every item in it moves
+ * when that width changes - and one edit walks the store `pending` -> `saving`
+ * -> `saved` -> `idle`, four different widths within a couple of seconds. The
+ * connection light slid one way and the version string the other, on every
+ * keystroke sequence typed anywhere in the app. A first fix reserved the widest
+ * line's width permanently, which stopped the jump but left a standing gap on
+ * every screen where nothing was being saved - the far more common case.
+ *
+ * jsdom lays nothing out, so the animated width itself is unobservable here
+ * (the same limit `tabs.test.tsx` hits for `MARK_TRACK`). What is observable is
+ * the mechanism: the slot is in the DOM in every state including `idle`, it is
+ * the *same* node across a transition rather than a remount, and its
+ * `grid-template-columns` track and cancelling margin flip between the zero
+ * and full-width classes as the status changes.
+ *
+ * Mutation check (confirmed): put the four `{saveStatus === "x" && …}` spans
+ * back in place of `<SaveStatusLine />` and "keeps the slot in the DOM" and
+ * "reuses the same node" both fail on the absent slot; swap the
+ * `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `SaveStatusLine` and "opens
+ * the track when a save state arrives" fails on the inverted classes.
+ */
+describe("the save line holds its own width", () => {
+	const slot = () => document.querySelector<HTMLElement>("[data-slot='dock-save-status']");
+
+	it("keeps the slot in the DOM with nothing to say, at a zero-width track", () => {
+		renderDock();
+		expect(slot(), "no slot - the line will widen the group when it arrives").not.toBeNull();
+		expect(slot()?.className).toContain("grid-cols-[0fr]");
+		// Cancels the row's leading gap-4 (not the trailing one, or the row's
+		// only surviving gap-4 would vanish too - see the note in Dock.tsx).
+		// `-mx-4` (both sides) shipped once and jammed "Connected" straight
+		// against the version string with no gap at all - this guards the
+		// single-sided form specifically, not just "some cancelling margin".
+		expect(slot()?.className).toContain("-ms-4");
+		expect(slot()?.className).not.toContain("-mx-4");
+		expect(slot()?.className).not.toContain("-me-4");
+	});
+
+	it("opens the track when a save state arrives", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "pending" }));
+		expect(slot()?.className).toContain("grid-cols-[1fr]");
+		expect(slot()?.className).toContain("ms-0");
+	});
+
+	it("reuses the same node across the whole save cycle", () => {
+		renderDock();
+		const idle = slot()!;
+
+		for (const status of ["pending", "saving", "saved"] as const) {
+			// `act`, or React batches the store write past the assertion and the
+			// node-identity check below passes without anything having rerendered.
+			act(() => useSaveStore.setState({ status }));
+			const next = slot()!;
+			// The same element, not a remount: only its track and live cell
+			// changed, so nothing was inserted into or removed from the centred
+			// group.
+			expect(next, `the slot remounted on ${status}`).toBe(idle);
+		}
+
+		// The line itself still reads "Saving…" here - `useSaveStatusDisplay`
+		// (see the dedicated describe block below) holds that text on screen for
+		// SAVING_MIN_VISIBLE_MS before showing "Saved", independent of the slot
+		// identity this loop is checking.
+		expect(liveSaveLine()).toBe("Saving…");
+	});
+
+	it("says nothing at rest, and reaches no screen reader while idle", () => {
+		renderDock();
+		expect(liveSaveLine()).toBe("");
+	});
+});
+
+/*
+ * The live text does not flash on every step of one save.
+ *
+ * A `key={line.text}` on the live span used to force a remount on every status
+ * change so `.enter-fade` would replay - but `.enter-fade` has no exit half
+ * (React removes a conditionally-rendered node synchronously), so the old text
+ * vanished in the same frame the new text started fading in from opacity 0.
+ * `pending` -> `saving` -> `saved` fired that hard-cut-then-fade three times in
+ * a few seconds, which read as a flash rather than motion - worse than the
+ * jump the track-animation mechanism exists to smooth over.
+ *
+ * The track opening from `idle` already carries the "something just appeared"
+ * motion; a text change within an already-open track needs none of its own.
+ *
+ * Mutation check (confirmed): restore `key={line.text}` and `enter-fade` on
+ * the live span and "keeps the same text node across a save cycle" fails on
+ * the remount; "carries no enter-fade class" fails on the class returning.
+ */
+describe("the save line's text does not flash on every step of one save", () => {
+	const liveTextNode = () =>
+		document.querySelector<HTMLElement>("[data-slot='dock-save-status'] span span");
+
+	it("keeps the same text node across a save cycle, not a remount per state", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "pending" }));
+		const pendingNode = liveTextNode()!;
+
+		act(() => useSaveStore.setState({ status: "saving" }));
+		const savingNode = liveTextNode()!;
+		expect(savingNode, "remounted on pending -> saving").toBe(pendingNode);
+
+		act(() => useSaveStore.setState({ status: "saved" }));
+		const savedNode = liveTextNode()!;
+		expect(savedNode, "remounted on saving -> saved").toBe(pendingNode);
+	});
+
+	it("carries no enter-fade class, so a text change replays no fade", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "pending" }));
+		expect(liveTextNode()?.className).not.toContain("enter-fade");
+
+		act(() => useSaveStore.setState({ status: "saving" }));
+		expect(liveTextNode()?.className).not.toContain("enter-fade");
+	});
+});
+
+/*
+ * "Saving…" holds the screen for SAVING_MIN_VISIBLE_MS before "Saved" can
+ * replace it - `useSaveStatusDisplay`'s own floor, distinct from the "no
+ * flash on a text change" cases above (those are about *how* a change is
+ * shown; this is about *when* one particular change is allowed to happen).
+ *
+ * A save against the local engine often lands in well under
+ * SAVING_MIN_VISIBLE_MS, which used to mean "Saving…" was on screen for less
+ * time than a person needs to register a state change at all - the store's
+ * own `status` jumped `pending` -> `saving` -> `saved` inside one render, and
+ * the Dock showed exactly that. The hook is what holds the *display* back on
+ * "saving" a beat past a "saved" it has already received, without touching
+ * `save-store.ts` itself - every other reader of `status` still gets the
+ * truth the instant it changes.
+ *
+ * Mutation check (confirmed): hardcode `remaining` to `0` in
+ * `useSaveStatusDisplay` and "holds 'Saving…' until the floor" fails on the
+ * line reading "Saved" immediately; drop the `elapsed`/`remaining`
+ * computation entirely (jump straight from "saving" to "saved" with no
+ * `setTimeout`) and the same case fails the same way.
+ */
+describe("the save line's floor on how long 'Saving…' stays up", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useSaveStore.setState({ status: "idle", lastErrorMessage: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds 'Saving…' until the floor, then shows 'Saved'", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() => useSaveStore.setState({ status: "saved" }));
+
+		expect(liveSaveLine()).toBe("Saving…");
+
+		act(() => vi.advanceTimersByTime(TIMING.SAVING_MIN_VISIBLE_MS - 1));
+		expect(liveSaveLine()).toBe("Saving…");
+
+		act(() => vi.advanceTimersByTime(1));
+		expect(liveSaveLine()).toBe("Saved");
+	});
+
+	it("does not hold a failure behind the floor", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() =>
+			useSaveStore.setState({ status: "error", lastErrorMessage: "database is locked" })
+		);
+
+		// The floor only ever applies to saving -> saved.
+		expect(liveSaveLine()).toBe("Not saved");
+	});
+
+	it("does not add to a save already slower than the floor", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() => vi.advanceTimersByTime(TIMING.SAVING_MIN_VISIBLE_MS + 500));
+
+		act(() => useSaveStore.setState({ status: "saved" }));
+
+		// Already past the floor when "saved" arrived - no further wait.
+		expect(liveSaveLine()).toBe("Saved");
+	});
+});
+
+/*
+ * The save line fades out on its way to idle, rather than being cut.
+ *
+ * `SAVE_LINES` has no entry for `idle`, so the moment `status` reached it the
+ * live text was removed from the tree in the same update that started the
+ * track's own `transition-[grid-template-columns]` - the track shrank
+ * smoothly, but the text inside it was simply gone, which read as a hard cut
+ * rather than the fade the surrounding motion implied. `useSaveStatusDisplay`
+ * holds `displayed` on the last real status for `TIMING.SAVE_LINE_FADE_MS`
+ * past the store's own return to `idle`, which is what gives the live cell's
+ * `opacity-0` a still-populated node to fade against instead of an empty one.
+ *
+ * Mutation check (confirmed): drop the `status === "idle" && displayed !==
+ * "idle"` branch from `useSaveStatusDisplay` (so `idle` is mirrored
+ * immediately, the old behaviour) and "keeps the text and track open while
+ * fading" fails on the empty line; hardcode `fading` to `false` in
+ * `SaveStatusLine` and "starts fading the instant the store goes idle" fails
+ * on the missing `opacity-0`.
+ */
+describe("the save line fades rather than cuts on its way to idle", () => {
+	const liveCell = () =>
+		document.querySelector<HTMLElement>("[data-slot='dock-save-status'] > span");
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useSaveStore.setState({ status: "idle", lastErrorMessage: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("keeps the text and track open while fading, then clears both", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saved" }));
+		act(() => useSaveStore.setState({ status: "idle" }));
+
+		// Still "Saved" - the fade has something to animate against.
+		expect(liveSaveLine()).toBe("Saved");
+
+		act(() => vi.advanceTimersByTime(TIMING.SAVE_LINE_FADE_MS - 1));
+		expect(liveSaveLine()).toBe("Saved");
+
+		act(() => vi.advanceTimersByTime(1));
+		expect(liveSaveLine()).toBe("");
+	});
+
+	it("starts fading the instant the store goes idle, not after the hold", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saved" }));
+		expect(liveCell()?.className).toContain("opacity-100");
+
+		act(() => useSaveStore.setState({ status: "idle" }));
+		expect(liveCell()?.className).toContain("opacity-0");
 	});
 });

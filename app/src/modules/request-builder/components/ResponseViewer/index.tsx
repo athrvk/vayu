@@ -21,6 +21,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { BookmarkPlus } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
 	Tabs,
 	TabsContent,
@@ -38,6 +39,8 @@ import { useExecutionEventsStore } from "@/stores";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { chordKeys } from "@/lib/platform";
 import { SEND_CHORD } from "@/constants/shortcuts";
+import { TIMING } from "@/config/timing";
+import { useHeldValue } from "@/hooks/useHeldValue";
 import {
 	ResponseBody as SharedResponseBody,
 	ResponseStatusBar,
@@ -56,7 +59,91 @@ import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
+import SendingWave from "./SendingWave";
 import type { ResponseState, ResponseTab } from "../../types";
+
+/**
+ * The Tests tab's pass/fail chip, animated into a track that costs nothing at
+ * rest.
+ *
+ * A result, not a count - it keeps its `Badge` rather than becoming a
+ * `TabCount`, and it says nothing at all when nothing ran, because "0/0" reads
+ * like a result. What it must *not* do is arrive by an instant jump: a mark on
+ * a trigger is a flex item, the trigger is `shrink-0` inside this strip's
+ * `flex-nowrap` list, so a chip appearing widens the Tests trigger by its own
+ * width plus the trigger's `gap-1.5` and pushes Events and Raw along with it -
+ * a response with tests and one without would draw the strip two different
+ * ways, under a pointer on its way to one of those two tabs.
+ *
+ * This is the same defect `MARK_TRACK` in `tabs.tsx` fixes for `TabCount` and
+ * `TabErrorDot`: a `grid-template-columns: 0fr -> 1fr` track that is
+ * genuinely zero width - and cancels the trigger's own leading `gap-1.5`
+ * alongside it, via `-ms-1.5`/`ms-0` - when there is nothing to show, and
+ * animates open to the chip's intrinsic width when there is.
+ *
+ * **Unlike `TabCount`, the `Badge` does not stay mounted empty.** `TabCount`'s
+ * live cell is bare text, so an empty one is genuinely invisible; `Badge`
+ * always paints an opaque `bg-*` fill regardless of its content, the same
+ * fact the width-reservation version of this component was written around
+ * ("an emptied `Badge` still paints a coloured pill"). A track that has not
+ * quite finished collapsing - or hits a rounding residual from the badge's
+ * own padding - would otherwise leave a stray filled pixel or two showing as
+ * a small solid mark next to "Tests" on every response that never ran one,
+ * which is worse than the jump this whole mechanism exists to fix. So the
+ * `Badge` itself mounts only when there is a result, the same true
+ * mount/unmount `TabErrorDot` has, and needs the same `starting:` opacity for
+ * its own fade-in independent of the track's width animation.
+ *
+ * **Unmounting it is held by one fade** (`useHeldValue`,
+ * `TIMING.MARK_FADE_MS`), the mirror of that `starting:` fade-in and the same
+ * fix `TabCount` and the Dock's save line take: the `Badge` used to be
+ * removed in the commit that put the track back to `0fr`, so the track spent
+ * 150ms collapsing around nothing and the chip itself was cut - which the
+ * collapse made easy to miss. It still leaves the tree entirely once the fade
+ * is over, so the stray-filled-pixel hazard above is unchanged: nothing is
+ * mounted at rest.
+ */
+function TestsResultChip({ results }: { results: readonly { passed: boolean }[] }) {
+	const passed = results.filter((t) => t.passed).length;
+	const hasResults = results.length > 0;
+	/*
+	 * The chip's whole content in one string, because `useHeldValue` holds a
+	 * primitive: `results` is a fresh `[]` on every render of a response that
+	 * ran none, so an array could never settle. The track reads `hasResults`
+	 * and collapses on time; the `Badge` reads `shown` and survives one fade
+	 * past it.
+	 */
+	const { shown, fading } = useHeldValue(
+		hasResults ? `${passed}/${results.length}` : null,
+		TIMING.MARK_FADE_MS
+	);
+	// Tone from the held label, not from `results`: while the chip is on its
+	// way out there are no live results left to read one from, and a green
+	// chip must not turn red in the last frames of its life.
+	const allPassed = shown !== null && shown.split("/")[0] === shown.split("/")[1];
+
+	return (
+		<span
+			data-slot="tests-result-chip"
+			className={cn(
+				"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out",
+				hasResults ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-1.5"
+			)}
+		>
+			{shown !== null && (
+				<Badge
+					variant={allPassed ? "default" : "destructive"}
+					className={cn(
+						"starting:opacity-0 transition-opacity duration-150 h-4 min-w-0 px-1 text-micro",
+						fading ? "opacity-0" : "opacity-100"
+					)}
+				>
+					{shown}
+				</Badge>
+			)}
+		</span>
+	);
+}
 
 export default function ResponseViewer() {
 	const { request, response, isExecuting } = useRequestBuilderContext();
@@ -69,7 +156,8 @@ export default function ResponseViewer() {
 	 * component without remounting it - `request.id` changes underneath the
 	 * same `useState` either way.
 	 */
-	const { getResponseTab, setResponseTab } = useTabSelectionStore();
+	const getResponseTab = useTabSelectionStore((s) => s.getResponseTab);
+	const setResponseTab = useTabSelectionStore((s) => s.setResponseTab);
 	const [activeTab, setActiveTabState] = useState<ResponseTab>(
 		() => (requestId ? getResponseTab(requestId) : null) ?? "body"
 	);
@@ -145,10 +233,27 @@ export default function ResponseViewer() {
 
 	const shown = response ?? streamedResponse;
 
-	// Loading state. A stream that has been accepted but whose headers have not
-	// arrived belongs here too: the send is over - `isExecuting` was cleared
-	// when the engine answered - but there is genuinely nothing to draw yet.
-	if (isExecuting || (isStreaming && !shown)) {
+	/*
+	 * Loading state - **only when there is nothing on screen to keep**.
+	 *
+	 * It used to be `isExecuting || …`, which replaced the whole pane with a
+	 * centred spinner on every send, the re-sends included: press Send on a
+	 * request you already have a response for and the status, the headers and
+	 * the body you were reading vanished until the new ones landed. That is the
+	 * loading state destroying the context the user is working in - the defect
+	 * stale-while-revalidate exists to fix, and what this pane's own rule in
+	 * docs/design-system.md ("Loading") already said not to do: an in-place
+	 * action on an existing control is an inline spinner on *that control*, and
+	 * nothing else on the pane should move. Send already carries it, relabelling
+	 * itself Sending. A re-send now keeps the previous exchange on screen and
+	 * marks it stale (see `busy` below) instead.
+	 *
+	 * What is left here is the case where there is genuinely nothing to keep:
+	 * the first send for this request, and a stream that has been accepted but
+	 * whose headers have not arrived - the send is over there, `isExecuting` was
+	 * cleared when the engine answered, but no exchange exists to draw yet.
+	 */
+	if (!shown && (isExecuting || isStreaming)) {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
@@ -193,6 +298,41 @@ export default function ResponseViewer() {
 			</div>
 		);
 	}
+
+	/*
+	 * A send is in flight over an exchange that is already on screen.
+	 *
+	 * The layout is still: the whole exchange recedes to 60% and nothing about
+	 * its own content changes size or position, so everything stays readable
+	 * and clickable while the new response is on its way. That is what the
+	 * "Loading" rule in docs/design-system.md asks for (the control that was
+	 * clicked shows the work; nothing else on the pane moves) and it is the
+	 * treatment React Query's own paginated-queries guide reaches for when it
+	 * hands back the previous page's data - dim what is stale, do not replace
+	 * it. `SendingWave` is the one deliberate exception to "nothing moves": a
+	 * faint band layered on top, low enough opacity to leave the dimmed text
+	 * legible under it, because a dim with no motion at all read as inert
+	 * rather than as a request actually in flight (see the doc's own
+	 * paragraph for the reasoning). It is not itself a live region and adds
+	 * nothing an assistive-tech user does not already get from `aria-busy`.
+	 *
+	 * It has to say *something* when the wave is off too, though, or a re-send
+	 * whose response is byte-identical to the one already showing would look
+	 * like a Send that never fired - the same trap `ResponseAnnouncer` bumps a
+	 * key to get out of. The dim lifting as the new response lands is that
+	 * signal.
+	 *
+	 * `aria-busy` rather than a live region: the pane is not one, and the
+	 * announcement of both the send and its result is `ResponseAnnouncer`'s
+	 * job. This only tells assistive tech that what it is reading here is
+	 * mid-update.
+	 *
+	 * Not `isStreaming`: an open stream's pane is being written to, not held
+	 * stale, and the status band already carries its live dot and its running
+	 * event count.
+	 */
+	const busy = isExecuting;
+	const staleClass = cn("transition-opacity duration-150", busy && "opacity-60");
 
 	/*
 	 * Every tab always renders.
@@ -269,8 +409,13 @@ export default function ResponseViewer() {
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
-			<div className="flex-1 flex flex-col surface-card overflow-hidden">
+			<div
+				className="relative flex-1 flex flex-col surface-card overflow-hidden"
+				aria-busy={busy}
+			>
+				{busy && <SendingWave />}
 				<ResponseStatusBar
+					className={staleClass}
 					status={shown.status}
 					statusText={shown.statusText}
 					time={shown.time}
@@ -282,13 +427,25 @@ export default function ResponseViewer() {
 					receivedAt={shown.receivedAt}
 					restoredFrom={shown.restoredFrom}
 				/>
-				<ClientErrorView errorCode={shown.errorCode} errorMessage={shown.errorMessage} />
+				{/* The wrapper is what carries the dim, `ClientErrorView` taking no
+				    class of its own; `flex-1 flex flex-col` is the box it was
+				    already given as a direct child of this column. */}
+				<div className={cn("flex-1 flex flex-col min-h-0", staleClass)}>
+					<ClientErrorView
+						errorCode={shown.errorCode}
+						errorMessage={shown.errorMessage}
+					/>
+				</div>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex-1 flex flex-col surface-card overflow-hidden">
+		<div
+			className="relative flex-1 flex flex-col surface-card overflow-hidden"
+			aria-busy={busy}
+		>
+			{busy && <SendingWave />}
 			{/*
 			 * Its own band, above the tabs.
 			 *
@@ -299,6 +456,7 @@ export default function ResponseViewer() {
 			 * ResponseStatusBar.
 			 */}
 			<ResponseStatusBar
+				className={staleClass}
 				status={shown.status}
 				statusText={shown.statusText}
 				time={shown.time}
@@ -319,7 +477,7 @@ export default function ResponseViewer() {
 			<Tabs
 				value={activeTab}
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
-				className="flex-1 flex flex-col overflow-hidden"
+				className={cn("flex-1 flex flex-col overflow-hidden", staleClass)}
 			>
 				{/* `border-rule`, and the `surface-card` root above is what gives it a
 				    value. Every divider in this pane says the same thing and the
@@ -337,7 +495,10 @@ export default function ResponseViewer() {
 					    when the right-hand group was just the actions; it matters now
 					    that the response's own facts live there.
 					 */}
-					<TabsList className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip">
+					<TabsList
+						variant="bare"
+						className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
+					>
 						<TabsTrigger value="body">
 							<TabLabel>Body</TabLabel>
 						</TabsTrigger>
@@ -377,21 +538,12 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger value="tests">
 							<TabLabel>Tests</TabLabel>
-							{/* A result, not a count - it keeps its chip. No chip at all when
-							    nothing ran, rather than a "0/0" that reads like a result. */}
-							{testResults.length > 0 && (
-								<Badge
-									variant={
-										testResults.every((t) => t.passed)
-											? "default"
-											: "destructive"
-									}
-									className="ml-0.5 h-4 px-1 text-[10px]"
-								>
-									{testResults.filter((t) => t.passed).length}/
-									{testResults.length}
-								</Badge>
-							)}
+							{/* A result, not a count - it keeps its chip, and says nothing
+							    at all when nothing ran rather than a "0/0" that reads like
+							    a result. Rendered unconditionally all the same: see
+							    `TestsResultChip`, which holds the width open so a chip
+							    arriving does not push Events and Raw sideways. */}
+							<TestsResultChip results={testResults} />
 						</TabsTrigger>
 						{/*
 						 * Always rendered, like the seven beside it (issue #59's
@@ -426,7 +578,7 @@ export default function ResponseViewer() {
 							onClick={() => setSavingExample(true)}
 							className="h-6 shrink-0 px-2 text-xs"
 						>
-							<BookmarkPlus className="h-3.5 w-3.5" />
+							<BookmarkPlus className="size-icon-sm" />
 							Save as example
 						</Button>
 					)}

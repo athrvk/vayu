@@ -21,8 +21,18 @@
 
 import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	Button,
+	Checkbox,
+	ICON_MOTION,
+	IconSwap,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
+import { isBlankRow } from "./key-value";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
 import FilePartCell, { type PickedFile } from "./FilePartCell";
@@ -68,6 +78,11 @@ interface KeyValueRowProps {
  * It renders only where there is something to resolve, so the column is empty
  * on an ordinary row and the marker is its own affordance - the alternative was
  * a hover with nothing on screen to say it existed.
+ *
+ * What it shows is the row's resolved text as the row itself computed it
+ * (`stableRowField` below), not a resolution of its own: "peek" promises the
+ * value this row stands for, and opening it twice without editing anything has
+ * to answer the same thing both times.
  */
 function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) {
 	return (
@@ -78,7 +93,7 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 					aria-label={`Resolved value of ${label}`}
 					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-[color,scale] duration-150 hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none active:scale-[0.98]"
 				>
-					<Sigma className="h-3 w-3" />
+					<Sigma className="size-icon-sm" />
 				</button>
 			</TooltipTrigger>
 			<TooltipContent side="left" className="max-w-md">
@@ -87,6 +102,30 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 		</Tooltip>
 	);
 }
+
+/*
+ * One entry per row *field* - `<row id>:key` and `<row id>:value` - cached
+ * across this row's own unmount.
+ *
+ * A `useMemo` cannot hold this and a memo per row cannot even be written: the
+ * row is one component rendered per item, so the memo would die with the row,
+ * and Params, Headers, form-data and urlencoded all live behind a
+ * `TabsContent` that Radix unmounts when you look at another tab
+ * (`RequestTabs/index.tsx` force-mounts Body and Elements only). Without this,
+ * a `{{$randomInt}}` in a value rerolled on every render the row took *and*
+ * every round trip through another tab, so the Σ peek answered with a
+ * different number each time it was opened, beside a "Sends" line one tab over
+ * that is stable.
+ *
+ * The resolver outliving the row is what makes the cache reachable: it arrives
+ * as `variables.resolveString`, which the request builder's provider owns
+ * (`useVariableSupport`), so it is the same function on the way back in. Row
+ * ids come from `toKeyValueItems` at the point the request is fetched, one
+ * level above every panel, so they survive the same unmount. See
+ * `lib/dynamic-variable-cache.ts` for why this is module scope and keyed by
+ * id rather than by the text.
+ */
+const stableRowField = createStableResolve();
 
 function KeyValueRow({
 	item,
@@ -108,8 +147,12 @@ function KeyValueRow({
 	canDisable = true,
 }: KeyValueRowProps) {
 	const resolveString = variables?.resolveString;
-	const resolvedKey = resolveString ? resolveString(item.key) : item.key;
-	const resolvedValue = resolveString ? resolveString(item.value) : item.value;
+	const resolvedKey = resolveString
+		? stableRowField(`${item.id}:key`, item.key, resolveString)
+		: item.key;
+	const resolvedValue = resolveString
+		? stableRowField(`${item.id}:value`, item.value, resolveString)
+		: item.value;
 	/*
 	 * "Contains a variable" is exactly "resolving changed something". A row whose
 	 * text is already literal has nothing to peek at, which is the condition the
@@ -125,21 +168,39 @@ function KeyValueRow({
 	// on a urlencoded row (which the engine refuses) must not paint a picker
 	// that cannot be sent.
 	const isFileRow = allowFiles && item.type === "file";
+	// The trailing spare row every table keeps (`withTrailingBlank`), read with
+	// the same predicate that decides it is spare rather than a second rule.
+	const isPlaceholderRow = isBlankRow(item);
 
 	return (
 		<div
 			className={cn(
 				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
+				// The leading column reads the `target` floor (issue #1679) rather
+				// than a literal 24px, so it grows to 28px at Comfortable along with
+				// the checkbox inside it instead of leaving a 24px column around a
+				// 28px control.
 				allowFiles
-					? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
-					: "grid-cols-[24px_1fr_1fr_20px_28px]",
+					? "grid-cols-[var(--spacing-target)_1fr_1fr_20px_20px_28px]"
+					: "grid-cols-[var(--spacing-target)_1fr_1fr_20px_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
 		>
-			{allowDisable ? (
-				<input
-					type="checkbox"
+			{/*
+			 * The trailing spare row has no checkbox at all (#1691).
+			 *
+			 * It used to paint a *checked* accent box, so the row that exists only
+			 * as somewhere to type read as an enabled parameter before anything had
+			 * been typed into it - three enabled-looking params on a request that
+			 * sends one. Rendering it unchecked instead would have been worse: the
+			 * box is bound to `item.enabled`, which is `true`, so clicking it would
+			 * have done nothing visible. The spacer keeps the column's width, so
+			 * nothing shifts when the first character arrives and the real control
+			 * takes its place.
+			 */}
+			{allowDisable && !isPlaceholderRow ? (
+				<Checkbox
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={keyReadOnly || !canDisable}
@@ -147,18 +208,15 @@ function KeyValueRow({
 					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
 					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
-					// `accent-primary` paints the native control in the user's accent.
-					// Without it the browser default wins - a fixed blue that ignores
-					// both the theme and the accent scheme, in the densest table in
-					// the app. The variables table already does this with
-					// `accent-scope-*`; this one had been left on the browser blue.
-					// The neighbouring `rounded-md` / `border-input` are inert on a
-					// native checkbox (no `appearance-none`), so `accent-color` is the
-					// only property here that actually paints.
-					className="w-4 h-4 accent-primary cursor-pointer disabled:opacity-50"
+					// `size-target` (issue #1679), not `size-icon`: this box is its own
+					// hit target, with no separate padding wrapper the way a close
+					// button's icon-in-a-bigger-box is - a native checkbox's rendered
+					// box and its clickable area are the same box, so it takes the
+					// interactive floor directly rather than the icon step.
+					className="size-target"
 				/>
 			) : (
-				<div className="w-4" />
+				<div className="size-target" />
 			)}
 
 			<VariableInput
@@ -212,11 +270,13 @@ function KeyValueRow({
 								}
 								className="h-6 w-5 rounded-md text-subtle-foreground hover:text-primary-text"
 							>
-								{isFileRow ? (
-									<Type className="h-3 w-3" />
-								) : (
-									<Paperclip className="h-3 w-3" />
-								)}
+								<IconSwap
+									state={isFileRow ? "file" : "text"}
+									icons={{
+										text: <Paperclip className="size-icon-sm" />,
+										file: <Type className="size-icon-sm" />,
+									}}
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="left">
@@ -254,7 +314,7 @@ function KeyValueRow({
 						: "opacity-0 group-hover:opacity-100"
 				)}
 			>
-				<Trash2 className="w-3.5 h-3.5" />
+				<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
 			</Button>
 		</div>
 	);

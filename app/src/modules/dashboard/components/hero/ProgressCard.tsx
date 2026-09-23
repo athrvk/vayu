@@ -30,7 +30,7 @@ export function ProgressCard({
 	return (
 		<HeroCardShell label="Progress" tip={TOOLTIPS.progress}>
 			<HeroValue value={pct !== undefined ? pct.toFixed(0) : "-"} unit="%" />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{formatNumber(requestsSent)}</span>{" "}
 				/{" "}
 				<span className="text-foreground font-semibold">

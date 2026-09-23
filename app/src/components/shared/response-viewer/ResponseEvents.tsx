@@ -163,16 +163,20 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 					aria-expanded={expanded}
 					// The `Button` primitive's own baseline already gives this row its
 					// hover/press transitions (index.css's `:where(button, ...)` rule) -
-					// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
-					// the primitive's default `size-4` glyph, matching this row's
-					// smaller chevron. `rounded-none` overrides the base's `rounded-md`:
-					// this row is full-bleed inside its list (`border-b last:border-b-0`
-					// below), so a rounded hover fill would float oddly inside its own
-					// square edges.
-					className="gap-2 rounded-none px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
+					// no hand-rolled `transition-*` needed. The chevron states its own
+					// `size-icon-sm` (issue #1679), which the primitive's
+					// `[&_svg:not([class*='size-'])]:size-icon` default leaves alone -
+					// no wrapper override needed. `rounded-none` overrides the base's
+					// `rounded-md`: this row is full-bleed inside its list
+					// (`border-b last:border-b-0` below), so a rounded hover fill would
+					// float oddly inside its own square edges.
+					className="gap-2 rounded-none px-4 py-1.5 hover:bg-muted/40"
 				>
-					<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
-					<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+					<Chevron
+						aria-hidden="true"
+						className="size-icon-sm shrink-0 text-muted-foreground"
+					/>
+					<span className="w-10 shrink-0 text-right font-mono text-label text-muted-foreground">
 						{index + 1}
 					</span>
 					{/*
@@ -185,7 +189,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						{event.event}
 					</Badge>
 					{event.sourceId && (
-						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+						<span className="shrink-0 font-mono text-label text-muted-foreground">
 							id {event.sourceId}
 						</span>
 					)}
@@ -200,7 +204,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						</Badge>
 					)}
 					{at && (
-						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+						<span className="shrink-0 font-mono text-label text-muted-foreground">
 							{at}
 						</span>
 					)}

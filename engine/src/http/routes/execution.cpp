@@ -1230,9 +1230,18 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // it here would be a copy that stops receiving that one's fixes. The
     // credentials half is a no-op for the ordinary send, whose auth the build
     // already applied.
+    //
+    // `row_columns` - not the two-argument overload's own empty default - so a
+    // bare `{{username}}` binds from the row here exactly as it does on both
+    // load paths (issue #1007). Omitting it left every bare-spelled column
+    // token unrecognised as bindable (`is_bound_column_name` reads nothing out
+    // of an empty set), so it survived the bind untouched and reached the wire
+    // as literal `{{column}}` text - a single send's `{{data.column}}` still
+    // worked, since that namespace is always bindable, which is what made the
+    // gap invisible on a full collection or load run (both already pass this).
     auto bound = vayu::core::bind_iteration (built.request,
-    vayu::core::tokenize_bindable_fields (built.request), row_auth.auth,
-    row_auth.credentials, binding);
+    vayu::core::tokenize_bindable_fields (built.request, row_columns),
+    row_auth.auth, row_auth.credentials, binding);
     if (!bound.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + bound.error);
         return bound.error;

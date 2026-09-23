@@ -53,8 +53,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
-import { Button, Input, Skeleton } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Button, Input, Skeleton, ICON_MOTION } from "@/components/ui";
+import { Callout, FieldError } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
 	useCollectionsQuery,
@@ -74,6 +74,7 @@ import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 import { formatRelative } from "./format";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
@@ -325,7 +326,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							onClick={() => fileInputRef.current?.click()}
 							disabled={bindSpec.isPending}
 						>
-							<Upload className="mr-2 h-4 w-4" />
+							<Upload
+								className="mr-2 size-icon"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							Choose file
 						</Button>
 						<input
@@ -342,12 +346,15 @@ export default function SpecTab({ collection }: SpecTabProps) {
 								if (file) handleFile(file);
 							}}
 						/>
-						<span className="text-[11px] text-muted-foreground">or</span>
+						<span className="text-label text-muted-foreground">or</span>
 						<Input
 							value={url}
 							onChange={(e) => setUrl(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") void handleFetch();
+								// `isCommitEnter`, not a bare Enter (#939, #935): a URL
+								// half-spelled by an IME must not be fetched, and
+								// mod+Enter is the Send chord.
+								if (isCommitEnter(e)) void handleFetch();
 							}}
 							placeholder="https://api.example.com/openapi.json"
 							className="flex-1"
@@ -359,9 +366,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							disabled={!url || fetching || bindSpec.isPending}
 						>
 							{fetching ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<Loader2 className="mr-2 size-icon animate-spin" />
 							) : (
-								<Link2 className="mr-2 h-4 w-4" />
+								<Link2 className="mr-2 size-icon" />
 							)}
 							Fetch
 						</Button>
@@ -392,7 +399,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					    or a document that did not read - is pending forever. */}
 					{(describeQuery.isFetching || matchQuery.isFetching) && (
 						<p className="flex items-center gap-2 text-xs text-muted-foreground">
-							<Loader2 className="h-3 w-3 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 							Reading this document and matching it against the requests here...
 						</p>
 					)}
@@ -418,9 +425,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					{picked && match && (
 						<Button onClick={handleBind} disabled={bindSpec.isPending}>
 							{bindSpec.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<Loader2 className="mr-2 size-icon animate-spin" />
 							) : (
-								<FileJson className="mr-2 h-4 w-4" />
+								<FileJson className="mr-2 size-icon" />
 							)}
 							Bind this spec
 						</Button>
@@ -450,10 +457,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<div>
 					<SectionLabel>Export</SectionLabel>
 					<Button variant="outline" onClick={() => setExporting(true)}>
-						<Download className="mr-2 h-4 w-4" />
+						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Export as OpenAPI
 					</Button>
-					<p className="mt-1 text-[11px] text-muted-foreground">
+					<p className="mt-1 text-label text-muted-foreground">
 						Writes this collection's own document back out, updated: operations it no
 						longer has removed, stored examples written in, and everything Vayu does not
 						model left exactly as it is.
@@ -468,10 +475,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						onClick={handleUnbind}
 						disabled={updateCollection.isPending}
 					>
-						<Trash2 className="mr-2 h-4 w-4" />
+						<Trash2 className="mr-2 size-icon" />
 						Unbind
 					</Button>
-					<p className="mt-1 text-[11px] text-muted-foreground">
+					<p className="mt-1 text-label text-muted-foreground">
 						Unbinding leaves the requests and their recorded operations exactly as they
 						are, and leaves the stored document for anything else bound to it.
 					</p>
@@ -545,9 +552,9 @@ function BoundSpec({
 					) : (
 						<>
 							{sourceUrl ? (
-								<Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+								<Link2 className="size-icon-sm text-primary shrink-0" />
 							) : (
-								<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+								<FileJson className="size-icon-sm text-primary shrink-0" />
 							)}
 							<span className="font-mono break-all">{source}</span>
 						</>
@@ -560,7 +567,7 @@ function BoundSpec({
 				 * hiding a value that is already known would be a second way of
 				 * describing the document wrongly.
 				 */}
-				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-label text-muted-foreground">
 					<div className="flex gap-1.5">
 						<dt>Hash</dt>
 						<dd className="font-mono text-foreground">{shortHash(specHash)}</dd>
@@ -607,10 +614,10 @@ function BoundSpec({
 					</div>
 				</dl>
 				{failed && (
-					<p className="text-[11px] text-destructive-text">
+					<FieldError>
 						The stored document could not be read - its source and fetch time are
 						unknown until the engine answers.
-					</p>
+					</FieldError>
 				)}
 			</div>
 		</div>
@@ -640,14 +647,14 @@ function MatchSummary({
 				{title || "Untitled API"}{" "}
 				<span className="font-normal text-muted-foreground">({format})</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground break-all">from {source}</p>
+			<p className="text-label text-muted-foreground break-all">from {source}</p>
 			{/*
 			 * All three numbers, always - including the zeros. "matched 12" alone
 			 * reads as a complete result; "matched 12, 3 requests unmatched, 4
 			 * operations with no request" is what the user is actually agreeing to,
 			 * and the two leftovers are what sync (#627) will later offer to act on.
 			 */}
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				Matched {matched} request{matched === 1 ? "" : "s"} · {unmatchedRequests} request
 				{unmatchedRequests === 1 ? "" : "s"} with no operation · {unmatchedOperations}{" "}
 				operation
@@ -660,7 +667,7 @@ function MatchSummary({
 			 * and the user is agreeing to it (issue #718).
 			 */}
 			{staleStamps > 0 && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{staleStamps} request{staleStamps === 1 ? "" : "s"} record
 					{staleStamps === 1 ? "s" : ""} an operation this document does not have - that
 					identity is cleared, because it names another document.

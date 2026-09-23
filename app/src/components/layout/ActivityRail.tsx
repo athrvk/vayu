@@ -43,7 +43,9 @@ import { RailButton } from "./RailButton";
 import { regionProps } from "./region-focus";
 
 export function ActivityRail() {
-	const { drawerOpen, drawerView, activateDrawerView } = useLayoutStore();
+	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
+	const drawerView = useLayoutStore((s) => s.drawerView);
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const runningServices = useRunningServiceCount();
 	const navRef = useRef<HTMLElement>(null);
 
@@ -87,7 +89,7 @@ export function ActivityRail() {
 			aria-label="Sidebar views"
 			{...regionProps("rail")}
 		>
-			{DRAWER_VIEWS.map(({ view, label, icon: Icon }) => {
+			{DRAWER_VIEWS.map(({ view, label, icon: Icon, motion }) => {
 				// The roving stop tracks the *selected* view, not whether the Drawer
 				// is currently open on it - the Drawer being closed must not leave
 				// the rail with zero tab stops.
@@ -103,7 +105,14 @@ export function ActivityRail() {
 						variant="indicator"
 						tabIndex={isRovingStop ? 0 : -1}
 					>
-						<Icon className="w-4 h-4" />
+						{/* The descriptor names the motion, not this file: the rail
+						    draws six glyphs generically and must not learn which one
+						    it has (#1687). An entry without a `motion` renders no
+						    attribute at all, since React drops an undefined one -
+						    which matters, because an empty `data-icon-motion` would
+						    still match the block's default-duration rule. The hover
+						    it fires from is `RailButton`'s own `group`. */}
+						<Icon className="size-icon" data-icon-motion={motion} />
 						{/* The one badge the footer carried that moves here: a local
 						    service listening is otherwise invisible outside the surface
 						    that started it (#502). The Dock keeps its own text chip for

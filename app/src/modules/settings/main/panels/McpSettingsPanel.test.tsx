@@ -103,6 +103,13 @@ async function renderPanel() {
 
 const toastMessages = () => useToastStore.getState().toasts.map((t) => t.message);
 
+/** Expands the named card's own `CardDescription` (not a row inside it, which may carry its own Show more). */
+function expandCardDescription(cardTitle: string) {
+	const card = screen.getByText(cardTitle).closest("[data-slot=card]") as HTMLElement;
+	const description = card.querySelector("[data-slot=card-description]") as HTMLElement;
+	fireEvent.click(within(description).getByRole("button", { name: /show more/i }));
+}
+
 describe("McpSettingsPanel load failures", () => {
 	it("surfaces a failed load instead of rendering an empty allowlist", async () => {
 		getMcpSafety.mockRejectedValue(new Error("engine ipc down"));
@@ -249,8 +256,12 @@ describe("McpSettingsPanel cap copy", () => {
 	function capDescription(label: string): string {
 		// `data-setting-row` is the shared NumberSettingRow's own container, so
 		// this reaches the description of *this* cap and no other.
-		const row = screen.getByLabelText(label).closest("[data-setting-row]");
-		const text = row?.querySelector("p")?.textContent ?? "";
+		const row = screen.getByLabelText(label).closest("[data-setting-row]") as HTMLElement;
+		// Long cap copy now collapses behind Show more - expand it so callers get
+		// the real sentence rather than a truncated prefix.
+		const expand = within(row).queryByRole("button", { name: /show more/i });
+		if (expand) fireEvent.click(expand);
+		const text = row.querySelector("p")?.textContent ?? "";
 		expect(text.length).toBeGreaterThan(0);
 		return text;
 	}
@@ -290,6 +301,9 @@ describe("McpSettingsPanel cap copy", () => {
 	it("says a cap above that maximum is lowered rather than stored", async () => {
 		await renderPanel();
 
+		// The sentence sits past the card description's collapse threshold.
+		expandCardDescription("Load caps");
+
 		expect(
 			screen.getByText(/a cap above the most vayu itself will run is lowered/i)
 		).toBeInTheDocument();
@@ -325,6 +339,9 @@ describe("McpSettingsPanel write-switch cross-references", () => {
 	it("tells the Tools card that Write access is a second switch", async () => {
 		await renderPanel();
 
+		// The cross-reference sits past the card description's collapse threshold.
+		expandCardDescription("Tools");
+
 		expect(screen.getByText(/write access, below/i)).toBeInTheDocument();
 	});
 
@@ -338,6 +355,9 @@ describe("McpSettingsPanel write-switch cross-references", () => {
 	it("tells the Write access card that a write tool is not offered at all", async () => {
 		await renderPanel();
 
+		// Both sentences sit past the card description's collapse threshold.
+		expandCardDescription("Write access");
+
 		expect(
 			screen.getByText(/no tool in the write group above is offered to the agent at all/i)
 		).toBeInTheDocument();
@@ -345,6 +365,8 @@ describe("McpSettingsPanel write-switch cross-references", () => {
 
 	it("tells the Write access card that a tool switched off in Tools stays off", async () => {
 		await renderPanel();
+
+		expandCardDescription("Write access");
 
 		expect(
 			screen.getByText(/turning it on grants no tool you switched off in tools/i)

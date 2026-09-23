@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -1119,10 +1120,28 @@ TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
 
 // The deadline is the strategy's own stop, not the controller's - it is the one
 // condition that is about the clock rather than about what the service did.
+//
+// 1800ms rather than the 1200ms this started at: `maintain_concurrency` reads
+// `std::chrono::steady_clock::now ()` directly (`load_strategy.cpp`) with no
+// injected clock, and no such seam exists anywhere in the engine to give this
+// test deterministic control over "now" - `capacity_controller.cpp`'s pure
+// decision logic takes elapsed time as a parameter but does not own the clock
+// either, so there is nothing here to inject into without a disproportionate
+// new abstraction the codebase has never needed before. At 1200ms the window
+// this test depends on (level 1 closing at ~1000ms, the deadline landing
+// ~200ms into level 2) left only 200ms of real wall-clock slack on each side,
+// a race by construction under any CI scheduling jitter - exactly what
+// flaked macOS CI at 8-way ctest parallelism on 3 real cores (see
+// docs/engine/building.md's macOS ctest section). 1800ms leaves ~800ms of
+// slack for level 1 to close and ~800ms of headroom before level 2 could
+// possibly reach the 1s `stepDuration` threshold itself, on both sides wide
+// enough that ordinary CI contention cannot plausibly close it - while still
+// being comfortably short of `concurrency`'s 1000-request ceiling, so the
+// search is still mid-climb (not capped) when the deadline lands.
 TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
     nlohmann::json config = {
         { "mode", "capacity" },
-        { "duration", "1200ms" }, // ends inside the second window
+        { "duration", "1800ms" }, // ends inside the second window, see comment above
         { "stepDuration", "1s" },
         { "sloMs", 2000 },
         { "startConcurrency", 2 },
@@ -1217,28 +1236,102 @@ TEST_F (LoadStrategyTest, PhaseHistogramsCanBeDisabledPerRun) {
     EXPECT_TRUE (stock->metrics_collector->phase_percentiles ().has_value ());
 }
 // The tick's wait is split so the sleep's overshoot lands in the spin and not
-// in the arrival gap (issue #1370). Platform-free on purpose: the arithmetic is
-// the whole of the decision, and a Linux host has to be able to review it.
+// in the arrival gap (issue #1370, extended to Linux/macOS by issue #1667).
+// Platform-free on purpose: the arithmetic is the whole of the decision, and a
+// Linux host has to be able to review it - so every case is phrased relative
+// to `tail`, the *current platform's* `spin_tail_us` at a remainder large
+// enough to sit well under any platform's cap (so the proportional macOS
+// shape has already flattened out and behaves like a plain constant here),
+// and this test runs on all three.
 TEST (TickPacing, SleepLegLeavesTheSpinTail) {
     using vayu::core::tick_sleep_leg_us;
-    constexpr int64_t tail = vayu::core::constants::pacing::SPIN_TAIL_US;
+    const int64_t tail = vayu::core::constants::pacing::spin_tail_us (1'000'000);
 
-    // 400 RPS - the rate the issue measured. A 2500us tick sleeps 500us and
-    // spins the last 2000, rather than sleeping all 2500 and landing ~1ms late.
-    EXPECT_EQ (tick_sleep_leg_us (2500, tail), 500);
-    // 200 RPS.
-    EXPECT_EQ (tick_sleep_leg_us (5000, tail), 3000);
+    // A remainder twice the tail sleeps exactly the tail's worth and spins
+    // the rest; three times the tail sleeps twice the tail.
+    EXPECT_EQ (tick_sleep_leg_us (tail * 2, tail), tail);
+    EXPECT_EQ (tick_sleep_leg_us (tail * 3, tail), tail * 2);
 
-    // At and below the tail the whole remainder is spun, which is what every
-    // tick from ~500 RPS up (a 1000us `tick_us`) already did - this leg must
-    // not have moved for them.
-    EXPECT_EQ (tick_sleep_leg_us (1000, tail), 0);
+    // At and below the tail the whole remainder is spun - the boundary itself,
+    // half of it, and one microsecond past it.
     EXPECT_EQ (tick_sleep_leg_us (tail, tail), 0);
+    EXPECT_EQ (tick_sleep_leg_us (tail / 2, tail), 0);
     EXPECT_EQ (tick_sleep_leg_us (tail + 1, tail), 1);
 
     // Never negative, whatever a caller hands it.
     EXPECT_EQ (tick_sleep_leg_us (0, tail), 0);
     EXPECT_EQ (tick_sleep_leg_us (-100, tail), 0);
+}
+
+// The per-platform tail *function* itself (issue #1667's macOS/Linux
+// follow-up to #1370's flat Windows constant): `min (remaining / divisor +
+// base_us, cap_us)`, degenerate (`divisor == 0`, always `cap_us`) on Windows
+// and Linux, proportional-with-cap on macOS. `detail::compute_spin_tail_us`
+// is exercised directly with each platform's own named parameters so every
+// shape is checked on whichever host runs the suite, not only the one whose
+// `#if` branch compiled here.
+TEST (SpinTailUs, MacOsShapeAtTheRealBenchmarkedLegs) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    // 1500 RPS: tick_us 1000, leg (tick - tail) is well under the cap, so
+    // this is pure slope math: 667 / 9 + 60 = 74 + 60 = 134us.
+    EXPECT_EQ (compute_spin_tail_us (667, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    134);
+
+    // 400 RPS: tick_us 2500. 2500 / 9 + 60 = 277 + 60 = 337us.
+    EXPECT_EQ (compute_spin_tail_us (2500, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    337);
+
+    // 200 RPS: tick_us 5000. 5000 / 9 + 60 = 555 + 60 = 615us.
+    EXPECT_EQ (compute_spin_tail_us (5000, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    615);
+}
+
+TEST (SpinTailUs, MacOsShapeCapsAbovePlateau) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    // Well above the ~5-10ms plateau point: 50000 / 9 + 60 = 5555 + 60 =
+    // 5615us uncapped, so the cap is what actually applies.
+    EXPECT_EQ (compute_spin_tail_us (50'000, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    pacing::MACOS_CAP_US);
+}
+
+TEST (SpinTailUs, WindowsAndLinuxAreFlatRegardlessOfInput) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    for (const int64_t remaining :
+    { int64_t{ 0 }, int64_t{ 667 }, int64_t{ 5000 }, int64_t{ 50'000 } }) {
+        EXPECT_EQ (compute_spin_tail_us (remaining, 0, pacing::WINDOWS_BASE_US,
+                   pacing::WINDOWS_CAP_US),
+        pacing::WINDOWS_CAP_US)
+        << "remaining=" << remaining;
+        EXPECT_EQ (compute_spin_tail_us (remaining, 0, pacing::LINUX_BASE_US, pacing::LINUX_CAP_US),
+        pacing::LINUX_CAP_US)
+        << "remaining=" << remaining;
+    }
+}
+
+// The platform-selected `spin_tail_us` (the actual call site's entry point,
+// not the parameterized helper above) behaves the same way on whichever
+// platform this build's `#if` branch resolved to.
+TEST (SpinTailUs, PlatformSelectedFunctionIsFlatOrCappedConsistently) {
+    using vayu::core::constants::pacing::spin_tail_us;
+
+    // Not named `small`: that identifier is a legacy typedef macro
+    // (`#define small char`, from the RPC headers `windows.h` pulls in) that
+    // NOMINMAX does not guard, so MSVC substitutes it mid-declaration.
+    const int64_t tail_at_zero    = spin_tail_us (0);
+    const int64_t tail_at_plateau = spin_tail_us (1'000'000);
+    EXPECT_GE (tail_at_zero, 0);
+    EXPECT_GE (tail_at_plateau, tail_at_zero); // the tail never shrinks as the remainder grows
+    EXPECT_LE (tail_at_plateau, 2000); // no platform's cap exceeds the Windows constant
 }
 
 // ============================================================================
@@ -1288,7 +1381,9 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAConfigItsKindsSchemaReje
     { "kind", "assert.status" }, { "config", { { "expected", 200 } } } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("assert.status"), std::string::npos) << *reason;
+    // The refusal names the kind's label ("Assert status code",
+    // `make_assert_status_kind`), not its wire kind.
+    EXPECT_NE (reason->find ("Assert status code"), std::string::npos) << *reason;
 }
 
 TEST (RequestElementsRunOverrideValidationTest, AcceptsAScriptPreAndAnAssertStatus) {
@@ -1325,7 +1420,10 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAControllerKind) {
     { "kind", "control.once" }, { "config", nlohmann::json::object () } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("control.once"), std::string::npos) << *reason;
+    // The refusal names the kind's human-readable label, not its wire kind -
+    // "Once only" is what `make_control_once_kind` sets as `label`.
+    EXPECT_NE (reason->find ("Once only"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("scenario"), std::string::npos) << *reason;
 }
 
 TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput) {
@@ -1333,13 +1431,19 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput)
         { "timer.pacing", { { "everyMs", 1000 } } },
         { "timer.throughput", { { "targetPerMinute", 60 } } },
     };
+    // The label each kind sets (`make_timer_pacing_kind` / `make_timer_throughput_kind`),
+    // since the refusal names that rather than the wire kind string.
+    const std::unordered_map<std::string, std::string> labels{
+        { "timer.pacing", "Pacing" },
+        { "timer.throughput", "Throughput" },
+    };
     for (const auto& [kind, valid_config] : cases) {
         const nlohmann::json config{ { "requestElements",
         nlohmann::json::array ({ nlohmann::json{
         { "id", "el_1" }, { "kind", kind }, { "config", valid_config } } }) } };
         auto reason = vayu::core::validate_request_elements_run_override (config);
         ASSERT_HAS_VALUE (reason) << kind;
-        EXPECT_NE (reason->find (kind), std::string::npos) << *reason;
+        EXPECT_NE (reason->find (labels.at (kind)), std::string::npos) << *reason;
     }
 }
 
@@ -1359,7 +1463,7 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsEveryPhaseZeroExtractAndA
 // names no id must get one rather than a 400 asking it to invent one.
 // Mutation check: drop the `stamp_default_element_ids` call in
 // `validate_request_elements_run_override` and this reddens on
-// `Registry::validate`'s own "'id' must be a non-empty string" refusal.
+// `Registry::validate`'s own "Item 1 is missing an id" refusal.
 TEST (RequestElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
     const nlohmann::json config{ { "requestElements",
     nlohmann::json::array ({ nlohmann::json{ { "kind", "assert.status" },

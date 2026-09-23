@@ -72,7 +72,15 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	if (!collectionId) {
 		return (
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				<Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+				{/*
+				 * `size-icon` (16px), not `size-icon-sm`: `Callout.tsx` - the one
+				 * notice treatment this shape is a hand-rolled copy of - pairs its
+				 * leading icon with `mt-px` at 16px, which centers on a `text-xs
+				 * leading-relaxed` line (19.5px) to within a rounding pixel. A 12px
+				 * icon at the same `mt-px` sits ~3px above that center - visible as
+				 * the icon floating above the text rather than beside it.
+				 */}
+				<Info className="size-icon shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
 					This request isn't in a collection, so there's nothing to inherit from.{" "}
 					<span className="text-foreground">No auth will be sent.</span>
@@ -88,7 +96,8 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	if (!source) {
 		return (
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				<Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
+				{/* `size-icon`, not `size-icon-sm` - see the note on the sibling notice above. */}
+				<Lock className="size-icon shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
 					{blockedBy ? (
 						<>
@@ -119,7 +128,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						from <span className="font-mono font-medium">{source.name}</span>.
 					</p>
 					{secret && (
-						<p className="mt-1 m-0 text-[11px] text-muted-foreground font-mono truncate">
+						<p className="mt-1 m-0 text-label text-muted-foreground font-mono truncate">
 							{renderWithVariables(secret)}
 						</p>
 					)}
@@ -140,13 +149,13 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						>
 							<Folder
 								className={cn(
-									"w-3 h-3 shrink-0",
+									"size-icon-sm shrink-0",
 									isSource ? "text-primary" : "text-muted-foreground"
 								)}
 							/>
 							<span
 								className={cn(
-									"text-[11px] font-mono truncate",
+									"text-label font-mono truncate",
 									isSource
 										? "text-foreground font-semibold"
 										: "text-muted-foreground"
@@ -158,7 +167,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 
 						<span
 							className={cn(
-								"text-[10px] font-mono shrink-0",
+								"text-micro font-mono shrink-0",
 								isSource ? "text-primary" : "text-muted-foreground"
 							)}
 						>
@@ -166,7 +175,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						</span>
 
 						{isSource && (
-							<span className="text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-micro font-semibold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}

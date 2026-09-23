@@ -70,18 +70,20 @@ let selectedCategory = "network_performance";
 vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory, restartRequiredKeys: [] }),
+	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({ selectedCategory, restartRequiredKeys: [] }),
 }));
 
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
-	useEngineStore: () => ({
-		engineStatus: "connected",
-		pendingRestart: false,
-		restartRequiredKeys: [],
-		addRestartRequiredKey: vi.fn(),
-		clearRestartRequired: vi.fn(),
-	}),
+	useEngineStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			engineStatus: "connected",
+			pendingRestart: false,
+			restartRequiredKeys: [],
+			addRestartRequiredKey: vi.fn(),
+			clearRestartRequired: vi.fn(),
+		}),
 	// The panel toasts the edits a category-switch flush had to drop.
 	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
 		selector({ showToast }),
@@ -89,17 +91,18 @@ vi.mock("@/stores", () => ({
 
 const setStatus = vi.fn();
 vi.mock("@/stores/save-store", () => ({
-	useSaveStore: () => ({
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: (...args: unknown[]) => setStatus(...args),
-		markPendingSave: vi.fn(),
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		updateContext: vi.fn(),
-	}),
+	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			startSaving: vi.fn(),
+			completeSaveThenIdle: vi.fn(),
+			failSave: vi.fn(),
+			setStatus: (...args: unknown[]) => setStatus(...args),
+			markPendingSave: vi.fn(),
+			registerContext: vi.fn(),
+			unregisterContext: vi.fn(),
+			setActiveContext: vi.fn(),
+			updateContext: vi.fn(),
+		}),
 }));
 
 /** Only the engine-restart button reaches the real client; the rest is mocked. */

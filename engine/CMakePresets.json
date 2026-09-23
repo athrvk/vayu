@@ -449,19 +449,28 @@
       "name": "macos-prod",
       "displayName": "Test macOS Release (native arch)",
       "configurePreset": "macos-prod",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 3
+      }
     },
     {
       "name": "macos-prod-arm64",
       "displayName": "Test macOS Release arm64",
       "configurePreset": "macos-prod-arm64",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 3
+      }
     },
     {
       "name": "macos-prod-x64",
       "displayName": "Test macOS Release x64",
       "configurePreset": "macos-prod-x64",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 3
+      }
     }
   ]
 }

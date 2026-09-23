@@ -23,20 +23,46 @@
  * and a bare `data-[state=active]:font-semibold` widens the trigger, so
  * switching tab shoves its neighbours sideways. `CollectionDetail` shipped that
  * bug. `TabLabel` reserves the bold width up front, in the primitive, so no
- * call site can reintroduce it.
+ * call site can reintroduce it. `MARK_TRACK` further down answers the same
+ * problem for the other half of a trigger's width: a count or an error dot
+ * that mounts at full width widens its trigger and shoves its neighbours, so
+ * the mark's own track animates open from zero instead of jumping.
  *
  * This file previously shipped shadcn's segmented-pill default, which four of
  * the five call sites immediately undid with `h-auto p-0 bg-transparent` before
- * re-declaring their own underline recipe. There is one look now, and no
- * `variant` prop: the segmented option had exactly one consumer and this change
- * converts it. Add the prop back when a real second look turns up with a caller
- * to justify its shape.
+ * re-declaring their own underline recipe. There is one *trigger* look now.
+ *
+ * **The strip's chrome is a `variant`, and it is required.** The triggers were
+ * shared while the band around them was not: seven call sites carried seven
+ * recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5` with a
+ * `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
+ * `px-3 py-1.5 border-b border-rule bg-muted/30`. Three chromes exist, and the
+ * prop has no default so a new strip has to say which one it is rather than
+ * inheriting whichever happened to be first:
+ *
+ * - `pane` - the strip *is* the pane's chrome band: `bg-panel px-4` with the
+ *   bottom rule the content hangs from. The dashboard, Collection Detail and
+ *   the unified response viewer.
+ * - `inset` - a strip inside content that is already padded, so it carries
+ *   only enough padding to keep the first trigger's focus ring off the edge
+ *   (`px-1`). The request strip, the import dialog, the load-test detail.
+ * - `bare` - the band belongs to a parent row that holds other things beside
+ *   the tabs (the response pane's strip shares its row with the status and the
+ *   actions), so the list adds no fill, no rule and no padding of its own.
+ *   Not a fourth look: it is `pane`, drawn by whoever owns the row.
+ *
+ * `border-rule` rather than a border token, and no surface class beside it:
+ * `bg-panel` is the `:root` default surface, which is the one case where the
+ * fallback value is the right answer (`docs/design-system.md`, "`border-rule`:
+ * let the surface pick the token").
  */
 
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
+import { useHeldValue } from "@/hooks/useHeldValue";
 
 const Tabs = TabsPrimitive.Root;
 
@@ -60,16 +86,37 @@ const SIZE: Record<TabSize, string> = {
 
 const TabsSizeContext = React.createContext<TabSize>("xs");
 
+/**
+ * The strip's chrome. See the file comment for what each one is for; the prop
+ * is required, so there is no "whatever the first caller wanted" default.
+ */
+type TabsVariant = "pane" | "inset" | "bare";
+
+const VARIANT: Record<TabsVariant, string> = {
+	pane: "border-b border-rule bg-panel px-4",
+	inset: "px-1",
+	bare: "",
+};
+
 function TabsList({
 	className,
 	size = "xs",
+	variant,
 	...props
-}: React.ComponentProps<typeof TabsPrimitive.List> & { size?: TabSize }) {
+}: React.ComponentProps<typeof TabsPrimitive.List> & {
+	size?: TabSize;
+	variant: TabsVariant;
+}) {
 	return (
 		<TabsSizeContext.Provider value={size}>
 			<TabsPrimitive.List
 				data-slot="tabs-list"
-				className={cn("flex min-w-0 items-stretch gap-0.5 bg-transparent", className)}
+				data-variant={variant}
+				className={cn(
+					"flex min-w-0 items-stretch gap-0.5 bg-transparent",
+					VARIANT[variant],
+					className
+				)}
 				{...props}
 			/>
 		</TabsSizeContext.Provider>
@@ -188,8 +235,45 @@ function TabLabel({ children }: { children: string }) {
 	);
 }
 
+/*
+ * The track a trailing mark on a trigger animates into - the count, the error
+ * dot.
+ *
+ * **Why this animates a track instead of reserving one.** A mark is a flex
+ * item on the trigger; the trigger is `shrink-0` inside a `flex-nowrap` list.
+ * So a mark that *mounts* at its full width widens its own trigger instantly
+ * and every trigger to its right jumps along with it - and so does whatever
+ * else shares the row (the request strip's `Table` toggle). Typing the first
+ * character into an empty Params table moved the seven tabs after Params and
+ * the toggle past them. This is the same defect `TabLabel` above fixes for
+ * the active weight, arriving through content instead of through a class.
+ *
+ * An earlier version fixed the jump by holding a `min-w-[1ch]` slot open at
+ * all times - it worked, but every countable tab then paid that width (plus
+ * the trigger's `gap-1.5` before it) permanently, on every tab strip in the
+ * app, whether or not anything was ever counted. That is dead space a strip
+ * that already scrolls at seven or eight tabs (see SIZE) cannot afford to
+ * spend on tabs that usually show nothing.
+ *
+ * The replacement is the `grid-template-columns: 0fr -> 1fr` technique
+ * (industry-standard for animating an element's own contribution to its
+ * container's size without a fixed target width: `0fr` is exactly zero,
+ * `1fr` resolves to the content's intrinsic width, and both are real track
+ * sizes a transition can interpolate between - unlike animating to `auto`,
+ * which cannot transition at all). `MARK_TRACK` is the wrapper: `grid-cols-*`
+ * carries the width, `overflow-hidden` clips the content mid-transition, and
+ * `-ms-1.5`/`ms-0` cancels and restores the trigger's own `gap-1.5` in step
+ * with the width so an empty mark costs nothing, not even its own gap - the
+ * two `transition-[...]` properties move together for exactly that reason.
+ * `TabLabel`'s hidden-copy trick does not transfer here: a count has no
+ * "widest state" to reserve, it is a number, not one string rendered two
+ * ways.
+ */
+const MARK_TRACK =
+	"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out";
+
 /**
- * A count beside a tab label.
+ * The small superscript count on a tab.
  *
  * A superscript rather than the `h-5` `Badge` pill this replaces: the pill set
  * a 20px floor that no 24px band can accommodate, and it was the single reason
@@ -197,34 +281,79 @@ function TabLabel({ children }: { children: string }) {
  *
  * 10px is the documented micro step - see type-scale.test.ts, which rejects the
  * half-pixel sizes that come from nudging a number until it looks right.
- */
-/**
- * The small superscript count on a tab.
  *
- * **Zero renders nothing.** A count is there to say "there are this many"; a
- * `0` says "there are none", which the tab's own empty state already says at
- * more length and without asking you to read a superscript to find out there is
- * nothing to read. The Console tab showed one the moment its gating was removed
- * and it always rendered - a `0` beside a tab whose panel says "No console
- * output".
+ * **Zero renders nothing, and so does `undefined`.** A count is there to say
+ * "there are this many"; a `0` says "there are none", which the tab's own empty
+ * state already says at more length and without asking you to read a
+ * superscript to find out there is nothing to read. The Console tab showed one
+ * the moment its gating was removed and it always rendered - a `0` beside a tab
+ * whose panel says "No console output".
  *
  * Handled here rather than at each call site because the call sites were
- * already working around it by hand: `RequestTabs` passes `badge: undefined`
- * and guards with `tab.badge !== undefined`, which is the same remembering
+ * already working around it by hand: `RequestTabs` passed `badge: undefined`
+ * and guarded with `tab.badge !== undefined`, which is the same remembering
  * problem one level up. A caller that genuinely wants to show a zero can pass
  * the string `"0"`.
+ *
+ * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
+ * `<sup>` is always here, at a `grid-cols-[0fr]` track (see `MARK_TRACK`);
+ * only its contents and its own track size come and go, so a count appearing
+ * grows in rather than popping and costs nothing at rest. It is empty, not
+ * `0` and not a placeholder glyph, so it contributes no text to the trigger's
+ * accessible name and a screen reader reads "Params", not "Params 0".
+ *
+ * **Going empty is held, not instant** (`useHeldValue`,
+ * `TIMING.MARK_FADE_MS`). The contents used to clear in the same commit that
+ * put the track back to `0fr`, so the track spent 150ms collapsing around a
+ * box that was already empty and the digit itself was cut - the appearance
+ * animates and the disappearance did not, which the track's own motion made
+ * easy to miss. The last count now stays in the node for one track duration
+ * while an opacity transition takes it out, so the two halves of the mark's
+ * life are mirror images.
+ *
+ * The contract that follows for callers: render `TabCount` **unconditionally**
+ * on any tab that can carry a count, passing `undefined` when it has none -
+ * gating the element is what reintroduces the shift. A tab that can never
+ * carry one renders no `TabCount` at all and pays no width, ever.
  */
-function TabCount({ value, className }: { value: React.ReactNode; className?: string }) {
-	if (value === 0) return null;
+function TabCount({ value, className }: { value?: number | string | null; className?: string }) {
+	const live = value === 0 || value === undefined || value === null ? null : value;
+	/*
+	 * The track reads `live`, the text reads `shown`: the collapse starts on
+	 * time while the digit it is collapsing around is still there to fade. The
+	 * contents used to empty in the same commit the track began shrinking, so
+	 * the track animated around an already-empty box and the count itself was
+	 * a hard cut - motion everywhere except on the part that carried the
+	 * meaning. See `useHeldValue`.
+	 */
+	const { shown, fading } = useHeldValue(live, TIMING.MARK_FADE_MS);
 
 	return (
 		<sup
+			data-slot="tab-count"
 			className={cn(
-				"font-mono text-[10px] leading-none tabular-nums text-primary-text",
-				className
+				MARK_TRACK,
+				live === null ? "grid-cols-[0fr] -ms-1.5" : "grid-cols-[1fr] ms-0"
 			)}
 		>
-			{value}
+			<span
+				className={cn(
+					"min-w-0 text-center font-mono text-micro leading-none tabular-nums text-primary-text",
+					// `shown === null` as well as `fading`, so an empty cell rests at
+					// zero rather than transitioning back up to full opacity behind
+					// a collapsed track - invisible either way, but a transition
+					// running on an empty box is the thing this whole fix is about.
+					// It also makes the entry a mirror of the exit: a count
+					// arriving fades up while its track opens. Not on first paint,
+					// where `shown` starts at the live value and the class never
+					// changes.
+					"transition-opacity duration-150 ease-out",
+					shown === null || fading ? "opacity-0" : "opacity-100",
+					className
+				)}
+			>
+				{shown}
+			</span>
 		</sup>
 	);
 }
@@ -236,6 +365,14 @@ function TabCount({ value, className }: { value: React.ReactNode; className?: st
  * script-error state in the count slot, so turning counts off would have
  * silently deleted the only signal that a script failed. Keeping the mark its
  * own element means the two can be controlled separately.
+ *
+ * It shares `MARK_TRACK` with the count, but unlike `TabCount` it is not kept
+ * mounted at rest - its one call site swaps it in for a `TabCount` outright
+ * (`hasScriptError ? <TabErrorDot /> : <TabCount .../>`), a real mount, not a
+ * prop flip on an already-present node. `transition-*` only animates a value
+ * that changes on an element already in the DOM, so a genuine mount needs
+ * `starting:` (`@starting-style`) to have a "before" frame to animate from -
+ * the same mechanism `.enter-fade` uses for the same reason.
  */
 function TabErrorDot({
 	label = "Script error",
@@ -246,12 +383,23 @@ function TabErrorDot({
 }) {
 	return (
 		<span
-			role="img"
-			aria-label={label}
-			title={label}
-			className={cn("size-[5px] shrink-0 rounded-full bg-status-error", className)}
-		/>
+			data-slot="tab-error-dot"
+			className={cn(
+				MARK_TRACK,
+				"starting:grid-cols-[0fr] starting:-ms-1.5 grid-cols-[1fr] ms-0"
+			)}
+		>
+			<span className="flex min-w-0 items-center justify-center">
+				<span
+					role="img"
+					aria-label={label}
+					title={label}
+					className={cn("size-[5px] shrink-0 rounded-full bg-status-error", className)}
+				/>
+			</span>
+		</span>
 	);
 }
 
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot };
+export type { TabsVariant };

@@ -116,15 +116,19 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// anything that wants more room wants a pane, not a wider modal.
 					// See docs/design-system.md; go wider only with content that
 					// earns it.
-					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg",
+					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto rounded-lg border bg-background p-5 shadow-lg",
 					className
 				)}
 				{...props}
 			>
 				{children}
 				{showClose && (
-					<DialogPrimitive.Close className="absolute right-4 top-4 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-						<X className="h-4 w-4" />
+					// `size-target` (issue #1679, 24px): the close button carried no
+					// explicit hit box at all - just the bare 16px icon - which read
+					// under the WCAG 2.2 SC 2.5.8 floor with only its own SVG bounds
+					// to click.
+					<DialogPrimitive.Close className="absolute right-4 top-4 flex size-target items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+						<X className="size-icon" />
 						<span className="sr-only">Close</span>
 					</DialogPrimitive.Close>
 				)}

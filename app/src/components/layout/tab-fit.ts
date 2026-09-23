@@ -28,10 +28,12 @@ import {
 } from "@/constants/layout";
 
 /**
- * The close button's footprint at the trailing edge: a 12px glyph in 2px of
- * padding either side, offset 2px from the edge (`TabStrip.tsx`).
+ * The close button's footprint at the trailing edge: a 24px `size-target` hit
+ * box (issue #1679 - the button was a 16px target, under the WCAG 2.2 SC
+ * 2.5.8 floor), offset 2px from the edge (`TabStrip.tsx`). The glyph inside it
+ * stays 12px (`size-icon-sm`) - only the hit area grew.
  */
-export const TAB_CLOSE_SPACE = 2 + 2 + 12 + 2;
+export const TAB_CLOSE_SPACE = 2 + 24;
 
 /** What the name must stop short of at the trailing edge: the button, and air. */
 export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
@@ -39,8 +41,15 @@ export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
 /**
  * Everything a tab draws that is not the name, in px.
  *
- * 8px leading padding, the trailing strip above, a 2px method rail, a 1px
- * separator, and 6px of gap when an icon is present.
+ * 12px leading padding (`px-3`, issue #1679 - was 8px), the trailing strip
+ * above, a 2px method rail, a 1px separator, and 6px of gap when an icon is
+ * present. These are Comfortable-density pixel values (`--spacing` at
+ * 0.25rem/unit): `px-3` is 12px there and only 9px at Default, `right-0.5`
+ * on the close button is 2px there and 1.5px at Default. This constant does
+ * not vary by density at all, so using the larger, Comfortable-derived
+ * numbers is the safe direction to be wrong in - a few spare px at Default
+ * rather than text running under the close button, the defect line 52
+ * below describes.
  *
  * The trailing strip is the close button's own footprint plus air. The button is
  * absolutely positioned, so it draws over that strip rather than sitting in the
@@ -52,7 +61,7 @@ export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
  * Still far short of the old strip's 22px per tab, which reserved the button
  * *and* the method word on all of them.
  */
-export const TAB_CHROME = 8 + TAB_TRAILING + 2 + 1;
+export const TAB_CHROME = 12 + TAB_TRAILING + 2 + 1;
 /** Extra when the tab carries a type icon (collection, run, settings…). */
 export const TAB_ICON_SPACE = 12 + 6;
 

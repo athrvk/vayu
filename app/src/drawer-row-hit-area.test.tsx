@@ -115,12 +115,21 @@ vi.mock("@/queries", () => ({
 // take as a prop. `VariableCategory` is a type-only import and is erased.
 const setSelectedCategory = vi.fn();
 vi.mock("@/stores", () => ({
-	useTabsStore: () => ({ openTab: vi.fn() }),
+	useTabsStore: (select: (s: { openTab: () => void }) => unknown) => select({ openTab: vi.fn() }),
 	// The environment tree reports a failed delete through the Dock's save status.
-	useSaveStore: () => ({ failSave: vi.fn() }),
+	useSaveStore: (select: (s: { failSave: () => void }) => unknown) =>
+		select({ failSave: vi.fn() }),
+	// Read by the empty-collections note's "Browse collections" action (#1693).
+	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>
+		select({ revealDrawerView: vi.fn() }),
 }));
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory }),
+	useVariablesStore: (
+		select: (s: {
+			selectedCategory: null;
+			setSelectedCategory: typeof setSelectedCategory;
+		}) => unknown
+	) => select({ selectedCategory: null, setSelectedCategory }),
 }));
 
 interface Row {

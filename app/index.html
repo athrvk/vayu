@@ -84,6 +84,16 @@
 					var radii = { square: "0rem", rounded: "0.75rem" };
 					var radius = radii[localStorage.getItem("vayu-ui-radius")];
 					if (radius) el.style.setProperty("--radius", radius);
+
+					/*
+						"default" sets no attribute - the tightened --spacing lives on
+						:root itself in index.css, and only "comfortable" needs the
+						selector that overrides it. Mirrors applyDensity in
+						src/stores/appearance-store.ts.
+					*/
+					if (localStorage.getItem("vayu-ui-density") === "comfortable") {
+						el.setAttribute("data-density", "comfortable");
+					}
 				} catch (e) {
 					/* localStorage unavailable - the hooks apply on mount */
 				}

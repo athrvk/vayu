@@ -30,6 +30,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui";
 import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import type { OAuth2Config, OAuth2GrantType } from "@/types";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
@@ -55,10 +56,33 @@ const PlainTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type })
 		/>
 	);
 
+/*
+ * One entry per config *field* - `<resolveKey>:clientId` and its siblings -
+ * cached across this form's own unmount.
+ *
+ * `resolvedConfig` below is not only a display: `TokenStatusRow` derives the
+ * token cache key from it (`computeOAuth2CacheKey`) and queries on that string,
+ * and the same object is what a Get Token actually posts. A `{{$guid}}` in the
+ * access-token URL or the client id therefore did more than flicker - the
+ * builder's Auth tab is not force-mounted (`RequestTabs/index.tsx`), so a look
+ * at Headers and back rebuilt this form, resolved fresh, and pointed the status
+ * row at a cache key nothing had ever fetched: a token that was on screen a
+ * moment ago reading as "No token cached", with nothing edited. The memo alone
+ * could not answer that, because it dies with the component.
+ *
+ * `resolveString` comes from the request builder's provider at the one host
+ * that passes it, so it outlives this form and the entry is still valid on the
+ * way back in. With no `resolveKey` the cache is bypassed entirely, which is
+ * the collection auth editor's case: it passes no resolver either, so every
+ * field is already its own literal text.
+ */
+const stableConfigField = createStableResolve();
+
 export default function OAuth2Form({
 	value,
 	onChange,
 	resolveString,
+	resolveKey,
 	TextInput = PlainTextInput,
 }: OAuth2FormProps) {
 	const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -70,30 +94,37 @@ export default function OAuth2Form({
 	const isAuthCode = grant === "authorization_code";
 	const isPassword = grant === "password";
 
-	// Config with variables resolved, for the token status/actions.
+	// Config with variables resolved, for the token status/actions. Each field
+	// keeps its own cache entry (see `stableConfigField` above), so the memo is
+	// what holds the object identity still and the cache is what holds the
+	// values still across a remount.
 	const resolvedConfig = useMemo<OAuth2Config>(() => {
-		const r = resolveString ?? ((s: string) => s);
-		const rz = (s?: string) => (s ? r(s) : s);
+		const resolve = resolveString ?? ((s: string) => s);
+		const r = (field: string, s: string) =>
+			resolveKey ? stableConfigField(`${resolveKey}:${field}`, s, resolve) : resolve(s);
+		// An absent optional field stays absent: resolving it would turn every
+		// `undefined` into `""`, and the cache key tells those two apart.
+		const rz = (field: string, s?: string) => (s ? r(field, s) : s);
 		return {
 			...value,
-			accessTokenUrl: r(value.accessTokenUrl ?? ""),
-			clientId: r(value.clientId ?? ""),
-			clientSecret: rz(value.clientSecret),
-			username: rz(value.username),
-			password: rz(value.password),
-			scope: rz(value.scope),
-			audience: rz(value.audience),
-			resource: rz(value.resource),
-			authorizationUrl: rz(value.authorizationUrl),
-			refreshTokenUrl: rz(value.refreshTokenUrl),
+			accessTokenUrl: r("accessTokenUrl", value.accessTokenUrl ?? ""),
+			clientId: r("clientId", value.clientId ?? ""),
+			clientSecret: rz("clientSecret", value.clientSecret),
+			username: rz("username", value.username),
+			password: rz("password", value.password),
+			scope: rz("scope", value.scope),
+			audience: rz("audience", value.audience),
+			resource: rz("resource", value.resource),
+			authorizationUrl: rz("authorizationUrl", value.authorizationUrl),
+			refreshTokenUrl: rz("refreshTokenUrl", value.refreshTokenUrl),
 		};
-	}, [value, resolveString]);
+	}, [value, resolveString, resolveKey]);
 
 	const field = (label: string, node: React.ReactNode, hint?: string) => (
 		<div className="space-y-1.5">
 			<Label>{label}</Label>
 			{node}
-			{hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+			{hint && <p className="text-label text-muted-foreground">{hint}</p>}
 		</div>
 	);
 
@@ -213,7 +244,7 @@ export default function OAuth2Form({
 			<Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
 				<CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
 					<ChevronDown
-						className={`w-3.5 h-3.5 transition-transform ${advancedOpen ? "" : "-rotate-90"}`}
+						className={`size-icon-sm transition-transform ${advancedOpen ? "" : "-rotate-90"}`}
 					/>
 					Advanced
 				</CollapsibleTrigger>

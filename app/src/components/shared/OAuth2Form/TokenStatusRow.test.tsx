@@ -161,6 +161,60 @@ describe("TokenStatusRow with an incomplete config", () => {
 	});
 });
 
+describe("TokenStatusRow's action rail when a token lands", () => {
+	/*
+	 * A fetch mounts Show and Clear. Anything mounting *after* the token action
+	 * slides it left under the pointer that just pressed it, so a second click
+	 * on the same spot lands on whatever mounted there - Clear, which threw the
+	 * fresh token away. jsdom has no layout, so the guard is the mechanism: the
+	 * action stays the rail's last child, and its label reserves every word it
+	 * can say.
+	 */
+	const complete = config({
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "abc",
+	});
+	const cached = {
+		found: true,
+		expired: false,
+		token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
+	};
+
+	function rerenderRow(rerender: ReturnType<typeof renderRow>["rerender"]) {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		rerender(
+			<QueryClientProvider client={client}>
+				<TooltipProvider>
+					<TokenStatusRow resolvedConfig={complete} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+	}
+
+	it("keeps the token action the rail's last child before and after", () => {
+		const { rerender } = renderRow(complete);
+		const before = getTokenButton();
+		expect(before.parentElement!.lastElementChild).toBe(before);
+
+		statusQuery.data = cached;
+		rerenderRow(rerender);
+
+		const after = screen.getByRole("button", { name: /renew/i });
+		const rail = after.parentElement!;
+		expect(rail.lastElementChild, "something mounted after the token action").toBe(after);
+		const clear = screen.getByRole("button", { name: "Clear cached token" });
+		expect(clear.parentElement).toBe(rail);
+	});
+
+	it("reserves every label the token action can show", () => {
+		renderRow(complete);
+		const reserved = [
+			...getTokenButton().querySelectorAll('[data-slot="label-swap-reserve"]'),
+		].map((node) => node.textContent);
+		expect(reserved).toEqual(["Get Token", "Renew", "Refresh"]);
+	});
+});
+
 describe("TokenStatusRow with a complete config", () => {
 	const complete = config({
 		accessTokenUrl: "https://idp.example.com/token",

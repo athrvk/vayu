@@ -19,10 +19,10 @@
  * - RequestResponseView: Status codes, errors, timing breakdown
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardStore, useToastStore } from "@/stores";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { EmptyState, Callout } from "@/components/shared";
+import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
 import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
@@ -30,26 +30,24 @@ import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
-	const {
-		currentRunId,
-		mode,
-		isStreaming,
-		currentMetrics,
-		historicalMetrics,
-		finalReport,
-		activeView,
-		isStopping,
-		loadTestConfig,
-		requestInfo,
-		setActiveView,
-		stopRun,
-		setFinalReport,
-		setStopping,
-		// Written by the SSE layer on a connection failure and, until now, read
-		// by nothing - so a dead metrics stream looked like a run with no data.
-		error: streamError,
-		setError: setStreamError,
-	} = useDashboardStore();
+	const currentRunId = useDashboardStore((s) => s.currentRunId);
+	const mode = useDashboardStore((s) => s.mode);
+	const isStreaming = useDashboardStore((s) => s.isStreaming);
+	const currentMetrics = useDashboardStore((s) => s.currentMetrics);
+	const historicalMetrics = useDashboardStore((s) => s.historicalMetrics);
+	const finalReport = useDashboardStore((s) => s.finalReport);
+	const activeView = useDashboardStore((s) => s.activeView);
+	const isStopping = useDashboardStore((s) => s.isStopping);
+	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
+	const requestInfo = useDashboardStore((s) => s.requestInfo);
+	const setActiveView = useDashboardStore((s) => s.setActiveView);
+	const stopRun = useDashboardStore((s) => s.stopRun);
+	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
+	const setStopping = useDashboardStore((s) => s.setStopping);
+	// Written by the SSE layer on a connection failure and, until now, read
+	// by nothing - so a dead metrics stream looked like a run with no data.
+	const streamError = useDashboardStore((s) => s.error);
+	const setStreamError = useDashboardStore((s) => s.setError);
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -203,36 +201,49 @@ export default function LoadTestDashboard() {
 		historicalMetrics.length,
 	]);
 
-	const handleStop = async () => {
-		if (currentRunId) {
-			setStopping(true);
-			try {
-				await apiService.stopRun(currentRunId);
-				loadTestService.stopMonitoring();
-				stopRun();
-			} catch (error) {
-				// The button re-enables and the run keeps streaming, so without
-				// this the click is indistinguishable from one that did nothing.
-				// A toast rather than the report Callout: this is the outcome of
-				// an action the user just took, not a state of the page.
-				console.error("Failed to stop run:", error);
-				showToast({
-					message: error instanceof Error ? error.message : "Couldn't stop the run",
-					variant: "error",
-					// The run is still generating load, so the retry is the whole
-					// point of telling them. Chasing the Stop button back down in
-					// the header is a worse version of the same click.
-					action: {
-						label: "Try again",
-						altText: "Try stopping the run again",
-						onClick: () => void handleStop(),
-					},
-				});
-			} finally {
-				setStopping(false);
+	// useCallback, not a plain arrow: this is DashboardHeader's onStop prop, and
+	// DashboardHeader is memo'd below - a fresh function identity every tick
+	// would defeat that memo the same way an inline object prop would (#1714).
+	//
+	// `attemptStop` is a named function expression, not the useCallback arrow
+	// itself, so the retry toast's `onClick` can call it by name: a `const`
+	// referencing itself inside its own initializer trips
+	// react-hooks/immutability (the value "is accessed before it is
+	// declared"), where a named function's self-reference is ordinary,
+	// hoisted-within-itself JavaScript.
+	const handleStop = useCallback(
+		async function attemptStop() {
+			if (currentRunId) {
+				setStopping(true);
+				try {
+					await apiService.stopRun(currentRunId);
+					loadTestService.stopMonitoring();
+					stopRun();
+				} catch (error) {
+					// The button re-enables and the run keeps streaming, so without
+					// this the click is indistinguishable from one that did nothing.
+					// A toast rather than the report Callout: this is the outcome of
+					// an action the user just took, not a state of the page.
+					console.error("Failed to stop run:", error);
+					showToast({
+						message: error instanceof Error ? error.message : "Couldn't stop the run",
+						variant: "error",
+						// The run is still generating load, so the retry is the whole
+						// point of telling them. Chasing the Stop button back down in
+						// the header is a worse version of the same click.
+						action: {
+							label: "Try again",
+							altText: "Try stopping the run again",
+							onClick: () => void attemptStop(),
+						},
+					});
+				} finally {
+					setStopping(false);
+				}
 			}
-		}
-	};
+		},
+		[currentRunId, setStopping, stopRun, showToast]
+	);
 
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
@@ -340,10 +351,33 @@ export default function LoadTestDashboard() {
 		return startTime && endTime ? endTime - startTime : 0;
 	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
+	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
+	const crumbs = useMemo(
+		() => [
+			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
+			{
+				id: "run",
+				// The live view and the finished report are different places to be,
+				// and the crumb is the only line that says which one this is.
+				label: mode === "completed" ? "Load test report" : "Live load test",
+			},
+		],
+		[mode, revealDrawerView]
+	);
+
 	// Empty state - placed after all hooks so the hook call order stays stable
 	// across renders (Rules of Hooks); the memos above are null-safe with no run.
 	if (!currentRunId) {
-		return <EmptyState title="No active load test" />;
+		return (
+			<EmptyState
+				title="No active load test"
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("history")}>
+						View past runs
+					</Button>
+				}
+			/>
+		);
 	}
 
 	return (
@@ -364,6 +398,15 @@ export default function LoadTestDashboard() {
 				elapsedDuration={elapsedDuration}
 				configuration={displayConfiguration}
 			/>
+
+			{/*
+			 * Where this screen sits (#1691). The dashboard is reached from a run in
+			 * History or from starting a load test, and nothing on it used to say
+			 * so - the header names the run, not the place. "History" reveals the
+			 * run list rather than toggling it, so a crumb pressed from here always
+			 * shows the list it points at.
+			 */}
+			<TabBreadcrumb label="Run location" crumbs={crumbs} className="bg-transparent px-5" />
 
 			{/*
 			 * One notice slot for both failures the dashboard can hit. The stream
@@ -420,10 +463,7 @@ export default function LoadTestDashboard() {
 			)}
 
 			{/* Tab bar */}
-			<TabsList
-				size="sm"
-				className="border-b border-border bg-panel px-5 shrink-0 justify-start"
-			>
+			<TabsList variant="pane" size="sm" className="shrink-0 justify-start">
 				<TabsTrigger value="metrics">
 					<TabLabel>Metrics</TabLabel>
 				</TabsTrigger>

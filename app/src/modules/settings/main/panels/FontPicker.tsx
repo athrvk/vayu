@@ -67,7 +67,7 @@ function FontTile({
 			>
 				{sample}
 			</span>
-			{selected && <CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />}
+			{selected && <CheckCircle2 className="size-icon text-primary absolute top-2 right-2" />}
 		</button>
 	);
 }

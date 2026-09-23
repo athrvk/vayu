@@ -13,13 +13,37 @@
 
 import type { RowAction } from "./row-actions";
 
-/** An item's contents: its glyph, then its label. */
+/**
+ * An item's contents: its glyph, then its label, then a trailing column holding
+ * either the reason the item is off or the value it carries (#1690).
+ *
+ * `data-icon-motion` arrives in a variable, so no source scan can see it - the
+ * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
+ *
+ * `ml-auto` rather than a gap: the reason is a second column, and a menu sizes
+ * itself to its widest row, so letting it sit where the label ends would leave
+ * "Already first" reading as part of "Move up" on the one row and not on the
+ * next. `text-muted-foreground` keeps it behind the label whichever it is - a
+ * disabled item is already at the menu's own disabled opacity, and the column
+ * has to stay secondary on an enabled one too.
+ */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
+	// Why it is off wins over what it carries: a Copy that cannot run is not
+	// describing a value the user can have.
+	const trailing = (action.disabled ? action.disabledReason : undefined) ?? action.hint;
 	return (
 		<>
-			<Icon className="h-4 w-4 shrink-0" />
+			<Icon className="size-icon shrink-0" data-icon-motion={action.iconMotion} />
 			{action.label}
+			{trailing ? (
+				// `max-w-48 truncate`: a hint is often a URL, and a menu sizes
+				// itself to its widest row - uncapped, one inbox row set the width
+				// of every item beside it.
+				<span className="ml-auto max-w-48 truncate pl-3 text-xs text-muted-foreground">
+					{trailing}
+				</span>
+			) : null}
 		</>
 	);
 }

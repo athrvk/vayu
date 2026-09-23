@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
 	Button,
+	Checkbox,
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -33,6 +34,8 @@ import {
 	TabLabel,
 	Textarea,
 	LabelSwap,
+	DialogCancelButton,
+	ICON_MOTION,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -59,7 +62,7 @@ import {
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
 
 type Tab = "file" | "url" | "paste";
@@ -99,7 +102,8 @@ const FORMAT_BADGES = [
 ];
 
 export function ImportModal() {
-	const { isOpen, close } = useImportModalStore();
+	const isOpen = useImportModalStore((s) => s.isOpen);
+	const close = useImportModalStore((s) => s.close);
 	const importMutation = useImportMutation();
 	const { data: collections = [] } = useCollectionsQuery();
 	const readBoundSpecs = useBoundSpecReader();
@@ -690,12 +694,9 @@ export function ImportModal() {
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
 					    is stated here instead. */}
-					{error && (
-						<p className="mt-3 flex items-center gap-1.5 text-xs text-destructive-text">
-							<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-							{error}
-						</p>
-					)}
+					<FieldError icon={AlertTriangle} className="mt-3">
+						{error}
+					</FieldError>
 				</>
 			) : (
 				<>
@@ -721,7 +722,11 @@ export function ImportModal() {
 						<button
 							type="button"
 							disabled={isBusy}
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
+							// `group`: the Upload glyph's `lift` fires from this
+							// dropzone's hover, and the `Icon motion` block gates on a
+							// `[data-slot="button"]` or `.group` ancestor - a bare
+							// <button> element is neither.
+							className="group w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
@@ -736,11 +741,14 @@ export function ImportModal() {
 								void handleFiles(Array.from(e.dataTransfer.files));
 							}}
 						>
-							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
+							<Upload
+								className="mx-auto h-6 w-6 text-muted-foreground"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							<span className="mt-2 block text-sm font-medium">
 								Drop files here, or click to browse
 							</span>
-							<span className="block text-[11px] text-muted-foreground">
+							<span className="block text-label text-muted-foreground">
 								Format is detected per file - drop as many as you like
 							</span>
 							<span className="mt-4 flex flex-wrap justify-center gap-1.5">
@@ -750,7 +758,7 @@ export function ImportModal() {
 										// Bare `bg-card` on purpose: the chip's edge faces the
 										// sunken drop zone, so its `border-rule` must inherit the
 										// zone's declaration, not declare a card rule of its own.
-										className="rounded-md border border-rule bg-card px-2 py-0.5 text-[10px] font-semibold"
+										className="rounded-md border border-rule bg-card px-2 py-0.5 text-micro font-semibold"
 									>
 										{b}
 									</span>
@@ -759,7 +767,7 @@ export function ImportModal() {
 						</button>
 					)}
 					{tab === "file" && (
-						<div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+						<div className="mt-2 flex items-center justify-center gap-2 text-label text-muted-foreground">
 							<span>Or bring in a whole directory of specs:</span>
 							<Button
 								variant="outline"
@@ -767,7 +775,7 @@ export function ImportModal() {
 								disabled={isBusy}
 								onClick={() => folderInputRef.current?.click()}
 							>
-								<FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+								<FolderOpen className="mr-1.5 size-icon-sm" />
 								Import folder
 							</Button>
 						</div>
@@ -857,9 +865,7 @@ export function ImportModal() {
 							<ImportProgressView progress={progress ?? { stage: "reading" }} />
 						</div>
 					)}
-					{phase === "error" && (
-						<p className="mt-3 text-xs text-destructive-text">{error}</p>
-					)}
+					{phase === "error" && <FieldError className="mt-3">{error}</FieldError>}
 				</>
 			)}
 		</>
@@ -918,9 +924,14 @@ export function ImportModal() {
 				 * underline tabs. These were hand-rolled buttons with `py-2` and no
 				 * horizontal padding, which is what made the focus ring look wrong:
 				 * the ring correctly wrapped a 73x38 box around 73px of text, so it
-				 * read as a tall rectangle floating around the label. Every other
-				 * tab in the app is px-4 py-2.5, so the ring wraps a proportioned
-				 * target.
+				 * read as a tall rectangle floating around the label.
+				 *
+				 * `size="sm"` (28px), not the `xs` default: File/URL/Paste is this
+				 * dialog's only top-level navigation, the role the dashboard's own
+				 * root tabs play - not a strip nested inside an already-chosen
+				 * section, which is what `xs` is sized for (Collection Detail, the
+				 * response viewer). Left at `xs` this read thinner than the header
+				 * and footer bands around it.
 				 *
 				 * Radix also brings the keyboard model tabs are supposed to have -
 				 * one tab stop for the set, arrow keys to move between them. The
@@ -935,7 +946,7 @@ export function ImportModal() {
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="w-full px-4">
+					<TabsList variant="pane" size="sm" className="w-full">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>
@@ -985,36 +996,36 @@ export function ImportModal() {
 							 * descendant, so clicking the words "Import pre-request &
 							 * test scripts" toggled Import environments instead - and the
 							 * second checkbox had no label at all, shrinking its hit
-							 * target to the 13px box.
+							 * target to the box itself. `size-target` (issue #1679, 24-28px)
+							 * is that box's own floor for exactly this reason - the label
+							 * fixed which words each checkbox answers to, not how small
+							 * the checkbox was to begin with.
 							 */}
-							<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+							<div className="flex flex-col gap-1 text-label text-muted-foreground">
 								<label className="flex w-fit items-center gap-1.5">
-									<input
-										type="checkbox"
+									<Checkbox
 										checked={importEnvironments}
 										disabled={applying}
 										onChange={(e) => toggleEnvironments(e.target.checked)}
+										className="size-target"
 									/>
 									Import environments &amp; variables
 								</label>
 								<label className="flex w-fit items-center gap-1.5">
-									<input
-										type="checkbox"
+									<Checkbox
 										checked={importScripts}
 										disabled={applying}
 										onChange={(e) => toggleScripts(e.target.checked)}
+										className="size-target"
 									/>
 									Import pre-request &amp; test scripts
 								</label>
 							</div>
 							<div className="flex gap-2">
-								<Button
-									variant="outline"
+								<DialogCancelButton
 									onClick={handleClose}
 									disabled={importMutation.isPending}
-								>
-									Cancel
-								</Button>
+								/>
 								<Button
 									onClick={handleImport}
 									disabled={applying || applicable.length === 0}
@@ -1072,10 +1083,10 @@ function PreviewView({
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
+				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{meta.format}</span>
 				{meta.fileName && (
-					<span className="font-mono text-[11px] text-muted-foreground">
+					<span className="font-mono text-label text-muted-foreground">
 						{meta.fileName}
 					</span>
 				)}
@@ -1084,7 +1095,7 @@ function PreviewView({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1100,9 +1111,9 @@ function PreviewView({
 						key={i}
 						className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium"
 					>
-						<Layers className="h-3.5 w-3.5 text-primary" />
+						<Layers className="size-icon-sm text-primary" />
 						{e.name}
-						<span className="text-[11px] font-normal text-muted-foreground">
+						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(Object.keys(e.variables).length)}
 						</span>
 					</div>
@@ -1113,9 +1124,9 @@ function PreviewView({
 				 */}
 				{globalCount > 0 && (
 					<div className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium">
-						<Globe className="h-3.5 w-3.5 text-primary" />
+						<Globe className="size-icon-sm text-primary" />
 						Globals
-						<span className="text-[11px] font-normal text-muted-foreground">
+						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(globalCount)}
 						</span>
 					</div>
@@ -1128,32 +1139,26 @@ function PreviewView({
 			    acceptance criterion 1). Unconditional like the other four: "0
 			    examples" is the answer for a file that carried none, which is
 			    different from a preview that does not mention them. */}
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				{meta.requestCount} requests · {meta.folderCount} folders · {meta.exampleCount}{" "}
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
+				<FieldError icon={AlertTriangle}>
 					{importEnvironments
 						? "Nothing to import from this file."
 						: "No collections in this file. Enable Import environments & variables below to import its environments."}
-				</p>
+				</FieldError>
 			)}
 			{globalCount > 0 && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
-			{lossSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
-					{lossSummary(meta)}
-				</p>
-			)}
+			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
 			{noticeSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-					<Info className="h-3.5 w-3.5 shrink-0" />
+				<p className="flex items-center gap-1.5 text-label text-muted-foreground">
+					<Info className="size-icon-sm shrink-0" />
 					{noticeSummary(meta)}
 				</p>
 			)}
@@ -1268,9 +1273,9 @@ function BatchLedger({
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
+				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{entries.length} files</span>
-				<span className="text-[11px] text-muted-foreground">
+				<span className="text-label text-muted-foreground">
 					{selected} selected for import
 				</span>
 				<button
@@ -1278,7 +1283,7 @@ function BatchLedger({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1286,7 +1291,7 @@ function BatchLedger({
 					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />
 				))}
 			</div>
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				Each file is imported on its own, as its own collection - a file the engine refuses
 				does not undo the ones before it.
 			</p>
@@ -1309,9 +1314,8 @@ function BatchRow({
 	const notices = result ? noticeSummary(result.meta) : "";
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
-			<input
-				type="checkbox"
-				className="mt-1"
+			<Checkbox
+				className="mt-1 size-icon"
 				checked={entry.included}
 				// An applied file is the one thing that must not be re-sent:
 				// `POST /import/apply` is create-only and carries no idempotency key,
@@ -1324,52 +1328,46 @@ function BatchRow({
 				<span className="flex items-baseline gap-1.5">
 					<span className="truncate font-medium">{name}</span>
 					{result && (
-						<span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+						<span className="shrink-0 text-micro font-semibold text-muted-foreground">
 							{result.meta.format}
 						</span>
 					)}
 				</span>
 				{result && (
-					<span className="block text-[11px] text-muted-foreground">
+					<span className="block text-label text-muted-foreground">
 						{result.meta.requestCount} requests · {result.meta.folderCount} folders ·{" "}
 						{result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
 						environments · {result.meta.globalCount} globals
 					</span>
 				)}
 				{bundledInto && (
-					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<Link2 className="h-3 w-3 shrink-0" />
+					<span className="flex items-center gap-1.5 text-label text-muted-foreground">
+						<Link2 className="size-icon-sm shrink-0" />
 						Referenced by {bundledInto} - imported as part of it
 					</span>
 				)}
-				{error && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<FileWarning className="h-3 w-3 shrink-0" />
-						{error}
-					</span>
-				)}
-				{loss && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<AlertTriangle className="h-3 w-3 shrink-0" />
-						{loss}
-					</span>
-				)}
+				<FieldError as="span" icon={FileWarning}>
+					{error}
+				</FieldError>
+				<FieldError as="span" icon={AlertTriangle}>
+					{loss}
+				</FieldError>
 				{notices && (
-					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<Info className="h-3 w-3 shrink-0" />
+					<span className="flex items-center gap-1.5 text-label text-muted-foreground">
+						<Info className="size-icon-sm shrink-0" />
 						{notices}
 					</span>
 				)}
 				{outcome && (
 					<span
-						className={`flex items-center gap-1.5 text-[11px] ${
+						className={`flex items-center gap-1.5 text-label ${
 							outcome.ok ? "text-status-success-text" : "text-destructive-text"
 						}`}
 					>
 						{outcome.ok ? (
-							<CheckCircle2 className="h-3 w-3 shrink-0" />
+							<CheckCircle2 className="size-icon-sm shrink-0" />
 						) : (
-							<FileWarning className="h-3 w-3 shrink-0" />
+							<FileWarning className="size-icon-sm shrink-0" />
 						)}
 						{outcome.message}
 					</span>
@@ -1515,12 +1513,12 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"request bodies Postman had turned off - imported with no body rather than sent anyway",
 	],
 	certificate: [
-		"request-level client certificate (Vayu certificates are per-host, not per-request - not yet imported)",
-		"request-level client certificates (Vayu certificates are per-host, not per-request - not yet imported)",
+		"request-level client certificate that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
+		"request-level client certificates that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
 	],
 	proxy_config: [
-		"request-level proxy override (not yet imported)",
-		"request-level proxy overrides (not yet imported)",
+		"request-level proxy override (Vayu has no per-request proxy setting to import it into)",
+		"request-level proxy overrides (Vayu has no per-request proxy setting to import it into)",
 	],
 	invalid_percent_encoding: [
 		"query value with an invalid % escape, changed when rejoined into the URL",
@@ -1561,14 +1559,14 @@ function TreeNode({
 	return (
 		<div className="pl-1">
 			<div className="flex items-center gap-1.5 py-0.5 text-xs font-medium">
-				<Folder className="h-3.5 w-3.5 text-primary" />
+				<Folder className="size-icon-sm text-primary" />
 				{name}
 			</div>
 			<div className="pl-5">
 				{requests.map((r, i) => (
 					<div
 						key={i}
-						className="flex items-center gap-2 py-0.5 text-[11px] text-muted-foreground"
+						className="flex items-center gap-2 py-0.5 text-label text-muted-foreground"
 					>
 						<MethodBadge method={r.method} variant="text" className="w-10" />
 						<span>{r.name}</span>

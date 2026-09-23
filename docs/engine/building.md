@@ -393,7 +393,11 @@ tracking issue.
   (2026-09-05): 10 of 10 raced without the entry, 10 of 10 passed with it, the
   report frame for frame the same - that release rewrote
   `process_and_close_socket` around a `serve_guarded` wrapper and left
-  `parse_status_line` alone. What is left is upstream in libstdc++.
+  `parse_status_line` alone. And again on the move to cpp-httplib 0.56.0
+  (2026-09-17): 9 of 10 raced without it, 10 of 10 passed with it, the same
+  stack once more - `parse_status_line` is byte-identical to 0.54.1's and its
+  regex is still `thread_local`, so nothing about the window moved. What is
+  left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
@@ -691,24 +695,39 @@ ctest -V
 
 Every **test preset** runs the suite multi-process (`ctest -j8`, wired once into
 the hidden `test-base` test preset in `engine/CMakePresets.json`, which the
-Windows presets narrow to `-j4`); a bare `ctest` or `./vayu_tests` runs serially.
-Parallelism is safe because the test binary enters a private per-process scratch
-directory before running, so the relative `test_*.db` files fixtures open never
-collide between concurrently scheduled tests (see `engine/tests/main.cpp` and
-`engine/tests/temp_database.hpp`). Override the job count with an explicit
-`ctest --preset linux-dev -jN`.
+Windows presets narrow to `-j4` and the `macos-prod`/`macos-prod-arm64`/
+`macos-prod-x64` presets narrow to `-j3`); a bare `ctest` or `./vayu_tests` runs
+serially. Parallelism is safe because the test binary enters a private
+per-process scratch directory before running, so the relative `test_*.db` files
+fixtures open never collide between concurrently scheduled tests (see
+`engine/tests/main.cpp` and `engine/tests/temp_database.hpp`). Override the job
+count with an explicit `ctest --preset linux-dev -jN`.
 
-8 is **twice** a hosted runner's four cores, deliberately. Most of the suite's
-wall time is spent waiting - on localhost mock servers, and on the sleeps the
-pacing and shutdown tests measure - not on CPU, so oversubscription keeps paying
-well past the core count. Measured on a 4-core runner-sized box, all green:
-278s serial, 78s at `-j4`, 55s at `-j8`, 47s at `-j12`, 42s at `-j16`, 40s at
-`-j24`. It stops at 8 because the curve is flattening by then and a hosted
-runner is noisier than an idle machine, with the wall-clock-budget tests
-(`run_stop_test.cpp`, `run_shutdown_test.cpp`, `load_pacing_test.cpp`,
+8 is **twice** a Linux hosted runner's four cores, deliberately. Most of the
+suite's wall time is spent waiting - on localhost mock servers, and on the
+sleeps the pacing and shutdown tests measure - not on CPU, so oversubscription
+keeps paying well past the core count. Measured on a 4-core runner-sized box,
+all green: 278s serial, 78s at `-j4`, 55s at `-j8`, 47s at `-j12`, 42s at
+`-j16`, 40s at `-j24`. It stops at 8 because the curve is flattening by then
+and a hosted runner is noisier than an idle machine, with the wall-clock-budget
+tests (`run_stop_test.cpp`, `run_shutdown_test.cpp`, `load_pacing_test.cpp`,
 `rate_limit_test.cpp`, `monitor_test.cpp`) the ones that would pay for a wrong
 guess - and widening a timing budget to afford a bigger number is not on the
 table.
+
+**macOS is not Linux's four cores.** A GitHub-hosted `macos-latest` runner has
+three vCPUs, not four - the number above was measured on a Linux-shaped box and
+carried over to macOS unexamined when the Windows narrowing was added. Running
+the same wall-clock-budget tests at `-j8` on three real cores leaves less
+scheduling headroom than the Windows `-j4` narrowing already judged necessary
+on four, and two release attempts (v0.30.0) each flaked a different tight
+threshold test that way -
+`LoadStrategyTest.CapacityStopsOnItsDeadline` and
+`ElementsTimersRunnerTest.ElementsTimersOffSilencesAConfiguredThinkTime`. The
+CI-facing test presets (`macos-prod`, `macos-prod-arm64`, `macos-prod-x64` -
+what `pr-tests.yml` and `release.yml` both run on `macos-latest`) narrow to
+`-j3` to match; `macos-dev` is unchanged; it is not what CI runs, and a
+developer's own Mac usually has more than three real cores to spend on it.
 
 **On Windows the database tests never overlap each other.** A plain `-j4` there
 took ~37 min against a ~6 min serial run - the same `-j4` that cut ubuntu from

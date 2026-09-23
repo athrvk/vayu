@@ -63,7 +63,7 @@ export function ScriptError({ which, message }: { which: ScriptKey; message: str
 	return (
 		<div className="p-3 rounded-md bg-destructive/10 border border-destructive/20">
 			<div className="flex items-start gap-2">
-				<AlertCircle className="w-3.5 h-3.5 text-destructive-text mt-0.5 shrink-0" />
+				<AlertCircle className="size-icon-sm text-destructive-text mt-0.5 shrink-0" />
 				<div className="flex-1 min-w-0">
 					<p className="text-xs font-semibold text-destructive-text">
 						{SCRIPT_SECTIONS[which].errorLabel}
@@ -97,7 +97,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 				 */}
 				<div
 					className={cn(
-						"flex items-center justify-center w-4 h-4 rounded-md transition-colors",
+						"flex items-center justify-center size-icon rounded-md transition-colors",
 						tone === "running"
 							? "bg-status-running/20 group-hover:bg-status-running/30"
 							: "bg-status-success/20 group-hover:bg-status-success/30"
@@ -106,7 +106,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 					{open ? (
 						<ChevronDown
 							className={cn(
-								"w-3 h-3",
+								"size-icon-sm",
 								tone === "running"
 									? "text-status-running-text"
 									: "text-status-success-text"
@@ -115,7 +115,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 					) : (
 						<ChevronRight
 							className={cn(
-								"w-3 h-3",
+								"size-icon-sm",
 								tone === "running"
 									? "text-status-running-text"
 									: "text-status-success-text"
@@ -163,7 +163,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 								<span
 									aria-hidden={tone.gutter === "" ? true : undefined}
 									className={cn(
-										"w-9 shrink-0 select-none text-right text-[10px] uppercase leading-5 tracking-wide",
+										"w-9 shrink-0 select-none text-right text-micro uppercase leading-5 tracking-wide",
 										tone.label
 									)}
 								>
@@ -188,7 +188,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 						 */
 						<div
 							ref={sentinelRef}
-							className="pt-2 text-[10px] text-muted-foreground tabular-nums"
+							className="pt-2 text-micro text-muted-foreground tabular-nums"
 						>
 							Showing {visible.toLocaleString()} of {logs.length.toLocaleString()}…
 						</div>

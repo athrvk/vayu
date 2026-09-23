@@ -9,6 +9,7 @@ import type {
 	CollectionDataSchema,
 	HttpMethod,
 	HttpVersion,
+	ImportApplyClientCertificate,
 	KeyValueEntry,
 	MockResponseMode,
 	RequestBody,
@@ -224,16 +225,23 @@ export interface SkippedItem {
 		| "disabled_body"
 		/**
 		 * A Postman request's own `certificate` (a client certificate scoped to
-		 * that one request). Vayu's client certificates belong to a host, not a
-		 * request (engine/CLAUDE.md), so importing one means writing a registry
-		 * entry beside the collection rather than a request field - not yet
-		 * built (issue #1656). Counted so the loss is not silent.
+		 * that one request) the engine could not resolve into a
+		 * `client_certificates` registry entry (issue #1656): no `cert.src`, an
+		 * unreadable file, a host the request's URL still carries as an
+		 * unresolved `{{var}}`, or a second, different certificate for a (host,
+		 * port) an earlier request in this import already claimed. A resolvable
+		 * one no longer reaches this kind - it lands in
+		 * {@link ImportResult.clientCertificates} instead, since Vayu's client
+		 * certificates belong to a host, not a request (`engine/CLAUDE.md`).
 		 */
 		| "certificate"
 		/**
 		 * A Postman request's own `proxy` override. Vayu has no per-request
-		 * proxy override to import it into - not yet built (issue #1656).
-		 * Counted so the loss is not silent.
+		 * proxy override to import it into, and no per-host or per-target
+		 * mechanism it could become instead - `TransportPolicy` is
+		 * workspace/run-scoped (`engine/CLAUDE.md`) - so unlike `certificate`
+		 * this stays a permanent tally rather than a deferred mapping (issue
+		 * #1656's own recorded decision).
 		 */
 		| "proxy_config"
 		/**
@@ -484,6 +492,15 @@ export interface ImportResult {
 	 */
 	globals: Record<string, VariableValue>;
 	meta: ImportMeta;
+	/**
+	 * `client_certificates` registry candidates the engine resolved (issue
+	 * #1656) - present only from a Postman parse; every other format's parser
+	 * sets no such key, so this is optional here rather than "always sent,
+	 * `[]` included" the way {@link ImportApplyRequest.specs} is. The
+	 * orchestrator defaults an absent one to `[]` when it flattens the preview
+	 * into the apply payload.
+	 */
+	clientCertificates?: ImportApplyClientCertificate[];
 }
 
 /**

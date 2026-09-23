@@ -26,9 +26,10 @@
  * body panel in the tree.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TIMING } from "@/config/timing";
 import type { ResponseState } from "../../types";
 import ResponseViewer from "./index";
 
@@ -239,13 +240,17 @@ describe("a tab count of zero", () => {
 		renderViewer();
 
 		/*
-		 * The absence of a `sup`, not an equality on the text. `TabLabel` renders
-		 * its label twice - once `invisible font-semibold` to reserve the width
-		 * the active state will need - so `textContent` is "ConsoleConsole" and
+		 * An *empty* `sup`, not an absent one, and not an equality on the text.
+		 * The slot itself is always rendered - it animates the count's own
+		 * track open so a count arriving grows in rather than shoving Tests,
+		 * Events and Raw sideways (see `MARK_TRACK` in `ui/tabs.tsx`) - and what
+		 * must not appear is any content in it. `TabLabel` renders its label
+		 * twice - once `invisible font-semibold` to reserve the width the
+		 * active state will need - so `textContent` is "ConsoleConsole" and
 		 * always will be.
 		 */
 		const trigger = screen.getByRole("tab", { name: /console/i });
-		expect(trigger.querySelector("sup")).toBeNull();
+		expect(trigger.querySelector("sup")?.textContent).toBe("");
 		expect(trigger.textContent).not.toMatch(/\d/);
 	});
 
@@ -257,5 +262,188 @@ describe("a tab count of zero", () => {
 
 		const trigger = screen.getByRole("tab", { name: /console/i });
 		expect(trigger.querySelector("sup")?.textContent).toBe("2");
+	});
+});
+
+/*
+ * A result chip arriving grows into place rather than jumping the tabs beside
+ * it.
+ *
+ * The constant tab set above stopped the *strip* from changing shape between
+ * responses; the Tests chip was the one thing left inside it that still did.
+ * It was `{testResults.length > 0 && <Badge …>}`, so a response that ran tests
+ * mounted a flex item on a `shrink-0` trigger inside this `flex-nowrap` list -
+ * the trigger grew by the chip plus its own `gap-1.5`, and Events and Raw moved
+ * with it instantly. Re-sending the same request with and without a test
+ * script drew the strip two different ways, under a pointer on its way to one
+ * of those tabs. A first fix (`MARK_SLOT` in `ui/tabs.tsx`) reserved the
+ * chip's width permanently instead, which the chip could not actually take -
+ * an emptied `Badge` still paints a coloured pill - so it fell back to
+ * `TabLabel`'s hidden-twin trick, paying that width on every response, tested
+ * or not.
+ *
+ * The chip now uses `MARK_TRACK`'s `grid-template-columns: 0fr -> 1fr`
+ * animation instead: a genuinely zero-width track when no tests ran, animating
+ * open to the chip's own width when a result arrives, with no permanent
+ * reservation either way.
+ *
+ * jsdom lays nothing out, so the animated width is unobservable here - the
+ * mechanism is what these read. Mutation check (confirmed): put the
+ * `{testResults.length > 0 && <Badge …>}` gate back and "keeps the chip's
+ * slot" and "reuses the same node" both fail on the absent slot; swap the
+ * `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `TestsResultChip` and "opens
+ * the track when a result arrives" fails on the inverted classes.
+ */
+describe("the Tests chip does not shove the tabs after it", () => {
+	const chipSlot = () =>
+		screen
+			.getByRole("tab", { name: /tests/i })
+			.querySelector<HTMLElement>("[data-slot='tests-result-chip']");
+
+	it("keeps the chip's slot on the trigger when no tests ran, at a zero-width track", () => {
+		state.response = { ...fullResponse(), testResults: undefined };
+		renderViewer();
+		const slot = chipSlot();
+		expect(slot, "no slot - the chip will widen the trigger when a test runs").not.toBeNull();
+		expect(slot?.className).toContain("grid-cols-[0fr]");
+		expect(slot?.textContent).toBe("");
+		expect(screen.queryByRole("tab", { name: /0\/0/ })).toBeNull();
+		// The `Badge` itself must not be in the DOM at all here, not just
+		// textless: `Badge` always paints an opaque `bg-*` fill regardless of
+		// content, so an empty-but-mounted one showed as a small solid red mark
+		// next to "Tests" on every response that never ran a test - worse than
+		// the jump this component exists to fix.
+		expect(slot?.querySelector("[data-slot='badge']")).toBeNull();
+	});
+
+	it("opens the track when a result arrives, sized to the chip's own content", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: true }],
+		};
+		renderViewer();
+		const slot = chipSlot()!;
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		expect(slot.textContent).toBe("1/1");
+	});
+
+	it("reuses the same node across the transition", () => {
+		state.response = { ...fullResponse(), testResults: undefined };
+		const { rerender } = renderViewer();
+
+		const tests = screen.getByRole("tab", { name: /tests/i });
+		const events = screen.getByRole("tab", { name: /events/i });
+		const emptySlot = chipSlot()!;
+		const triggerClasses = tests.className;
+
+		state.response = {
+			...fullResponse(),
+			testResults: [
+				{ name: "status is 200", passed: true },
+				{ name: "body has id", passed: false },
+			],
+		};
+		rerender();
+
+		const filledSlot = chipSlot()!;
+		// The same element, not a remount: only its track and contents changed.
+		expect(filledSlot).toBe(emptySlot);
+		expect(filledSlot.className).toContain("grid-cols-[1fr]");
+		expect(tests.className).toBe(triggerClasses);
+		expect(filledSlot.textContent).toBe("1/2");
+		// Nothing was inserted before Events, which is how the shift travelled.
+		expect(events.querySelector("[data-slot='tests-result-chip']")).toBeNull();
+	});
+});
+
+/*
+ * The Tests chip fades on its way out; it used to be cut while the track
+ * faded for it.
+ *
+ * The `Badge` mounts only while there is a result (an emptied one still
+ * paints a coloured pill, so it cannot simply stay), and it used to leave the
+ * tree in the same commit that put the track back to `grid-cols-[0fr]` - so
+ * the 150ms collapse ran around an already-empty box and the chip itself was
+ * a hard cut. The collapse is what made it easy to miss: the trigger *was*
+ * animating, just not the part carrying the result. `useHeldValue` keeps the
+ * outgoing label for `TIMING.MARK_FADE_MS` so the opacity transition, the
+ * mirror of the `starting:opacity-0` fade-in it already had, has a populated
+ * node to take out. Nothing is mounted once that window closes, so the
+ * stray-pixel hazard the mount/unmount exists for is unchanged.
+ *
+ * Reachable the ordinary way: re-sending a request whose test script was
+ * removed, and switching to a response that ran none.
+ *
+ * Mutation check (confirmed): gate the `Badge` on `hasResults` again and
+ * "holds the chip through its fade" fails on the missing badge; pin `fading`
+ * to `false` and "starts the fade in the same commit…" fails on the missing
+ * `opacity-0`.
+ */
+describe("the Tests chip fades rather than being cut", () => {
+	const chip = () =>
+		screen
+			.getByRole("tab", { name: /tests/i })
+			.querySelector<HTMLElement>("[data-slot='tests-result-chip']")!;
+	const badge = () => chip().querySelector<HTMLElement>("[data-slot='badge']");
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds the chip through its fade, then drops it out of the tree", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: true }],
+		};
+		const { rerender } = renderViewer();
+		expect(badge()?.textContent).toBe("1/1");
+
+		// The same request re-sent with its test script gone.
+		state.response = { ...fullResponse(), testResults: undefined };
+		rerender();
+
+		// Still showing - the fade has a populated node to take out.
+		expect(badge()?.textContent).toBe("1/1");
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 1);
+		});
+		expect(badge()?.textContent).toBe("1/1");
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(badge(), "an emptied Badge still paints a pill - it must leave").toBeNull();
+	});
+
+	it("starts the fade in the same commit as the track's collapse, not after the hold", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: false }],
+		};
+		const { rerender } = renderViewer();
+		// A class-boundary match, not `toContain`: the chip's own fade-in
+		// variant is spelled `starting:opacity-0`, so a bare substring check
+		// would read the entry half and pass with the exit half gone.
+		const opacityClass = (el: HTMLElement | null) =>
+			(el?.className ?? "").split(/\s+/).find((c) => /^opacity-\d+$/.test(c)) ?? null;
+
+		expect(opacityClass(badge())).toBe("opacity-100");
+
+		state.response = { ...fullResponse(), testResults: [] };
+		rerender();
+
+		// The track goes immediately, off the live results...
+		expect(chip().className).toContain("grid-cols-[0fr]");
+		// ...and the chip it is collapsing around fades with it.
+		expect(opacityClass(badge())).toBe("opacity-0");
+		// Tone is the held one: a failing chip must not turn green on the way out.
+		expect(badge()?.textContent).toBe("0/1");
+		expect(badge()?.className).toContain("destructive");
 	});
 });

@@ -83,7 +83,7 @@ export default function HistoricalChartsSection({
 		<div className="space-y-4">
 			{isFetchingMore && progress && (
 				<div className="enter-fade flex items-center gap-2 text-sm text-muted-foreground">
-					<Loader2 className="h-4 w-4 animate-spin" />
+					<Loader2 className="size-icon animate-spin" />
 					<span>
 						Loading more data... ({progress.loaded.toLocaleString()} /{" "}
 						{progress.total.toLocaleString()} points)

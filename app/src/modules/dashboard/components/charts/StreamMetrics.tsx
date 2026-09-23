@@ -49,7 +49,7 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				<StreamStat label="streams" value={fmtCount(stream.completions)} />
 			</div>
 
-			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 pt-2.5 border-t border-dashed border-border text-[11px] text-muted-foreground">
+			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 pt-2.5 border-t border-dashed border-border text-label text-muted-foreground">
 				<span />
 				<span className="text-right font-medium">p50</span>
 				<span className="text-right font-medium">p95</span>
@@ -57,7 +57,7 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				<span className="text-right font-medium">max</span>
 			</div>
 			<div className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5">
-				<span className="text-[11px] text-muted-foreground flex items-center">
+				<span className="text-label text-muted-foreground flex items-center">
 					per stream
 					<InfoChip tip={TOOLTIPS.streamEvents} />
 				</span>
@@ -68,17 +68,17 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 			</div>
 
 			{allCapped ? (
-				<p className="text-[11px] text-warning-text">
+				<p className="text-label text-warning-text">
 					Every stream was ended by a cap rather than by the server, so these counts
 					measure the caps, not the target. Raise them to see further.
 				</p>
 			) : stream.capped > 0 ? (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{fmtCount(stream.capped)} of {fmtCount(stream.completions)} streams were ended
 					by a cap; the rest were closed by the server.
 				</p>
 			) : (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					Every stream was closed by the server - no cap was reached.
 				</p>
 			)}
@@ -115,14 +115,14 @@ function StreamStat({
 			>
 				{value}
 			</div>
-			<div className="text-[10px] text-muted-foreground">{label}</div>
+			<div className="text-micro text-muted-foreground">{label}</div>
 		</div>
 	);
 }
 
 function EventValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
 	return (
-		<span className="text-right font-mono tabular-nums text-[11px]">
+		<span className="text-right font-mono tabular-nums text-label">
 			<span className={emphasis ? "text-foreground font-medium" : "text-foreground"}>
 				{fmtCount(value)}
 			</span>

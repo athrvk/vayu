@@ -76,7 +76,6 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				// Get theme from Electron
 				const theme = await window.electronAPI.getTheme();
 				source = theme.themeSource as ThemeSource;
-				applyTheme(theme.shouldUseDarkColors, scheme);
 
 				// Check if accent color is supported. The main process answers
 				// `accent:get` on every platform, but only resolves a scheme on
@@ -85,10 +84,13 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				const accentInfo = await window.electronAPI.getAccentScheme();
 				accentSupported = accentInfo.accentScheme !== null;
 
-				// If match system accent is enabled and we have an accent color, use it
-				if (shouldMatchAccent && accentInfo.accentScheme) {
-					setColorScheme(accentInfo.accentScheme);
-				}
+				// Resolve once: when matching is on and the OS gave us a scheme, it
+				// wins over the stored value for both the DOM write and the state
+				// set below, so the two never disagree on the same async turn.
+				const resolved =
+					shouldMatchAccent && accentInfo.accentScheme ? accentInfo.accentScheme : scheme;
+				applyTheme(theme.shouldUseDarkColors, resolved);
+				setColorScheme(resolved);
 			} else {
 				// Fallback: check localStorage or system preference
 				if (savedSource) {
@@ -105,10 +107,10 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 					const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 					applyTheme(prefersDark, scheme);
 				}
+				setColorScheme(scheme);
 			}
 
 			setThemeSource(source);
-			setColorScheme(scheme);
 			setMatchSystemAccent(shouldMatchAccent);
 			setSupportsAccent(accentSupported);
 			setIsLoading(false);

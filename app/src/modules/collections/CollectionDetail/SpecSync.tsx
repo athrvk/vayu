@@ -51,7 +51,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { Button, Checkbox, DeleteConfirmDialog, ICON_MOTION } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
@@ -220,13 +220,13 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 						disabled={state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							<Loader2 className="mr-2 size-icon animate-spin" />
 						) : (
-							<RefreshCw className="mr-2 h-4 w-4" />
+							<RefreshCw className="mr-2 size-icon" />
 						)}
 						Check for changes
 					</Button>
-					<span className="text-[11px] text-muted-foreground">
+					<span className="text-label text-muted-foreground">
 						Re-reads the document and compares it. Nothing is written until you apply.
 					</span>
 				</div>
@@ -239,7 +239,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 
 				{state.phase === "unchanged" && (
 					<p className="flex items-center gap-2 text-xs text-status-success-text">
-						<Check className="h-3.5 w-3.5 shrink-0" />
+						<Check className="size-icon-sm shrink-0" />
 						Up to date - the document is byte for byte the one this collection is bound
 						to.
 					</p>
@@ -247,7 +247,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 
 				{state.phase === "applied" && (
 					<p className="flex items-center gap-2 text-xs text-status-success-text">
-						<Check className="h-3.5 w-3.5 shrink-0" />
+						<Check className="size-icon-sm shrink-0" />
 						{state.created + state.updated + state.deleted === 0 ? (
 							<>
 								Applied - the stored document, its response schemas and its coverage
@@ -280,13 +280,16 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 								disabled={syncSpec.isPending}
 							>
 								{syncSpec.isPending ? (
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									<Loader2 className="mr-2 size-icon animate-spin" />
 								) : (
-									<Upload className="mr-2 h-4 w-4" />
+									<Upload
+										className="mr-2 size-icon"
+										data-icon-motion={ICON_MOTION.lift}
+									/>
 								)}
 								{documentOnly ? "Update the stored document" : "Apply selected"}
 							</Button>
-							<span className="text-[11px] text-muted-foreground">
+							<span className="text-label text-muted-foreground">
 								{applySummary(state.selection)}
 							</span>
 						</div>
@@ -308,8 +311,8 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				title="Delete requests this document no longer declares?"
 				description={
 					<>
-						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} will be deleted,
-						with everything saved on {pendingDeletes === 1 ? "it" : "them"}. The rest of
+						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} and everything
+						saved on {pendingDeletes === 1 ? "it" : "them"} are removed. The rest of
 						this sync is applied in the same step.
 					</>
 				}
@@ -384,13 +387,13 @@ function DiffReport({
 		<div className="space-y-3">
 			<div className="rounded-md border border-rule surface-sunken p-3 space-y-1">
 				<p className="text-xs font-semibold">The document has changed</p>
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{diff.added.length} new operation{diff.added.length === 1 ? "" : "s"} ·{" "}
 					{diff.removed.length} request{diff.removed.length === 1 ? "" : "s"} whose
 					operation is gone · {diff.changed.length} changed · {diff.unchanged} unchanged
 				</p>
 				{documentLevelOnly(diff) && (
-					<p className="text-[11px] text-muted-foreground">
+					<p className="text-label text-muted-foreground">
 						Document-level changes only - no operation this collection maps has moved.
 						Response schemas, statuses and <code>servers</code> live on the document
 						rather than on a request, so applying stores the new document and rebuilds
@@ -398,7 +401,7 @@ function DiffReport({
 					</p>
 				)}
 				{diff.unmapped > 0 && (
-					<p className="text-[11px] text-muted-foreground">
+					<p className="text-label text-muted-foreground">
 						{diff.unmapped} request{diff.unmapped === 1 ? "" : "s"} carry no operation
 						and {diff.unmapped === 1 ? "is" : "are"} not part of this comparison.
 					</p>
@@ -465,7 +468,7 @@ function DiffReport({
 				</Group>
 			)}
 
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				Applying a change also refreshes that request&rsquo;s response examples from the
 				document - the ones a previous import or sync wrote. Examples you saved from a live
 				response are never replaced.
@@ -495,9 +498,8 @@ function ChangedRow({
 
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2 space-y-1">
-			<label className="flex items-baseline gap-2">
-				<input
-					type="checkbox"
+			<label className="flex items-center gap-2">
+				<Checkbox
 					checked={applying}
 					onChange={(e) =>
 						onChange(
@@ -511,15 +513,21 @@ function ChangedRow({
 						)
 					}
 					aria-label={`Apply changes to ${changed.name}`}
+					// `size-target` (issue #1679), not `size-icon`: same reason as
+					// the field-level checkbox below - a bare checkbox is its own
+					// hit target. `items-center`, not `items-baseline`, above: a
+					// checkbox this size floats above a single-line label at its
+					// text baseline rather than sitting level with it.
+					className="size-target"
 				/>
 				<span className="text-xs font-medium">{changed.name}</span>
-				<span className="text-[11px] font-mono text-muted-foreground break-all">
+				<span className="text-label font-mono text-muted-foreground break-all">
 					{operationKey(changed.operation)}
 				</span>
 			</label>
 
 			{changed.renamed && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					Followed by its {changed.matchedBy === "operationId" ? "operationId" : "path"}:
 					this request records {operationKey(changed.boundOperation)}, and applying
 					records the new identity.
@@ -527,7 +535,7 @@ function ChangedRow({
 			)}
 
 			{changed.previousUnknown && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					The bound document does not describe this operation, so an edit of yours and a
 					change of the document&rsquo;s cannot be told apart here - nothing is ticked for
 					you.
@@ -537,19 +545,23 @@ function ChangedRow({
 			{changed.fields.length > 0 && (
 				<ul className="space-y-1">
 					{changed.fields.map((field) => (
-						<li key={field.field} className="text-[11px]">
-							<label className="flex items-baseline gap-1.5">
-								<input
-									type="checkbox"
+						<li key={field.field} className="text-label">
+							<label className="flex items-center gap-1.5">
+								<Checkbox
 									checked={fields?.has(field.field) ?? false}
 									disabled={!applying}
 									onChange={(e) => toggleField(field.field, e.target.checked)}
 									aria-label={`Apply ${field.field} to ${changed.name}`}
+									// `size-target` (issue #1679), not `size-icon-sm`: a bare
+									// checkbox is its own hit target, same as `KeyValueRow`'s.
+									// `items-center`, not `items-baseline`, above - see the
+									// group checkbox's comment.
+									className="size-target"
 								/>
 								<span className="font-semibold">{field.field}</span>
 								{field.userTouched && (
 									<span className="text-status-warning-text">
-										<AlertTriangle className="mr-1 inline h-3 w-3 align-[-1px]" />
+										<AlertTriangle className="mr-1 inline size-icon-sm align-[-1px]" />
 										edited here
 									</span>
 								)}
@@ -576,8 +588,8 @@ function Group({
 }) {
 	return (
 		<div>
-			<p className="text-[11px] font-semibold">{title}</p>
-			<p className="mb-1.5 text-[11px] text-muted-foreground">{hint}</p>
+			<p className="text-label font-semibold">{title}</p>
+			<p className="mb-1.5 text-label text-muted-foreground">{hint}</p>
 			<ul className="space-y-1.5">{children}</ul>
 		</div>
 	);
@@ -599,17 +611,20 @@ function CheckRow({
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2">
 			<label className="flex items-baseline gap-2">
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={checked}
 					onChange={(e) => onChange(e.target.checked)}
 					aria-label={`${title} (${detail})`}
+					// `size-target` (issue #1679), not `size-icon`: same reason as
+					// the field-level checkbox above - a bare checkbox is its own
+					// hit target.
+					className="size-target"
 				/>
 				<span className="text-xs font-medium">{title}</span>
-				<span className="text-[11px] font-mono text-muted-foreground break-all">
+				<span className="text-label font-mono text-muted-foreground break-all">
 					{detail}
 				</span>
-				{note && <span className="text-[11px] text-muted-foreground">{note}</span>}
+				{note && <span className="text-label text-muted-foreground">{note}</span>}
 			</label>
 		</li>
 	);

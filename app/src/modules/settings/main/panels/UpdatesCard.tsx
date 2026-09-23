@@ -35,10 +35,13 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	IconSwap,
 	LabelSwap,
 } from "@/components/ui";
+import { useCopy } from "@/hooks/useCopy";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
+import { FieldError } from "@/components/shared";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -49,7 +52,7 @@ const APP_VERSION = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ :
 export function UpdatesCard() {
 	const [checking, setChecking] = useState(false);
 	const [result, setResult] = useState<UpdateCheckResult | null>(null);
-	const [copied, setCopied] = useState(false);
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	const api = window.electronAPI;
 
@@ -69,9 +72,7 @@ export function UpdatesCard() {
 	};
 
 	const copyInstallCommand = async (command: string) => {
-		await navigator.clipboard.writeText(command);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		await copy(command, "Install command");
 	};
 
 	/**
@@ -103,11 +104,7 @@ export function UpdatesCard() {
 			case "unavailable":
 				return <p className="text-sm text-muted-foreground">{result.detail}</p>;
 			case "error":
-				return (
-					<p className="text-sm text-destructive-text">
-						Couldn&apos;t check for updates. {result.message}
-					</p>
-				);
+				return <FieldError>Couldn&apos;t check for updates. {result.message}</FieldError>;
 			case "available": {
 				// Bound here so the optional survives narrowing into the handler.
 				const { version, strategy, releaseUrl, installCommand } = result;
@@ -124,7 +121,7 @@ export function UpdatesCard() {
 								size="sm"
 								onClick={() => void api.openReleasePage(releaseUrl)}
 							>
-								<ExternalLink className="w-4 h-4 mr-1.5" />
+								<ExternalLink className="size-icon mr-1.5" />
 								Release notes
 							</Button>
 							{installCommand && (
@@ -134,11 +131,14 @@ export function UpdatesCard() {
 										size="sm"
 										onClick={() => void copyInstallCommand(installCommand)}
 									>
-										{copied ? (
-											<Check className="w-4 h-4 mr-1.5" />
-										) : (
-											<Copy className="w-4 h-4 mr-1.5" />
-										)}
+										<IconSwap
+											className="mr-1.5"
+											state={copied ? "copied" : "copy"}
+											icons={{
+												copy: <Copy className="size-icon" />,
+												copied: <Check className="size-icon" />,
+											}}
+										/>
 										<LabelSwap
 											label={copied ? "Copied" : "Copy install command"}
 											states={["Copy install command", "Copied"]}
@@ -156,7 +156,7 @@ export function UpdatesCard() {
 										size="sm"
 										onClick={() => void api.quitForUpdate()}
 									>
-										<Power className="w-4 h-4 mr-1.5" />
+										<Power className="size-icon mr-1.5" />
 										Quit to update
 									</Button>
 								</>
@@ -187,9 +187,9 @@ export function UpdatesCard() {
 					</p>
 					<Button variant="outline" size="sm" onClick={check} disabled={!api || checking}>
 						{checking ? (
-							<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+							<Loader2 className="size-icon mr-1.5 animate-spin" />
 						) : (
-							<RefreshCw className="w-4 h-4 mr-1.5" />
+							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						Check for updates
 					</Button>

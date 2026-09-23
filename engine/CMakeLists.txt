@@ -33,7 +33,7 @@ if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 project(vayu-engine
-    VERSION 0.29.2
+    VERSION 0.35.2
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
@@ -543,6 +543,7 @@ add_library(vayu_core STATIC
     src/core/spec_diff.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
+    src/core/schema_error_text.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp

@@ -68,14 +68,12 @@ export function engineStatusAfterFailedPoll(
  * Updates engine store with connection status
  */
 export function useHealthQuery() {
-	const {
-		setEngineStatus,
-		setEngineError,
-		setEngineRecovery,
-		setWorkers,
-		openEngineStartWindow,
-		closeEngineStartWindow,
-	} = useEngineStore();
+	const setEngineStatus = useEngineStore((s) => s.setEngineStatus);
+	const setEngineError = useEngineStore((s) => s.setEngineError);
+	const setEngineRecovery = useEngineStore((s) => s.setEngineRecovery);
+	const setWorkers = useEngineStore((s) => s.setWorkers);
+	const openEngineStartWindow = useEngineStore((s) => s.openEngineStartWindow);
+	const closeEngineStartWindow = useEngineStore((s) => s.closeEngineStartWindow);
 	const queryClient = useQueryClient();
 
 	/**

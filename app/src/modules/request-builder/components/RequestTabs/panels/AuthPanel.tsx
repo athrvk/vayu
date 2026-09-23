@@ -123,7 +123,7 @@ export default function AuthPanel() {
 							return (
 								<SelectItem key={mode} value={mode}>
 									<div className="flex items-center gap-2">
-										<Icon className="w-4 h-4" />
+										<Icon className="size-icon" />
 										<span>{AUTH_MODE_LABELS[mode]}</span>
 									</div>
 								</SelectItem>
@@ -151,6 +151,14 @@ export default function AuthPanel() {
 					noAuthDescription="No authentication will be sent with this request."
 					TextInput={VariableTextInput}
 					resolveString={resolveString}
+					/*
+					 * Names the fields whose resolved values have to hold still
+					 * across this panel's unmount - Auth is not force-mounted, so
+					 * Auth → Headers → Auth is a new form. A request with no id
+					 * yet shares one entry, the same trade `ParamsPanel` makes:
+					 * an unsaved draft has nothing else stable to key on.
+					 */
+					resolveKey={request.id ?? "new"}
 				/>
 			)}
 		</div>

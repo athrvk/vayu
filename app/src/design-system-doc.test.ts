@@ -124,4 +124,52 @@ describe("design-system.md token values", () => {
 			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
 		}
 	});
+
+	// Issue #1679: the Chrome, Target and Icon Floors table names nine steps
+	// that deliberately do NOT ride `--spacing` - the opposite property the
+	// superseded icon-sizing decision this replaces used to check. Read each
+	// row's Default/Comfortable px values against the real plain `@theme`
+	// block (deliberately not `@theme inline` - see index.css's own comment:
+	// `inline` bakes a literal into the utility instead of a `var()`
+	// reference, which silently disables the Comfortable override) and
+	// `[data-density="comfortable"]` declarations, rather than trusting the
+	// doc's own table.
+	it("keeps the Chrome, Target and Icon Floors table in step with index.css", () => {
+		const start = doc.indexOf("### Chrome, Target and Icon Floors");
+		expect(start, "the Chrome, Target and Icon Floors heading has moved").toBeGreaterThan(-1);
+		const next = doc.indexOf("\n### ", start + 1);
+		const section = next === -1 ? doc.slice(start) : doc.slice(start, next);
+
+		const rows = [
+			...section.matchAll(/\| `(--spacing-[a-z-]+)` \| `[a-z-]+` \| (\d+)px \| (\d+)px \|/g),
+		];
+		expect(rows.length, "no floor-step rows found - has the table moved?").toBe(9);
+
+		// `indexOf("@theme {")`, with the space, skips past the earlier
+		// `@theme inline {` block on purpose.
+		const themeOpen = css.indexOf("@theme {");
+		const themeClose = css.indexOf("\n}", themeOpen);
+		const themeBlock = css.slice(themeOpen, themeClose);
+		const comfortableBlock =
+			/\[data-density="comfortable"\]\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+
+		for (const [, name, defaultPx, comfortablePx] of rows) {
+			const declared = new RegExp(`${name}:\\s*(\\d+)px;`).exec(themeBlock)?.[1];
+			expect(declared, `${name} not declared in the plain @theme block`).toBe(defaultPx);
+
+			// band/banner/icon/icon-sm are theme-independent and carry no
+			// [data-density="comfortable"] override at all - only
+			// control/control-sm/target scale, so the table's two columns
+			// only differ where an override actually exists.
+			if (defaultPx === comfortablePx) {
+				expect(
+					comfortableBlock,
+					`${name} should not be overridden under Comfortable`
+				).not.toMatch(new RegExp(`${name}:`));
+			} else {
+				const overridden = new RegExp(`${name}:\\s*(\\d+)px;`).exec(comfortableBlock)?.[1];
+				expect(overridden, `${name} not overridden under Comfortable`).toBe(comfortablePx);
+			}
+		}
+	});
 });

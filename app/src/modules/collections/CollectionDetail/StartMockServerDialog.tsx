@@ -40,8 +40,9 @@ import {
 	DialogTitle,
 	Input,
 	Label,
+	DialogCancelButton,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, FieldError } from "@/components/shared";
 import {
 	DEFAULT_MOCK_OPTIONS,
 	MAX_MOCK_ERROR_RATE_PCT,
@@ -120,11 +121,7 @@ export function StartMockServerDialog({
 								aria-describedby={latencyError ? "mock-latency-error" : undefined}
 							/>
 						</div>
-						{latencyError && (
-							<p id="mock-latency-error" className="text-xs text-destructive-text">
-								{latencyError}
-							</p>
-						)}
+						<FieldError id="mock-latency-error">{latencyError}</FieldError>
 					</div>
 
 					<div className="space-y-1">
@@ -152,11 +149,7 @@ export function StartMockServerDialog({
 								}
 							/>
 						</div>
-						{errorRateError && (
-							<p id="mock-error-rate-error" className="text-xs text-destructive-text">
-								{errorRateError}
-							</p>
-						)}
+						<FieldError id="mock-error-rate-error">{errorRateError}</FieldError>
 					</div>
 
 					{/* The engine's own refusal - a collection with nothing to serve,
@@ -170,12 +163,10 @@ export function StartMockServerDialog({
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					<Button onClick={start} disabled={!canStart}>
 						{pending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Start mock server
 					</Button>

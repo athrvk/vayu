@@ -20,11 +20,21 @@
  *
  * **The editor box has a definite pixel height** (issue #1605). The element
  * card it sits in (`ElementRow`) is an auto-height block, not a bounded
- * ancestor a percentage or a `ResizablePanelGroup` could divide, so
- * `CodeEditor`'s default `height="100%"` used to resolve against nothing and
- * Monaco laid out at zero height. A drag handle below the box - the GraphQL
- * body's `ResizableHandle` styling, without the panel group it depends on -
- * sets that height directly, in `layout-store`'s `scriptEditorHeights`.
+ * ancestor a percentage or a `ResizablePanelGroup` could divide. `Group`
+ * (`react-resizable-panels`, `components/ui/resizable.tsx`) sizes a panel
+ * with `flex-grow` against the group's own measured `getBoundingClientRect`
+ * (v4 does take a pixel `minSize`/`maxSize`/`resize()`, but those are still
+ * validated against that same measured total) - so it can constrain a
+ * *share* of a definite total, never set one, which is exactly what this
+ * box's own absolute, unbounded-parent height needs. A drag handle below the
+ * box sets the height directly, in `layout-store`'s `scriptEditorHeights`,
+ * through `useResizeGesture` (issue #1715) - the same rAF-coalesced-write,
+ * one-commit-on-release mechanism `PanelResizeHandle` uses for the drawer
+ * and context bar widths, extracted into a shared hook (issue #1738) rather
+ * than left as two independently-drifting copies: this row's keyboard
+ * handling now matches `PanelResizeHandle`'s (Page keys, Home/End, a reset),
+ * and both copies now abort a `pointercancel`'d drag instead of leaving it
+ * uncommitted with its listeners still attached.
  *
  * **That height is per element id, not shared across every script row**
  * (issue #1643). A request or collection can show a `script.pre` and a
@@ -50,13 +60,16 @@
  * fallback and this form's lead line.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "@/components/ui";
 import { ScriptSnippets } from "@/components/shared";
 import { insertSnippetAtCursor } from "@/lib/editor-snippet";
+import { useResizeGesture } from "@/lib/resize-gesture";
 import { useLayoutStore } from "@/stores";
 import {
+	DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	SCRIPT_EDITOR_HEIGHT_PAGE_STEP,
 	SCRIPT_EDITOR_HEIGHT_STEP,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 	SCRIPT_EDITOR_MIN_HEIGHT,
@@ -71,27 +84,6 @@ export interface ScriptElementFormProps {
 	/** The kind's own catalogue description - the form's lead sentence. */
 	description: string;
 	onChange: (config: Record<string, unknown>) => void;
-}
-
-function clampHeight(height: number): number {
-	return Math.max(SCRIPT_EDITOR_MIN_HEIGHT, Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height));
-}
-
-/**
- * The persisted height save, debounced the way `GraphQLBody`'s
- * `handleVariablesResize` is: a drag fires on every pointer-move frame, and
- * the store writes through to localStorage.
- */
-function useDebouncedHeightSave(save: (height: number) => void) {
-	const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(() => () => clearTimeout(timeout.current ?? undefined), []);
-	return useCallback(
-		(height: number) => {
-			if (timeout.current) clearTimeout(timeout.current);
-			timeout.current = setTimeout(() => save(height), 200);
-		},
-		[save]
-	);
 }
 
 export function ScriptElementForm({
@@ -117,38 +109,48 @@ export function ScriptElementForm({
 	const [mountDefault] = useState(() => useLayoutStore.getState().scriptEditorHeightDefault);
 	const storedHeight = ownHeight ?? mountDefault;
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
-	const saveHeight = useDebouncedHeightSave(
-		useCallback((h: number) => setStoredHeight(id, h), [id, setStoredHeight])
-	);
-	const [dragHeight, setDragHeight] = useState<number | null>(null);
-	const height = dragHeight ?? storedHeight;
 
-	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
-		const startY = e.clientY;
-		const startHeight = storedHeight;
+	const boxRef = useRef<HTMLDivElement | null>(null);
+	const gesture = useResizeGesture({
+		min: SCRIPT_EDITOR_MIN_HEIGHT,
+		max: SCRIPT_EDITOR_MAX_HEIGHT,
+		getValue: () => storedHeight,
+		commit: (height) => setStoredHeight(id, height),
+		paint: (height) => {
+			if (boxRef.current) boxRef.current.style.height = `${height}px`;
+		},
+	});
 
-		const onMove = (moveEvent: PointerEvent) => {
-			const next = clampHeight(startHeight + (moveEvent.clientY - startY));
-			setDragHeight(next);
-			saveHeight(next);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-			setDragHeight(null);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
-
-	const onHandleKeyDown = (e: React.KeyboardEvent) => {
-		if (e.key === "ArrowDown") {
+	const onHandleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		const nudge = (delta: number) => {
 			e.preventDefault();
-			saveHeight(clampHeight(storedHeight + SCRIPT_EDITOR_HEIGHT_STEP));
-		} else if (e.key === "ArrowUp") {
+			gesture.applyKey(e, gesture.currentValue() + delta);
+		};
+		const jumpTo = (target: number) => {
 			e.preventDefault();
-			saveHeight(clampHeight(storedHeight - SCRIPT_EDITOR_HEIGHT_STEP));
+			gesture.applyKey(e, target);
+		};
+
+		switch (e.key) {
+			case "ArrowDown":
+				return nudge(SCRIPT_EDITOR_HEIGHT_STEP);
+			case "ArrowUp":
+				return nudge(-SCRIPT_EDITOR_HEIGHT_STEP);
+			case "PageDown":
+				return nudge(SCRIPT_EDITOR_HEIGHT_PAGE_STEP);
+			case "PageUp":
+				return nudge(-SCRIPT_EDITOR_HEIGHT_PAGE_STEP);
+			case "Home":
+				return jumpTo(SCRIPT_EDITOR_MIN_HEIGHT);
+			case "End":
+				return jumpTo(SCRIPT_EDITOR_MAX_HEIGHT);
+			case "Enter":
+			case " ":
+				e.preventDefault();
+				gesture.applyKey(e, DEFAULT_SCRIPT_EDITOR_HEIGHT);
+				return;
+			default:
+				return;
 		}
 	};
 
@@ -170,12 +172,13 @@ export function ScriptElementForm({
 			<p className="text-xs text-muted-foreground">{description}</p>
 			<div className="flex flex-col">
 				<div
+					ref={boxRef}
 					// `min-h-0`: the GraphQL body's own trap (`GraphQLBody.tsx:812-817`) -
 					// a flex item will not shrink below its content, so a card that ever
 					// gains a flex ancestor above this one must not let the editor keep
 					// its old height and grow a second scrollbar beside Monaco's own.
 					className="min-h-0 shrink-0 rounded-t-md border border-b-0 border-rule surface-card bg-card overflow-hidden"
-					style={{ height }}
+					style={{ height: storedHeight }}
 				>
 					<CodeEditor
 						language="javascript"
@@ -196,8 +199,10 @@ export function ScriptElementForm({
 					aria-valuemin={SCRIPT_EDITOR_MIN_HEIGHT}
 					aria-valuemax={SCRIPT_EDITOR_MAX_HEIGHT}
 					tabIndex={0}
-					onPointerDown={startResize}
+					onPointerDown={(e) => gesture.startDrag(e, "y")}
 					onKeyDown={onHandleKeyDown}
+					onKeyUp={gesture.flushKey}
+					onBlur={gesture.flushKey}
 					className={cn(
 						"h-1.5 w-full shrink-0 cursor-row-resize rounded-b-md border border-t-0 border-rule bg-rule transition-colors",
 						"hover:bg-primary focus-visible:bg-primary focus-visible:outline-none"

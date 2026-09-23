@@ -68,7 +68,7 @@ export function CollectionVariablesSection({ tab }: ContextBarSectionProps) {
 						// in a `title`, which a keyboard user never sees.
 						marker={
 							definition.enabled ? undefined : (
-								<span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+								<span className="text-micro uppercase tracking-wide text-muted-foreground shrink-0">
 									off
 								</span>
 							)

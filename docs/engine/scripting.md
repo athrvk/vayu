@@ -941,6 +941,16 @@ Rules worth knowing before you rely on them:
   visible in the response pane's Console tab. Assigning a string to a
   `form-data` body fails the same way, for the same reason: a value the engine
   cannot send is refused rather than dropped.
+- **`pm.request.body = string` and `pm.request.body.raw = string` reach the
+  wire the same way, but only the second is safe to read back.** Assigning to
+  `pm.request.body` directly replaces the whole `RequestBody` object with the
+  string, so a later `pm.request.body.raw` (or `.length`, or a hash of it) in
+  the *same script* reads `undefined`, not the string just set - the object it
+  lived on is gone. Assigning to `.raw` instead updates that object in place,
+  so the new body stays readable for the rest of the script. Any script that
+  signs, hashes, measures or re-parses the body it just wrote - the
+  `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
+  must use `pm.request.body.raw = …`, not `pm.request.body = …`.
 - **Setting a variable can re-render the URL, if composition left it
   unresolved.** `{{placeholders}}` are still resolved at compose time
   (`POST /compose`), strictly before any script runs (#226, D1 stands) - but a

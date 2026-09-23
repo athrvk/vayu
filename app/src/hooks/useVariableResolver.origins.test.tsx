@@ -47,7 +47,7 @@ vi.mock("@/queries", () => ({
 	useEnvironmentsQuery: () => ({ data: environments }),
 }));
 vi.mock("@/stores", () => ({
-	useSessionStore: () => session,
+	useSessionStore: (selector: (s: typeof session) => unknown) => selector(session),
 }));
 
 import { useVariableResolver } from "./useVariableResolver";
@@ -341,11 +341,20 @@ describe("the bound row as an origin", () => {
 		expect(origins[0].winner).toBe(true);
 	});
 
-	it("gives the reserved data.* spelling no row origin", () => {
-		// The cells are keyed by bare column name, so `data.email` finds nothing
-		// here - which is what keeps its own terminal explanation correct.
+	it("gives the reserved data.* spelling the same row origin as the bare name", () => {
+		// `{{data.email}}` and `{{email}}` read one cell (issue #1007, #1062) -
+		// a reader hovering both must see the same answer, not a value on one
+		// spelling and the bare declaration text on the other.
 		const r = setup({ boundRow: { email: "alice@acme.io" } });
-		expect(r.getVariableOrigins("data.email")).toEqual([]);
+		expect(r.getVariableOrigins("data.email")).toEqual(r.getVariableOrigins("email"));
+		expect(r.getVariableOrigins("data.email")).toEqual([
+			{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
+		]);
+	});
+
+	it("leaves the data.* spelling with no row origin for a column the row lacks", () => {
+		const r = setup({ boundRow: { email: "alice@acme.io" } });
+		expect(r.getVariableOrigins("data.host")).toEqual([]);
 	});
 
 	it("keeps the row out of the resolved-variable map", () => {

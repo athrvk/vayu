@@ -7,7 +7,7 @@
 
 import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
-import { Button } from "@/components/ui";
+import { Button, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { formatRelativeTime } from "@/lib/format-time";
 import type { TrashEntry } from "@/types";
@@ -81,7 +81,7 @@ export default function TrashItem({
 			className="focus-row surface-card border border-rule rounded-md overflow-hidden w-full"
 		>
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
-				<KindIcon className="w-4 h-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<KindIcon className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />
 
 				<div className="flex-1 min-w-0">
 					<TruncatedText className="text-sm text-foreground">{entry.name}</TruncatedText>
@@ -108,12 +108,14 @@ export default function TrashItem({
 						disabled={busy}
 						aria-label={`Restore ${entry.name}`}
 						title="Put this back where it came from"
-						className="h-6 w-6"
 					>
 						{isRestoring ? (
-							<Loader2 className="w-3 h-3 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<RotateCcw className="w-3 h-3" />
+							<RotateCcw
+								className="size-icon-sm"
+								data-icon-motion={ICON_MOTION.spinBack}
+							/>
 						)}
 					</Button>
 					<Button
@@ -123,12 +125,11 @@ export default function TrashItem({
 						disabled={busy}
 						aria-label={`Delete ${entry.name} forever`}
 						title="Delete forever"
-						className="h-6 w-6"
 					>
 						{isPurging ? (
-							<Loader2 className="w-3 h-3 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<Trash2 className="w-3 h-3" />
+							<Trash2 className="size-icon-sm" />
 						)}
 					</Button>
 				</div>

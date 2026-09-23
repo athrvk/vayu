@@ -22,13 +22,14 @@ import { useCollectionsQuery, useRunsQuery, flattenRunPages } from "@/queries";
 import { ErrorState } from "@/components/shared";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "./components/CollectionPicker";
+import { DEMO_REQUEST_PRESET } from "./demo-request";
 import { FirstRunWelcome } from "./FirstRunWelcome";
 import { Launcher } from "./Launcher";
 import { LauncherSkeleton } from "./LauncherSkeleton";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	// The flow itself lives in `useNewRequest`, shared with the command palette's
@@ -79,7 +80,9 @@ export default function WelcomeScreen() {
 
 	return (
 		<div className="flex-1 overflow-auto bg-background">
-			<div className="max-w-2xl px-8 py-10">
+			{/* Gutters only: the column is the state's own (WELCOME_COLUMN), so a
+			    skeleton and the content it stands in for cannot land in different ones. */}
+			<div className="px-8 py-10">
 				{isLoading ? (
 					<LauncherSkeleton />
 				) : isEmpty ? (
@@ -90,7 +93,11 @@ export default function WelcomeScreen() {
 							onRetry={retry}
 						/>
 					) : (
-						<FirstRunWelcome onImport={openImport} onNewRequest={newRequest} />
+						<FirstRunWelcome
+							onImport={openImport}
+							onNewRequest={newRequest}
+							onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
+						/>
 					)
 				) : (
 					<Launcher
@@ -98,6 +105,7 @@ export default function WelcomeScreen() {
 						collectionCount={collections.length}
 						onImport={openImport}
 						onNewRequest={newRequest}
+						onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
 						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}

@@ -193,9 +193,9 @@ export default function DataTab({ collection }: DataTabProps) {
 		<div className="max-w-[720px] flex flex-col gap-4">
 			<InfoBanner>
 				Declare which columns this collection&apos;s data files carry, so{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">{`{{data.column}}`}</code>{" "}
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">{`{{data.column}}`}</code>{" "}
 				and{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">
 					pm.iterationData
 				</code>{" "}
 				can be checked before a run. The columns are saved with the collection; the file
@@ -212,7 +212,7 @@ export default function DataTab({ collection }: DataTabProps) {
 							{declared.map((column) => (
 								<code
 									key={column}
-									className="rounded-sm bg-accent px-1.5 py-0.5 font-mono text-[11px]"
+									className="rounded-sm bg-accent px-1.5 py-0.5 font-mono text-label"
 								>
 									{column}
 								</code>
@@ -255,9 +255,9 @@ export default function DataTab({ collection }: DataTabProps) {
 			<div className="flex items-center gap-2">
 				<Button onClick={handleDeclare} disabled={!file || updateCollection.isPending}>
 					{updateCollection.isPending ? (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						<Loader2 className="mr-2 size-icon animate-spin" />
 					) : (
-						<Check className="mr-2 h-4 w-4" />
+						<Check className="mr-2 size-icon" />
 					)}
 					{declaredContract ? "Re-declare from this file" : "Declare columns"}
 				</Button>
@@ -267,7 +267,7 @@ export default function DataTab({ collection }: DataTabProps) {
 						onClick={handleClear}
 						disabled={updateCollection.isPending}
 					>
-						<Trash2 className="mr-2 h-4 w-4" />
+						<Trash2 className="mr-2 size-icon" />
 						Clear
 					</Button>
 				)}
@@ -287,7 +287,7 @@ export default function DataTab({ collection }: DataTabProps) {
 			 */}
 			{declaredContract && !file && reading && (
 				<p className="flex items-center gap-2 text-xs text-muted-foreground">
-					<Loader2 className="h-3.5 w-3.5 animate-spin" />
+					<Loader2 className="size-icon-sm animate-spin" />
 					Reading {remembered?.fileName ?? "the declared file"}…
 				</p>
 			)}

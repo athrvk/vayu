@@ -23,9 +23,11 @@ import {
 	CardHeader,
 	CardTitle,
 	Button,
+	DisabledHint,
 	Eyebrow,
 	Kbd,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
@@ -199,20 +201,28 @@ export default function GeneralPanel() {
 								? "No stored runs."
 								: `${runs.length} stored run${runs.length === 1 ? "" : "s"}.`}
 						</p>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setConfirmClear(true)}
-							disabled={runs.length === 0 || clearing}
-							className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
+						<DisabledHint
+							reason={
+								clearing
+									? "Clearing the run history"
+									: runs.length === 0 && "No stored runs to clear"
+							}
 						>
-							{clearing ? (
-								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-							) : (
-								<Database className="w-4 h-4 mr-1.5" />
-							)}
-							Clear run history
-						</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setConfirmClear(true)}
+								disabled={runs.length === 0 || clearing}
+								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
+							>
+								{clearing ? (
+									<Loader2 className="size-icon mr-1.5 animate-spin" />
+								) : (
+									<Database className="size-icon mr-1.5" />
+								)}
+								Clear run history
+							</Button>
+						</DisabledHint>
 					</div>
 					{/* This card shows and clears the runs; how many are kept, and for
 					    how long, are engine settings at the far end of the tree.
@@ -285,7 +295,7 @@ export default function GeneralPanel() {
 											className="shrink-0"
 											onClick={() => void openLogsFolder()}
 										>
-											<FolderOpen className="w-4 h-4 mr-1.5" />
+											<FolderOpen className="size-icon mr-1.5" />
 											Open
 										</Button>
 									)}
@@ -320,7 +330,10 @@ export default function GeneralPanel() {
 						onClick={() => setConfirmReset(true)}
 						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
-						<RotateCcw className="w-4 h-4 mr-1.5" />
+						<RotateCcw
+							className="size-icon mr-1.5"
+							data-icon-motion={ICON_MOTION.spinBack}
+						/>
 						Reset to defaults
 					</Button>
 				</CardContent>
@@ -340,7 +353,7 @@ export default function GeneralPanel() {
 				open={confirmClear}
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
-				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics will be permanently removed. This cannot be undone.`}
+				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics are removed permanently. This cannot be undone.`}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>

@@ -49,7 +49,7 @@ export function RateFidelityCard({
 	return (
 		<HeroCardShell label="Rate Fidelity" tip={TOOLTIPS.rateFidelity}>
 			<HeroValue value={fmt(achievement, 1)} unit="%" color={textColor} />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				target <span className="text-foreground font-semibold">{fmt(targetRps, 1)}</span> ·
 				actual <span className="text-foreground font-semibold">{fmt(actualRps, 2)}</span>{" "}
 				req/s

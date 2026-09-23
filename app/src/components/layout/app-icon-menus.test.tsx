@@ -219,9 +219,16 @@ describe.each([["win32"], ["linux"]])("app icon on %s", (platform) => {
 	it("follows the spec's 16px icon at a 16px inset", async () => {
 		// "The size of the window icon is 16px by 16px", placed "16px from the
 		// left-most border". It was 20px at 12px.
+		//
+		// `size-icon` (issue #1679), not `w-4 h-4`: the OS spec's 16px is a
+		// fixed platform convention, not part of Vayu's own density rhythm,
+		// and `w-4 h-4` had stopped being 16px the moment `--spacing` moved to
+		// the 3px rhythm for #1670 (12px, not 16, at Default) - the same drift
+		// this issue exists to close, here on a literal spec requirement
+		// rather than an internal convention.
 		await renderFor(platform);
 		expect(icon().className).toContain("pl-4");
-		expect(icon().querySelector("img")?.className).toContain("w-4");
+		expect(icon().querySelector("img")?.className).toContain("size-icon");
 	});
 });
 

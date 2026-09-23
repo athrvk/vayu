@@ -90,6 +90,10 @@ export function useImportMutation() {
 			// A Postman globals export writes the globals singleton; without this the
 			// imported variables sit on the engine unread until the next reload.
 			queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+			// A Postman `certificate` the engine resolved writes a registry row
+			// through the same apply call (issue #1656); without this the
+			// Settings card shows the old list until the next reload.
+			queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
 		},
 	});
 }

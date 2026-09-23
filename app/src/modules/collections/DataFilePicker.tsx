@@ -43,6 +43,7 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import {
@@ -212,10 +213,12 @@ export default function DataFilePicker({
 					Data file
 					<span className="block text-xs font-normal text-muted-foreground">
 						{mode === "declare" ? (
+							// Only the columns: the Data tab's banner directly above
+							// already says where the file stays and that the contract
+							// holds no cell of it, and this is the tab's only host.
 							<>
 								The file the contract is read from. Its columns become the declared{" "}
-								{"{{data.column}}"} names; the file stays on this machine, and the
-								contract records the shape of its rows rather than their values.
+								{"{{data.column}}"} names.
 							</>
 						) : loadTest ? (
 							<>
@@ -239,7 +242,7 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<X className="mr-1.5 h-3.5 w-3.5" />
+						<X className="mr-1.5 size-icon-sm" />
 						Remove
 					</Button>
 				) : (
@@ -251,7 +254,10 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<Upload className="mr-1.5 h-3.5 w-3.5" />
+						<Upload
+							className="mr-1.5 size-icon-sm"
+							data-icon-motion={ICON_MOTION.lift}
+						/>
 						Choose file
 					</Button>
 				)}
@@ -274,7 +280,7 @@ export default function DataFilePicker({
 			{selected && (
 				<div className="space-y-2 rounded-md border border-rule bg-card surface-card p-3">
 					<div className="flex items-center gap-2 text-xs">
-						<FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<FileSpreadsheet className="size-icon-sm shrink-0 text-muted-foreground" />
 						<span className="truncate font-medium">{selected.fileName}</span>
 						<span className="ml-auto shrink-0 text-muted-foreground">
 							{selected.parsed.format.toUpperCase()} · {rowCount}{" "}
@@ -287,14 +293,9 @@ export default function DataFilePicker({
 					    its duration - so the resolved-iterations sentence would be
 					    arithmetic about a number that does not exist. What it says
 					    instead is the property the shared cursor buys. Declaring a
-					    contract has no run behind it at all, so it says neither. */}
-					{mode === "declare" ? (
-						<p className="text-xs text-muted-foreground">
-							{selected.parsed.columns.length}{" "}
-							{selected.parsed.columns.length === 1 ? "column" : "columns"} to
-							declare, read from {rowCount} {rowCount === 1 ? "row" : "rows"}.
-						</p>
-					) : (
+					    contract has no run behind it at all, so it says neither: the
+					    row and column counts are already on the line above. */}
+					{mode !== "declare" && (
 						<p className="text-xs text-muted-foreground">
 							{loadTest
 								? `${rowCount} ${rowCount === 1 ? "row" : "rows"}, bound one per iteration across every virtual user - they repeat from the top once they run out.`

@@ -1537,6 +1537,23 @@ export interface ImportApplyEnvironment {
 }
 
 /**
+ * A `client_certificates` registry candidate a Postman import resolved (issue
+ * #1656) - same field names `POST /client-certificates` takes, because
+ * `POST /import/apply` reuses that route's own check-and-write, best-effort,
+ * after the rest of the tree commits. No `tempId`: nothing else in the tree
+ * references a certificate by one, and the engine owns its id the same way it
+ * owns a hand-created row's.
+ */
+export interface ImportApplyClientCertificate {
+	host: string;
+	port?: number;
+	certPath: string;
+	keyPath?: string;
+	certFormat?: "pem" | "p12";
+	passphrase?: string;
+}
+
+/**
  * `POST /import/parse` (issue #877) - a raw import document in, the whole
  * `ImportResult` out.
  *
@@ -1567,6 +1584,13 @@ export interface ImportApplyRequest {
 	 * shape for every format rather than one the OpenAPI parsers grow a key on.
 	 */
 	specs: ImportApplySpec[];
+	/**
+	 * `client_certificates` registry candidates a Postman import resolved
+	 * (issue #1656). Always sent, `[]` included, on the same "one shape for
+	 * every format" rule as {@link specs} - only a Postman preview ever
+	 * populates it.
+	 */
+	clientCertificates: ImportApplyClientCertificate[];
 }
 
 export interface ImportApplyResponse {

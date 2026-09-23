@@ -28,6 +28,62 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
+import { FieldError } from "@/components/shared";
+
+/** Roughly two lines of `text-sm` at a settings card's width - past this, a
+ *  description reads as a wall of text ahead of the control it explains. */
+const DEFAULT_DESCRIPTION_CLAMP = 150;
+
+interface CollapsibleTextProps {
+	text: string;
+	className?: string;
+	/** Override the default clamp - e.g. a narrower row than a card's width. */
+	clampAt?: number;
+}
+
+/**
+ * A description that reads as one or two lines by default, with a "Show
+ * more" that reveals the rest - for the MCP tool/category descriptions and
+ * the engine's per-setting `CardDescription`, both of which run to full
+ * paragraphs (issue: settings descriptions too long to scan).
+ *
+ * Character-counted rather than CSS `line-clamp` + a measured overflow: jsdom
+ * lays out nothing, so a test asserting on real overflow would have nothing
+ * to assert on. A length threshold is deterministic here and in the test that
+ * mutation-checks it, at the cost of not tracking the container's actual
+ * width - an acceptable trade for a description, which is prose a user reads
+ * once, not a value they compare pixel-for-pixel.
+ */
+export function CollapsibleText({
+	text,
+	className,
+	clampAt = DEFAULT_DESCRIPTION_CLAMP,
+}: CollapsibleTextProps) {
+	const [expanded, setExpanded] = useState(false);
+	if (text.length <= clampAt) {
+		return <span className={className}>{text}</span>;
+	}
+
+	// Cut at the last full word at-or-before the clamp, so the ellipsis never
+	// splits one - `?? clampAt` covers the pathological case of one word
+	// longer than the whole clamp, where slicing mid-word beats not clamping.
+	const cut = text.slice(0, clampAt);
+	const wordBoundary = cut.lastIndexOf(" ");
+	const truncated = wordBoundary > 0 ? cut.slice(0, wordBoundary) : cut;
+
+	return (
+		<span className={className}>
+			{expanded ? text : `${truncated}…`}{" "}
+			<button
+				type="button"
+				onClick={() => setExpanded((e) => !e)}
+				className="font-medium text-primary hover:underline"
+			>
+				{expanded ? "Show less" : "Show more"}
+			</button>
+		</span>
+	);
+}
 
 export interface OptionButtonItem<T> {
 	value: T;
@@ -104,7 +160,7 @@ export function OptionButtons<T extends string | number>({
 							</span>
 						)}
 						{isSelected && (
-							<CheckCircle2 className="w-4 h-4 text-primary absolute top-1.5 right-1.5" />
+							<CheckCircle2 className="size-icon text-primary absolute top-1.5 right-1.5" />
 						)}
 					</button>
 				);
@@ -570,11 +626,7 @@ export function NumberSettingRow({
 					<span className="text-xs text-muted-foreground whitespace-nowrap">{hint}</span>
 				)}
 			</div>
-			{error && (
-				<p id={errorId} className="text-xs text-destructive-text">
-					{error}
-				</p>
-			)}
+			<FieldError id={errorId}>{error}</FieldError>
 			{description && (
 				<p id={descriptionId} className="text-xs text-muted-foreground">
 					{description}

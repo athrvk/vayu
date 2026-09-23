@@ -39,11 +39,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
 import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
  * A run that is still executing is stopped by the engine before it is deleted,
@@ -64,20 +66,21 @@ function deleteRunErrorMessage(error: unknown): string {
 }
 
 export default function HistoryList() {
-	const { openTab, openTabs, activeTabId, closeTabsForEntities } = useTabsStore();
-	const { activateDrawerView } = useLayoutStore();
-	const {
-		searchQuery,
-		setSearchQuery,
-		filterType,
-		setFilterType,
-		filterStatus,
-		setFilterStatus,
-		pinnedOnly,
-		setPinnedOnly,
-		sortBy,
-		setSortBy,
-	} = useHistoryStore();
+	const openTab = useTabsStore((s) => s.openTab);
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const searchQuery = useHistoryStore((s) => s.searchQuery);
+	const setSearchQuery = useHistoryStore((s) => s.setSearchQuery);
+	const filterType = useHistoryStore((s) => s.filterType);
+	const setFilterType = useHistoryStore((s) => s.setFilterType);
+	const filterStatus = useHistoryStore((s) => s.filterStatus);
+	const setFilterStatus = useHistoryStore((s) => s.setFilterStatus);
+	const pinnedOnly = useHistoryStore((s) => s.pinnedOnly);
+	const setPinnedOnly = useHistoryStore((s) => s.setPinnedOnly);
+	const sortBy = useHistoryStore((s) => s.sortBy);
+	const setSortBy = useHistoryStore((s) => s.setSortBy);
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -168,7 +171,7 @@ export default function HistoryList() {
 		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
 	// Deleting one of these stops it first, which is a second consequence the
-	// dialog has to name - "permanently removed" alone does not cover ending a
+	// dialog has to name - "removed permanently" alone does not cover ending a
 	// test that is still generating load.
 	const deleteConfirmStopsRun =
 		runToDelete?.status === "running" || runToDelete?.status === "pending";
@@ -249,7 +252,7 @@ export default function HistoryList() {
 				{/* Search & Filters */}
 				<div className="space-y-3 shrink-0">
 					<div className="relative">
-						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 size-icon text-muted-foreground" />
 						<Input
 							type="text"
 							value={searchQuery}
@@ -332,7 +335,10 @@ export default function HistoryList() {
 							aria-pressed={pinnedOnly}
 							title="Show only pinned runs"
 						>
-							<Pin className="w-3.5 h-3.5 shrink-0" />
+							<Pin
+								className="size-icon-sm shrink-0"
+								data-icon-motion={ICON_MOTION.tiltPin}
+							/>
 							Pinned
 						</Button>
 					</div>
@@ -393,6 +399,25 @@ export default function HistoryList() {
 											? "Pin a run as its request's baseline to keep it here."
 											: "Run your first load test to see its results here."
 								}
+								action={
+									// Only when a control is doing the narrowing:
+									// "Clear the filters" is not an offer to make
+									// when the list is empty because nothing ran.
+									searchQuery ||
+									filterType !== "all" ||
+									filterStatus !== "all" ? (
+										<Button
+											variant="link"
+											onClick={() => {
+												setSearchQuery("");
+												setFilterType("all");
+												setFilterStatus("all");
+											}}
+										>
+											Clear the filters
+										</Button>
+									) : undefined
+								}
 							/>
 						)}
 
@@ -405,9 +430,9 @@ export default function HistoryList() {
 									 * runs said nothing after the first row) - see
 									 * `group-runs-by-day.ts`.
 									 */}
-									<div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
+									<Eyebrow className="px-1 pt-1 text-subtle-foreground first:pt-0">
 										{group.label}
-									</div>
+									</Eyebrow>
 									{group.runs.map((run) => (
 										<RunItem
 											key={run.id}
@@ -448,7 +473,7 @@ export default function HistoryList() {
 						<>
 							{deleteConfirmStopsRun
 								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
-								: "This run will be permanently removed. This cannot be undone."}
+								: "This run is removed permanently. This cannot be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

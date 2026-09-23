@@ -113,6 +113,62 @@ export const TAB_OVERFLOW_WIDTH = 56;
 /** Width of the trailing "new tab" button, also reserved up front. */
 export const TAB_NEW_BUTTON_WIDTH = 30;
 
+/* ── Request builder: where the response sits ────────────────────────────── */
+
+/**
+ * Bounds for the request/response split ratio (the request pane's share, 0-1),
+ * one ratio per arrangement - `requestSplitRatioBeside` and
+ * `requestSplitRatioBelow` in `layout-store`.
+ */
+export const DEFAULT_REQUEST_SPLIT_RATIO = 0.5;
+export const REQUEST_SPLIT_RATIO_MIN = 0.2;
+export const REQUEST_SPLIT_RATIO_MAX = 0.8;
+
+/**
+ * Below this builder width (px) the `auto` response position stacks the
+ * response under the request; at or above it the response sits beside
+ * (issue #1711). The builder's own width, not the window's: the drawer and
+ * the context bar take their share first, and it is the pane left over that
+ * has to fit a URL bar next to a JSON body.
+ *
+ * 880px is two panes of about 440px: the least in which a method select, a
+ * URL with a path in it and a Send button still share one row, or a JSON body
+ * shows a key and its value beside the line gutter without wrapping.
+ */
+export const AUTO_RESPONSE_BELOW_MAX_WIDTH = 880;
+
+/**
+ * The Response position options as Settings > Appearance prints them, in
+ * display order. Beside first because it is the default; Auto last because
+ * it is the rule, not an arrangement. The Auto description names the
+ * threshold from the constant above so the sentence cannot drift from the
+ * number the hook applies.
+ */
+export const RESPONSE_POSITIONS = [
+	{ value: "beside", label: "Beside", description: "To the right of the request" },
+	{ value: "below", label: "Below", description: "Under the request" },
+	{
+		value: "auto",
+		label: "Auto",
+		description: `Below when the builder is narrower than ${AUTO_RESPONSE_BELOW_MAX_WIDTH}px`,
+	},
+] as const;
+
+/**
+ * How far past the threshold the width has to move before `auto` flips back
+ * (px). A divider or window drag that hovers at the threshold would otherwise
+ * re-arrange the builder on every pixel, each flip remounting the split.
+ */
+export const AUTO_RESPONSE_HYSTERESIS = 40;
+
+/**
+ * Minimum height (px) of either pane while the response is below the request.
+ * Pixels rather than the 20% the beside arrangement uses: 20% of a short
+ * window is a response pane too small to show a status line and one row of
+ * body, where 20% of a wide window is still a usable column.
+ */
+export const STACKED_PANE_MIN_HEIGHT = 160;
+
 /* ── GraphQL body: the Variables pane ────────────────────────────────────── */
 
 /**
@@ -135,6 +191,13 @@ export const GRAPHQL_VARIABLES_MAX_SIZE = 75;
  * header's own height and the panel's `collapsedSize` - one constant, because
  * the two disagreeing is a collapsed pane that clips its own badges or leaves a
  * strip of dead editor under them.
+ *
+ * Deliberately not the `band` chrome floor (32px, issue #1679, `--spacing-band`
+ * in `index.css`): this header sits *inside* a resizable editor stack, not on
+ * the window's chrome anchors (the tab strip, the drawer header) that floor
+ * exists for, and it is a plain number here rather than a CSS custom property
+ * because `ResizablePanelGroup`'s `collapsedSize` is a JS prop with no way to
+ * read a CSS variable at layout time.
  */
 export const GRAPHQL_PANE_HEADER_HEIGHT = 28;
 
@@ -153,3 +216,5 @@ export const DEFAULT_SCRIPT_EDITOR_HEIGHT = 160;
 export const SCRIPT_EDITOR_MIN_HEIGHT = 120;
 export const SCRIPT_EDITOR_MAX_HEIGHT = 800;
 export const SCRIPT_EDITOR_HEIGHT_STEP = 16;
+/** Page Up/Down jump, the same 4x-the-step ratio `PANEL_MAX_WIDTH`'s own page step uses. */
+export const SCRIPT_EDITOR_HEIGHT_PAGE_STEP = 64;

@@ -71,23 +71,25 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory: "general_engine", restartRequiredKeys: [] }),
+	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({ selectedCategory: "general_engine", restartRequiredKeys: [] }),
 }));
 
 // `@/stores` is deliberately NOT mocked - the real engine store is the thing
 // under test. Only the save registry is stubbed, as the sibling tests do.
 vi.mock("@/stores/save-store", () => ({
-	useSaveStore: () => ({
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: vi.fn(),
-		markPendingSave: vi.fn(),
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		updateContext: vi.fn(),
-	}),
+	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			startSaving: vi.fn(),
+			completeSaveThenIdle: vi.fn(),
+			failSave: vi.fn(),
+			setStatus: vi.fn(),
+			markPendingSave: vi.fn(),
+			registerContext: vi.fn(),
+			unregisterContext: vi.fn(),
+			setActiveContext: vi.fn(),
+			updateContext: vi.fn(),
+		}),
 }));
 
 function renderSettings() {

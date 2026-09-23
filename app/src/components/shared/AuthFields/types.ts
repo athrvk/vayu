@@ -32,4 +32,6 @@ export interface AuthFieldsProps {
 	TextInput?: AuthTextInput;
 	/** Resolves {{variables}} before an OAuth 2.0 token request. */
 	resolveString?: (value: string) => string;
+	/** Forwarded to `OAuth2Form` - see `resolveKey` on `OAuth2FormProps`. */
+	resolveKey?: string;
 }

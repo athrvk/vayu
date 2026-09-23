@@ -71,7 +71,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 										{cookie.attrs.map((attr, j) => (
 											<span
 												key={j}
-												className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+												className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-label text-muted-foreground"
 											>
 												{attr}
 											</span>

@@ -63,7 +63,6 @@ import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
 import { sendsGraphQLInTheUrl } from "./graphql-method";
-import { schemaStatusTitle } from "@/lib/graphql/schema-status";
 import { useLayoutStore } from "@/stores";
 import {
 	GRAPHQL_PANE_HEADER_HEIGHT,
@@ -139,7 +138,7 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 				className="text-muted-foreground"
 				title="These variables contain {{variables}}, so they are not JSON until the request is sent. They are resolved and sent."
 			>
-				<Braces className="w-3 h-3" />
+				<Braces className="size-icon-sm" />
 				Templated
 			</BadgeText>
 		);
@@ -150,7 +149,7 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 			className="text-warning-text"
 			title="These variables are not valid JSON, so the request will be sent without them."
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			Not sent
 		</BadgeText>
 	);
@@ -175,7 +174,7 @@ function GetTransportBadge({ method }: { method: HttpMethod }) {
 			className="text-muted-foreground"
 			title="GraphQL over GET is sent as query parameters, not as a JSON body. A mutation needs POST."
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			Sent as query parameters
 		</BadgeText>
 	);
@@ -247,7 +246,11 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
 	if (collapsed === undefined) return <span className={EYEBROW_CLASS}>{children}</span>;
 	return (
 		<span className={cn(EYEBROW_CLASS, "flex items-center gap-1")}>
-			{collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+			{collapsed ? (
+				<ChevronRight className="size-icon-sm" />
+			) : (
+				<ChevronDown className="size-icon-sm" />
+			)}
 			{children}
 		</span>
 	);
@@ -293,19 +296,18 @@ function SchemaControls({
 	onToggle: () => void;
 	onRefresh: () => void;
 }) {
-	const status = entry?.status ?? "idle";
-	const loading = status === "loading";
+	const loading = entry?.status === "loading";
 	return (
 		<span className="flex items-center gap-1">
 			<TooltipIconButton
 				label={open ? "Hide schema" : "Browse schema"}
 				aria-expanded={open}
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					open ? (
-						<PanelLeftClose className="w-3 h-3" />
+						<PanelLeftClose className="size-icon-sm" />
 					) : (
-						<PanelLeftOpen className="w-3 h-3" />
+						<PanelLeftOpen className="size-icon-sm" />
 					)
 				}
 				onClick={onToggle}
@@ -317,25 +319,22 @@ function SchemaControls({
 			 * a target - the two things a user does about the schema are the
 			 * buttons on either side of it.
 			 *
-			 * A schema nothing has been said about yet falls back to a plain label
-			 * rather than the badge's `null`, so the row keeps its shape from the
-			 * first render.
+			 * A schema nothing has been said about yet is the badge's own `idle`
+			 * face now, not a fallback spelled out here: the badge renders
+			 * unconditionally and holds its width across every state, so the row
+			 * keeps its shape from the first render *and* keeps it when the state
+			 * changes - Refresh, one element to the right, used to slide out from
+			 * under the pointer that had just pressed it.
 			 */}
-			{status === "idle" ? (
-				<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
-					Schema
-				</BadgeText>
-			) : (
-				<SchemaStatusBadge entry={entry} />
-			)}
+			<SchemaStatusBadge entry={entry} />
 			<TooltipIconButton
 				label="Refresh schema"
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					loading ? (
-						<Loader2 className="w-3 h-3 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 					) : (
-						<RefreshCw className="w-3 h-3" />
+						<RefreshCw className="size-icon-sm" />
 					)
 				}
 				onClick={onRefresh}
@@ -793,7 +792,7 @@ export function GraphQLBody({
 								onValueChange={(name) => write({ operationName: name })}
 							>
 								<SelectTrigger
-									className="h-6 w-auto gap-1 px-2 text-[11px]"
+									className="h-6 w-auto gap-1 px-2 text-label"
 									aria-label="Operation"
 								>
 									<SelectValue placeholder="Operation" />
@@ -963,7 +962,7 @@ function PendingVariablesBadge({ names }: { names: string[] }) {
 			className="text-warning-text"
 			title={`The Variables pane is not plain JSON, so these were not added: ${names.join(", ")}.`}
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			{`${names.length} ${names.length === 1 ? "variable needs" : "variables need"} a value`}
 		</BadgeText>
 	);

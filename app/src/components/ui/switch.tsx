@@ -31,7 +31,14 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
 		<SwitchPrimitives.Root
 			data-slot="switch"
 			className={cn(
-				"peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
+				// `h-target` (issue #1679), not `h-5`: every toggle in Settings was a
+				// 15px interactive control, under the WCAG 2.2 SC 2.5.8 24x24px
+				// floor. The track's own width is a fixed `44px` - `target`
+				// describes a roughly-square hit box, not an elongated toggle track,
+				// and a rhythm-scaled width paired with a fixed-floor height made
+				// the thumb's travel distance a different fraction of the track at
+				// each density; fixed keeps both ends of the transform exact.
+				"peer inline-flex h-target w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
 				className
 			)}
 			{...props}
@@ -39,7 +46,11 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
 			<SwitchPrimitives.Thumb
 				data-slot="switch-thumb"
 				className={cn(
-					"pointer-events-none block h-4 w-4 rounded-full bg-background dark:bg-foreground shadow-lg ring-0 transition-transform data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0"
+					// `size-icon` (16px, was `h-4 w-4`/12px) - the thumb reads as an
+					// icon-scale glyph on the track, not a target of its own. The
+					// 44px track less its 2px border each side leaves 40px inside;
+					// less the 16px thumb, the full travel is 24px.
+					"pointer-events-none block size-icon rounded-full bg-background dark:bg-foreground shadow-lg ring-0 transition-transform data-[state=checked]:translate-x-[24px] data-[state=unchecked]:translate-x-0"
 				)}
 			/>
 		</SwitchPrimitives.Root>

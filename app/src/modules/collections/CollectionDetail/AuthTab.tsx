@@ -182,7 +182,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		<div className="max-w-[520px]">
 			<InfoBanner>
 				Auth set here is <strong>inherited by requests</strong> in this collection that use{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">
 					Inherit from collection
 				</code>
 				. Nested folders take precedence over parent folders.
@@ -231,7 +231,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 						</SelectContent>
 					</Select>
 				</div>
-				{hint && <div className="text-[11px] text-muted-foreground mt-1.5">{hint}</div>}
+				{hint && <div className="text-label text-muted-foreground mt-1.5">{hint}</div>}
 			</div>
 
 			{/*
@@ -241,8 +241,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			 * rather than after the user goes looking for a way to keep it.
 			 */}
 			{hasCredentialFields && (
-				<p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1.5">
-					<Lock className="w-3 h-3 shrink-0" aria-hidden="true" />
+				<p className="text-label text-muted-foreground mb-2 flex items-center gap-1.5">
+					<Lock className="size-icon-sm shrink-0" aria-hidden="true" />
 					These fields are saved together, when you press Save Auth - not as you type.
 				</p>
 			)}
@@ -260,7 +260,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 					mode === "noauth" ? (
 						<>
 							No authentication, and no inheriting past this collection.
-							<div className="text-[11px] text-muted-foreground mt-1">
+							<div className="text-label text-muted-foreground mt-1">
 								Requests using "Inherit from collection" send no auth even if a
 								parent collection defines some.
 							</div>
@@ -268,7 +268,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 					) : (
 						<>
 							No authentication set on this collection.
-							<div className="text-[11px] text-muted-foreground mt-1">
+							<div className="text-label text-muted-foreground mt-1">
 								Requests using "Inherit from collection" inherit from a parent
 								collection instead, if one defines auth.
 							</div>

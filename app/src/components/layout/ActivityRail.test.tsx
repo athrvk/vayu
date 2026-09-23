@@ -23,6 +23,8 @@ import { useEngineStore, useLayoutStore } from "@/stores";
 import type { Inbox } from "@/types";
 import { DRAWER_VIEW_CHORDS } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
+import { ICON_MOTION } from "@/components/ui/icon-motion";
 import { ActivityRail } from "./ActivityRail";
 
 const listInboxes = vi.fn();
@@ -150,6 +152,64 @@ describe("ActivityRail - the six view buttons", () => {
 			drawerOpen: true,
 			drawerView: "services",
 		});
+	});
+});
+
+describe("ActivityRail - icon motion from the descriptor (#1687)", () => {
+	/** The `data-icon-motion` on one button's glyph, or `null` for none. */
+	function motionOf(label: string): string | null {
+		const svg = screen.getByRole("button", { name: label }).querySelector("svg");
+		expect(svg, `${label} rendered no glyph`).not.toBeNull();
+		return svg?.getAttribute("data-icon-motion") ?? null;
+	}
+
+	it("gives every one of the six a motion, and no two the same (#1707)", () => {
+		// The rail is six navigation affordances, so every glyph answers its
+		// hover - and with a motion of its own. A shared `scale` across
+		// Collections and Variables, and nothing at all on History and
+		// Services, is exactly the state this replaced: a rail where four of
+		// six glyphs said nothing about what they are.
+		renderRail();
+		const motions = DRAWER_VIEWS.map(({ label }) => motionOf(label));
+		expect(motions).not.toContain(null);
+		expect(new Set(motions).size, `two views share a motion: ${motions.join(", ")}`).toBe(
+			DRAWER_VIEWS.length
+		);
+	});
+
+	it("renders the motion each view's own mark earns", () => {
+		// Spelled per view as well, because the claim above is about
+		// distinctness and this one is about fitness: a folder tips, a clock's
+		// hands sweep, braces part, a broadcast emanates, a lid opens, a cog
+		// turns. `Clock` animating here is the refined policy, not an
+		// exception to it - see `icon-motion-status.test.ts`.
+		renderRail();
+		expect(motionOf("Collections")).toBe(ICON_MOTION.tilt);
+		expect(motionOf("History")).toBe(ICON_MOTION.hands);
+		expect(motionOf("Variables")).toBe(ICON_MOTION.spread);
+		expect(motionOf("Services")).toBe(ICON_MOTION.waves);
+		expect(motionOf("Trash")).toBe(ICON_MOTION.lid);
+		expect(motionOf("Settings")).toBe(ICON_MOTION.spinOnce);
+	});
+
+	it("matches every descriptor, so a new entry's motion cannot go unrendered", () => {
+		// The claim above is spelled per view for readability; this is the same
+		// claim made against the registry, so adding a seventh view with a
+		// motion the rail drops fails here rather than shipping.
+		renderRail();
+		expect(DRAWER_VIEWS.length).toBeGreaterThan(5);
+		for (const { label, motion } of DRAWER_VIEWS) {
+			expect(motionOf(label), `${label}`).toBe(motion ?? null);
+		}
+	});
+
+	it("gives each glyph the group owner its motion fires from", () => {
+		// Every rule in the `Icon motion` block keys off a `[data-slot="button"]`
+		// or `.group` ancestor's hover; `RailButton` is neither a Button nor a
+		// row, so it carries `group` itself.
+		renderRail();
+		const button = screen.getByRole("button", { name: "Trash" });
+		expect(button.className.split(/\s+/)).toContain("group");
 	});
 });
 

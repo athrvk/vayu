@@ -33,6 +33,7 @@ import {
 	DialogTitle,
 	Input,
 	Label,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { formatSize } from "@/components/shared/response-viewer";
@@ -138,12 +139,10 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={onClose}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={onClose} />
 					<Button onClick={onSave} disabled={!canSave}>
 						{pending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Save example
 					</Button>

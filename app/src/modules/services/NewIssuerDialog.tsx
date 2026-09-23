@@ -47,8 +47,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Textarea,
+	DialogCancelButton,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, FieldError } from "@/components/shared";
 import { useStartMockIssuerMutation } from "@/queries";
 import { useToastStore } from "@/stores";
 import type { MockIssuerFailureMode } from "@/types";
@@ -181,14 +182,10 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 								}
 							/>
 						</div>
-						{!expiresInValid && (
-							<p
-								id="new-issuer-expiry-error"
-								className="text-xs text-destructive-text"
-							>
-								{`A whole number of seconds, 1 to ${MAX_EXPIRES_IN_SECONDS}.`}
-							</p>
-						)}
+						<FieldError id="new-issuer-expiry-error">
+							{!expiresInValid &&
+								`A whole number of seconds, 1 to ${MAX_EXPIRES_IN_SECONDS}.`}
+						</FieldError>
 					</div>
 
 					<div className="flex items-center justify-between gap-4">
@@ -241,14 +238,10 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 									}
 								/>
 							</div>
-							{!slowMsValid && (
-								<p
-									id="new-issuer-slow-error"
-									className="text-xs text-destructive-text"
-								>
-									{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
-								</p>
-							)}
+							<FieldError id="new-issuer-slow-error">
+								{!slowMsValid &&
+									`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+							</FieldError>
 						</div>
 					)}
 
@@ -270,14 +263,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 							aria-invalid={!!claims.error}
 							aria-describedby={claims.error ? "new-issuer-claims-error" : undefined}
 						/>
-						{claims.error && (
-							<p
-								id="new-issuer-claims-error"
-								className="text-xs text-destructive-text"
-							>
-								{claims.error}
-							</p>
-						)}
+						<FieldError id="new-issuer-claims-error">{claims.error}</FieldError>
 					</div>
 
 					{/* The engine's own refusal, shown where the field that caused it
@@ -291,12 +277,10 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					<Button onClick={start} disabled={!canStart}>
 						{startIssuer.isPending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Start issuer
 					</Button>

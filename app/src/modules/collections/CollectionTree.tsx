@@ -17,6 +17,8 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	DeleteConfirmDialog,
+	DialogCancelButton,
+	ICON_MOTION,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import ExportSpecDialog from "./ExportSpecDialog";
@@ -34,11 +36,14 @@ import {
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { Request } from "@/types";
 import { compareTreeOrder } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { openTabs, activeTabId } = useTabsStore();
-	const { expandedCollectionIds, expandCollections } = useCollectionsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
+	const expandCollections = useCollectionsStore((s) => s.expandCollections);
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
 
@@ -184,13 +189,12 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.openNewCollectionForm}
 								disabled={panel.isCreatingCollection}
-								className="h-7 w-7"
 								aria-label="Add collection"
 							>
 								{panel.isCreatingCollection ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
-									<FolderPlus className="w-4 h-4" />
+									<FolderPlus className="size-icon" />
 								)}
 							</Button>
 						</TooltipTrigger>
@@ -203,13 +207,12 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.createRequestFromToolbar}
 								disabled={panel.isCreatingRequest}
-								className="h-7 w-7"
 								aria-label="Add request"
 							>
 								{panel.isCreatingRequest ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
-									<Plus className="w-4 h-4" />
+									<Plus className="size-icon" />
 								)}
 							</Button>
 						</TooltipTrigger>
@@ -225,10 +228,12 @@ export default function CollectionTree() {
 								variant="ghost"
 								size="icon"
 								onClick={openImport}
-								className="h-7 w-7"
 								aria-label="Import collection"
 							>
-								<Download className="w-4 h-4" />
+								<Download
+									className="size-icon"
+									data-icon-motion={ICON_MOTION.drop}
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Import collection</TooltipContent>
@@ -253,7 +258,10 @@ export default function CollectionTree() {
 							value={panel.newCollectionName}
 							onChange={(e) => panel.setNewCollectionName(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") panel.createCollection();
+								// `isCommitEnter`, not a bare Enter (#939, #935): an IME
+								// commits its composition buffer with an ordinary Enter
+								// keydown, and mod+Enter is the Send chord.
+								if (isCommitEnter(e)) panel.createCollection();
 								if (e.key === "Escape") panel.cancelNewCollectionForm();
 							}}
 							placeholder="Collection name"
@@ -267,18 +275,15 @@ export default function CollectionTree() {
 							disabled={panel.isCreatingCollection}
 						>
 							{panel.isCreatingCollection && (
-								<Loader2 className="w-3 h-3 animate-spin mr-1" />
+								<Loader2 className="size-icon-sm animate-spin mr-1" />
 							)}
 							Add
 						</Button>
-						<Button
-							variant="secondary"
+						<DialogCancelButton
 							size="sm"
 							onClick={panel.cancelNewCollectionForm}
 							disabled={panel.isCreatingCollection}
-						>
-							Cancel
-						</Button>
+						/>
 					</div>
 				)}
 

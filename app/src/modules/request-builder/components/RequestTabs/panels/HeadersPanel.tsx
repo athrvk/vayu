@@ -31,7 +31,7 @@ import type { KeyValueItem, RequestDefaultHeader } from "@/types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import { useRequestDefaultsQuery } from "@/queries";
-import { Eyebrow } from "@/components/ui";
+import { Checkbox, Eyebrow } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { STANDARD_HEADERS } from "@/constants/http";
 import { EmptyTableHint } from "./EmptyTableHint";
@@ -57,17 +57,18 @@ function DefaultHeaderRow({
 		// The table's own column track, so name and value line up with the rows
 		// above rather than starting a second, narrower grid.
 		<div className="grid grid-cols-[24px_1fr_1fr_20px_28px] gap-2 items-center px-1 py-0.5">
-			<input
-				type="checkbox"
+			<Checkbox
 				checked={sent}
 				onChange={(e) => onToggle(e.target.checked)}
 				// Named after the header it governs: one per row, and a bare
 				// "checkbox" says nothing about which.
 				aria-label={`Send ${header.name}`}
-				// `accent-primary` for the same reason the table's row checkbox
-				// carries it - the browser default is a fixed blue that ignores
-				// both the theme and the accent scheme.
-				className="w-4 h-4 accent-primary cursor-pointer"
+				// `size-target` (issue #1679), not `size-icon`: a bare checkbox is
+				// its own hit target, the same reason `KeyValueRow`'s row-enable
+				// checkbox already carries this class - this one was the sweep's
+				// own blind spot, never wired through a `Button`/`TooltipIconButton`
+				// so #1679's "swap the icon-button override" fix never found it.
+				className="size-target"
 			/>
 			<span
 				className={cn(
@@ -107,10 +108,18 @@ export default function HeadersPanel() {
 	const variables = useVariableSupport();
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 
+	// Stable, not an inline arrow: `useHeadersManager` hands this straight back
+	// as `handleHeadersChange`, which is `KeyValueEditor`'s `onChange` and a
+	// dependency of every row callback there - a fresh identity per render
+	// would re-render every header row on every keystroke (issue #1716).
+	const onHeadersUpdate = useCallback(
+		(newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
+		[updateField]
+	);
 	const { displayHeaders, handleHeadersChange, handleBulkEdit, formatForBulkEdit } =
 		useHeadersManager({
 			headers: request.headers,
-			onUpdate: (newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
+			onUpdate: onHeadersUpdate,
 		});
 
 	const disabled = request.disabledDefaultHeaders;
@@ -150,20 +159,8 @@ export default function HeadersPanel() {
 					Add headers to send with this request.
 				</EmptyTableHint>
 			}
-		>
-			<div className="space-y-3">
-				<KeyValueEditor
-					items={displayHeaders}
-					onChange={handleHeadersChange}
-					keyPlaceholder="Header"
-					valuePlaceholder="Value"
-					showResolved={true}
-					allowDisable={true}
-					keySuggestions={STANDARD_HEADERS}
-					variables={variables}
-				/>
-
-				{declared.length > 0 && (
+			after={
+				declared.length > 0 && (
 					<div className="enter-fade surface-sunken border border-rule rounded-md p-2 space-y-1">
 						<div className="px-1">
 							<Eyebrow>Added by Vayu</Eyebrow>
@@ -182,8 +179,19 @@ export default function HeadersPanel() {
 							/>
 						))}
 					</div>
-				)}
-			</div>
+				)
+			}
+		>
+			<KeyValueEditor
+				items={displayHeaders}
+				onChange={handleHeadersChange}
+				keyPlaceholder="Header"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				keySuggestions={STANDARD_HEADERS}
+				variables={variables}
+			/>
 		</BulkEditor>
 	);
 }

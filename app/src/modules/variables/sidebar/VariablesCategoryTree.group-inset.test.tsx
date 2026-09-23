@@ -129,7 +129,10 @@ describe("everything inside a section's group takes the row's left edge", () => 
 		const expected = rowInsetClass();
 		renderTree();
 
-		fireEvent.click(screen.getByRole("button", { name: "Add environment" }));
+		// Two carry the label with no environments listed: the section header's
+		// icon button and the empty note's link (issue #1693). Either opens the
+		// field; the header's is the first.
+		fireEvent.click(screen.getAllByRole("button", { name: "Add environment" })[0]);
 		const field = screen.getByPlaceholderText("Environment name");
 
 		expect(insetClass(field.parentElement as HTMLElement)).toBe(expected);

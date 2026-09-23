@@ -121,7 +121,7 @@ export function TestValidationSummary({
 									key={i}
 									className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
 								>
-									<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
+									<XCircle className="size-icon text-status-error-text mt-0.5 shrink-0" />
 									<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
 										{failure}
 									</pre>

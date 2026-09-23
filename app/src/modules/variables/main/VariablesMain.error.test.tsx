@@ -57,10 +57,9 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({
-		selectedCategory: state.selectedCategory,
-		setSelectedCategory: vi.fn(),
-	}),
+	useVariablesStore: (
+		selector: (s: { selectedCategory: unknown; setSelectedCategory: () => void }) => unknown
+	) => selector({ selectedCategory: state.selectedCategory, setSelectedCategory: vi.fn() }),
 }));
 
 // The editor itself is not under test; a marker is enough to tell "real

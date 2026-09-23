@@ -571,7 +571,7 @@ TEST (ScenarioDataJsonBodyTest, TheUrlAndHeadersAreNeverEscapedForAJsonBody) {
     ASSERT_TRUE (result.ok) << result.error;
     EXPECT_EQ (request.url, R"(https://api.test/?q=a"b)");
     EXPECT_EQ (request.headers.at ("X-Note"), R"(a"b)");
-    EXPECT_EQ (request.body.content, R"({"q":"a\"b"})");
+    EXPECT_EQ (request.body.content, "{\"q\":\"a\\\"b\"}");
 }
 
 TEST (ScenarioDataJsonBodyTest, AGraphqlEnvelopeIsAJsonDocumentAndABareOneIsNot) {
@@ -1202,7 +1202,7 @@ TEST (ScenarioDataBareColumnTest, TheHeaderAndDocumentRulesHoldForABareColumnToo
     const json document_row = json::parse (R"({"name":"say \"hi\""})");
     const auto escaped = bind_with_columns (document, { "name" }, document_row);
     ASSERT_TRUE (escaped.ok) << escaped.error;
-    EXPECT_EQ (document.body.content, R"({"name":"say \"hi\""})");
+    EXPECT_EQ (document.body.content, "{\"name\":\"say \\\"hi\\\"\"}");
 
     auto null_cell          = request_with_url ("https://api.test/u/{{id}}");
     const json null_row     = json::parse (R"({"id":null})");

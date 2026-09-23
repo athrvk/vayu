@@ -27,9 +27,17 @@
  * defaults-only case worth one click.
  */
 
-import { Copy, ExternalLink, Play, ServerCog, SlidersHorizontal, Square } from "lucide-react";
+import {
+	Copy,
+	ExternalLink,
+	Loader2,
+	Play,
+	ServerCog,
+	SlidersHorizontal,
+	Square,
+} from "lucide-react";
 import { useState } from "react";
-import { Button, TooltipIconButton } from "@/components/ui";
+import { Button, IconSwap, TooltipIconButton, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import {
 	useMockServersQuery,
@@ -44,7 +52,7 @@ import type { MockServerOptions } from "./mock-server-options";
 
 export default function MockServerControl({ collectionId }: { collectionId: string }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const mocksQuery = useMockServersQuery();
 	const startMock = useStartMockServerMutation();
@@ -98,13 +106,42 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					onClick={() => start()}
 					disabled={startMock.isPending}
 				>
-					<Play className="h-3.5 w-3.5" aria-hidden="true" />
+					{/*
+					 * Play and Square are the pair the design system names for
+					 * this control, but they live in two branches of this
+					 * component - a stopped server needs a labelled button, a
+					 * running one an icon in a chip row - so nothing crossfades
+					 * between them without merging the two controls (#1689).
+					 * What does change in place is the pending state of each,
+					 * and that is what swaps here.
+					 */}
+					<IconSwap
+						state={startMock.isPending ? "starting" : "idle"}
+						icons={{
+							idle: (
+								<Play
+									className="size-icon-sm"
+									aria-hidden="true"
+									data-icon-motion={ICON_MOTION.scale}
+								/>
+							),
+							starting: (
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
+							),
+						}}
+					/>
 					Run mock server
 				</Button>
 				<TooltipIconButton
 					label="Mock server options"
 					tooltipHint="Latency and error rate"
-					icon={<SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />}
+					icon={
+						<SlidersHorizontal
+							className="size-icon-sm"
+							aria-hidden="true"
+							data-icon-motion={ICON_MOTION.nudgeX}
+						/>
+					}
 					disabled={startMock.isPending}
 					// The mutation outlives the dialog, so a failed direct start
 					// would greet the next open with a Callout about it.
@@ -137,7 +174,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				    misses even the 3:1 icon bar on a light surface (2.21:1,
 				    design-system.md). */}
 				<ServerCog
-					className="h-3.5 w-3.5 shrink-0 text-status-success-text"
+					className="size-icon-sm shrink-0 text-status-success-text"
 					aria-hidden="true"
 				/>
 				<TruncatedText className="font-mono text-xs">{running.url}</TruncatedText>
@@ -150,19 +187,29 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			<TooltipIconButton
 				label="Open mock server"
 				tooltipHint="View its route table and activity log"
-				icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<ExternalLink className="size-icon-sm" aria-hidden="true" />}
 				onClick={() => openTab({ type: "mock-server", entityId: running.mockId })}
 			/>
 			<TooltipIconButton
 				label="Copy mock server URL"
 				tooltipHint={running.url}
-				icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 				onClick={() => void copy(running.url, "Mock server URL")}
 			/>
 			<TooltipIconButton
 				label={`Stop mock server on port ${running.port}`}
 				tooltipHint="A mock keeps the collection, latency and error rate it started with - stop and start it again to change any of them"
-				icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={
+					<IconSwap
+						state={stopMock.isPending ? "stopping" : "idle"}
+						icons={{
+							idle: <Square className="size-icon-sm" aria-hidden="true" />,
+							stopping: (
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
+							),
+						}}
+					/>
+				}
 				disabled={stopMock.isPending}
 				onClick={() =>
 					stopMock.mutate(running.mockId, {

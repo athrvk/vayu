@@ -61,6 +61,8 @@ import {
 	Skeleton,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
@@ -84,7 +86,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 	// contract to keep - the engine reads the same fact off the same row.
 	const bound = Boolean(collection.openapi?.specId);
 	const exported = useSpecExportQuery(collection.id, format, mode);
-	const copy = useCopy();
+	const { copy } = useCopy();
 
 	const result = exported.data;
 	/**
@@ -166,7 +168,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 								aria-label="Assembling the document"
 								className="text-muted-foreground"
 							>
-								<Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							</span>
 						)}
 					</div>
@@ -183,9 +185,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					{/*
 					 * Disabled while a format assembles, not only while there is
 					 * nothing: what is held is the *previous* format's text, and a
@@ -197,11 +197,11 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						disabled={!result || reassembling}
 						onClick={() => void copy(result?.text ?? "", "The document")}
 					>
-						<Copy className="mr-2 h-4 w-4" />
+						<Copy className="mr-2 size-icon" />
 						Copy
 					</Button>
 					<Button disabled={!result || reassembling} onClick={handleDownload}>
-						<Download className="mr-2 h-4 w-4" />
+						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>
 				</DialogFooter>
@@ -296,12 +296,12 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 	return (
 		<div className="enter-fade rounded-md border border-rule surface-sunken p-3 space-y-2">
 			<p className="flex items-center gap-2 text-xs font-semibold">
-				<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+				<FileJson className="size-icon-sm text-primary shrink-0" />
 				{title}
 				<span className="font-normal text-muted-foreground">({notes.dialect})</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground">{body}</p>
-			<ul className="text-[11px] text-muted-foreground space-y-0.5">
+			<p className="text-label text-muted-foreground">{body}</p>
+			<ul className="text-label text-muted-foreground space-y-0.5">
 				<Line
 					count={notes.requestsExported}
 					label="request"
@@ -406,7 +406,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 				)}
 			</ul>
 			{notes.vocabularyNotWritten && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{notes.dialect} states parameters and examples in a vocabulary Vayu writes only
 					when asked to write everything. Operations nothing here claims are still
 					removed, but nothing is written into the ones that stay.

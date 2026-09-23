@@ -35,20 +35,34 @@ import type { SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
 import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button, Input, Skeleton } from "@/components/ui";
+import { Button, Input, Skeleton, type IconMotion } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
 import { searchSettings } from "@/lib/settings-index";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 interface CategoryMeta {
 	label: string;
 	icon: LucideIcon;
+	/**
+	 * The named icon motion this row's glyph answers its own hover with
+	 * (#1707). Read from whichever registry owns the category rather than
+	 * mapped here: a category row is a navigation affordance like a rail
+	 * entry, and the tree draws fifteen glyphs generically without learning
+	 * which one it has (`ActivityRail` makes the same argument).
+	 *
+	 * Optional so the unreachable fallback below can omit it - an entry with
+	 * no motion renders no attribute at all, since React drops an undefined
+	 * one, which matters because an empty `data-icon-motion` would still match
+	 * the block's default-duration rule.
+	 */
+	motion?: IconMotion;
 }
 
 function categoryMeta(category: SettingsCategory): CategoryMeta {
 	const app = APP_SETTINGS_PANELS.find((p) => p.id === category);
-	if (app) return { label: app.label, icon: app.icon };
+	if (app) return { label: app.label, icon: app.icon, motion: app.motion };
 	const engine = ENGINE_SETTINGS_CATEGORIES.find((c) => c.id === category);
 	// Every category in this tree comes from one of the two registries, so the
 	// fallback is unreachable by construction - it exists so a future category
@@ -59,18 +73,20 @@ function categoryMeta(category: SettingsCategory): CategoryMeta {
 function SectionHeading({ children, icon: Icon }: { children: string; icon?: LucideIcon }) {
 	return (
 		<div className="px-3 py-2 mb-1">
-			<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-				{Icon && <Icon className="w-3 h-3" />}
+			<Eyebrow className="flex items-center gap-2">
+				{Icon && <Icon className="size-icon-sm" />}
 				{children}
-			</div>
+			</Eyebrow>
 		</div>
 	);
 }
 
 export default function SettingsCategoryTree() {
-	const { selectedCategory, setSelectedCategory, searchQuery: query } = useSettingsStore();
+	const selectedCategory = useSettingsStore((s) => s.selectedCategory);
+	const setSelectedCategory = useSettingsStore((s) => s.setSelectedCategory);
+	const query = useSettingsStore((s) => s.searchQuery);
 	const setQuery = useSettingsStore((s) => s.setSearchQuery);
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 	const { isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now
@@ -92,7 +108,7 @@ export default function SettingsCategoryTree() {
 	);
 
 	const renderCategory = (category: SettingsCategory) => {
-		const { label, icon: Icon } = categoryMeta(category);
+		const { label, icon: Icon, motion } = categoryMeta(category);
 		const isSelected = selectedCategory === category;
 
 		return (
@@ -108,12 +124,18 @@ export default function SettingsCategoryTree() {
 					// different class lists instead of one changing value, so the
 					// selected state snapped instead of fading in - the same bug
 					// already fixed in `TabStrip.tsx`.
-					"w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
+					// `group`: the glyph's motion fires from the `:hover` /
+					// `:focus-visible` of a `[data-slot="button"]` or a `.group`
+					// ancestor (the `Icon motion` block in `index.css`), and this
+					// is a hand-rolled `<button>` that is neither. Without it
+					// every row carries the attribute and nothing ever moves -
+					// dead CSS that looks wired up.
+					"group w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
 					"data-[active=false]:text-foreground data-[active=false]:hover:bg-accent",
 					"data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
 				)}
 			>
-				<Icon className="w-4 h-4 shrink-0" />
+				<Icon className="size-icon shrink-0" data-icon-motion={motion} />
 				<span className="flex-1 truncate">{label}</span>
 			</button>
 		);
@@ -124,7 +146,7 @@ export default function SettingsCategoryTree() {
 			<div className="flex flex-col w-full py-2">
 				<div className="px-3 pb-2">
 					<div className="relative">
-						<Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
@@ -140,7 +162,7 @@ export default function SettingsCategoryTree() {
 								aria-label="Clear search"
 								className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2 p-0"
 							>
-								<X className="h-3.5 w-3.5" />
+								<X className="size-icon-sm" />
 							</Button>
 						)}
 					</div>

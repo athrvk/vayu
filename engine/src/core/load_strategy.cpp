@@ -27,6 +27,7 @@
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -329,7 +330,8 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
         return std::nullopt;
     }
     if (!elements->is_object ()) {
-        return "'elements' must be an object";
+        return "The run's Timers/Scripts overrides ('elements') must be an "
+               "object";
     }
 
     static const std::unordered_set<std::string> known_keys = { "timers",
@@ -338,30 +340,35 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
         (void)value;
         if (!known_keys.contains (key)) {
             return "'elements." + key +
-            "' is not a known field - expected one of timers, scripts, "
-            "includeScriptTime, seed";
+            "' is not a recognized override - expected one of timers, "
+            "scripts, includeScriptTime or seed";
         }
     }
 
+    // "Timers"/"Scripts" name the same controls `RunCollectionDialog` and
+    // `LoadTestConfigDialog` show under those labels; `seed` and
+    // `includeScriptTime` have no dialog control of their own (API/MCP only),
+    // so they are named in plain English rather than borrowing a label that
+    // does not exist.
     if (auto timers = elements->find ("timers");
     timers != elements->end () && !is_valid_elements_timers_shape (*timers)) {
-        return "'elements.timers' must be 'asConfigured', 'off', "
+        return "The Timers override must be 'asConfigured', 'off', "
                "{\"fixedMs\": N} or {\"minMs\"/\"maxMs\": N}";
     }
     if (auto seed = elements->find ("seed");
     seed != elements->end () && !is_non_negative_integer (*seed)) {
-        return "'elements.seed' must be a non-negative integer";
+        return "The run's random seed override must be a non-negative integer";
     }
     if (auto scripts = elements->find ("scripts"); scripts != elements->end ()) {
         if (!scripts->is_string () ||
         (*scripts != "asMarked" && *scripts != "allInline" && *scripts != "allDeferred")) {
-            return "'elements.scripts' must be 'asMarked', 'allInline' or "
+            return "The Scripts override must be 'asMarked', 'allInline' or "
                    "'allDeferred'";
         }
     }
     if (auto include_time = elements->find ("includeScriptTime");
     include_time != elements->end () && !include_time->is_boolean ()) {
-        return "'elements.includeScriptTime' must be a boolean";
+        return "The run's 'include script time' override must be true or false";
     }
 
     return std::nullopt;
@@ -388,10 +395,18 @@ const nlohmann::json& config) {
     };
     for (size_t i = 0; i < lifecycle->size (); ++i) {
         const auto& entry = (*lifecycle)[i];
-        const std::string kind = entry.is_object () ? entry.value ("kind", "") : "";
-        if (!allowed_kinds.contains (kind)) {
-            return "'lifecycleElements[" + std::to_string (i) + "]' has kind '" +
-            kind + "' - only script.setup and script.teardown are allowed here";
+        // A malformed entry (not an object, no string "kind") is left for
+        // `Registry::validate` below to report precisely, rather than folded
+        // into this refusal as an empty kind name.
+        if (!entry.is_object () || !entry.contains ("kind") || !entry["kind"].is_string ()) {
+            continue;
+        }
+        const std::string kind_name = entry["kind"].get<std::string> ();
+        if (!allowed_kinds.contains (kind_name)) {
+            const auto* kind = vayu::core::Registry::instance ().find (kind_name);
+            return std::format (
+            "Step {}: '{}' can only be a Setup script or Teardown script here",
+            i + 1, kind != nullptr ? kind->label : kind_name);
         }
     }
 
@@ -476,11 +491,10 @@ const nlohmann::json& config) {
         kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
         if (!is_supported) {
             return std::format (
-            "requestElements[{}]: '{}' does not run on a single-target load "
-            "run - only extract.*, assert.*, timer.think and "
-            "script.pre/script.post do; run this as part of a \"scenario\" "
-            "instead",
-            i, kind_name);
+            "Step {}: '{}' can only be used in a scenario, not a "
+            "single-request load test. Remove it, or run this as a "
+            "scenario instead",
+            i + 1, kind != nullptr ? kind->label : kind_name);
         }
     }
     return std::nullopt;
@@ -1068,17 +1082,22 @@ class ConstantLoadStrategy : public LoadStrategy {
      * every tick and pays the overshoot back as a double dispatch on the next
      * one.
      *
-     * So every Windows tick ends on a spin, and only the stretch before it is
-     * slept (issue #1370): the overshoot lands inside the tail rather than
-     * inside the arrival gap, and the spin is bounded by the tail rather than
-     * by the tick, so its cost does not grow as the target rate falls. A
-     * remainder no longer than the tail is spun whole - which is what every
-     * tick from ~500 RPS up already was, `tick_us` below being 1000us there.
+     * So every tick ends on a spin, and only the stretch before it is slept
+     * (issue #1370, extended off Windows by issue #1667's platform-specific
+     * tail): the overshoot lands inside the tail rather than inside the
+     * arrival gap, and the spin is bounded by the tail rather than by the
+     * tick, so its cost does not grow as the target rate falls. A remainder
+     * no longer than the tail is spun whole - which is what every tick from
+     * ~500 RPS up already was, `tick_us` below being 1000us there.
      *
-     * @p context is read only by that spin, so the leg without it leaves the
-     * parameter unused.
+     * The sleep leg is `platform::sleep_until_precise`: Linux and macOS use
+     * an absolute wait (`clock_nanosleep` / `mach_wait_until`) that does not
+     * itself need the spin tail to be accurate, but the tail stays for the
+     * same reason it stays on Windows - a run does not want to trust *any*
+     * platform's wakeup latency for the last stretch of a tick, and the tail
+     * is cheap.
      */
-    static void wait_for_next_tick ([[maybe_unused]] const std::shared_ptr<RunContext>& context,
+    static void wait_for_next_tick (const std::shared_ptr<RunContext>& context,
     std::chrono::steady_clock::time_point next_tick) {
         const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
         next_tick - std::chrono::steady_clock::now ())
@@ -1086,17 +1105,15 @@ class ConstantLoadStrategy : public LoadStrategy {
         if (sleep_us <= 100) {
             return;
         }
-#ifdef _WIN32
-        const int64_t leg = tick_sleep_leg_us (sleep_us, constants::pacing::SPIN_TAIL_US);
+        const int64_t tail = constants::pacing::spin_tail_us (sleep_us);
+        const int64_t leg  = tick_sleep_leg_us (sleep_us, tail);
         if (leg > 0) {
-            std::this_thread::sleep_for (std::chrono::microseconds (leg));
+            vayu::platform::sleep_until_precise (
+            next_tick - std::chrono::microseconds (tail));
         }
         while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
             /* spin */
         }
-#else
-        std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
-#endif
     }
 
     /**

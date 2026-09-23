@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
@@ -13,6 +13,7 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import {
 	RowActionsMenu,
 	RowContextMenu,
@@ -54,9 +55,7 @@ export default function RequestItem({
 		selectedRequestId,
 		deletingRequestId,
 		renamingRequestId,
-		renameRequestValue,
 		onRequestClick,
-		onRequestRenameChange,
 		onRequestRenameSubmit,
 		onRequestRenameCancel,
 		onStartRequestRename,
@@ -75,23 +74,18 @@ export default function RequestItem({
 	const dnd = useRowDnd(entity);
 
 	const rowRef = useRef<HTMLDivElement>(null);
-	/**
-	 * Set when the rename field is about to be closed *from the keyboard*, so
-	 * focus can be put back on the row once React has unmounted the field.
-	 *
-	 * Without it F2, Escape drops the user out of the tree entirely: the field
-	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
-	 * of the document. Blur deliberately does not set it - a blur means focus has
-	 * already gone somewhere the user chose, and yanking it back would be worse
-	 * than the bug.
-	 */
-	const returnFocusToRow = useRef(false);
 
-	useEffect(() => {
-		if (isRenaming || !returnFocusToRow.current) return;
-		returnFocusToRow.current = false;
-		rowRef.current?.focus();
-	}, [isRenaming]);
+	/**
+	 * The keyboard contract, the Escape-never-commits guard and the focus return
+	 * to the row all live in the hook; see `useInlineRename`.
+	 */
+	const rename = useInlineRename({
+		active: isRenaming,
+		initialValue: request.name,
+		onCommit: (name) => onRequestRenameSubmit(request.id, name),
+		onCancel: onRequestRenameCancel,
+		getRowElement: () => rowRef.current,
+	});
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -135,7 +129,7 @@ export default function RequestItem({
 	const rowActions: RowAction[] = [
 		{ label: "Rename", icon: Edit2, onSelect: () => onStartRequestRename(request) },
 		{ label: "Duplicate", icon: Copy, onSelect: () => onDuplicateRequest(request) },
-		...(dnd.moveAction ? [dnd.moveAction] : []),
+		...dnd.moveActions,
 		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
 	];
 	const menuLabel = `More actions for request ${request.name}`;
@@ -226,18 +220,7 @@ export default function RequestItem({
 					{isRenaming ? (
 						<Input
 							type="text"
-							value={renameRequestValue}
-							onChange={(e) => onRequestRenameChange(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									returnFocusToRow.current = true;
-									onRequestRenameSubmit(request.id);
-								} else if (e.key === "Escape") {
-									returnFocusToRow.current = true;
-									onRequestRenameCancel();
-								}
-							}}
-							onBlur={() => onRequestRenameSubmit(request.id)}
+							{...rename.inputProps}
 							className="flex-1 h-6 text-sm"
 							autoFocus
 							onClick={(e) => e.stopPropagation()}
@@ -250,7 +233,7 @@ export default function RequestItem({
 				</button>
 
 				{isDeleting && (
-					<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+					<Loader2 className="size-icon-sm shrink-0 animate-spin text-destructive-text" />
 				)}
 
 				{/*

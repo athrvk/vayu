@@ -30,6 +30,8 @@ import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from
 import {
 	Badge,
 	Button,
+	DeleteConfirmDialog,
+	DisabledHint,
 	Label,
 	Select,
 	SelectContent,
@@ -37,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Switch,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout, EmptyState, ErrorState, NonLoopbackBadge } from "@/components/shared";
 import {
@@ -155,7 +158,7 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 				onClick={deletion.requestDelete}
 				disabled={deletion.isDeleting}
 			>
-				<Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+				<Trash2 className="mr-2 size-icon-sm" aria-hidden="true" />
 				Delete
 			</Button>
 			<DeleteInboxDialog deletion={deletion} />
@@ -165,12 +168,18 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
-	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const { copy } = useCopy();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
 	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
 	// carried across a switch can select a row in the inbox switched *to*.
 	const [selection, setSelection] = useState<{ inboxId: string; captureId: number } | null>(null);
+	// Clearing wipes every capture the inbox has recorded - as permanent as
+	// deleting the inbox itself, so it goes through the same confirmation
+	// rather than firing on the first click (issue #1689).
+	const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
 	// The notify map is pruned against the engine's list by `useInboxWatchers`,
 	// at the app level: an id is dead once the engine that minted it exits, and
@@ -271,7 +280,11 @@ export default function InboxView() {
 				description="Start one to get a local URL that records every request sent to it - no tunnel, no third party."
 				action={
 					<Button onClick={start} disabled={startInbox.isPending}>
-						<Play className="mr-2 h-4 w-4" aria-hidden="true" />
+						<Play
+							className="mr-2 size-icon"
+							aria-hidden="true"
+							data-icon-motion={ICON_MOTION.scale}
+						/>
 						Start inbox
 					</Button>
 				}
@@ -282,7 +295,7 @@ export default function InboxView() {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-				<InboxIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+				<InboxIcon className="size-icon text-muted-foreground" aria-hidden="true" />
 				<code className="font-mono text-xs">{inbox.url}</code>
 				<Button
 					variant="ghost"
@@ -290,7 +303,7 @@ export default function InboxView() {
 					aria-label="Copy inbox URL"
 					onClick={() => void copy(inbox.url, "Inbox URL")}
 				>
-					<Copy className="h-3.5 w-3.5" aria-hidden="true" />
+					<Copy className="size-icon-sm" aria-hidden="true" />
 				</Button>
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
@@ -324,19 +337,28 @@ export default function InboxView() {
 					    whole inbox, and two adjacent destructive controls sharing one
 					    icon is how a listener gets deleted by someone meaning to empty
 					    the list. */}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() =>
-							clearCaptures.mutate(inbox.inboxId, {
-								onError: reportFailure("Could not clear the captures"),
-							})
+					{/* The empty case is the one a user meets: an inbox that has
+					    just been cleared, or one that has not been hit yet, looks
+					    exactly like a Clear that is broken (issue #1690). The hint
+					    explains the state the button is in; the dialog below confirms
+					    the click when it is not in it. */}
+					<DisabledHint
+						reason={
+							clearCaptures.isPending
+								? "Clearing the captures"
+								: captures.length === 0 && "No captures to clear"
 						}
-						disabled={clearCaptures.isPending || captures.length === 0}
 					>
-						<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-						Clear
-					</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setConfirmClearOpen(true)}
+							disabled={clearCaptures.isPending || captures.length === 0}
+						>
+							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
+							Clear
+						</Button>
+					</DisabledHint>
 					{inbox.running ? (
 						<Button
 							variant="outline"
@@ -348,12 +370,16 @@ export default function InboxView() {
 							}
 							disabled={stopInbox.isPending}
 						>
-							<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							<Square className="mr-2 size-icon-sm" aria-hidden="true" />
 							Stop
 						</Button>
 					) : (
 						<Button size="sm" onClick={start} disabled={startInbox.isPending}>
-							<Play className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							<Play
+								className="mr-2 size-icon-sm"
+								aria-hidden="true"
+								data-icon-motion={ICON_MOTION.scale}
+							/>
 							Start new
 						</Button>
 					)}
@@ -363,6 +389,26 @@ export default function InboxView() {
 					<DeleteInboxButton inbox={inbox} listedTotal={capturesTotal} />
 				</div>
 			</header>
+
+			<DeleteConfirmDialog
+				open={confirmClearOpen}
+				onOpenChange={setConfirmClearOpen}
+				title="Clear captures?"
+				description={`All ${captures.length} recorded ${
+					captures.length === 1 ? "request" : "requests"
+				} in this inbox are removed. This cannot be undone.`}
+				confirmLabel="Clear"
+				onConfirm={() =>
+					clearCaptures.mutate(inbox.inboxId, {
+						onSuccess: () => setConfirmClearOpen(false),
+						onError: (error) => {
+							setConfirmClearOpen(false);
+							reportFailure("Could not clear the captures")(error);
+						},
+					})
+				}
+				isDeleting={clearCaptures.isPending}
+			/>
 
 			{/* Keyed on what the engine is serving, so a change made elsewhere
 			    re-seeds the drafts by remount rather than by an effect. */}
@@ -387,7 +433,7 @@ export default function InboxView() {
 						title="Live updates stopped"
 						action={
 							<Button variant="outline" size="sm" onClick={live.resume}>
-								<RotateCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+								<RotateCw className="mr-2 size-icon-sm" aria-hidden="true" />
 								Resume
 							</Button>
 						}

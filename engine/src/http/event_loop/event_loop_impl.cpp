@@ -48,7 +48,8 @@ EventLoopImpl::EventLoopImpl (EventLoopConfig cfg) : config (std::move (cfg)) {
     const EventLoopConfig worker_config = per_worker_config (config, num_workers);
     workers.reserve (num_workers);
     for (size_t i = 0; i < num_workers; ++i) {
-        workers.push_back (std::make_unique<EventLoopWorker> (worker_config));
+        workers.push_back (std::make_unique<EventLoopWorker> (worker_config,
+        static_cast<unsigned> (i), static_cast<unsigned> (num_workers)));
     }
 }
 

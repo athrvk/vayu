@@ -63,7 +63,7 @@ function statusLabel(status: Run["status"]): { text: string; className: string }
 }
 
 export function RecentRuns({ runs }: { runs: Run[] }) {
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 
 	// Copy before sorting: `runs` is the TanStack Query cache array.
 	const recent = [...runs]
@@ -95,7 +95,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							className="group justify-between gap-3 px-2 py-1.5 hover:bg-accent"
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
-								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase">
+								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro font-mono font-semibold uppercase">
 									{run.type === "load" ? "Load" : "Design"}
 								</span>
 								{method && <MethodBadge method={method} size="sm" />}
@@ -125,7 +125,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 										{formatRelativeTime(run.startTime)}
 									</span>
 								)}
-								<ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+								<ChevronRight className="size-icon text-muted-foreground transition-colors group-hover:text-foreground" />
 							</span>
 						</Button>
 					);

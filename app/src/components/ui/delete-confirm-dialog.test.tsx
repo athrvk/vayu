@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+import { deleteConfirmCopy } from "./delete-confirm-copy";
 
 function open(props: Partial<React.ComponentProps<typeof DeleteConfirmDialog>> = {}) {
 	return render(
@@ -72,5 +73,37 @@ describe("DeleteConfirmDialog", () => {
 		const dialog = await screen.findByRole("dialog");
 		fireEvent.keyDown(dialog, { key: "ArrowRight" });
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+
+	// Issue #1689: one template produces the sentence, so every call site that
+	// passes `name` instead of writing its own prose reads the same shape.
+	describe("the generated {name, scope} sentence", () => {
+		it("renders the default-scope shape", () => {
+			open({ title: undefined, description: undefined, name: "Staging" });
+			expect(screen.getByText('Delete "Staging"?')).toBeInTheDocument();
+			expect(
+				screen.getByText('"Staging" is removed permanently. This cannot be undone.')
+			).toBeInTheDocument();
+		});
+
+		it("adds the cascade suffix without changing the rest of the sentence", () => {
+			open({ title: undefined, description: undefined, name: "Orders", scope: "cascade" });
+			expect(screen.getByText('Delete "Orders"?')).toBeInTheDocument();
+			expect(
+				screen.getByText(
+					'"Orders" and everything inside it is removed permanently. This cannot be undone.'
+				)
+			).toBeInTheDocument();
+		});
+
+		it("never reuses the phrasing this replaced", () => {
+			const { description } = deleteConfirmCopy("Anything", "cascade");
+			expect(description).not.toMatch(/permanently removed|removed for good|will be deleted/);
+		});
+
+		it("lets an explicit description opt out of the template", () => {
+			open({ title: undefined, description: "Custom prose.", name: "Staging" });
+			expect(screen.getByText("Custom prose.")).toBeInTheDocument();
+		});
 	});
 });

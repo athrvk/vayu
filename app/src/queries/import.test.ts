@@ -30,6 +30,7 @@ describe("createImportApi", () => {
 			requests: [],
 			environments: [],
 			specs: [],
+			clientCertificates: [],
 		};
 		await expect(api.applyImport(payload)).resolves.toEqual({ idMap: { c1: "col_1" } });
 		expect(apiService.applyImport).toHaveBeenCalledWith(payload);

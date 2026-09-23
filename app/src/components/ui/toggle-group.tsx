@@ -38,9 +38,14 @@
  * render twice, stacked in one grid cell, with a `font-semibold` hidden copy
  * sizing the column so the visible copy's own weight never changes the box.
  *
- * **Sizes are the app's band steps**, not new numbers. `xs` is 24px and `sm` is
- * 28px, matching `tabs.tsx` - the response toolbar sits an `xs` control on a
- * 32px band, one step above the 24px tab strip above it.
+ * **Sizes are the app's own floor steps** (issue #1679), not new numbers. `xs`
+ * is `--spacing-control-sm` (24px) and `sm` is `--spacing-control` (28px) - the
+ * response toolbar sits an `xs` control on a 32px `band`, one step above the
+ * `band` tab strip above it. They used to be written as `h-5`/`h-6`, which
+ * this doc comment already described as 24/28px; under the 3px spacing
+ * rhythm `--spacing` moved to for #1670, those resolved to 15px/18px instead
+ * - a comment describing an intent the class list had stopped delivering.
+ * Named steps that do not ride `--spacing` are what closes that gap for good.
  */
 
 import * as React from "react";
@@ -57,8 +62,8 @@ const TRACK: Record<SegmentSize, string> = {
 };
 
 const ITEM: Record<SegmentSize, string> = {
-	xs: "h-5 px-2 text-[11px]",
-	sm: "h-6 px-2.5 text-xs",
+	xs: "h-control-sm px-2 text-label",
+	sm: "h-control px-2.5 text-xs",
 };
 
 // The gap sits on the inner content spans, not the item itself - see

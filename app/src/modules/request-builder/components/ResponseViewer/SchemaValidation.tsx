@@ -37,7 +37,10 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 			<div className="flex items-center gap-1.5 text-xs">
 				{!validation.checked ? (
 					<>
-						<HelpCircle aria-hidden="true" className="size-3.5 text-muted-foreground" />
+						<HelpCircle
+							aria-hidden="true"
+							className="size-icon-sm text-muted-foreground"
+						/>
 						<span className="text-muted-foreground">
 							{uncheckedReasonText(validation.reason)}
 						</span>
@@ -46,7 +49,7 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 					<>
 						<CheckCircle2
 							aria-hidden="true"
-							className="size-3.5 text-status-success-text"
+							className="size-icon-sm text-status-success-text"
 						/>
 						<span className="text-foreground">
 							Matched the schema the spec declares
@@ -58,7 +61,10 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 					</>
 				) : (
 					<>
-						<XCircle aria-hidden="true" className="size-3.5 text-status-error-text" />
+						<XCircle
+							aria-hidden="true"
+							className="size-icon-sm text-status-error-text"
+						/>
 						<span className="text-foreground tabular-nums">
 							<span className="text-status-error-text font-medium">{total}</span>{" "}
 							{total === 1 ? "problem" : "problems"} against the schema
@@ -96,7 +102,7 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 			 */}
 			{unevaluated.length > 0 && (
 				<div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-					<AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+					<AlertTriangle aria-hidden="true" className="mt-0.5 size-icon-sm shrink-0" />
 					<span>
 						Part of this schema was not evaluated:{" "}
 						{unevaluated

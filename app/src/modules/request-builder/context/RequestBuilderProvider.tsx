@@ -204,7 +204,8 @@ export default function RequestBuilderProvider({
 	}, [request.id]);
 
 	// Response state - use store for persistence across view switches
-	const { getResponse, setResponse: storeSetResponse } = useResponseStore();
+	const getResponse = useResponseStore((s) => s.getResponse);
+	const storeSetResponse = useResponseStore((s) => s.setResponse);
 	const [response, setLocalResponse] = useState<ResponseState | null>(() => {
 		// Initialize from store if available
 		const requestId = initialRequest?.id;
@@ -283,7 +284,8 @@ export default function RequestBuilderProvider({
 	 * open request tabs reuses this same provider instance rather than
 	 * remounting it.
 	 */
-	const { getRequestTab, setRequestTab } = useTabSelectionStore();
+	const getRequestTab = useTabSelectionStore((s) => s.getRequestTab);
+	const setRequestTab = useTabSelectionStore((s) => s.setRequestTab);
 	const [activeTab, setActiveTabState] = useState<RequestTab>(
 		() => (initialRequest?.id ? getRequestTab(initialRequest.id) : null) ?? "params"
 	);
@@ -1142,8 +1144,28 @@ export default function RequestBuilderProvider({
 
 			if (!onExecute) return;
 
+			/*
+			 * The previous response stays on screen for the whole send.
+			 *
+			 * Clearing it here (`setLocalResponse(null)`, which this used to do)
+			 * is what made a re-send throw away the exchange the user was
+			 * reading: the pane had nothing left but its loading branch, and
+			 * fixing that branch alone would only have moved it on to "No
+			 * response yet". Either way the status, the headers and the body of
+			 * the send before this one were gone from the press of Send -
+			 * for a fast request, a blank flash; for a slow one, nothing to
+			 * compare the new answer against. `isExecuting` is what the pane
+			 * reads to mark it stale, and every path out of `onExecute`
+			 * resolves to a response that replaces it (a failure comes back as
+			 * a `status: 0` one - see `handleExecute` in `request-builder/`),
+			 * so there is no case where the old one is left standing as if it
+			 * were the answer to this send.
+			 *
+			 * The streaming path above still clears, and must: its pane is fed
+			 * by a placeholder built from the relay's `open` frame, and that
+			 * placeholder is only built when there is no stored response.
+			 */
 			setIsExecuting(true);
-			setLocalResponse(null);
 
 			try {
 				const result = await onExecute(executingRequest, dataRow);

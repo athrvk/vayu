@@ -104,15 +104,14 @@ function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarS
 }
 
 export function ContextBar({ mode = "push" }: ContextBarProps) {
-	const {
-		contextBarOpen,
-		setContextBarOpen,
-		contextBarWidth,
-		setContextBarWidth,
-		contextBarCollapsedSections,
-		toggleContextBarSection,
-	} = useLayoutStore();
-	const { openTabs, activeTabId } = useTabsStore();
+	const contextBarOpen = useLayoutStore((s) => s.contextBarOpen);
+	const setContextBarOpen = useLayoutStore((s) => s.setContextBarOpen);
+	const contextBarWidth = useLayoutStore((s) => s.contextBarWidth);
+	const setContextBarWidth = useLayoutStore((s) => s.setContextBarWidth);
+	const contextBarCollapsedSections = useLayoutStore((s) => s.contextBarCollapsedSections);
+	const toggleContextBarSection = useLayoutStore((s) => s.toggleContextBarSection);
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
 	// Nothing to show is a different case from closed (below): it never
@@ -167,8 +166,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 						<span className="text-xs font-medium text-foreground">Context</span>
 						<TooltipIconButton
 							label="Close context bar"
-							icon={<X className="w-3.5 h-3.5" />}
-							className="h-6 w-6"
+							icon={<X className="size-icon-sm" />}
 							tooltipSide="bottom"
 							onClick={() => setContextBarOpen(false)}
 						/>

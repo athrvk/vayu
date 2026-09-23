@@ -81,13 +81,13 @@ export default function FilePartCell({
 			aria-label={chosen ? `Replace file ${name}` : "Choose file"}
 			className="h-8 w-full justify-start gap-1.5 rounded-md px-2 font-normal"
 		>
-			<FileUp className="h-3.5 w-3.5 shrink-0" />
+			<FileUp className="size-icon-sm shrink-0" />
 			<span className={cn("truncate text-xs", !chosen && "text-muted-foreground")}>
 				{label}
 			</span>
 			{unresolved && (
 				<TriangleAlert
-					className="ml-auto h-3.5 w-3.5 shrink-0 text-warning-text"
+					className="ml-auto size-icon-sm shrink-0 text-warning-text"
 					aria-label="File path not verified on this machine"
 				/>
 			)}

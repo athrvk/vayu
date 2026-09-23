@@ -76,9 +76,15 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	}),
 }));
 
+const showToast = vi.fn();
+
 vi.mock("@/stores", () => ({
 	useSessionStore: (selector: (s: { activeEnvironmentId: string | null }) => unknown) =>
 		selector({ activeEnvironmentId: "env_1" }),
+	// The copy button reaches the clipboard through `useCopy`, which reports a
+	// failure as a toast - so this mock has to answer for the toast store too.
+	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
+		selector({ showToast }),
 }));
 
 const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;

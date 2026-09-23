@@ -8,6 +8,7 @@
 #include "vayu/core/run_manager.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iostream>
 
@@ -21,6 +22,7 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -32,6 +34,24 @@ inline int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
     .count ();
+}
+
+/// Once-ever, not once-per-run: a container or sandbox that denies a raised
+/// scheduling priority denies it the same way on every run, so repeating the
+/// warning would only restate what the operator was already told.
+std::atomic<bool> g_pacing_priority_denied_logged{ false };
+
+/// Nudge the calling thread's scheduling priority above default, best-effort,
+/// logging a denial once ever rather than inline in `execute_load_test` - a
+/// second call site (`readability-function-cognitive-complexity`) that
+/// function does not need to carry.
+void raise_pacing_thread_priority () {
+    if (!vayu::platform::raise_current_thread_priority () &&
+    !g_pacing_priority_denied_logged.exchange (true)) {
+        vayu::utils::log_warning ("run",
+        "Could not raise the load-run pacing thread's scheduling priority; "
+        "continuing at the default priority");
+    }
 }
 
 /**
@@ -2008,6 +2028,13 @@ vayu::db::Database* db_ptr,
 RunManager& manager) {
     // Note: is_running and both start stamps are set in start_run() before
     // threads spawn to avoid race condition with metrics_thread
+
+    // This is the pacing thread for every load strategy (constant_rps's
+    // wait_for_next_tick included) - never pinned, only nudged above the
+    // default priority, since it is the timing-sensitive one and its own
+    // work is negligible CPU (submission and sleeping, not the transfers
+    // themselves, which the event loop workers drive).
+    raise_pacing_thread_priority ();
 
     auto& db           = *db_ptr;
     const auto& config = context->config;

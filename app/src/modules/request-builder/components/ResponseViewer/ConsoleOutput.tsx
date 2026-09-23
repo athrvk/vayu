@@ -40,7 +40,7 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { Input } from "@/components/ui";
+import { Button, Input } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import type { ConsoleLogEntry } from "@/types";
 import { parseConsoleLogs, splitBySource } from "./console/parse-logs";
@@ -92,7 +92,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 			) : (
 				<div className="space-y-3">
 					<div className="relative">
-						<Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+						<Search className="pointer-events-none absolute left-2 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
 							value={filter}
 							onChange={(e) => setFilter(e.target.value)}
@@ -108,7 +108,15 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					</div>
 
 					{filtering && matched === 0 ? (
-						<EmptyState variant="inline" title="No log matches that filter" />
+						<EmptyState
+							variant="inline"
+							title="No log matches that filter"
+							action={
+								<Button variant="link" onClick={() => setFilter("")}>
+									Clear the filter
+								</Button>
+							}
+						/>
 					) : (
 						<>
 							<ScriptLogs which="pre" logs={bySource.pre} />
