@@ -209,7 +209,7 @@ export function CannedResponseControls({
 			await onApply(next);
 			completeSaveThenIdle(INBOX_REPLY_SAVE_CONTEXT);
 		} catch (error) {
-			failSave(error instanceof Error ? error.message : "Could not update the response");
+			failSave(error instanceof Error ? error.message : "Couldn't update the response");
 		}
 	};
 

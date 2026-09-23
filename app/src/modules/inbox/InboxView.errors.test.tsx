@@ -182,7 +182,7 @@ describe("a refused mutation in the inbox tab", () => {
 		await waitFor(() =>
 			expect(firstToast()).toMatchObject({
 				variant: "error",
-				message: "Could not stop the inbox",
+				message: "Couldn't stop the inbox",
 			})
 		);
 	});

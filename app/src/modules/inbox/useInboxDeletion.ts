@@ -65,7 +65,7 @@ export function useInboxDeletion(inbox: Inbox, listedTotal?: number): InboxDelet
 				// the same call that just refused.
 				setConfirmOpen(false);
 				showToast(
-					error instanceof Error ? error.message : "Could not delete the inbox",
+					error instanceof Error ? error.message : "Couldn't delete the inbox",
 					"error"
 				);
 			},
