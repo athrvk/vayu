@@ -225,7 +225,7 @@ describe("a file the engine refuses", () => {
 		// closing on a partial failure would be the silent half of the same bug.
 		expect(within(row("two.json")).getByText(/engine said no: two\.json/)).toBeInTheDocument();
 		expect(within(row("one.json")).getByText(/Imported/)).toBeInTheDocument();
-		expect(screen.getByText(/1 of 3 files failed/i)).toBeInTheDocument();
+		expect(screen.getByText(/Couldn't import 1 of 3 files/i)).toBeInTheDocument();
 	});
 
 	it("never lets an applied file be sent twice", async () => {
@@ -311,7 +311,7 @@ describe("importing a folder", () => {
 		expect(
 			within(row("pet.json")).getByText(/Referenced by openapi\.json/)
 		).toBeInTheDocument();
-		expect(screen.queryByText(/Vayu could not read/i)).toBeNull();
+		expect(screen.queryByText(/Vayu couldn't read/i)).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: /^Import/i }));
 		await waitFor(() => expect(applied.names).toEqual(["openapi.json"]));

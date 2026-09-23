@@ -54,7 +54,7 @@ async function preview() {
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
 		target: { value: JSON.stringify({ any: "document" }) },
 	});
-	fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 }
 
 /**

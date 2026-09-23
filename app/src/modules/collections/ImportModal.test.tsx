@@ -61,7 +61,7 @@ describe("ImportModal", () => {
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
 			target: { value: withFileBody },
 		});
-		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 
 		await waitFor(() => expect(screen.getByText(/file body/i)).toBeInTheDocument());
 		expect(screen.queryByText(/file_body/)).not.toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("ImportModal", () => {
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: spec } });
-		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 
 		await waitFor(() =>
 			expect(screen.getByText(/1 file part needs a file/i)).toBeInTheDocument()
@@ -115,7 +115,7 @@ describe("ImportModal", () => {
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
-		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 		await waitFor(() =>
 			expect(screen.getByText(/Postman Collection v2.1/i)).toBeInTheDocument()
 		);
@@ -135,7 +135,7 @@ describe("ImportModal", () => {
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
-		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 		await waitFor(() => expect(screen.getByText(/Sample API/)).toBeInTheDocument());
 
 		for (const label of [/Import environments/i, /Import pre-request/i]) {
@@ -153,7 +153,7 @@ describe("ImportModal", () => {
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: '{"x":1}' } });
-		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 		await waitFor(() => expect(screen.getByText(/Unrecognised format/i)).toBeInTheDocument());
 	});
 });

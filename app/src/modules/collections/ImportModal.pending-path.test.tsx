@@ -92,7 +92,7 @@ describe("ImportModal - a pending path from the OS", () => {
 
 		await waitFor(() =>
 			expect(
-				screen.getByText(/Could not read this file outside the desktop app/i)
+				screen.getByText(/Couldn't read this file outside the desktop app/i)
 			).toBeInTheDocument()
 		);
 	});

@@ -315,7 +315,7 @@ export function ImportModal() {
 			// Outside Electron there is no gated channel to read the path
 			// through, and no path here is safe to fetch as a URL instead.
 			patchTab("file", at, {
-				error: "Could not read this file outside the desktop app.",
+				error: "Couldn't read this file outside the desktop app.",
 				phase: "error",
 			});
 			return;
@@ -339,7 +339,7 @@ export function ImportModal() {
 			// refuses - whichever it is, the message it rejected with already
 			// names it in words a user can act on.
 			patchTab("file", at, {
-				error: e instanceof Error ? e.message : "Could not read this file.",
+				error: e instanceof Error ? e.message : "Couldn't read this file.",
 				phase: "error",
 			});
 		}
@@ -444,7 +444,7 @@ export function ImportModal() {
 					relativePath,
 					specPath,
 					text: "",
-					readError: "Could not read file",
+					readError: "Couldn't read the file",
 				});
 			reader.readAsText(file);
 		});
@@ -642,8 +642,8 @@ export function ImportModal() {
 					// Several: the count, because each row carries its own message.
 					error:
 						outcomes.size === 1
-							? (failures[0]?.message ?? "Import failed")
-							: `${failures.length} of ${outcomes.size} files failed to import.`,
+							? (failures[0]?.message ?? "Couldn't import this file")
+							: `Couldn't import ${failures.length} of ${outcomes.size} files.`,
 				},
 			};
 		});
@@ -846,7 +846,7 @@ export function ImportModal() {
 								disabled={!pasteText.trim() || isBusy}
 								className="mt-2"
 							>
-								Detect &amp; Preview
+								Detect and preview
 							</Button>
 						</div>
 					)}
@@ -915,7 +915,7 @@ export function ImportModal() {
 			>
 				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-rule px-5 py-4">
 					<DialogTitle className="text-sm font-bold tracking-tight">
-						Import Collection
+						Import collection
 					</DialogTitle>
 				</DialogHeader>
 
@@ -1140,7 +1140,7 @@ function PreviewView({
 			    examples" is the answer for a file that carried none, which is
 			    different from a preview that does not mention them. */}
 			<p className="text-label text-muted-foreground">
-				{meta.requestCount} requests · {meta.folderCount} folders · {meta.exampleCount}{" "}
+				{meta.requestCount} requests · {meta.folderCount} collections · {meta.exampleCount}{" "}
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
@@ -1243,8 +1243,8 @@ function noticeSummary(meta: ImportResult["meta"]): string {
  * otherwise read as something the spec contained.
  */
 const FOLDER_STRATEGY_NOTES: Record<"paths" | "mixed", string> = {
-	paths: "Folders from paths - this spec declares no operation tags",
-	mixed: "Folders from tags, and from paths where an operation declared none",
+	paths: "Collections from paths - this spec declares no operation tags",
+	mixed: "Collections from tags, and from paths where an operation declared none",
 };
 
 /**
@@ -1335,8 +1335,8 @@ function BatchRow({
 				</span>
 				{result && (
 					<span className="block text-label text-muted-foreground">
-						{result.meta.requestCount} requests · {result.meta.folderCount} folders ·{" "}
-						{result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
+						{result.meta.requestCount} requests · {result.meta.folderCount} collections
+						· {result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
 						environments · {result.meta.globalCount} globals
 					</span>
 				)}
@@ -1421,8 +1421,8 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 	// a schema the spec pointed at in another file (issue #649). The wording says
 	// which half failed - Vayu found the reference and could not read the file.
 	external_ref: [
-		"reference to a file Vayu could not read",
-		"references to files Vayu could not read",
+		"reference to a file Vayu couldn't read",
+		"references to files Vayu couldn't read",
 	],
 	// The operation imports; what it loses is the repeated id, so the wording
 	// says which half went (issue #715) rather than implying a dropped request.
@@ -1451,8 +1451,8 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"request bodies in a format Vayu cannot fill in (binary, XML, image)",
 	],
 	unresolved_base_url: [
-		"server URL that could not be resolved to a real address",
-		"server URLs that could not be resolved to a real address",
+		"server URL that couldn't be resolved to a real address",
+		"server URLs that couldn't be resolved to a real address",
 	],
 	unsupported_auth: [
 		"auth scheme Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
@@ -1513,8 +1513,8 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"request bodies Postman had turned off - imported with no body rather than sent anyway",
 	],
 	certificate: [
-		"request-level client certificate that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
-		"request-level client certificates that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
+		"request-level client certificate that couldn't be registered (an unreadable file, or a host this import already registered a different certificate for)",
+		"request-level client certificates that couldn't be registered (an unreadable file, or a host this import already registered a different certificate for)",
 	],
 	proxy_config: [
 		"request-level proxy override (Vayu has no per-request proxy setting to import it into)",
@@ -1533,8 +1533,8 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"requests whose fixed mock example is no longer in the document, so they mock the first example instead",
 	],
 	vayu_extension_invalid: [
-		"hand-edited Vayu detail (a request's rows, body, auth or settings, or a folder) that no longer made sense - the document's own reading was kept",
-		"hand-edited Vayu details (a request's rows, body, auth or settings, or a folder) that no longer made sense - the document's own reading was kept",
+		"hand-edited Vayu detail (a request's rows, body, auth or settings, or a collection) that no longer made sense - the document's own reading was kept",
+		"hand-edited Vayu details (a request's rows, body, auth or settings, or a collection) that no longer made sense - the document's own reading was kept",
 	],
 };
 
