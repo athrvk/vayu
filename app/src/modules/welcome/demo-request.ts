@@ -6,7 +6,7 @@
  */
 
 /**
- * What the Launcher's "Open Demo API" tile creates (issue #1694).
+ * What the Launcher's "Open demo API" tile creates (issue #1694).
  *
  * A public, stable, CORS-open GET that always answers the same small JSON
  * body - no account, no key, nothing for the click to explain. Kept as its

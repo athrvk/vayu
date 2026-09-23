@@ -49,7 +49,7 @@ Two consequences worth keeping in mind before adding anything here:
   reason that size exists: a surface whose work is reading and choosing.
 - Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
-- **The "Open Demo API" tile is a second first-run step, decided in issue
+- **The "Open demo API" tile is a second first-run step, decided in issue
   #1694**: it is a tile rather than a strip, and on the Launcher it retires the
   moment a run exists (`Launcher.tsx` renders `DemoApiTile` only while
   `runs.length === 0`) - no dismiss of its own, since the question it asks is

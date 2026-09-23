@@ -113,7 +113,7 @@ describe("WelcomeScreen when the workspace fails to load", () => {
 		queryState.runs = { ...failed([] as Run[]), refetch: refetchRuns };
 		renderScreen();
 
-		expect(screen.getByText(/couldn't load your workspace/i)).toBeInTheDocument();
+		expect(screen.getByText(/couldn't load your collections and runs/i)).toBeInTheDocument();
 		expect(screen.getByText(/failed to fetch/i)).toBeInTheDocument();
 		// The dangerous half: the first-run pitch aimed at someone who is not new.
 		expect(
@@ -148,7 +148,9 @@ describe("WelcomeScreen when the workspace fails to load", () => {
 		renderScreen();
 
 		expect(screen.getByText(/Recent runs/i)).toBeInTheDocument();
-		expect(screen.queryByText(/couldn't load your workspace/i)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/couldn't load your collections and runs/i)
+		).not.toBeInTheDocument();
 	});
 
 	it("still shows the first-run screen when the workspace is genuinely empty", () => {
@@ -157,6 +159,8 @@ describe("WelcomeScreen when the workspace fails to load", () => {
 		expect(
 			screen.getByText(/Send API requests, script them, and load test them/i)
 		).toBeInTheDocument();
-		expect(screen.queryByText(/couldn't load your workspace/i)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/couldn't load your collections and runs/i)
+		).not.toBeInTheDocument();
 	});
 });
