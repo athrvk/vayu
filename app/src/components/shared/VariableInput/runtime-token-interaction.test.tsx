@@ -246,16 +246,34 @@ describe("clicking a run-time token", () => {
 });
 
 describe("an editable token", () => {
-	it("is not treated as a run-time one - its popover still owns the click", () => {
-		const { container, input } = renderInput("{{merchantId}}");
+	it("is not treated as a run-time one - it gets a proportional caret, not an edge", () => {
+		const { container, input } = renderInput("ab{{merchantId}}cd");
 		expect(container.querySelector("[data-runtime-token]")).toBeNull();
 
 		const token = container.querySelector<HTMLElement>("[data-variable-token]");
 		expect(token).toBeTruthy();
-		fireEvent.click(token!);
+		// `{{merchantId}}` is 14 characters; stub a box and click its midpoint.
+		stubBox(token!, 100, 140);
+		fireEvent.click(token!, { clientX: 170 });
 
-		// The container's click handler must not pull focus into the input
-		// behind a token that opened something of its own.
-		expect(document.activeElement).not.toBe(input);
+		/*
+		 * A click on an editable token now places a caret inside its text
+		 * instead of opening its popover (issue #1220 hover redesign) - hover
+		 * and the keyboard chord are the popover's only ways in now, so the
+		 * click focuses the real input and lands the caret proportionally
+		 * across the token, unlike the run-time edge-only snap above.
+		 */
+		expect(document.activeElement).toBe(input);
+		// "ab" is two characters before the token starts, and the click landed
+		// at the token's own midpoint - seven characters in.
+		expect(input.selectionStart).toBe(2 + 7);
+	});
+
+	it("does not open its popover from a plain click any more", () => {
+		const { container } = renderInput("{{merchantId}}");
+		const token = container.querySelector<HTMLElement>("[data-variable-token]");
+		stubBox(token!, 0, 10);
+		fireEvent.click(token!, { clientX: 5 });
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 });

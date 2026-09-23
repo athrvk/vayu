@@ -602,6 +602,34 @@ export default function VariableInput({
 		setCursorPosition(caret);
 	};
 
+	/**
+	 * Put the caret where inside the token's own text the click landed
+	 * (issue #1220 hover redesign).
+	 *
+	 * An editable token's click used to open its popover outright, so the field
+	 * had no way to place a caret inside `{{merchantId}}` with the mouse - only
+	 * arrowing in from an edge reached it. Unlike a run-time token, every
+	 * position inside an editable name is one a keystroke can legitimately land
+	 * on, so the near edge is not enough here: the field's font is `--font-mono`
+	 * (fixed-width), so the click's fraction across the token's rendered width
+	 * converts directly to a character offset.
+	 */
+	const placeCaretInToken = (token: HTMLElement, clientX: number) => {
+		const input = inputRef.current;
+		const start = Number(token.dataset.tokenStart);
+		const end = Number(token.dataset.tokenEnd);
+		if (!input || !Number.isFinite(start) || !Number.isFinite(end)) return;
+
+		const length = end - start;
+		const rect = token.getBoundingClientRect();
+		const charWidth = length > 0 ? rect.width / length : 0;
+		const offset = charWidth > 0 ? Math.round((clientX - rect.left) / charWidth) : 0;
+		const caret = start + Math.min(Math.max(offset, 0), length);
+		input.focus();
+		input.setSelectionRange(caret, caret);
+		setCursorPosition(caret);
+	};
+
 	// Focus the hidden input when clicking on the container (but not on variable tokens)
 	const handleContainerClick = (e: React.MouseEvent) => {
 		const target = e.target as HTMLElement;
@@ -618,8 +646,12 @@ export default function VariableInput({
 			placeCaretAtTokenEdge(runtime, e.clientX);
 			return;
 		}
-		// Don't focus if clicking on a variable token (it has its own click handling)
-		if (target.closest("[data-variable-token]")) {
+		// A click on an editable token now places a caret rather than opening
+		// anything - hover and the keyboard chord are the popover's only ways in
+		// (issue #1220 hover redesign).
+		const editable = target.closest<HTMLElement>("[data-variable-token]");
+		if (editable) {
+			placeCaretInToken(editable, e.clientX);
 			return;
 		}
 		inputRef.current?.focus();
@@ -683,6 +715,7 @@ export default function VariableInput({
 					<span
 						key={key}
 						data-variable-token
+						{...bounds}
 						style={{ pointerEvents: "auto" }} // Make variable tokens clickable
 					>
 						<EditableVariable

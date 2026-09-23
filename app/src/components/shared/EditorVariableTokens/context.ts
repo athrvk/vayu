@@ -46,6 +46,16 @@ export interface TokenEditRequest {
 	onClose?: () => void;
 	/** How a script's span reads, if it is one - see `ScriptTokenHint`. */
 	scriptHint?: ScriptTokenHint;
+	/**
+	 * Whether this open should land focus inside the popover (issue #1220 hover
+	 * redesign). A keyboard chord has no hover state and must be reachable, so
+	 * it opens focused; a hover open must not steal focus or the caret from
+	 * wherever the reader is actually typing, so it opens inert. Defaults to
+	 * `true`, matching the chord's own long-standing behaviour, so a caller that
+	 * predates this field (there is none left, but the type stays permissive)
+	 * still opens the way it always did.
+	 */
+	focus?: boolean;
 }
 
 /** A token the pointer is resting on, for the shared tooltip to answer. */
@@ -69,6 +79,17 @@ export interface EditorVariableTokensValue {
 	getVariableOrigins: (name: string) => VariableOrigin[];
 	/** Open the shared popover over a token. */
 	openTokenEditor: (request: TokenEditRequest) => void;
+	/**
+	 * Close the shared popover, as if its own dismissal had fired.
+	 *
+	 * For an editor's hover-opened popover only (issue #1220 hover redesign): the
+	 * editor owns the leave-grace timer (the pointer left both the token and the
+	 * editor, and did not move into the popover's own content), and this is how
+	 * it tells the provider the grace period ran out. A no-op when nothing is
+	 * open, so a stale timer firing after some other close already happened does
+	 * nothing.
+	 */
+	closeTokenEditor: () => void;
 	/**
 	 * Show the shared tooltip over a token, or take it down with `null`.
 	 *

@@ -60,6 +60,7 @@ import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
+import { MENU_TRIGGERED_CLICK_DETAIL } from "@/lib/context-menu";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 import { Eyebrow } from "./eyebrow";
@@ -205,6 +206,32 @@ export interface VariablePopoverProps {
 	 * keyboard user who cannot reach what opened is no better off than before.
 	 */
 	focusOnOpen?: boolean;
+	/**
+	 * Lets a host answer, per gesture, whether *this* mounted instance should
+	 * open at all - returning `false` suppresses the built-in open and the host
+	 * is expected to have done something else about it (issue #1220 hover
+	 * redesign).
+	 *
+	 * The token this component renders is a persistent, always-focusable
+	 * element, but a host that opens differently depending on *how* the token
+	 * was reached - unfocused on hover, focused on a keyboard chord - cannot
+	 * express that with one static `focusOnOpen`: the same trigger has to
+	 * decide, at the moment of the gesture, which correctly-configured instance
+	 * should actually become the open one (`EditableVariable` mounts a fresh
+	 * instance per open, keyed by that decision). Undefined behaves exactly as
+	 * before every source opens this instance.
+	 */
+	onBeforeOpen?: (source: "click" | "keyboard" | "menu") => boolean;
+	/**
+	 * Forwarded straight onto the trigger span (issue #1220 hover redesign): a
+	 * host driving its own hover-open/close timers off this exact token needs
+	 * the listener on the one element that visually *is* the token, not on an
+	 * extra wrapper around it - `VariableInput/`'s font and layout guards read
+	 * `[data-variable-token] span` expecting this trigger to be the first span
+	 * inside, and a wrapper would put a different one there instead.
+	 */
+	onMouseEnter?: () => void;
+	onMouseLeave?: () => void;
 }
 
 export function VariablePopover({
@@ -222,6 +249,9 @@ export function VariablePopover({
 	defaultOpen = false,
 	onOpenChange,
 	focusOnOpen = false,
+	onBeforeOpen,
+	onMouseEnter,
+	onMouseLeave,
 }: VariablePopoverProps) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
@@ -437,8 +467,31 @@ export function VariablePopover({
 			role="button"
 			tabIndex={disabled ? -1 : tabIndex}
 			className={cn("inline", triggerClassName)}
+			onMouseEnter={onMouseEnter}
+			onMouseLeave={onMouseLeave}
 			onClick={(e) => {
 				if (disabled) return;
+				/*
+				 * A click dispatched by the "Edit variable" menu command
+				 * (`lib/context-menu.ts`) carries this sentinel instead of an
+				 * ordinary click count. It is a deliberate, explicit action like
+				 * the keyboard chord - not an incidental pointer gesture - so it
+				 * is offered to `onBeforeOpen` under its own source rather than
+				 * skipping the check: a host that mounts a focused instance for
+				 * "keyboard" (`EditableVariable`) does the same for "menu".
+				 */
+				const source = e.detail === MENU_TRIGGERED_CLICK_DETAIL ? "menu" : "click";
+				if (onBeforeOpen?.(source) === false) {
+					/*
+					 * `PopoverTrigger asChild` composes Radix's own click-to-toggle
+					 * handler with this one (`composeEventHandlers`), which still
+					 * runs unless the event's default was prevented - so returning
+					 * here alone would suppress nothing: Radix's own handler would
+					 * open the popover anyway, through the controlled `open` prop.
+					 */
+					e.preventDefault();
+					return;
+				}
 				e.stopPropagation(); // Prevent input blur
 				if (!isOpen) openPopover();
 			}}
@@ -449,6 +502,7 @@ export function VariablePopover({
 					// where it would otherwise type a space.
 					e.preventDefault();
 					e.stopPropagation();
+					if (onBeforeOpen?.("keyboard") === false) return;
 					openPopover();
 				}
 			}}
@@ -626,8 +680,14 @@ export function VariablePopover({
 											 * user could not read (issue #1215). The eye is the right
 											 * landing: revealing is the only action here, and it hands
 											 * focus on to the editable field.
+											 *
+											 * Gated on `focusOnOpen` (issue #1220 hover redesign): this
+											 * `autoFocus` is a real DOM attribute, so it fires on mount
+											 * whatever Radix's own `onOpenAutoFocus` decided - a hover
+											 * that opens this same branch unfocused would otherwise
+											 * still land the caret here.
 											 */
-											autoFocus
+											autoFocus={focusOnOpen}
 										/>
 									</div>
 								) : (
@@ -642,7 +702,9 @@ export function VariablePopover({
 												isSecret && "pr-8"
 											)}
 											aria-label={`Value of ${name}`}
-											autoFocus
+											// See the masked branch above: a real DOM attribute,
+											// gated the same way for the same reason.
+											autoFocus={focusOnOpen}
 										/>
 										{isSecret && (
 											<RevealButton
@@ -711,7 +773,11 @@ export function VariablePopover({
 								placeholder="value…"
 								className="h-8 font-mono text-sm"
 								aria-label={`Value for new variable ${name}`}
-								autoFocus
+								// See the resolved branch's own `autoFocus={focusOnOpen}`: a
+								// real DOM attribute fires on mount regardless of Radix's own
+								// `onOpenAutoFocus`, so an inert (hover) open of an undefined
+								// variable must gate this the same way.
+								autoFocus={focusOnOpen}
 							/>
 							{/*
 							 * The label sits above the control, not beside it, which is

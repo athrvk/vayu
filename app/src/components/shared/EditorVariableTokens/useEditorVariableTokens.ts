@@ -124,16 +124,36 @@ export interface EditorVariableTokensOptions {
 	readOnly: boolean;
 }
 
+/** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */
+const POPOVER_CONTENT_SELECTOR = '[data-slot="popover-content"]';
+
 /** What one editor's installation holds, so unmounting can take it all down. */
 interface Installation {
 	editor: Monaco.editor.IStandaloneCodeEditor;
 	decorations: Monaco.editor.IEditorDecorationsCollection;
 	listeners: Monaco.IDisposable[];
 	timer?: ReturnType<typeof setTimeout>;
-	/** Counting down to the tooltip the pointer has been resting on. */
+	/** Counting down to the tooltip or popover the pointer has been resting on. */
 	hoverTimer?: ReturnType<typeof setTimeout>;
-	/** The token that tooltip is for, showing or pending - see `hoverAt`. */
+	/** The token that tooltip or popover is for, showing or pending - see `hoverAt`. */
 	hovered?: string;
+	/**
+	 * The token key this editor's own hover currently has the shared popover
+	 * open over, if any (issue #1220 hover redesign). Set only for an editable
+	 * token - a run-time one still gets `TokenHoverCard` - and read by the leave
+	 * handlers to know whether there is a hover-opened popover of this editor's
+	 * to close, as opposed to a tooltip.
+	 */
+	hoverOpenKey?: string;
+	/** Counting down the leave-grace before a hover-opened popover closes. */
+	hoverCloseTimer?: ReturnType<typeof setTimeout>;
+	/**
+	 * Detaches the listeners below, if any are attached. The popover's content
+	 * is portalled outside this editor's DOM, so telling the grace timer "the
+	 * pointer is over it now" takes a listener on that content itself, attached
+	 * once it actually mounts (a tick after `openTokenEditor` is called).
+	 */
+	hoverContentCleanup?: () => void;
 	/**
 	 * The spans `paint` last found, read back by `hoverAt` instead of scanning
 	 * again. A per-character mouse move used to re-scan the one line under the
@@ -219,20 +239,82 @@ export function useEditorVariableTokens({
 		if (!current) return;
 		clearTimeout(current.hoverTimer);
 		current.hoverTimer = undefined;
+		clearTimeout(current.hoverCloseTimer);
+		current.hoverCloseTimer = undefined;
+		current.hoverContentCleanup?.();
+		current.hoverContentCleanup = undefined;
+		if (current.hoverOpenKey !== undefined) {
+			current.hoverOpenKey = undefined;
+			live.current.tokens?.closeTokenEditor();
+		}
 		if (current.hovered === undefined) return;
 		current.hovered = undefined;
 		live.current.tokens?.setHoveredToken(null);
 	}, []);
 
 	/**
-	 * The pointer moved: show the token under it, hide anything else.
+	 * The pointer left the token that opened a hover popover - not the editor
+	 * necessarily, just the token - so the popover has to be told, but not
+	 * instantly: the reader may be moving the pointer *into* it, to click the
+	 * value field or read a shadowed definition (issue #1220 hover redesign).
+	 *
+	 * Immediate where there is nothing to wait for - a scroll or a model change
+	 * invalidates the anchor rectangle outright, so `hideHover` there stays
+	 * unconditional; this is only for the ordinary "pointer moved off" case.
+	 */
+	const scheduleHoverClose = useCallback(() => {
+		const current = installation.current;
+		if (!current || current.hoverOpenKey === undefined) return;
+		clearTimeout(current.hoverCloseTimer);
+		current.hoverCloseTimer = setTimeout(() => {
+			const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
+			if (content && content.contains(document.activeElement)) return;
+			const stillCurrent = installation.current;
+			if (!stillCurrent || stillCurrent.hoverOpenKey === undefined) return;
+			stillCurrent.hoverOpenKey = undefined;
+			stillCurrent.hovered = undefined;
+			stillCurrent.hoverContentCleanup?.();
+			stillCurrent.hoverContentCleanup = undefined;
+			live.current.tokens?.closeTokenEditor();
+		}, TIMING.TOOLTIP_DELAY_MS);
+	}, []);
+
+	/**
+	 * Watch the hover-opened popover's own content for the pointer entering or
+	 * leaving it, once it has actually mounted - a tick after `openTokenEditor`
+	 * is called, since the state update that renders it has not committed yet
+	 * inside the same callback.
+	 */
+	const trackHoverContent = useCallback(
+		(current: Installation, key: string) => {
+			setTimeout(() => {
+				if (installation.current !== current || current.hoverOpenKey !== key) return;
+				const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
+				if (!content) return;
+				const onEnter = () => clearTimeout(current.hoverCloseTimer);
+				const onLeave = () => scheduleHoverClose();
+				content.addEventListener("mouseenter", onEnter);
+				content.addEventListener("mouseleave", onLeave);
+				current.hoverContentCleanup = () => {
+					content.removeEventListener("mouseenter", onEnter);
+					content.removeEventListener("mouseleave", onLeave);
+				};
+			}, 0);
+		},
+		[scheduleHoverClose]
+	);
+
+	/**
+	 * The pointer moved: show what is under it, hide anything else.
 	 *
 	 * The delay is the app's own tooltip delay rather than Monaco's, because
-	 * what opens is the app's own tooltip - the same card, after the same wait,
-	 * as the one over a `{{token}}` in the URL bar one row above. Moving along a
-	 * line of text fires this per character, so a move that stays inside the
-	 * token it is already showing does nothing at all: re-arming the timer there
-	 * would mean a hover that never opens while the hand is not perfectly still.
+	 * what opens is the app's own popover - the same one, after the same wait,
+	 * that opens over a `{{token}}` in the URL bar one row above (issue #1220
+	 * hover redesign). A run-time token still gets `TokenHoverCard`: it has no
+	 * popover to open at all. Moving along a line of text fires this per
+	 * character, so a move that stays inside the token already showing does
+	 * nothing at all: re-arming the timer there would mean a hover that never
+	 * opens while the hand is not perfectly still.
 	 */
 	const hoverAt = useCallback(
 		(editor: Monaco.editor.IStandaloneCodeEditor, position: Monaco.IPosition | null) => {
@@ -250,9 +332,16 @@ export function useEditorVariableTokens({
 			// earlier line than the one under the pointer).
 			const range = position ? tokenAtPosition(current.ranges ?? [], position) : null;
 			if (!range) {
-				hideHover();
+				// A hover-opened popover gets the grace period; a plain tooltip has
+				// no interactive content to move into and comes down at once, exactly
+				// as it always has.
+				if (current.hoverOpenKey !== undefined) scheduleHoverClose();
+				else hideHover();
 				return;
 			}
+			// Landed back on the token a hover-opened popover is already showing -
+			// nothing pending to cancel or start over.
+			clearTimeout(current.hoverCloseTimer);
 			const key = tokenKey(range);
 			if (current.hovered === key) return;
 			clearTimeout(current.hoverTimer);
@@ -263,10 +352,32 @@ export function useEditorVariableTokens({
 				// it is now or does not open at all.
 				const rect = tokenRect(editor, range);
 				if (!rect) return;
-				context.setHoveredToken({ name: range.name, rect, scriptHint: range.scriptHint });
+				const kind = context.classify(range.name, range.scriptHint);
+				if (kind.state === "runtime") {
+					context.setHoveredToken({
+						name: range.name,
+						rect,
+						scriptHint: range.scriptHint,
+					});
+					return;
+				}
+				current.hoverOpenKey = key;
+				context.openTokenEditor({
+					name: range.name,
+					rect,
+					scriptHint: range.scriptHint,
+					// Inert: resting the pointer must never steal focus or the caret
+					// from wherever the reader is actually typing.
+					focus: false,
+					// See `EditorVariableTokensProvider`'s `close`: this only actually
+					// runs if the popover took focus at some point, so an untouched
+					// hover closing never yanks focus off another field.
+					onClose: () => editor.focus(),
+				});
+				trackHoverContent(current, key);
 			}, TIMING.TOOLTIP_DELAY_MS);
 		},
-		[hideHover]
+		[hideHover, scheduleHoverClose, trackHoverContent]
 	);
 
 	/** Open the popover over a token, if there is anything behind it to edit. */
@@ -274,8 +385,9 @@ export function useEditorVariableTokens({
 		(editor: Monaco.editor.IStandaloneCodeEditor, range: VariableTokenRange) => {
 			const context = live.current.tokens;
 			if (!context) return;
-			// Whatever happens next, the pointer's tooltip is not part of it: the
-			// popover that opens carries the same value over the same rectangle.
+			// Whatever happens next, the pointer's tooltip or hover-opened popover
+			// is not part of it: this open carries the same value over the same
+			// rectangle, freshly.
 			hideHover();
 			// A generator, a bound column, or a script's bare `{{name}}` (never
 			// interpolated, so never editable) all classify as "runtime" - nothing
@@ -287,6 +399,9 @@ export function useEditorVariableTokens({
 				name: range.name,
 				rect,
 				scriptHint: range.scriptHint,
+				// A keyboard user has no hover state, so this open has to land focus
+				// inside the popover to be reachable at all.
+				focus: true,
 				// Closing puts the caret back where it was: an editor that hands focus
 				// away and does not take it back is the defect this program exists to
 				// remove (#1218).
@@ -309,7 +424,7 @@ export function useEditorVariableTokens({
 	);
 
 	/**
-	 * Install the decorations, the click-to-edit and the chord on the mounted editor -
+	 * Install the decorations, the hover and the chord on the mounted editor -
 	 * once, and only where the tokens are painted at all.
 	 *
 	 * Called from the mount callback and again from the effect below, because
@@ -344,35 +459,36 @@ export function useEditorVariableTokens({
 				paint();
 			}),
 			editor.onMouseMove((event) => hoverAt(editor, event.target?.position ?? null)),
-			// Off the editor entirely, and on a scroll: the rectangle the card was
-			// drawn over belongs to a line that has moved.
-			editor.onMouseLeave(() => hideHover()),
-			editor.onDidScrollChange(() => hideHover()),
-			editor.onMouseDown((event) => {
-				/*
-				 * A plain click on a token opens it, which is what everyone tries
-				 * first - the token is painted like something you can click.
-				 *
-				 * It used to take ⌘/Ctrl, on the reasoning that a plain click
-				 * belongs to the caret. What made that liveable was the hover
-				 * saying "⌘-click or ⇧⌘D to edit"; without that line the chord is
-				 * unguessable, and a token that looks clickable and answers
-				 * nothing is worse than a caret that lands one character late.
-				 * The caret is not actually lost either: `preventDefault` is only
-				 * called for the modified click, so a plain one still places it
-				 * before the popover takes focus, and Escape hands focus back to
-				 * exactly there.
-				 */
-				if (!event.target.position) return;
-				const model = editor.getModel();
-				const matcher = live.current.matcher;
-				if (!model || !matcher) return;
-				const range = tokenAtPosition(matcher(model), event.target.position);
-				if (!range) return;
-				if (event.event.ctrlKey || event.event.metaKey) event.event.preventDefault();
-				open(editor, range);
-			})
+			/*
+			 * Off the editor entirely. A hover-opened popover gets the grace period
+			 * rather than an immediate close - it lives outside the editor's own
+			 * DOM, so leaving the editor is exactly what happens on the way into it
+			 * (issue #1220 hover redesign). Whatever tooltip is pending or showing
+			 * closes at once either way: there is nothing pointer-driven left to
+			 * wait for once the pointer has left.
+			 */
+			editor.onMouseLeave(() => {
+				const current = installation.current;
+				if (!current) return;
+				clearTimeout(current.hoverTimer);
+				current.hoverTimer = undefined;
+				if (current.hoverOpenKey !== undefined) {
+					scheduleHoverClose();
+					return;
+				}
+				hideHover();
+			}),
+			// On a scroll: the rectangle the card or popover was drawn over belongs
+			// to a line that has moved, so this stays immediate rather than taking
+			// the leave-grace - unlike a leave onto the popover's own content, a
+			// scroll is never "the reader moving toward it".
+			editor.onDidScrollChange(() => hideHover())
 		);
+
+		// A plain click on a token now does nothing beyond letting Monaco's own
+		// native caret placement proceed - hover and the edit chord are the
+		// popover's only ways in (issue #1220 hover redesign), so there is no
+		// `onMouseDown` handler here any more to open one.
 
 		// `addCommand` has no matching remove, which is the other reason this
 		// runs once: a second call would leave the chord bound twice.
@@ -382,7 +498,7 @@ export function useEditorVariableTokens({
 		}
 
 		paint();
-	}, [hideHover, hoverAt, open, openAt, paint]);
+	}, [hideHover, hoverAt, openAt, paint, scheduleHoverClose]);
 
 	/*
 	 * The install, reachable from the mount callback without that callback

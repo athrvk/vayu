@@ -99,14 +99,24 @@ export function resolveContext(eventTarget: EventTarget | null): ResolvedContext
 }
 
 /**
+ * A `MouseEvent.detail` a real click never carries - it is a click count and
+ * never negative - so `openVariablePopover` can mark the click it dispatches
+ * as the menu's own rather than a pointer gesture. Needed because an ordinary
+ * click on an editable token now places a caret instead of opening anything
+ * (issue #1220 hover redesign): the menu item's whole point is opening the
+ * popover, so its click has to say so.
+ */
+export const MENU_TRIGGERED_CLICK_DETAIL = -1;
+
+/**
  * Open the popover for a token the menu was opened on.
  *
  * A click, because that is the popover's one way in: `VariablePopover` holds its
  * own open state and offers no prop to force it (`components/ui/variable-popover.tsx`),
  * and the token is a `role="button"` whose click handler opens it. Going through
  * that handler is also what makes the menu item honest - it opens the same
- * popover the same click opens, rather than a second path to the same component
- * that could drift from it.
+ * popover an ordinary open opens, rather than a second path to the same
+ * component that could drift from it.
  *
  * The element is re-checked rather than trusted: a menu is modal, and a render
  * in the meantime can have replaced or removed the token it was opened over.
@@ -114,7 +124,13 @@ export function resolveContext(eventTarget: EventTarget | null): ResolvedContext
 export function openVariablePopover(token: HTMLElement | null, name: string): boolean {
 	if (!token || !token.isConnected) return false;
 	if (token.getAttribute(VARIABLE_ATTRIBUTE) !== name) return false;
-	token.click();
+	token.dispatchEvent(
+		new MouseEvent("click", {
+			bubbles: true,
+			cancelable: true,
+			detail: MENU_TRIGGERED_CLICK_DETAIL,
+		})
+	);
 	return true;
 }
 

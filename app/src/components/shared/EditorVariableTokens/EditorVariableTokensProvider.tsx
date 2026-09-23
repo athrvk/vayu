@@ -32,7 +32,7 @@
  * above it paints nothing.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VariablePopover } from "@/components/ui";
 import {
 	classifyScriptToken,
@@ -93,6 +93,45 @@ export function EditorVariableTokensProvider({
 	const [active, setActive] = useState<ActiveRequest | null>(null);
 	const [hovered, setHovered] = useState<TokenHoverRequest | null>(null);
 
+	/**
+	 * Whether the currently open instance has ever actually held focus - as
+	 * opposed to having merely been mounted, unfocused, by a hover (issue #1220
+	 * hover redesign).
+	 *
+	 * A permanent document-level listener rather than one scoped to `active`'s
+	 * lifetime: React runs a child's mount effects (Radix's own auto-focus among
+	 * them) before this component's, so a listener attached only once `active`
+	 * changes could miss the very focus move it exists to catch. Attached once,
+	 * for the app's life, and reset explicitly at the one place an open begins.
+	 */
+	const tookFocusRef = useRef(false);
+	/*
+	 * What `close`/`closeTokenEditor` read, so both can stay stable
+	 * (`useCallback(..., [])`) like every other value on this context -
+	 * `onOpenChange`'s inline `close()` call already needed that stability
+	 * once `closeTokenEditor` existed alongside it, since a callback that
+	 * changes identity on every `active` transition is also a callback whose
+	 * closure over `active` is stale everywhere it was captured before the
+	 * next transition (an editor's own `hoverAt`/`scheduleHoverClose`
+	 * included).
+	 */
+	const activeRef = useRef<ActiveRequest | null>(null);
+	useEffect(() => {
+		activeRef.current = active;
+	}, [active]);
+	useEffect(() => {
+		const onFocusIn = (e: FocusEvent) => {
+			if (
+				e.target instanceof HTMLElement &&
+				e.target.closest('[data-slot="popover-content"]')
+			) {
+				tookFocusRef.current = true;
+			}
+		};
+		document.addEventListener("focusin", onFocusIn);
+		return () => document.removeEventListener("focusin", onFocusIn);
+	}, []);
+
 	/*
 	 * One snapshot per change, not one per token: `getAllVariables` copies the
 	 * whole map on every call, and a body with fifty tokens would otherwise copy
@@ -118,23 +157,38 @@ export function EditorVariableTokensProvider({
 		// many. The editor cancels its own timer; this covers the chord, which
 		// opens with no pointer involved.
 		setHovered(null);
+		// This open has not taken focus yet - `focus: false` (a hover) never
+		// will on its own, and `focus: true` (the chord) is about to, which the
+		// permanent listener above will catch.
+		tookFocusRef.current = false;
 		setActive((previous) => ({ ...request, key: (previous?.key ?? 0) + 1 }));
 	}, []);
+
+	const close = useCallback(() => {
+		// A hover-opened popover that never took focus closes silently: calling
+		// `onClose` here is what sends `editor.focus()` back to the editor
+		// (`useEditorVariableTokens.ts`'s `open`), and doing that for a popover
+		// the reader never actually reached would yank focus away from wherever
+		// they are really typing - a different field, another editor entirely.
+		if (tookFocusRef.current) activeRef.current?.onClose?.();
+		setActive(null);
+	}, []);
+
+	const closeTokenEditor = useCallback(() => {
+		if (!activeRef.current) return;
+		close();
+	}, [close]);
 
 	const value = useMemo<EditorVariableTokensValue>(
 		() => ({
 			classify,
 			getVariableOrigins,
 			openTokenEditor,
+			closeTokenEditor,
 			setHoveredToken: setHovered,
 		}),
-		[classify, getVariableOrigins, openTokenEditor]
+		[classify, getVariableOrigins, openTokenEditor, closeTokenEditor]
 	);
-
-	const close = useCallback(() => {
-		active?.onClose?.();
-		setActive(null);
-	}, [active]);
 
 	/*
 	 * A run-time token has no stored variable behind it, so there is nothing for
@@ -195,7 +249,10 @@ export function EditorVariableTokensProvider({
 						origins={originsForHint(getVariableOrigins(active.name), active.scriptHint)}
 						writableScopes={support.writableScopes}
 						defaultOpen
-						focusOnOpen
+						// Undefined (no caller left that omits it) behaves as `true`,
+						// matching the chord's own long-standing behaviour - see
+						// `TokenEditRequest.focus`.
+						focusOnOpen={active.focus ?? true}
 						onOpenChange={(open) => {
 							if (!open) close();
 						}}

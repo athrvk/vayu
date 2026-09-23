@@ -2112,7 +2112,7 @@ makes it, for every surface (see below):
 |-------|-----------|------------|
 | `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken`, or a decoration in an editor | muted or amber, depending on the declared contract - see below |
 | `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken`, or a decoration in an editor | muted, "not generated here", no popover |
-| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover reads, and click or Enter - or ⇧⌘D in an editor - edits or creates |
+| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover opens the popover inert (issue #1220 hover redesign), a click places a caret, and Enter/Space - or ⇧⌘D in an editor - opens it focused |
 | `{{$guid}}` - a generator | `RuntimeToken`, or a decoration in an editor | muted, "generated per use", no popover |
 
 The two reserved rows sit above the scopes for the same reason and the generator
@@ -2124,12 +2124,22 @@ and keeps the red paint that is how a typo is spotted (issue #186).
 
 **The same four states now paint inside the Monaco body and GraphQL editors
 too** (issue #1220), as decorations rather than DOM tokens - there is no
-`<input>` behind that text to overlay. Hovering opens the app's own tooltip
-card over the token's screen rectangle, saying what the overlay's tooltip
-says - not Monaco's own hover widget, which is what answered until issue
-#1320 - and a click or the `EDIT_VARIABLE_CHORD` opens the same
-`VariablePopover`, positioned over that same rectangle. The decision of *what
-a token is* is shared: `classifyVariableToken` (`lib/variable-token-kind.ts`)
+`<input>` behind that text to overlay. For a run-time token, hovering still
+opens the app's own read-only card (`TokenHoverCard`) over the token's screen
+rectangle - not Monaco's own hover widget, which is what answered until issue
+#1320. For an editable token, hovering (after the same debounce) opens the
+same shared `VariablePopover` instead, over that same rectangle, but inert:
+nothing is focused, so resting the pointer never steals the caret from
+wherever the reader is actually typing (issue #1220 hover redesign). A click on
+an editable token now only places a caret in it - Monaco's own native
+placement, once nothing intercepts the click - and `EDIT_VARIABLE_CHORD` opens
+the popover focused, which is also the only role left for a keyboard user with
+no hover state. The popover stays open through a short grace period if the
+pointer moves from the token onto the popover's own content, and closing it
+only calls `editor.focus()` back if it actually took focus at some point - a
+hover the reader merely swept past must not steal focus from another field
+when it closes. The decision of *what a token is* is shared:
+`classifyVariableToken` (`lib/variable-token-kind.ts`)
 lifts the same ladder this section describes out of the paint, so the editors
 and the overlay answer one `{{name}}` identically - the overlay classifies
 each `{{name}}` once per repaint, before any paint, and its five ordered

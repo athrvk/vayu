@@ -9,8 +9,10 @@
  * EditableVariable Component
  *
  * A clickable `{{variable}}` token, inline in a URL or header value.
- * - Hover shows what it resolves to, without opening anything
- * - Click (or Enter/Space) opens VariablePopover to view and edit it
+ * - Hover (after a debounce) opens the real, full popover - inert, so resting
+ *   the pointer never steals focus or risks an edit
+ * - Click places a caret in the token's text; it opens nothing by itself
+ * - Enter/Space opens the popover focused, for a keyboard user who has no hover
  * - Colour reflects whether the variable resolves at all
  *
  * This is the request-builder half of the pair: `VariablePopover` lives in
@@ -19,16 +21,12 @@
  * written to - happen here.
  */
 
-import {
-	VariablePopover,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-	TooltipValue,
-} from "@/components/ui";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { VariablePopover } from "@/components/ui";
 import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { variableProps } from "@/lib/context-menu";
+import { TIMING } from "@/config/timing";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
 import type { VariableScope as RequestBuilderVariableScope, VariableSupport } from "@/types";
@@ -59,11 +57,16 @@ export interface EditableVariableProps {
 	/**
 	 * Position in the host field's roving tab order (issue #1215). `VariableInput`
 	 * paints a strip of these over one input and gives exactly one of them the
-	 * Tab stop, so a URL with five variables costs one stop rather than five.
-	 * Left at `0` for a token rendered on its own.
+	 * Tab stop. Left at `0` for a token rendered on its own.
 	 */
 	tabIndex?: number;
 }
+
+/** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */
+const POPOVER_CONTENT_SELECTOR = '[data-slot="popover-content"]';
+
+/** How the popover currently open over this token got there. */
+type OpenMode = { reason: "hover" | "keyboard"; key: number } | null;
 
 export default function EditableVariable({
 	name,
@@ -82,22 +85,109 @@ export default function EditableVariable({
 
 	const varInfo = resolved ? { value, scope: scope as VariableScope, secret, sourceName } : null;
 
-	/**
-	 * The bound row's answer, if it has one (issue #1064).
-	 *
-	 * Hovering reads and clicking edits, so the two must not read differently:
-	 * once the popover names the row as the origin, a tooltip still printing the
-	 * environment's value makes the same token say two things about one send.
-	 * Taken off the origins this component already fetches rather than through a
-	 * prop of its own, so there is one answer to "what wins" and not two.
-	 */
-	const boundRowValue = origins.find((o) => o.scope === "row")?.value;
-
 	const handleValueChange = onValueChange
 		? (varName: string, varValue: string, varScope: VariableScope) => {
 				onValueChange(varName, varValue, varScope as RequestBuilderVariableScope);
 			}
 		: undefined;
+
+	const [openMode, setOpenMode] = useState<OpenMode>(null);
+	const nextKey = useRef(0);
+	const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+	const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+	const clearHoverTimer = useCallback(() => clearTimeout(hoverTimer.current), []);
+	const clearCloseTimer = useCallback(() => clearTimeout(closeTimer.current), []);
+
+	const openWith = useCallback(
+		(reason: "hover" | "keyboard") => {
+			clearCloseTimer();
+			setOpenMode({ reason, key: ++nextKey.current });
+		},
+		[clearCloseTimer]
+	);
+
+	/**
+	 * Closes a hover-opened popover once the pointer has been off both the token
+	 * and the popover's own content for the grace period - unless the reader has
+	 * focused into it, which means they are reading or editing it rather than
+	 * having merely brushed past. A keyboard-opened popover never reaches this:
+	 * `handleMouseLeave` only arms it for the hover reason.
+	 */
+	const scheduleClose = useCallback(() => {
+		clearCloseTimer();
+		closeTimer.current = setTimeout(() => {
+			const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
+			if (content && content.contains(document.activeElement)) return;
+			setOpenMode(null);
+		}, TIMING.TOOLTIP_DELAY_MS);
+	}, [clearCloseTimer]);
+
+	const handleMouseEnter = useCallback(() => {
+		clearCloseTimer();
+		if (disabled || openMode) return;
+		clearHoverTimer();
+		hoverTimer.current = setTimeout(() => openWith("hover"), TIMING.TOOLTIP_DELAY_MS);
+	}, [disabled, openMode, clearCloseTimer, clearHoverTimer, openWith]);
+
+	const handleMouseLeave = useCallback(() => {
+		clearHoverTimer();
+		if (openMode?.reason === "hover") scheduleClose();
+	}, [openMode, clearHoverTimer, scheduleClose]);
+
+	/*
+	 * What the permanent listener below reads - kept in a ref rather than a
+	 * dependency, because the listener is attached once for the component's
+	 * life (see its own comment) and must not go stale between renders.
+	 */
+	const openModeRef = useRef(openMode);
+	useEffect(() => {
+		openModeRef.current = openMode;
+	}, [openMode]);
+
+	/*
+	 * The popover's own content is portalled well outside this token's subtree,
+	 * so the grace period has to be told directly when the pointer is over it -
+	 * a leave off the token alone would otherwise close the popover the reader
+	 * just moved into, to click its value field or read a shadowed definition.
+	 *
+	 * Delegated on `document`, permanently, rather than a per-open effect that
+	 * looks the content up once it is open: `VariablePopover` mounts a fresh
+	 * instance per open (`key={openMode?.key}`), and Radix's own content does
+	 * not necessarily exist in the DOM yet by the time this component's own
+	 * effect runs after that state change - a real race, not a hypothetical
+	 * one. `mouseover`/`mouseout` bubble (unlike `mouseenter`/`mouseleave`), so
+	 * a listener attached once, before any token ever opens, still catches
+	 * every entry and exit of whichever content is on screen at the time.
+	 */
+	useEffect(() => {
+		const isInContent = (node: EventTarget | null): boolean =>
+			node instanceof Element && node.closest(POPOVER_CONTENT_SELECTOR) !== null;
+		const onMouseOver = (e: MouseEvent) => {
+			if (isInContent(e.target)) clearCloseTimer();
+		};
+		const onMouseOut = (e: MouseEvent) => {
+			// Only the moment of actually leaving the content - not a move
+			// between two elements both inside it, which fires the same event.
+			if (isInContent(e.target) && !isInContent(e.relatedTarget)) {
+				if (openModeRef.current?.reason === "hover") scheduleClose();
+			}
+		};
+		document.addEventListener("mouseover", onMouseOver);
+		document.addEventListener("mouseout", onMouseOut);
+		return () => {
+			document.removeEventListener("mouseover", onMouseOver);
+			document.removeEventListener("mouseout", onMouseOut);
+		};
+	}, [clearCloseTimer, scheduleClose]);
+
+	useEffect(
+		() => () => {
+			clearHoverTimer();
+			clearCloseTimer();
+		},
+		[clearHoverTimer, clearCloseTimer]
+	);
 
 	/*
 	 * `font-[inherit]`, matching the plain-text segments beside it.
@@ -130,6 +220,13 @@ export default function EditableVariable({
 
 	return (
 		<VariablePopover
+			// A new instance per open, so `defaultOpen`/`focusOnOpen` - both read
+			// only at mount - carry the right answer for *this* open rather than
+			// the previous one's. `onMouseEnter`/`onMouseLeave` are forwarded onto
+			// the same trigger span regardless of which instance is mounted, so
+			// hover tracking survives the remount even though the DOM node itself
+			// does not.
+			key={openMode?.key ?? "closed"}
 			tabIndex={tabIndex}
 			name={name}
 			varInfo={varInfo}
@@ -139,67 +236,27 @@ export default function EditableVariable({
 			disabled={disabled}
 			origins={origins}
 			writableScopes={writableScopes}
-			trigger={
-				/*
-				 * Hovering reads, clicking edits.
-				 *
-				 * Most token clicks are only ever to *see* what a variable resolves
-				 * to, and a click commits you to a popover you then have to dismiss.
-				 * The tooltip answers that without one, which makes a URL full of
-				 * variables readable by sweeping across it.
-				 *
-				 * A secret shows dots and never its value: the popover gates that
-				 * behind a deliberate reveal, and a tooltip printing it on mouseover
-				 * would walk straight around the gate.
-				 *
-				 * Radix closes a tooltip on pointerdown and on blur, so opening the
-				 * popover - by click, or by Enter, which moves focus into it - takes
-				 * the tooltip down rather than stacking the two.
-				 */
-				<Tooltip>
-					<TooltipTrigger asChild>{token}</TooltipTrigger>
-					{/*
-					 * Everything in here is a tint of `--primary-foreground`, not a
-					 * semantic token. `TooltipContent` paints `bg-primary-fill` and
-					 * carries a white label, so `text-muted-foreground` would be
-					 * near-invisible on it and `text-destructive-text` - a dark rose
-					 * tuned for a light card - would be worse. The token itself is
-					 * already red when unresolved; the tooltip only has to say so.
-					 */}
-					<TooltipContent side="bottom" className="max-w-xs">
-						{boundRowValue !== undefined ? (
-							/*
-							 * The row outranks every scope, so it is the answer whether or
-							 * not one of them also defines the name - which makes this the
-							 * first branch rather than a case inside the resolved one. A
-							 * cell is never a secret: it came from the picked file, not
-							 * from a stored variable someone marked.
-							 */
-							<TooltipValue className="font-mono" hint="Bound row">
-								{boundRowValue || "empty"}
-							</TooltipValue>
-						) : !resolved ? (
-							<span className="italic opacity-90">not defined</span>
-						) : (
-							/*
-							 * A secret says it *is* a secret rather than drawing a row
-							 * of dots. Dots on hover are the worst of both: they occupy
-							 * the space of an answer, tell you nothing you did not
-							 * already know from the token, and invite a second look to
-							 * check you did not misread them. The word plus the source
-							 * is the useful part - whether it is set at all belongs in
-							 * the popover, where revealing is a deliberate act.
-							 */
-							<TooltipValue
-								className={secret ? "italic opacity-90" : "font-mono"}
-								hint={sourceName}
-							>
-								{secret ? "secret" : value || "empty"}
-							</TooltipValue>
-						)}
-					</TooltipContent>
-				</Tooltip>
-			}
+			defaultOpen={openMode !== null}
+			focusOnOpen={openMode?.reason === "keyboard"}
+			onBeforeOpen={(source) => {
+				// A click never opens by itself any more - it places a caret
+				// instead (`VariableInput/index.tsx`'s `handleContainerClick`),
+				// which needs the click to keep bubbling rather than being
+				// swallowed here. A keyboard open, and the right-click menu's
+				// "Edit variable" (`source: "menu"`), are both a deliberate,
+				// explicit request to edit - not an incidental gesture like
+				// hover or a plain click - so both need a *focused* instance,
+				// which this "closed" one is not: the gesture is answered by
+				// mounting a fresh one instead of opening this one.
+				if (source === "keyboard" || source === "menu") openWith("keyboard");
+				return false;
+			}}
+			onOpenChange={(open) => {
+				if (!open) setOpenMode(null);
+			}}
+			onMouseEnter={handleMouseEnter}
+			onMouseLeave={handleMouseLeave}
+			trigger={token}
 			triggerClassName={cn(
 				"inline cursor-pointer transition-colors rounded-md",
 				!resolved

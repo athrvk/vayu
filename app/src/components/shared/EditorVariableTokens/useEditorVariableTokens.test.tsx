@@ -9,9 +9,11 @@
  */
 
 /**
- * What one editor does with the tokens in its text: paints them, shows the one
- * under the pointer, opens one on a click, and binds the chord that opens the
- * one under the caret.
+ * What one editor does with the tokens in its text: paints them, opens the
+ * shared popover over the one the pointer rests on (issue #1220 hover
+ * redesign) - unfocused for an editable token, the read-only `TokenHoverCard`
+ * for a run-time one - and binds the chord that opens the one under the caret,
+ * focused.
  *
  * Driven against a Monaco stub rather than a real editor - the API surface used
  * here is six methods, and jsdom has no layout for the real one to measure. The
@@ -24,6 +26,10 @@
  * three - it has its own matcher (`lib/script-variable-tokens.ts`) - so the
  * cases below cover a script's per-accessor scoping, its `replaceIn(...)`
  * templates and its bare, muted, never-editable mentions too.
+ *
+ * A click opens nothing here any more - there is no `onMouseDown` handler left
+ * to test - so every case that used to open a token with a ⌘-click now does it
+ * through the hover delay or the edit chord instead.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -40,6 +46,7 @@ const variables: Record<string, ResolvedVariable> = {};
 let origins: VariableOrigin[] = [];
 
 const openTokenEditor = vi.fn();
+const closeTokenEditor = vi.fn();
 const setHoveredToken = vi.fn();
 
 const contextValue: EditorVariableTokensValue = {
@@ -50,6 +57,7 @@ const contextValue: EditorVariableTokensValue = {
 		}),
 	getVariableOrigins: () => origins,
 	openTokenEditor,
+	closeTokenEditor,
 	setHoveredToken,
 };
 
@@ -69,7 +77,6 @@ function stubEditor(lines: string[]) {
 		getLineContent: (lineNumber: number) => lines[lineNumber - 1] ?? "",
 	};
 	const handlers: {
-		mouse?: (e: Monaco.editor.IEditorMouseEvent) => void;
 		move?: (e: Monaco.editor.IEditorMouseEvent) => void;
 		leave?: () => void;
 		scroll?: () => void;
@@ -89,10 +96,6 @@ function stubEditor(lines: string[]) {
 		}),
 		onDidChangeModelContent: () => ({ dispose: () => {} }),
 		onDidChangeModel: () => ({ dispose: () => {} }),
-		onMouseDown: (cb: (e: Monaco.editor.IEditorMouseEvent) => void) => {
-			handlers.mouse = cb;
-			return { dispose: () => {} };
-		},
 		onMouseMove: (cb: (e: Monaco.editor.IEditorMouseEvent) => void) => {
 			handlers.move = cb;
 			return { dispose: () => {} };
@@ -157,22 +160,17 @@ function hoverAt(stub: ReturnType<typeof stubEditor>, column: number | null) {
 			target: { position: column === null ? null : { lineNumber: 1, column } },
 		} as unknown as Monaco.editor.IEditorMouseEvent);
 		vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+		// The listener `trackHoverContent` attaches is scheduled a tick after the
+		// open, via a real (non-fake) `setTimeout(0)` macrotask boundary - flushed
+		// by letting fake timers past it too.
+		vi.advanceTimersByTime(0);
 	});
-}
-
-/** A ⌘-click landing on `column` of the first line. */
-function metaClickAt(stub: ReturnType<typeof stubEditor>, column: number) {
-	const preventDefault = vi.fn();
-	stub.handlers.mouse?.({
-		event: { metaKey: true, ctrlKey: false, preventDefault },
-		target: { position: { lineNumber: 1, column } },
-	} as unknown as Monaco.editor.IEditorMouseEvent);
-	return preventDefault;
 }
 
 beforeEach(() => {
 	vi.useFakeTimers();
 	openTokenEditor.mockClear();
+	closeTokenEditor.mockClear();
 	setHoveredToken.mockClear();
 	for (const key of Object.keys(variables)) delete variables[key];
 	origins = [];
@@ -208,118 +206,228 @@ describe("useEditorVariableTokens", () => {
 		expect(stub.handlers.commands).toHaveLength(0);
 	});
 
-	it("shows the token the pointer rests on, over the token's own rectangle", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
+	describe("hovering an editable token", () => {
+		it("opens the shared popover, unfocused, over the token's own rectangle", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			mount(stub);
 
-		hoverAt(stub, 8);
-		expect(setHoveredToken).toHaveBeenCalledTimes(1);
-		expect(setHoveredToken.mock.calls[0][0]).toMatchObject({
-			name: "baseUrl",
-			rect: { left: 10 + 5 * 8, top: 24, height: 18 },
+			hoverAt(stub, 8);
+			expect(openTokenEditor).toHaveBeenCalledTimes(1);
+			expect(openTokenEditor.mock.calls[0][0]).toMatchObject({
+				name: "baseUrl",
+				focus: false,
+				rect: { left: 10 + 5 * 8, top: 24, height: 18 },
+			});
+			// Never the read-only tooltip - the two are mutually exclusive.
+			expect(setHoveredToken).not.toHaveBeenCalled();
+		});
+
+		it("reads one line per mouse move, not the whole model", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			mount(stub);
+
+			// The paint at install walks the model; the pointer must not.
+			stub.lineCount.mockClear();
+			hoverAt(stub, 8);
+			expect(openTokenEditor).toHaveBeenCalledTimes(1);
+			// Mutation check: scan with `variableTokenRanges` here and this fails -
+			// which is a full scan of a body that can be thousands of lines, per
+			// character of pointer travel.
+			expect(stub.lineCount).not.toHaveBeenCalled();
+		});
+
+		it("waits the tooltip delay out, so sweeping across a body opens nothing", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			mount(stub);
+
+			act(() => {
+				stub.handlers.move?.({
+					target: { position: { lineNumber: 1, column: 8 } },
+				} as unknown as Monaco.editor.IEditorMouseEvent);
+				vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS - 1);
+			});
+			// Mutation check: open on the move itself and this fails.
+			expect(openTokenEditor).not.toHaveBeenCalled();
+		});
+
+		it("stays open while the pointer moves inside the token it is showing", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			mount(stub);
+
+			hoverAt(stub, 8);
+			hoverAt(stub, 10);
+			// One open, and no take-down in between: re-arming the timer per character
+			// is a popover that never opens while the hand is not perfectly still.
+			expect(openTokenEditor).toHaveBeenCalledTimes(1);
+			expect(closeTokenEditor).not.toHaveBeenCalled();
+		});
+
+		/**
+		 * The leave-grace (issue #1220 hover redesign). A pointer that just moved
+		 * off the token - toward the popover's own content, to click its value
+		 * field or read a shadowed definition - must not have the popover pulled
+		 * out from under it the instant it leaves the token.
+		 */
+		describe("the leave-grace before it closes", () => {
+			it("does not close the instant the pointer leaves the token", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => {
+					stub.handlers.move?.({
+						target: { position: { lineNumber: 1, column: 1 } },
+					} as unknown as Monaco.editor.IEditorMouseEvent);
+				});
+				// Mutation check: close on the leave itself and this fails.
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+			});
+
+			it("closes once the grace period actually runs out", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => {
+					stub.handlers.move?.({
+						target: { position: { lineNumber: 1, column: 1 } },
+					} as unknown as Monaco.editor.IEditorMouseEvent);
+					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+				});
+				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
+			});
+
+			it("cancels the close when the pointer lands back on the token in time", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => {
+					stub.handlers.move?.({
+						target: { position: { lineNumber: 1, column: 1 } },
+					} as unknown as Monaco.editor.IEditorMouseEvent);
+					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS / 2);
+					stub.handlers.move?.({
+						target: { position: { lineNumber: 1, column: 8 } },
+					} as unknown as Monaco.editor.IEditorMouseEvent);
+					vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+				});
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+			});
+
+			it("takes the grace, not an immediate close, when the pointer leaves the editor entirely", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => stub.handlers.leave?.());
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+
+				act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
+			});
+
+			it("closes immediately on a scroll - the anchor rectangle is already stale", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				act(() => stub.handlers.scroll?.());
+				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
+			});
+		});
+
+		it("takes it down the moment the editor stops painting tokens at all", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			const rendered = mount(stub);
+
+			hoverAt(stub, 8);
+			// A body mode that left the languages with a matcher, with the popover
+			// still up - "http", `RawRequestResponse`'s own language, which (like
+			// every language absent from `VARIABLE_TOKEN_MATCHERS`) paints nothing.
+			act(() => rendered.rerender({ language: "http", readOnly: false }));
+			expect(closeTokenEditor).toHaveBeenCalledTimes(1);
+		});
+
+		it("closes it on unmount, rather than leaving it hanging over whatever replaces the editor", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(["GET {{baseUrl}}"]);
+			const rendered = mount(stub);
+
+			hoverAt(stub, 8);
+			act(() => rendered.unmount());
+			expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 		});
 	});
 
-	it("reads one line per mouse move, not the whole model", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
+	describe("hovering a run-time token", () => {
+		it("shows the read-only tooltip rather than opening the popover", () => {
+			const stub = stubEditor(["{{$guid}}"]);
+			mount(stub);
 
-		// The paint at install walks the model; the pointer must not.
-		stub.lineCount.mockClear();
-		hoverAt(stub, 8);
-		expect(setHoveredToken).toHaveBeenCalledTimes(1);
-		// Mutation check: scan with `variableTokenRanges` here and this fails -
-		// which is a full scan of a body that can be thousands of lines, per
-		// character of pointer travel.
-		expect(stub.lineCount).not.toHaveBeenCalled();
-	});
-
-	it("waits the tooltip delay out, so sweeping across a body opens nothing", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
-
-		act(() => {
-			stub.handlers.move?.({
-				target: { position: { lineNumber: 1, column: 8 } },
-			} as unknown as Monaco.editor.IEditorMouseEvent);
-			vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS - 1);
+			hoverAt(stub, 4);
+			expect(setHoveredToken).toHaveBeenCalledTimes(1);
+			expect(setHoveredToken.mock.calls[0][0]).toMatchObject({ name: "$guid" });
+			expect(openTokenEditor).not.toHaveBeenCalled();
 		});
-		// Mutation check: open on the move itself and this fails.
-		expect(setHoveredToken).not.toHaveBeenCalled();
+
+		it("takes the tooltip down off the token, on a scroll, and when the editor goes", () => {
+			// A leading character so column 1 sits *outside* the token - unlike
+			// `{{$guid}}` alone, where column 1 is its own first column.
+			const stub = stubEditor(["z {{$guid}}"]);
+			const rendered = mount(stub);
+
+			hoverAt(stub, 6);
+			act(() => {
+				stub.handlers.move?.({
+					target: { position: { lineNumber: 1, column: 1 } },
+				} as unknown as Monaco.editor.IEditorMouseEvent);
+			});
+			expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+			hoverAt(stub, 6);
+			act(() => stub.handlers.scroll?.());
+			expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+			hoverAt(stub, 6);
+			act(() => stub.handlers.leave?.());
+			expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+			hoverAt(stub, 6);
+			rendered.unmount();
+			expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+		});
+
+		it("never shows one in a read-only editor - a response body's `{{x}}` is data", () => {
+			const stub = stubEditor(["{{baseUrl}}"]);
+			mount(stub, { readOnly: true });
+			// The hook installs nothing there, so there is no handler to fire.
+			expect(stub.handlers.move).toBeUndefined();
+			hoverAt(stub, 4);
+			expect(setHoveredToken).not.toHaveBeenCalled();
+		});
 	});
 
-	it("stays open while the pointer moves inside the token it is showing", () => {
+	it("closes the tooltip when the edit chord opens a different token", () => {
 		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
+		const stub = stubEditor(["{{$guid}} {{baseUrl}}"]);
 		mount(stub);
 
-		hoverAt(stub, 8);
-		hoverAt(stub, 10);
-		// One open, and no take-down in between: re-arming the timer per character
-		// is a tooltip that never opens while the hand is not perfectly still.
-		expect(setHoveredToken.mock.calls).toEqual([
-			[expect.objectContaining({ name: "baseUrl" })],
-		]);
-	});
-
-	it("takes it down off the token, on a scroll, and when the editor goes", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		const rendered = mount(stub);
-
-		hoverAt(stub, 8);
-		hoverAt(stub, 2);
-		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
-
-		hoverAt(stub, 8);
-		act(() => stub.handlers.scroll?.());
-		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
-
-		hoverAt(stub, 8);
-		act(() => stub.handlers.leave?.());
-		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
-
-		hoverAt(stub, 8);
-		rendered.unmount();
-		// A card left hanging over whatever replaces the editor is the failure
-		// this one guards.
-		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
-	});
-
-	it("takes it down the moment the editor stops painting tokens at all", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		const rendered = mount(stub);
-
-		hoverAt(stub, 8);
-		// A body mode that left the languages with a matcher, with the card still
-		// up - "http", `RawRequestResponse`'s own language, which (like every
-		// language absent from `VARIABLE_TOKEN_MATCHERS`) paints nothing.
-		act(() => rendered.rerender({ language: "http", readOnly: false }));
-		// Mutation check: drop the `if (!enabled) hideHover()` and the card hangs
-		// there until some later pointer event happens to arrive.
-		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
-	});
-
-	it("never shows one in a read-only editor - a response body's `{{x}}` is data", () => {
-		const stub = stubEditor(["{{baseUrl}}"]);
-		mount(stub, { readOnly: true });
-		// The hook installs nothing there, so there is no handler to fire.
-		expect(stub.handlers.move).toBeUndefined();
 		hoverAt(stub, 4);
-		expect(setHoveredToken).not.toHaveBeenCalled();
-	});
+		expect(setHoveredToken).toHaveBeenCalledTimes(1);
 
-	it("closes the tooltip when the popover opens over the same token", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
-
-		hoverAt(stub, 8);
-		metaClickAt(stub, 8);
+		stub.moveCaretTo(15);
+		act(() => stub.handlers.commands[0].run());
 		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
 		expect(openTokenEditor).toHaveBeenCalledTimes(1);
 	});
@@ -387,6 +495,7 @@ describe("useEditorVariableTokens", () => {
 				name: "host",
 				scriptHint: { via: "bare" },
 			});
+			expect(openTokenEditor).not.toHaveBeenCalled();
 		});
 
 		it("never opens a popover for a bare template, even via the edit chord", () => {
@@ -403,12 +512,14 @@ describe("useEditorVariableTokens", () => {
 			const stub = stubEditor(['pm.environment.get("baseUrl");']);
 			mount(stub, { language: "javascript" });
 
-			// Column 21 is inside "baseUrl" - see `script-variable-tokens.test.ts`
+			// Column 22 is inside "baseUrl" - see `script-variable-tokens.test.ts`
 			// for the same offset math.
-			metaClickAt(stub, 22);
+			stub.moveCaretTo(22);
+			stub.handlers.commands[0].run();
 			expect(openTokenEditor).toHaveBeenCalledTimes(1);
 			expect(openTokenEditor.mock.calls[0][0]).toMatchObject({
 				name: "baseUrl",
+				focus: true,
 				scriptHint: { via: "scope", scope: "environment" },
 			});
 		});
@@ -421,58 +532,15 @@ describe("useEditorVariableTokens", () => {
 		expect(stub.handlers.commands).toHaveLength(0);
 	});
 
-	it("opens the token under a ⌘-click, over the token's own rectangle", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
-
-		const preventDefault = metaClickAt(stub, 8);
-		expect(preventDefault).toHaveBeenCalled();
-		expect(openTokenEditor).toHaveBeenCalledTimes(1);
-		const request = openTokenEditor.mock.calls[0][0];
-		expect(request.name).toBe("baseUrl");
-		// The editor's box plus the visible position of the token's first column.
-		expect(request.rect).toMatchObject({ left: 10 + 5 * 8, top: 24, height: 18 });
-	});
-
-	it("opens on a plain click too, without taking the caret from it", () => {
-		// The chord was the only way in while the Monaco hover spelled it out.
-		// Nothing spells it out now, and a painted token looks pressable.
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
-
-		const preventDefault = vi.fn();
-		stub.handlers.mouse?.({
-			event: { metaKey: false, ctrlKey: false, preventDefault },
-			target: { position: { lineNumber: 1, column: 8 } },
-		} as unknown as Monaco.editor.IEditorMouseEvent);
-		expect(openTokenEditor).toHaveBeenCalledTimes(1);
-		expect(openTokenEditor.mock.calls[0][0].name).toBe("baseUrl");
-		// Monaco still places the caret: only the modified click is prevented,
-		// so Escape hands focus back to where the click landed.
-		expect(preventDefault).not.toHaveBeenCalled();
-	});
-
-	it("leaves a click outside any token to the editor", () => {
-		variables.baseUrl = { value: "https://x", scope: "environment" };
-		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub);
-		stub.handlers.mouse?.({
-			event: { metaKey: false, ctrlKey: false, preventDefault: vi.fn() },
-			target: { position: { lineNumber: 1, column: 2 } },
-		} as unknown as Monaco.editor.IEditorMouseEvent);
-		expect(openTokenEditor).not.toHaveBeenCalled();
-	});
-
-	it("opens nothing for a run-time token, which has no stored variable", () => {
+	it("opens nothing for a run-time token, even via the edit chord", () => {
 		const stub = stubEditor(["{{$guid}}"]);
 		mount(stub);
-		metaClickAt(stub, 4);
+		stub.moveCaretTo(4);
+		stub.handlers.commands[0].run();
 		expect(openTokenEditor).not.toHaveBeenCalled();
 	});
 
-	it("binds the edit chord, and it reads the caret's own token", () => {
+	it("binds the edit chord, and it reads the caret's own token, focused", () => {
 		variables.baseUrl = { value: "https://x", scope: "environment" };
 		const stub = stubEditor(["GET {{baseUrl}} {{other}}"]);
 		mount(stub);
@@ -484,7 +552,7 @@ describe("useEditorVariableTokens", () => {
 		stub.moveCaretTo(8);
 		stub.handlers.commands[0].run();
 		expect(openTokenEditor).toHaveBeenCalledTimes(1);
-		expect(openTokenEditor.mock.calls[0][0].name).toBe("baseUrl");
+		expect(openTokenEditor.mock.calls[0][0]).toMatchObject({ name: "baseUrl", focus: true });
 
 		// And nothing when the caret is not in a token at all.
 		openTokenEditor.mockClear();
@@ -493,11 +561,12 @@ describe("useEditorVariableTokens", () => {
 		expect(openTokenEditor).not.toHaveBeenCalled();
 	});
 
-	it("hands focus back to the editor when the popover closes", () => {
+	it("hands focus back to the editor when a chord-opened popover closes", () => {
 		variables.baseUrl = { value: "https://x", scope: "environment" };
 		const stub = stubEditor(["GET {{baseUrl}}"]);
 		mount(stub);
-		metaClickAt(stub, 8);
+		stub.moveCaretTo(8);
+		stub.handlers.commands[0].run();
 		openTokenEditor.mock.calls[0][0].onClose();
 		expect(stub.editor.focus).toHaveBeenCalled();
 	});
