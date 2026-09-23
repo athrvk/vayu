@@ -266,23 +266,23 @@ cadence is the proxy that proves it was.
 
 ## Docs to keep in step
 
-| Doc                                 | Update it when you change…                                   |
-| ----------------------------------- | ------------------------------------------------------------ |
-| `docs/design-system.md`             | Any token value, colour rule, radius, or shared UI primitive |
+| Doc                                 | Update it when you change…                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| `docs/design-system.md`             | Any token value, colour rule, radius, or shared UI primitive                      |
 | `docs/ux-writing.md`                | Voice, error-message templates, terminology, or any user-facing string convention |
-| `docs/app/COMPONENTS.md`            | Adding or moving a module / shared component                 |
-| `docs/app/architecture.md`          | Renderer-side structural decisions                           |
-| `docs/app/state-management.md`      | Adding a store, changing query keys or cache policy          |
-| `docs/app/api-integration.md`       | Request/response shapes the renderer sends                   |
-| `docs/app/variable-resolution.md`   | Resolution order, scopes, the resolver hook                  |
-| `docs/app/import-collections/`      | Detectors, drafts, any format mapping                        |
-| `docs/app/pm-api-compatibility.md`  | Which `pm.*` APIs the runtime supports                       |
-| `docs/app/data-driven-runs.md`      | Data files, bound rows, `{{data.*}}`                         |
-| `docs/app/graphql.md`               | The GraphQL body mode, schema explorer, GET transport        |
-| `docs/app/openapi.md`               | Spec binding, sync, diff, export from the app's side         |
-| `docs/app/file-name-conventions.md` | The naming conventions themselves                            |
-| `docs/app/building.md`              | App build steps or tooling                                   |
-| `docs/engine/logging.md`            | The app's log record, categories, file names or the IPC path |
+| `docs/app/COMPONENTS.md`            | Adding or moving a module / shared component                                      |
+| `docs/app/architecture.md`          | Renderer-side structural decisions                                                |
+| `docs/app/state-management.md`      | Adding a store, changing query keys or cache policy                               |
+| `docs/app/api-integration.md`       | Request/response shapes the renderer sends                                        |
+| `docs/app/variable-resolution.md`   | Resolution order, scopes, the resolver hook                                       |
+| `docs/app/import-collections/`      | Detectors, drafts, any format mapping                                             |
+| `docs/app/pm-api-compatibility.md`  | Which `pm.*` APIs the runtime supports                                            |
+| `docs/app/data-driven-runs.md`      | Data files, bound rows, `{{data.*}}`                                              |
+| `docs/app/graphql.md`               | The GraphQL body mode, schema explorer, GET transport                             |
+| `docs/app/openapi.md`               | Spec binding, sync, diff, export from the app's side                              |
+| `docs/app/file-name-conventions.md` | The naming conventions themselves                                                 |
+| `docs/app/building.md`              | App build steps or tooling                                                        |
+| `docs/engine/logging.md`            | The app's log record, categories, file names or the IPC path                      |
 
 **A test that reads a file outside `app/` registers it in
 `src/lib/routed-inputs.testkit.ts`**: a page under `docs/` in
