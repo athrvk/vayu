@@ -148,6 +148,24 @@ interface Installation {
 	/** Counting down the leave-grace before a hover-opened popover closes. */
 	hoverCloseTimer?: ReturnType<typeof setTimeout>;
 	/**
+	 * Whether the pointer is confirmed to be over the hover-opened popover's own
+	 * content right now (issue #1220 leave-grace hardening).
+	 *
+	 * Monaco's own `onMouseLeave` fires twice for one physical pointer crossing
+	 * from the editor onto the popover - `PointerEventHandler` and `MouseHandler`
+	 * (monaco-editor's `controller/pointerHandler.js` and `mouseHandler.js`) each
+	 * attach their own leave listener to the same DOM node, for `pointerleave`
+	 * and native `mouseleave` respectively. The order observed is: Monaco's
+	 * first leave arms the close timer, the content's own `onContentMouseEnter`
+	 * cancels it, then Monaco's *second* leave re-arms it - with the pointer now
+	 * resting motionless on the content and nothing left to cancel that second
+	 * timer, so it fires and closes a popover the pointer never actually left.
+	 * Gating `scheduleHoverClose` on this flag, rather than trusting that a
+	 * cancel always arrives after every arm, makes the fix immune to how many
+	 * times either side's leave fires.
+	 */
+	pointerOnContent?: boolean;
+	/**
 	 * The spans `paint` last found, read back by `hoverAt` instead of scanning
 	 * again. A per-character mouse move used to re-scan the one line under the
 	 * pointer; a script's spans are not line-local (a `replaceIn(...)` argument
@@ -234,6 +252,7 @@ export function useEditorVariableTokens({
 		current.hoverTimer = undefined;
 		clearTimeout(current.hoverCloseTimer);
 		current.hoverCloseTimer = undefined;
+		current.pointerOnContent = false;
 		if (current.hoverOpenKey !== undefined) {
 			current.hoverOpenKey = undefined;
 			live.current.tokens?.closeTokenEditor();
@@ -256,6 +275,10 @@ export function useEditorVariableTokens({
 	const scheduleHoverClose = useCallback(() => {
 		const current = installation.current;
 		if (!current || current.hoverOpenKey === undefined) return;
+		// The pointer is confirmed on the content right now - see `pointerOnContent`'s
+		// own comment for why this cannot instead trust that every arm is paired
+		// with a later cancel.
+		if (current.pointerOnContent) return;
 		clearTimeout(current.hoverCloseTimer);
 		current.hoverCloseTimer = setTimeout(() => {
 			const content = document.querySelector<HTMLElement>(POPOVER_CONTENT_SELECTOR);
@@ -326,6 +349,10 @@ export function useEditorVariableTokens({
 					return;
 				}
 				current.hoverOpenKey = key;
+				// A fresh open, however the previous one ended - never inherit a
+				// stale flag from a token whose content the pointer never actually
+				// left before this one took over.
+				current.pointerOnContent = false;
 				context.openTokenEditor({
 					name: range.name,
 					rect,
@@ -341,9 +368,19 @@ export function useEditorVariableTokens({
 					// content, and restart it once the pointer leaves the content
 					// again - ordinary props on `VariablePopover`'s own content, wired
 					// through the provider, rather than this hook reaching for the
-					// node itself once it exists.
-					onContentMouseEnter: () => clearTimeout(current.hoverCloseTimer),
-					onContentMouseLeave: () => scheduleHoverClose(),
+					// node itself once it exists. `pointerOnContent` is set here and
+					// read inside `scheduleHoverClose` itself (see that flag's own
+					// comment) rather than trusted to a plain `clearTimeout`, because
+					// Monaco's own leave can fire again afterward and re-arm the timer
+					// with the pointer still on the content.
+					onContentMouseEnter: () => {
+						current.pointerOnContent = true;
+						clearTimeout(current.hoverCloseTimer);
+					},
+					onContentMouseLeave: () => {
+						current.pointerOnContent = false;
+						scheduleHoverClose();
+					},
 				});
 			}, TIMING.TOOLTIP_DELAY_MS);
 		},

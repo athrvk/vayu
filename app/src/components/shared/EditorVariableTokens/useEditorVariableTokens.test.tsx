@@ -357,6 +357,38 @@ describe("useEditorVariableTokens", () => {
 				expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 			});
 
+			/**
+			 * Monaco's own `onMouseLeave` fires twice for one physical pointer
+			 * crossing from the editor onto the popover - `PointerEventHandler` and
+			 * `MouseHandler` each attach their own leave listener to the same DOM
+			 * node, for `pointerleave` and native `mouseleave` respectively (see
+			 * `pointerOnContent`'s own comment in `useEditorVariableTokens.ts`).
+			 * A version of this hook that only cleared the close timer on content
+			 * enter - rather than gating `scheduleHoverClose` on a flag - let the
+			 * *second* leave re-arm a timer with the pointer already resting on the
+			 * content and nothing left to cancel it: reproduced live, a popover the
+			 * pointer never left closed anyway.
+			 */
+			it("a second editor leave after the content was already entered does not re-arm the close", () => {
+				variables.baseUrl = { value: "https://x", scope: "environment" };
+				const stub = stubEditor(["GET {{baseUrl}}"]);
+				mount(stub);
+
+				hoverAt(stub, 8);
+				// Monaco's first leave (`pointerleave`): arms the close timer.
+				act(() => stub.handlers.leave?.());
+				// The content confirms the pointer arrived: cancels it.
+				const request = openTokenEditor.mock.calls[0][0];
+				act(() => request.onContentMouseEnter());
+				// Monaco's second leave (native `mouseleave`), for the same crossing -
+				// the pointer never actually moved again.
+				act(() => stub.handlers.leave?.());
+				act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+				// Mutation check: drop the `pointerOnContent` guard in
+				// `scheduleHoverClose` and this fails.
+				expect(closeTokenEditor).not.toHaveBeenCalled();
+			});
+
 			it("takes the grace, not an immediate close, when the pointer leaves the editor entirely", () => {
 				variables.baseUrl = { value: "https://x", scope: "environment" };
 				const stub = stubEditor(["GET {{baseUrl}}"]);
