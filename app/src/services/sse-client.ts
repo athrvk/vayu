@@ -414,7 +414,11 @@ export class SSEClient {
 				// For CONNECTING state errors, wait - the browser will retry.
 			});
 		} catch (error) {
-			onError(error instanceof Error ? error : new Error("Failed to connect to SSE"));
+			onError(
+				error instanceof Error
+					? error
+					: new Error("Couldn't connect to the engine's event stream.")
+			);
 		}
 	}
 

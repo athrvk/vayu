@@ -271,7 +271,7 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({
 					kind: NOTIFY_KINDS.loadRunFinished,
-					body: "The run ended, but its report could not be read.",
+					body: "Couldn't read this run's report.",
 				})
 			);
 		});
@@ -441,7 +441,7 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({
 					kind: NOTIFY_KINDS.loadRunFailed,
-					body: "The run ended, but its report could not be read.",
+					body: "Couldn't read this run's report.",
 				})
 			);
 		});

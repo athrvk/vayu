@@ -419,7 +419,7 @@ class LoadTestService {
 			this.notifyTerminal(
 				runId,
 				failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
-				summary ?? "The run ended, but its report could not be read."
+				summary ?? "Couldn't read this run's report."
 			);
 			// The run has reached a terminal state, so the lists that carry its
 			// status are stale until the next 5s poll - and once the user has
