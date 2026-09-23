@@ -346,7 +346,9 @@ describe("an inbox row", () => {
 		expect(await screen.findByText(/37 recorded requests/i)).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 
-		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+		fireEvent.click(
+			within(screen.getByRole("dialog")).getByRole("button", { name: "Delete inbox" })
+		);
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
 	});
 
