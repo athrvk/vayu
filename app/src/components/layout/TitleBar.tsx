@@ -374,8 +374,8 @@ function EnvSwitcher() {
 					showToast({
 						message:
 							error instanceof Error
-								? `Could not switch environment: ${error.message}`
-								: "Could not switch environment",
+								? `Couldn't switch environment: ${error.message}`
+								: "Couldn't switch environment",
 						variant: "error",
 					}),
 			}
@@ -428,7 +428,7 @@ function EnvSwitcher() {
 					aria-label="Switch environment"
 				>
 					<Cloud className="size-icon-sm shrink-0" />
-					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
+					<span className="truncate">{activeEnv?.name ?? "No environment"}</span>
 					{/* Inherits the control's colour: the old `opacity-60` was a magic
 					    number that fought the tinted state, dimming an already-tinted
 					    foreground a second time. */}
@@ -443,21 +443,21 @@ function EnvSwitcher() {
 					className="group text-xs gap-2"
 				>
 					<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
-					<span className="flex-1">New Environment</span>
+					<span className="flex-1">New environment</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem
 					onClick={openImport}
-					// `group`: same as the New Environment item above - a
+					// `group`: same as the New environment item above - a
 					// DropdownMenuItem is not a `[data-slot="button"]`, so the item
 					// has to be the owner whose hover the glyph answers.
 					className="group text-xs gap-2"
 				>
 					<Download className="size-icon-sm" data-icon-motion={ICON_MOTION.drop} />
-					<span className="flex-1">Import Environment...</span>
+					<span className="flex-1">Import environment…</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
-					<span className="flex-1">No Environment</span>
+					<span className="flex-1">No environment</span>
 					{!activeEnv && <Check className="size-icon-sm" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (

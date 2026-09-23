@@ -12,8 +12,8 @@
  * is: what a tab is called and what a tab can do are both answers this strip
  * gives, and both are wanted by more than one surface eventually.
  *
- * **Every close here is a store action, never a loop in this file.** Close
- * Others and Close to the Right each remove a set, and the store closes a set
+ * **Every close here is a store action, never a loop in this file.** "Close
+ * others" and "Close to the right" each remove a set, and the store closes a set
  * in one publication with one recorded visit (`tabs-store.ts`); a loop of
  * `closeTab` calls would walk Back through tabs the user never opened.
  *
@@ -48,7 +48,7 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 	return [
 		{ label: "Close", icon: X, onSelect: () => closeTab(tab.id) },
 		{
-			label: "Close Others",
+			label: "Close others",
 			icon: XCircle,
 			onSelect: () => closeOtherTabs(tab.id),
 			// Offered but inert with one tab open would be a menu item that does
@@ -56,13 +56,13 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 			disabled: openTabs.length < 2,
 		},
 		{
-			label: "Close to the Right",
+			label: "Close to the right",
 			icon: ChevronsRight,
 			onSelect: () => closeTabsToRight(tab.id),
 			disabled: isLast,
 		},
 		{
-			label: "Close Saved",
+			label: "Close saved",
 			icon: CheckCheck,
 			onSelect: closeSavedTabs,
 		},
@@ -71,7 +71,7 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 		...(descriptor.path
 			? [
 					{
-						label: "Copy Path",
+						label: "Copy path",
 						icon: Copy,
 						onSelect: () => void copy(descriptor.path ?? "", "Path"),
 					},

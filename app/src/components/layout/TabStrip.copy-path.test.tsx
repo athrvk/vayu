@@ -86,7 +86,7 @@ describe("Copy Path", () => {
 		);
 
 		fireEvent.contextMenu(document.querySelector<HTMLElement>('[data-tab-id="t1"]')!);
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Copy Path" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Copy path" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
 		expect(writeText).toHaveBeenCalledWith("Acme API / Billing / Get customer");

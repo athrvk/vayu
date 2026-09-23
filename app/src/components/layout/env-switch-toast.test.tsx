@@ -154,7 +154,7 @@ describe("environment switch notification", () => {
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
 		renderTitleBar(TitleBar);
 		const menu = openMenu();
-		fireEvent.click(menu.getByText("No Environment"));
+		fireEvent.click(menu.getByText("No environment"));
 
 		expect(useSessionStore.getState().activeEnvironmentId).toBeNull();
 		await waitFor(() => expect(messages()).toEqual(["Environment cleared"]));
@@ -175,7 +175,7 @@ describe("environment switch notification", () => {
 		fireEvent.click(menu.getByText("Staging"));
 
 		await waitFor(() =>
-			expect(messages()).toEqual(["Could not switch environment: engine unreachable"])
+			expect(messages()).toEqual(["Couldn't switch environment: engine unreachable"])
 		);
 		expect(useToastStore.getState().toasts[0].variant).toBe("error");
 		expect(useSessionStore.getState().activeEnvironmentId).toBe("env-2");
@@ -193,7 +193,7 @@ describe("environment switch notification", () => {
 	it("stays quiet when No Environment is re-picked from cleared", () => {
 		renderTitleBar(TitleBar);
 		const menu = openMenu();
-		fireEvent.click(menu.getByText("No Environment"));
+		fireEvent.click(menu.getByText("No environment"));
 
 		expect(messages()).toEqual([]);
 	});

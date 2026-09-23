@@ -74,7 +74,7 @@ describe("a tab's right-click menu", () => {
 		const menu = await openMenuOn("t2");
 
 		expect(menu).toBeInTheDocument();
-		for (const label of ["Close", "Close Others", "Close to the Right", "Close Saved"]) {
+		for (const label of ["Close", "Close others", "Close to the right", "Close saved"]) {
 			expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
 		}
 	});
@@ -92,7 +92,7 @@ describe("a tab's right-click menu", () => {
 		renderStrip();
 
 		await openMenuOn("t2");
-		await choose("Close Others");
+		await choose("Close others");
 
 		await waitFor(() => expect(openTabIds()).toEqual(["t2"]));
 	});
@@ -101,7 +101,7 @@ describe("a tab's right-click menu", () => {
 		renderStrip();
 
 		await openMenuOn("t2");
-		await choose("Close to the Right");
+		await choose("Close to the right");
 
 		await waitFor(() => expect(openTabIds()).toEqual(["t1", "t2"]));
 	});
@@ -117,7 +117,7 @@ describe("a tab's right-click menu", () => {
 		renderStrip();
 
 		await openMenuOn("t1");
-		await choose("Close Saved");
+		await choose("Close saved");
 
 		// t2 is the Settings tab, whose editor is the dirty one.
 		await waitFor(() => expect(openTabIds()).toEqual(["t2"]));
@@ -130,10 +130,10 @@ describe("a tab's right-click menu", () => {
 		await openMenuOn("t1");
 
 		// One tab open: nothing else to close, and nothing to its right.
-		expect(screen.getByRole("menuitem", { name: "Close Others" })).toHaveAttribute(
+		expect(screen.getByRole("menuitem", { name: "Close others" })).toHaveAttribute(
 			"data-disabled"
 		);
-		expect(screen.getByRole("menuitem", { name: "Close to the Right" })).toHaveAttribute(
+		expect(screen.getByRole("menuitem", { name: "Close to the right" })).toHaveAttribute(
 			"data-disabled"
 		);
 	});
@@ -144,7 +144,7 @@ describe("a tab's right-click menu", () => {
 		await openMenuOn("t3");
 
 		// A singleton tab is not in a collection, so there is no path to copy.
-		expect(screen.queryByRole("menuitem", { name: "Copy Path" })).toBeNull();
+		expect(screen.queryByRole("menuitem", { name: "Copy path" })).toBeNull();
 	});
 
 	it("marks a tab so the main process draws no edit menu over it", () => {

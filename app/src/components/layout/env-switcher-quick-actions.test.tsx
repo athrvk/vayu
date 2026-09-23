@@ -85,7 +85,7 @@ describe("environment switcher quick actions", () => {
 	it("creates a new environment and opens the Variables editor on it, without activating it", async () => {
 		renderTitleBar();
 		const menu = openMenu();
-		fireEvent.click(menu.getByText("New Environment"));
+		fireEvent.click(menu.getByText("New environment"));
 
 		expect(createEnvironment).toHaveBeenCalledWith({ name: "New Environment", variables: {} });
 		await vi.waitFor(() =>
@@ -104,7 +104,7 @@ describe("environment switcher quick actions", () => {
 	it("opens the import dialog from Import Environment...", () => {
 		renderTitleBar();
 		const menu = openMenu();
-		fireEvent.click(menu.getByText("Import Environment..."));
+		fireEvent.click(menu.getByText("Import environment…"));
 
 		expect(useImportModalStore.getState().isOpen).toBe(true);
 	});
