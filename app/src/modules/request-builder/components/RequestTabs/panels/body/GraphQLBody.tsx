@@ -81,6 +81,7 @@ import {
 	type VariablesForm,
 } from "@/lib/graphql/graphql-body";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface GraphQLBodyProps {
 	body: string;
@@ -758,7 +759,7 @@ export function GraphQLBody({
 		pendingCursor.current = result.cursor;
 
 		const unwritten = merged.pending.length
-			? ` ${merged.pending.length} ${merged.pending.length === 1 ? "variable needs" : "variables need"} a value: ${merged.pending.join(", ")}.`
+			? ` ${merged.pending.length} ${pluralize(merged.pending.length, "variable needs", "variables need")} a value: ${merged.pending.join(", ")}.`
 			: "";
 		announce(`Inserted ${result.label} ${PLACEMENT_PHRASE[result.placement]}.${unwritten}`);
 	};
@@ -963,7 +964,7 @@ function PendingVariablesBadge({ names }: { names: string[] }) {
 			title={`The Variables pane is not plain JSON, so these were not added: ${names.join(", ")}.`}
 		>
 			<AlertCircle className="size-icon-sm" />
-			{`${names.length} ${names.length === 1 ? "variable needs" : "variables need"} a value`}
+			{`${names.length} ${pluralize(names.length, "variable needs", "variables need")} a value`}
 		</BadgeText>
 	);
 }

@@ -27,6 +27,7 @@
  */
 
 import { useState } from "react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useRequestBuilderContext } from "../context";
 
 function formatMs(ms: number): string {
@@ -78,7 +79,7 @@ export default function ResponseAnnouncer() {
 				const failed = tests.filter((t) => !t.passed).length;
 				parts.push(
 					failed === 0
-						? `${tests.length} ${tests.length === 1 ? "test" : "tests"} passed`
+						? `${tests.length} ${pluralize(tests.length, "test")} passed`
 						: `${failed} of ${tests.length} tests failed`
 				);
 			}
