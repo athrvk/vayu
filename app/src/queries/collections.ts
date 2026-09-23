@@ -639,7 +639,7 @@ export function useReorderMutation() {
 			}
 			useSaveStore
 				.getState()
-				.failSave(error instanceof Error ? error.message : "Failed to reorder");
+				.failSave(error instanceof Error ? error.message : "Couldn't reorder.");
 		},
 		onSettled: (_data, _error, _plan, context) => {
 			if (context?.keys.touchesCollections) {
