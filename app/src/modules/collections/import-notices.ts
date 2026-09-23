@@ -116,8 +116,8 @@ const COPY: Partial<Record<string, Copy>> = {
 	default_response: HIDDEN,
 	external_ref: {
 		tier: "action",
-		one: "1 referenced file could not be read - its bodies are empty",
-		many: "{n} referenced files could not be read - their bodies are empty",
+		one: "1 referenced file couldn't be read - its bodies are empty",
+		many: "{n} referenced files couldn't be read - their bodies are empty",
 	},
 	// The request imports whole; only its sync identity is its path.
 	duplicate_operation_id: HIDDEN,
