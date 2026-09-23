@@ -5358,7 +5358,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Export a collection as an OpenAPI document - its own bound document updated, or a skeleton describing its requests when it binds none. Reads only: nothing is stored, and the collection is left exactly as it is. A bound export patches the stored document, so everything Vayu does not model (vendor extensions, security schemes, unreferenced components) survives and operations no request claims are removed; a skeleton is a starting point rather than a contract, with no schema Vayu did not read off a stored example body. `notes` says what the export could not carry - a request with no operation identity, an example whose media type nobody recorded - and the document text is capped at 32 KB with `contentBytes` reporting the true size, so a large spec comes back described rather than whole.",
+			"Export a collection as an OpenAPI document - its own bound document updated, or a skeleton describing its requests when it binds none. Reads only: nothing is stored, and the collection is left exactly as it is. A bound export patches the stored document, so everything Vayu does not model (vendor extensions, security schemes, unreferenced components) survives and operations no request claims are removed; a skeleton is a starting point rather than a contract, with no schema Vayu did not read off a stored example body. A bound export keeps the contract by default (examples and parameter values only); `mode` set to `full` writes every edit the collection holds into the document instead - names, new rows, bodies, auth, and new operations for requests the document never declared. Everything OpenAPI has no member for (folders, scripts, settings, variables) travels as `x-vayu-*` extensions Vayu reads back, and secrets are exported empty. `notes` says what the export could not carry - a request with no operation identity, an example whose media type nobody recorded, how many secrets it left out - and the document text is capped at 32 KB with `contentBytes` reporting the true size, so a large spec comes back described rather than whole.",
 		annotations: {
 			title: "Export collection as OpenAPI",
 			readOnlyHint: true,
@@ -5375,13 +5375,20 @@ export const TOOLS: McpTool[] = [
 				.enum(["json", "yaml"])
 				.optional()
 				.describe('Serialization to write. Defaults to "json".'),
+			mode: z
+				.enum(["contract", "full"])
+				.optional()
+				.describe(
+					'What a bound export may write. "contract" (default) keeps the stored document as the contract and writes only examples and parameter values; "full" writes every edit the collection holds. Ignored for a collection bound to no document.'
+				),
 		},
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const format = str(args, "format") || "json";
+			const mode = str(args, "mode") || "contract";
 			let exported: unknown;
 			try {
-				exported = await ctx.client.exportSpec(collectionId, format, signal);
+				exported = await ctx.client.exportSpec(collectionId, format, mode, signal);
 			} catch (err) {
 				// The engine's own sentence, which is the useful one here: a 404
 				// names the collection, and a 409 names the binding whose document
@@ -5394,6 +5401,7 @@ export const TOOLS: McpTool[] = [
 			return jsonResult({
 				collectionId,
 				format,
+				mode,
 				fileName: answer.fileName ?? null,
 				notes: answer.notes ?? null,
 				document: bounded,

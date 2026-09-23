@@ -8281,7 +8281,7 @@ describe("OpenAPI spec binding tools", () => {
 			ctxWith(client)
 		);
 		expect(res.isError).toBeFalsy();
-		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "yaml", undefined);
+		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "yaml", "contract", undefined);
 		// The assembly is the engine's, so nothing here reads the collection, its
 		// requests or the document it is bound to - one call is the whole tool.
 		expect(client.listRequests).not.toHaveBeenCalled();
@@ -8305,7 +8305,7 @@ describe("OpenAPI spec binding tools", () => {
 				.mockResolvedValue({ text: document, fileName: "api.openapi.json", notes: {} }),
 		});
 		const res = await dispatchTool("export_spec", { collectionId: "col_1" }, ctxWith(client));
-		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "json", undefined);
+		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "json", "contract", undefined);
 		const value = JSON.parse(firstText(res));
 		expect(Buffer.byteLength(value.document, "utf8")).toBeLessThanOrEqual(
 			MAX_INLINE_BODY_BYTES
@@ -8314,6 +8314,18 @@ describe("OpenAPI spec binding tools", () => {
 		// The cut says what it is a prefix of - a length read off the truncated
 		// text would tell an agent the document is 32 KB.
 		expect(value.contentBytes).toBe(document.length);
+	});
+
+	test("export_spec asks for a write-everything export when told to", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"export_spec",
+			{ collectionId: "col_1", mode: "full" },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "json", "full", undefined);
+		expect(JSON.parse(firstText(res)).mode).toBe("full");
 	});
 
 	test("export_spec passes the engine's refusal through rather than inventing one", async () => {

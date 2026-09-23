@@ -59,15 +59,10 @@ function notes(overrides: Partial<ExportNotes> = {}): ExportNotes {
 		rowsNotDeclared: 0,
 		operationsEdited: 0,
 		vocabularyNotWritten: false,
-		authDropped: 0,
-		scriptsDropped: 0,
-		variablesDropped: 0,
-		foldersFlattened: 0,
-		bodiesDropped: 0,
-		formValuesDropped: 0,
-		settingsDropped: 0,
-		exampleHeadersDropped: 0,
-		duplicateParameterRowsDropped: 0,
+		secretsOmitted: 0,
+		requestsOnlyInExtension: 0,
+		operationsAdded: 0,
+		boundMode: "contract",
 		...overrides,
 	};
 }
@@ -81,7 +76,7 @@ function answer(overrides: Partial<SpecExportResponse> = {}): SpecExportResponse
 	};
 }
 
-function collection(): Collection {
+function collection(overrides: Partial<Collection> = {}): Collection {
 	return {
 		id: "col_1",
 		name: "Petstore",
@@ -92,6 +87,7 @@ function collection(): Collection {
 		elements: [],
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
+		...overrides,
 	};
 }
 
@@ -121,9 +117,16 @@ function captureDownload() {
 	};
 }
 
-function open() {
-	render(withQueryClient(<ExportSpecDialog collection={collection()} onOpenChange={vi.fn()} />));
+function open(overrides: Partial<Collection> = {}) {
+	render(
+		withQueryClient(
+			<ExportSpecDialog collection={collection(overrides)} onOpenChange={vi.fn()} />
+		)
+	);
 }
+
+/** A collection bound to a stored document - the one kind asked how much to write. */
+const BOUND: Partial<Collection> = { openapi: { specId: "spec_1", specHash: "h", syncedAt: 1 } };
 
 /**
  * The one question both in-flight indicators answer (issue #1311): the
@@ -161,7 +164,7 @@ describe("ExportSpecDialog", () => {
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
 		expect(lines).toContain("1 operation removed - nothing here claims it");
 		expect(lines).toContain(
-			"1 request with no operation identity - not written, bind the collection to give them one"
+			"1 request with no operation identity - not written; choose Write everything to add it"
 		);
 		expect(lines).toContain("1 request exported as an operation");
 	});
@@ -191,7 +194,7 @@ describe("ExportSpecDialog", () => {
 			"1 $ref response left as it is - a reference takes no siblings, and the component it names is shared"
 		);
 		expect(lines).toContain(
-			"3 requests whose body is not written - this direction writes parameters and examples"
+			"3 requests whose body is not written - this mode writes parameters and examples"
 		);
 		expect(lines).toContain("1 row the operation declares no parameter for - not written");
 		expect(lines).toContain(
@@ -217,7 +220,11 @@ describe("ExportSpecDialog", () => {
 		);
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
 		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
-		expect(exportSpec.mock.calls[1][0]).toEqual({ collectionId: "col_1", format: "yaml" });
+		expect(exportSpec.mock.calls[1][0]).toEqual({
+			collectionId: "col_1",
+			format: "yaml",
+			mode: "contract",
+		});
 		// The other format is a second read, not a re-render: the in-flight
 		// indicator going away is what says its answer is the one Download holds.
 		await waitFor(() => expect(assembling()).toBeNull());
@@ -246,55 +253,68 @@ describe("ExportSpecDialog", () => {
 		expect(screen.getByText(/OpenAPI 3.1.0/)).toBeTruthy();
 	});
 
-	it("names what a free-form export could not carry, singular and plural alike", async () => {
+	it("names what a free-form export carries only as an extension, and the secrets it left out", async () => {
 		exportSpec.mockResolvedValue(
 			answer({
 				notes: notes({
 					direction: "skeleton",
 					dialect: "OpenAPI 3.1.0",
+					boundMode: "",
 					operationsRemoved: 0,
 					requestsWithoutOperation: 0,
-					authDropped: 1,
-					scriptsDropped: 2,
-					variablesDropped: 3,
-					foldersFlattened: 1,
-					bodiesDropped: 1,
-					formValuesDropped: 1,
-					settingsDropped: 1,
-					exampleHeadersDropped: 2,
-					duplicateParameterRowsDropped: 1,
+					requestsOnlyInExtension: 1,
+					secretsOmitted: 3,
 				}),
 			})
 		);
 		open();
 
 		expect(await screen.findByText(/A skeleton document/)).toBeTruthy();
+		expect(screen.getByText(/rides along as x-vayu extensions/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
 		expect(lines).toContain(
-			"1 row sharing a key and location with an earlier row - only the first is declared"
+			"1 request with no path of its own, or sharing one another request claimed - carried only in the x-vayu extension"
 		);
 		expect(lines).toContain(
-			"1 request whose auth OpenAPI has no securityScheme for - not written"
+			"3 secrets left out - tokens, passwords and secret variables are exported empty"
 		);
+		// A skeleton has no document of its own: nothing was removed from one.
+		expect(lines.some((line) => line?.includes("removed - nothing here claims it"))).toBe(
+			false
+		);
+	});
+
+	it("asks a bound collection how much to write, and keeps the contract by default", async () => {
+		open(BOUND);
+		await screen.findByText(/own document, updated/);
+		expect(exportSpec.mock.calls[0][0].mode).toBe("contract");
+
+		exportSpec.mockResolvedValue(
+			answer({ notes: notes({ boundMode: "full", operationsAdded: 2, secretsOmitted: 1 }) })
+		);
+		fireEvent.click(screen.getByRole("radio", { name: "Write everything" }));
+		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
+		expect(exportSpec.mock.calls[1][0]).toEqual({
+			collectionId: "col_1",
+			format: "json",
+			mode: "full",
+		});
+		expect(await screen.findByText(/with every edit written in/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain("2 operations added for a request the document never declared");
 		expect(lines).toContain(
-			"2 requests carrying a pre- or post-request script - OpenAPI has no operation-scoped hook for one"
+			"1 secret left out - tokens, passwords and secret variables are exported empty"
 		);
-		expect(lines).toContain(
-			"3 collection variables besides baseUrl - a document has nowhere else to declare one"
+		// The contract mode's "not written" lines say nothing about this one.
+		expect(lines.some((line) => line?.includes("not written; choose Write everything"))).toBe(
+			false
 		);
-		expect(lines).toContain(
-			"1 request whose folder nests more than one level - written as a single flat tag"
-		);
-		expect(lines).toContain(
-			"1 request whose body is in a mode this direction has no media type for"
-		);
-		expect(lines).toContain(
-			"1 request whose form body declares field names but not their values"
-		);
-		expect(lines).toContain(
-			"1 request carrying a non-default execution setting - redirects, TLS, HTTP version, streaming"
-		);
-		expect(lines).toContain("2 examples carrying a header besides Content-Type - not written");
+	});
+
+	it("does not ask a free-form collection how much to write", async () => {
+		open();
+		await screen.findByText(/own document, updated/);
+		expect(screen.queryByRole("radio", { name: "Write everything" })).toBeNull();
 	});
 
 	it("shows the engine's own sentence when there is no document, and downloads nothing", async () => {
@@ -354,12 +374,11 @@ describe("ExportSpecDialog", () => {
 		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
 		expect(placeholder.className).toContain("surface-sunken");
 		// A heading bar, two for the paragraph that wraps under it, and a row per
-		// count. The skeleton direction lists one more row than the bound
-		// direction since issue #1465 (fifteen vs fourteen), and the placeholder
-		// holds the larger of the two so neither answer grows the dialog when it
-		// lands. jsdom measures no heights, so the row counts those heights come
-		// from are what a test can hold.
-		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(18);
+		// count of the longest list - a bound export keeping its contract, at
+		// fourteen - so no answer grows the dialog when it lands. jsdom measures
+		// no heights, so the row counts those heights come from are what a test
+		// can hold.
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(17);
 
 		first.settle(answer());
 		expect(await screen.findByText(/own document, updated/)).toBeTruthy();

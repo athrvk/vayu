@@ -20,6 +20,7 @@ import { boundCollections, type BoundSpec } from "@/services/openapi/bound-spec-
 import type {
 	Collection,
 	ExportFormat,
+	ExportMode,
 	Request,
 	SpecBindResponse,
 	SpecDiffRequest,
@@ -297,11 +298,15 @@ export function useSpecMatchQuery(
  * placeholder is the previous format's answer, and `isFetching` is what the
  * dialog shows while the new one is in flight.
  */
-export function useSpecExportQuery(collectionId: string, format: ExportFormat) {
+export function useSpecExportQuery(
+	collectionId: string,
+	format: ExportFormat,
+	mode: ExportMode = "contract"
+) {
 	const [opened] = useState(() => Date.now());
 	return useQuery({
-		queryKey: queryKeys.specs.export(collectionId, format, opened),
-		queryFn: () => apiService.exportSpec({ collectionId, format }),
+		queryKey: queryKeys.specs.export(collectionId, format, mode, opened),
+		queryFn: () => apiService.exportSpec({ collectionId, format, mode }),
 		placeholderData: keepPreviousData,
 		staleTime: Infinity,
 		retry: false,

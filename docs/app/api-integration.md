@@ -393,7 +393,8 @@ requests, because an OpenAPI import files them under tag sub-collections and the
 engine gathers the whole subtree itself.
 
 `exportSpec` is a read for the same reason and sends even less (issue #855): a
-collection id and a format. The engine reads the subtree, each request's stored
+collection id, a format, and - for a bound collection - the mode the user chose
+(`contract` or `full`). The engine reads the subtree, each request's stored
 examples and the bound document - which is the point, since a bound export
 *patches* those stored bytes - and answers with the finished text, a file name
 and the notes the dialog prints. A `409` there is a binding whose document is

@@ -177,6 +177,7 @@ function flatten(
 		variables: c.variables,
 		auth: c.auth,
 		elements: c.elements,
+		...(c.dataSchema !== undefined ? { dataSchema: c.dataSchema } : {}),
 		...(specTempId ? { openapi: { specTempId } } : {}),
 	});
 
