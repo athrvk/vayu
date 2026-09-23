@@ -46,8 +46,8 @@
  *     forward-delete, Fn+Delete, which effectively nobody presses - so a
  *     `"Delete"`-only handler is dead on macOS. Both are accepted here on every
  *     platform rather than behind an `isMac` fork: Backspace-to-delete is
- *     standard list behaviour, and the control this clicks opens the
- *     confirm dialog, so a mistaken press costs a dialog rather than data.
+ *     standard list behaviour, and the control this clicks is a soft delete
+ *     with an undo toast, so a mistaken press costs an Undo rather than data.
  *   - Mac keyboards have no Menu key, and F10 is a media key by default, so the
  *     row menu had no keyboard path at all there. **Shift+Enter** is the third
  *     one; plain Enter still activates.

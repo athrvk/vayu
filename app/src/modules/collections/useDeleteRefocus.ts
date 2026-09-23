@@ -28,8 +28,8 @@ import { TREE_ITEM, focusTreeRow, rowAfterRemoving } from "./tree-focus";
  * which attribute identifies a row and where an emptied tree hands focus, so
  * those are the parameters.
  *
- * @param doomedSelector matches the row the open dialog would remove, `null`
- *   when no dialog is open. The caller spells it, because only the caller knows
+ * @param doomedSelector matches the row the pending delete would remove, `null`
+ *   when none is pending. The caller spells it, because only the caller knows
  *   which attribute carries its ids.
  * @param lastResort where focus goes when the tree can name no successor at all
  *   - the row deleted was the only one left. `null` says the tree cannot reach
@@ -41,7 +41,7 @@ export function useDeleteRefocus(
 	doomedSelector: string | null,
 	lastResort: RefObject<HTMLElement | null> | null
 ) {
-	const { capture, onCloseAutoFocus } = useRemovalRefocus();
+	const { capture, onCloseAutoFocus, awaitRemoval } = useRemovalRefocus();
 
 	useEffect(() => {
 		if (!doomedSelector) return;
@@ -64,5 +64,5 @@ export function useDeleteRefocus(
 		});
 	}, [capture, doomedSelector, lastResort, treeRef]);
 
-	return { onCloseAutoFocus };
+	return { onCloseAutoFocus, awaitRemoval };
 }

@@ -9,13 +9,13 @@
  */
 
 /**
- * What the confirm dialog does while the delete it confirmed is running.
+ * What a collection delete does, with and without a dialog in front of it.
  *
- * `DeleteConfirmDialog` takes an `isDeleting` prop and spends it on a spinner
- * and a disabled pair of buttons - and it could never be true here, because both
- * delete handlers closed the dialog as their very first act. The user confirmed
- * a cascade delete of a folder and got an instantly-empty dialog with the tree
- * unchanged until the round trip landed.
+ * A delete is a soft delete with an undo toast behind it, so it runs the moment
+ * it is asked for. The one exception is a collection with a mock server running
+ * for it: stopping the mock is not undone by Undo, so that delete asks first,
+ * and its dialog stays up with `isDeleting` spent on a spinner and a disabled
+ * pair of buttons until the delete settles.
  *
  * The cascade list is the other half: closing tabs for a deleted folder has to
  * reach requests nested two levels down, which the walk in `tree-utils` is now
@@ -49,7 +49,7 @@ const TREE_REQUESTS: Array<[string, Array<Record<string, unknown>>]> = [
 /*
  * Mutable, so a test can answer differently once the delete has settled. The
  * engine's refetch is what removes a deleted row, and it lands *after* the
- * dialog has closed - the timing the refocus has to survive (#1234), and one a
+ * delete has settled - the timing the refocus has to survive (#1234), and one a
  * fixed fixture cannot express.
  */
 let collections = [...TREE];
@@ -98,10 +98,14 @@ function renderTree() {
 
 	return {
 		...view,
-		/** The refetch that follows a delete, landing after the dialog is gone. */
+		/** The refetch that follows a delete, landing after it has settled. */
 		refetchWithout(collectionId: string) {
 			collections = collections.filter((entry) => entry.id !== collectionId);
 			requests = new Map(TREE_REQUESTS.filter(([owner]) => owner !== collectionId));
+			act(() => view.rerender(ui()));
+		},
+		/** A render with nothing changed, the kind the delete's own state causes. */
+		rerender() {
 			act(() => view.rerender(ui()));
 		},
 	};
@@ -136,56 +140,44 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
 
-describe("confirming a collection delete", () => {
-	it("keeps the dialog up, with both actions disabled, until the delete settles", async () => {
-		let settle: () => void = () => {};
-		deleteCollection.mockReturnValue(
-			new Promise<void>((resolve) => {
-				settle = resolve;
-			})
-		);
+/** Every mock in `mockServers` belongs to "Invoices", the collection deleted. */
+function runMockOnInvoices() {
+	mockServers = [
+		{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
+	];
+}
+
+/** The delete has been sent and its `finally` has run. */
+async function deleteSettled() {
+	await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
+	await act(async () => {});
+}
+
+describe("deleting a collection with nothing running", () => {
+	it("deletes straight away, with no dialog to confirm", async () => {
 		renderTree();
 		await askToDelete("Invoices");
 
-		fireEvent.click(await confirmButton());
-
-		// In flight: the dialog is the only thing on screen saying so, and its
-		// buttons are disabled - which `isDeleting` could never make them, because
-		// the dialog was already unmounted by this point.
-		await waitFor(() => expect(cancelButton()).toBeDisabled());
-
-		settle();
-
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
-	});
-
-	it("closes the dialog when the delete fails, having reported it", async () => {
-		deleteCollection.mockRejectedValue(new Error("database is locked"));
-		renderTree();
-		await askToDelete("Invoices");
-
-		fireEvent.click(await confirmButton());
-
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("leaf"));
+		expect(screen.queryByRole("alertdialog")).toBeNull();
+		expect(cancelButton()).toBeNull();
 	});
 
 	/*
-	 * Where focus goes once the dialog is gone (#1218). The menu item that
-	 * opened it has unmounted with the menu, and the dialog is controlled with
-	 * no trigger for Radix to restore to, so without this focus lands on
-	 * `<body>` and the next Tab restarts from the top of the document.
+	 * Where focus goes once the delete has run (#1218). The menu item it was
+	 * invoked from has unmounted with the menu, and with no dialog there is no
+	 * close to hang the refocus on, so without an explicit hand-off focus lands
+	 * on `<body>` and the next Tab restarts from the top of the document.
 	 *
 	 * The move waits for the row to actually go (#1234): the delete settles
-	 * before the refetch that removes the row, so at close the row is still
-	 * rendered and is where focus belongs until it is not.
+	 * before the refetch that removes the row, so until then the row is still
+	 * rendered and is where focus belongs.
 	 */
 	it("leaves focus on the row that follows the deleted one, once that row is gone", async () => {
 		const view = renderTree();
 		await askToDelete("Invoices");
 
-		fireEvent.click(await confirmButton());
-
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		await deleteSettled();
 		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="leaf"]'));
 
 		view.refetchWithout("leaf");
@@ -199,10 +191,9 @@ describe("confirming a collection delete", () => {
 	/*
 	 * The other order, and the one the real mutation produces: it drops the id
 	 * from the cached list in its own `onSuccess`, so the row can be gone before
-	 * the `finally` closes the dialog. Then there is nothing to defer to and the
-	 * successor is where focus goes at close.
+	 * the delete's `finally` has run.
 	 */
-	it("moves focus to the successor when the row went before the dialog closed", async () => {
+	it("moves focus to the successor when the row went before the delete settled", async () => {
 		let view: ReturnType<typeof renderTree> | null = null;
 		deleteCollection.mockImplementation(() => {
 			view?.refetchWithout("leaf");
@@ -211,26 +202,20 @@ describe("confirming a collection delete", () => {
 		view = renderTree();
 		await askToDelete("Invoices");
 
-		fireEvent.click(await confirmButton());
-
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		await deleteSettled();
 		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
 	});
 
 	/*
 	 * The row a failed delete did not remove is still the row the user was on,
-	 * and it is still there to be focused. Reading the confirm click as the
-	 * outcome sent focus to the successor instead, beside a surviving row
-	 * (#1234).
+	 * and it is still there to be focused (#1234).
 	 */
 	it("leaves focus on the row when the delete fails", async () => {
 		deleteCollection.mockRejectedValue(new Error("database is locked"));
 		renderTree();
 		await askToDelete("Invoices");
 
-		fireEvent.click(await confirmButton());
-
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		await deleteSettled();
 		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="leaf"]'));
 	});
 
@@ -242,9 +227,7 @@ describe("confirming a collection delete", () => {
 	it("does not chase the successor when focus has moved on before the row goes", async () => {
 		const view = renderTree();
 		await askToDelete("Invoices");
-
-		fireEvent.click(await confirmButton());
-		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		await deleteSettled();
 
 		const elsewhere = document.querySelector<HTMLElement>('[data-collection-id="root"]')!;
 		elsewhere.focus();
@@ -254,24 +237,27 @@ describe("confirming a collection delete", () => {
 		expect(document.activeElement).toBe(elsewhere);
 	});
 
-	it("cannot fire the same delete twice from a double click", async () => {
+	/*
+	 * The delete is sent by an effect, and the delete's own state changes
+	 * re-render the tree while it runs: each of those must not send it again.
+	 */
+	it("sends the delete once, however often the tree renders while it runs", async () => {
 		let settle: () => void = () => {};
 		deleteCollection.mockReturnValue(
 			new Promise<void>((resolve) => {
 				settle = resolve;
 			})
 		);
-		renderTree();
+		const view = renderTree();
 		await askToDelete("Invoices");
-		const confirm = await confirmButton();
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
 
-		// Both clicks land before React can re-render the button as disabled -
-		// the frame the dialog now stays open for.
-		fireEvent.click(confirm);
-		fireEvent.click(confirm);
+		view.rerender();
+		view.rerender();
 		settle();
+		await act(async () => {});
 
-		await waitFor(() => expect(deleteCollection).toHaveBeenCalledTimes(1));
+		expect(deleteCollection).toHaveBeenCalledTimes(1);
 	});
 
 	it("closes the tabs of every descendant folder and request, not just the top level", async () => {
@@ -287,48 +273,9 @@ describe("confirming a collection delete", () => {
 		renderTree();
 		await askToDelete("Acme");
 
-		fireEvent.click(await confirmButton());
-
 		// The nested request two levels down is the one a single-level cascade
 		// would leave open on a row the engine has already removed.
 		await waitFor(() => expect(useTabsStore.getState().openTabs).toEqual([]));
-	});
-});
-
-/*
- * A collection can have a mock server running for it. Deleting it - or a
- * parent whose descendant has one - stops that mock as part of the delete,
- * and the dialog says so before the user confirms. `mockServers` is set per
- * test rather than in `beforeEach`, so the default (no test) case above stays
- * the "no mock" baseline.
- */
-describe("deleting a collection with a mock server running", () => {
-	it("shows no warning and behaves exactly as before when nothing is running", async () => {
-		renderTree();
-		await askToDelete("Invoices");
-
-		expect(screen.queryByText(/mock server/i)).not.toBeInTheDocument();
-	});
-
-	it("warns in the dialog when the deleted collection itself has a running mock", async () => {
-		mockServers = [
-			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
-		];
-		renderTree();
-		await askToDelete("Invoices");
-
-		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
-	});
-
-	it("warns when a descendant sub-collection has the running mock, not just the collection itself", async () => {
-		mockServers = [
-			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
-		];
-		renderTree();
-		// "Acme" is root; "leaf" (Invoices) is two levels below it.
-		await askToDelete("Acme");
-
-		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
 	});
 
 	it("does not mention or stop a mock running for an unrelated collection", async () => {
@@ -338,18 +285,119 @@ describe("deleting a collection with a mock server running", () => {
 		renderTree();
 		await askToDelete("Invoices");
 
+		await deleteSettled();
+		expect(deleteCollection).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText(/mock server/i)).not.toBeInTheDocument();
+		expect(stopMockServer).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * A collection can have a mock server running for it. Deleting it - or a
+ * parent whose descendant has one - stops that mock as part of the delete,
+ * and that is the one part Undo cannot give back, so this delete alone asks
+ * first and says so. `mockServers` is set per test rather than in
+ * `beforeEach`, so the default stays the "no mock" case above.
+ */
+describe("deleting a collection with a mock server running", () => {
+	it("asks first, and deletes nothing until confirmed", async () => {
+		runMockOnInvoices();
+		renderTree();
+		await askToDelete("Invoices");
+
+		expect(await confirmButton()).toBeInTheDocument();
+		expect(deleteCollection).not.toHaveBeenCalled();
+	});
+
+	it("warns in the dialog when the deleted collection itself has a running mock", async () => {
+		runMockOnInvoices();
+		renderTree();
+		await askToDelete("Invoices");
+
+		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
+	});
+
+	it("warns when a descendant sub-collection has the running mock, not just the collection itself", async () => {
+		runMockOnInvoices();
+		renderTree();
+		// "Acme" is root; "leaf" (Invoices) is two levels below it.
+		await askToDelete("Acme");
+
+		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
+	});
+
+	it("keeps the dialog up, with both actions disabled, until the delete settles", async () => {
+		runMockOnInvoices();
+		let settle: () => void = () => {};
+		deleteCollection.mockReturnValue(
+			new Promise<void>((resolve) => {
+				settle = resolve;
+			})
+		);
+		renderTree();
+		await askToDelete("Invoices");
 
 		fireEvent.click(await confirmButton());
 
-		await waitFor(() => expect(deleteCollection).toHaveBeenCalledTimes(1));
+		// In flight: the dialog is the only thing on screen saying so, and its
+		// buttons are disabled.
+		await waitFor(() => expect(cancelButton()).toBeDisabled());
+
+		settle();
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+	});
+
+	it("closes the dialog when the delete fails, having reported it", async () => {
+		runMockOnInvoices();
+		deleteCollection.mockRejectedValue(new Error("database is locked"));
+		renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
 		expect(stopMockServer).not.toHaveBeenCalled();
 	});
 
+	it("leaves focus on the row that follows the deleted one, once the dialog closes and the row goes", async () => {
+		runMockOnInvoices();
+		const view = renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="leaf"]'));
+
+		view.refetchWithout("leaf");
+
+		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
+	});
+
+	it("cannot fire the same delete twice from a double click", async () => {
+		runMockOnInvoices();
+		let settle: () => void = () => {};
+		deleteCollection.mockReturnValue(
+			new Promise<void>((resolve) => {
+				settle = resolve;
+			})
+		);
+		renderTree();
+		await askToDelete("Invoices");
+		const confirm = await confirmButton();
+
+		// Both clicks land before React can re-render the button as disabled -
+		// the frame the dialog stays open for.
+		fireEvent.click(confirm);
+		fireEvent.click(confirm);
+		settle();
+
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledTimes(1));
+	});
+
 	it("stops the running mock once the delete is confirmed", async () => {
-		mockServers = [
-			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
-		];
+		runMockOnInvoices();
 		renderTree();
 		await askToDelete("Invoices");
 

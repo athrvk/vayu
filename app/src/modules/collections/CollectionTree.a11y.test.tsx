@@ -46,6 +46,16 @@ const TREE_REQUESTS: Array<[string, Array<{ id: string; [key: string]: unknown }
 // dialog has closed (#1234), and only a fixture that can shrink says so.
 let collections = [...TREE];
 let requests = new Map(TREE_REQUESTS);
+/** No mocks running unless a test says otherwise: the one case a delete asks about. */
+let mockServers: Array<{
+	mockId: string;
+	collectionId: string;
+	collectionName: string;
+	port: number;
+}> = [];
+
+const deleteCollection = vi.fn();
+const deleteRequest = vi.fn();
 
 vi.mock("@/queries", () => ({
 	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
@@ -59,12 +69,12 @@ vi.mock("@/queries", () => ({
 	useMultipleCollectionRequests: () => ({ requestsByCollection: requests }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useDeleteCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteCollectionMutation: () => ({ mutateAsync: deleteCollection, isPending: false }),
 	useCreateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteRequestMutation: () => ({ mutateAsync: deleteRequest, isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useMockServersQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: mockServers }),
 	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -118,6 +128,9 @@ beforeEach(() => {
 	Element.prototype.scrollIntoView = vi.fn();
 	collections = [...TREE];
 	requests = new Map(TREE_REQUESTS);
+	mockServers = [];
+	deleteCollection.mockReset().mockResolvedValue(undefined);
+	deleteRequest.mockReset().mockResolvedValue(undefined);
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["acme"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
@@ -202,27 +215,47 @@ describe("ArrowLeft leaves the group", () => {
 });
 
 describe("the Delete key", () => {
-	it("opens the confirm dialog from a collection row", async () => {
+	/*
+	 * A delete is a soft delete with an undo toast behind it, so the key acts at
+	 * once rather than asking first. Either way it has to *act*: the hook
+	 * preventDefaults Delete, so without the row's hidden control the key was
+	 * swallowed and nothing at all happened.
+	 */
+	it("deletes a collection row straight away, with no dialog in front", async () => {
 		renderTree();
 		const row = collectionRow("billing");
 		row.focus();
 
 		fireEvent.keyDown(row, { key: "Delete" });
 
-		// The hook preventDefaults Delete either way, so without the row's hidden
-		// control the key was swallowed and nothing at all happened.
-		expect(await screen.findByText('Delete "Billing"?')).toBeInTheDocument();
-		expect(screen.getByText(/"Billing" and all its requests/)).toBeInTheDocument();
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("billing"));
+		expect(screen.queryByRole("alertdialog")).toBeNull();
 	});
 
-	it("still opens the request dialog from a request row", async () => {
+	it("deletes a request row straight away, with no dialog in front", async () => {
 		renderTree();
 		const row = requestRow("r-ping");
 		row.focus();
 
 		fireEvent.keyDown(row, { key: "Delete" });
 
-		expect(await screen.findByText('Delete "Ping"?')).toBeInTheDocument();
+		await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith("r-ping"));
+		expect(screen.queryByRole("alertdialog")).toBeNull();
+	});
+
+	it("still asks first when the collection has a mock server running", async () => {
+		mockServers = [
+			{ mockId: "mock-1", collectionId: "billing", collectionName: "Billing", port: 4123 },
+		];
+		renderTree();
+		const row = collectionRow("billing");
+		row.focus();
+
+		fireEvent.keyDown(row, { key: "Delete" });
+
+		expect(await screen.findByText('Delete "Billing"?')).toBeInTheDocument();
+		expect(screen.getByText(/"Billing" and all its requests/)).toBeInTheDocument();
+		expect(deleteCollection).not.toHaveBeenCalled();
 	});
 });
 
@@ -296,21 +329,22 @@ describe("a rename never strands focus", () => {
  */
 describe("a delete never strands focus", () => {
 	/**
-	 * The keyboard path in: Delete on a focused row, then the confirm button -
-	 * and then the removal itself, because the row goes when the refetch lands
-	 * rather than when the dialog closes, and focus follows the row (#1234).
+	 * The keyboard path in: Delete on a focused row, which deletes at once - and
+	 * then the removal itself, because the row goes when the refetch lands rather
+	 * than when the delete settles, and focus follows the row (#1234).
 	 */
 	async function deleteFromKeyboard(
 		row: HTMLElement,
-		title: string,
-		confirmLabel: string,
+		mutation: typeof deleteCollection,
+		id: string,
 		removeRow: () => void
 	) {
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
-		expect(await screen.findByText(title)).toBeInTheDocument();
-		fireEvent.click(screen.getByRole("button", { name: confirmLabel }));
-		await waitFor(() => expect(screen.queryByText(title)).toBeNull());
+		await waitFor(() => expect(mutation).toHaveBeenCalledWith(id));
+		// Let the delete's `finally` land before the refetch does, the order the
+		// engine's round trip produces.
+		await act(async () => {});
 		removeRow();
 	}
 
@@ -319,11 +353,8 @@ describe("a delete never strands focus", () => {
 
 		// "Billing" is followed in Acme's group by the "Ping" request: the next
 		// row at its own level, not the next row in the document.
-		await deleteFromKeyboard(
-			collectionRow("billing"),
-			'Delete "Billing"?',
-			"Delete collection",
-			() => removeCollection("billing")
+		await deleteFromKeyboard(collectionRow("billing"), deleteCollection, "billing", () =>
+			removeCollection("billing")
 		);
 
 		expect(document.activeElement).toBe(requestRow("r-ping"));
@@ -334,7 +365,7 @@ describe("a delete never strands focus", () => {
 
 		// "Ping" is last in Acme's group - the row after it belongs to the other
 		// root, whose set this delete does not touch.
-		await deleteFromKeyboard(requestRow("r-ping"), 'Delete "Ping"?', "Delete request", () =>
+		await deleteFromKeyboard(requestRow("r-ping"), deleteRequest, "r-ping", () =>
 			removeRequest("r-ping")
 		);
 
@@ -344,11 +375,8 @@ describe("a delete never strands focus", () => {
 	it("puts the tree's tab stop on the row it focused", async () => {
 		renderTree();
 
-		await deleteFromKeyboard(
-			collectionRow("billing"),
-			'Delete "Billing"?',
-			"Delete collection",
-			() => removeCollection("billing")
+		await deleteFromKeyboard(collectionRow("billing"), deleteCollection, "billing", () =>
+			removeCollection("billing")
 		);
 
 		// Focus without the roving stop is a row the next Tab cannot return to.
@@ -361,16 +389,11 @@ describe("a delete never strands focus", () => {
 		requests = new Map();
 		renderTree();
 
-		await deleteFromKeyboard(
-			collectionRow("solo"),
-			'Delete "Solo"?',
-			"Delete collection",
-			() => {
-				collections = [];
-				requests = new Map();
-				rerenderTree();
-			}
-		);
+		await deleteFromKeyboard(collectionRow("solo"), deleteCollection, "solo", () => {
+			collections = [];
+			requests = new Map();
+			rerenderTree();
+		});
 
 		// One row, so there is no root before or after it and no parent either:
 		// the only shape the tree's own rule answers `null` for, and `<body>` is
@@ -380,6 +403,10 @@ describe("a delete never strands focus", () => {
 	});
 
 	it("returns focus to the row when the dialog is cancelled", async () => {
+		// The one delete that still asks: a collection with a running mock.
+		mockServers = [
+			{ mockId: "mock-1", collectionId: "billing", collectionName: "Billing", port: 4123 },
+		];
 		renderTree();
 		const row = collectionRow("billing");
 		row.focus();
@@ -391,5 +418,6 @@ describe("a delete never strands focus", () => {
 		// Nothing was deleted, so the successor must not be where focus lands -
 		// and Radix's own restore aims at a trigger this dialog does not have.
 		await waitFor(() => expect(document.activeElement).toBe(row));
+		expect(deleteCollection).not.toHaveBeenCalled();
 	});
 });

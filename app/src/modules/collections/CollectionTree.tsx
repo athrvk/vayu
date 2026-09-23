@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useCallback, useMemo } from "react";
+import { useRef, useCallback, useEffect, useMemo } from "react";
 import { Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useImportModalStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
@@ -117,6 +117,20 @@ export default function CollectionTree() {
 		: null;
 
 	/*
+	 * A collection or request delete is a soft delete (issue #988) with an
+	 * undo toast already offered on completion (`useTreeCrud`'s `offerUndo`),
+	 * so a blocking dialog in front of it is friction with nothing to protect
+	 * against - the UX writing guide's own rule for a recoverable action. The
+	 * one exception is a collection with a running mock server: stopping that
+	 * mock is not undone by Undo (it is engine-process state, not a database
+	 * row), so that one case keeps asking first.
+	 */
+	const deleteNeedsConfirm =
+		panel.deleteConfirm?.type === "collection" &&
+		!!panel.deleteConfirm.runningMocks &&
+		panel.deleteConfirm.runningMocks.length > 0;
+
+	/*
 	 * Where focus goes when the deleted row was the only one in the tree - the
 	 * one case the tree's own rule cannot answer, since a root otherwise falls
 	 * back to the root before it. "Add collection" is the nearest surviving
@@ -125,6 +139,22 @@ export default function CollectionTree() {
 	const addCollectionRef = useRef<HTMLButtonElement>(null);
 
 	const deleteRefocus = useDeleteRefocus(treeRef, doomedRowSelector, addCollectionRef);
+
+	/*
+	 * Skips the dialog for the common case by confirming on its own the instant
+	 * a delete that needs no confirmation is requested. `deleteConfirm` is still
+	 * set first so `doomedRowSelector` captures the row for focus restoration
+	 * while it is on screen, and this effect is declared after
+	 * `useDeleteRefocus` so that capture has run by the time `awaitRemoval`
+	 * reads it - with no dialog there is no close to arm the refocus from.
+	 * Re-runs while the delete is in flight are harmless: `confirmDelete` refuses
+	 * a second delete until the first settles.
+	 */
+	useEffect(() => {
+		if (!panel.deleteConfirm || deleteNeedsConfirm) return;
+		deleteRefocus.awaitRemoval();
+		panel.confirmDelete();
+	}, [panel, deleteNeedsConfirm, deleteRefocus]);
 
 	/*
 	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
@@ -383,28 +413,26 @@ export default function CollectionTree() {
 				</div>
 
 				<DeleteConfirmDialog
-					open={!!panel.deleteConfirm}
+					// Only ever open for a collection with a running mock server -
+					// `deleteNeedsConfirm` - so the copy below only has that one case
+					// to describe; every other delete confirms itself (see the effect
+					// after `useDeleteRefocus`) and goes straight to the undo toast.
+					open={deleteNeedsConfirm}
 					onOpenChange={(open) => !open && panel.dismissDeleteConfirm()}
 					title={`Delete "${panel.deleteConfirm?.name}"?`}
-					confirmLabel={
-						panel.deleteConfirm?.type === "collection"
-							? "Delete collection"
-							: "Delete request"
-					}
+					confirmLabel="Delete collection"
 					description={
 						<>
 							{/* What the engine does is a soft delete (issue #988): the row
 							    is stamped and kept, and the Trash view (issue #989) is where
 							    it is restored from. So the copy says where it went rather
 							    than "cannot be undone", which stopped being true. */}
-							{panel.deleteConfirm?.type === "collection"
-								? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
-								: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`}
+							{`"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`}
 							{/* A running mock is engine-process state, not a database row
 							    (unlike the delete itself), so it does not come back on
 							    Undo - stopping it here is the one irreversible part of an
-							    otherwise-reversible action, worth calling out on its own
-							    line rather than folding into the sentence above. */}
+							    otherwise-reversible action, and the reason this dialog is
+							    asking at all. */}
 							{panel.deleteConfirm?.runningMocks &&
 								panel.deleteConfirm.runningMocks.length > 0 && (
 									<span className="mt-2 block">

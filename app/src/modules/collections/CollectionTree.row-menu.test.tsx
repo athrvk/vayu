@@ -53,7 +53,11 @@ vi.mock("@/queries", () => ({
 	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useMockServersQuery: () => ({ data: [] }),
+	// A mock running for the one collection: it is what makes Delete a
+	// dialog-opening action, the one delete that asks first.
+	useMockServersQuery: () => ({
+		data: [{ mockId: "mock-1", collectionId: "acme", collectionName: "Acme", port: 4123 }],
+	}),
 	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 

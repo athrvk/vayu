@@ -116,9 +116,10 @@ export interface CollectionTreeCrudSlice {
 	onStartRequestRename: (request: Request) => void;
 
 	/**
-	 * Opens the delete confirm dialog. Both rows go through it - the ⋯ menu and
-	 * the hidden `data-tree-delete` control the Delete key clicks - so a cascade
-	 * delete is never one keystroke.
+	 * Starts a delete. Both paths go through it - the ⋯ menu and the hidden
+	 * `data-tree-delete` control the Delete key clicks - so they cannot differ:
+	 * a soft delete with an undo toast, asked about first only when it would
+	 * stop a running mock server (`CollectionTree`'s `deleteNeedsConfirm`).
 	 */
 	onCollectionDeleteClick: (collectionId: string, collectionName: string) => void;
 	onRequestDeleteClick: (requestId: string, requestName: string) => void;

@@ -363,8 +363,8 @@ export default function CollectionItem({
 				    (see useRovingTreeFocus). Never shown; the same actions live in
 				    the row's menu. The delete one used to exist on request rows
 				    only, so Delete on a folder was swallowed silently - the hook
-				    preventDefaults the key either way. It opens the same confirm
-				    dialog the menu does: a cascade delete is never one keystroke. */}
+				    preventDefaults the key either way. It is the same delete the
+				    menu starts, dialog or no dialog. */}
 					<button
 						type="button"
 						className="hidden"
