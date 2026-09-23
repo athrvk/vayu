@@ -37,6 +37,7 @@ import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands"
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
 import { chordKeys, isMac } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/format-time";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { RECENT_LIMIT } from "./ranking";
 
 /**
@@ -284,7 +285,9 @@ describe("searching", () => {
 		expect(rowsUnder("Quick actions")).toContain("Import collection");
 		// Suggestions are not results: the announcement still says the query
 		// narrowed everything away.
-		expect(screen.getByText(/searchable results$/).textContent).toBe("0 searchable results");
+		expect(screen.getByText(/searchable results?$/).textContent).toBe(
+			`0 searchable ${pluralize(0, "result")}`
+		);
 	});
 
 	/*
@@ -335,8 +338,10 @@ describe("searching", () => {
 
 		typeQuery("theme");
 
-		const announced = screen.getByText(/searchable results$/).textContent ?? "";
-		expect(announced).toBe(`${visibleRows().length} searchable results`);
+		const announced = screen.getByText(/searchable results?$/).textContent ?? "";
+		expect(announced).toBe(
+			`${visibleRows().length} searchable ${pluralize(visibleRows().length, "result")}`
+		);
 	});
 
 	it("switches to an open tab rather than opening a second one", async () => {
@@ -486,8 +491,10 @@ describe("the launcher sections", () => {
 		renderPalette();
 		open();
 
-		const announced = screen.getByText(/^\d+ results$/).textContent ?? "";
-		expect(announced).toBe(`${visibleRows().length} results`);
+		const announced = screen.getByText(/^\d+ results?$/).textContent ?? "";
+		expect(announced).toBe(
+			`${visibleRows().length} ${pluralize(visibleRows().length, "result")}`
+		);
 	});
 
 	it("caps Recents, keeping the newest", () => {

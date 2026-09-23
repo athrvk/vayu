@@ -19,6 +19,7 @@
 import { Download, Plus, Braces, History, Radio, Search } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { ActionTile } from "./components/ActionTile";
 import { DemoApiTile } from "./components/DemoApiTile";
 import { FooterLinks } from "./components/FooterLinks";
@@ -35,10 +36,6 @@ interface LauncherProps {
 	onHistory: () => void;
 	onVariables: () => void;
 	onServices: () => void;
-}
-
-function plural(n: number, word: string) {
-	return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 export function Launcher({
@@ -96,7 +93,8 @@ export function Launcher({
 
 			<div className="flex flex-col gap-3">
 				<p className="text-xs font-mono tabular-nums text-muted-foreground">
-					{plural(collectionCount, "collection")} · {plural(runs.length, "run")}
+					{collectionCount} {pluralize(collectionCount, "collection")} · {runs.length}{" "}
+					{pluralize(runs.length, "run")}
 				</p>
 				<FooterLinks />
 			</div>
