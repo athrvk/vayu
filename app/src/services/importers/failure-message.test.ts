@@ -121,7 +121,7 @@ describe("importFailureMessage", () => {
 		expect(importFailureMessage(new Error("Network error: failed"), result())).toBe(
 			"Network error: failed"
 		);
-		expect(importFailureMessage(new Error(""), result())).toBe("Import failed");
-		expect(importFailureMessage(undefined, null)).toBe("Import failed");
+		expect(importFailureMessage(new Error(""), result())).toBe("Couldn't import.");
+		expect(importFailureMessage(undefined, null)).toBe("Couldn't import.");
 	});
 });

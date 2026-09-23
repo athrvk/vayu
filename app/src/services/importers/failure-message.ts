@@ -61,7 +61,7 @@ function nameOfTempId(result: ImportResult, tempId: string): string | null {
  * engine named but the parsed result no longer contains.
  */
 export function importFailureMessage(error: unknown, result: ImportResult | null): string {
-	const message = (error instanceof Error ? error.message : "") || "Import failed";
+	const message = (error instanceof Error ? error.message : "") || "Couldn't import.";
 	const tempId = failedTempId(error);
 	if (!tempId) return message;
 
