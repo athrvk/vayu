@@ -19,6 +19,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/operation_match.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
@@ -525,23 +526,6 @@ void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& no
     notes.examples_written += static_cast<int> (writing.size ());
 }
 
-/// Stored headers besides `Content-Type` a skeleton export has no home for -
-/// counted, not written; the bound direction already has its own answer for
-/// every example (patch the document's own response) and does not go through
-/// this count.
-void count_dropped_example_headers (const std::vector<ExportExample>& examples,
-ExportDirection direction,
-ExportNotes& notes) {
-    if (direction != ExportDirection::Skeleton) {
-        return;
-    }
-    for (const ExportExample& example : examples) {
-        if (example.has_extra_headers) {
-            notes.example_headers_dropped += 1;
-        }
-    }
-}
-
 /**
  * The description an undeclared response's Response Object is written with.
  *
@@ -570,7 +554,6 @@ void write_response_examples (Json& responses,
 const std::vector<ExportExample>& examples,
 ExportNotes& notes,
 ExportDirection direction) {
-    count_dropped_example_headers (examples, direction, notes);
     std::vector<const ExportExample*> all;
     all.reserve (examples.size ());
     for (const ExportExample& example : examples) {
@@ -864,13 +847,16 @@ DeclaredParameters inherited_parameters (const Json& document, const Json& path_
  * documentation to a row nobody typed in.
  *
  * @p declared arrives holding the path item's own parameters and comes back
- * holding this operation's too.
+ * holding this operation's too. @p example_key is `example` in 3.x and the
+ * `x-example` extension 2.0 tools read, which has no `example` on a
+ * non-body parameter.
  */
 DeclaredParameters patch_parameters (Json& operation,
 const Json& document,
 const ExportRequest& entry,
 DeclaredParameters declared,
-ExportNotes& notes) {
+ExportNotes& notes,
+std::string_view example_key = "example") {
     const auto parameters = operation.find ("parameters");
     if (parameters == operation.end () || !parameters->is_array ()) {
         return declared;
@@ -911,7 +897,7 @@ ExportNotes& notes) {
         if (row == rows->end () || row->value.empty ()) {
             continue;
         }
-        parameter["example"] = row->value;
+        parameter[std::string (example_key)] = row->value;
     }
     return declared;
 }
@@ -992,33 +978,6 @@ void count_edited_identity (const ExportRequest& entry, ExportNotes& notes) {
     }
 }
 
-void patch_operation (Json& operation,
-const Json& document,
-const ExportRequest& entry,
-DeclaredParameters inherited,
-ExportNotes& notes) {
-    const DeclaredParameters declared =
-    patch_parameters (operation, document, entry, std::move (inherited), notes);
-    count_undeclared_rows (entry, declared, notes);
-    count_unwritten_body (entry, notes);
-    count_edited_identity (entry, notes);
-    // `x-vayu-elements` (issue #1518): called only when `dialect.writable`
-    // (`patch_path_item` below), the same gate every other field this
-    // function patches already relies on - a vendor extension key added to an
-    // operation the document already declares is additive, never a rewrite of
-    // what the operation itself means.
-    if (entry.elements.is_array () && !entry.elements.empty ()) {
-        operation["x-vayu-elements"] = entry.elements;
-    }
-    if (!entry.examples.empty ()) {
-        write_response_examples (child_record (operation, "responses"),
-        entry.examples, notes, ExportDirection::Bound);
-    }
-    const auto responses = operation.find ("responses");
-    write_mock_extension (
-    operation, entry, responses == operation.end () ? nullptr : &*responses);
-}
-
 /**
  * The dialect the stored document declares.
  *
@@ -1063,167 +1022,17 @@ std::unordered_map<std::string, size_t>& by_method_path) {
     }
 }
 
-/**
- * Every operation on one path item, patched or removed.
- *
- * @p document is the whole stored document, read for the components a `$ref`
- * names. Only members *under* @p path_item are written, so nothing this reads
- * moves while it is being read.
- */
-void patch_path_item (Assembly& assembly,
-const std::vector<ExportRequest>& requests,
-const Json& document,
-const Dialect& dialect,
-const std::string& path,
-const std::unordered_map<std::string, size_t>& by_operation_id,
-const std::unordered_map<std::string, size_t>& by_method_path,
-std::unordered_set<size_t>& claimed,
-Json& path_item) {
-    const DeclaredParameters inherited = inherited_parameters (document, path_item);
-    for (const std::string_view method : PATH_ITEM_METHODS) {
-        const std::string key (method);
-        const auto operation = path_item.find (key);
-        if (operation == path_item.end () || !operation->is_object ()) {
-            continue;
-        }
-        const size_t* found =
-        find_request (*operation, method, path, by_operation_id, by_method_path);
-        if (found == nullptr) {
-            path_item.erase (key);
-            assembly.notes.operations_removed += 1;
-            continue;
-        }
-        claimed.insert (*found);
-        assembly.notes.requests_exported += 1;
-        if (dialect.writable) {
-            patch_operation (
-            *operation, document, requests[*found], inherited, assembly.notes);
-        }
-    }
-}
+// --- Building operations: shared by the skeleton and a full bound export ----
+
+namespace ext = vayu::core::vayu_ext;
 
 /**
- * Every operation the document declares, patched or removed.
- *
- * A path left with no operations goes with them. This is what makes a re-import
- * of the exported document produce the collection it came from.
+ * Which dialect an operation is being written in. A skeleton is always 3.x; a
+ * full bound export writes into whatever the document already is, and 2.0
+ * states a parameter's type and example, a body and a response's example in
+ * a vocabulary of its own.
  */
-void patch_document_paths (Assembly& assembly,
-const std::vector<ExportRequest>& requests,
-const Dialect& dialect,
-const std::unordered_map<std::string, size_t>& by_operation_id,
-const std::unordered_map<std::string, size_t>& by_method_path,
-std::unordered_set<size_t>& claimed,
-std::unordered_set<std::string>& referenced_paths) {
-    const auto paths = assembly.document.find ("paths");
-    if (paths != assembly.document.end () && paths->is_object ()) {
-        std::vector<std::string> emptied;
-        for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
-            Json& path_item = entry.value ();
-            if (!path_item.is_object ()) {
-                continue;
-            }
-            if (!string_member (path_item, "$ref").empty ()) {
-                referenced_paths.insert (entry.key ());
-                continue;
-            }
-            // The document is read (for the components a `$ref` names) while a
-            // path item inside it is written; the two never touch the same
-            // node, and no member of the root is added or removed here.
-            patch_path_item (assembly, requests, assembly.document, dialect,
-            entry.key (), by_operation_id, by_method_path, claimed, path_item);
-            const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
-            PATH_ITEM_METHODS.end (), [&] (std::string_view method) {
-                return path_item.contains (std::string (method));
-            });
-            if (!has_operation) {
-                // A path left with no operations goes with them. This is what
-                // makes a re-import of the exported document produce the
-                // collection it came from.
-                emptied.push_back (entry.key ());
-            }
-        }
-        for (const std::string& key : emptied) {
-            paths->erase (key);
-        }
-    }
-}
-
-/** What became of the requests no operation in the document claimed. */
-void count_unclaimed_requests (const std::vector<ExportRequest>& requests,
-const std::unordered_set<size_t>& claimed,
-const std::unordered_set<std::string>& referenced_paths,
-ExportNotes& notes) {
-    for (size_t index = 0; index < requests.size (); ++index) {
-        if (claimed.contains (index)) {
-            continue;
-        }
-        const auto& identity = requests[index].spec_operation;
-        if (!identity) {
-            notes.requests_without_operation += 1;
-        } else if (referenced_paths.contains (identity->path)) {
-            notes.requests_exported += 1;
-        } else {
-            notes.operations_not_in_document += 1;
-        }
-    }
-}
-
-/**
- * The stored bytes, patched.
- *
- * Everything Vayu does not model - `info`, `tags`, vendor extensions,
- * `security`, components no operation here references - is carried through
- * untouched, because it is carried through by simply not being visited. That is
- * the whole reason this direction exists: a rebuilt document would be Vayu's
- * opinion of the user's contract, and the parts it has no opinion about would
- * quietly disappear.
- */
-Assembly patch_bound_document (const std::string& content,
-const std::vector<ExportRequest>& requests) {
-    Assembly assembly;
-    DocumentRead read = read_document (content);
-    if (!read.ok ()) {
-        assembly.error = "The stored document could not be read: " + read.error;
-        return assembly;
-    }
-    if (!read.root.is_object ()) {
-        assembly.error = "The stored document is not an OpenAPI object.";
-        return assembly;
-    }
-    assembly.document = std::move (read.root);
-
-    Dialect dialect;
-    if (auto refusal = read_dialect (assembly.document, dialect)) {
-        assembly.error = *refusal;
-        return assembly;
-    }
-    assembly.notes = empty_notes ("document", dialect.label);
-    assembly.notes.vocabulary_not_written = !dialect.writable;
-
-    std::unordered_map<std::string, size_t> by_operation_id;
-    std::unordered_map<std::string, size_t> by_method_path;
-    index_requests (requests, by_operation_id, by_method_path);
-
-    std::unordered_set<size_t> claimed;
-    /*
-     * Paths whose Path Item is itself a `$ref` (legal in 3.0/3.1, and what a
-     * bundler emits when it hoists a shared item into `components.pathItems`).
-     * Its methods are not readable from here without following the ref and
-     * mutating a node other paths may share, so such an item is left exactly as
-     * it is - and a request that names one of those paths is reported as
-     * carried rather than as missing, which is what it is.
-     */
-    std::unordered_set<std::string> referenced_paths;
-
-    patch_document_paths (assembly, requests, dialect, by_operation_id,
-    by_method_path, claimed, referenced_paths);
-    count_unclaimed_requests (requests, claimed, referenced_paths, assembly.notes);
-
-    return assembly;
-}
-
-// --- The skeleton direction: a collection that was never a spec -------------
+enum class Vocabulary : std::uint8_t { V3, V2 };
 
 /**
  * A request path with Vayu's tokens written the way OpenAPI writes them:
@@ -1256,16 +1065,26 @@ std::string path_template (std::string_view path) {
     return out;
 }
 
+/// A `string` parameter's type in @p vocabulary - a 3.x `schema`, or 2.0's
+/// `type` on the parameter itself.
+void write_string_type (Json& parameter, Vocabulary vocabulary) {
+    if (vocabulary == Vocabulary::V3) {
+        parameter["schema"] = Json{ { "type", "string" } };
+    } else {
+        parameter["type"] = "string";
+    }
+}
+
 /**
  * The `{name}` placeholders of the templated path, as required path parameters.
  *
  * `required: true` is not an inference: OpenAPI states that a path parameter is
  * always required, so this is the format's own rule rather than a claim about
- * this endpoint. The `string` schema is the same kind of minimum - a parameter
- * object must carry a schema, and a URL segment is text until something says
+ * this endpoint. The `string` type is the same kind of minimum - a parameter
+ * object must carry one, and a URL segment is text until something says
  * otherwise.
  */
-void append_path_parameters (const std::string& templated, Json& parameters) {
+void append_path_parameters (const std::string& templated, Json& parameters, Vocabulary vocabulary) {
     // The renderer's `/\{([^{}]+)\}/g`, read left to right: a `{` starts a name
     // over, so `{a{b}` declares `b` rather than nothing.
     size_t open = std::string::npos;
@@ -1278,9 +1097,10 @@ void append_path_parameters (const std::string& templated, Json& parameters) {
             continue;
         }
         if (open != std::string::npos && index > open + 1) {
-            parameters.push_back (Json{
-            { "name", templated.substr (open + 1, index - open - 1) }, { "in", "path" },
-            { "required", true }, { "schema", Json{ { "type", "string" } } } });
+            Json parameter{ { "name", templated.substr (open + 1, index - open - 1) },
+                { "in", "path" }, { "required", true } };
+            write_string_type (parameter, vocabulary);
+            parameters.push_back (std::move (parameter));
         }
         open = std::string::npos;
     }
@@ -1289,20 +1109,19 @@ void append_path_parameters (const std::string& templated, Json& parameters) {
 /**
  * One Params or Headers row as a parameter.
  *
- * A disabled row is still declared - which is why `enabled` is not among the
- * fields this reads: the endpoint accepts the parameter either way, and the
- * toggle says what this request sends, not what the API takes. For the same
- * reason `required` is never written - a user enabling a row is not the API
- * demanding it.
+ * A disabled row is still declared: the endpoint accepts the parameter either
+ * way, and the toggle says what this request sends, not what the API takes -
+ * which is why `x-vayu-enabled` carries it rather than `required`. A user
+ * enabling a row is not the API demanding it.
  */
-Json parameter_object (const ExportKeyValue& row, std::string_view location) {
+Json parameter_object (const ExportKeyValue& row, std::string_view location, Vocabulary vocabulary) {
     Json parameter{ { "name", row.key }, { "in", std::string (location) } };
     if (!row.description.empty ()) {
         parameter["description"] = row.description;
     }
-    parameter["schema"] = Json{ { "type", "string" } };
+    write_string_type (parameter, vocabulary);
     if (!row.value.empty ()) {
-        parameter["example"] = row.value;
+        parameter[vocabulary == Vocabulary::V3 ? "example" : "x-example"] = row.value;
     }
     // Written either way, not only when disabled: an empty-valued *enabled*
     // row and a non-empty-valued *disabled* one are both real states a
@@ -1311,79 +1130,223 @@ Json parameter_object (const ExportKeyValue& row, std::string_view location) {
     return parameter;
 }
 
-Json media_type_body (std::string_view content_type, const Json& value) {
-    Json media{ { "schema", schema_from_example (value) }, { "example", value } };
-    return Json{ { "content", Json{ { std::string (content_type), std::move (media) } } } };
+/// Whether @p key names a header OpenAPI states elsewhere (`security`, the
+/// body's media type) rather than as a parameter.
+bool is_non_parameter_header (const std::string& key) {
+    const std::string lowered = vayu::utils::ascii_lower (key);
+    return std::find (NON_PARAMETER_HEADERS.begin (),
+           NON_PARAMETER_HEADERS.end (), lowered) != NON_PARAMETER_HEADERS.end ();
 }
 
 /**
- * A request body as a `requestBody`, or nothing when the request states none.
- *
- * Nothing is inferred about the endpoint here either: the schema is read off
- * the body that is actually stored, and a mode whose stored text is not the
- * body the endpoint receives writes nothing at all.
- *
- * Every `Json` answer leaves through `std::make_optional`: copy-initializing an
- * `optional<Json>` from a `Json` puts nlohmann's `operator ValueType()` up
- * against `optional`'s converting constructor, which GCC reports as
- * -Wconversion. Direct-initializing considers the constructor alone.
+ * Every Params and Headers row @p declared does not already hold, as
+ * parameters. OpenAPI names a parameter by name and location, so a second row
+ * with both is not written - `x-vayu-request` carries it, and every
+ * `Authorization` / `Content-Type` row, verbatim.
  */
-std::optional<Json> request_body_object (const ExportBody& body, ExportNotes& notes) {
-    const std::string_view content = trim (body.content);
-    if (body.mode == "json" || body.mode == "jsonrpc") {
-        if (content.empty ()) {
-            return std::nullopt;
+void append_row_parameters (const ExportRequest& entry,
+DeclaredParameters& declared,
+Json& parameters,
+Vocabulary vocabulary) {
+    for (const ExportKeyValue& row : entry.params) {
+        if (!row.key.empty () &&
+        declared.query.insert (vayu::utils::ascii_lower (row.key)).second) {
+            parameters.push_back (parameter_object (row, "query", vocabulary));
         }
-        return std::make_optional (
-        media_type_body ("application/json", example_value (body.content)));
     }
-    if (body.mode == "xml") {
-        // The text as it stands, never parsed: an XML body is not JSON, so the
-        // value under `example` is the document itself.
-        if (content.empty ()) {
-            return std::nullopt;
+    for (const ExportKeyValue& row : entry.headers) {
+        if (!row.key.empty () && !is_non_parameter_header (row.key) &&
+        declared.header.insert (vayu::utils::ascii_lower (row.key)).second) {
+            parameters.push_back (parameter_object (row, "header", vocabulary));
         }
-        return std::make_optional (media_type_body ("application/xml", body.content));
     }
-    if (body.mode == "text") {
-        if (content.empty ()) {
-            return std::nullopt;
+}
+
+/**
+ * The media type an enabled `Content-Type` row names, lowered and without its
+ * parameters - `application/vnd.api+json` rather than the mode's generic
+ * `application/json` - or `""` when the request has none, or one that is
+ * still a `{{variable}}`.
+ */
+std::string declared_content_type (const ExportRequest& entry) {
+    for (const ExportKeyValue& row : entry.headers) {
+        if (!row.enabled || !vayu::utils::ascii_lower_equal (row.key, "content-type")) {
+            continue;
         }
-        return std::make_optional (media_type_body ("text/plain", body.content));
+        const std::string_view value = trim (std::string_view (row.value).substr (
+        0, std::min (row.value.find (';'), row.value.size ())));
+        if (value.empty () || value.find ("{{") != std::string_view::npos) {
+            return {};
+        }
+        return vayu::utils::ascii_lower (value);
+    }
+    return {};
+}
+
+/// The body's own media type for @p mode, overridden by a `Content-Type` row.
+std::string body_media_type (const ExportRequest& entry, std::string_view fallback) {
+    const std::string declared = declared_content_type (entry);
+    return declared.empty () ? std::string (fallback) : declared;
+}
+
+/**
+ * A request body as the value an `example` holds and the media type it is
+ * filed under, or nothing when the request states none.
+ *
+ * GraphQL is written as the JSON envelope a GraphQL-over-HTTP server receives
+ * (`{query, variables}`, which is what Vayu stores), a form as the object of
+ * its enabled text fields. Every mode round-trips exactly through
+ * `x-vayu-request.body`; this is what another tool reads.
+ */
+struct BodyExample {
+    std::string media_type;
+    Json value;
+    /// Set for a form: its fields as schema properties, file parts as
+    /// `format: binary`, described where the row is.
+    std::optional<Json> form_schema;
+};
+
+/// A GraphQL body as the JSON envelope a GraphQL-over-HTTP server receives -
+/// what Vayu stores, or a bare query wrapped as one.
+std::optional<BodyExample> graphql_example_of (const ExportRequest& entry) {
+    if (trim (entry.body.content).empty ()) {
+        return std::nullopt;
+    }
+    Json envelope = example_value (entry.body.content);
+    if (!envelope.is_object ()) {
+        envelope = Json{ { "query", entry.body.content } };
+    }
+    return BodyExample{ body_media_type (entry, "application/json"),
+        std::move (envelope), std::nullopt };
+}
+
+/// A form's rows: the stored ones when there are any (value, toggle,
+/// description, file part), only the field names otherwise.
+nlohmann::json form_fields_of (const ExportRequest& entry) {
+    if (const auto stored = entry.stored_body.find ("fields");
+    stored != entry.stored_body.end () && stored->is_array ()) {
+        return *stored;
+    }
+    nlohmann::json fields = nlohmann::json::array ();
+    for (const std::string& key : entry.body.field_keys) {
+        fields.push_back (nlohmann::json{ { "key", key }, { "value", "" } });
+    }
+    return fields;
+}
+
+/// One form field as a schema property: a string, `format: binary` for a
+/// file part, described where the row is.
+Json form_property_of (const nlohmann::json& field) {
+    Json property{ { "type", "string" } };
+    if (field.value ("type", "") == "file") {
+        property["format"] = "binary";
+    }
+    if (const std::string description = field.value ("description", "");
+    !description.empty ()) {
+        property["description"] = description;
+    }
+    return property;
+}
+
+/// A form body: its fields as schema properties, its enabled text values as
+/// the example - a disabled row is not sent, a file part is one machine's file.
+std::optional<BodyExample> form_example_of (const ExportRequest& entry) {
+    const nlohmann::json fields = form_fields_of (entry);
+    Json properties             = Json::object ();
+    Json values                 = Json::object ();
+    for (const auto& field : fields) {
+        const std::string key = field.is_object () ? field.value ("key", "") : "";
+        if (key.empty () || properties.contains (key)) {
+            continue;
+        }
+        properties[key] = form_property_of (field);
+        if (field.value ("type", "") != "file" && field.value ("enabled", true)) {
+            values[key] = field.value ("value", "");
+        }
+    }
+    if (properties.empty ()) {
+        return std::nullopt;
+    }
+    return BodyExample{ entry.body.mode == "form-data" ? "multipart/form-data" : "application/x-www-form-urlencoded",
+        std::move (values),
+        std::make_optional (
+        Json{ { "type", "object" }, { "properties", std::move (properties) } }) };
+}
+
+std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
+    const ExportBody& body = entry.body;
+    if (body.mode == "graphql") {
+        return graphql_example_of (entry);
     }
     if (body.mode == "form-data" || body.mode == "x-www-form-urlencoded") {
-        Json properties = Json::object ();
-        for (const std::string& field : body.field_keys) {
-            if (!field.empty ()) {
-                properties[field] = Json{ { "type", "string" } };
-            }
-        }
-        if (properties.empty ()) {
-            return std::nullopt;
-        }
-        // The field *names* are declared below as schema properties; the
-        // values one machine typed into them are not carried at all - a form
-        // field's value is one send's data, not a claim about the endpoint.
-        notes.form_values_dropped += 1;
-        const std::string content_type = body.mode == "form-data" ?
-        "multipart/form-data" :
-        "application/x-www-form-urlencoded";
-        // The field names are declared by the request itself, so this schema
-        // states what the collection holds rather than a shape read off one
-        // sample - it carries no derivation note.
-        Json schema{ { "type", "object" }, { "properties", std::move (properties) } };
-        return std::make_optional (Json{ { "content",
-        Json{ { content_type, Json{ { "schema", std::move (schema) } } } } } });
+        return form_example_of (entry);
     }
-    // `graphql` and `none`. GraphQL over HTTP posts a JSON envelope, but the
-    // stored body is the query text alone - Vayu composes the envelope at send
-    // time. Writing the query as though it were the body would describe a
-    // request the endpoint never receives, so this is left out and the
-    // operation keeps its path, parameters and responses.
-    if (body.mode == "graphql" && !content.empty ()) {
-        notes.bodies_dropped += 1;
+    if (trim (body.content).empty ()) {
+        return std::nullopt;
+    }
+    if (body.mode == "json" || body.mode == "jsonrpc") {
+        return BodyExample{ body_media_type (entry, "application/json"),
+            example_value (body.content), std::nullopt };
+    }
+    if (body.mode == "xml" || body.mode == "text") {
+        // The text as it stands, never parsed.
+        return BodyExample{ body_media_type (entry,
+                            body.mode == "xml" ? "application/xml" : "text/plain"),
+            Json (body.content), std::nullopt };
     }
     return std::nullopt;
+}
+
+/// One body example as a 3.x media object: the schema read off it (or the
+/// form's own fields), and the example itself when it says anything.
+Json media_object_of (const BodyExample& body) {
+    Json media = Json::object ();
+    media["schema"] =
+    body.form_schema ? *body.form_schema : schema_from_example (body.value);
+    if (!(body.value.is_object () && body.value.empty ())) {
+        media["example"] = body.value;
+    }
+    return media;
+}
+
+/// A request body as a 3.x `requestBody`, or nothing when the request states none.
+std::optional<Json> request_body_object (const ExportRequest& entry) {
+    const std::optional<BodyExample> body = body_example_of (entry);
+    if (!body) {
+        return std::nullopt;
+    }
+    return std::make_optional (
+    Json{ { "content", Json{ { body->media_type, media_object_of (*body) } } } });
+}
+
+/**
+ * A request body as 2.0 parameters: one `in: body` parameter carrying the
+ * derived schema and the example on it, or one `in: formData` parameter per
+ * form field (`type: file` for a file part). Empty when the request states no
+ * body.
+ */
+Json body_parameters_v2 (const ExportRequest& entry) {
+    Json parameters                       = Json::array ();
+    const std::optional<BodyExample> body = body_example_of (entry);
+    if (!body) {
+        return parameters;
+    }
+    if (body->form_schema) {
+        for (const auto& [name, property] : body->form_schema->at ("properties").items ()) {
+            Json parameter{ { "name", name }, { "in", "formData" },
+                { "type", property.value ("format", "") == "binary" ? "file" : "string" } };
+            if (property.contains ("description")) {
+                parameter["description"] = property.at ("description");
+            }
+            parameters.push_back (std::move (parameter));
+        }
+        return parameters;
+    }
+    Json schema       = schema_from_example (body->value);
+    schema["example"] = body->value;
+    parameters.push_back (
+    Json{ { "name", "body" }, { "in", "body" }, { "schema", std::move (schema) } });
+    return parameters;
 }
 
 /// Explicit no-auth - `security: []` is exact for it, no scheme needed.
@@ -1453,85 +1416,246 @@ Json security_scheme_of (const ExportAuth& auth) {
         { "flows", Json{ { flow, std::move (flow_object) } } } };
 }
 
+/**
+ * `auth` as a 2.0 `securityDefinitions` entry, or nothing for bearer - 2.0
+ * has no HTTP scheme besides `basic`, and an `apiKey` named `Authorization`
+ * standing in for one would re-import as an API key.
+ */
+std::optional<Json> security_definition_of (const ExportAuth& auth) {
+    if (auth.mode == "basic") {
+        return std::make_optional (Json{ { "type", "basic" } });
+    }
+    if (auth.mode == "apikey") {
+        return std::make_optional (Json{ { "type", "apiKey" }, { "name", auth.api_key_name },
+        { "in", auth.api_key_in.empty () ? "header" : auth.api_key_in } });
+    }
+    if (auth.mode != "oauth2") {
+        return std::nullopt;
+    }
+    std::string flow = "application";
+    if (auth.oauth2_grant_type == "authorization_code") {
+        flow = "accessCode";
+    } else if (auth.oauth2_grant_type == "password") {
+        flow = "password";
+    }
+    Json definition{ { "type", "oauth2" }, { "flow", flow } };
+    if (flow == "accessCode") {
+        definition["authorizationUrl"] = auth.oauth2_authorization_url;
+    }
+    definition["tokenUrl"] = auth.oauth2_token_url;
+    definition["scopes"]   = oauth2_scopes_of (auth.oauth2_scope);
+    return std::make_optional (std::move (definition));
+}
+
 /// What an auth mode resolves to for export purposes: nothing to inherit
 /// from (`inherit`), an explicit absence (`auth_is_none`), a scheme this file
 /// can build, or a mode OpenAPI cannot name at all.
 struct AuthDisposition {
     enum class Kind : std::uint8_t { Inherit, None, Scheme, Unsupported };
     Kind kind = Kind::Inherit;
-    Json scheme;
+    ExportAuth auth;
 };
 
 AuthDisposition disposition_of (const ExportAuth& auth) {
     if (auth.mode == "inherit") {
-        return { AuthDisposition::Kind::Inherit, {} };
+        return { AuthDisposition::Kind::Inherit, auth };
     }
     if (auth_is_none (auth.mode)) {
-        return { AuthDisposition::Kind::None, {} };
+        return { AuthDisposition::Kind::None, auth };
     }
     if (auth_is_expressible (auth.mode)) {
-        return { AuthDisposition::Kind::Scheme, security_scheme_of (auth) };
+        return { AuthDisposition::Kind::Scheme, auth };
     }
-    return { AuthDisposition::Kind::Unsupported, {} };
+    return { AuthDisposition::Kind::Unsupported, auth };
+}
+
+/// Whether two dispositions send the same thing: same kind, and for a scheme
+/// the same scheme.
+bool same_disposition (const AuthDisposition& a, const AuthDisposition& b) {
+    return a.kind == b.kind &&
+    (a.kind != AuthDisposition::Kind::Scheme ||
+    security_scheme_of (a.auth) == security_scheme_of (b.auth));
+}
+
+/// The base a scheme's name is derived from, by the scheme's own type.
+std::string scheme_base_name (const ExportAuth& auth) {
+    if (auth.mode == "basic") {
+        return "basicAuth";
+    }
+    if (auth.mode == "bearer") {
+        return "bearerAuth";
+    }
+    if (auth.mode == "apikey") {
+        return "apiKeyAuth";
+    }
+    return "oauth2Auth";
 }
 
 /**
- * `components.securitySchemes`, built up as requests ask for one. Two
- * requests whose auth reduces to the same scheme share it; the name is
- * derived from the scheme's own type and de-duplicated only when two
+ * Who names the `securitySchemes` an operation references: a skeleton's own
+ * registry, or a bound document's existing schemes (plus any it has to add).
+ * Nothing when the document's dialect cannot state the scheme at all.
+ */
+class SchemeNamer {
+    public:
+    SchemeNamer ()                              = default;
+    SchemeNamer (const SchemeNamer&)            = delete;
+    SchemeNamer& operator= (const SchemeNamer&) = delete;
+    SchemeNamer (SchemeNamer&&)                 = delete;
+    SchemeNamer& operator= (SchemeNamer&&)      = delete;
+    virtual ~SchemeNamer ()                     = default;
+    virtual std::optional<std::string> name_for (const ExportAuth& auth) = 0;
+};
+
+/**
+ * `components.securitySchemes` for a skeleton, built up as requests ask for
+ * one. Two requests whose auth reduces to the same scheme share it; the name
+ * is derived from the scheme's own type and de-duplicated only when two
  * *different* schemes would otherwise collide (two api keys named
  * differently, say).
  */
-class SecuritySchemeRegistry {
+class SkeletonSchemes final : public SchemeNamer {
     public:
-    std::string name_for (const Json& scheme) {
+    std::optional<std::string> name_for (const ExportAuth& auth) override {
+        const Json scheme           = security_scheme_of (auth);
         const std::string canonical = scheme.dump ();
         if (const auto found = by_shape_.find (canonical); found != by_shape_.end ()) {
             return found->second;
         }
-        const std::string base = base_name_of (scheme);
+        const std::string base = scheme_base_name (auth);
         std::string name       = base;
-        for (int suffix = 2; used_names_.contains (name); ++suffix) {
+        for (int suffix = 2; schemes_.contains (name); ++suffix) {
             name = base + std::to_string (suffix);
         }
-        used_names_.insert (name);
         by_shape_[canonical] = name;
-        order_.push_back (name);
-        schemes_.emplace (name, scheme);
+        schemes_[name]       = scheme;
         return name;
     }
 
-    [[nodiscard]] bool empty () const {
-        return order_.empty ();
-    }
-
-    [[nodiscard]] Json schemes_object () const {
-        Json out = Json::object ();
-        for (const std::string& name : order_) {
-            out[name] = schemes_.at (name);
-        }
-        return out;
+    [[nodiscard]] const Json& schemes () const {
+        return schemes_;
     }
 
     private:
-    static std::string base_name_of (const Json& scheme) {
-        const std::string type = string_member (scheme, "type");
-        if (type == "http") {
-            return string_member (scheme, "scheme") == "basic" ? "basicAuth" : "bearerAuth";
+    std::unordered_map<std::string, std::string> by_shape_;
+    Json schemes_ = Json::object ();
+};
+
+/**
+ * Whether a scheme the document declares states the same credential as
+ * @p wanted - compared on what a client sends (type, HTTP scheme, API key
+ * name and location), never on the description, `bearerFormat` or scopes a
+ * document author wrote around it.
+ */
+bool scheme_matches (const Json& declared, const Json& wanted) {
+    if (!declared.is_object () ||
+    string_member (declared, "type") != string_member (wanted, "type")) {
+        return false;
+    }
+    const std::string type = string_member (wanted, "type");
+    if (type == "http") {
+        return vayu::utils::ascii_lower (string_member (declared, "scheme")) ==
+        string_member (wanted, "scheme");
+    }
+    if (type == "apiKey") {
+        return vayu::utils::ascii_lower_equal (string_member (declared, "name"),
+               string_member (wanted, "name")) &&
+        string_member (declared, "in") == string_member (wanted, "in");
+    }
+    return true; // oauth2, basic (2.0): the type is the credential's shape
+}
+
+/**
+ * The schemes of a bound document, read without being written: a request's
+ * auth names an existing scheme stating the same credential when there is one,
+ * and a scheme it has to add is held here and written by `write_into` once
+ * the walk over `paths` has finished - adding a root member while a path item
+ * is being written would move the node under it.
+ */
+class BoundSchemes final : public SchemeNamer {
+    public:
+    BoundSchemes (const Json& document, Vocabulary vocabulary)
+    : vocabulary_ (vocabulary) {
+        const Json* container = nullptr;
+        if (vocabulary == Vocabulary::V3) {
+            const auto components = document.find ("components");
+            if (components != document.end () && components->is_object ()) {
+                const auto found = components->find ("securitySchemes");
+                container = found != components->end () ? &*found : nullptr;
+            }
+        } else {
+            const auto found = document.find ("securityDefinitions");
+            container        = found != document.end () ? &*found : nullptr;
         }
-        if (type == "apiKey") {
-            return "apiKeyAuth";
+        if (container != nullptr && container->is_object ()) {
+            declared_ = *container;
         }
-        if (type == "oauth2") {
-            return "oauth2Auth";
-        }
-        return "auth";
     }
 
-    std::unordered_map<std::string, std::string> by_shape_;
-    std::unordered_set<std::string> used_names_;
-    std::vector<std::string> order_;
-    std::unordered_map<std::string, Json> schemes_;
+    std::optional<std::string> name_for (const ExportAuth& auth) override {
+        std::optional<Json> wanted;
+        if (vocabulary_ == Vocabulary::V3) {
+            wanted = security_scheme_of (auth);
+        } else {
+            wanted = security_definition_of (auth);
+        }
+        if (!wanted) {
+            return std::nullopt;
+        }
+        for (const Json* schemes : { &declared_, &added_ }) {
+            for (auto entry = schemes->begin (); entry != schemes->end (); ++entry) {
+                if (scheme_matches (entry.value (), *wanted)) {
+                    return entry.key ();
+                }
+            }
+        }
+        const std::string base = scheme_base_name (auth);
+        std::string name       = base;
+        for (int suffix = 2; declared_.contains (name) || added_.contains (name); ++suffix) {
+            name = base + std::to_string (suffix);
+        }
+        added_[name] = std::move (*wanted);
+        return name;
+    }
+
+    /// Whether @p requirement's first scheme states the same credential as @p auth.
+    [[nodiscard]] bool names (const Json& requirement, const ExportAuth& auth) const {
+        if (!requirement.is_array () || requirement.empty () ||
+        !requirement.front ().is_object () || requirement.front ().empty ()) {
+            return false;
+        }
+        const std::string name = requirement.front ().begin ().key ();
+        const Json* declared   = nullptr;
+        if (declared_.contains (name)) {
+            declared = &declared_.at (name);
+        } else if (added_.contains (name)) {
+            declared = &added_.at (name);
+        } else {
+            return false;
+        }
+        const std::optional<Json> wanted = vocabulary_ == Vocabulary::V3 ?
+        std::make_optional (security_scheme_of (auth)) :
+        security_definition_of (auth);
+        return wanted && scheme_matches (*declared, *wanted);
+    }
+
+    /// Writes the schemes this export added into @p document.
+    void write_into (Json& document) const {
+        if (added_.empty ()) {
+            return;
+        }
+        Json& container = vocabulary_ == Vocabulary::V3 ?
+        child_record (child_record (document, "components"), "securitySchemes") :
+        child_record (document, "securityDefinitions");
+        for (auto entry = added_.begin (); entry != added_.end (); ++entry) {
+            container[entry.key ()] = entry.value ();
+        }
+    }
+
+    private:
+    Vocabulary vocabulary_;
+    Json declared_ = Json::object ();
+    Json added_    = Json::object ();
 };
 
 /// `security` requirement referencing @p name, with no scopes named - Vayu
@@ -1543,39 +1667,209 @@ Json security_requirement (const std::string& name) {
 /**
  * The operation-level `security` override for @p request_disp against
  * @p collection_disp already in force - `nullopt` when the operation simply
- * inherits the document's (an unresolved `inherit`, or an identical scheme).
- * Registers a new scheme with @p schemes and counts an unsupported mode into
- * @p notes exactly where it is found, collection and request alike.
+ * inherits the document's (an unresolved `inherit`, an identical scheme, a
+ * mode OpenAPI cannot state, or a scheme this dialect has no word for; the
+ * last two travel in `x-vayu-request.auth`).
  */
 std::optional<Json> operation_security_of (const AuthDisposition& request_disp,
 const AuthDisposition& collection_disp,
-SecuritySchemeRegistry& schemes,
-ExportNotes& notes) {
-    if (request_disp.kind == AuthDisposition::Kind::Inherit) {
-        return std::nullopt;
-    }
-    if (request_disp.kind == AuthDisposition::Kind::Unsupported) {
-        notes.auth_dropped += 1;
-        return std::nullopt;
-    }
-    const bool same_as_collection = request_disp.kind == collection_disp.kind &&
-    (request_disp.kind != AuthDisposition::Kind::Scheme ||
-    request_disp.scheme == collection_disp.scheme);
-    if (same_as_collection) {
+SchemeNamer& schemes) {
+    if (request_disp.kind == AuthDisposition::Kind::Inherit ||
+    request_disp.kind == AuthDisposition::Kind::Unsupported ||
+    same_disposition (request_disp, collection_disp)) {
         return std::nullopt;
     }
     if (request_disp.kind == AuthDisposition::Kind::None) {
         return std::make_optional (Json::array ());
     }
-    return std::make_optional (
-    security_requirement (schemes.name_for (request_disp.scheme)));
+    const std::optional<std::string> name = schemes.name_for (request_disp.auth);
+    if (!name) {
+        return std::nullopt;
+    }
+    return std::make_optional (security_requirement (*name));
 }
 
+// --- What only the `x-vayu-*` extensions carry (vayu_extensions.hpp) --------
+
+/// The execution settings that differ from a fresh request's, or `{}`.
+Json settings_object_of (const ExportRequest& entry) {
+    Json settings = Json::object ();
+    if (!entry.follow_redirects) {
+        settings["followRedirects"] = false;
+    }
+    if (entry.max_redirects != 10) {
+        settings["maxRedirects"] = entry.max_redirects;
+    }
+    if (entry.http_version != "auto") {
+        settings["httpVersion"] = entry.http_version;
+    }
+    if (!entry.verify_ssl) {
+        settings["verifySSL"] = false;
+    }
+    if (entry.stream) {
+        settings["stream"] = true;
+    }
+    return settings;
+}
+
+/// Whether @p value is a non-empty object or array - the stored columns this
+/// export copies only when they say something.
+bool says_something (const nlohmann::json& value) {
+    return (value.is_object () || value.is_array ()) && !value.empty ();
+}
+
+/**
+ * `x-vayu-request`: everything about @p entry the operation's standard members
+ * cannot state exactly. @p standalone adds what an operation would otherwise
+ * say (method, description, elements, mock mode), for a request carried in
+ * `x-vayu-collection.requests` with no operation of its own.
+ */
+Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool standalone) {
+    Json out{ { "name", entry.name }, { "method", upper (entry.method) },
+        { "url", entry.url }, { "order", entry.order } };
+    if (standalone && !entry.description.empty ()) {
+        out["description"] = entry.description;
+    }
+    if (!entry.folder_path.empty ()) {
+        out["folder"] = Json (entry.folder_path);
+    }
+    if (says_something (entry.stored_params)) {
+        out["params"] = Json (entry.stored_params);
+    }
+    if (says_something (entry.stored_headers)) {
+        out["headers"] = Json (entry.stored_headers);
+    }
+    if (entry.stored_body.is_object () && entry.stored_body.value ("mode", "none") != "none") {
+        out["body"] = ext::portable_body (Json (entry.stored_body));
+    }
+    if (says_something (entry.stored_auth)) {
+        out["auth"] = ext::redact_auth (Json (entry.stored_auth), notes.secrets_omitted);
+    }
+    if (Json settings = settings_object_of (entry); !settings.empty ()) {
+        out["settings"] = std::move (settings);
+    }
+    if (!entry.examples.empty ()) {
+        Json examples = Json::array ();
+        for (const ExportExample& example : entry.examples) {
+            Json row{ { "name", example.name }, { "status", example.status },
+                { "contentType", example.content_type },
+                { "headers", Json (example.headers) }, { "body", example.body } };
+            if (example.body_truncated) {
+                row["bodyTruncated"] = true;
+            }
+            examples.push_back (std::move (row));
+        }
+        out["examples"] = std::move (examples);
+    }
+    if (entry.mock_response_mode != "first") {
+        out["mockResponseMode"] = entry.mock_response_mode;
+        if (entry.mock_example_index) {
+            out["mockExample"] = *entry.mock_example_index;
+        }
+    }
+    if (standalone && says_something (entry.elements)) {
+        out["elements"] = Json (entry.elements);
+    }
+    return out;
+}
+
+/**
+ * `x-vayu-collection`: the collection's variables, auth and data contract, its
+ * whole folder tree, and @p extra_requests - the requests no operation holds.
+ * `folders` is written even when empty: its presence is what tells an import
+ * that this document states its own tree, so an untagged operation belongs
+ * at the root rather than in a folder named after its path.
+ */
+Json vayu_collection_object (const ExportCollection& collection,
+Json extra_requests,
+ExportNotes& notes) {
+    Json out = Json::object ();
+    if (says_something (collection.stored_variables)) {
+        out["variables"] = ext::redact_variables (
+        Json (collection.stored_variables), notes.secrets_omitted);
+    }
+    if (says_something (collection.stored_auth)) {
+        out["auth"] =
+        ext::redact_auth (Json (collection.stored_auth), notes.secrets_omitted);
+    }
+    if (says_something (collection.data_schema)) {
+        out["dataSchema"] = Json (collection.data_schema);
+    }
+    Json folders = Json::array ();
+    for (const ExportFolder& folder : collection.folders) {
+        Json entry{ { "path", Json (folder.path) } };
+        if (!folder.description.empty ()) {
+            entry["description"] = folder.description;
+        }
+        if (says_something (folder.variables)) {
+            entry["variables"] =
+            ext::redact_variables (Json (folder.variables), notes.secrets_omitted);
+        }
+        if (says_something (folder.auth)) {
+            entry["auth"] = ext::redact_auth (Json (folder.auth), notes.secrets_omitted);
+        }
+        if (says_something (folder.elements)) {
+            entry["elements"] = Json (folder.elements);
+        }
+        folders.push_back (std::move (entry));
+    }
+    out["folders"] = std::move (folders);
+    if (!extra_requests.empty ()) {
+        out["requests"] = std::move (extra_requests);
+    }
+    return out;
+}
+
+/// A request no operation can hold, carried whole in `x-vayu-collection`.
+void carry_in_extension (const ExportRequest& entry, Json& extra_requests, ExportNotes& notes) {
+    extra_requests.push_back (vayu_request_object (entry, notes, /*standalone=*/true));
+    notes.requests_only_in_extension += 1;
+}
+
+/// A 2.0 operation's `responses` from its stored examples: one response per
+/// status, the first writable example per media type under its `examples` map.
+Json responses_v2_of (const ExportRequest& entry, ExportNotes& notes) {
+    Json responses = Json::object ();
+    for (const ExportExample& example : entry.examples) {
+        const std::string status = std::to_string (example.status);
+        if (!responses.contains (status)) {
+            responses[status] = Json{ { "description",
+            undeclared_response_description (status, example.name) } };
+        }
+        if (example.body_truncated) {
+            notes.examples_truncated += 1;
+            continue;
+        }
+        if (example.content_type.empty ()) {
+            notes.examples_without_media_type += 1;
+            continue;
+        }
+        Json& examples = child_record (responses[status], "examples");
+        if (!examples.contains (example.content_type)) {
+            examples[example.content_type] = example_value (example.body);
+            notes.examples_written += 1;
+        }
+    }
+    return responses;
+}
+
+/// What a new operation is written with, beyond the request itself.
+struct OperationContext {
+    Vocabulary vocabulary = Vocabulary::V3;
+    /// Whether the dialect requires `responses` (3.0 and 2.0 do, 3.1 does not).
+    bool responses_required = false;
+    AuthDisposition collection;
+};
+
+/**
+ * One request as a new operation - a skeleton's every operation, and a full
+ * bound export's operation for a request the document never declared.
+ */
 Json operation_object (const ExportRequest& entry,
 const std::string& templated,
 ExportNotes& notes,
-const AuthDisposition& collection_disp,
-SecuritySchemeRegistry& schemes) {
+const OperationContext& context,
+SchemeNamer& schemes) {
     Json operation = Json::object ();
     if (!entry.name.empty ()) {
         operation["summary"] = entry.name;
@@ -1585,76 +1879,52 @@ SecuritySchemeRegistry& schemes) {
     }
 
     Json parameters = Json::array ();
-    append_path_parameters (templated, parameters);
-    // OpenAPI defines a unique parameter by name+location, so two rows sharing
-    // both would produce an invalid document; only the first is written, the
-    // same row `patch_parameters` matches on the bound direction.
-    std::unordered_set<std::string> declared_parameters;
-    for (const ExportKeyValue& row : entry.params) {
-        if (row.key.empty ()) {
-            continue;
+    append_path_parameters (templated, parameters, context.vocabulary);
+    DeclaredParameters declared;
+    append_row_parameters (entry, declared, parameters, context.vocabulary);
+    if (context.vocabulary == Vocabulary::V2) {
+        for (Json& parameter : body_parameters_v2 (entry)) {
+            parameters.push_back (std::move (parameter));
         }
-        if (!declared_parameters
-            .insert ("query:" + vayu::utils::ascii_lower (row.key))
-            .second) {
-            notes.duplicate_parameter_rows_dropped += 1;
-            continue;
-        }
-        parameters.push_back (parameter_object (row, "query"));
-    }
-    for (const ExportKeyValue& row : entry.headers) {
-        const std::string key = vayu::utils::ascii_lower (row.key);
-        if (row.key.empty () ||
-        std::find (NON_PARAMETER_HEADERS.begin (), NON_PARAMETER_HEADERS.end (),
-        key) != NON_PARAMETER_HEADERS.end ()) {
-            continue;
-        }
-        if (!declared_parameters.insert ("header:" + key).second) {
-            notes.duplicate_parameter_rows_dropped += 1;
-            continue;
-        }
-        parameters.push_back (parameter_object (row, "header"));
     }
     if (!parameters.empty ()) {
         operation["parameters"] = std::move (parameters);
     }
-
-    if (const auto body = request_body_object (entry.body, notes)) {
-        operation["requestBody"] = *body;
+    if (context.vocabulary == Vocabulary::V3) {
+        if (auto body = request_body_object (entry)) {
+            operation["requestBody"] = std::move (*body);
+        }
     }
 
-    if (const auto security = operation_security_of (
-        disposition_of (entry.auth), collection_disp, schemes, notes)) {
-        operation["security"] = *security;
+    if (auto security = operation_security_of (
+        disposition_of (entry.auth), context.collection, schemes)) {
+        operation["security"] = std::move (*security);
     }
     // `x-vayu-elements` (issue #1518): a vendor extension key, never a
     // standard OpenAPI field, so writing it is never "rewriting the user's
-    // contract" - the same reasoning `x-vayu-enabled` already rests on
-    // (`parameter_object` above). It replaces the old script-only drop count:
-    // a script is one element kind among several, and every one of them now
-    // round-trips through this key rather than only being counted as lost.
-    if (entry.elements.is_array () && !entry.elements.empty ()) {
-        operation["x-vayu-elements"] = entry.elements;
-    }
-    if (!entry.follow_redirects || entry.max_redirects != 10 ||
-    entry.http_version != "auto" || !entry.verify_ssl || entry.stream) {
-        notes.settings_dropped += 1;
+    // contract" - the same reasoning `x-vayu-enabled` already rests on.
+    if (says_something (entry.elements)) {
+        operation["x-vayu-elements"] = Json (entry.elements);
     }
 
-    if (!entry.examples.empty ()) {
-        // The skeleton direction, unlike the bound one: there is no declared
-        // schema here to defer to, and a shape read off the example -
-        // saying so in its own description - is the most a skeleton may claim.
-        // An operation with no stored example documents no response at all,
-        // which is legal in 3.1 and honest: an invented `200 OK` would be the
-        // one claim this export is most likely to be believed about.
-        Json responses = Json::object ();
+    // An operation with no stored example documents no response at all where
+    // the dialect allows it (3.1): an invented `200 OK` would be the one claim
+    // this export is most likely to be believed about.
+    Json responses = Json::object ();
+    if (context.vocabulary == Vocabulary::V2) {
+        responses = responses_v2_of (entry, notes);
+    } else if (!entry.examples.empty ()) {
         write_response_examples (responses, entry.examples, notes, ExportDirection::Skeleton);
-        write_mock_extension (operation, entry, &responses);
-        operation["responses"] = std::move (responses);
-    } else {
-        write_mock_extension (operation, entry, nullptr);
     }
+    write_mock_extension (operation, entry,
+    context.vocabulary == Vocabulary::V3 ? &responses : nullptr);
+    if (responses.empty () && context.responses_required) {
+        responses["default"] = Json{ { "description", "No response documented." } };
+    }
+    if (!responses.empty ()) {
+        operation["responses"] = std::move (responses);
+    }
+    operation[std::string (ext::REQUEST_KEY)] = vayu_request_object (entry, notes, false);
     return operation;
 }
 
@@ -1680,16 +1950,12 @@ Json server_object (const std::string& origin, const ExportCollection& collectio
         Json{ { "baseUrl", Json{ { "default", collection.base_url_value } } } } } };
 }
 
-/// One tag per folder path (`Pets/Actions` for a request two levels deep),
-/// counting a nested one as flattened - `folderStrategy: tags` regroups by
-/// tag name flat, so a multi-level chain re-imports as one folder rather than
-/// its original nesting.
-std::optional<std::string> tag_of (const ExportRequest& entry, ExportNotes& notes) {
+/// The tag a request's folder is written as - its whole path joined
+/// (`Pets/Actions`), which is what another tool can group by. The nesting
+/// itself travels in `x-vayu-collection.folders`.
+std::optional<std::string> tag_of (const ExportRequest& entry) {
     if (entry.folder_path.empty ()) {
         return std::nullopt;
-    }
-    if (entry.folder_path.size () > 1) {
-        notes.folders_flattened += 1;
     }
     std::string joined;
     for (const std::string& segment : entry.folder_path) {
@@ -1699,6 +1965,21 @@ std::optional<std::string> tag_of (const ExportRequest& entry, ExportNotes& note
         joined += segment;
     }
     return joined;
+}
+
+/// The description of the folder a joined tag name stands for, or `""`.
+std::string folder_description_of (const ExportCollection& collection,
+const std::string& tag) {
+    for (const ExportFolder& folder : collection.folders) {
+        std::string joined;
+        for (const std::string& segment : folder.path) {
+            joined += (joined.empty () ? "" : "/") + segment;
+        }
+        if (joined == tag) {
+            return folder.description;
+        }
+    }
+    return {};
 }
 
 /// `servers` and `tags`, each written only when there is one to write.
@@ -1716,7 +1997,12 @@ const ExportCollection& collection) {
     if (!tag_order.empty ()) {
         Json entries = Json::array ();
         for (const std::string& name : tag_order) {
-            entries.push_back (Json{ { "name", name } });
+            Json tag{ { "name", name } };
+            if (const std::string description = folder_description_of (collection, name);
+            !description.empty ()) {
+                tag["description"] = description;
+            }
+            entries.push_back (std::move (tag));
         }
         document["tags"] = std::move (entries);
     }
@@ -1726,15 +2012,16 @@ const ExportCollection& collection) {
 /// `securitySchemes` every operation and the root together asked for.
 void write_root_security (Json& document,
 const AuthDisposition& collection_disp,
-SecuritySchemeRegistry& schemes) {
+SkeletonSchemes& schemes) {
     if (collection_disp.kind == AuthDisposition::Kind::None) {
         document["security"] = Json::array ();
     } else if (collection_disp.kind == AuthDisposition::Kind::Scheme) {
-        document["security"] =
-        security_requirement (schemes.name_for (collection_disp.scheme));
+        if (const auto name = schemes.name_for (collection_disp.auth)) {
+            document["security"] = security_requirement (*name);
+        }
     }
-    if (!schemes.empty ()) {
-        document["components"] = Json{ { "securitySchemes", schemes.schemes_object () } };
+    if (!schemes.schemes ().empty ()) {
+        document["components"] = Json{ { "securitySchemes", schemes.schemes () } };
     }
 }
 
@@ -1744,14 +2031,11 @@ const std::vector<ExportRequest>& requests) {
     assembly.notes =
     empty_notes ("skeleton", "OpenAPI " + std::string (SKELETON_VERSION));
 
-    const AuthDisposition collection_disp = disposition_of (collection.auth);
-    if (collection_disp.kind == AuthDisposition::Kind::Unsupported) {
-        assembly.notes.auth_dropped += 1;
-    }
-    assembly.notes.variables_dropped += collection.other_variables;
-
-    SecuritySchemeRegistry schemes;
-    Json paths = Json::object ();
+    const OperationContext context{ Vocabulary::V3,
+        /*responses_required=*/false, disposition_of (collection.auth) };
+    SkeletonSchemes schemes;
+    Json paths          = Json::object ();
+    Json extra_requests = Json::array ();
     std::vector<std::string> servers;
     std::unordered_set<std::string> claimed;
     std::vector<std::string> tag_order;
@@ -1761,6 +2045,7 @@ const std::vector<ExportRequest>& requests) {
         const RequestUrlParts parts = split_request_url (entry.url);
         if (!parts.path) {
             assembly.notes.requests_without_path += 1;
+            carry_in_extension (entry, extra_requests, assembly.notes);
             continue;
         }
         const std::string templated = path_template (*parts.path);
@@ -1769,6 +2054,7 @@ const std::vector<ExportRequest>& requests) {
             // Two requests on the same method and path are one operation in a
             // document, and the second would silently replace the first.
             assembly.notes.duplicate_operations += 1;
+            carry_in_extension (entry, extra_requests, assembly.notes);
             continue;
         }
         if (parts.origin &&
@@ -1778,8 +2064,8 @@ const std::vector<ExportRequest>& requests) {
 
         Json& item = child_record (paths, templated);
         Json operation =
-        operation_object (entry, templated, assembly.notes, collection_disp, schemes);
-        if (const auto tag = tag_of (entry, assembly.notes)) {
+        operation_object (entry, templated, assembly.notes, context, schemes);
+        if (const auto tag = tag_of (entry)) {
             operation["tags"] = Json::array ({ *tag });
             if (tags_seen.insert (*tag).second) {
                 tag_order.push_back (*tag);
@@ -1798,13 +2084,652 @@ const std::vector<ExportRequest>& requests) {
     assembly.document = Json{ { "openapi", std::string (SKELETON_VERSION) },
         { "info", std::move (info) } };
     write_servers_and_tags (assembly.document, servers, tag_order, collection);
-    write_root_security (assembly.document, collection_disp, schemes);
-    if (collection.elements.is_array () && !collection.elements.empty ()) {
-        assembly.document["x-vayu-elements"] = collection.elements;
+    write_root_security (assembly.document, context.collection, schemes);
+    if (says_something (collection.elements)) {
+        assembly.document["x-vayu-elements"] = Json (collection.elements);
     }
+    assembly.document[std::string (ext::COLLECTION_KEY)] =
+    vayu_collection_object (collection, std::move (extra_requests), assembly.notes);
     assembly.document["paths"] = std::move (paths);
     return assembly;
 }
+
+// --- The bound direction, assembled ----------------------------------------
+
+/// How a bound export writes: which mode the user chose, the dialect's
+/// vocabulary, and - in the full mode - the schemes it names.
+struct BoundWrite {
+    BoundMode mode = BoundMode::Contract;
+    OperationContext context;
+    BoundSchemes* schemes = nullptr;
+};
+
+/**
+ * The root requirement an import reads (`primary_scheme` in
+ * `import_document.cpp`): the document's own `security`, else its first
+ * declared scheme - so a document that declares schemes but requires none
+ * already says "the first one" and is not rewritten to say it again.
+ */
+std::optional<Json> root_requirement_as_imported (const Json& document, Vocabulary vocabulary) {
+    if (const auto own = document.find ("security"); own != document.end ()) {
+        return std::make_optional (*own);
+    }
+    const Json* schemes = nullptr;
+    if (vocabulary == Vocabulary::V3) {
+        const auto components = document.find ("components");
+        if (components != document.end () && components->is_object ()) {
+            const auto found = components->find ("securitySchemes");
+            schemes          = found == components->end () ? nullptr : &*found;
+        }
+    } else {
+        const auto found = document.find ("securityDefinitions");
+        schemes          = found == document.end () ? nullptr : &*found;
+    }
+    if (schemes == nullptr || !schemes->is_object () || schemes->empty ()) {
+        return std::nullopt;
+    }
+    return std::make_optional (
+    Json::array ({ Json{ { schemes->begin ().key (), Json::array () } } }));
+}
+
+/// Whether @p requirement already says what @p disposition sends.
+bool security_says (const Json* requirement,
+const AuthDisposition& disposition,
+const BoundSchemes& schemes) {
+    if (disposition.kind == AuthDisposition::Kind::None) {
+        return requirement == nullptr ||
+        (requirement->is_array () &&
+        (requirement->empty () ||
+        (requirement->size () == 1 && requirement->front ().is_object () &&
+        requirement->front ().empty ())));
+    }
+    if (disposition.kind == AuthDisposition::Kind::Scheme) {
+        return requirement != nullptr &&
+        schemes.names (*requirement, disposition.auth);
+    }
+    return true; // inherit / a mode OpenAPI cannot state: nothing to write
+}
+
+/**
+ * A request body written into an operation the document declares (full mode).
+ *
+ * The document's own schema stays: the request's body lands as the media
+ * type's `example` (an `examples` map, which admits no `example` beside it, is
+ * left alone - `x-vayu-request.body` carries the body either way), and a media
+ * type the operation does not declare is added whole. A `$ref` request body is
+ * shared and is never written through.
+ */
+void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vocabulary) {
+    if (vocabulary == Vocabulary::V2) {
+        const auto parameters    = operation.find ("parameters");
+        const bool declares_body = parameters != operation.end () &&
+        parameters->is_array () &&
+        std::any_of (parameters->begin (), parameters->end (), [] (const Json& p) {
+            const std::string location = string_member (p, "in");
+            return location == "body" || location == "formData";
+        });
+        if (declares_body) {
+            return;
+        }
+        Json body = body_parameters_v2 (entry);
+        if (body.empty ()) {
+            return;
+        }
+        if (parameters == operation.end () || !parameters->is_array ()) {
+            operation["parameters"] = Json::array ();
+        }
+        for (Json& parameter : body) {
+            operation["parameters"].push_back (std::move (parameter));
+        }
+        return;
+    }
+    const std::optional<BodyExample> body = body_example_of (entry);
+    if (!body) {
+        return;
+    }
+    const auto declared = operation.find ("requestBody");
+    if (declared != operation.end () &&
+    (!declared->is_object () || !string_member (*declared, "$ref").empty ())) {
+        return;
+    }
+    Json& content = child_record (child_record (operation, "requestBody"), "content");
+    const auto media = content.find (body->media_type);
+    if (media == content.end () || !media->is_object ()) {
+        content[body->media_type] = media_object_of (*body);
+        return;
+    }
+    if (!media->contains ("examples") &&
+    !(body->value.is_object () && body->value.empty ())) {
+        (*media)["example"] = body->value;
+    }
+    if (!media->contains ("schema")) {
+        (*media)["schema"] =
+        body->form_schema ? *body->form_schema : schema_from_example (body->value);
+    }
+}
+
+/// A 2.0 operation's saved examples merged into the responses it declares.
+void write_examples_v2 (Json& operation, const ExportRequest& entry, ExportNotes& notes) {
+    // An imported example came from this document - or was sampled off its
+    // schema, which the document never stated (see `disposition_of`, which
+    // makes the same call for 3.x). Examples cannot be edited in place, so
+    // only a response somebody saved is news to the document.
+    ExportRequest saved = entry;
+    std::erase_if (
+    saved.examples, [] (const ExportExample& e) { return e.from_import; });
+    Json& responses       = child_record (operation, "responses");
+    const Json documented = responses_v2_of (saved, notes);
+    for (const auto& [status, response] : documented.items ()) {
+        if (!responses.contains (status)) {
+            responses[status] = response;
+            continue;
+        }
+        const auto examples = response.find ("examples");
+        if (!responses[status].is_object () || examples == response.end ()) {
+            continue;
+        }
+        Json& declared = child_record (responses[status], "examples");
+        for (const auto& [media, value] : examples->items ()) {
+            if (!declared.contains (media)) {
+                declared[media] = value;
+            }
+        }
+    }
+}
+
+/**
+ * Everything the contract mode leaves out, written into an operation the
+ * document declares (full mode): the request's name and description, a
+ * parameter for every row the operation does not declare, its body, its auth
+ * where the operation does not already state it, and the `x-vayu-*`
+ * extensions for the rest.
+ */
+void write_everything (Json& operation,
+const ExportRequest& entry,
+DeclaredParameters declared,
+ExportNotes& notes,
+const BoundWrite& write) {
+    const Vocabulary vocabulary = write.context.vocabulary;
+    // The name an import reads (`name_draft`): the summary, else the
+    // operationId, else the method and path. A request still called that
+    // needs no summary written for it.
+    std::string imported_name = string_member (operation, "summary");
+    if (imported_name.empty () && !operation.contains ("summary")) {
+        imported_name = string_member (operation, "operationId");
+        if (imported_name.empty () && !operation.contains ("operationId") &&
+        entry.spec_operation) {
+            imported_name =
+            upper (entry.spec_operation->method) + " " + entry.spec_operation->path;
+        }
+    }
+    if (!entry.name.empty () && entry.name != imported_name) {
+        operation["summary"] = entry.name;
+    }
+    if (entry.description.empty ()) {
+        operation.erase ("description");
+    } else {
+        operation["description"] = entry.description;
+    }
+
+    Json added = Json::array ();
+    append_row_parameters (entry, declared, added, vocabulary);
+    if (!added.empty ()) {
+        Json& parameters = operation["parameters"];
+        if (!parameters.is_array ()) {
+            parameters = Json::array ();
+        }
+        for (Json& parameter : added) {
+            parameters.push_back (std::move (parameter));
+        }
+    }
+    write_body_full (operation, entry, vocabulary);
+
+    // An operation with no `security` of its own imports as `inherit` - the
+    // collection's auth - so it already says the request's when the two agree.
+    const AuthDisposition request_disp = disposition_of (entry.auth);
+    const auto own_security            = operation.find ("security");
+    const bool already_said            = own_security == operation.end () ?
+               same_disposition (request_disp, write.context.collection) ||
+    request_disp.kind == AuthDisposition::Kind::Inherit ||
+    request_disp.kind == AuthDisposition::Kind::Unsupported :
+               security_says (&*own_security, request_disp, *write.schemes);
+    if (!already_said) {
+        if (request_disp.kind == AuthDisposition::Kind::None) {
+            operation["security"] = Json::array ();
+        } else if (const auto name = write.schemes->name_for (request_disp.auth)) {
+            operation["security"] = security_requirement (*name);
+        }
+    }
+
+    if (says_something (entry.elements)) {
+        operation["x-vayu-elements"] = Json (entry.elements);
+    }
+    if (vocabulary == Vocabulary::V2) {
+        write_examples_v2 (operation, entry, notes);
+        write_mock_extension (operation, entry, nullptr);
+    }
+    operation[std::string (ext::REQUEST_KEY)] = vayu_request_object (entry, notes, false);
+}
+
+void patch_operation (Json& operation,
+const Json& document,
+const ExportRequest& entry,
+DeclaredParameters inherited,
+ExportNotes& notes,
+const BoundWrite& write) {
+    const bool full             = write.mode == BoundMode::Full;
+    const Vocabulary vocabulary = write.context.vocabulary;
+    const DeclaredParameters declared = patch_parameters (operation, document, entry,
+    std::move (inherited), notes, vocabulary == Vocabulary::V3 ? "example" : "x-example");
+    count_edited_identity (entry, notes);
+    if (full) {
+        write_everything (operation, entry, declared, notes, write);
+    } else {
+        count_undeclared_rows (entry, declared, notes);
+        count_unwritten_body (entry, notes);
+        // `x-vayu-elements` (issue #1518): a vendor extension key added to an
+        // operation the document already declares is additive, never a
+        // rewrite of what the operation itself means.
+        if (says_something (entry.elements)) {
+            operation["x-vayu-elements"] = Json (entry.elements);
+        }
+    }
+    if (vocabulary == Vocabulary::V3) {
+        if (!entry.examples.empty ()) {
+            write_response_examples (child_record (operation, "responses"),
+            entry.examples, notes, ExportDirection::Bound);
+        }
+        const auto responses = operation.find ("responses");
+        write_mock_extension (
+        operation, entry, responses == operation.end () ? nullptr : &*responses);
+    }
+}
+
+/**
+ * Every operation on one path item, patched or removed.
+ *
+ * @p document is the whole stored document, read for the components a `$ref`
+ * names. Only members *under* @p path_item are written, so nothing this reads
+ * moves while it is being read.
+ */
+void patch_path_item (Assembly& assembly,
+const std::vector<ExportRequest>& requests,
+const Json& document,
+const Dialect& dialect,
+const BoundWrite& write,
+const std::string& path,
+const std::unordered_map<std::string, size_t>& by_operation_id,
+const std::unordered_map<std::string, size_t>& by_method_path,
+std::unordered_set<size_t>& claimed,
+Json& path_item) {
+    const DeclaredParameters inherited = inherited_parameters (document, path_item);
+    for (const std::string_view method : PATH_ITEM_METHODS) {
+        const std::string key (method);
+        const auto operation = path_item.find (key);
+        if (operation == path_item.end () || !operation->is_object ()) {
+            continue;
+        }
+        const size_t* found =
+        find_request (*operation, method, path, by_operation_id, by_method_path);
+        if (found == nullptr) {
+            path_item.erase (key);
+            assembly.notes.operations_removed += 1;
+            continue;
+        }
+        claimed.insert (*found);
+        assembly.notes.requests_exported += 1;
+        // The contract mode writes into a 3.x operation only: 2.0 states
+        // parameters and examples in a vocabulary of its own. The full mode
+        // was asked to write everything, and writes 2.0's.
+        if (dialect.writable || write.mode == BoundMode::Full) {
+            patch_operation (*operation, document, requests[*found], inherited,
+            assembly.notes, write);
+        }
+    }
+}
+
+/**
+ * Every operation the document declares, patched or removed.
+ *
+ * A path left with no operations goes with them. This is what makes a re-import
+ * of the exported document produce the collection it came from.
+ */
+void patch_document_paths (Assembly& assembly,
+const std::vector<ExportRequest>& requests,
+const Dialect& dialect,
+const BoundWrite& write,
+const std::unordered_map<std::string, size_t>& by_operation_id,
+const std::unordered_map<std::string, size_t>& by_method_path,
+std::unordered_set<size_t>& claimed,
+std::unordered_set<std::string>& referenced_paths) {
+    const auto paths = assembly.document.find ("paths");
+    if (paths != assembly.document.end () && paths->is_object ()) {
+        std::vector<std::string> emptied;
+        for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
+            Json& path_item = entry.value ();
+            if (!path_item.is_object ()) {
+                continue;
+            }
+            if (!string_member (path_item, "$ref").empty ()) {
+                referenced_paths.insert (entry.key ());
+                continue;
+            }
+            // The document is read (for the components a `$ref` names) while a
+            // path item inside it is written; the two never touch the same
+            // node, and no member of the root is added or removed here.
+            patch_path_item (assembly, requests, assembly.document, dialect, write,
+            entry.key (), by_operation_id, by_method_path, claimed, path_item);
+            const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
+            PATH_ITEM_METHODS.end (), [&] (std::string_view method) {
+                return path_item.contains (std::string (method));
+            });
+            if (!has_operation) {
+                // A path left with no operations goes with them. This is what
+                // makes a re-import of the exported document produce the
+                // collection it came from.
+                emptied.push_back (entry.key ());
+            }
+        }
+        for (const std::string& key : emptied) {
+            paths->erase (key);
+        }
+    }
+}
+
+/** What became of the requests no operation in the document claimed. */
+void count_unclaimed_requests (const std::vector<ExportRequest>& requests,
+const std::unordered_set<size_t>& claimed,
+const std::unordered_set<std::string>& referenced_paths,
+ExportNotes& notes) {
+    for (size_t index = 0; index < requests.size (); ++index) {
+        if (claimed.contains (index)) {
+            continue;
+        }
+        const auto& identity = requests[index].spec_operation;
+        if (!identity) {
+            notes.requests_without_operation += 1;
+        } else if (referenced_paths.contains (identity->path)) {
+            notes.requests_exported += 1;
+        } else {
+            notes.operations_not_in_document += 1;
+        }
+    }
+}
+
+/**
+ * The requests no operation in the document claimed, added as operations of
+ * their own (full mode) - under the path and method their URL states, filed
+ * under their folder's tag. A request whose URL states no path, or whose
+ * method and path an operation already holds, goes whole into
+ * `x-vayu-collection.requests` instead.
+ */
+void add_unclaimed_operations (Assembly& assembly,
+const std::vector<ExportRequest>& requests,
+const std::unordered_set<size_t>& claimed,
+const std::unordered_set<std::string>& referenced_paths,
+const BoundWrite& write,
+Json& extra_requests,
+std::vector<std::string>& new_tags) {
+    Json& paths = child_record (assembly.document, "paths");
+    for (size_t index = 0; index < requests.size (); ++index) {
+        const ExportRequest& entry = requests[index];
+        if (claimed.contains (index) ||
+        (entry.spec_operation &&
+        referenced_paths.contains (entry.spec_operation->path))) {
+            continue;
+        }
+        const RequestUrlParts parts = split_request_url (entry.url);
+        if (!parts.path) {
+            assembly.notes.requests_without_path += 1;
+            carry_in_extension (entry, extra_requests, assembly.notes);
+            continue;
+        }
+        const std::string templated = path_template (*parts.path);
+        const std::string method    = vayu::utils::ascii_lower (entry.method);
+        Json& item                  = child_record (paths, templated);
+        if (item.contains (method) || !string_member (item, "$ref").empty ()) {
+            assembly.notes.duplicate_operations += 1;
+            carry_in_extension (entry, extra_requests, assembly.notes);
+            continue;
+        }
+        Json operation = operation_object (
+        entry, templated, assembly.notes, write.context, *write.schemes);
+        if (const auto tag = tag_of (entry)) {
+            operation["tags"] = Json::array ({ *tag });
+            if (std::find (new_tags.begin (), new_tags.end (), *tag) == new_tags.end ()) {
+                new_tags.push_back (*tag);
+            }
+        }
+        item[method] = std::move (operation);
+        assembly.notes.operations_added += 1;
+        assembly.notes.requests_exported += 1;
+    }
+}
+
+/// A Server Object's URL with each `{variable}` replaced by its `default` -
+/// the URL an import reads it as.
+std::string resolved_server_url (const Json& server) {
+    std::string url      = string_member (server, "url");
+    const auto variables = server.find ("variables");
+    if (variables == server.end () || !variables->is_object ()) {
+        return url;
+    }
+    for (const auto& [name, variable] : variables->items ()) {
+        const std::string token = "{" + name + "}";
+        for (size_t at = url.find (token); at != std::string::npos; at = url.find (token)) {
+            url.replace (at, token.size (), string_member (variable, "default"));
+        }
+    }
+    return url;
+}
+
+/// `servers[0]` pointed at @p base when it no longer resolves to it, keeping
+/// its description - a 3.x document's half of `write_base_url`.
+void write_server_v3 (Json& document, const std::string& base) {
+    Json& servers = document["servers"];
+    if (!servers.is_array ()) {
+        servers = Json::array ();
+    }
+    if (servers.empty ()) {
+        servers.push_back (Json{ { "url", base } });
+        return;
+    }
+    Json& first = servers.front ();
+    if (first.is_object () && resolved_server_url (first) == base) {
+        return;
+    }
+    Json server{ { "url", base } };
+    if (first.is_object () && first.contains ("description")) {
+        server["description"] = first.at ("description");
+    }
+    first = std::move (server);
+}
+
+/// `schemes`, `host` and `basePath` pointed at @p base where they no longer
+/// say it - a 2.0 document's half of `write_base_url`.
+void write_host_v2 (Json& document, const std::string& base) {
+    const size_t scheme_end = base.find ("://");
+    if (scheme_end == std::string::npos) {
+        return;
+    }
+    const std::string scheme = base.substr (0, scheme_end);
+    const std::string rest   = base.substr (scheme_end + 3);
+    const size_t slash       = rest.find ('/');
+    const std::string host   = rest.substr (0, slash);
+    const std::string path = slash == std::string::npos ? "" : rest.substr (slash);
+    if (string_member (document, "host") != host) {
+        document["host"] = host;
+    }
+    const std::string declared_path = string_member (document, "basePath");
+    if ((declared_path == "/" ? "" : declared_path) != path) {
+        document["basePath"] = path.empty () ? "/" : path;
+    }
+    const auto schemes = document.find ("schemes");
+    const bool same    = schemes != document.end () && schemes->is_array () &&
+    !schemes->empty () && schemes->front ().is_string () &&
+    schemes->front ().get<std::string> () == scheme;
+    if (!same) {
+        document["schemes"] = Json::array ({ scheme });
+    }
+}
+
+/**
+ * The document's base URL pointed at the collection's `baseUrl` when it no
+ * longer says the same - the value a re-import turns back into
+ * `{{baseUrl}}`. A value that is still a `{{variable}}` names no server and is
+ * left out.
+ */
+void write_base_url (Json& document, const ExportCollection& collection, Vocabulary vocabulary) {
+    const std::string& base = collection.base_url_value;
+    if (base.empty () || base.find ("{{") != std::string::npos) {
+        return;
+    }
+    if (vocabulary == Vocabulary::V3) {
+        write_server_v3 (document, base);
+    } else {
+        write_host_v2 (document, base);
+    }
+}
+
+/**
+ * The document's own name, description, base URL and `security`, tags for the
+ * folders new operations were filed under, and the `x-vayu-*` root members -
+ * the collection-level half of the full mode.
+ */
+void write_document_root (Assembly& assembly,
+const ExportCollection& collection,
+const BoundWrite& write,
+Json extra_requests,
+const std::vector<std::string>& new_tags) {
+    Json& document = assembly.document;
+    Json& info     = child_record (document, "info");
+    if (!collection.name.empty ()) {
+        info["title"] = collection.name;
+    }
+    if (collection.description.empty ()) {
+        info.erase ("description");
+    } else {
+        info["description"] = collection.description;
+    }
+    write_base_url (document, collection, write.context.vocabulary);
+
+    const AuthDisposition& collection_disp = write.context.collection;
+    const std::optional<Json> root_security =
+    root_requirement_as_imported (document, write.context.vocabulary);
+    if (!security_says (root_security ? &*root_security : nullptr,
+        collection_disp, *write.schemes)) {
+        if (collection_disp.kind == AuthDisposition::Kind::None) {
+            document["security"] = Json::array ();
+        } else if (const auto name = write.schemes->name_for (collection_disp.auth)) {
+            document["security"] = security_requirement (*name);
+        }
+    }
+    write.schemes->write_into (document);
+
+    if (!new_tags.empty ()) {
+        Json& tags = document["tags"];
+        if (!tags.is_array ()) {
+            tags = Json::array ();
+        }
+        for (const std::string& name : new_tags) {
+            const bool declared = std::any_of (tags.begin (), tags.end (),
+            [&] (const Json& tag) { return string_member (tag, "name") == name; });
+            if (declared) {
+                continue;
+            }
+            Json tag{ { "name", name } };
+            if (const std::string description = folder_description_of (collection, name);
+            !description.empty ()) {
+                tag["description"] = description;
+            }
+            tags.push_back (std::move (tag));
+        }
+    }
+    if (says_something (collection.elements)) {
+        document["x-vayu-elements"] = Json (collection.elements);
+    } else {
+        document.erase ("x-vayu-elements");
+    }
+    document[std::string (ext::COLLECTION_KEY)] =
+    vayu_collection_object (collection, std::move (extra_requests), assembly.notes);
+}
+
+/**
+ * The stored bytes, patched.
+ *
+ * Everything Vayu does not model - `info`, `tags`, vendor extensions,
+ * `security`, components no operation here references - is carried through
+ * untouched, because it is carried through by simply not being visited. That is
+ * the whole reason this direction exists: a rebuilt document would be Vayu's
+ * opinion of the user's contract, and the parts it has no opinion about would
+ * quietly disappear. The full mode (`BoundMode::Full`) visits more - see
+ * `write_everything` and `write_document_root` - and still never rebuilds.
+ */
+Assembly patch_bound_document (const std::string& content,
+const ExportCollection& collection,
+const std::vector<ExportRequest>& requests,
+BoundMode mode) {
+    Assembly assembly;
+    DocumentRead read = read_document (content);
+    if (!read.ok ()) {
+        assembly.error = "The stored document could not be read: " + read.error;
+        return assembly;
+    }
+    if (!read.root.is_object ()) {
+        assembly.error = "The stored document is not an OpenAPI object.";
+        return assembly;
+    }
+    assembly.document = std::move (read.root);
+
+    Dialect dialect;
+    if (auto refusal = read_dialect (assembly.document, dialect)) {
+        assembly.error = *refusal;
+        return assembly;
+    }
+    assembly.notes            = empty_notes ("document", dialect.label);
+    assembly.notes.bound_mode = mode == BoundMode::Full ? "full" : "contract";
+    assembly.notes.vocabulary_not_written = !dialect.writable && mode == BoundMode::Contract;
+
+    const Vocabulary vocabulary = dialect.writable ? Vocabulary::V3 : Vocabulary::V2;
+    BoundSchemes schemes (assembly.document, vocabulary);
+    const std::string version = string_member (assembly.document, "openapi");
+    const BoundWrite write{ mode,
+        OperationContext{ vocabulary,
+        /*responses_required=*/vocabulary == Vocabulary::V2 || version.starts_with ("3.0"),
+        disposition_of (collection.auth) },
+        &schemes };
+
+    std::unordered_map<std::string, size_t> by_operation_id;
+    std::unordered_map<std::string, size_t> by_method_path;
+    index_requests (requests, by_operation_id, by_method_path);
+
+    std::unordered_set<size_t> claimed;
+    /*
+     * Paths whose Path Item is itself a `$ref` (legal in 3.0/3.1, and what a
+     * bundler emits when it hoists a shared item into `components.pathItems`).
+     * Its methods are not readable from here without following the ref and
+     * mutating a node other paths may share, so such an item is left exactly as
+     * it is - and a request that names one of those paths is reported as
+     * carried rather than as missing, which is what it is.
+     */
+    std::unordered_set<std::string> referenced_paths;
+
+    patch_document_paths (assembly, requests, dialect, write, by_operation_id,
+    by_method_path, claimed, referenced_paths);
+    if (mode == BoundMode::Full) {
+        Json extra_requests = Json::array ();
+        std::vector<std::string> new_tags;
+        add_unclaimed_operations (assembly, requests, claimed, referenced_paths,
+        write, extra_requests, new_tags);
+        write_document_root (
+        assembly, collection, write, std::move (extra_requests), new_tags);
+    } else {
+        count_unclaimed_requests (requests, claimed, referenced_paths, assembly.notes);
+    }
+
+    return assembly;
+}
+
 
 // --- Serialization ----------------------------------------------------------
 
@@ -1842,9 +2767,11 @@ std::string file_slug (const std::string& name) {
 ExportOutcome export_openapi (const ExportCollection& collection,
 const std::vector<ExportRequest>& requests,
 const std::optional<std::string>& spec_content,
-ExportFormat format) {
-    Assembly assembly = spec_content ? patch_bound_document (*spec_content, requests) :
-                                       skeleton_document (collection, requests);
+ExportFormat format,
+BoundMode bound_mode) {
+    Assembly assembly = spec_content ?
+    patch_bound_document (*spec_content, collection, requests, bound_mode) :
+    skeleton_document (collection, requests);
 
     ExportOutcome outcome;
     if (!assembly.error.empty ()) {
@@ -1877,14 +2804,9 @@ nlohmann::json export_notes_json (const ExportNotes& notes) {
         { "rowsNotDeclared", notes.rows_not_declared },
         { "operationsEdited", notes.operations_edited },
         { "vocabularyNotWritten", notes.vocabulary_not_written },
-        { "authDropped", notes.auth_dropped }, { "scriptsDropped", notes.scripts_dropped },
-        { "variablesDropped", notes.variables_dropped },
-        { "foldersFlattened", notes.folders_flattened },
-        { "bodiesDropped", notes.bodies_dropped },
-        { "formValuesDropped", notes.form_values_dropped },
-        { "settingsDropped", notes.settings_dropped },
-        { "exampleHeadersDropped", notes.example_headers_dropped },
-        { "duplicateParameterRowsDropped", notes.duplicate_parameter_rows_dropped } };
+        { "secretsOmitted", notes.secrets_omitted },
+        { "requestsOnlyInExtension", notes.requests_only_in_extension },
+        { "operationsAdded", notes.operations_added }, { "boundMode", notes.bound_mode } };
 }
 
 } // namespace vayu::core

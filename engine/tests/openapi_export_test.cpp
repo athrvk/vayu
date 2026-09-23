@@ -44,19 +44,6 @@ using json = nlohmann::ordered_json;
 
 namespace {
 
-/**
- * The collection every case exports unless it says otherwise.
- *
- * A function rather than a namespace-scope object: `ExportCollection` holds two
- * `std::string`s, so building one before `main` is dynamic initialisation whose
- * allocation cannot be caught (`cert-err58-cpp`). A reference to the
- * function-local static is still usable as a default argument below.
- */
-const ExportCollection& petstore () {
-    static const ExportCollection collection{ "Petstore", "", {}, "", "", "", 0 };
-    return collection;
-}
-
 std::string fixture (const std::string& name) {
     const std::filesystem::path path =
     std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" / "fixtures" / name;
@@ -154,7 +141,23 @@ std::string oauth2_scope             = "") {
  * see `auth`'s comment for why every field is listed. */
 ExportCollection named_collection (std::string name,
 vayu::core::ExportAuth collection_auth = {}) {
-    return { std::move (name), "", std::move (collection_auth), "", "", "", 0 };
+    ExportCollection collection;
+    collection.name = std::move (name);
+    collection.auth = std::move (collection_auth);
+    return collection;
+}
+
+/**
+ * The collection every case exports unless it says otherwise.
+ *
+ * A function rather than a namespace-scope object: `ExportCollection` holds two
+ * `std::string`s, so building one before `main` is dynamic initialisation whose
+ * allocation cannot be caught (`cert-err58-cpp`). A reference to the
+ * function-local static is still usable as a default argument below.
+ */
+const ExportCollection& petstore () {
+    static const ExportCollection collection = named_collection ("Petstore");
+    return collection;
 }
 
 /** An export that must have succeeded, with its text parsed back. */
@@ -722,6 +725,8 @@ TEST (SkeletonExport, StripsADuplicateParamsOrHeadersRowRatherThanWritingTwoPara
     ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
     entry.params        = { row ("verbose", "1"), row ("Verbose", "2") };
     entry.headers = { row ("X-Tenant", "acme"), row ("x-tenant", "acme2") };
+    entry.stored_params = nlohmann::json::parse (R"([
+        {"key":"verbose","value":"1","enabled":true},{"key":"Verbose","value":"2","enabled":true}])");
 
     const Exported exported = export_json ({ entry });
     const json& parameters = operation_of (exported.document, "/pets", "get")["parameters"];
@@ -730,7 +735,10 @@ TEST (SkeletonExport, StripsADuplicateParamsOrHeadersRowRatherThanWritingTwoPara
     EXPECT_EQ (parameters[0]["example"], "1");
     EXPECT_EQ (parameters[1]["name"], "X-Tenant");
     EXPECT_EQ (parameters[1]["example"], "acme");
-    EXPECT_EQ (exported.notes.duplicate_parameter_rows_dropped, 2);
+    // The second rows are not lost: `x-vayu-request` carries every row as typed.
+    EXPECT_EQ (operation_of (
+               exported.document, "/pets", "get")["x-vayu-request"]["params"],
+    json (entry.stored_params));
 }
 
 TEST (SkeletonExport, WritesADisabledRowsToggleRatherThanGuessingItFromItsValue) {
@@ -769,35 +777,59 @@ TEST (SkeletonExport, DescribesABodyOnlyFromTheBodyThatIsThereAndMarksTheShapeAs
     EXPECT_FALSE (operation_of (exported.document, "/pets", "put").contains ("responses"));
 }
 
-TEST (SkeletonExport, WritesTheQueryTextOfAGraphqlRequestNowhere) {
-    // GraphQL over HTTP posts a JSON envelope Vayu composes at send time, so
-    // the stored query text is not the body the endpoint receives. The
-    // operation keeps its path; it gains no `requestBody` describing a request
-    // nobody sends - counted, since it is real content the export drops.
-    ExportRequest posted = request ("POST", "{{baseUrl}}/graphql");
-    posted.body          = { "graphql", "query { pets { id } }", {} };
+TEST (SkeletonExport, WritesAGraphqlBodyAsTheEnvelopeAServerReceives) {
+    // GraphQL over HTTP posts a `{query, variables}` JSON envelope, which is
+    // what Vayu stores - written as an `application/json` example. A stored
+    // query that is not that envelope is wrapped as one.
+    ExportRequest enveloped = request ("POST", "{{baseUrl}}/graphql");
+    enveloped.body          = { "graphql",
+                 R"({"query":"{ pets { id } }","variables":{"n":1}})", {} };
+    ExportRequest bare      = request ("POST", "{{baseUrl}}/bare");
+    bare.body               = { "graphql", "query { pets { id } }", {} };
 
-    const Exported exported = export_json ({ posted });
-    EXPECT_FALSE (
-    operation_of (exported.document, "/graphql", "post").contains ("requestBody"));
-    EXPECT_EQ (exported.notes.bodies_dropped, 1);
+    const Exported exported = export_json ({ enveloped, bare });
+    EXPECT_EQ (operation_of (exported.document, "/graphql",
+               "post")["requestBody"]["content"]["application/json"]["example"],
+    json::parse (R"({"query":"{ pets { id } }","variables":{"n":1}})"));
+    EXPECT_EQ (operation_of (exported.document, "/bare",
+               "post")["requestBody"]["content"]["application/json"]["example"],
+    json::parse (R"({"query":"query { pets { id } }"})"));
 }
 
-TEST (SkeletonExport, DeclaresAFormsFieldNamesAndNoneOfItsValues) {
+TEST (SkeletonExport, DeclaresAFormsFieldsAndItsEnabledValuesAsTheExample) {
     ExportRequest posted = request ("POST", "{{baseUrl}}/pets");
-    posted.body          = { "x-www-form-urlencoded", "", { "name", "tag" } };
+    posted.body          = { "form-data", "", { "name", "tag", "photo" } };
+    posted.stored_body = nlohmann::json::parse (R"({"mode":"form-data","fields":[
+        {"key":"name","value":"Rex","enabled":true,"description":"The name"},
+        {"key":"tag","value":"old","enabled":false},
+        {"key":"photo","value":"","enabled":true,"type":"file","src":"/home/me/a.png"}]})");
 
     const Exported exported = export_json ({ posted });
-    EXPECT_EQ (
-    operation_of (exported.document, "/pets",
-    "post")["requestBody"]["content"]["application/x-www-form-urlencoded"],
-    json::parse (R"({"schema":{"type":"object","properties":{"name":{"type":"string"},"tag":{"type":"string"}}}})"));
-    EXPECT_EQ (exported.notes.form_values_dropped, 1);
+    const json& media       = operation_of (exported.document, "/pets",
+          "post")["requestBody"]["content"]["multipart/form-data"];
+    EXPECT_EQ (media["schema"], json::parse (R"({"type":"object","properties":{
+        "name":{"type":"string","description":"The name"},
+        "tag":{"type":"string"},
+        "photo":{"type":"string","format":"binary"}}})"));
+    // Enabled text fields only - a disabled row is not sent, a file part is
+    // one machine's file.
+    EXPECT_EQ (media["example"], json::parse (R"({"name":"Rex"})"));
+}
+
+TEST (SkeletonExport, FilesTheBodyUnderTheMediaTypeItsContentTypeRowNames) {
+    ExportRequest posted = request ("POST", "{{baseUrl}}/pets");
+    posted.body          = { "json", R"({"a":1})", {} };
+    posted.headers = { row ("Content-Type", "application/vnd.api+json; charset=utf-8") };
+
+    const Exported exported = export_json ({ posted });
+    EXPECT_TRUE (
+    operation_of (exported.document, "/pets", "post")["requestBody"]["content"].contains (
+    "application/vnd.api+json"));
 }
 
 TEST (SkeletonExport, GivesATemplatedBaseUrlServerVariableItsRealDefault) {
-    const ExportCollection collection{ "Petstore", "", {}, "", "",
-        "https://api.example.com", 0 };
+    ExportCollection collection = named_collection ("Petstore");
+    collection.base_url_value   = "https://api.example.com";
 
     const Exported exported =
     export_json ({ request ("GET", "{{baseUrl}}/pets") }, std::nullopt, collection);
@@ -824,12 +856,13 @@ TEST (SkeletonExport, FilesARequestUnderItsFolderPathAsOneTag) {
     json::parse (R"(["Pets/Actions"])"));
     EXPECT_FALSE (operation_of (exported.document, "/health", "get").contains ("tags"));
     EXPECT_EQ (exported.document["tags"], json::parse (R"([{"name":"Pets/Actions"}])"));
-    // Two levels of nesting collapse into one flat tag on reimport - counted,
-    // since the original hierarchy does not survive.
-    EXPECT_EQ (exported.notes.folders_flattened, 1);
+    // The nesting itself travels as the folder path in `x-vayu-request`.
+    EXPECT_EQ (operation_of (
+               exported.document, "/pets", "get")["x-vayu-request"]["folder"],
+    json::parse (R"(["Pets","Actions"])"));
 }
 
-TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanNameAndCountsTheRest) {
+TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanName) {
     ExportRequest basic  = request ("GET", "{{baseUrl}}/a");
     basic.auth           = auth ("basic");
     ExportRequest bearer = request ("GET", "{{baseUrl}}/b");
@@ -860,10 +893,9 @@ TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanNameAndCountsTheRest) {
     json::parse (R"([{"apiKeyAuth":[]}])"));
     EXPECT_EQ (operation_of (exported.document, "/d", "get")["security"],
     json::parse (R"([{"oauth2Auth":[]}])"));
-    // `digest` has no OpenAPI securityScheme this file writes - counted, no
-    // `security` override left on an operation nothing could describe.
+    // `digest` has no OpenAPI securityScheme - no `security` override on an
+    // operation nothing could describe; `x-vayu-request.auth` carries it.
     EXPECT_FALSE (operation_of (exported.document, "/e", "get").contains ("security"));
-    EXPECT_EQ (exported.notes.auth_dropped, 1);
 }
 
 TEST (SkeletonExport, WritesNoAuthAsAnEmptySecurityRequirement) {
@@ -891,27 +923,6 @@ TEST (SkeletonExport, LeavesAnInheritingRequestsOperationWithNoSecurityOverride)
     EXPECT_FALSE (operation_of (exported.document, "/a", "get").contains ("security"));
 }
 
-TEST (SkeletonExport, CountsSettingsVariablesAndExampleHeadersItCannotCarry) {
-    ExportCollection collection = named_collection ("Petstore");
-    collection.other_variables  = 2;
-
-    ExportRequest entry       = request ("GET", "{{baseUrl}}/pets");
-    entry.follow_redirects    = false;
-    ExportExample stamped     = example ();
-    stamped.has_extra_headers = true;
-    entry.examples            = { stamped };
-
-    const Exported exported = export_json ({ entry }, std::nullopt, collection);
-    // Scripts are elements now (issue #1518): they round-trip through
-    // `x-vayu-elements` rather than being counted as lost, so this count
-    // reverted to 0 is itself the mutation check - restore either dropped
-    // increment this test used to assert and it goes back to non-zero.
-    EXPECT_EQ (exported.notes.scripts_dropped, 0);
-    EXPECT_EQ (exported.notes.settings_dropped, 1);
-    EXPECT_EQ (exported.notes.variables_dropped, 2);
-    EXPECT_EQ (exported.notes.example_headers_dropped, 1);
-}
-
 TEST (SkeletonExport, WritesElementsAsAVayuExtensionOnRequestAndCollection) {
     ExportCollection collection = named_collection ("Petstore");
     collection.elements         = json::parse (
@@ -922,7 +933,6 @@ TEST (SkeletonExport, WritesElementsAsAVayuExtensionOnRequestAndCollection) {
     R"json([{"id":"el_r1","kind":"script.post","enabled":true,"config":{"script":"pm.test('ok', () => {})"}}])json");
 
     const Exported exported = export_json ({ entry }, std::nullopt, collection);
-    EXPECT_EQ (exported.notes.scripts_dropped, 0);
     EXPECT_EQ (exported.document["x-vayu-elements"], collection.elements);
     EXPECT_EQ (
     operation_of (exported.document, "/pets", "get")["x-vayu-elements"], entry.elements);
@@ -1036,8 +1046,9 @@ TEST (SkeletonExport, CountsARequestItCannotPlaceInsteadOfGuessingAtOne) {
 }
 
 TEST (SkeletonExport, NamesTheCollectionAndNeverInventsAVersionItWasTold) {
-    const Exported exported = export_json (
-    {}, std::nullopt, { "Internal tools", "Scratch space", {}, "", "", "", 0 });
+    ExportCollection collection = named_collection ("Internal tools");
+    collection.description      = "Scratch space";
+    const Exported exported     = export_json ({}, std::nullopt, collection);
     EXPECT_EQ (exported.document["info"],
     json::parse (R"({"title":"Internal tools","version":"0.0.0","description":"Scratch space"})"));
     EXPECT_FALSE (exported.document.contains ("servers"));

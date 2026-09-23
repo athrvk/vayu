@@ -428,6 +428,15 @@ struct SpecRequestDraft {
      */
     std::optional<nlohmann::ordered_json> mock;
     /**
+     * The operation's `x-vayu-request` object (`core/vayu_extensions.hpp`) -
+     * everything about the request a Vayu export wrote that no standard member
+     * states exactly - copied verbatim when present. Import-only, for the same
+     * reason as @ref elements: a re-fetched document must never overwrite a
+     * user's locally edited headers, auth or settings through the sync diff.
+     * Checked piece by piece in `parse_openapi` before any of it is applied.
+     */
+    std::optional<nlohmann::ordered_json> vayu_request;
+    /**
      * Whether the `paths` key this hangs off is a path at all - see
      * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`
      * returned, since a diff only ever sees identified operations.

@@ -590,11 +590,21 @@ logged as a warning: it means a client skipped composition.
     (#1518, read back by the importer and validated against the registry
     before it reaches a stored request), a request's `mock_response_mode` as
     `x-vayu-mock` (#1649, its `"fixed"` target named by the `examples` map key
-    it resolves to rather than an id nothing has minted yet) - and counts
-    what it cannot (other variables, unmapped bodies, form values, execution
-    settings, extra example headers) in `ExportNotes`. The subtree walk stops
-    at a collection bound to a *different* document and not at one bound to
-    the same (#721), as a predicate on `collection_subtree_ids`. YAML output is
+    it resolves to rather than an id nothing has minted yet), and everything
+    else the UI holds in `x-vayu-request` (per operation) and
+    `x-vayu-collection` (root: variables, auth, data contract, the folder tree,
+    requests no operation can hold) - `core/vayu_extensions.hpp`, one module
+    for both directions, which blanks every secret on the way out (counted as
+    `secretsOmitted`; a pure `{{var}}` reference is kept) and checks every
+    piece on the way in (`vayu_extension_invalid`, never a refused import).
+    An `inherit` request's `security` is resolved through its folders by
+    `resolve_inherited_auth`, the rule `POST /compose` uses. A bound export's
+    `mode` is the user's choice: `contract` (default) patches as above,
+    `full` writes every edit into the document's own dialect, 2.0 included
+    (`BoundMode`), and an unedited `full` export changes no standard member.
+    The subtree walk stops at a collection bound to a *different* document
+    and not at one bound to the same (#721), as a predicate on
+    `collection_subtree_ids`. YAML output is
     `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides
     quoting, and split across two files a document would export as
     `swagger: 2.0` and re-import as a number.

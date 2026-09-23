@@ -27,12 +27,14 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/types.hpp"
 
 using nlohmann::json;
 
@@ -76,6 +78,78 @@ R"("post":{"operationId":"createPet","responses":{"201":{"description":"made"}}}
 constexpr const char* OWNERS_DOC =
 R"({"openapi":"3.1.0","info":{"title":"Owners","version":"1.0.0"},)"
 R"("paths":{"/owners":{"get":{"operationId":"listOwners","responses":{"200":{"description":"ok"}}}}}})";
+
+
+/// A stored JSON column as a value to compare, `null` when it does not parse.
+json column (const std::string& blob) {
+    return json::parse (blob, nullptr, /*allow_exceptions=*/false);
+}
+
+/**
+ * Everything the UI shows for @p root_id's subtree, as one value two
+ * collections can be compared by: every collection's editor fields, every
+ * request's tabs, every saved example - folders and requests in the order the
+ * sidebar lists them. Ids and timestamps are left out; they are the store's.
+ */
+json snapshot (vayu::db::Database& db, const std::string& root_id, bool is_root = true) {
+    const auto collection = db.get_collection (root_id);
+    if (!collection) {
+        ADD_FAILURE () << "no collection " << root_id;
+        return json ();
+    }
+    json out{ { "description", collection->description },
+        { "variables", column (collection->variables) },
+        { "auth", column (collection->auth) },
+        { "elements", column (collection->elements) },
+        { "dataSchema", column (collection->data_schema) } };
+    if (!is_root) {
+        out["name"] = collection->name;
+    }
+    auto rows = db.get_requests_in_collection (root_id);
+    std::stable_sort (rows.begin (), rows.end (),
+    [] (const auto& a, const auto& b) { return a.order < b.order; });
+    json requests = json::array ();
+    for (const auto& row : rows) {
+        json examples     = json::array ();
+        int fixed         = -1;
+        const auto stored = db.get_request_examples (row.id);
+        for (size_t at = 0; at < stored.size (); ++at) {
+            const auto& example = stored[at];
+            examples.push_back (
+            json{ { "name", example.name }, { "status", example.status },
+            { "body", example.body }, { "contentType", example.content_type },
+            { "headers", column (example.headers) },
+            { "truncated", example.body_truncated } });
+            if (row.mock_example_id && *row.mock_example_id == example.id) {
+                fixed = static_cast<int> (at);
+            }
+        }
+        requests.push_back (json{ { "name", row.name },
+        { "description", row.description }, { "method", vayu::to_string (row.method) },
+        { "url", row.url }, { "params", column (row.params) },
+        { "headers", column (row.headers) }, { "body", column (row.body) },
+        { "auth", column (row.auth) }, { "elements", column (row.elements) },
+        { "followRedirects", row.follow_redirects }, { "maxRedirects", row.max_redirects },
+        { "httpVersion", row.http_version }, { "verifySSL", row.verify_ssl },
+        { "stream", row.stream }, { "mockResponseMode", row.mock_response_mode },
+        { "mockExample", fixed }, { "examples", std::move (examples) } });
+    }
+    out["requests"] = std::move (requests);
+    std::vector<vayu::db::Collection> children;
+    for (const auto& candidate : db.get_collections ()) {
+        if (candidate.parent_id && *candidate.parent_id == root_id) {
+            children.push_back (candidate);
+        }
+    }
+    std::stable_sort (children.begin (), children.end (),
+    [] (const auto& a, const auto& b) { return a.order < b.order; });
+    json folders = json::array ();
+    for (const auto& child : children) {
+        folders.push_back (snapshot (db, child.id, /*is_root=*/false));
+    }
+    out["folders"] = std::move (folders);
+    return out;
+}
 
 class SpecExportRouteTest : public ::testing::Test {
     protected:
@@ -139,6 +213,14 @@ class SpecExportRouteTest : public ::testing::Test {
         auto [status, response] = routes::export_spec_response (*db_, body);
         EXPECT_EQ (status, 200) << response.dump ();
         return response;
+    }
+
+    /// @p text imported through `POST /import`, answering the new root's id.
+    std::string import_text (const std::string& text) {
+        auto [status, imported] =
+        routes::import_response (*db_, json{ { "content", text } });
+        EXPECT_EQ (status, 200) << imported.dump ();
+        return imported["idMap"].value ("c1", std::string{});
     }
 
     json export_collection (const std::string& collection_id = {}) {
@@ -334,6 +416,216 @@ TEST_F (SpecExportRouteTest, RoundTripsAFixedMockModeThroughXVayuMock) {
     // unrelated 200 example (`p0`).
     EXPECT_EQ (json::parse (target->body), json::parse (R"({"id":"p1"})"));
     EXPECT_EQ (target->status, 201);
+}
+
+TEST_F (SpecExportRouteTest, ResolvesAnInheritingRequestsAuthThroughItsFolder) {
+    // `inherit` means the nearest level with a credential, the rule
+    // `POST /compose` applies. A folder with its own API key sits between this
+    // request and the root's bearer token, so the operation must say API key -
+    // it used to say nothing and so read as the root's bearer.
+    auto [status, response] = routes::update_collection_response (*db_, root_,
+    json{ { "auth", json{ { "mode", "bearer" }, { "token", "t" } } } });
+    ASSERT_EQ (status, 200) << response.dump ();
+    const std::string folder =
+    create_collection (json{ { "name", "Users" }, { "parentId", root_ },
+    { "auth",
+    json{ { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "k" }, { "in", "header" } } } });
+    create_request (folder, "GET", "{{baseUrl}}/users");
+    const std::string plain =
+    create_collection (json{ { "name", "Plain" }, { "parentId", root_ } });
+    create_request (plain, "GET", "{{baseUrl}}/plain");
+
+    // Not const: a missing member reads as `null` and fails the expectation,
+    // where const `operator[]` would abort the whole suite.
+    json document = json::parse (export_collection ()["text"].get<std::string> ());
+    EXPECT_EQ (document["security"],
+    json::array ({ json{ { "bearerAuth", json::array () } } }));
+    EXPECT_EQ (document["paths"]["/users"]["get"]["security"],
+    json::array ({ json{ { "apiKeyAuth", json::array () } } }));
+    EXPECT_EQ (document["components"]["securitySchemes"]["apiKeyAuth"]["name"], "X-Api-Key");
+    // A folder with no auth of its own steps over to the root's, which the
+    // document already states - no override.
+    EXPECT_FALSE (document["paths"]["/plain"]["get"].contains ("security"));
+}
+
+
+// ============================================================================
+// Round trips - export, import the file, and compare what the UI would show
+// ============================================================================
+
+/// Swagger 2.0, the dialect the contract mode writes nothing into.
+constexpr const char* SWAGGER_DOC =
+R"({"swagger":"2.0","info":{"title":"Shop","version":"1"},"host":"shop.example.com",)"
+R"("basePath":"/v1","schemes":["https"],"tags":[{"name":"items"}],)"
+R"("securityDefinitions":{"key":{"type":"apiKey","name":"X-Key","in":"header"}},)"
+R"("paths":{"/items":{"get":{"operationId":"listItems","tags":["items"],)"
+R"("parameters":[{"name":"limit","in":"query","type":"integer"}],)"
+R"("responses":{"200":{"description":"ok"}}}}}})";
+
+TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
+    // Every editor field the UI has, at every level: what an exported file
+    // carries is the collection, not only the part OpenAPI has words for.
+    auto [root_status, root_body] = routes::update_collection_response (
+    *db_, root_, json::parse (R"json({"description":"Root **notes**",
+        "variables":{"baseUrl":{"value":"https://api.example.com","enabled":true},
+                     "tenant":{"value":"acme","enabled":false,"type":"string"}},
+        "auth":{"mode":"bearer","token":"{{token}}"},
+        "dataSchema":{"columns":["user","pass"],"fileName":"users.csv"},
+        "elements":[{"id":"el_1","kind":"script.pre","enabled":true,"config":{"script":"console.log(1)"}}]})json"));
+    ASSERT_EQ (root_status, 200) << root_body.dump ();
+    const std::string users = create_collection (json::parse (R"json({"name":"Users",
+        "description":"People","variables":{"page":{"value":"2","enabled":true}},
+        "auth":{"mode":"apikey","key":"X-Api-Key","value":"{{key}}","in":"header"},
+        "elements":[{"id":"el_2","kind":"script.post","enabled":true,"config":{"script":"pm.test('t', () => {})"}}]})json"));
+    ASSERT_EQ (routes::update_collection_response (*db_, users, json{ { "parentId", root_ } })
+               .first,
+    200);
+    const std::string admin = create_collection (json{ { "name", "Admin" },
+    { "parentId", users }, { "auth", json{ { "mode", "noauth" } } } });
+    create_collection (json{ { "name", "Empty" }, { "parentId", root_ } });
+
+    auto [get_status, get_body] = routes::create_request_response (*db_, json::parse (R"json({
+        "collectionId":")json" + users + R"json(","name":"Get user","description":"One user",
+        "method":"GET","url":"{{baseUrl}}/users/{{id}}?expand=all",
+        "params":[{"key":"expand","value":"all","enabled":true,"description":"What"},
+                  {"key":"Expand","value":"none","enabled":false}],
+        "headers":[{"key":"Accept","value":"application/json","enabled":true},
+                   {"key":"Authorization","value":"Token {{t}}","enabled":false}],
+        "auth":{"mode":"inherit"},
+        "elements":[{"id":"el_3","kind":"assert.status","enabled":true,"config":{"in":[200]}}],
+        "followRedirects":false,"maxRedirects":3,"httpVersion":"http2","verifySSL":false,"stream":true})json"));
+    ASSERT_EQ (get_status, 200) << get_body.dump ();
+    const std::string get_id = get_body.value ("id", std::string{});
+    add_example (get_id, json::parse (R"({"name":"Found","status":200,"body":"{\"id\":1}",
+        "contentType":"application/json","origin":"user",
+        "headers":[{"key":"Content-Type","value":"application/json","enabled":true},
+                   {"key":"X-Rate","value":"9","enabled":true}]})"));
+    add_example (get_id, json::parse (R"({"name":"Gone","status":404,"body":"<no/>",
+        "contentType":"application/xml","origin":"user","headers":[]})"));
+    ASSERT_EQ (routes::update_request_response (*db_, get_id,
+               json{ { "mockResponseMode", "fixed" },
+               { "mockExampleId", db_->get_request_examples (get_id)[1].id } })
+               .first,
+    200);
+
+    for (const json& request :
+    { json::parse (R"json({"name":"Upload","method":"POST","url":"{{baseUrl}}/files",
+            "body":{"mode":"form-data","fields":[{"key":"title","value":"hi","enabled":true,"description":"T"},
+              {"key":"draft","value":"y","enabled":false},{"key":"file","value":"","enabled":true,"type":"file","fileName":"a.png"}]},
+            "auth":{"mode":"digest","config":{"username":"u"}},"mockResponseMode":"random"})json"),
+    json::parse (R"json({"name":"Query","method":"POST","url":"{{baseUrl}}/graphql",
+            "body":{"mode":"graphql","content":"{\"query\":\"{ me { id } }\"}"},
+            "auth":{"mode":"oauth2","config":{"grantType":"client_credentials","accessTokenUrl":"https://auth.example.com/t","clientId":"cid","scope":"a b"}}})json"),
+    json::parse (R"json({"name":"Soap","method":"POST","url":"{{baseUrl}}/soap",
+            "headers":[{"key":"Content-Type","value":"text/xml","enabled":true}],
+            "body":{"mode":"xml","content":"<x/>"},"auth":{"mode":"none"}})json"),
+    json::parse (R"json({"name":"Home","method":"GET","url":"{{baseUrl}}"})json"),
+    json::parse (R"json({"name":"Upload again","method":"POST","url":"{{baseUrl}}/files"})json") }) {
+        json body              = request;
+        body["collectionId"]   = request["name"] == "Soap" ? admin : root_;
+        auto [status, created] = routes::create_request_response (*db_, body);
+        ASSERT_EQ (status, 200) << created.dump ();
+    }
+
+    const json before      = snapshot (*db_, root_);
+    const std::string text = export_collection ()["text"].get<std::string> ();
+    const std::string copy = import_text (text);
+    ASSERT_FALSE (copy.empty ());
+    EXPECT_EQ (snapshot (*db_, copy), before) << text;
+}
+
+TEST_F (SpecExportRouteTest, LeavesOutEverySecretAndCountsIt) {
+    auto [status, body] = routes::update_collection_response (*db_, root_,
+    json::parse (R"json({"auth":{"mode":"basic","username":"u","password":"hunter2"},
+        "variables":{"token":{"value":"abc","enabled":true,"secret":true},
+                     "ref":{"value":"{{vault}}","enabled":true,"secret":true}}})json"));
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string id = create_request (root_, "GET", "{{baseUrl}}/x");
+    ASSERT_EQ (routes::update_request_response (*db_, id,
+               json::parse (R"({"auth":{"mode":"apikey","key":"K","value":"s3cret","in":"query"}})"))
+               .first,
+    200);
+
+    const json exported    = export_collection ();
+    const std::string text = exported["text"].get<std::string> ();
+    EXPECT_EQ (text.find ("hunter2"), std::string::npos);
+    EXPECT_EQ (text.find ("s3cret"), std::string::npos);
+    EXPECT_EQ (text.find ("\"abc\""), std::string::npos);
+    // A value that is one `{{variable}}` names a secret without being one.
+    EXPECT_NE (text.find ("{{vault}}"), std::string::npos);
+    EXPECT_EQ (exported["notes"]["secretsOmitted"], 3);
+}
+
+TEST_F (SpecExportRouteTest, KeepsTheContractByDefaultAndWritesEverythingWhenAsked) {
+    const std::string copy = import_text (SWAGGER_DOC);
+    std::string folder;
+    for (const auto& c : db_->get_collections ()) {
+        if (c.parent_id && *c.parent_id == copy) {
+            folder = c.id;
+        }
+    }
+    ASSERT_FALSE (folder.empty ());
+    const auto rows = db_->get_requests_in_collection (folder);
+    ASSERT_EQ (rows.size (), 1);
+
+    // Unedited, both modes leave every standard member exactly as it was.
+    const json original = json::parse (SWAGGER_DOC);
+    for (const char* mode : { "contract", "full" }) {
+        json document = json::parse (
+        export_ok (json{ { "collectionId", copy }, { "mode", mode } })["text"].get<std::string> ());
+        document.erase ("x-vayu-collection");
+        for (auto& [path, item] : document["paths"].items ()) {
+            for (auto& [method, operation] : item.items ()) {
+                operation.erase ("x-vayu-request");
+            }
+        }
+        EXPECT_EQ (document, original) << mode;
+    }
+
+    auto [status, body] = routes::update_request_response (*db_, rows[0].id,
+    json::parse (R"json({"name":"All items","description":"Every item",
+        "params":[{"key":"limit","value":"5","enabled":true},{"key":"sort","value":"asc","enabled":true}],
+        "headers":[{"key":"X-Trace","value":"1","enabled":true}],
+        "body":{"mode":"json","content":"{\"a\":1}"},"verifySSL":false,
+        "elements":[{"id":"el_1","kind":"script.pre","enabled":true,"config":{"script":"console.log(1)"}}]})json"));
+    ASSERT_EQ (status, 200) << body.dump ();
+    create_request (folder, "DELETE", "{{baseUrl}}/items/{{id}}");
+
+    const json contract = json::parse (
+    export_ok (json{ { "collectionId", copy } })["text"].get<std::string> ());
+    // The contract mode writes the value into the declared parameter and
+    // nothing else: no new parameter, no body, no new operation, no rename.
+    const json& kept = contract["paths"]["/items"]["get"];
+    EXPECT_EQ (kept["parameters"].size (), 1);
+    EXPECT_FALSE (kept.contains ("summary"));
+    EXPECT_FALSE (contract["paths"].contains ("/items/{id}"));
+
+    const json full_body =
+    export_ok (json{ { "collectionId", copy }, { "mode", "full" } });
+    EXPECT_EQ (full_body["notes"]["boundMode"], "full");
+    EXPECT_EQ (full_body["notes"]["operationsAdded"], 1);
+    const std::string text = full_body["text"].get<std::string> ();
+    const json full        = json::parse (text);
+    const json& written    = full["paths"]["/items"]["get"];
+    EXPECT_EQ (written["summary"], "All items");
+    EXPECT_EQ (written["description"], "Every item");
+    EXPECT_EQ (written["parameters"][0]["x-example"], "5");
+    EXPECT_EQ (written["parameters"][1]["name"], "sort");
+    EXPECT_EQ (written["parameters"][2]["name"], "X-Trace");
+    EXPECT_EQ (written["parameters"][3]["in"], "body");
+    EXPECT_TRUE (full["paths"]["/items/{id}"].contains ("delete"));
+    EXPECT_EQ (full["swagger"], "2.0");
+
+    // And the file is the collection: importing it shows what the UI showed.
+    const json before = snapshot (*db_, copy);
+    EXPECT_EQ (snapshot (*db_, import_text (text)), before) << text;
+}
+
+TEST_F (SpecExportRouteTest, RefusesABoundModeItDoesNotHave) {
+    auto [status, body] = routes::export_spec_response (
+    *db_, json{ { "collectionId", root_ }, { "mode", "everything" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("mode"), std::string::npos);
 }
 
 TEST_F (SpecExportRouteTest, WritesYamlWhenAskedForIt) {

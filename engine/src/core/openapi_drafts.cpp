@@ -1206,6 +1206,30 @@ DraftRequest& draft) {
 }
 
 /**
+ * The operation members only an import reads - its own `security` and the
+ * `x-vayu-*` extensions a Vayu export writes - copied verbatim onto @p entry.
+ * None of them reaches `DraftRequest`, which is what the sync diff compares:
+ * a re-fetched document must never overwrite what a user edited locally.
+ */
+void read_import_only_members (const json* operation, SpecRequestDraft& entry) {
+    if (const json* security = prop (operation, "security"); security != nullptr) {
+        entry.security = *security;
+    }
+    if (const json* elements = prop (operation, "x-vayu-elements");
+    elements != nullptr && elements->is_array ()) {
+        entry.elements = *elements;
+    }
+    if (const json* mock = prop (operation, "x-vayu-mock");
+    mock != nullptr && mock->is_object ()) {
+        entry.mock = *mock;
+    }
+    if (const json* request = prop (operation, "x-vayu-request");
+    request != nullptr && request->is_object ()) {
+        entry.vayu_request = *request;
+    }
+}
+
+/**
  * The drafts, for either caller: the sync diff, which wants the operations a
  * document *declares*, and the import, which wants a request for every
  * operation it *writes* plus a tally of what it had to drop.
@@ -1235,17 +1259,7 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         SpecRequestDraft entry;
         std::tie (entry.folder, entry.folder_from_tag) =
         folder_of (prop (operation, "tags"), path);
-        if (const json* security = prop (operation, "security"); security != nullptr) {
-            entry.security = *security;
-        }
-        if (const json* elements = prop (operation, "x-vayu-elements");
-        elements != nullptr && elements->is_array ()) {
-            entry.elements = *elements;
-        }
-        if (const json* mock = prop (operation, "x-vayu-mock");
-        mock != nullptr && mock->is_object ()) {
-            entry.mock = *mock;
-        }
+        read_import_only_members (operation, entry);
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);
