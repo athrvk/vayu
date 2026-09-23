@@ -588,8 +588,15 @@ export function useTreeCrud({
 				return;
 			} finally {
 				// Only now: the dialog stays up, with its confirm button spinning,
-				// for as long as the delete is actually running.
-				setDeleteConfirm(null);
+				// for as long as the delete is actually running. Guarded rather than
+				// unconditional: a second delete requested while this one was in
+				// flight is refused by `handleConfirmDelete` above and sits in
+				// `deleteConfirm` waiting its turn, so clearing unconditionally here
+				// would drop it on the floor with no dialog and no toast to show for
+				// it (the row simply stays, deleted-looking request gone silently).
+				setDeleteConfirm((current) =>
+					current?.type === "collection" && current.id === collectionId ? null : current
+				);
 				setDeletingCollectionId(null);
 			}
 
@@ -638,7 +645,11 @@ export function useTreeCrud({
 			} catch (error) {
 				reportFailure(error, "Couldn't delete the request");
 			} finally {
-				setDeleteConfirm(null);
+				// See the matching guard in `handleDeleteCollection`: a delete queued
+				// behind this one during the mutation must survive this clear.
+				setDeleteConfirm((current) =>
+					current?.type === "request" && current.id === requestId ? null : current
+				);
 				setDeletingRequestId(null);
 			}
 		},

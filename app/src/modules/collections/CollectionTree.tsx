@@ -148,7 +148,11 @@ export default function CollectionTree() {
 	 * `useDeleteRefocus` so that capture has run by the time `awaitRemoval`
 	 * reads it - with no dialog there is no close to arm the refocus from.
 	 * Re-runs while the delete is in flight are harmless: `confirmDelete` refuses
-	 * a second delete until the first settles.
+	 * a second delete until the first settles, and once it does, `panel`'s own
+	 * memo picks up the cleared `deletingCollectionId`/`deletingRequestId` and
+	 * gives this effect a fresh reference to run again - which is what lets a
+	 * delete requested mid-flight (still sitting in `deleteConfirm`, per the
+	 * guarded clear in `useTreeCrud`) actually go through once its turn comes.
 	 */
 	useEffect(() => {
 		if (!panel.deleteConfirm || deleteNeedsConfirm) return;

@@ -278,6 +278,36 @@ describe("deleting a collection with nothing running", () => {
 		await waitFor(() => expect(useTabsStore.getState().openTabs).toEqual([]));
 	});
 
+	/*
+	 * A delete requested while another is still running used to be lost outright:
+	 * the in-flight delete's `finally` cleared `deleteConfirm` unconditionally,
+	 * wiping out whichever delete had queued up behind it, with no dialog and no
+	 * toast to show for it. The fix is a guarded clear in `useTreeCrud`, so the
+	 * queued delete survives to be sent once the first one settles.
+	 */
+	it("delivers a delete requested while another is still in flight, instead of losing it", async () => {
+		let settleFirst: () => void = () => {};
+		deleteCollection.mockImplementation((id: unknown) => {
+			if (id === "leaf") {
+				return new Promise<void>((resolve) => {
+					settleFirst = resolve;
+				});
+			}
+			return Promise.resolve();
+		});
+		renderTree();
+		await askToDelete("Invoices");
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("leaf"));
+
+		await askToDelete("Acme");
+		// Queued behind "leaf": refused for as long as it is still in flight.
+		await act(async () => {});
+		expect(deleteCollection).not.toHaveBeenCalledWith("root");
+
+		settleFirst();
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("root"));
+	});
+
 	it("does not mention or stop a mock running for an unrelated collection", async () => {
 		mockServers = [
 			{ mockId: "mock-other", collectionId: "root", collectionName: "Acme", port: 5000 },
