@@ -2752,6 +2752,24 @@ json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally&
     return auth;
 }
 
+/**
+ * The collection's own `x-vayu-elements` (issue #1518), which a skeleton
+ * export writes at the document root - validated the way an operation's are
+ * in `draft_request`, against the collection owner's rules, and counted as
+ * `elements_invalid` rather than applied when it fails.
+ */
+std::optional<json> collection_elements (const json& document, ImportTally& tally) {
+    const json* elements = prop (&document, "x-vayu-elements");
+    if (elements == nullptr || !elements->is_array () || elements->empty ()) {
+        return std::nullopt;
+    }
+    if (Registry::instance ().validate (*elements, ElementOwner::Collection)) {
+        tally.add ("elements_invalid");
+        return std::nullopt;
+    }
+    return std::make_optional (*elements);
+}
+
 json parse_openapi (const json& document,
 const std::string& raw,
 const ImportSource& source,
@@ -2819,8 +2837,11 @@ walk::Dialect dialect) {
       json::object () :
       json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
     root["auth"]        = collection_primary_auth (scheme, v3, tally);
-    root["children"]    = folders.children ();
-    root["requests"]    = folders.root_requests ();
+    if (std::optional<json> elements = collection_elements (document, tally)) {
+        root["elements"] = std::move (*elements);
+    }
+    root["children"] = folders.children ();
+    root["requests"] = folders.root_requests ();
     // The document itself, so the import can store it and bind this collection
     // to it in the same atomic call (#637). `raw` and not a re-serialization:
     // the engine hashes the bytes it stores, and a sync compares against that

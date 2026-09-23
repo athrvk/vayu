@@ -323,9 +323,9 @@ struct DraftExample {
 
 /// A draft request's body, in the shape `requests.body` stores.
 struct DraftBody {
-    /// `none`, `json`, `text`, `form-data` or `x-www-form-urlencoded`.
+    /// `none`, `json`, `text`, `xml`, `form-data` or `x-www-form-urlencoded`.
     std::string mode = "none";
-    /// The `json` / `text` payload, and `""` for the form and `none` modes.
+    /// The `json` / `text` / `xml` payload, and `""` for the form and `none` modes.
     std::string content;
     /// The form modes' fields, empty for every other mode.
     std::vector<DraftField> fields;

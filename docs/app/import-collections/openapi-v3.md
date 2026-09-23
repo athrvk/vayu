@@ -208,7 +208,8 @@ Why optional value-less parameters import **disabled** (issues #622, #658): the 
 | `content` media type | Vayu `RequestBody` | How content is produced |
 |----------------------|--------------------|-------------------------|
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
-| `text/plain` | `{ mode: "text", content: "" }` | empty string (the schema is not sampled for text bodies) |
+| `text/plain` | `{ mode: "text", content }` | the media object's `example` as the text it is, else empty (the schema is not sampled for text bodies) |
+| `application/xml`, `text/xml`, or any `+xml` type | `{ mode: "xml", content }` | the same: the `example` as the text it is, else empty - a Vayu skeleton export writes an `xml` body exactly this way |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
 | no `content`, or none of the above | `{ mode: "none" }` | |

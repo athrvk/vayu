@@ -2473,7 +2473,8 @@
                     "params": [],
                     "headers": [],
                     "body": {
-                      "mode": "none"
+                      "mode": "xml",
+                      "content": ""
                     },
                     "auth": {
                       "mode": "inherit"
@@ -2572,10 +2573,6 @@
               "count": 1
             },
             {
-              "kind": "unmapped_body",
-              "count": 1
-            },
-            {
               "kind": "malformed_spec",
               "count": 1
             },
@@ -2668,9 +2665,10 @@
             "params": [],
             "headers": [],
             "body": {
-              "mode": "none"
+              "mode": "xml",
+              "content": ""
             },
-            "bodyType": "none",
+            "bodyType": "xml",
             "auth": {
               "mode": "inherit"
             },

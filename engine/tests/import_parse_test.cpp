@@ -918,6 +918,37 @@ TEST (ImportParse, DropsAndCountsAnInvalidXVayuElementsArray) {
     EXPECT_TRUE (counted);
 }
 
+/// The document root's own `x-vayu-elements` is the collection's - a skeleton
+/// export writes a collection's scripts there. It used to be written and never
+/// read, so every re-import lost them.
+TEST (ImportParse, ReadsRootXVayuElementsIntoTheCollection) {
+    const ImportParse parsed = parse_import (R"json({"openapi":"3.1.0","info":{"title":"T"},
+        "x-vayu-elements":[{"id":"el_1","kind":"script.pre","enabled":true,
+        "config":{"script":"console.log(1)"}}],
+        "paths":{}})json",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& root = parsed.result.at ("collections")[0];
+    ASSERT_TRUE (root.contains ("elements"));
+    EXPECT_EQ (root.at ("elements")[0].at ("kind"), "script.pre");
+}
+
+/// An XML request body imports as Vayu's own `xml` mode with the example as
+/// its text - a skeleton export writes an `xml` body exactly this way, and it
+/// used to come back as no body at all (`unmapped_body`).
+TEST (ImportParse, ReadsAnXmlRequestBodyAsTheXmlMode) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+        "paths":{"/soap":{"post":{"responses":{},
+        "requestBody":{"content":{"application/xml":{"example":"<a>1</a>"}}}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("body").at ("mode"), "xml");
+    EXPECT_EQ (request.at ("body").at ("content"), "<a>1</a>");
+    EXPECT_TRUE (parsed.result.at ("meta").at ("skipped").empty ());
+}
+
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
     const ImportParse v30 =
     parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});
