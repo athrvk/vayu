@@ -117,7 +117,7 @@ describe("WorkspaceBackupCard", () => {
 		backUp();
 
 		expect(await screen.findByText(/disk full/)).toBeInTheDocument();
-		expect(showToast).toHaveBeenCalledWith("Could not back up the workspace", "error");
+		expect(showToast).toHaveBeenCalledWith("Couldn't back up the workspace", "error");
 	});
 
 	it("clears a previous failure when a retry succeeds", async () => {

@@ -111,7 +111,7 @@ export default function GeneralPanel() {
 			showToast(
 				failed === 0
 					? "Run history cleared"
-					: `Cleared history - ${failed} run${failed === 1 ? "" : "s"} could not be deleted`,
+					: `Couldn't delete ${failed} of ${runs.length} runs`,
 				failed === 0 ? "success" : "error"
 			);
 		} finally {

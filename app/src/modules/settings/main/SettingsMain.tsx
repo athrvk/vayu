@@ -342,7 +342,7 @@ export default function SettingsMain() {
 				}
 			} catch (err) {
 				console.error("Failed to save settings:", err);
-				failSave(err instanceof Error ? err.message : "Failed to save settings");
+				failSave(err instanceof Error ? err.message : "Couldn't save settings");
 			}
 		},
 		[
@@ -503,7 +503,7 @@ export default function SettingsMain() {
 	if (error) {
 		return (
 			<ErrorState
-				title="Failed to load settings"
+				title="Couldn't load settings"
 				detail={error instanceof Error ? error.message : "Unknown error"}
 			/>
 		);

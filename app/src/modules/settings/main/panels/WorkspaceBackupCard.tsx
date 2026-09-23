@@ -79,7 +79,7 @@ export function WorkspaceBackupCard() {
 						? error.message
 						: "The engine did not answer";
 			setFailure(message);
-			showToast("Could not back up the workspace", "error");
+			showToast("Couldn't back up the workspace", "error");
 		} finally {
 			setRunning(false);
 		}

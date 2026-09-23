@@ -89,7 +89,7 @@ export function CookiesCard() {
 				"success"
 			);
 		} catch {
-			showToast("Could not clear cookies", "error");
+			showToast("Couldn't clear cookies", "error");
 		}
 	};
 
