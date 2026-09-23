@@ -232,7 +232,7 @@ export function SampledExchange({
 						{phases.length > 0 && (
 							<div className="space-y-1">
 								<p className="text-xs font-medium text-muted-foreground">
-									Timing Breakdown
+									Timing breakdown
 								</p>
 								<TimingPhaseTiles phases={phases} />
 							</div>

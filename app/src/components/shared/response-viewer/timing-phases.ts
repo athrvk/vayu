@@ -117,7 +117,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 	{
 		key: "ttfb",
 		label: "TTFB",
-		longLabel: "First Byte",
+		longLabel: "First byte",
 		cssVar: "--chart-3",
 		tip: PHASE_TIPS.ttfb,
 		traceKey: "firstByteMs",

@@ -106,7 +106,7 @@ describe("TestValidationSummary", () => {
 		);
 
 		expect(screen.getByText("status is 200: expected 500 to equal 200")).toBeTruthy();
-		expect(screen.queryByText("Samples Tested")).toBeNull();
+		expect(screen.queryByText("Samples tested")).toBeNull();
 	});
 
 	it("discloses what the tested-response store displaced", () => {

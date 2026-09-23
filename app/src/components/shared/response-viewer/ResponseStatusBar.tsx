@@ -246,7 +246,7 @@ export function ResponseStatusBar({
 					className="flex items-center gap-1.5 text-xs text-muted-foreground"
 					title={
 						`Sent with the client certificate registered for ${clientCertificate} ` +
-						`(Settings > Network & connectivity).`
+						`(Settings › Network & connectivity).`
 					}
 				>
 					<ShieldCheck className="size-icon-sm" />

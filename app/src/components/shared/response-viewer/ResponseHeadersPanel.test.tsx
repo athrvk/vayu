@@ -35,8 +35,8 @@ describe("ResponseHeadersPanel", () => {
 		);
 
 		// Both sections are present...
-		expect(screen.getByText("Response Headers")).toBeInTheDocument();
-		expect(screen.getByText("Request Headers")).toBeInTheDocument();
+		expect(screen.getByText("Response headers")).toBeInTheDocument();
+		expect(screen.getByText("Request headers")).toBeInTheDocument();
 
 		// ...but only the response one has its table open. What came back is the
 		// question being asked; what was sent usually is not.
@@ -47,8 +47,8 @@ describe("ResponseHeadersPanel", () => {
 	it("omits the request section entirely when nothing was sent", () => {
 		render(<ResponseHeadersPanel responseHeaders={{ "content-type": "text/plain" }} />);
 
-		expect(screen.queryByText("Request Headers")).toBeNull();
-		expect(screen.getByText("Response Headers")).toBeInTheDocument();
+		expect(screen.queryByText("Request headers")).toBeNull();
+		expect(screen.getByText("Response headers")).toBeInTheDocument();
 	});
 
 	it("explains an empty response rather than rendering a blank pane", () => {
