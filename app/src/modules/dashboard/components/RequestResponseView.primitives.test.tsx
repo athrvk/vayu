@@ -153,7 +153,7 @@ describe("RequestResponseView captured samples (#174)", () => {
 	it("renders the captured body, joined to the row by result id", async () => {
 		renderView();
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
-		expect(await screen.findByText("Response Body")).toBeTruthy();
+		expect(await screen.findByText("Response body")).toBeTruthy();
 	});
 
 	it("shows nothing when the run captured no exchange for this row", async () => {
@@ -167,9 +167,9 @@ describe("RequestResponseView captured samples (#174)", () => {
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
 
 		await waitFor(() => expect(getRunSamples).toHaveBeenCalled());
-		// Not an empty "Response Body" heading: a heading over nothing reads as
+		// Not an empty "Response body" heading: a heading over nothing reads as
 		// a bug in the engine rather than as "this sample has no body".
-		expect(screen.queryByText("Response Body")).toBeNull();
+		expect(screen.queryByText("Response body")).toBeNull();
 		expect(screen.queryByText("Response Headers")).toBeNull();
 	});
 });

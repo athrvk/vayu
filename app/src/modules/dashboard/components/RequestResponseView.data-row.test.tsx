@@ -70,7 +70,7 @@ describe("RequestResponseView renders a sample's data row (#449)", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /server error/ }));
 
-		expect(screen.getByText(/Data Row:/)).toBeTruthy();
+		expect(screen.getByText(/Data row:/)).toBeTruthy();
 		expect(screen.getByText("7")).toBeTruthy();
 	});
 
@@ -85,7 +85,7 @@ describe("RequestResponseView renders a sample's data row (#449)", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /server error/ }));
 
-		expect(screen.getByText(/Data Row:/)).toBeTruthy();
+		expect(screen.getByText(/Data row:/)).toBeTruthy();
 		expect(screen.getByText("0")).toBeTruthy();
 	});
 
@@ -94,6 +94,6 @@ describe("RequestResponseView renders a sample's data row (#449)", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /server error/ }));
 
-		expect(screen.queryByText(/Data Row:/)).toBeNull();
+		expect(screen.queryByText(/Data row:/)).toBeNull();
 	});
 });

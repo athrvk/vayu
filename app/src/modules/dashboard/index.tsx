@@ -122,7 +122,7 @@ export default function LoadTestDashboard() {
 				console.error("Failed to fetch final report:", err);
 				if (!cancelled) {
 					setReportError(
-						err instanceof Error ? err.message : "Could not load the run report"
+						err instanceof Error ? err.message : "Couldn't load the run report"
 					);
 				}
 			} finally {
@@ -181,7 +181,7 @@ export default function LoadTestDashboard() {
 					} else {
 						loadAttemptRef.current = 0;
 						setReportError(
-							err instanceof Error ? err.message : "Could not load the run report"
+							err instanceof Error ? err.message : "Couldn't load the run report"
 						);
 					}
 				} finally {

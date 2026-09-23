@@ -29,7 +29,7 @@ export const TOOLTIPS = {
 	achievedThroughput:
 		"Requests per second emerging from the configured concurrent users. In closed-loop testing the rate is an output, not a target - the server's response time determines what RPS you actually achieve. Throughput / VU below shows what each simulated user produced per second.",
 	progress:
-		"Progress through the configured iteration count. The bar fills as requests complete; ETA is computed from current throughput. Once 100%, the test stops automatically.",
+		"Progress through the configured iteration count. The bar fills as requests complete; ETA is computed from current throughput. Once 100%, the load test stops automatically.",
 	currentConcurrency:
 		"Current number of in-flight requests at this instant. The configured ramp climbs concurrency linearly from startConcurrency to the target over rampUpDuration. Ramp lag is the percentage of the configured curve that the generator failed to deliver - non-zero values mean the server is too slow to absorb the planned concurrency.",
 
@@ -52,7 +52,7 @@ export const TOOLTIPS = {
 	queueChip:
 		"Average time requests spent waiting in the generator's in-flight queue before being sent. Non-zero values mean the generator is queueing - usually because the server is slow to respond.",
 	concurrencyUtil:
-		"Of your configured N concurrent users, how many were actually in-flight on average. Below 100% means some VUs were idle - usually because the test was completing requests faster than it could re-fire (rare) or because the server occasionally returned errors that aborted iterations.",
+		"Of your configured N concurrent users, how many were actually in-flight on average. Below 100% means some VUs were idle - usually because the load test was completing requests faster than it could re-fire (rare) or because the server occasionally returned errors that aborted iterations.",
 	throughput:
 		"Average requests per second across the run so far. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
 	saturation:

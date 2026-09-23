@@ -21,3 +21,13 @@ export function formatDuration(ms: number): string {
 	const remainingMinutes = minutes % 60;
 	return `${hours}h ${remainingMinutes}m`;
 }
+
+const pluralRules = new Intl.PluralRules("en-US");
+
+/**
+ * Real plural handling for a counted noun, per the UX writing guide - never a
+ * hand-rolled "noun(s)" ternary. Only "one" and "other" matter for en-US.
+ */
+export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+	return pluralRules.select(count) === "one" ? singular : plural;
+}

@@ -115,14 +115,14 @@ describe("RequestResponseView captured stream events", () => {
 		expect(screen.getByText("1 event")).toBeInTheDocument();
 		// The raw bytes stay: the parsed list is a reading aid, not a
 		// replacement for what came back.
-		expect(screen.getByText("Response Body")).toBeInTheDocument();
+		expect(screen.getByText("Response body")).toBeInTheDocument();
 	});
 
 	it("shows no events block for a capture that did not stream", async () => {
 		getRunSamples.mockResolvedValue(samplesPage(false));
 		await renderAndExpand();
 
-		await waitFor(() => expect(screen.getByText("Response Body")).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText("Response body")).toBeInTheDocument());
 		expect(screen.queryByText("Events")).not.toBeInTheDocument();
 	});
 });
