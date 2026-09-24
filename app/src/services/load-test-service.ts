@@ -253,13 +253,25 @@ class LoadTestService {
 	/**
 	 * Tell the user their run ended, once, and only if they are elsewhere -
 	 * `electron/notify.ts` answers the "elsewhere" half.
+	 *
+	 * `options.title` overrides `NOTIFY_TITLES` - `handleError` uses it because
+	 * the *stream* dropped there, not the load test, and the default failed
+	 * title would misreport what happened. The taskbar mark is unchanged: a
+	 * stream error still reddens it (#1364, pinned by the Dock/taskbar test
+	 * below), because the user has no live view into whether the run itself is
+	 * still healthy once its updates stop arriving.
 	 */
-	private notifyTerminal(runId: string | null, kind: LoadRunNotifyKind, body: string): void {
+	private notifyTerminal(
+		runId: string | null,
+		kind: LoadRunNotifyKind,
+		body: string,
+		options?: { title?: string }
+	): void {
 		if (!runId || this.notifiedRunId === runId) return;
 		this.notifiedRunId = runId;
 		systemNotify.post({
 			kind,
-			title: NOTIFY_TITLES[kind],
+			title: options?.title ?? NOTIFY_TITLES[kind],
 			body,
 			target: { view: "run", runId },
 		});
@@ -336,7 +348,14 @@ class LoadTestService {
 		console.error("[LoadTestService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		this.failProgress(this.activeRunId);
-		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.loadRunFailed, error.message);
+		// The stream dropped, not the load test - it keeps executing on the
+		// engine, so the notification says that instead of claiming it failed.
+		this.notifyTerminal(
+			this.activeRunId,
+			NOTIFY_KINDS.loadRunFailed,
+			`${error.message} The load test itself is unaffected.`,
+			{ title: "Lost live updates for this load test" }
+		);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
 	}

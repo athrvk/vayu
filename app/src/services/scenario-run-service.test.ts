@@ -467,7 +467,8 @@ describe("ScenarioRunService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({
 					kind: NOTIFY_KINDS.collectionRunFailed,
-					body: "engine gone",
+					title: "Lost live updates for this run",
+					body: "engine gone The run itself is unaffected.",
 				})
 			);
 		});

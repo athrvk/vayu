@@ -283,8 +283,8 @@ describe("LoadTestService", () => {
 
 			expect(mockNotifyPost).toHaveBeenCalledWith({
 				kind: NOTIFY_KINDS.loadRunFailed,
-				title: "Load test failed",
-				body: "transport gone",
+				title: "Lost live updates for this load test",
+				body: "transport gone The load test itself is unaffected.",
 				target: { view: "run", runId: "run_10" },
 			});
 		});
