@@ -132,6 +132,7 @@ import {
 	MCP_PORT,
 	MCP_ENDPOINT_URL,
 	APP_USER_MODEL_ID,
+	APP_NAME,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -154,6 +155,12 @@ app.commandLine.appendSwitch("use-mock-keychain");
 // at module scope, because it must precede the first notification and the
 // documented requirement is "before app is ready".
 app.setAppUserModelId(APP_USER_MODEL_ID);
+
+// `app.getName()` otherwise answers the npm package's name, "vayu-client",
+// which is what macOS titles the app menu and its "About"/"Quit" roles from -
+// see APP_NAME's own comment. Set at module scope, ahead of `createMenu()`,
+// for the same "before anything reads it" reason as the AppUserModelID above.
+app.setName(APP_NAME);
 
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
@@ -1430,7 +1437,7 @@ app.whenReady().then(async () => {
 	// Windows/Linux, and the macOS app menu's About item).
 	const aboutIconPath = appIconPath();
 	app.setAboutPanelOptions({
-		applicationName: "Vayu",
+		applicationName: APP_NAME,
 		applicationVersion: app.getVersion(),
 		copyright: "© 2026 Atharva Kusumbia",
 		website: "https://github.com/athrvk/vayu",
