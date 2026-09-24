@@ -235,7 +235,9 @@ export default function SaveRunToRequestDialog({
 			onOpenChange(false);
 		} catch (error) {
 			showToast(
-				error instanceof Error ? error.message : "Couldn't update the request",
+				error instanceof Error
+					? `Couldn't update the request - ${error.message}`
+					: "Couldn't update the request",
 				"error"
 			);
 		} finally {
