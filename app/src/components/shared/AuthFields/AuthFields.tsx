@@ -155,7 +155,14 @@ export default function AuthFields({
 							onChange({ ...value, in: next })
 						}
 					>
-						<SelectTrigger className="w-48">
+						{/* `w-[12rem]`, not `w-48`: the trigger holds a fixed option
+						    label ("Query params"), a text measure, and `w-48` rides
+						    `--spacing`, which narrowed it below the label's width at
+						    the Default density. No named container-scale step sits
+						    this low (the scale starts at `3xs`/16rem), so this is a
+						    literal rem value instead - the same reasoning as the
+						    toast's `w-xs`, at a size the scale does not cover. */}
+						<SelectTrigger className="w-[12rem]">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
