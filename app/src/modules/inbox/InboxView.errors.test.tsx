@@ -146,7 +146,7 @@ describe("a refused mutation in the inbox tab", () => {
 		await waitFor(() =>
 			expect(firstToast()).toMatchObject({
 				variant: "error",
-				message: "inbox is already stopped",
+				message: "Couldn't stop the inbox - inbox is already stopped",
 			})
 		);
 	});
@@ -165,7 +165,10 @@ describe("a refused mutation in the inbox tab", () => {
 			within(await screen.findByRole("dialog")).getByRole("button", { name: /^clear$/i })
 		);
 		await waitFor(() =>
-			expect(firstToast()).toMatchObject({ variant: "error", message: "database is locked" })
+			expect(firstToast()).toMatchObject({
+				variant: "error",
+				message: "Couldn't clear the captures - database is locked",
+			})
 		);
 	});
 

@@ -241,7 +241,10 @@ export default function InboxView() {
 	 * brush - whichever landed second was to skip it.
 	 */
 	const reportFailure = (fallback: string) => (mutationError: unknown) =>
-		showToast(mutationError instanceof Error ? mutationError.message : fallback, "error");
+		showToast(
+			mutationError instanceof Error ? `${fallback} - ${mutationError.message}` : fallback,
+			"error"
+		);
 
 	const start = () => {
 		startInbox.mutate(
