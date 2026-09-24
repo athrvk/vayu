@@ -262,7 +262,7 @@ export function useExecutionEvents(): void {
 					// stored trace is what will say what it got.
 					store.setError(
 						runId,
-						"Couldn't reconnect to the event stream. The run's stored events are still recorded."
+						"Couldn't reconnect to Vayu's live feed of this stream. The run's stored events are still recorded."
 					);
 					store.endStream(runId, "error", null);
 					return;
