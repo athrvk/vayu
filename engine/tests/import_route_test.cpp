@@ -172,14 +172,20 @@ TEST (ImportFetch, ReturnsBadGatewayOnFetchFailure) {
     EXPECT_EQ (status, 502);
 }
 
-TEST (ImportFetch, ProxiesNon2xxRemoteResponse) {
+// The upstream's error page is not the document. Handed on as `content`, it
+// reached the format reader and read as an unrecognised format; refused, the
+// message names whose answer it was. Mutation-check: drop the status check in
+// `fetch_outcome` and this answers 200 with the 404 page as content.
+TEST (ImportFetch, RefusesANon2xxRemoteResponseNamingItsStatus) {
     MockSpecServer mock;
     std::string body =
     R"({"url":"http://127.0.0.1:)" + std::to_string (mock.port ()) + R"(/missing"})";
     auto [status, json] =
     vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
-    EXPECT_EQ (status, 200); // transport OK → proxied through, not 502
-    EXPECT_EQ (json["content"].get<std::string> (), R"({"error":"not found"})");
+    EXPECT_EQ (status, 502);
+    EXPECT_FALSE (json.contains ("content"));
+    EXPECT_NE (json.dump ().find ("The server answered HTTP 404"), std::string::npos)
+    << json.dump ();
 }
 
 // ---------------------------------------------------------------------------
