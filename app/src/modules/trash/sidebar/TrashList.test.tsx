@@ -269,7 +269,7 @@ describe("delete forever", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 
-		expect(await screen.findByText("Delete forever?")).toBeInTheDocument();
+		expect(await screen.findByText('Delete "Billing" forever?')).toBeInTheDocument();
 		expect(purge).not.toHaveBeenCalled();
 	});
 
@@ -301,7 +301,9 @@ describe("delete forever", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 		fireEvent.click(await screen.findByRole("button", { name: /^Cancel$/ }));
 
-		await waitFor(() => expect(screen.queryByText("Delete forever?")).not.toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.queryByText('Delete "Billing" forever?')).not.toBeInTheDocument()
+		);
 		expect(purge).not.toHaveBeenCalled();
 	});
 
