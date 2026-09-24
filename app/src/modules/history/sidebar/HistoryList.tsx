@@ -54,9 +54,9 @@ import { Eyebrow } from "@/components/ui/eyebrow";
  * is what used to orphan metrics against a deleted run id. Nothing is removed in
  * that case, so the right thing to tell the user is to try again shortly.
  *
- * The engine's error body is a bare `{"error": "..."}` string, which the shared
- * http client cannot read into `ApiError.message` (it looks for `error.message`),
- * so the wording lives here rather than being echoed from the response.
+ * The wording lives here, rather than being echoed from the response, so it
+ * reads as an instruction ("try again in a moment") instead of the engine's
+ * own wait-timed-out phrasing.
  */
 function deleteRunErrorMessage(error: unknown): string {
 	if (error instanceof ApiError && error.statusCode === 409) {
