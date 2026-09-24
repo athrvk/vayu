@@ -87,7 +87,15 @@ export function SuggestionList({
 	const shown = limit === undefined ? items : items.slice(0, limit);
 
 	return (
-		<div className={cn("enter-fade w-64 rounded-lg border bg-popover shadow-md", className)}>
+		<div
+			className={cn(
+				// `w-3xs` (16rem), not `w-64`: the list holds suggestion text, a
+				// text measure, and `w-64` rides `--spacing` - 192px at the Default
+				// density rather than the 256px `w-3xs` reads as.
+				"enter-fade w-3xs rounded-lg border bg-popover shadow-md",
+				className
+			)}
+		>
 			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
