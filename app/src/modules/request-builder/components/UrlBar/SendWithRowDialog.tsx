@@ -500,7 +500,11 @@ export default function SendWithRowDialog({
 									placeholder={`1 - ${total.toLocaleString()}`}
 									aria-label="Send with a row by number"
 									aria-invalid={typed.kind === "error"}
-									className="h-7 w-28 font-mono text-xs"
+									// Fixed rem, not `w-28`: the field holds a row number
+									// (the placeholder reads e.g. "1 - 500"), a text measure
+									// that should not narrow at the Default density the way
+									// `w-28`'s `--spacing` unit does.
+									className="h-7 w-[7rem] font-mono text-xs"
 								/>
 							</label>
 						</div>
