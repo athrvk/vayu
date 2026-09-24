@@ -2098,7 +2098,9 @@ unconditional `title={name}` - the obvious version - pops a tooltip on every
 hover, including names that are already fully readable, telling the user
 something they can see. The tooltip appears when the name is cut off and
 disappears when the drawer is widened enough to read it; `useOverflowTitle`
-re-measures on resize via `ResizeObserver`.
+re-measures on resize via `ResizeObserver`. It renders a block box whatever tag
+it is given: `overflow` and `text-overflow` do nothing on an inline one, so a
+`span` under a non-flex parent never ellipsed at all.
 
 Do not hand-write `title={name}` alongside `truncate`. That is the pattern this
 component replaced, and it drifts - some rows get it, some do not, and the ones
