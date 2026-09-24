@@ -103,7 +103,12 @@ export function RowContextMenu({ label, actions, disabled, children }: RowContex
 			>
 				{children}
 			</ContextMenuTrigger>
-			<ContextMenuContent aria-label={label} className="min-w-40">
+			{/* `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the action
+			    labels, a text measure, and `min-w-40` rides `--spacing` - at the
+			    Default density it resolved under the primitive's own fixed
+			    `min-w-[8rem]` default (context-menu.tsx), overriding a deliberately
+			    density-independent floor with a smaller, density-scaled one. */}
+			<ContextMenuContent aria-label={label} className="min-w-[10rem]">
 				{rowActionRows(actions).map(({ action, separatorBefore }) => (
 					<Fragment key={action.label}>
 						{separatorBefore && <ContextMenuSeparator />}

@@ -108,7 +108,13 @@ export function RowActionsMenu({
 			</DropdownMenuTrigger>
 			<DropdownMenuContent
 				align="end"
-				className="min-w-40"
+				// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the
+				// action labels ("Move up", "Duplicate", …), a text measure, and
+				// `min-w-40` rides `--spacing` - at the Default density it resolved
+				// under the primitive's own fixed `min-w-[8rem]` default
+				// (dropdown-menu.tsx), overriding a deliberately density-independent
+				// floor with a smaller, density-scaled one.
+				className="min-w-[10rem]"
 				onCloseAutoFocus={(e) => {
 					// Radix hands focus back to the trigger. In a roving-tabindex
 					// tree that control is deliberately not a tab stop, so the row
