@@ -156,6 +156,6 @@ describe("ImportModal", () => {
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: '{"x":1}' } });
 		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
-		await waitFor(() => expect(screen.getByText(/Unrecognised format/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText(/Unrecognized format/i)).toBeInTheDocument());
 	});
 });

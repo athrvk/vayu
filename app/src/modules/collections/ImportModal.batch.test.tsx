@@ -177,7 +177,7 @@ describe("dropping several files", () => {
 		drop(file("good.json", postman), file("junk.json", '{"x":1}'));
 
 		await waitFor(() => expect(screen.getByText("2 files")).toBeInTheDocument());
-		expect(within(row("junk.json")).getByText(/Unrecognised format/i)).toBeInTheDocument();
+		expect(within(row("junk.json")).getByText(/Unrecognized format/i)).toBeInTheDocument();
 		// Errors are visible but excluded - the honest refusal, per file.
 		expect(screen.getByLabelText("junk.json")).not.toBeChecked();
 		expect(screen.getByLabelText("good.json")).toBeChecked();
