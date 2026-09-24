@@ -94,9 +94,10 @@ describe("the request lookup failed", () => {
 
 		renderPane();
 
-		// The request is probably fine; only the lookup failed. Claiming it was
-		// deleted here is the lie this branch exists to stop.
+		// Only the lookup failed. Claiming the request was deleted here is the
+		// lie this branch exists to stop, and the failure itself is shown as-is.
 		expect(screen.getByText(/couldn't load this request/i)).toBeTruthy();
+		expect(screen.getByText("Network error: fetch failed")).toBeTruthy();
 		expect(screen.queryByText(/no longer exists/i)).toBeNull();
 
 		const retry = screen.getByRole("button", { name: /try again/i });

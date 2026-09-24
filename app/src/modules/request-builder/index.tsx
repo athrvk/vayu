@@ -46,6 +46,7 @@ import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
+import { ApiError } from "@/services/http-client";
 import { generateCurl } from "@/services/codegen";
 import type {
 	RequestState,
@@ -550,7 +551,10 @@ export default function RequestBuilder() {
 					bodyType: "text",
 					time: 0,
 					size: 0,
-					errorCode: "INTERNAL_ERROR",
+					// Compose runs first, so an engine that is down throws here
+					// before any send - a plain Error from the fetch, not an
+					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
+					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
 					errorMessage: errorMsg,
 				};
 			}
@@ -632,7 +636,7 @@ export default function RequestBuilder() {
 						bodyType: "text",
 						time: 0,
 						size: 0,
-						errorCode: "INTERNAL_ERROR",
+						errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
 						errorMessage: errorMsg,
 					},
 				};
@@ -869,7 +873,9 @@ export default function RequestBuilder() {
 			} catch (error) {
 				console.error("Failed to start load test:", error);
 				showToast(
-					error instanceof Error ? error.message : "Couldn't start the load test.",
+					error instanceof Error
+						? `Couldn't start the load test - ${error.message}`
+						: "Couldn't start the load test.",
 					"error"
 				);
 			} finally {
@@ -964,7 +970,11 @@ export default function RequestBuilder() {
 		) : (
 			<ErrorState
 				title="Couldn't load this request"
-				detail="The engine didn't answer, or answered with an error. The request itself is probably fine."
+				detail={
+					requestLookupError instanceof Error
+						? requestLookupError.message
+						: "The engine didn't answer, or answered with an error."
+				}
 				onRetry={() => refetch()}
 				action={closeTabAction}
 			/>

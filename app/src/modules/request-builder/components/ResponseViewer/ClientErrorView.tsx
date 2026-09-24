@@ -55,6 +55,12 @@ const ErrorHints: Record<string, string> = {
 		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
 	INVALID_URL: "The URL has to start with http:// or https://.",
 	ENGINE_ERROR: "Vayu's engine isn't running or didn't answer. Restart Vayu.",
+	AUTH_REQUIRED: "Open the Auth tab to get a token, then send again.",
+	AUTH_FAILED: "Check the Auth tab's token settings, then send again.",
+	INVALID_METHOD:
+		"This method can't carry the body this request has. Remove the body, or change the method.",
+	DATA_BINDING_FAILED:
+		"A {{data.*}} variable names a column the bound row doesn't have. Check the column names in the data file.",
 };
 
 /**
@@ -77,6 +83,10 @@ const ErrorTitles: Record<string, string> = {
 	INVALID_URL: "Couldn't parse the URL",
 	ENGINE_ERROR: "Vayu's engine didn't respond",
 	INTERNAL_ERROR: "Couldn't send the request",
+	AUTH_FAILED: "Couldn't get an OAuth 2.0 token",
+	AUTH_REQUIRED: "This request needs an OAuth 2.0 token",
+	INVALID_METHOD: "Couldn't send - the method doesn't allow this",
+	DATA_BINDING_FAILED: "Couldn't bind the data row",
 };
 
 /**
