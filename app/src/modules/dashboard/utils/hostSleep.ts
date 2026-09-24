@@ -15,28 +15,19 @@
  */
 
 import type { HostSleep } from "@/stores/host-sleep-store";
-
-const SECOND_MS = 1000;
-const MINUTE_MS = 60 * SECOND_MS;
-const HOUR_MS = 60 * MINUTE_MS;
+import { formatDuration } from "./format";
 
 /**
  * "45s", "6m 12s", "1h 4m" - the coarsest pair that still says something.
  *
  * A run interrupted overnight is the case the hours branch exists for, and a
- * reader counting 31,000 seconds is a reader the marker failed.
+ * reader counting 31,000 seconds is a reader the marker failed. Rounds
+ * (rather than truncates) and drops a trailing zero unit ("2h", not "2h 0m")
+ * - `formatDuration`'s defaults suit a ticking elapsed-time readout, not a
+ * one-line "the machine was gone for" sentence.
  */
 export function formatSleepDuration(durationMs: number): string {
-	const ms = Math.max(0, durationMs);
-	if (ms < MINUTE_MS) return `${Math.round(ms / SECOND_MS)}s`;
-	if (ms < HOUR_MS) {
-		const minutes = Math.floor(ms / MINUTE_MS);
-		const seconds = Math.round((ms % MINUTE_MS) / SECOND_MS);
-		return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-	}
-	const hours = Math.floor(ms / HOUR_MS);
-	const minutes = Math.round((ms % HOUR_MS) / MINUTE_MS);
-	return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+	return formatDuration(durationMs, { round: true, omitZeroUnit: true });
 }
 
 /** The chart mark's label, and the Events row's sentence. */
