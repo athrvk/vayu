@@ -29,6 +29,7 @@
 
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import type { ComposedRequest, ExecuteRequestRequest } from "@/types";
 
 /**
@@ -77,6 +78,15 @@ const INTROSPECTION_DISABLED = /introspection/i;
  * disproportionate for a once-per-endpoint fetch.
  */
 const yieldToPaint = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/** The host a failure names; the whole URL when it doesn't parse. */
+function hostOf(url: string): string {
+	try {
+		return new URL(url).host || url;
+	} catch {
+		return url;
+	}
+}
 
 /**
  * What introspection needs in order to compose: the endpoint as the user typed
@@ -136,11 +146,13 @@ export function buildIntrospectionRequest(
 }
 
 export async function introspectSchema(target: IntrospectionTarget): Promise<GraphQLSchema> {
-	// Compose and execute are the two calls that can fail without an answer -
-	// the engine being down, the collection being gone, the endpoint refusing
-	// the connection. All of them mean "never got a reply", which is a different
-	// fix from anything the endpoint itself said.
+	// A throw from compose or execute is the engine's own failure - it is down,
+	// the collection is gone, a variable didn't resolve. The endpoint refusing
+	// the connection is not one of them: that comes back as `status: 0` below.
+	// The engine's message already names what failed, so it passes through
+	// rather than being framed as the endpoint being unreachable.
 	let res;
+	let url: string;
 	try {
 		const composed = await apiService.composeRequest({
 			request: {
@@ -152,16 +164,28 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 			collectionId: target.collectionId,
 			environmentId: target.environmentId,
 		});
+		url = composed.url;
 		res = await apiService.executeRequest(
 			buildIntrospectionRequest(composed, target.environmentId)
 		);
 	} catch (e) {
-		throw new IntrospectionError(
-			"network",
-			`Couldn't reach the endpoint: ${e instanceof Error ? e.message : String(e)}`
-		);
+		throw new IntrospectionError("network", e instanceof Error ? e.message : String(e));
 	}
 
+	// `status: 0` is the engine reporting that nothing answered (or that it
+	// couldn't get a token to send with) - not an HTTP status the endpoint
+	// chose, so it is checked before the non-2xx branch below.
+	if (res.status === 0) {
+		const code = res.errorCode ? ` (${res.errorCode})` : "";
+		const detail = res.errorMessage ? ` ${res.errorMessage}` : "";
+		if (res.errorCode === "AUTH_REQUIRED" || res.errorCode === "AUTH_FAILED") {
+			throw new IntrospectionError(
+				"auth",
+				`Couldn't get an OAuth 2.0 token${code}.${humanizeOAuth2Error(detail)}`
+			);
+		}
+		throw new IntrospectionError("network", `Couldn't reach ${hostOf(url)}${code}.${detail}`);
+	}
 	if (res.status === 401 || res.status === 403) {
 		throw new IntrospectionError(
 			"auth",
