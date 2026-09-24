@@ -17,6 +17,7 @@
  */
 
 import type { LoadTestRunConfig } from "@/stores/dashboard-store";
+import { pluralize } from "./format";
 
 /**
  * A run at least this long is worth an ask.
@@ -69,9 +70,9 @@ export function isLongRun(config: LoadTestRunConfig | null | undefined): boolean
 
 /** "30 minutes" / "8 minutes" - the length, for the sentence that asks. */
 export function formatRunLength(totalSeconds: number): string {
-	if (totalSeconds < 120) return `${totalSeconds} seconds`;
+	if (totalSeconds < 120) return `${totalSeconds} ${pluralize(totalSeconds, "second")}`;
 	const minutes = Math.round(totalSeconds / 60);
-	if (minutes < 120) return `${minutes} minutes`;
+	if (minutes < 120) return `${minutes} ${pluralize(minutes, "minute")}`;
 	const hours = Math.round(minutes / 6) / 10;
-	return `${hours} hours`;
+	return `${hours} ${pluralize(hours, "hour")}`;
 }

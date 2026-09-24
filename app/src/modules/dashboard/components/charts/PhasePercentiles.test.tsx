@@ -137,11 +137,11 @@ describe("TimingWaterfall reads the averages half, not the object", () => {
 	// waterfall renders averages.
 	//
 	// Mutation check: restore `hasData = !!report?.timingBreakdown` and the
-	// total below reads "0 ms" instead of "- ms".
+	// total below reads "0 ms" instead of "-".
 	it("shows the empty state for a phases-only report", () => {
 		withTooltips(<TimingWaterfall report={reportWith({ phases: CALM_PHASES })} />);
 
-		expect(screen.getByText("- ms")).toBeTruthy();
+		expect(screen.getAllByText("-").length).toBeGreaterThan(0);
 		expect(screen.queryByText("0 ms")).toBeNull();
 	});
 

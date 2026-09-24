@@ -18,6 +18,7 @@ import { XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import { pluralize } from "../utils/format";
 import {
 	CompactHeadersViewer,
 	CapturedResponseNotice,
@@ -118,7 +119,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 										{statusCodeLabel(Number(code))}
 									</span>
 									<p className="text-sm text-muted-foreground">
-										{String(count)} requests
+										{count} {pluralize(count, "request")}
 									</p>
 								</div>
 							))}
@@ -340,7 +341,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 															trace.failures.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
-																		Failed Tests
+																		Failed tests
 																		{trace.totalFailed !==
 																			undefined && (
 																			<span className="ml-1">
@@ -397,7 +398,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 														0 && (
 														<CompactHeadersViewer
 															headers={captured.response.headers}
-															title="Response Headers"
+															title="Response headers"
 															className="max-h-40 overflow-auto"
 														/>
 													)}

@@ -96,7 +96,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 					{hasData ? (
 						<span className="text-foreground">{total.toFixed(0)} ms</span>
 					) : (
-						<span className="text-subtle-foreground">- ms</span>
+						<span className="text-subtle-foreground">-</span>
 					)}
 				</span>
 			</div>

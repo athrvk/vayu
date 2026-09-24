@@ -256,7 +256,7 @@ function MetricsView({
 										className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 										style={{ background: "hsl(var(--subtle-foreground))" }}
 									/>
-									target {targetRps}
+									target {targetRps} req/s
 								</span>
 							)}
 							{rampOverlay && (

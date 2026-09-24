@@ -56,7 +56,7 @@ export const TOOLTIPS = {
 	throughput:
 		"Average requests per second across the run so far. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
 	saturation:
-		"Whether the server has reached its capacity ceiling. 'Healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'Degrading' means p99 has crossed the threshold or errors started - the call-out shows the concurrency value at which the degradation began (the breakpoint).",
+		"Whether the server has reached its capacity ceiling. 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'degrading' means p99 has crossed the threshold or errors started - the call-out shows the concurrency value at which the degradation began (the breakpoint).",
 
 	// ---- Hero card #3 (universal) ----
 	errorRate:

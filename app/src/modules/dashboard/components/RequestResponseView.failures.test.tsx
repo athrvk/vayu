@@ -75,10 +75,10 @@ describe("RequestResponseView renders per-test validation failures (#111)", () =
 		expect(screen.getByText("status is 200: expected 404 to equal 200")).toBeTruthy();
 		expect(screen.getByText("body has token: expected undefined to exist")).toBeTruthy();
 		// The failed-count heading annotation.
-		expect(screen.getByText(/Failed Tests/)).toBeTruthy();
+		expect(screen.getByText(/Failed tests/)).toBeTruthy();
 	});
 
-	it("does not render a Failed Tests block when the trace carries no failures", () => {
+	it("does not render a Failed tests block when the trace carries no failures", () => {
 		const report = makeReportWithFailures();
 		report.results![0].trace = { error_type: "ConnectionError" };
 		report.results![0].error = "connection refused";
@@ -86,6 +86,6 @@ describe("RequestResponseView renders per-test validation failures (#111)", () =
 
 		fireEvent.click(screen.getByRole("button", { name: /connection refused/ }));
 
-		expect(screen.queryByText(/Failed Tests/)).toBeNull();
+		expect(screen.queryByText(/Failed tests/)).toBeNull();
 	});
 });

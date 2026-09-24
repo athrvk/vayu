@@ -247,7 +247,7 @@ export function RequestRateChart({
 				orient: "horizontal",
 				value: targetRps,
 				role: "subtle",
-				label: `target ${targetRps}`,
+				label: `target ${targetRps} req/s`,
 			});
 		m.push(...breakpointMarker(breakpoint));
 		return m;
