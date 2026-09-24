@@ -68,6 +68,18 @@ export interface TokenEditRequest {
 	 */
 	onContentMouseEnter?: () => void;
 	onContentMouseLeave?: () => void;
+	/**
+	 * Identifies a hover-triggered open, so a later `closeTokenEditor` can tell
+	 * whether it is still the one it was scheduled for (issue #1220 hover
+	 * redesign, cross-editor race). One provider serves every editor under it,
+	 * so a leave-grace timer armed for a token in one editor can still be
+	 * pending when the pointer has already opened a *different* token in
+	 * another editor - the timer knows nothing of that, so an unguarded close
+	 * would tear down the new popover instead of the one it meant to close.
+	 * Omitted for the chord-triggered open (`useEditorVariableTokens.ts`'s
+	 * `open`), which never calls `closeTokenEditor` itself.
+	 */
+	hoverToken?: string;
 }
 
 /** A token the pointer is resting on, for the shared tooltip to answer. */
@@ -99,9 +111,11 @@ export interface EditorVariableTokensValue {
 	 * editor, and did not move into the popover's own content), and this is how
 	 * it tells the provider the grace period ran out. A no-op when nothing is
 	 * open, so a stale timer firing after some other close already happened does
-	 * nothing.
+	 * nothing - and, with `token` set, also a no-op when the popover now open is
+	 * a *different* hover-triggered one than the caller's timer was armed for
+	 * (see `TokenEditRequest.hoverToken`).
 	 */
-	closeTokenEditor: () => void;
+	closeTokenEditor: (token?: string) => void;
 	/**
 	 * Show the shared tooltip over a token, or take it down with `null`.
 	 *
