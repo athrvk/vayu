@@ -254,8 +254,9 @@ export function useEditorVariableTokens({
 		current.hoverCloseTimer = undefined;
 		current.pointerOnContent = false;
 		if (current.hoverOpenKey !== undefined) {
+			const token = current.hoverOpenKey;
 			current.hoverOpenKey = undefined;
-			live.current.tokens?.closeTokenEditor();
+			live.current.tokens?.closeTokenEditor(token);
 		}
 		if (current.hovered === undefined) return;
 		current.hovered = undefined;
@@ -285,9 +286,10 @@ export function useEditorVariableTokens({
 			if (content && content.contains(document.activeElement)) return;
 			const stillCurrent = installation.current;
 			if (!stillCurrent || stillCurrent.hoverOpenKey === undefined) return;
+			const token = stillCurrent.hoverOpenKey;
 			stillCurrent.hoverOpenKey = undefined;
 			stillCurrent.hovered = undefined;
-			live.current.tokens?.closeTokenEditor();
+			live.current.tokens?.closeTokenEditor(token);
 		}, TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS);
 	}, []);
 
@@ -357,6 +359,10 @@ export function useEditorVariableTokens({
 					name: range.name,
 					rect,
 					scriptHint: range.scriptHint,
+					// So a leave-grace close armed for this token can tell, once it
+					// fires, whether it is still the popover open - see
+					// `TokenEditRequest.hoverToken`.
+					hoverToken: key,
 					// Inert: resting the pointer must never steal focus or the caret
 					// from wherever the reader is actually typing.
 					focus: false,

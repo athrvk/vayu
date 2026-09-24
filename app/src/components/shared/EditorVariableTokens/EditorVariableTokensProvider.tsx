@@ -174,10 +174,21 @@ export function EditorVariableTokensProvider({
 		setActive(null);
 	}, []);
 
-	const closeTokenEditor = useCallback(() => {
-		if (!activeRef.current) return;
-		close();
-	}, [close]);
+	const closeTokenEditor = useCallback(
+		(token?: string) => {
+			const current = activeRef.current;
+			if (!current) return;
+			// A hover-armed close names the token it was scheduled for. One
+			// provider serves every editor, so by the time this fires the pointer
+			// may already have opened a *different* editor's token - closing
+			// unconditionally would tear that one down instead (issue #1220 hover
+			// redesign, cross-editor race). An open with no `hoverToken` (the
+			// chord, or a caller that predates this) is never second-guessed.
+			if (current.hoverToken !== undefined && current.hoverToken !== token) return;
+			close();
+		},
+		[close]
+	);
 
 	const value = useMemo<EditorVariableTokensValue>(
 		() => ({

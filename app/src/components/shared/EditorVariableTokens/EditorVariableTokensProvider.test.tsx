@@ -197,6 +197,36 @@ describe("EditorVariableTokensProvider", () => {
 			act(() => tokens.closeTokenEditor());
 			expect(onClose).toHaveBeenCalled();
 		});
+
+		/**
+		 * One provider serves every editor under it, so a leave-grace close
+		 * armed by one editor's hover can still be pending when the pointer has
+		 * already opened a *different* editor's token. Reported as: hover a
+		 * variable, its popover opens; move onto another one before the first's
+		 * grace timer fires, and the second popover opens then immediately
+		 * closes - the stale timer for the first was closing whatever was open,
+		 * not the token it was actually armed for.
+		 */
+		it("does not close a different token's popover with a stale hover-close call", () => {
+			const tokens = mountProvider();
+			act(() =>
+				tokens.openTokenEditor({ name: "baseUrl", rect, focus: false, hoverToken: "a" })
+			);
+			expect(screen.getByText("baseUrl")).toBeTruthy();
+
+			act(() =>
+				tokens.openTokenEditor({ name: "email", rect, focus: false, hoverToken: "b" })
+			);
+			expect(screen.getByText("email")).toBeTruthy();
+
+			// The first token's own leave-grace timer, arriving late.
+			act(() => tokens.closeTokenEditor("a"));
+			expect(screen.getByText("email")).toBeTruthy();
+
+			// The second token's own close still works.
+			act(() => tokens.closeTokenEditor("b"));
+			expect(screen.queryByText("email")).toBeNull();
+		});
 	});
 
 	/**
