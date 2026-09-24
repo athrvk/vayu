@@ -338,7 +338,12 @@ function IssuerDetailRow({
 }) {
 	return (
 		<div className="flex items-center gap-1 py-0.5">
-			<span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
+			{/*
+			 * `w-16` rode `--spacing`: at the Default density it was 48px, and
+			 * "Authorize" clipped to "Authoriz". `w-[4rem]` is the fixed 64px the
+			 * column needs to hold the longest label, at both densities.
+			 */}
+			<span className="w-[4rem] shrink-0 text-xs text-muted-foreground">{label}</span>
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
 			<TooltipIconButton
 				label={copyLabel}
@@ -458,7 +463,8 @@ function IssuerRow({
 					    secret in a 260px drawer is noise, and this one is offered as
 					    a value to paste, not to read. */}
 					<div className="flex items-center gap-1 py-0.5">
-						<span className="w-16 shrink-0 text-xs text-muted-foreground">Key</span>
+						{/* `w-[4rem]`, not `w-16` - see {@link IssuerDetailRow}'s label column. */}
+						<span className="w-[4rem] shrink-0 text-xs text-muted-foreground">Key</span>
 						<span className="min-w-0 flex-1 text-xs text-muted-foreground">
 							HS256 shared secret
 						</span>
