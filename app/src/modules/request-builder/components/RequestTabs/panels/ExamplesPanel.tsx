@@ -255,7 +255,10 @@ function MockResponseModeControl({
 					value={request.mockExampleId ?? examples[0]?.id}
 					onValueChange={(id) => setMode("fixed", id)}
 				>
-					<SelectTrigger className="h-7 w-40 text-xs" aria-label="Example">
+					{/* Fixed rem, not `w-40`: the trigger holds an example's name, a
+					    text measure that should not narrow at the Default density the
+					    way `w-40`'s `--spacing` unit does. */}
+					<SelectTrigger className="h-7 w-[10rem] text-xs" aria-label="Example">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
