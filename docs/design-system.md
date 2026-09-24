@@ -3018,6 +3018,14 @@ its right edge. See **Geometry** for why that is a token and not a literal. It
 also clears dialogs at `z-50` on `z-[100]`, which is hit-tested rather than
 assumed, since a dialog portals to `body` while the viewport lives in `#root`.
 
+**The stack is `w-xs` (20rem) at both densities.** Its width is a text measure,
+not rhythm, so it stays off `--spacing`: the `w-80` it replaced was 240px at the
+Default density, a ~160px text column that wrapped `Moved "<name>" to the Trash`
+for almost any name. Inside it, the action sits at its own width (`self-start`
+in the text column, which is a `flex-col` and would otherwise stretch it), and
+the title and message take `break-words`, since the toast is `overflow-hidden`
+and a name can be one unbroken operation id.
+
 Durations are floors, not limits - the primitive pauses them on hover, focus and
 window blur. A failure gets longer than a confirmation because it often carries a
 cause from the engine ("database is locked") that takes longer to take in.
