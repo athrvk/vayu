@@ -205,7 +205,7 @@ describe("the running-services indicator", () => {
 	 * Services are engine-*process* state, so a disconnected engine is running
 	 * none of them - but TanStack holds the last good list through failed
 	 * refetches, so the Dock rendered "1 service" in green beside its own
-	 * "Disconnected" light. Mutation-check: drop the gate in
+	 * "Engine disconnected" light. Mutation-check: drop the gate in
 	 * `useRunningServiceCount` and this fails.
 	 */
 	it("says nothing while the engine is down, whatever the cache still holds", async () => {
@@ -217,6 +217,6 @@ describe("the running-services indicator", () => {
 
 		useEngineStore.setState({ engineStatus: "unreachable" });
 		await waitFor(() => expect(screen.queryByText(/service/i)).not.toBeInTheDocument());
-		expect(screen.getByText("Disconnected")).toBeInTheDocument();
+		expect(screen.getByText("Engine disconnected")).toBeInTheDocument();
 	});
 });

@@ -417,7 +417,7 @@ export class SSEClient {
 			onError(
 				error instanceof Error
 					? error
-					: new Error("Couldn't connect to the engine's event stream.")
+					: new Error("Couldn't connect to the event stream from Vayu's engine.")
 			);
 		}
 	}

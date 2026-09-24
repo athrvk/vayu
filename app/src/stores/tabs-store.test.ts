@@ -279,7 +279,7 @@ describe("closeTab keeps a dirty tab the engine cannot save", () => {
 
 		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toContain("dirty");
 		expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
-			"Not saved - the engine is unreachable"
+			"Not saved - Vayu's engine is unreachable"
 		);
 	});
 

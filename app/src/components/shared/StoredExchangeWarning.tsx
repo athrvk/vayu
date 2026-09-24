@@ -56,7 +56,8 @@ export function StoredExchangeWarning({ steps, dataBound, className }: StoredExc
 					{" "}
 					This run bound a data file, and a bound value is part of the request that
 					carried it: those cells are stored in these steps, though the file itself was
-					never read by the engine and the collection&apos;s contract keeps none of them.
+					never read by Vayu&apos;s engine and the collection&apos;s contract keeps none
+					of them.
 				</>
 			)}{" "}
 			It is deleted when the run is, so the <code>maxRunsRetained</code> setting is its

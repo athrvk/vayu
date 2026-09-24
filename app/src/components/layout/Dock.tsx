@@ -33,8 +33,8 @@ import { ResponsePositionButton } from "./ResponsePositionButton";
  */
 const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
 	starting: "Starting…",
-	connected: "Connected",
-	unreachable: "Disconnected",
+	connected: "Engine connected",
+	unreachable: "Engine disconnected",
 };
 
 /**

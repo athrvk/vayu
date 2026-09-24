@@ -66,7 +66,7 @@ beforeEach(() => {
 describe("the engine status indicator", () => {
 	it("says Disconnected with no affordance when no reason was recorded", () => {
 		renderDock();
-		expect(screen.getByText("Disconnected")).toBeTruthy();
+		expect(screen.getByText("Engine disconnected")).toBeTruthy();
 		// Nothing to hover for, so nothing pretends there is.
 		expect(document.querySelector("[tabindex='0'] .lucide-info")).toBeNull();
 	});
@@ -78,7 +78,7 @@ describe("the engine status indicator", () => {
 		});
 		renderDock();
 
-		const trigger = screen.getByText("Disconnected").closest("[tabindex='0']");
+		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
 		expect(trigger).toBeTruthy();
 
 		fireEvent.focus(trigger!);
@@ -100,7 +100,7 @@ describe("the engine status indicator", () => {
 		useEngineStore.setState({ engineStatus: "unreachable", engineError: long });
 		renderDock();
 
-		fireEvent.focus(screen.getByText("Disconnected").closest("[tabindex='0']")!);
+		fireEvent.focus(screen.getByText("Engine disconnected").closest("[tabindex='0']")!);
 		await waitFor(() => expect(screen.getAllByText(long).length).toBeGreaterThan(0));
 	});
 
@@ -109,8 +109,8 @@ describe("the engine status indicator", () => {
 		// on success, and the indicator only offers the tooltip while down.
 		useEngineStore.setState({ engineStatus: "connected", engineError: null });
 		renderDock();
-		expect(screen.getByText("Connected")).toBeTruthy();
-		expect(screen.getByText("Connected").closest("[tabindex='0']")).toBeNull();
+		expect(screen.getByText("Engine connected")).toBeTruthy();
+		expect(screen.getByText("Engine connected").closest("[tabindex='0']")).toBeNull();
 	});
 
 	it("paints the connection light from the --status-* family", () => {
@@ -123,7 +123,7 @@ describe("the engine status indicator", () => {
 		useEngineStore.setState({ engineStatus: "connected", engineError: null });
 		renderDock();
 
-		const light = screen.getByText("Connected").closest("span");
+		const light = screen.getByText("Engine connected").closest("span");
 		expect(light).toBeTruthy();
 		expect([...light!.classList]).toContain("text-status-success-text");
 	});
@@ -135,7 +135,7 @@ describe("the engine status indicator", () => {
 		useEngineStore.setState({ engineStatus: "starting", engineError: null });
 		renderDock();
 		expect(screen.getByText("Starting…")).toBeTruthy();
-		expect(screen.queryByText("Disconnected")).toBeNull();
+		expect(screen.queryByText("Engine disconnected")).toBeNull();
 	});
 
 	it("offers no reason while the engine is merely starting", () => {

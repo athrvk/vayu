@@ -654,7 +654,7 @@ export const useTabsStore = create<TabsState>()(
 				) {
 					useToastStore
 						.getState()
-						.showToast("Not saved - the engine is unreachable", "error");
+						.showToast("Not saved - Vayu's engine is unreachable", "error");
 					return;
 				}
 				const next = closeTabs(get(), new Set([tabId]));

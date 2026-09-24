@@ -73,7 +73,7 @@ describe("useEngineRestart", () => {
 		// notification while the window is in front.
 		expect(mockNotifyPost).toHaveBeenCalledWith({
 			kind: NOTIFY_KINDS.engineRestartFailed,
-			title: "Couldn't restart the engine",
+			title: "Couldn't restart Vayu's engine",
 			body: "port 9876 still in use",
 		});
 	});

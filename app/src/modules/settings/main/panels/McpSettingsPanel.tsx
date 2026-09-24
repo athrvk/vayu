@@ -873,7 +873,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{CAPS.label}</CardTitle>
 					</div>
 					<CardDescription>
-						<CollapsibleText text="Hard ceilings on agent-started load runs. A request over any cap is rejected before it reaches the engine, and each cap bounds only the runs that carry the field it names. A cap above the most Vayu itself will run is lowered to that maximum when you save it." />
+						<CollapsibleText text="Hard ceilings on agent-started load runs. A request over any cap is rejected before it reaches Vayu's engine, and each cap bounds only the runs that carry the field it names. A cap above the most Vayu itself will run is lowered to that maximum when you save it." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">

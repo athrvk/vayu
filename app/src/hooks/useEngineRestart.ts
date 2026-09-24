@@ -43,7 +43,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			// daemon to restart - say so rather than appearing to have done it.
 			showToast({
 				message:
-					"Engine restart is only available in the desktop app. Restart the engine manually.",
+					"Engine restart is only available in the desktop app. Restart Vayu's engine manually.",
 				variant: "warning",
 			});
 			return;
@@ -78,7 +78,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				closeEngineStartWindow();
 				const reason = result.error ?? "unknown error";
 				showToast({
-					message: `Couldn't restart the engine: ${reason}`,
+					message: `Couldn't restart Vayu's engine: ${reason}`,
 					variant: "error",
 				});
 				// A restart is slow enough to walk away from, and this is its
@@ -86,7 +86,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				// user who stayed.
 				systemNotify.post({
 					kind: NOTIFY_KINDS.engineRestartFailed,
-					title: "Couldn't restart the engine",
+					title: "Couldn't restart Vayu's engine",
 					body: reason,
 				});
 				return;
