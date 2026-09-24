@@ -338,8 +338,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 		chords: [NEW_REQUEST_CHORD, SEND_CHORD, LOAD_TEST_CHORD, FOCUS_URL_CHORD],
 	},
 	{
-		id: "workspace",
-		title: "Workspace",
+		id: "general",
+		title: "General",
 		chords: [
 			PALETTE_CHORD,
 			SAVE_CHORD,

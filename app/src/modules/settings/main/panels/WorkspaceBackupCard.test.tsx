@@ -68,7 +68,7 @@ describe("WorkspaceBackupCard", () => {
 		expect(await screen.findByText(SNAPSHOT.path)).toBeInTheDocument();
 		expect(screen.getByText(/2\.0 MB/)).toBeInTheDocument();
 		expect(screen.getByText(/removed 2 older snapshots/)).toBeInTheDocument();
-		expect(showToast).toHaveBeenCalledWith("Workspace backed up", "success");
+		expect(showToast).toHaveBeenCalledWith("Backed up", "success");
 	});
 
 	it("does not claim to have removed anything when it removed nothing", async () => {
@@ -107,6 +107,9 @@ describe("WorkspaceBackupCard", () => {
 		// And it does not present the engine's raw sentence, which reads as an
 		// error where this is a state.
 		expect(screen.queryByText(/could not/i)).not.toBeInTheDocument();
+		// Nor does it fire the error toast - a 409 here isn't a failure, so
+		// there's nothing to raise an alarm about.
+		expect(showToast).not.toHaveBeenCalled();
 	});
 
 	it("shows a real failure on the card rather than only in a toast", async () => {
@@ -117,7 +120,7 @@ describe("WorkspaceBackupCard", () => {
 		backUp();
 
 		expect(await screen.findByText(/disk full/)).toBeInTheDocument();
-		expect(showToast).toHaveBeenCalledWith("Couldn't back up the workspace", "error");
+		expect(showToast).toHaveBeenCalledWith("Couldn't back up", "error");
 	});
 
 	it("clears a previous failure when a retry succeeds", async () => {
