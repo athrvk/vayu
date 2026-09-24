@@ -66,6 +66,7 @@
 
 import { asRecord, asStr } from "@/lib/json-node";
 import { apiService } from "@/services/api";
+import { formatBytes } from "@/modules/settings/utils/format-size";
 
 /** Root key the resolved documents are inlined under. */
 export const BUNDLE_KEY = "x-vayu-bundled";
@@ -123,8 +124,8 @@ export class SpecBundleTooLargeError extends Error {
 	constructor(bytes: number, maxBytes: number, bundled = true) {
 		super(
 			bundled
-				? `The spec and the files it references come to ${bytes} bytes, over the ${maxBytes} one document may hold. Raise the maxSpecDocumentBytes engine setting, or import a bundled spec.`
-				: `The spec is ${bytes} bytes, over the ${maxBytes} one document may hold. Raise the maxSpecDocumentBytes engine setting.`
+				? `The spec and the files it references come to ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting, or import a bundled spec.`
+				: `The spec is ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting.`
 		);
 		this.name = "SpecBundleTooLargeError";
 	}
