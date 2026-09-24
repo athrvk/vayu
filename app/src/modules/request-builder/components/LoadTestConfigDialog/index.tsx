@@ -469,7 +469,10 @@ export default function LoadTestConfigDialog({
 				key: "capacity-range",
 				severity: "blocking",
 				node: (
-					<Callout severity="blocking" title="The search has nowhere to climb">
+					<Callout
+						severity="blocking"
+						title="Start concurrency is at or above the maximum"
+					>
 						{capacityRangeError}
 					</Callout>
 				),

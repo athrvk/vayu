@@ -31,6 +31,7 @@ import { Button, Switch } from "@/components/ui";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/queries/oauth";
 import { useToastStore } from "@/stores";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import type { OAuth2Config } from "@/types";
 import { coverageState, fmtDuration, isMidRunRefreshable } from "./oauth2-load-test-coverage";
 import { Callout } from "@/components/shared";
@@ -103,7 +104,7 @@ export default function OAuth2LoadTestGuard({
 				onError: (err) =>
 					showToast(
 						err instanceof Error
-							? err.message
+							? `Couldn't refresh the OAuth 2.0 token - ${humanizeOAuth2Error(err.message)}`
 							: "Couldn't refresh the OAuth 2.0 token.",
 						"error"
 					),
