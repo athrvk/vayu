@@ -332,7 +332,9 @@ describe("VariablesSection - the commit payload", () => {
 		);
 		expect(cached?.variables.host.value).toBe("example.com");
 		expect(cached?.variables.port.value).toBe("8080");
-		expect(useToastStore.getState().toasts[0].message).toBe("value must not be empty");
+		expect(useToastStore.getState().toasts[0].message).toBe(
+			"Couldn't save {{host}} - value must not be empty"
+		);
 		expect(input.value).toBe("example.com");
 	});
 });

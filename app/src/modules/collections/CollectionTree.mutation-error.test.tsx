@@ -9,15 +9,15 @@
  */
 
 /**
- * A failed create or delete used to resolve to nothing at all.
- *
- * Rename was the only handler in the tree that caught anything - it reports
- * through `useSaveStore.failSave`, which now raises an error toast. Create
- * and delete called `mutateAsync` bare, so a rejection became an unhandled
- * promise: the confirm dialog had already closed, the row un-dimmed, and the
- * collection stayed exactly where it was with no explanation. That reads as "my
- * click didn't register", which invites the user to try again against a backend
+ * A failed create or delete used to resolve to nothing at all: `mutateAsync`
+ * was called bare, so a rejection became an unhandled promise and the row
+ * stayed exactly where it was with no explanation. That reads as "my click
+ * didn't register", which invites the user to try again against a backend
  * that just refused.
+ *
+ * The report is a plain error toast that names what was attempted, and never
+ * the save-state machine: `failSave` parks the Dock on "Not saved", and a
+ * failed delete or create is not an unsaved edit.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -88,8 +88,14 @@ describe("CollectionTree when a mutation rejects", () => {
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
 
-		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
-		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]).toMatchObject({
+				variant: "error",
+				message: "Couldn't delete the request - database is locked",
+			})
+		);
+		expect(useSaveStore.getState().status).toBe("idle");
+		expect(useSaveStore.getState().lastErrorMessage).toBeNull();
 	});
 
 	it("reports a failed create and keeps the typed name to retry with", async () => {
@@ -101,8 +107,13 @@ describe("CollectionTree when a mutation rejects", () => {
 		fireEvent.change(field, { target: { value: "Payments" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
 
-		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
-		expect(useToastStore.getState().toasts[0]?.message).toMatch(/disk full/i);
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]).toMatchObject({
+				variant: "error",
+				message: "Couldn't create the collection - disk full",
+			})
+		);
+		expect(useSaveStore.getState().status).toBe("idle");
 		expect(screen.getByPlaceholderText(/Collection name/i)).toHaveValue("Payments");
 	});
 

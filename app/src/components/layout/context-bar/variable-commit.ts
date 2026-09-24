@@ -260,7 +260,8 @@ export function useVariableCommit(): (
 				// staleness the fresh read exists to avoid.
 				const current = scope.read();
 				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
-				rollBack(error instanceof Error ? error.message : `Couldn't save {{${name}}}`);
+				const fallback = `Couldn't save {{${name}}}`;
+				rollBack(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 			},
 			onSettled: settle,
 		});

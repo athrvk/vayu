@@ -146,20 +146,25 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Report a failed mutation through the same channel the rename path already
-	 * uses - `failSave` raises a toast, the one channel every failure in the
-	 * app goes through.
+	 * Report a failed create, duplicate or delete as a plain error toast.
 	 *
-	 * Rename was the only handler here that caught anything. Create and delete
-	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
-	 * nothing else: a failed delete closed the confirm dialog, un-dimmed the row
-	 * and left the collection sitting there with no explanation, which reads as
-	 * "the click didn't register" rather than "the delete failed".
+	 * Not `failSave`: that is the save-state machine's failure, and it parks
+	 * the Dock on "Not saved" until the next successful save. None of these
+	 * is an unsaved edit - nothing is pending, nothing will retry - so routing
+	 * them there left a "Not saved" line describing no edit at all, stuck
+	 * until some unrelated save cleared it. The renames below are saves
+	 * (`startSaving` first), and keep `failSave`.
+	 *
+	 * The fallback leads even when the engine sent a message: its message says
+	 * why ("database is locked"), never what was being attempted.
 	 */
 	const reportFailure = useCallback(
 		(error: unknown, fallback: string) =>
-			failSave(error instanceof Error ? error.message : fallback),
-		[failSave]
+			showToast(
+				error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+				"error"
+			),
+		[showToast]
 	);
 
 	const handleCollectionClick = useCallback(
@@ -316,7 +321,8 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Couldn't rename the collection");
+				const fallback = "Couldn't rename the collection";
+				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 			}
 		},
 		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
@@ -360,7 +366,8 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Couldn't rename the request");
+				const fallback = "Couldn't rename the request";
+				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 			}
 		},
 		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
@@ -518,8 +525,9 @@ export function useTreeCrud({
 				const notice = restoreNotice(restored, name);
 				if (notice) showToast({ message: notice, variant: "info" });
 			} catch (error) {
+				const fallback = `Couldn't restore "${name}"`;
 				showToast(
-					error instanceof Error ? error.message : `Couldn't restore "${name}"`,
+					error instanceof Error ? `${fallback} - ${error.message}` : fallback,
 					"error"
 				);
 			}

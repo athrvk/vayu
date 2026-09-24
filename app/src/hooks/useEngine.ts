@@ -93,7 +93,9 @@ export function useEngine(): UseEngineReturn {
 			return true;
 		} catch (err) {
 			const errorMessage =
-				err instanceof Error ? err.message : "Couldn't stop the load test.";
+				err instanceof Error
+					? `Couldn't stop the load test - ${err.message}`
+					: "Couldn't stop the load test.";
 			setError(errorMessage);
 			return false;
 		}

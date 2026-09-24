@@ -76,7 +76,8 @@ export function useDraftSaveContext({
 		try {
 			await saveRef.current();
 		} catch (error) {
-			failSave(error instanceof Error ? error.message : `Couldn't save ${name}`);
+			const fallback = `Couldn't save ${name}`;
+			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 		}
 	}, [failSave, name]);
 
