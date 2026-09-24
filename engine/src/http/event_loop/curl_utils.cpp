@@ -724,12 +724,14 @@ const std::string& url) {
  * codes. An enumeration would be a list to extend every time a backend spread
  * one event across another code - the trap `proxy_refused_tunnel` above exists
  * to avoid - and it is consulted only where the mapping has already run out of
- * meanings, so nothing with an answer of its own reaches it.
+ * meanings, or where its meaning ("the target failed the exchange") is the
+ * very one this shape refines, so nothing with a more specific answer reaches
+ * it.
  *
  * What it costs: an https endpoint that accepts a connection and hangs up
- * before answering for a reason of its own now reads as a TLS error. It read
- * as an *internal* error before, which is worse - nothing inside this engine
- * failed - and libcurl's own message travels with the code either way.
+ * before answering for a reason of its own reads as a TLS error rather than
+ * a connection failure; libcurl's own message travels with the code either
+ * way.
  */
 bool tls_connection_never_answered (CURL* curl) {
     if (!curl) {
@@ -780,9 +782,22 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     // an endpoint that was never the problem (issue #705).
     case CURLE_COULDNT_RESOLVE_PROXY:
     case CURLE_PROXY: error.code = ErrorCode::ProxyError; break;
-    case CURLE_COULDNT_CONNECT:
-    case CURLE_COULDNT_RESOLVE_HOST:
-        error.code = ErrorCode::ConnectionFailed;
+    case CURLE_COULDNT_RESOLVE_HOST: error.code = ErrorCode::DnsError; break;
+    case CURLE_COULDNT_CONNECT: error.code = ErrorCode::ConnectionFailed; break;
+    // The target was reached and then failed the exchange: an empty reply, a
+    // reset mid-transfer, a redirect loop, a body its own `Content-Encoding`
+    // cannot decode, a reply that is not HTTP. The target's or the network's
+    // doing, never this engine's, so not `InternalError`. The TLS shape still
+    // wins here: a client-certificate refusal under TLS 1.3 arrives as
+    // `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802).
+    case CURLE_GOT_NOTHING:
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_TOO_MANY_REDIRECTS:
+    case CURLE_BAD_CONTENT_ENCODING:
+    case CURLE_WEIRD_SERVER_REPLY:
+        error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
+                                                            ErrorCode::ConnectionFailed;
         break;
     case CURLE_SSL_CONNECT_ERROR:
     case CURLE_SSL_CERTPROBLEM:
