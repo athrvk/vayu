@@ -187,7 +187,7 @@ export class ErrorBoundary extends Component<Props, State> {
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
 									<AlertCircle className="w-6 h-6 text-destructive-text" />
-									<CardTitle>Something went wrong</CardTitle>
+									<CardTitle>Couldn&apos;t render this view</CardTitle>
 								</div>
 								<span className="text-xs text-muted-foreground">
 									v{APP_VERSION}
@@ -196,7 +196,7 @@ export class ErrorBoundary extends Component<Props, State> {
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<p className="text-sm text-muted-foreground">
-								{this.state.error?.message || "An unexpected error occurred"}
+								{this.state.error?.message || "No error details available."}
 							</p>
 
 							{this.state.error?.stack && (
@@ -221,12 +221,12 @@ export class ErrorBoundary extends Component<Props, State> {
 									{copied ? (
 										<>
 											<Check className="size-icon mr-2 text-status-success-text" />
-											Copied!
+											Copied
 										</>
 									) : (
 										<>
 											<Copy className="size-icon mr-2" />
-											Copy Error Info
+											Copy error info
 										</>
 									)}
 								</Button>
@@ -239,7 +239,7 @@ export class ErrorBoundary extends Component<Props, State> {
 									className="flex-1"
 								>
 									<RefreshCw className="size-icon mr-2" />
-									Try Again
+									Try again
 								</Button>
 								<Button
 									variant="default"
@@ -247,12 +247,12 @@ export class ErrorBoundary extends Component<Props, State> {
 									className="flex-1"
 								>
 									<Home className="size-icon mr-2" />
-									Reload App
+									Reload app
 								</Button>
 							</div>
 
 							<p className="text-xs text-muted-foreground text-center">
-								If this issue persists, please copy the error info and report it.
+								If this issue persists, copy the error info and report it.
 							</p>
 						</CardContent>
 					</Card>

@@ -20,6 +20,7 @@
  * which depends on latency - guessing there would be worse than saying nothing.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { LoadTestConfig } from "@/types";
 
 export interface SummaryInput {
@@ -42,7 +43,7 @@ function count(n: number): string {
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
-	return `${count(n)} ${n === 1 ? one : many}`;
+	return `${count(n)} ${pluralize(n, one, many)}`;
 }
 
 /**
@@ -83,7 +84,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 	}
 
 	if (mode === "constant_rps") {
-		const shape = `Holds ${count(rps)} requests/sec for ${count(duration)}s`;
+		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
 		return `${shape} - about ${plural(rps * duration, "request")} in total.`;
 	}

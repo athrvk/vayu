@@ -82,7 +82,7 @@ describe("SampledExchange", () => {
 		);
 
 		const text = document.body.textContent ?? "";
-		const order = ["connect: timed out", "the-details", "Timing Breakdown", "the-children"].map(
+		const order = ["connect: timed out", "the-details", "Timing breakdown", "the-children"].map(
 			(t) => text.indexOf(t)
 		);
 		expect(order.every((i) => i >= 0)).toBe(true);
@@ -118,7 +118,7 @@ describe("SampledExchange", () => {
 		// with only TTFB and download printed a heading over nothing.
 		render(<SampledExchange {...base} isExpanded phases={phasesFromTrace({})} />);
 
-		expect(screen.queryByText("Timing Breakdown")).toBeNull();
+		expect(screen.queryByText("Timing breakdown")).toBeNull();
 	});
 
 	it("squares off the row's own corners", () => {

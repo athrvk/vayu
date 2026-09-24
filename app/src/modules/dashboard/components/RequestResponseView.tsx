@@ -18,6 +18,7 @@ import { XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import { pluralize } from "../utils/format";
 import {
 	CompactHeadersViewer,
 	CapturedResponseNotice,
@@ -70,7 +71,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 	if (!report) {
 		return (
 			<div className="p-5 text-center py-12 text-muted-foreground">
-				<p>Request/Response view available after test completion</p>
+				<p>Request/response view available after the load test completes</p>
 			</div>
 		);
 	}
@@ -93,7 +94,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			{/* Status Code Distribution */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Status Code Distribution</CardTitle>
+					<CardTitle>Status code distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
 					{hasStatusCodes ? (
@@ -118,7 +119,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 										{statusCodeLabel(Number(code))}
 									</span>
 									<p className="text-sm text-muted-foreground">
-										{String(count)} requests
+										{count} {pluralize(count, "request")}
 									</p>
 								</div>
 							))}
@@ -135,12 +136,12 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			{report.errors && report.errors.total > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Error Summary</CardTitle>
+						<CardTitle>Error summary</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="space-y-3">
 							<div className="flex justify-between">
-								<span className="text-muted-foreground">Total Errors:</span>
+								<span className="text-muted-foreground">Total errors:</span>
 								<span className="font-semibold text-destructive-text">
 									{report.errors.total}
 								</span>
@@ -163,7 +164,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			{hasPhaseAverages(report.timingBreakdown) && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Timing Breakdown</CardTitle>
+						<CardTitle>Timing breakdown</CardTitle>
 					</CardHeader>
 					<CardContent>
 						{/* Run-level averages: five label/value pairs, driven by the
@@ -203,12 +204,12 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			{report.slowRequests && report.slowRequests.count > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Slow Requests</CardTitle>
+						<CardTitle>Slow requests</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
-								<p className="text-sm text-muted-foreground">Slow Requests</p>
+								<p className="text-sm text-muted-foreground">Slow requests</p>
 								<p className="font-bold text-status-stopped-text">
 									{report.slowRequests.count}
 								</p>
@@ -254,7 +255,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 				<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2">
-							Sampled Requests
+							Sampled requests
 							<Badge variant="secondary" className="text-xs">
 								{report.results.length} shown
 							</Badge>
@@ -306,7 +307,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 														{trace.error_type && (
 															<div className="flex gap-4 text-sm">
 																<span className="text-muted-foreground">
-																	Error Type:
+																	Error type:
 																</span>
 																<span className="font-mono">
 																	{trace.error_type}
@@ -323,7 +324,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 														{trace.dataRowIndex !== undefined && (
 															<div className="flex gap-4 text-sm">
 																<span className="text-muted-foreground">
-																	Data Row:
+																	Data row:
 																</span>
 																<span className="font-mono">
 																	{trace.dataRowIndex}
@@ -340,7 +341,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 															trace.failures.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
-																		Failed Tests
+																		Failed tests
 																		{trace.totalFailed !==
 																			undefined && (
 																			<span className="ml-1">
@@ -397,14 +398,14 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 														0 && (
 														<CompactHeadersViewer
 															headers={captured.response.headers}
-															title="Response Headers"
+															title="Response headers"
 															className="max-h-40 overflow-auto"
 														/>
 													)}
 													{captured.response.body && (
 														<div className="space-y-1">
 															<p className="text-xs font-medium text-muted-foreground">
-																Response Body
+																Response body
 															</p>
 															<div className="h-48 overflow-hidden rounded-md border border-rule">
 																<ResponseBody

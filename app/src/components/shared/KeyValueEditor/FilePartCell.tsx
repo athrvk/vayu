@@ -110,7 +110,7 @@ export default function FilePartCell({
 				<TooltipTrigger asChild>{button}</TooltipTrigger>
 				<TooltipContent side="left" className="max-w-md">
 					<span className="font-mono break-all">
-						{src?.trim() || "No file chosen - this part cannot be sent yet."}
+						{src?.trim() || "No file chosen - this part can't be sent yet."}
 					</span>
 					{unresolved && (
 						<span className="mt-1 block">

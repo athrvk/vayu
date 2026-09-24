@@ -5,6 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
+
 /**
  * `maxScenarioDataRows`, as every surface that reads a data file states it
  * (issue #751).
@@ -35,5 +37,5 @@
  */
 export function describeRowCapRefusal(rowCount: number, maxRows: number): string | null {
 	if (rowCount <= maxRows) return null;
-	return `The file has ${rowCount} rows, over the ${maxRows} a run may carry. Raise the maxScenarioDataRows engine setting, or split the file.`;
+	return `The file has ${rowCount} ${pluralize(rowCount, "row")}, over the ${maxRows} a run may carry. Raise the maxScenarioDataRows engine setting, or split the file.`;
 }

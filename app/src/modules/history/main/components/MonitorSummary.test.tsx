@@ -66,7 +66,7 @@ describe("the Server Vitals summary on a stored run", () => {
 			},
 		});
 
-		expect(screen.getByText("Server Vitals Summary")).toBeTruthy();
+		expect(screen.getByText("Server vitals summary")).toBeTruthy();
 		expect(screen.getByText("cpu_percent")).toBeTruthy();
 		expect(screen.getByText("heap_bytes")).toBeTruthy();
 		// The chart's own formatter, not a second spelling of the same numbers.
@@ -80,7 +80,7 @@ describe("the Server Vitals summary on a stored run", () => {
 		// Absent section = absent panel, as everywhere else - a run that scraped
 		// no endpoint did not measure a target reporting zeros.
 		renderTab(undefined);
-		expect(screen.queryByText("Server Vitals Summary")).toBeNull();
+		expect(screen.queryByText("Server vitals summary")).toBeNull();
 	});
 
 	it("says every scrape failed rather than showing an empty panel", () => {

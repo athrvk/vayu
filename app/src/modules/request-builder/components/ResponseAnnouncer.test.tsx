@@ -84,7 +84,7 @@ describe("ResponseAnnouncer", () => {
 			isExecuting: false,
 		});
 		const text = screen.getByRole("status").textContent ?? "";
-		expect(text).toContain("Request failed. Could not resolve host");
+		expect(text).toContain("Couldn't get a response. Could not resolve host");
 		expect(text).not.toContain("0 ");
 	});
 

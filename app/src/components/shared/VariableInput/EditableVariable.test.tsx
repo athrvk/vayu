@@ -110,7 +110,7 @@ describe("hovering an editable token", () => {
 	it("says so when the variable does not resolve", () => {
 		const { container } = renderToken({ resolved: false, value: "", sourceName: undefined });
 		hover(container);
-		expect(screen.getByRole("dialog")).toHaveTextContent("Variable not defined");
+		expect(screen.getByRole("dialog")).toHaveTextContent("Not defined in any scope");
 	});
 
 	it("distinguishes a defined-but-empty variable from an undefined one", () => {
@@ -120,7 +120,7 @@ describe("hovering an editable token", () => {
 		const { container } = renderToken({ value: "", onValueChange: undefined });
 		hover(container);
 		expect(screen.getByRole("dialog")).toHaveTextContent("empty");
-		expect(screen.queryByText("Variable not defined")).not.toBeInTheDocument();
+		expect(screen.queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 	});
 
 	it("masks a secret exactly as a keyboard-opened popover would", () => {

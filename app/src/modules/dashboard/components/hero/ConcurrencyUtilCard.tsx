@@ -48,7 +48,7 @@ export function ConcurrencyUtilCard({
 	const fillColor = utilFillColor(util);
 
 	return (
-		<HeroCardShell label="Concurrency Utilisation" tip={TOOLTIPS.concurrencyUtil}>
+		<HeroCardShell label="Concurrency utilisation" tip={TOOLTIPS.concurrencyUtil}>
 			<HeroValue
 				value={currentConcurrency}
 				color={textColor}

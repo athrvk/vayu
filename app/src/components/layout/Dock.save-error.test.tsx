@@ -187,7 +187,7 @@ describe("the save line holds its own width", () => {
 		expect(slot()?.className).toContain("grid-cols-[0fr]");
 		// Cancels the row's leading gap-4 (not the trailing one, or the row's
 		// only surviving gap-4 would vanish too - see the note in Dock.tsx).
-		// `-mx-4` (both sides) shipped once and jammed "Connected" straight
+		// `-mx-4` (both sides) shipped once and jammed "Engine connected" straight
 		// against the version string with no gap at all - this guards the
 		// single-sided form specifically, not just "some cancelling margin".
 		expect(slot()?.className).toContain("-ms-4");

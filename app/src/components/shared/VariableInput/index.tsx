@@ -157,7 +157,7 @@ function parseSegments(
 export default function VariableInput({
 	value,
 	onChange,
-	placeholder = "Enter value...",
+	placeholder = "Value",
 	className,
 	disabled = false,
 	suggestions = [],

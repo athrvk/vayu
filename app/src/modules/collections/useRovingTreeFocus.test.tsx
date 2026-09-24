@@ -107,7 +107,7 @@ function Tree({ expanded }: { expanded: boolean }) {
 }
 
 /**
- * An expanded folder with nothing in it. The "Empty folder" line is a plain
+ * An expanded folder with nothing in it. The "Empty collection" line is a plain
  * div, not a treeitem, so in document order the row after this one is its
  * *sibling* - the shape ArrowRight used to step into.
  */
@@ -132,7 +132,7 @@ function EmptyFolderTree() {
 							toggle
 						</button>
 					</div>
-					<div>Empty folder</div>
+					<div>Empty collection</div>
 				</div>
 				<div
 					role="treeitem"

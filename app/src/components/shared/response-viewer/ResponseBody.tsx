@@ -170,7 +170,7 @@ export default function ResponseBody({
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<ImageIcon className="size-icon" />
 						<span>
-							Image Response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
+							Image response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
 						</span>
 					</div>
 					<div className="max-w-full max-h-[400px] overflow-auto">
@@ -197,7 +197,7 @@ export default function ResponseBody({
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<File className="size-icon" />
-						<span>PDF Document</span>
+						<span>PDF document</span>
 					</div>
 					<p className="text-sm text-muted-foreground">
 						PDF preview is not available. Download to view.
@@ -219,10 +219,10 @@ export default function ResponseBody({
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<FileCode className="size-icon" />
-						<span>Binary Data</span>
+						<span>Binary data</span>
 					</div>
 					<p className="text-sm text-muted-foreground">
-						Binary content cannot be displayed. Download to view.
+						Binary content can't be displayed. Download to view.
 					</p>
 				</div>
 			</div>
@@ -336,7 +336,7 @@ export default function ResponseBody({
 						srcDoc={previewHtml}
 						className="w-full h-full bg-white"
 						sandbox="allow-scripts allow-same-origin"
-						title="HTML Preview"
+						title="HTML preview"
 					/>
 				) : (
 					<CodeEditor

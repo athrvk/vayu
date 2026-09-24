@@ -52,7 +52,7 @@ function preview() {
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
 		target: { value: JSON.stringify({ any: "document" }) },
 	});
-	fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 }
 
 /**
@@ -167,10 +167,10 @@ describe("the import preview's notices", () => {
 		stubParse(vendorParse);
 		preview();
 
-		await waitFor(() => expect(screen.getByText(/2 folders/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText(/2 collections/i)).toBeInTheDocument());
 		// Path-derived folders are Vayu's doing, not the document's, so the preview
 		// says so before the user accepts the tree.
-		expect(screen.getByText(/Folders grouped by URL path/i)).toBeInTheDocument();
+		expect(screen.getByText(/Collections grouped by URL path/i)).toBeInTheDocument();
 	});
 
 	it("says nothing about grouping when the folders are the document's own tags", async () => {
@@ -192,7 +192,7 @@ describe("the import preview's notices", () => {
 		);
 		preview();
 
-		await waitFor(() => expect(screen.getByText(/1 folders/i)).toBeInTheDocument());
-		expect(screen.queryByText(/Folders grouped/i)).not.toBeInTheDocument();
+		await waitFor(() => expect(screen.getByText(/1 collections/i)).toBeInTheDocument());
+		expect(screen.queryByText(/Collections grouped/i)).not.toBeInTheDocument();
 	});
 });

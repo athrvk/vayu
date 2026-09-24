@@ -133,7 +133,7 @@ describe("VariablesSection - a rejected variable edit", () => {
 		expect(globalsMutate).toHaveBeenCalledTimes(1);
 		const toasts = useToastStore.getState().toasts;
 		expect(toasts).toHaveLength(1);
-		expect(toasts[0].message).toBe("value must not be empty");
+		expect(toasts[0].message).toBe("Couldn't save {{host}} - value must not be empty");
 		expect(toasts[0].variant).toBe("error");
 		expect(input.value).toBe("example.com");
 	});

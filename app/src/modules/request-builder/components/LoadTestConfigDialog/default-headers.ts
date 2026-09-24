@@ -23,12 +23,13 @@
  * endpoint exists to end.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RequestDefaultHeader, RequestDefaults } from "@/types";
 
 function describeMissing(names: string[], verb: string): string | null {
 	if (names.length === 0) return null;
 	const list = names.join(", ");
-	return `${list} ${names.length === 1 ? "is" : "are"} ${verb}`;
+	return `${list} ${pluralize(names.length, "is", "are")} ${verb}`;
 }
 
 /** `undefined` when the header carries no value yet - a generated one included. */

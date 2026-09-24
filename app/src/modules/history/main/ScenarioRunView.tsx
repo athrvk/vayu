@@ -189,7 +189,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 			// a click that failed is indistinguishable from one that did nothing.
 			console.error("Failed to stop scenario run:", error);
 			showToast({
-				message: error instanceof Error ? error.message : "Couldn't stop the run",
+				message:
+					error instanceof Error
+						? `Couldn't stop the run - ${error.message}`
+						: "Couldn't stop the run",
 				variant: "error",
 				// The sequence is still sending requests, so the retry is the
 				// reason for telling them at all.

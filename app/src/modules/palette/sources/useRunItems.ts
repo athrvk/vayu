@@ -38,6 +38,7 @@ import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatRelativeTime } from "@/lib/format-time";
 import type { Collection, Run } from "@/types";
 import { type PaletteItem } from "../types";
@@ -118,7 +119,7 @@ export function useRunItems(query: string): PaletteItem[] {
 				id: "run:search-more",
 				kind: "run" as const,
 				title: `Search runs for “${search}”…`,
-				subtitle: `${data.pagination.total} runs`,
+				subtitle: `${data.pagination.total} ${pluralize(data.pagination.total, "run")}`,
 				icon: Search,
 				escape: true,
 				perform: () => {

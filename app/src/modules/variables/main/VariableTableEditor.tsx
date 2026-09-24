@@ -55,8 +55,15 @@ import {
 import { useSaveStore, useSessionStore } from "@/stores";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
-import { Button, Badge, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
+import {
+	Button,
+	Badge,
+	DeleteConfirmDialog,
+	TooltipIconButton,
+	environmentDeleteDescription,
+} from "@/components/ui";
 import { Callout, ErrorState } from "@/components/shared";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
 import {
@@ -208,10 +215,10 @@ const EDITOR_CONFIGS = {
 	globals: {
 		icon: Globe as LucideIcon,
 		iconColor: "text-scope-global",
-		title: "Global Variables",
-		subtitle: "Global Variables",
+		title: "Global variables",
+		subtitle: "Global scope",
 		infoText:
-			"Global variables are available in all requests (lowest priority). They can be overridden by environment and collection variables.",
+			"Variables in this scope are available in all requests (lowest priority). Overridden by environment and collection scopes.",
 		infoBg: "bg-scope-global/10",
 		infoTextColor: "text-scope-global",
 		infoBorder: "border-scope-global/20",
@@ -222,9 +229,9 @@ const EDITOR_CONFIGS = {
 		icon: Cloud as LucideIcon,
 		iconColor: "text-scope-environment",
 		title: (name: string) => name,
-		subtitle: "Environment Variables",
+		subtitle: "Environment scope",
 		infoText:
-			"Environment variables override global variables but can be overridden by collection variables.",
+			"Variables in this scope override the global scope but are overridden by collection scope.",
 		infoBg: "bg-scope-environment/10",
 		infoTextColor: "text-scope-environment",
 		infoBorder: "border-scope-environment/20",
@@ -235,9 +242,9 @@ const EDITOR_CONFIGS = {
 		icon: Folder as LucideIcon,
 		iconColor: "text-scope-collection",
 		title: (name: string) => name,
-		subtitle: "Collection Variables",
+		subtitle: "Collection scope",
 		infoText:
-			"Collection variables have the highest priority and override both global and environment variables.",
+			"Variables in this scope have the highest priority and override both global and environment scopes.",
 		infoBg: "bg-scope-collection/10",
 		infoTextColor: "text-scope-collection",
 		infoBorder: "border-scope-collection/20",
@@ -416,7 +423,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					resolve();
 				},
 				onError: (error: unknown) => {
-					failSave(error instanceof Error ? error.message : "Save failed");
+					failSave(error instanceof Error ? error.message : "Couldn't save");
 					reject(error);
 				},
 			};
@@ -730,7 +737,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		return (
 			<ErrorState
 				variant="inline"
-				title={`Failed to load ${type === "globals" ? "globals" : type === "environment" ? "environment" : "collection"}`}
+				title={`Couldn't load the ${type === "globals" ? "variables" : type === "environment" ? "environment" : "collection"}`}
 			/>
 		);
 	}
@@ -758,7 +765,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									onClick={handleSetActiveEnvironment}
 									className="min-w-30 border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
 								>
-									Set Active
+									Set active
 								</Button>
 							) : (
 								<Badge
@@ -797,7 +804,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				<DeleteConfirmDialog
 					open={showDeleteConfirm}
 					onOpenChange={(open) => !open && setShowDeleteConfirm(false)}
-					name={environment.name}
+					title={`Delete "${environment.name}"?`}
+					description={environmentDeleteDescription(environment)}
+					confirmLabel="Delete environment"
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
 				/>
@@ -880,7 +889,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			{/* Footer */}
 			{!embedded && (
 				<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
-					{variables.filter((v) => v.key && !v.isNew).length} variable(s)
+					{(() => {
+						const savedCount = variables.filter((v) => v.key && !v.isNew).length;
+						return `${savedCount} ${pluralize(savedCount, "variable")}`;
+					})()}
 				</div>
 			)}
 		</div>

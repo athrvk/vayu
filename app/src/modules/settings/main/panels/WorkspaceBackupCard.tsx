@@ -32,6 +32,7 @@ import { useState } from "react";
 import { HardDriveDownload, Loader2 } from "lucide-react";
 
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { apiService } from "@/services";
 import { ApiError } from "@/services/http-client";
 import { useToastStore } from "@/stores";
@@ -67,19 +68,23 @@ export function WorkspaceBackupCard() {
 		try {
 			const snapshot = await apiService.backupWorkspace();
 			setResult(snapshot);
-			showToast("Workspace backed up", "success");
+			showToast("Backed up", "success");
 		} catch (error) {
 			// A 409 is not a failure of the backup - the user's own earlier
 			// request is still writing the file - and saying "could not back up"
 			// would send them looking for a problem that is not there.
-			const message =
-				error instanceof ApiError && error.statusCode === 409
-					? "A backup is already running - it will finish on its own."
-					: error instanceof Error
-						? error.message
-						: "The engine did not answer";
+			const isAlreadyRunning = error instanceof ApiError && error.statusCode === 409;
+			const message = isAlreadyRunning
+				? "A backup is already running - it will finish on its own."
+				: error instanceof Error
+					? error.message
+					: "The engine did not answer";
 			setFailure(message);
-			showToast("Could not back up the workspace", "error");
+			// The 409 case above isn't a failure, so it gets no error toast -
+			// the inline message already says the backup will finish on its own.
+			if (!isAlreadyRunning) {
+				showToast("Couldn't back up", "error");
+			}
 		} finally {
 			setRunning(false);
 		}
@@ -93,9 +98,9 @@ export function WorkspaceBackupCard() {
 					<CardTitle>{WORKSPACE_BACKUP.label}</CardTitle>
 				</div>
 				<CardDescription>
-					Writes a complete, compacted copy of the workspace - collections, environments,
-					credentials and run history - into a backups folder beside the database. Safe to
-					run while Vayu is working; copying the database file by hand is not.
+					Writes a complete, compacted copy of the database - collections, environments,
+					credentials and run history - into a backups folder beside it. Safe to run while
+					Vayu is working; copying the database file by hand is not.
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
@@ -128,7 +133,7 @@ export function WorkspaceBackupCard() {
 							Saved {formatSize(result.sizeBytes)} at{" "}
 							{new Date(result.createdAt).toLocaleString()}
 							{result.pruned > 0 &&
-								` - removed ${result.pruned} older snapshot${result.pruned === 1 ? "" : "s"}`}
+								` - removed ${result.pruned} older ${pluralize(result.pruned, "snapshot")}`}
 						</p>
 						<p className="text-xs font-mono break-all text-foreground">{result.path}</p>
 						{/* Restoring is a manual copy with the engine stopped, so the

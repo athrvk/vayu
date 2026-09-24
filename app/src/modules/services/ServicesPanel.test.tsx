@@ -231,7 +231,7 @@ describe("the services drawer", () => {
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]).toMatchObject({
 				variant: "error",
-				message: "address already in use",
+				message: "Couldn't start the inbox - address already in use",
 			})
 		);
 	});
@@ -346,7 +346,9 @@ describe("an inbox row", () => {
 		expect(await screen.findByText(/37 recorded requests/i)).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 
-		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+		fireEvent.click(
+			within(screen.getByRole("dialog")).getByRole("button", { name: "Delete inbox" })
+		);
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
 	});
 
@@ -500,6 +502,28 @@ describe("an issuer row", () => {
 		).toBeInTheDocument();
 	});
 
+	it("summarises a server-error issuer in its own words, not the Select label lowercased", async () => {
+		listMockIssuers.mockResolvedValue([issuer({ failureMode: "server_error" })]);
+		renderPanel();
+		fireEvent.click(
+			await screen.findByRole("button", { name: /expand issuer on port 42000/i })
+		);
+		expect(
+			screen.getByText(/Tokens expire in 3600s · answers with a server error · /)
+		).toBeInTheDocument();
+	});
+
+	it("summarises an invalid-client issuer in its own words, not the Select label lowercased", async () => {
+		listMockIssuers.mockResolvedValue([issuer({ failureMode: "invalid_client" })]);
+		renderPanel();
+		fireEvent.click(
+			await screen.findByRole("button", { name: /expand issuer on port 42000/i })
+		);
+		expect(
+			screen.getByText(/Tokens expire in 3600s · rejects every client id · /)
+		).toBeInTheDocument();
+	});
+
 	it("flips a running issuer into a failure mode without restarting it", async () => {
 		listMockIssuers.mockResolvedValue([issuer()]);
 		renderPanel();
@@ -583,7 +607,7 @@ describe("an issuer row", () => {
 
 		const delay = screen.getByLabelText(/delay/i);
 		fireEvent.change(delay, { target: { value: "999999" } });
-		expect(screen.getByText(/whole number of milliseconds, 0 to 60000/i)).toBeInTheDocument();
+		expect(screen.getByText(/whole number of milliseconds, 0 to 60,000/i)).toBeInTheDocument();
 		fireEvent.blur(delay);
 		expect(updateMockIssuer).not.toHaveBeenCalled();
 	});
@@ -684,7 +708,7 @@ describe("starting an issuer", () => {
 		const dialog = await openDialog();
 		fireEvent.change(dialog.getByLabelText(/token lifetime/i), { target: { value: "0" } });
 		expect(dialog.getByRole("button", { name: /start issuer/i })).toBeDisabled();
-		expect(dialog.getByText(/whole number of seconds, 1 to 2678400/i)).toBeInTheDocument();
+		expect(dialog.getByText(/whole number of seconds, 1 to 2,678,400/i)).toBeInTheDocument();
 	});
 
 	it("refuses an out-of-range delay, and says what would be in range", async () => {
@@ -692,7 +716,7 @@ describe("starting an issuer", () => {
 		fireEvent.click(dialog.getByRole("combobox"));
 		fireEvent.click(await screen.findByRole("option", { name: "Slow" }));
 		fireEvent.change(dialog.getByLabelText(/delay/i), { target: { value: "-1" } });
-		expect(dialog.getByText(/whole number of milliseconds, 0 to 60000/i)).toBeInTheDocument();
+		expect(dialog.getByText(/whole number of milliseconds, 0 to 60,000/i)).toBeInTheDocument();
 		expect(dialog.getByRole("button", { name: /start issuer/i })).toBeDisabled();
 	});
 });

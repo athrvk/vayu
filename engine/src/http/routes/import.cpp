@@ -125,8 +125,8 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
  *
  * Shared for the same reason the validator is: the buffered route answers this
  * with a status and the streaming one with an event, but *what* it says - a 413
- * for a refused body, a 502 for a failed hop, the content and its type for a
- * good one - must be the one answer.
+ * for a refused body, a 502 for a failed hop or a non-2xx upstream answer, the
+ * content and its type for a good one - must be the one answer.
  */
 std::pair<int, nlohmann::json> fetch_outcome (const vayu::http::Client& client,
 const Result<Response>& result) {
@@ -146,6 +146,14 @@ const Result<Response>& result) {
         const std::string detail =
         resp.error_message.empty () ? "connection error" : resp.error_message;
         return { 502, error_body (502, "Failed to fetch: " + detail) };
+    }
+    // The upstream answered, but not with the document: a 404 or 500 page
+    // handed on as `content` reaches a JSON/YAML reader and is reported as an
+    // unrecognised format, which blames the file for the server's answer. The
+    // status is named so the caller can say whose answer it was.
+    if (resp.status_code < 200 || resp.status_code >= 300) {
+        return { 502,
+            error_body (502, "The server answered HTTP " + std::to_string (resp.status_code)) };
     }
     // `Headers` compares without case, so one lookup covers every casing the
     // upstream can have spelled the name in, and the map holds one value per

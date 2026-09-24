@@ -548,7 +548,11 @@ export function VariablePopover({
 		<Popover open={isOpen} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>{triggerElement}</PopoverTrigger>
 			<PopoverContent
-				className="w-96 max-w-[calc(100vw-2rem)] p-2.5"
+				// `w-sm` (24rem), not `w-96`: the card holds the variable's name,
+				// value and source, a text measure, and `w-96` rides `--spacing` -
+				// 288px at the Default density rather than the 384px `w-sm` reads
+				// as.
+				className="w-sm max-w-[calc(100vw-2rem)] p-2.5"
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
@@ -841,7 +845,7 @@ export function VariablePopover({
 									id={createScopeLabelId}
 									className="block text-micro text-muted-foreground"
 								>
-									create in
+									Create in
 								</span>
 								{/*
 								 * One choice out of a few, all of them visible, so the
@@ -957,7 +961,7 @@ export function VariablePopover({
 					) : boundRowOrigin ? (
 						/*
 						 * Undefined everywhere, but the picked row carries the column, so
-						 * the send resolves it. "Variable not defined" in destructive red
+						 * the send resolves it. "Not defined in any scope" in destructive red
 						 * is the one thing this must not say: the red states a token that
 						 * will reach the server with its braces on, and this one will not.
 						 */
@@ -976,12 +980,12 @@ export function VariablePopover({
 						 */
 						<Callout severity="blocking">
 							Defined, but every definition is switched off, so this token does not
-							resolve.
+							resolve and is sent as literal text.
 						</Callout>
 					) : (
 						<Callout severity="blocking">
-							Variable not defined. Define it in Globals, an Environment, or
-							Collection variables.
+							Not defined in any scope, so this token is sent as literal text. Define
+							it in globals, an environment, or a collection.
 						</Callout>
 					)}
 					{/*

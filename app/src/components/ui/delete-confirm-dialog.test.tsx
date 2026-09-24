@@ -82,7 +82,7 @@ describe("DeleteConfirmDialog", () => {
 			open({ title: undefined, description: undefined, name: "Staging" });
 			expect(screen.getByText('Delete "Staging"?')).toBeInTheDocument();
 			expect(
-				screen.getByText('"Staging" is removed permanently. This cannot be undone.')
+				screen.getByText(`"Staging" is removed permanently. This can't be undone.`)
 			).toBeInTheDocument();
 		});
 
@@ -91,7 +91,7 @@ describe("DeleteConfirmDialog", () => {
 			expect(screen.getByText('Delete "Orders"?')).toBeInTheDocument();
 			expect(
 				screen.getByText(
-					'"Orders" and everything inside it is removed permanently. This cannot be undone.'
+					`"Orders" and everything inside it is removed permanently. This can't be undone.`
 				)
 			).toBeInTheDocument();
 		});

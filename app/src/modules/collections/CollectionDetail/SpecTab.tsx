@@ -157,7 +157,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const bindSpec = useBindSpecMutation();
 
 	const [picked, setPicked] = useState<PickedSpec | null>(null);
-	const [pickError, setPickError] = useState<string | null>(null);
+	// `title` carries which of the two failure sources this is: a local file
+	// that didn't read, or a URL fetch that never got a document back. Both
+	// land here rather than in `describeQuery` because that query only ever
+	// runs once a document's bytes are already in hand (issue #869) - the two
+	// cases above it are Vayu never having bytes to describe.
+	const [pickError, setPickError] = useState<{ title: string; message: string } | null>(null);
 	const [url, setUrl] = useState("");
 	const [exporting, setExporting] = useState(false);
 	const [fetching, setFetching] = useState(false);
@@ -221,7 +226,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				path: window.electronAPI?.getFilePath(file) ?? "",
 			});
 		};
-		reader.onerror = () => setPickError("Could not read that file.");
+		reader.onerror = () =>
+			setPickError({ title: "Couldn't read that file", message: "Couldn't read that file." });
 		reader.readAsText(file);
 	};
 
@@ -233,7 +239,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			const { content } = await apiService.importFetch(url, specMaxBytes);
 			setPicked({ content, token: nextPickToken(), sourceUrl: url });
 		} catch (e) {
-			setPickError((e as Error).message);
+			// A fetch that never got a document back - a bad host, a refused
+			// connection, the engine itself unreachable - is not a document that
+			// failed to read: nothing was ever read. Kept apart from
+			// `describeQuery`'s "Couldn't read that document" below, which only
+			// fires once bytes are already in hand.
+			setPickError({ title: "Couldn't fetch that URL", message: (e as Error).message });
 		} finally {
 			setFetching(false);
 		}
@@ -375,8 +386,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					</div>
 
 					{pickError && (
-						<Callout severity="blocking" title="Couldn't read that document">
-							{pickError}
+						<Callout severity="blocking" title={pickError.title}>
+							{pickError.message}
 						</Callout>
 					)}
 
@@ -548,7 +559,10 @@ function BoundSpec({
 					{/* The icon is part of the claim - a link icon beside a skeleton would
 					    already be saying the document came from a URL. */}
 					{loading ? (
-						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-64" />
+						// `w-3xs` (16rem, the container scale), not `w-64`: the skeleton
+						// stands in for a line of source text, not a row's rhythm, and
+						// `w-64` rides `--spacing` the way the toast viewport's `w-80` did.
+						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-3xs" />
 					) : (
 						<>
 							{sourceUrl ? (
@@ -576,7 +590,14 @@ function BoundSpec({
 						<dt>Operations mapped</dt>
 						<dd className="text-foreground">
 							{requestsLoading ? (
-								<Skeleton data-testid="spec-mapped-skeleton" className="h-3 w-28" />
+								// Fixed rem, not `w-28`: a placeholder for a short count
+								// string ("3 of 10 requests"), which does not get longer or
+								// shorter with the density setting. No container-scale token
+								// is this small, so the width is spelled out directly.
+								<Skeleton
+									data-testid="spec-mapped-skeleton"
+									className="h-3 w-[7rem]"
+								/>
 							) : (
 								<>
 									{mappedCount} of {requestCount} request
@@ -589,9 +610,11 @@ function BoundSpec({
 						<dt>Fetched</dt>
 						<dd className="text-foreground">
 							{loading ? (
+								// Fixed rem: stands in for a relative-time string ("2 hours
+								// ago"), a text measure, not `w-20`'s density unit.
 								<Skeleton
 									data-testid="spec-fetched-skeleton"
-									className="h-3 w-20"
+									className="h-3 w-[5rem]"
 								/>
 							) : (
 								formatRelative(epochToIso(fetchedAt))
@@ -606,7 +629,12 @@ function BoundSpec({
 						<dt>Size</dt>
 						<dd className="text-foreground">
 							{loading ? (
-								<Skeleton data-testid="spec-size-skeleton" className="h-3 w-16" />
+								// Fixed rem: stands in for a size string ("128 KB"), a text
+								// measure, not `w-16`'s density unit.
+								<Skeleton
+									data-testid="spec-size-skeleton"
+									className="h-3 w-[4rem]"
+								/>
 							) : (
 								formatDocumentSize(contentBytes)
 							)}
@@ -615,7 +643,7 @@ function BoundSpec({
 				</dl>
 				{failed && (
 					<FieldError>
-						The stored document could not be read - its source and fetch time are
+						Couldn&apos;t read the stored document - its source and fetch time are
 						unknown until the engine answers.
 					</FieldError>
 				)}

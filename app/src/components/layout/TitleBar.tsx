@@ -374,8 +374,8 @@ function EnvSwitcher() {
 					showToast({
 						message:
 							error instanceof Error
-								? `Could not switch environment: ${error.message}`
-								: "Could not switch environment",
+								? `Couldn't switch environment: ${error.message}`
+								: "Couldn't switch environment",
 						variant: "error",
 					}),
 			}
@@ -390,7 +390,11 @@ function EnvSwitcher() {
 						// rounded-md, not rounded-full: this is an interactive control,
 						// so its corners follow the Appearance → Roundedness setting.
 						// rounded-full is reserved for non-interactive indicators.
-						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
+						// `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-44`:
+						// this bounds how long an environment name can grow before it
+						// truncates, not chrome rhythm, and `max-w-44` rode `--spacing`,
+						// truncating names shorter at the Default density.
+						"flex items-center gap-1.5 max-w-3xs text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
 						// Explicit property list, not `transition-colors`: a hand-rolled
 						// button carries no `[data-slot="button"]`, so it misses the
 						// baseline's `scale` press-feedback transition (`index.css`) -
@@ -428,14 +432,16 @@ function EnvSwitcher() {
 					aria-label="Switch environment"
 				>
 					<Cloud className="size-icon-sm shrink-0" />
-					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
+					<span className="truncate">{activeEnv?.name ?? "No environment"}</span>
 					{/* Inherits the control's colour: the old `opacity-60` was a magic
 					    number that fought the tinted state, dimming an already-tinted
 					    foreground a second time. */}
 					<ChevronDown className="size-icon-sm shrink-0" />
 				</button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="min-w-44">
+			{/* `min-w-3xs` (16rem, Tailwind's container scale), not `min-w-44`: see
+			    the switcher pill above - the same rode-`--spacing` bug. */}
+			<DropdownMenuContent align="end" className="min-w-3xs">
 				<DropdownMenuItem
 					onClick={() => void createNewEnvironment()}
 					// `group`: the menu item is the owner whose hover the glyph
@@ -443,21 +449,21 @@ function EnvSwitcher() {
 					className="group text-xs gap-2"
 				>
 					<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
-					<span className="flex-1">New Environment</span>
+					<span className="flex-1">New environment</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem
 					onClick={openImport}
-					// `group`: same as the New Environment item above - a
+					// `group`: same as the New environment item above - a
 					// DropdownMenuItem is not a `[data-slot="button"]`, so the item
 					// has to be the owner whose hover the glyph answers.
 					className="group text-xs gap-2"
 				>
 					<Download className="size-icon-sm" data-icon-motion={ICON_MOTION.drop} />
-					<span className="flex-1">Import Environment...</span>
+					<span className="flex-1">Import environment…</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
-					<span className="flex-1">No Environment</span>
+					<span className="flex-1">No environment</span>
 					{!activeEnv && <Check className="size-icon-sm" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (

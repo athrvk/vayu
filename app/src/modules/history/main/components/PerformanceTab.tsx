@@ -87,7 +87,7 @@ export default function PerformanceTab({
 				(isRampUp ? (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
-							<CardTitle>Response Time vs Concurrency</CardTitle>
+							<CardTitle>Response time vs concurrency</CardTitle>
 						</CardHeader>
 						<CardContent>
 							<ResponseTimeVsConcurrencyChart
@@ -100,7 +100,7 @@ export default function PerformanceTab({
 				) : (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
-							<CardTitle>Response Time Percentiles Over Time</CardTitle>
+							<CardTitle>Response time percentiles over time</CardTitle>
 						</CardHeader>
 						<CardContent>
 							<LatencyPercentilesChart
@@ -122,7 +122,7 @@ export default function PerformanceTab({
 			{report.monitor && (
 				<Card className="enter-fade">
 					<CardHeader>
-						<CardTitle>Server Vitals Summary</CardTitle>
+						<CardTitle>Server vitals summary</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<MonitorSummary monitor={report.monitor} />
@@ -133,7 +133,7 @@ export default function PerformanceTab({
 			{/* Latency Statistics */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Latency Distribution</CardTitle>
+					<CardTitle>Latency distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -167,7 +167,7 @@ export default function PerformanceTab({
 			{report.timingBreakdown?.phases && (
 				<Card className="enter-fade">
 					<CardHeader>
-						<CardTitle>Phase Latency Percentiles</CardTitle>
+						<CardTitle>Phase latency percentiles</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<PhasePercentiles report={report} />
@@ -179,7 +179,7 @@ export default function PerformanceTab({
 			{report.rateControl && isRateLimitedRun(derived.mode, derived.targetRps) && (
 				<Card className="enter-fade">
 					<CardHeader>
-						<CardTitle>Rate Control Performance</CardTitle>
+						<CardTitle>Rate control performance</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-3 gap-6">
@@ -197,7 +197,7 @@ export default function PerformanceTab({
 							</div>
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">
-									Achievement Rate
+									Achievement rate
 								</p>
 								{/* good / caution / bad is semantics, not decoration, so all
 								    three branches take the semantic -text trio. The third

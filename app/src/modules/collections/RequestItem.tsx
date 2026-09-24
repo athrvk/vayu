@@ -117,8 +117,8 @@ export default function RequestItem({
 	 */
 	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
-	// Always the confirm dialog, never a bare delete: the ⋯ menu and the hidden
-	// `data-tree-delete` control the Delete key clicks are the same one action.
+	// The ⋯ menu and the hidden `data-tree-delete` control the Delete key clicks
+	// are the same one action: a soft delete with an undo toast behind it.
 	const handleDelete = () => {
 		if (isDeleting) return;
 		onRequestDeleteClick(request.id, request.name);

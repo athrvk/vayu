@@ -31,6 +31,7 @@ import { Button, Switch } from "@/components/ui";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/queries/oauth";
 import { useToastStore } from "@/stores";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import type { OAuth2Config } from "@/types";
 import { coverageState, fmtDuration, isMidRunRefreshable } from "./oauth2-load-test-coverage";
 import { Callout } from "@/components/shared";
@@ -101,7 +102,12 @@ export default function OAuth2LoadTestGuard({
 			{ config, force: true },
 			{
 				onError: (err) =>
-					showToast(err instanceof Error ? err.message : "Token refresh failed", "error"),
+					showToast(
+						err instanceof Error
+							? `Couldn't refresh the OAuth 2.0 token - ${humanizeOAuth2Error(err.message)}`
+							: "Couldn't refresh the OAuth 2.0 token.",
+						"error"
+					),
 			}
 		);
 	};
@@ -110,10 +116,10 @@ export default function OAuth2LoadTestGuard({
 		return (
 			<Callout severity="info" positive>
 				{state.nonExpiring
-					? "Access token does not expire - it covers the full test."
+					? "Access token doesn't expire - it covers the whole run."
 					: state.viaRefresh
-						? "Access token expires during the test - the engine refreshes it mid-run."
-						: "Access token covers the full test duration."}
+						? "Access token expires during the run - the engine refreshes it mid-run."
+						: "Access token covers the whole run."}
 			</Callout>
 		);
 	}
@@ -139,8 +145,8 @@ export default function OAuth2LoadTestGuard({
 					</Button>
 				}
 			>
-				One is fetched when the test starts; if its lifetime is shorter than the test,
-				requests will fail after it expires.
+				One is fetched when the run starts. If its lifetime is shorter than the run,
+				requests fail once it expires.
 			</Callout>
 		);
 	}
@@ -168,8 +174,8 @@ export default function OAuth2LoadTestGuard({
 			{isRefreshable ? (
 				<>
 					the cached token expires in <strong>{fmtDuration(state.remainingMs)}</strong>,
-					but this test runs for <strong>{fmtDuration(state.durationMs)}</strong>. Refresh
-					for a full <strong>{fmtDuration(state.lifetimeMs)}</strong> window.
+					but this run lasts <strong>{fmtDuration(state.durationMs)}</strong>. Refresh for
+					a full <strong>{fmtDuration(state.lifetimeMs)}</strong> window.
 					<Button
 						size="sm"
 						variant="outline"
@@ -189,8 +195,8 @@ export default function OAuth2LoadTestGuard({
 				<>
 					this provider&apos;s tokens last only{" "}
 					<strong>{fmtDuration(state.lifetimeMs)}</strong>, shorter than the{" "}
-					<strong>{fmtDuration(state.durationMs)}</strong> test. Requests will fail once
-					it expires - this credential cannot be renewed mid-run (a query-placed token,
+					<strong>{fmtDuration(state.durationMs)}</strong> run. Requests fail once it
+					expires - this credential can&apos;t be renewed mid-run (a query-placed token,
 					auto-refresh turned off, or an authorization-code grant with no refresh token),
 					so shorten the run to avoid failures.
 				</>

@@ -107,7 +107,7 @@ describe("importNotices", () => {
 			"1 WebSocket request not imported",
 			"2 file fields need files",
 			"1 other server URL ignored - only the first is used",
-			"Folders grouped by URL path (the spec has no tags)",
+			"Collections grouped by URL path (the spec has no tags)",
 		]);
 	});
 

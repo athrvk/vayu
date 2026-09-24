@@ -58,6 +58,7 @@ import {
 } from "@/services/data-files";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import { formatBytes } from "@/modules/settings/utils/format-size";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /** A chosen file: its name, for the user, and its rows, for the payload. */
 export interface SelectedDataFile {
@@ -185,12 +186,12 @@ export default function DataFilePicker({
 				refuse(
 					e instanceof DataFileError
 						? e.message
-						: `Could not read the file: ${(e as Error).message}`
+						: `Couldn't read the file: ${(e as Error).message}`
 				);
 			}
 		};
 		reader.onerror = () => {
-			refuse("Could not read the file.");
+			refuse("Couldn't read the file.");
 		};
 		reader.readAsArrayBuffer(file);
 	};
@@ -272,7 +273,7 @@ export default function DataFilePicker({
 			/>
 
 			{error && (
-				<Callout severity="blocking" title="Could not read the data file">
+				<Callout severity="blocking" title="Couldn't read the data file">
 					{error}
 				</Callout>
 			)}
@@ -284,8 +285,8 @@ export default function DataFilePicker({
 						<span className="truncate font-medium">{selected.fileName}</span>
 						<span className="ml-auto shrink-0 text-muted-foreground">
 							{selected.parsed.format.toUpperCase()} · {rowCount}{" "}
-							{rowCount === 1 ? "row" : "rows"} · {selected.parsed.columns.length}{" "}
-							{selected.parsed.columns.length === 1 ? "column" : "columns"}
+							{pluralize(rowCount, "row")} · {selected.parsed.columns.length}{" "}
+							{pluralize(selected.parsed.columns.length, "column")}
 						</span>
 					</div>
 
@@ -298,12 +299,12 @@ export default function DataFilePicker({
 					{mode !== "declare" && (
 						<p className="text-xs text-muted-foreground">
 							{loadTest
-								? `${rowCount} ${rowCount === 1 ? "row" : "rows"}, bound one per iteration across every virtual user - they repeat from the top once they run out.`
+								? `${rowCount} ${pluralize(rowCount, "row")}, bound one per iteration across every virtual user - they repeat from the top once they run out.`
 								: resolved === rowCount
-									? `${resolved} ${resolved === 1 ? "iteration" : "iterations"}, one per row.`
+									? `${resolved} ${pluralize(resolved, "iteration")}, one per row.`
 									: resolved < rowCount
-										? `${resolved} ${resolved === 1 ? "iteration" : "iterations"} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
-										: `${resolved} iterations over ${rowCount} ${rowCount === 1 ? "row" : "rows"} - the rows repeat from the top once they run out.`}
+										? `${resolved} ${pluralize(resolved, "iteration")} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
+										: `${resolved} iterations over ${rowCount} ${pluralize(rowCount, "row")} - the rows repeat from the top once they run out.`}
 						</p>
 					)}
 

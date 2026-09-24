@@ -133,7 +133,11 @@ export default function OAuth2Form({
 			{field(
 				OAUTH2_FIELD_LABELS.grantType,
 				<Select value={grant} onValueChange={(g: OAuth2GrantType) => set("grantType", g)}>
-					<SelectTrigger className="w-64">
+					{/* `w-3xs`, not `w-64`: the trigger holds a fixed grant-type
+					    label ("Authorization Code"), a text measure, and `w-64`
+					    rides `--spacing` - narrower at the Default density than the
+					    label it holds. */}
+					<SelectTrigger className="w-3xs">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -223,7 +227,7 @@ export default function OAuth2Form({
 				<TextInput
 					value={value.scope ?? ""}
 					onChange={(v) => set("scope", v)}
-					placeholder="space-separated scopes"
+					placeholder="openid profile email"
 				/>
 			)}
 

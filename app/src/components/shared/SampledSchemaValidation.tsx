@@ -35,6 +35,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import { uncheckedReasonText } from "./response-viewer/validation-reasons";
 import type { RunSchemaValidation, ValidationUncheckedReason } from "@/types/domain";
@@ -175,8 +176,8 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 						/>
 						<span className="tabular-nums">
 							{validation.unevaluated} checked{" "}
-							{validation.unevaluated === 1 ? "response" : "responses"} met schema
-							keywords the validator cannot evaluate:{" "}
+							{pluralize(validation.unevaluated, "response")} met schema keywords the
+							validator can't evaluate:{" "}
 							{unevaluated
 								.map(({ keyword, count }) =>
 									count > 1 ? `${keyword} (${count})` : keyword

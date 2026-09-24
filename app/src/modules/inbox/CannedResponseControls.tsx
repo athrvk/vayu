@@ -209,7 +209,11 @@ export function CannedResponseControls({
 			await onApply(next);
 			completeSaveThenIdle(INBOX_REPLY_SAVE_CONTEXT);
 		} catch (error) {
-			failSave(error instanceof Error ? error.message : "Could not update the response");
+			failSave(
+				error instanceof Error
+					? `Couldn't update the response - ${error.message}`
+					: "Couldn't update the response"
+			);
 		}
 	};
 
@@ -295,7 +299,7 @@ export function CannedResponseControls({
 				<p className="text-xs text-muted-foreground mt-1.5">
 					{stopped
 						? "This inbox is stopped, so nothing is being served. Start a new one to change what callers receive."
-						: "Every caller to this inbox gets this reply. Apply sends the changes to the engine; the Dock reports the save."}
+						: "Every caller to this inbox gets this reply. Apply sends the changes to the engine; the status bar shows when it's saved."}
 				</p>
 			</div>
 

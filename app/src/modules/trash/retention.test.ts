@@ -63,21 +63,23 @@ describe("the sentence", () => {
 	});
 
 	it("reads 0 as keep-forever, not as delete-immediately", () => {
-		expect(retentionCopy(0)).toBe("Items are kept here until you delete them.");
+		expect(retentionCopy(0)).toBe("Items are kept here until you permanently delete them.");
 	});
 
 	it("reads a negative window the same way the engine does", () => {
 		// `retention_days <= 0` returns early engine-side; anything below zero is
 		// the same switch-off, not a window in the past.
-		expect(retentionCopy(-1)).toBe("Items are kept here until you delete them.");
+		expect(retentionCopy(-1)).toBe("Items are kept here until you permanently delete them.");
 	});
 
 	it("does not say '1 days'", () => {
-		expect(retentionCopy(1)).toBe("Items are deleted for good a day after they land here.");
+		expect(retentionCopy(1)).toBe("Items are permanently deleted a day after they land here.");
 	});
 
 	it("names the window it was given", () => {
-		expect(retentionCopy(30)).toBe("Items are deleted for good 30 days after they land here.");
-		expect(retentionCopy(7)).toBe("Items are deleted for good 7 days after they land here.");
+		expect(retentionCopy(30)).toBe(
+			"Items are permanently deleted 30 days after they land here."
+		);
+		expect(retentionCopy(7)).toBe("Items are permanently deleted 7 days after they land here.");
 	});
 });

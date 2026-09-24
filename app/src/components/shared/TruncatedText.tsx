@@ -40,8 +40,12 @@ export function TruncatedText({ children, className, as: Tag = "span" }: Truncat
 	return (
 		// `truncate` is not optional - `scrollWidth > clientWidth` only means
 		// "clipped" when the element hides its overflow, so the hook cannot
-		// detect anything without it.
-		<Tag ref={ref as React.Ref<never>} className={cn("truncate", className)}>
+		// detect anything without it. Nor is `block`: overflow and
+		// `text-overflow` do nothing on an inline box, so the default `span`
+		// under a non-flex parent (the Trash row) ran past its column, clipped
+		// mid-word by the row with no ellipsis and no tooltip. A flex or grid
+		// child is blockified anyway, so this changes nothing there.
+		<Tag ref={ref as React.Ref<never>} className={cn("block truncate", className)}>
 			{children}
 		</Tag>
 	);

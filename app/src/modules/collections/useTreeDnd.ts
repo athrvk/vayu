@@ -709,7 +709,7 @@ export function useTreeDnd({
 							? folders[folders.length - 1]
 							: undefined;
 				if (!into) {
-					setAnnouncement(`No folder above ${entity.name} to move it into`);
+					setAnnouncement(`No collection above ${entity.name} to move it into`);
 					return;
 				}
 				const size =
@@ -741,7 +741,7 @@ export function useTreeDnd({
 				return;
 			}
 			if (!grandparentId) {
-				setAnnouncement(`${entity.name} cannot move out of ${nameOf(owner)}`);
+				setAnnouncement(`${entity.name} can't move out of ${nameOf(owner)}`);
 				return;
 			}
 			applyPlacement(

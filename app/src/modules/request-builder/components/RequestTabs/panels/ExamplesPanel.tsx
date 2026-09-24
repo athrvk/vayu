@@ -255,7 +255,10 @@ function MockResponseModeControl({
 					value={request.mockExampleId ?? examples[0]?.id}
 					onValueChange={(id) => setMode("fixed", id)}
 				>
-					<SelectTrigger className="h-7 w-40 text-xs" aria-label="Example">
+					{/* Fixed rem, not `w-40`: the trigger holds an example's name, a
+					    text measure that should not narrow at the Default density the
+					    way `w-40`'s `--spacing` unit does. */}
+					<SelectTrigger className="h-7 w-[10rem] text-xs" aria-label="Example">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -300,7 +303,9 @@ export default function ExamplesPanel() {
 		return <p className="text-xs text-muted-foreground">Loading examples…</p>;
 	}
 	if (isError) {
-		return <p className="text-xs text-status-error-text">Could not load example responses.</p>;
+		return (
+			<p className="text-xs text-status-error-text">Couldn&apos;t load example responses.</p>
+		);
 	}
 	if (!examples || examples.length === 0) {
 		return (
@@ -344,21 +349,21 @@ export default function ExamplesPanel() {
 			<DeleteConfirmDialog
 				open={!!pendingDelete}
 				onOpenChange={(open) => !open && setPendingDelete(null)}
-				title="Delete example?"
+				title={`Delete "${pendingDelete?.name ?? "example"}"?`}
+				confirmLabel="Delete example"
 				description={
 					<>
-						<span className="font-medium">{pendingDelete?.name}</span> is removed from
-						this request. A mock server for this collection stops answering with it once
-						it is restarted.{" "}
+						The example is removed from this request. A mock server for this collection
+						stops answering with it once it is restarted.{" "}
 						{pendingDelete?.origin === "import"
-							? "Syncing this collection with its spec will not bring it back; re-importing the document will."
-							: "Nothing here can bring it back."}
+							? "Syncing this collection with its spec won't bring it back; re-importing the document will."
+							: "This can't be undone."}
 						{/* The engine's refusal, in the dialog that asked for the delete.
 						    Without it a failed delete looks like nothing happened: the row
 						    is still there and the dialog is still open. */}
 						{deleteExample.error && (
 							<span className="mt-2 block text-status-error-text">
-								Could not delete it: {deleteExample.error.message}
+								Couldn&apos;t delete the example: {deleteExample.error.message}
 							</span>
 						)}
 					</>

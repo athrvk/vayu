@@ -146,7 +146,7 @@ describe("Examples tab", () => {
 	it("says the read failed rather than claiming there are none", async () => {
 		listRequestExamples.mockRejectedValue(new Error("engine unreachable"));
 		renderExamplesTab({ id: "req_1" });
-		expect(await screen.findByText(/Could not load example responses/i)).toBeTruthy();
+		expect(await screen.findByText(/Couldn.t load example responses/i)).toBeTruthy();
 	});
 
 	/*
@@ -196,7 +196,7 @@ describe("Examples tab", () => {
 			// The confirm says what a running mock does about it, since removing a
 			// row can change what the next restart serves.
 			expect(screen.getByText(/restarted/i)).toBeTruthy();
-			fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+			fireEvent.click(screen.getByRole("button", { name: /^delete example$/i }));
 
 			await waitFor(() =>
 				expect(deleteRequestExample).toHaveBeenCalledWith("req_1", "exa_1")
@@ -215,9 +215,9 @@ describe("Examples tab", () => {
 			renderExamplesTab({ id: "req_1" });
 
 			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
-			expect(screen.getByText(/will not bring it back/i)).toBeTruthy();
+			expect(screen.getByText(/won't bring it back/i)).toBeTruthy();
 			expect(screen.getByText(/re-importing the document will/i)).toBeTruthy();
-			expect(screen.queryByText(/Nothing here can bring it back/i)).toBeNull();
+			expect(screen.queryByText(/This can't be undone/i)).toBeNull();
 		});
 
 		it("tells a saved row that nothing brings it back", async () => {
@@ -225,7 +225,7 @@ describe("Examples tab", () => {
 			renderExamplesTab({ id: "req_1" });
 
 			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
-			expect(screen.getByText(/Nothing here can bring it back/i)).toBeTruthy();
+			expect(screen.getByText(/This can't be undone/i)).toBeTruthy();
 			expect(screen.queryByText(/re-importing the document/i)).toBeNull();
 		});
 
@@ -235,11 +235,11 @@ describe("Examples tab", () => {
 			renderExamplesTab({ id: "req_1" });
 
 			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
-			fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+			fireEvent.click(screen.getByRole("button", { name: /^delete example$/i }));
 
 			// A failed delete that closed the dialog would look like a delete that
 			// worked until the list refreshed under it.
-			expect(await screen.findByText(/Could not delete it/i)).toBeTruthy();
+			expect(await screen.findByText(/Couldn.t delete the example/i)).toBeTruthy();
 			// The row is still listed behind the dialog. By label rather than by
 			// role: an open Radix dialog marks the page behind it aria-hidden, so a
 			// role query cannot see a row that is plainly still there.

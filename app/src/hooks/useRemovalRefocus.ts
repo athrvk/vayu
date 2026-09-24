@@ -72,8 +72,11 @@ export function useRemovalRefocus() {
 		if (doomed) {
 			// Still there, so nothing has been decided yet - unless the user has
 			// moved on from the row we put them on, in which case there is no
-			// longer a deferred move to make.
-			if (document.activeElement !== doomed) settle();
+			// longer a deferred move to make. Neither a control inside the row nor
+			// the menu a dialog-free delete was chosen from is moving on: that
+			// menu is still closing, and hands focus back to the row once it has.
+			const active = document.activeElement;
+			if (!doomed.contains(active) && !active?.closest('[role="menu"]')) settle();
 			return;
 		}
 
@@ -111,5 +114,16 @@ export function useRemovalRefocus() {
 		[settle]
 	);
 
-	return { capture, onCloseAutoFocus };
+	/*
+	 * The wait above, armed for a delete that runs with no dialog in front of it
+	 * and so has no close for `onCloseAutoFocus` to ride on. Called as the delete
+	 * starts, after `capture`; without it the removed row takes focus to
+	 * `<body>` exactly as #1218 did. It moves no focus itself: the row, or the
+	 * menu that is handing focus back to it, is where the delete was invoked.
+	 */
+	const awaitRemoval = useCallback(() => {
+		if (targets.current) awaitingRemoval.current = true;
+	}, []);
+
+	return { capture, onCloseAutoFocus, awaitRemoval };
 }

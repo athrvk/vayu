@@ -90,7 +90,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				onError: (error) => {
 					if (options) return;
 					showToast(
-						error instanceof Error ? error.message : "Could not start the mock server",
+						error instanceof Error ? error.message : "Couldn't start the mock server",
 						"error"
 					);
 				},
@@ -130,7 +130,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 							),
 						}}
 					/>
-					Run mock server
+					Start mock server
 				</Button>
 				<TooltipIconButton
 					label="Mock server options"
@@ -217,7 +217,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 							showToast(
 								error instanceof Error
 									? error.message
-									: "Could not stop the mock server",
+									: "Couldn't stop the mock server",
 								"error"
 							),
 					})

@@ -135,12 +135,14 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 
 	return (
 		<div className="enter-fade bg-warning/10 border-b border-warning/30 px-6 py-3 shrink-0">
-			<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
-				<div className="flex items-center gap-3">
-					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-warning/15">
+			{/* Same shape as the header below: the label list grows with every
+			    restart-required save, so its column has to be the one that wraps. */}
+			<div className="flex items-center justify-between gap-4 max-w-3xl mx-auto w-full">
+				<div className="flex min-w-0 flex-1 items-center gap-3">
+					<div className="flex shrink-0 items-center justify-center w-8 h-8 rounded-full bg-warning/15">
 						<AlertTriangle className="size-icon text-warning-text" />
 					</div>
-					<div>
+					<div className="min-w-0">
 						<p className="text-sm font-medium text-warning-text">
 							Engine restart required
 						</p>
@@ -150,7 +152,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						</p>
 					</div>
 				</div>
-				<div className="flex items-center gap-2">
+				<div className="flex shrink-0 items-center gap-2">
 					<Button
 						variant="outline"
 						size="sm"
@@ -172,8 +174,8 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						<LabelSwap
-							label={isRestarting ? "Restarting..." : "Restart Engine"}
-							states={["Restart Engine", "Restarting..."]}
+							label={isRestarting ? "Restarting…" : "Restart engine"}
+							states={["Restart engine", "Restarting…"]}
 						/>
 					</Button>
 				</div>
@@ -342,7 +344,11 @@ export default function SettingsMain() {
 				}
 			} catch (err) {
 				console.error("Failed to save settings:", err);
-				failSave(err instanceof Error ? err.message : "Failed to save settings");
+				failSave(
+					err instanceof Error
+						? `Couldn't save settings - ${err.message}`
+						: "Couldn't save settings"
+				);
 			}
 		},
 		[
@@ -503,8 +509,8 @@ export default function SettingsMain() {
 	if (error) {
 		return (
 			<ErrorState
-				title="Failed to load settings"
-				detail={error instanceof Error ? error.message : "Unknown error"}
+				title="Couldn't load settings"
+				detail={error instanceof Error ? error.message : "Couldn't load the settings"}
 			/>
 		);
 	}
@@ -675,7 +681,7 @@ export default function SettingsMain() {
 								{needsRestart && (
 									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold border border-warning/30 bg-warning/15 text-warning-text">
 										<RefreshCw className="w-2.5 h-2.5" />
-										Restart Required
+										Restart required
 									</span>
 								)}
 								{isPendingRestart && (
@@ -861,8 +867,12 @@ export default function SettingsMain() {
 
 			{/* Header */}
 			<div className="border-b border-border px-6 py-4 shrink-0">
-				<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
-					<div>
+				{/* The text column wraps inside its own box and the buttons keep
+				    theirs: without the gap it ran into Reset, and without the wrap
+				    a narrow pane squeezed it to one word per line. `basis-xs` is
+				    the container scale, so the wrap point is not density-scaled. */}
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 max-w-3xl mx-auto w-full">
+					<div className="min-w-0 flex-1 basis-xs">
 						<h1 className="text-xl font-semibold">{categoryConfig?.label}</h1>
 						<p className="text-sm text-muted-foreground mt-1">
 							{categoryConfig?.description}
@@ -871,7 +881,7 @@ export default function SettingsMain() {
 						    tell in their own header. */}
 						<p className="text-xs text-muted-foreground mt-1.5">{ENGINE_SAVE_NOTE}</p>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex shrink-0 items-center gap-2">
 						<Button
 							variant="outline"
 							size="sm"
@@ -882,7 +892,7 @@ export default function SettingsMain() {
 								className="size-icon mr-1.5"
 								data-icon-motion={ICON_MOTION.spinBack}
 							/>
-							Reset to Defaults
+							Reset to defaults
 						</Button>
 						<Button
 							size="sm"
@@ -899,7 +909,7 @@ export default function SettingsMain() {
 									data-icon-motion={ICON_MOTION.press}
 								/>
 							)}
-							Save Changes
+							Save changes
 						</Button>
 					</div>
 				</div>

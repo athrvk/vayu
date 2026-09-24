@@ -27,6 +27,7 @@
  */
 
 import { useState } from "react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useRequestBuilderContext } from "../context";
 
 function formatMs(ms: number): string {
@@ -62,12 +63,12 @@ export default function ResponseAnnouncer() {
 		// Ctrl/Cmd+Enter gives no other feedback: focus does not move and the
 		// Send button's label change is not announced unless it happens to be
 		// the focused element.
-		message = "Sending request";
+		message = "Sending request…";
 	} else if (response) {
 		if (response.status === 0) {
 			// No server response - status 0 is the client-side failure sentinel,
 			// and "0" is not a status code worth speaking.
-			message = `Request failed. ${response.errorMessage || response.errorCode || "No response from server"}`;
+			message = `Couldn't get a response. ${response.errorMessage || response.errorCode || "The server didn't respond."}`;
 		} else {
 			const parts = [
 				`${response.status} ${response.statusText}`.trim(),
@@ -78,7 +79,7 @@ export default function ResponseAnnouncer() {
 				const failed = tests.filter((t) => !t.passed).length;
 				parts.push(
 					failed === 0
-						? `${tests.length} ${tests.length === 1 ? "test" : "tests"} passed`
+						? `${tests.length} ${pluralize(tests.length, "test")} passed`
 						: `${failed} of ${tests.length} tests failed`
 				);
 			}

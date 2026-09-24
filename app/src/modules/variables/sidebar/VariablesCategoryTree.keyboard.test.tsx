@@ -318,13 +318,15 @@ describe("the actions that had no keyboard path", () => {
 		const tree = renderTree();
 
 		press(row(tree, "Production"), "Delete");
-		expect(screen.getByText(/"Production" is removed permanently/)).toBeInTheDocument();
+		expect(screen.getByText(/Delete "Production"\?/)).toBeInTheDocument();
+		expect(screen.getByText(/Its 0 variables are removed/)).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		// The key a Mac keyboard actually has. Both are live on every platform,
 		// so neither is asserted against a stubbed `isMac`.
 		press(row(tree, "Staging"), "Backspace");
-		expect(screen.getByText(/"Staging" is removed permanently/)).toBeInTheDocument();
+		expect(screen.getByText(/Delete "Staging"\?/)).toBeInTheDocument();
+		expect(screen.getByText(/Its 0 variables are removed/)).toBeInTheDocument();
 	});
 });
 
@@ -364,7 +366,7 @@ describe("a delete never strands focus", () => {
 	/** Delete on the row, then Confirm, waiting for the dialog to actually go. */
 	async function deleteFromKeyboard(target: HTMLElement) {
 		press(target, "Delete");
-		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete environment" }));
 		await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull());
 	}
 

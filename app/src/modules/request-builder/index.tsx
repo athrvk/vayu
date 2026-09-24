@@ -46,6 +46,7 @@ import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
+import { ApiError } from "@/services/http-client";
 import { generateCurl } from "@/services/codegen";
 import type {
 	RequestState,
@@ -198,10 +199,10 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 			// A text button, so the acknowledgement is the toast rather than a
 			// check swap (design-system.md, Component Patterns) - and `useCopy`
 			// owns the failure path, which this used to duplicate by hand.
-			await copy(snippet.code, "curl command");
+			await copy(snippet.code, "cURL command");
 		} catch (error) {
 			console.error("Failed to build the request as curl:", error);
-			showToast("Couldn't build the curl command", "error");
+			showToast("Couldn't build the cURL command.", "error");
 		}
 	}, [copy, request, showToast]);
 
@@ -212,7 +213,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 			action={
 				<div className="flex gap-2">
 					<Button variant="outline" size="sm" onClick={handleCopyCurl}>
-						Copy as curl
+						Copy as cURL
 					</Button>
 					{onCloseTab && (
 						<Button variant="outline" size="sm" onClick={onCloseTab}>
@@ -506,7 +507,7 @@ export default function RequestBuilder() {
 				// its error, but the toast points the user at the fix.
 				if (result.errorCode === "AUTH_REQUIRED") {
 					showToast(
-						"OAuth 2.0 token required - open the Auth tab and click Get Token",
+						"This request needs an OAuth 2.0 token. Open the Auth tab to get one.",
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
@@ -515,7 +516,7 @@ export default function RequestBuilder() {
 					showToast(
 						result.errorMessage
 							? humanizeOAuth2Error(result.errorMessage)
-							: "OAuth 2.0 token request failed",
+							: "Couldn't get an OAuth 2.0 token. Check the Auth tab's token settings.",
 						"error"
 					);
 				}
@@ -550,7 +551,10 @@ export default function RequestBuilder() {
 					bodyType: "text",
 					time: 0,
 					size: 0,
-					errorCode: "INTERNAL_ERROR",
+					// Compose runs first, so an engine that is down throws here
+					// before any send - a plain Error from the fetch, not an
+					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
+					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
 					errorMessage: errorMsg,
 				};
 			}
@@ -632,7 +636,7 @@ export default function RequestBuilder() {
 						bodyType: "text",
 						time: 0,
 						size: 0,
-						errorCode: "INTERNAL_ERROR",
+						errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
 						errorMessage: errorMsg,
 					},
 				};
@@ -669,7 +673,7 @@ export default function RequestBuilder() {
 			 */
 			if (useDashboardStore.getState().isStreaming) {
 				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running", "warning");
+				showToast("A load test is already running.", "warning");
 				return;
 			}
 			setPendingLoadTestRequest(request);
@@ -686,7 +690,7 @@ export default function RequestBuilder() {
 			// Defensive re-check in case a run started while the dialog was open.
 			if (useDashboardStore.getState().isStreaming) {
 				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running", "warning");
+				showToast("A load test is already running.", "warning");
 				setShowLoadTestDialog(false);
 				return;
 			}
@@ -869,7 +873,9 @@ export default function RequestBuilder() {
 			} catch (error) {
 				console.error("Failed to start load test:", error);
 				showToast(
-					error instanceof Error ? error.message : "Failed to start load test",
+					error instanceof Error
+						? `Couldn't start the load test - ${error.message}`
+						: "Couldn't start the load test.",
 					"error"
 				);
 			} finally {
@@ -964,7 +970,11 @@ export default function RequestBuilder() {
 		) : (
 			<ErrorState
 				title="Couldn't load this request"
-				detail="The engine could not be reached, or it failed to answer. The request itself is probably fine."
+				detail={
+					requestLookupError instanceof Error
+						? requestLookupError.message
+						: "The engine didn't answer, or answered with an error."
+				}
 				onRetry={() => refetch()}
 				action={closeTabAction}
 			/>

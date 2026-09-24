@@ -14,7 +14,7 @@
  * A restart the user asked for kills the daemon and spawns a fresh one that
  * repeats the whole cold start, with the port down for all of it. The health
  * poll kept classifying that silence as an engine that had answered and
- * stopped - so the Dock painted "Disconnected" and a raw transport string
+ * stopped - so the Dock painted "Engine disconnected" and a raw transport string
  * beside its own "Restarting…" spinner, and the louder of the two described a
  * failure the user had just requested.
  *
@@ -99,7 +99,7 @@ describe("the Dock during a restart the user asked for", () => {
 
 		const client = makeClient();
 		renderDock(client);
-		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
 
 		getHealth.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:9876"));
 		fireEvent.click(restartButton());
@@ -112,7 +112,7 @@ describe("the Dock during a restart the user asked for", () => {
 		});
 
 		await waitFor(() => expect(screen.getByText("Starting…")).toBeTruthy());
-		expect(screen.queryByText("Disconnected")).toBeNull();
+		expect(screen.queryByText("Engine disconnected")).toBeNull();
 		expect(reasonAffordance()).toBeNull();
 		// The spinner the contradiction stood beside is still up.
 		expect(screen.getByRole("button", { name: /Restarting…/i })).toBeTruthy();
@@ -130,7 +130,7 @@ describe("the Dock during a restart the user asked for", () => {
 
 		const client = makeClient();
 		renderDock(client);
-		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
 
 		// A poll in flight against an engine that is still alive. Held open by
 		// hand: the interleaving is the whole case, so it cannot be left to a
@@ -164,7 +164,7 @@ describe("the Dock during a restart the user asked for", () => {
 		});
 
 		await waitFor(() => expect(screen.getByText("Starting…")).toBeTruthy());
-		expect(screen.queryByText("Disconnected")).toBeNull();
+		expect(screen.queryByText("Engine disconnected")).toBeNull();
 	});
 
 	it("does not sit on Starting… over an engine nobody is bringing up", async () => {
@@ -176,7 +176,7 @@ describe("the Dock during a restart the user asked for", () => {
 
 		const client = makeClient();
 		renderDock(client);
-		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
 
 		getHealth.mockImplementation(() => Promise.reject(new Error("socket hang up")));
 		fireEvent.click(restartButton());
@@ -186,7 +186,7 @@ describe("the Dock during a restart the user asked for", () => {
 			await client.refetchQueries({ queryKey: queryKeys.health.status() });
 		});
 
-		await waitFor(() => expect(screen.getByText("Disconnected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine disconnected")).toBeTruthy());
 		expect(screen.queryByText("Starting…")).toBeNull();
 		expect(reasonAffordance()).not.toBeNull();
 	});
@@ -197,14 +197,14 @@ describe("the Dock during a restart the user asked for", () => {
 
 		const client = makeClient();
 		renderDock(client);
-		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
 
 		getHealth.mockRejectedValue(new Error("socket hang up"));
 		await act(async () => {
 			await client.refetchQueries();
 		});
 
-		await waitFor(() => expect(screen.getByText("Disconnected")).toBeTruthy());
+		await waitFor(() => expect(screen.getByText("Engine disconnected")).toBeTruthy());
 		expect(useEngineStore.getState().engineError).toContain("socket hang up");
 		expect(reasonAffordance()).not.toBeNull();
 	});

@@ -71,7 +71,7 @@ export interface TabDescriptor {
 	/**
 	 * Where the request lives, as the breadcrumb reads it: its collection chain
 	 * and then its own name. Request tabs only, and absent until the request has
-	 * loaded - what the tab menu's "Copy Path" copies (#1360).
+	 * loaded - what the tab menu's "Copy path" copies (#1360).
 	 *
 	 * Built here rather than in the menu because this hook already holds both
 	 * halves - the request and the collections list - and a menu that fetched
@@ -198,11 +198,11 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 			case "variables":
 				return { label: "Variables", title: "Variables", icon };
 			case "inbox":
-				return { label: "Inbox", title: "Webhook Inbox", icon };
+				return { label: "Inbox", title: "Webhook inbox", icon };
 			case "mock-server":
-				return { label: "Mock Server", title: "Mock Server", icon };
+				return { label: "Mock server", title: "Mock server", icon };
 			case "dashboard":
-				return { label: "Load Test", title: "Load Test", icon };
+				return { label: "Load test", title: "Load test", icon };
 			case "collection": {
 				const name = collections.find((c) => c.id === tab.entityId)?.name ?? "Collection";
 				return { label: name, title: name, icon };

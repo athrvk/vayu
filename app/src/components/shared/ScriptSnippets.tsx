@@ -166,7 +166,7 @@ export function ScriptSnippets({
 				<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
 					{isError ? (
 						<p className="px-3 py-2 text-xs text-muted-foreground">
-							Snippets come from the engine, which is not answering right now.
+							Snippets come from Vayu's engine, which is not answering right now.
 						</p>
 					) : isPending ? (
 						<p className="px-3 py-2 text-xs text-muted-foreground">Loading snippets…</p>

@@ -13,7 +13,7 @@
 
 import { Activity, Clock, Globe, Calendar, Table2, Timer } from "lucide-react";
 import type { RunMetadataProps } from "../types";
-import { formatDuration } from "../utils/format";
+import { formatDuration, pluralize } from "../utils/format";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { LoadTestConfig } from "@/types";
 import { MethodBadge } from "@/components/shared";
@@ -70,7 +70,7 @@ export default function RunMetadata({
 						)}
 						{configuration.duration && (
 							<span className="text-muted-foreground">
-								(for {configuration.duration} seconds)
+								(for {configuration.duration})
 							</span>
 						)}
 					</div>
@@ -88,7 +88,7 @@ export default function RunMetadata({
 							<span className="font-medium text-muted-foreground">Data:</span>
 							<span className="text-foreground">
 								{configuration.dataRowCount}{" "}
-								{configuration.dataRowCount === 1 ? "row" : "rows"}
+								{pluralize(configuration.dataRowCount, "row")}
 							</span>
 							<span className="text-muted-foreground text-xs">
 								(one per request, repeating)
@@ -125,7 +125,7 @@ export default function RunMetadata({
 				{(elapsedDuration > 0 || startTime) && (
 					<div className="flex items-center gap-2">
 						<Timer className="size-icon text-muted-foreground" />
-						<span className="font-medium text-muted-foreground">Run Duration:</span>
+						<span className="font-medium text-muted-foreground">Run duration:</span>
 						<span className="text-foreground">
 							{mode === "completed"
 								? formatDuration(
@@ -142,7 +142,7 @@ export default function RunMetadata({
 							setupOverhead > 0 && (
 								<span
 									className="text-muted-foreground text-xs"
-									title="Time spent in setup before test started"
+									title="Time spent in setup before the load test started"
 								>
 									(+{(setupOverhead * 1000).toFixed(0)}ms setup)
 								</span>

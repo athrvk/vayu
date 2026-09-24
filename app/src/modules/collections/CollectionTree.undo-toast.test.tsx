@@ -9,12 +9,13 @@
  */
 
 /**
- * The undo the confirm dialog promises (issue #989).
+ * The undo a delete offers (issue #989), and the reason it no longer asks first.
  *
- * The dialog has said "moved to the Trash, where it can be restored" since the
- * engine's delete went soft (#988/#1045), and for a while nothing in the app
+ * The confirm dialog said "moved to the Trash, where it can be restored" since
+ * the engine's delete went soft (#988/#1045), and for a while nothing in the app
  * could restore anything: the delete succeeded silently and the sentence was a
- * claim about a surface that did not exist.
+ * claim about a surface that did not exist. With this toast behind it, a delete
+ * runs as soon as it is chosen; only one that stops a running mock still asks.
  *
  * Two halves are asserted here, and the second is the one that decides whether
  * the affordance is honest. A toast offering Undo is easy; an Undo that fails
@@ -95,7 +96,6 @@ async function askToDeleteCollection(name: string) {
 		pointerType: "mouse",
 	});
 	fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-	fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
 }
 
 /** The options object handed to the last `showToast` call. */
@@ -188,7 +188,7 @@ describe("deleting from the tree", () => {
 	it("raises the engine's own refusal when the undo cannot be honoured", async () => {
 		// What a 409 says when the item's collection has since been deleted too.
 		// The wording is the engine's, and naming the blocking collection is the
-		// whole value of it - an invented "Couldn't restore" would not.
+		// whole value of it - a bare "Couldn't restore" in its place would not.
 		restoreTrash.mockRejectedValue(
 			new Error(
 				"Request 'r-root' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first"
@@ -233,7 +233,6 @@ describe("deleting from the tree", () => {
 			}
 		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
 
 		await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith("r-root"));
 		// Gone while it is in the trash.
@@ -264,7 +263,6 @@ describe("deleting from the tree", () => {
 			}
 		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
 		await waitFor(() => expect(deleteRequest).toHaveBeenCalled());
 
 		lastToast().action.onClick();
@@ -305,7 +303,14 @@ describe("deleting from the tree", () => {
 		renderTree();
 		await askToDeleteCollection("Acme");
 
-		await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
-		expect(showToast).not.toHaveBeenCalled();
+		// The failure itself is reported, as a plain error string - the options
+		// form, the only one that can carry an Undo action, is never raised.
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't delete the collection - database is locked",
+				"error"
+			)
+		);
+		expect(showToast).toHaveBeenCalledTimes(1);
 	});
 });

@@ -265,4 +265,48 @@ describe("Toaster", () => {
 			expect(screen.getByText("database is locked")).toBeInTheDocument();
 		});
 	});
+
+	/*
+	 * jsdom has no layout, so these read the rendered class list. Each one is a
+	 * defect seen in the running app, measured with Chromium.
+	 */
+	describe("layout", () => {
+		it("sizes the stack on a fixed width, not on the density unit", () => {
+			// `w-80` is `calc(var(--spacing) * 80)`: 320px at Comfortable, but
+			// 240px at the Default density, which left a ~160px text column and
+			// wrapped `Moved "<name>" to the Trash` for almost any name.
+			render(<Toaster />);
+			show("Saved");
+			const viewport = document.querySelector('[data-slot="toast-viewport"]');
+			expect(viewport).not.toBeNull();
+			expect(viewport!.className).toMatch(/\bw-xs\b/);
+			expect(viewport!.className).not.toMatch(/(^|\s)w-\d/);
+		});
+
+		it("keeps the action its own width instead of stretching it", () => {
+			// The action is a child of the text column, a `flex-col`, whose
+			// default `align-items: stretch` drew Undo as a full-width bar.
+			render(<Toaster />);
+			act(() => {
+				useToastStore.getState().showToast({
+					message: 'Moved "Find pet by ID." to the Trash',
+					action: { label: "Undo", onClick: () => {} },
+				});
+			});
+			expect(screen.getByRole("button", { name: "Undo" }).className).toMatch(
+				/\bself-start\b/
+			);
+		});
+
+		it("wraps an unbroken name inside the toast instead of clipping it", () => {
+			// A request name can be one long operation id; the toast is
+			// `overflow-hidden`, so without a break opportunity it was cut off.
+			render(<Toaster />);
+			act(() => {
+				useToastStore.getState().showToast({ title: "Deleted", message: "body" });
+			});
+			expect(screen.getByText("Deleted").className).toMatch(/\bbreak-words\b/);
+			expect(screen.getByText("body").className).toMatch(/\bbreak-words\b/);
+		});
+	});
 });

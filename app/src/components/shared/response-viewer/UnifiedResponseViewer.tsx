@@ -121,13 +121,13 @@ export default function UnifiedResponseViewer({
 						{request?.headers && Object.keys(request.headers).length > 0 && (
 							<CompactHeadersViewer
 								headers={request.headers}
-								title="Request Headers"
+								title="Request headers"
 							/>
 						)}
 						{response?.headers && Object.keys(response.headers).length > 0 && (
 							<CompactHeadersViewer
 								headers={response.headers}
-								title="Response Headers"
+								title="Response headers"
 							/>
 						)}
 						{(!request?.headers || Object.keys(request.headers).length === 0) &&

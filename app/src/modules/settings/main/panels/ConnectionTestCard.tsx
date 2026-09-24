@@ -74,7 +74,7 @@ const OUTCOME: Record<ConnectionTestOutcome, { label: string; chip: string; hint
 	failed: {
 		label: "Failed",
 		chip: "bg-status-error-fill text-white",
-		hint: "The endpoint could not be reached. The proxy, if any, was not the thing that refused.",
+		hint: "Couldn't reach the endpoint. The proxy, if any, was not the thing that refused.",
 	},
 };
 
@@ -177,7 +177,7 @@ export function ConnectionTestCard() {
 
 				{failure && (
 					<p className="enter-fade text-sm text-status-error-text">
-						The test could not be run: {failure}
+						Couldn't run the test: {failure}
 					</p>
 				)}
 

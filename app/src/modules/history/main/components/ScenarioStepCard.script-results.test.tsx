@@ -130,7 +130,7 @@ describe("ScenarioStepCard script results", () => {
 		);
 
 		expect(screen.getByText("token was issued")).toBeTruthy();
-		expect(screen.getByText("Pre-request Script")).toBeTruthy();
+		expect(screen.getByText("Pre-request script")).toBeTruthy();
 		// And it is counted: the chip reads the stored list, which is now what
 		// the engine's live tally counted for the same step.
 		expect(screen.getByText("1 passed, 1 failed")).toBeTruthy();

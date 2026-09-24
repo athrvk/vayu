@@ -173,7 +173,7 @@ async function previewPaste(text: string) {
 	renderModal();
 	selectTab(/Paste JSON/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: text } });
-	fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 	// The Import button only exists in the preview phase, whatever format the
 	// document turned out to be.
 	await importButton();

@@ -33,8 +33,8 @@ import { ResponsePositionButton } from "./ResponsePositionButton";
  */
 const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
 	starting: "Starting…",
-	connected: "Connected",
-	unreachable: "Disconnected",
+	connected: "Engine connected",
+	unreachable: "Engine disconnected",
 };
 
 /**
@@ -112,9 +112,13 @@ function EngineStatus() {
 				</span>
 			</TooltipTrigger>
 			{/* Wraps rather than truncates: an engine message names a port, a path
-			    or a TLS failure, and the tail is the part that identifies it. */}
+			    or a TLS failure, and the tail is the part that identifies it.
+			    `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: this
+			    bounds the wrap width of the error text, not chrome rhythm, and
+			    `max-w-64` rode `--spacing`, narrowing the column at the Default
+			    density. */}
 			<TooltipContent side="top">
-				<p className="max-w-64 whitespace-normal break-words">{engineError}</p>
+				<p className="max-w-3xs whitespace-normal break-words">{engineError}</p>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -280,8 +284,10 @@ function SaveError() {
 					<Info className="size-icon-sm" aria-hidden="true" />
 				</span>
 			</TooltipTrigger>
+			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
+			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}
 			<TooltipContent side="top">
-				<p className="max-w-64 whitespace-normal break-words">{message}</p>
+				<p className="max-w-3xs whitespace-normal break-words">{message}</p>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -471,8 +477,10 @@ function PendingRestartButton() {
 					{isRestarting ? "Restarting…" : "Restart pending"}
 				</button>
 			</TooltipTrigger>
+			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
+			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}
 			<TooltipContent side="top">
-				<p className="max-w-64 whitespace-normal break-words">
+				<p className="max-w-3xs whitespace-normal break-words">
 					A saved setting needs an engine restart to take effect. Click to restart now.
 				</p>
 			</TooltipContent>

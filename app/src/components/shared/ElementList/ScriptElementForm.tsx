@@ -96,7 +96,7 @@ export function ScriptElementForm({
 	const script = typeof config.script === "string" ? config.script : "";
 	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	const isPre = kind === "script.pre";
-	const editorLabel = isPre ? "Pre-request script" : "Test script";
+	const editorLabel = isPre ? "Pre-request script" : "Post-request script";
 
 	// This row's own entry, if it has ever been dragged - a live subscription,
 	// so a drag on *this* row's handle re-renders it. The fallback default is

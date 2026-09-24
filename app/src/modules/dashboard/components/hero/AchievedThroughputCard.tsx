@@ -27,7 +27,7 @@ export function AchievedThroughputCard({
 			: undefined;
 
 	return (
-		<HeroCardShell label="Achieved Throughput" tip={TOOLTIPS.achievedThroughput}>
+		<HeroCardShell label="Achieved throughput" tip={TOOLTIPS.achievedThroughput}>
 			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				from{" "}

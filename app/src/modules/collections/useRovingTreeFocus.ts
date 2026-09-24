@@ -46,8 +46,8 @@
  *     forward-delete, Fn+Delete, which effectively nobody presses - so a
  *     `"Delete"`-only handler is dead on macOS. Both are accepted here on every
  *     platform rather than behind an `isMac` fork: Backspace-to-delete is
- *     standard list behaviour, and the control this clicks opens the
- *     confirm dialog, so a mistaken press costs a dialog rather than data.
+ *     standard list behaviour, and the control this clicks is a soft delete
+ *     with an undo toast, so a mistaken press costs an Undo rather than data.
  *   - Mac keyboards have no Menu key, and F10 is a media key by default, so the
  *     row menu had no keyboard path at all there. **Shift+Enter** is the third
  *     one; plain Enter still activates.
@@ -180,7 +180,7 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 					if (expanded === "false") click("[data-tree-toggle]");
 					else if (expanded === "true") {
 						// Expanded: move to the *first child*, and nowhere at all if
-						// there is none. An empty folder renders an "Empty folder"
+						// there is none. An empty folder renders an "Empty collection"
 						// div rather than a treeitem, so the next row in document
 						// order is its sibling and stepping to it was an ArrowDown
 						// wearing ArrowRight's key (#931 review). Parentage decides,

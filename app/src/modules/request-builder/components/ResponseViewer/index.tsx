@@ -706,7 +706,7 @@ export default function ResponseViewer() {
 						<EmptyState
 							variant="inline"
 							title="No tests ran"
-							description="Assertions written in the request's Tests script show up here."
+							description="Assertions from the post-request script and assert elements show up here."
 						/>
 					)}
 				</TabsContent>

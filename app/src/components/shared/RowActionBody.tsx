@@ -37,10 +37,14 @@ export function RowActionBody({ action }: { action: RowAction }) {
 			<Icon className="size-icon shrink-0" data-icon-motion={action.iconMotion} />
 			{action.label}
 			{trailing ? (
-				// `max-w-48 truncate`: a hint is often a URL, and a menu sizes
+				// `max-w-[12rem] truncate`: a hint is often a URL, and a menu sizes
 				// itself to its widest row - uncapped, one inbox row set the width
-				// of every item beside it.
-				<span className="ml-auto max-w-48 truncate pl-3 text-xs text-muted-foreground">
+				// of every item beside it. The cap is a text measure, so it is a
+				// literal rem value rather than `max-w-48`, which rides `--spacing`
+				// and would tighten the cap at the Default density; no named
+				// container-scale step sits this low (the scale starts at `3xs`,
+				// 16rem).
+				<span className="ml-auto max-w-[12rem] truncate pl-3 text-xs text-muted-foreground">
 					{trailing}
 				</span>
 			) : null}

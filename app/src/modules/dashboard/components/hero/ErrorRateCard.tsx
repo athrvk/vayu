@@ -69,7 +69,7 @@ export function ErrorRateCard({
 	const widthFor = (n: number) => (buckets.total > 0 ? `${(n / buckets.total) * 100}%` : "0%");
 
 	return (
-		<HeroCardShell label="Error Rate" tip={TOOLTIPS.errorRate}>
+		<HeroCardShell label="Error rate" tip={TOOLTIPS.errorRate}>
 			<div className="flex items-baseline gap-2 mt-0.5">
 				<span
 					className="text-hero font-bold leading-none font-mono tabular-nums transition-colors duration-150"

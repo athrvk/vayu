@@ -275,20 +275,31 @@ class ScenarioRunService {
 	 * A detach method with no caller is surface that cannot be verified.
 	 */
 
-	/** Tell the user their run ended, once, and only if they are elsewhere. */
+	/**
+	 * Tell the user their run ended, once, and only if they are elsewhere.
+	 *
+	 * `options.title` overrides the default kind-derived wording - `handleError`
+	 * uses it because the *stream* dropped there, not the run, and the default
+	 * failed title would misreport what happened. The taskbar mark is
+	 * unchanged: a stream error still reddens it (#1364, pinned by the
+	 * Dock/taskbar test below), because the user has no live view into whether
+	 * the run itself is still healthy once its updates stop arriving.
+	 */
 	private notifyTerminal(
 		runId: string | null,
 		kind: typeof NOTIFY_KINDS.collectionRunFinished | typeof NOTIFY_KINDS.collectionRunFailed,
-		body: string
+		body: string,
+		options?: { title?: string }
 	): void {
 		if (!runId || this.notifiedRunId === runId) return;
 		this.notifiedRunId = runId;
 		systemNotify.post({
 			kind,
 			title:
-				kind === NOTIFY_KINDS.collectionRunFinished
+				options?.title ??
+				(kind === NOTIFY_KINDS.collectionRunFinished
 					? "Collection run finished"
-					: "Collection run failed",
+					: "Collection run failed"),
 			body,
 			target: { view: "run", runId },
 		});
@@ -317,7 +328,15 @@ class ScenarioRunService {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
 		this.failProgress(this.activeRunId);
-		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
+		// The stream dropped, not the run - it keeps executing on the engine
+		// (same fact `ScenarioRunView`'s "Live updates stopped" callout states),
+		// so the notification says that instead of claiming the run failed.
+		this.notifyTerminal(
+			this.activeRunId,
+			NOTIFY_KINDS.collectionRunFailed,
+			`${error.message} The run itself is unaffected.`,
+			{ title: "Lost live updates for this run" }
+		);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
 		// would be the run's last steps, silently missing from a list the reader

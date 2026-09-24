@@ -256,7 +256,7 @@ function MetricsView({
 										className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 										style={{ background: "hsl(var(--subtle-foreground))" }}
 									/>
-									target {targetRps}
+									target {targetRps} req/s
 								</span>
 							)}
 							{rampOverlay && (
@@ -614,6 +614,7 @@ function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
 		<span>
 			<span className="text-muted-foreground">{k}</span>{" "}
 			<span className="text-foreground font-semibold">{fmt(v, 0)}</span>
+			<span className="text-muted-foreground">{v === undefined ? "" : "ms"}</span>
 		</span>
 	);
 }

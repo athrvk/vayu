@@ -89,9 +89,9 @@ describe("WelcomeScreen", () => {
 		// belongs on this screen too.
 		it("shows the demo tile, and creates a collection first to hold the preset request", async () => {
 			renderScreen();
-			expect(screen.getByRole("button", { name: /Open Demo API/i })).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /Open demo API/i })).toBeInTheDocument();
 
-			fireEvent.click(screen.getByRole("button", { name: /Open Demo API/i }));
+			fireEvent.click(screen.getByRole("button", { name: /Open demo API/i }));
 			await waitFor(() => expect(mocks.createCollection).toHaveBeenCalled());
 			expect(mocks.createRequest).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -236,7 +236,7 @@ describe("WelcomeScreen", () => {
 		it("shows while no run exists, and creates the preset request", async () => {
 			mocks.runs = { data: [], isLoading: false };
 			renderScreen();
-			fireEvent.click(screen.getByRole("button", { name: /Open Demo API/i }));
+			fireEvent.click(screen.getByRole("button", { name: /Open demo API/i }));
 			await waitFor(() =>
 				expect(mocks.createRequest).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -255,7 +255,7 @@ describe("WelcomeScreen", () => {
 			mocks.runs = { data: [run()], isLoading: false };
 			renderScreen();
 			expect(
-				screen.queryByRole("button", { name: /Open Demo API/i })
+				screen.queryByRole("button", { name: /Open demo API/i })
 			).not.toBeInTheDocument();
 		});
 	});

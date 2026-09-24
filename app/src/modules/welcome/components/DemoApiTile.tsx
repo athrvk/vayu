@@ -34,7 +34,7 @@ export function DemoApiTile({ onClick }: { onClick: () => void }) {
 			className="group flex w-full items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<Zap className="size-icon shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
-			<span className="flex-1 text-sm font-medium text-foreground">Open Demo API</span>
+			<span className="flex-1 text-sm font-medium text-foreground">Open demo API</span>
 			<span className="flex shrink-0 items-center gap-1 text-label text-muted-foreground">
 				{/* One `Kbd` per key, so the chord reads as the app's own everywhere
 				    else it is shown - see the primitive's own doc comment. */}

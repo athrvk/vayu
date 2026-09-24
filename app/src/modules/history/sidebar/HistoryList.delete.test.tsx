@@ -129,7 +129,7 @@ async function openDeleteDialog() {
 async function confirmDelete() {
 	const confirm = screen
 		.getAllByRole("button")
-		.find((b) => /^delete$/i.test(b.textContent?.trim() ?? ""));
+		.find((b) => /^delete run$/i.test(b.textContent?.trim() ?? ""));
 	expect(confirm).toBeDefined();
 	confirm!.click();
 }
@@ -165,7 +165,7 @@ describe("HistoryList when the delete is refused", () => {
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
-				"This run is still stopping - try deleting it again in a moment",
+				"Couldn't delete this run yet - it's still stopping. Try again in a moment.",
 				"error"
 			)
 		);

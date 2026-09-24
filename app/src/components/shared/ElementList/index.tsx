@@ -445,7 +445,8 @@ function ElementRow({
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${title}?`}
-				description={`This removes "${title}" and its configuration. This cannot be undone.`}
+				confirmLabel="Delete element"
+				description={`This removes "${title}" and its configuration. This can't be undone.`}
 				onConfirm={() => {
 					setConfirmingDelete(false);
 					onRemove();
@@ -566,7 +567,10 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 				    `ScriptSnippets.tsx` uses for the same `Command`, one surface deep. */}
 				<PopoverContent
 					align="start"
-					className="w-96 border-0 bg-transparent p-0 shadow-none"
+					// `w-sm`, not `w-96`: this holds a search list of element names, a
+					// text measure, and `w-96` rides `--spacing` - 288px at the Default
+					// density rather than the 384px `w-sm` (24rem) reads as.
+					className="w-sm border-0 bg-transparent p-0 shadow-none"
 				>
 					<Command filter={commandFilter}>
 						<CommandInput placeholder="Search elements" />

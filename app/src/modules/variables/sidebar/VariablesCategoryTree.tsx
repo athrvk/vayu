@@ -67,7 +67,14 @@ import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy } from "lucide
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
-import { Badge, Button, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
+import {
+	Badge,
+	Button,
+	Input,
+	DeleteConfirmDialog,
+	TooltipIconButton,
+	environmentDeleteDescription,
+} from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 /**
@@ -311,7 +318,7 @@ export default function VariablesCategoryTree() {
 			// which reads as "the click didn't register" rather than "the delete
 			// failed". Reported through the Dock, the channel the collection tree's
 			// own failures already use.
-			failSave(error instanceof Error ? error.message : "Failed to delete environment");
+			failSave(error instanceof Error ? error.message : "Couldn't delete the environment");
 		} finally {
 			// Both outcomes close it, because focus is handed back from the close
 			// and the decision of *where* is read from whether the row actually
@@ -813,12 +820,16 @@ export default function VariablesCategoryTree() {
 			<DeleteConfirmDialog
 				open={!!deleteConfirmEnvId}
 				onOpenChange={(open) => !open && setDeleteConfirmEnvId(null)}
-				title={envToDelete ? undefined : "Delete environment?"}
-				description={envToDelete ? undefined : "This cannot be undone."}
-				name={envToDelete?.name}
+				title={envToDelete ? `Delete "${envToDelete.name}"?` : "Delete environment?"}
+				description={
+					envToDelete
+						? environmentDeleteDescription(envToDelete)
+						: "This can't be undone."
+				}
 				onConfirm={handleConfirmDelete}
 				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}
+				confirmLabel="Delete environment"
 			/>
 		</>
 	);

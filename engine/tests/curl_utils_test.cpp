@@ -1,9 +1,9 @@
 /**
  * @file tests/curl_utils_test.cpp
  * @brief Tests for the pure helpers on the transfer path - URL authority
- *        parsing, wire-sendability, and phase timing. These run on the event
- *        loop worker thread, where a thrown exception has no handler and
- *        terminates the daemon, so every one of them must be total.
+ *        parsing, wire-sendability, phase timing and error attribution. These
+ *        run on the event loop worker thread, where a thrown exception has no
+ *        handler and terminates the daemon, so every one of them must be total.
  */
 
 #include <gtest/gtest.h>
@@ -17,6 +17,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 
 using vayu::http::detail::apply_phase_timings;
+using vayu::http::detail::curl_to_error;
 using vayu::http::detail::CurlPhaseTimes;
 using vayu::http::detail::extract_hostname;
 using vayu::http::detail::extract_port;
@@ -355,4 +356,47 @@ TEST (ApplyPhaseTimings, EveryPhaseIsClampedAtZero) {
     EXPECT_GE (timing.tls_ms, 0.0);
     EXPECT_GE (timing.first_byte_ms, 0.0);
     EXPECT_GE (timing.download_ms, 0.0);
+}
+
+// ============================================================================
+// curl_to_error - which of three sources a failure is attributed to
+// ============================================================================
+
+// A null handle is the documented "code alone" path, which is the mapping
+// under test here; the handle-dependent refinements (proxy CONNECT code, the
+// TLS shape) have their own wire tests in mutual_tls_test.cpp.
+
+// Mutation-check: fold CURLE_COULDNT_RESOLVE_HOST back under
+// CURLE_COULDNT_CONNECT and this reads CONNECTION_FAILED.
+TEST (CurlToError, AnUnresolvableTargetHostIsADnsError) {
+    const vayu::http::CurlErrorBuffer errors;
+    const vayu::Error error = curl_to_error (nullptr, CURLE_COULDNT_RESOLVE_HOST, errors);
+    EXPECT_EQ (error.code, vayu::ErrorCode::DnsError);
+    EXPECT_FALSE (error.message.empty ());
+}
+
+// The proxy's own name failing to resolve stays the proxy's failure (#705).
+TEST (CurlToError, AnUnresolvableProxyHostIsStillAProxyError) {
+    const vayu::http::CurlErrorBuffer errors;
+    EXPECT_EQ (curl_to_error (nullptr, CURLE_COULDNT_RESOLVE_PROXY, errors).code,
+    vayu::ErrorCode::ProxyError);
+}
+
+// The target was reached and failed the exchange: none of these is this
+// engine's own failure. Mutation-check: delete the case group and every one
+// of them reads INTERNAL_ERROR again.
+TEST (CurlToError, ATargetThatFailedTheExchangeIsNotAnInternalError) {
+    const vayu::http::CurlErrorBuffer errors;
+    for (const CURLcode code : { CURLE_GOT_NOTHING, CURLE_SEND_ERROR, CURLE_RECV_ERROR,
+         CURLE_TOO_MANY_REDIRECTS, CURLE_BAD_CONTENT_ENCODING, CURLE_WEIRD_SERVER_REPLY }) {
+        EXPECT_EQ (curl_to_error (nullptr, code, errors).code, vayu::ErrorCode::ConnectionFailed)
+        << curl_easy_strerror (code);
+    }
+}
+
+// The fallback is untouched: a code with no meaning of its own is still ours.
+TEST (CurlToError, AnUnclassifiableCodeIsStillAnInternalError) {
+    const vayu::http::CurlErrorBuffer errors;
+    EXPECT_EQ (curl_to_error (nullptr, CURLE_OUT_OF_MEMORY, errors).code,
+    vayu::ErrorCode::InternalError);
 }

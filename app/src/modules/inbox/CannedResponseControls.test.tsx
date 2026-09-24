@@ -315,7 +315,7 @@ describe("Apply reports through the save store (#1450)", () => {
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
 		expect(useToastStore.getState().toasts).toHaveLength(1);
 		expect(useToastStore.getState().toasts[0]).toMatchObject({
-			message: "Engine refused the update",
+			message: "Couldn't update the response - Engine refused the update",
 			variant: "error",
 		});
 	});

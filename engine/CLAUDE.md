@@ -719,10 +719,13 @@ logged as a warning: it means a client skipped composition.
   `ErrorCode::ProxyError`, distinct from the target's `ConnectionFailed`;
   `curl_to_error` takes the handle because only `CURLINFO_HTTP_CONNECTCODE`
   remembers a proxy's 407. The handle answers a second question (#802): an
-  https transfer that failed for an unmapped code with no response line is an
-  `SslError`, which is where every client-certificate refusal lands under
-  TLS 1.3. The rule is the shape, never a list of codes, consulted only after
-  every mapping with a meaning of its own.
+  https transfer that failed for an unmapped code, or for one of the
+  target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, otherwise
+  `ConnectionFailed`), with no response line is an `SslError`, which is where
+  every client-certificate refusal lands under TLS 1.3. The rule is the shape,
+  never a list of codes, consulted only after every mapping more specific than
+  "the target failed the exchange". An unresolvable target host is
+  `DnsError`, never `ConnectionFailed`.
 - **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
   `openssl` feature with `default-features: false`. That does not make Windows
   a single-backend build: the port's `http2` feature depends on `curl[ssl]`,

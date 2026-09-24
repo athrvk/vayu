@@ -251,11 +251,11 @@ describe("a tab shows its own work", () => {
 	it("keeps one tab's failure off the others", async () => {
 		renderModal();
 		dropFiles({ name: "bad.json", text: spec("Broken") });
-		await waitFor(() => expect(screen.getByText(/Unrecognised format/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText(/Unrecognized format/i)).toBeInTheDocument());
 
 		selectTab(/Paste JSON/i);
 
-		expect(screen.queryByText(/Unrecognised format/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/Unrecognized format/i)).not.toBeInTheDocument();
 	});
 
 	it("survives a progress tick landing while another tab's detect is in flight", async () => {

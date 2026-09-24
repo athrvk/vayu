@@ -108,7 +108,7 @@ const ONCE_KIND = kindSchema({
 
 const SCRIPT_KIND = kindSchema({
 	kind: "script.pre",
-	label: "Pre-request Script",
+	label: "Pre-request script",
 	category: "script",
 	description: "Runs before the request is sent.",
 });
@@ -238,7 +238,7 @@ describe("ElementList - the generic form for a kind with no bespoke override", (
 describe("ElementList - the bespoke form for script.pre", () => {
 	it("renders ScriptElementForm's editor instead of a generic text field", () => {
 		renderList([scriptElement("s1", "pm.test('ok', () => {});")]);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		expect(screen.getByTestId("code-editor")).toHaveValue("pm.test('ok', () => {});");
 		// SCRIPT_KIND's fixture schema declares no properties - if the bespoke
@@ -250,14 +250,14 @@ describe("ElementList - the bespoke form for script.pre", () => {
 
 	it("shows the kind's own catalogue description as the form's intro, not a hard-coded one", () => {
 		renderList([scriptElement("s1")]);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		expect(screen.getByText(SCRIPT_KIND.description)).toBeInTheDocument();
 	});
 
 	it("edits the script through the bespoke form's own onChange", () => {
 		const onChange = renderList([scriptElement("s1", "")]);
-		expandRow("Pre-request Script");
+		expandRow("Pre-request script");
 
 		fireEvent.change(screen.getByTestId("code-editor"), { target: { value: "pm.test();" } });
 
@@ -302,8 +302,17 @@ describe("ElementList - the Add menu", () => {
 		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
 	}
 
+	// A label can also match an empty-state quick-add chip (a plain `<Button>`,
+	// not a `[cmdk-item]`) - the catalogue's own "Pre-request script" and the
+	// quick-add chip for the same kind now read identically (issue #1220 UX
+	// writing pass), so `getByText` alone is ambiguous whenever both render.
 	function optionRow(label: string): HTMLElement {
-		return screen.getByText(label).closest("[cmdk-item]") as HTMLElement;
+		const match = screen
+			.getAllByText(label)
+			.map((el) => el.closest("[cmdk-item]"))
+			.find((el): el is HTMLElement => el !== null);
+		if (!match) throw new Error(`No catalogue row for "${label}"`);
+		return match;
 	}
 
 	it("groups the catalogue by category, in family order and title case", async () => {
@@ -410,9 +419,9 @@ describe("ElementList - the Add menu", () => {
 	it("seeds a script kind's config with an empty script, not an empty object", async () => {
 		const onChange = renderList([]);
 		openMenu();
-		await screen.findByText("Pre-request Script");
+		await waitFor(() => optionRow("Pre-request script"));
 
-		fireEvent.click(optionRow("Pre-request Script"));
+		fireEvent.click(optionRow("Pre-request script"));
 
 		const added = (onChange.mock.calls[0][0] as ElementDef[])[0];
 		expect(added.kind).toBe("script.pre");
@@ -464,7 +473,7 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 		expect(onChange).not.toHaveBeenCalled();
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "Delete element" }));
 		expect(onChange).toHaveBeenCalledWith([]);
 	});
 
@@ -503,7 +512,7 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 		});
 		const onChange = renderList([scriptElement("s1")]);
 
-		await chooseRowAction("Pre-request Script", "Duplicate");
+		await chooseRowAction("Pre-request script", "Duplicate");
 
 		const next = onChange.mock.calls[0][0] as ElementDef[];
 		const copyId = next[1].id;

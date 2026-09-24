@@ -257,6 +257,57 @@ describe("failure classification", () => {
 	});
 
 	/*
+	 * A throw from compose or execute is the engine's own failure, and its
+	 * message already says so. Framing it as the endpoint being unreachable
+	 * read "Couldn't reach the endpoint: Couldn't reach the engine (...)".
+	 */
+	it("passes the engine's own failure through without blaming the endpoint", async () => {
+		vi.mocked(apiService.composeRequest).mockRejectedValue(
+			new Error("Couldn't reach the engine (Failed to fetch).")
+		);
+		await expect(introspectSchema(TARGET)).rejects.toThrow(
+			/^Couldn't reach the engine \(Failed to fetch\)\.$/
+		);
+	});
+
+	/*
+	 * The engine answers `/execute` with HTTP 200 and `status: 0` when nothing
+	 * answered at the target. That is not an HTTP status the endpoint chose -
+	 * "The endpoint answered HTTP 0" said something answered when nothing did.
+	 */
+	it("names the host and the code when the target never answered", async () => {
+		vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+		vi.mocked(apiService.executeRequest).mockResolvedValue({
+			status: 0,
+			bodyRaw: "",
+			errorCode: "CONNECTION_FAILED",
+			errorMessage: "Connection refused",
+		} as SanityResult);
+
+		const failure = introspectSchema(TARGET);
+		await expect(failure).rejects.toThrow(
+			"Couldn't reach api.test (CONNECTION_FAILED). Connection refused"
+		);
+		expect(await kindOf(failure)).toBe("network");
+	});
+
+	it("classifies a token the engine couldn't get as auth, not network", async () => {
+		vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+		vi.mocked(apiService.executeRequest).mockResolvedValue({
+			status: 0,
+			bodyRaw: "",
+			errorCode: "AUTH_FAILED",
+			errorMessage: "accessTokenUrl is required",
+		} as SanityResult);
+
+		const failure = introspectSchema(TARGET);
+		await expect(failure).rejects.toThrow(
+			"Couldn't get an OAuth 2.0 token (AUTH_FAILED). Access Token URL is required"
+		);
+		expect(await kindOf(failure)).toBe("auth");
+	});
+
+	/*
 	 * The parse below is synchronous and holds the renderer's only thread, so a
 	 * pathological response has to be refused before it is parsed rather than
 	 * after - the refusal is what keeps the window responsive.

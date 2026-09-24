@@ -132,7 +132,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					</p>
 
 					{save.error && (
-						<Callout severity="blocking" title="Could not save the example">
+						<Callout severity="blocking" title="Couldn't save the example">
 							{save.error.message}
 						</Callout>
 					)}

@@ -75,7 +75,7 @@ export function ThroughputTwinCard({
 								: "bg-destructive/10 text-destructive-text"
 						)}
 					>
-						Δ {delta.toFixed(1)}
+						Δ {delta.toFixed(1)} req/s
 					</span>
 					<span>
 						{deltaOk ? "server kept pace with dispatch" : "server is lagging dispatch"}

@@ -37,17 +37,14 @@ export interface SaveContext {
 }
 
 /**
- * Every failure is reported by a toast, and `failSave` is the single place that
- * does it.
+ * Every failed *save* is reported by a toast, and `failSave` is the single place
+ * that does it. Doing it here rather than at the call sites is deliberate: there
+ * were eight of them, and a missed one is a failure that reports nowhere at all.
  *
- * Failures used to arrive on two different surfaces depending on which file you
- * were in: `showToast` in the dialogs, the dashboard, MCP and OAuth, and this
- * store -> the Dock everywhere else. Worse, "everywhere else" included things
- * that are not saves at all - `CollectionTree` routed a failed *delete* through
- * here, so deleting a collection and failing produced "Save failed - ...".
- *
- * Doing it here rather than at the call sites is deliberate: there were eight of
- * them, and a missed one is a failure that reports nowhere at all.
+ * Only a save belongs here. `failSave` also parks the Dock on "Not saved" until
+ * the next successful save, so a failure that is not an unsaved edit - a failed
+ * delete, create or duplicate - raises its own `showToast` instead; routed here
+ * it leaves "Not saved" stuck on screen describing no edit at all.
  *
  * This also removed the `errorMessage` field the store used to hold, back when
  * its only reader was the Dock's error line: the toast replaced that line, and
@@ -163,7 +160,9 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			get().completeSaveThenIdle(context.id);
 			return "saved";
 		} catch (error) {
-			get().failSave(error instanceof Error ? error.message : "Save failed");
+			get().failSave(
+				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+			);
 			return "failed";
 		}
 	};

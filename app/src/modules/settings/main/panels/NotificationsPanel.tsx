@@ -75,7 +75,11 @@ const PREVIEW_SEQUENCE = [
 	{ variant: "success" as const, message: "Request completed in 214 ms" },
 	{ variant: "info" as const, message: "Environment switched to Staging" },
 	{ variant: "warning" as const, message: "3 of 40 requests returned 4xx" },
-	{ variant: "error" as const, message: "Connection refused: 127.0.0.1:8080" },
+	{
+		variant: "error" as const,
+		message:
+			"Couldn't connect to 127.0.0.1:8080 (ECONNREFUSED). Nothing is listening on that port - is your server running?",
+	},
 ];
 
 export default function NotificationsPanel() {
@@ -332,7 +336,7 @@ function SystemNotificationsCard() {
 	const previewHint = previewResult
 		? PREVIEW_RESULT_HINTS[previewResult]
 		: unavailableReason
-			? "Nothing to preview - this build cannot post system notifications."
+			? "Nothing to preview - this build can't post system notifications."
 			: !enabled
 				? "Turn the setting on to preview one."
 				: "Posts a real one now.";
@@ -353,7 +357,7 @@ function SystemNotificationsCard() {
 				<ToggleRow
 					anchor={SYSTEM.anchor}
 					label={SYSTEM.label}
-					description="A load or collection run reaching its end, the engine dropping out, an update becoming ready, and a sign-in finishing in your browser. Nothing else, and nothing at all while Vayu is the window in front - the toast already told you."
+					description="A load or collection run reaching its end, Vayu's engine dropping out, an update becoming ready, and a sign-in finishing in your browser. Nothing else, and nothing at all while Vayu is the window in front - the toast already told you."
 					checked={enabled}
 					onChange={setEnabled}
 				/>

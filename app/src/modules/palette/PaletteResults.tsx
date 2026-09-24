@@ -29,6 +29,7 @@
 
 import { useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatRelativeTime } from "@/lib/format-time";
 import { getMethodColor } from "@/lib/method-display";
 import { chordKeys } from "@/lib/platform";
@@ -116,7 +117,9 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	return (
 		<>
 			<span aria-live="polite" className="sr-only">
-				{query ? `${total} searchable results` : `${total} results`}
+				{query
+					? `${total} searchable ${pluralize(total, "result")}`
+					: `${total} ${pluralize(total, "result")}`}
 			</span>
 			{/* The list caps itself at 400px, and at 60vh before that: about
 			    eleven rows where the primitive's 300px showed six, and never

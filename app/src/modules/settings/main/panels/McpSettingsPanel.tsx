@@ -775,7 +775,7 @@ export default function McpSettingsPanel() {
 						<code className="font-mono">https://api.example.com:8080/v1</code> and{" "}
 						<code className="font-mono">api.example.com</code> are the same entry. The
 						list is checked before Vayu sends anything, so a script an agent writes
-						cannot reach around it: <code className="font-mono">pm.sendRequest</code> is
+						can't reach around it: <code className="font-mono">pm.sendRequest</code> is
 						refused entirely for requests an agent starts, and works normally when you
 						Send from Vayu.
 					</CardDescription>
@@ -858,7 +858,7 @@ export default function McpSettingsPanel() {
 							</div>
 						) : config ? (
 							<p className="text-xs text-muted-foreground italic">
-								No hosts allowed yet. Agents cannot send requests until you add one.
+								No hosts allowed yet. Agents can't send requests until you add one.
 							</p>
 						) : null}
 					</div>
@@ -873,7 +873,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{CAPS.label}</CardTitle>
 					</div>
 					<CardDescription>
-						<CollapsibleText text="Hard ceilings on agent-started load runs. A request over any cap is rejected before it reaches the engine, and each cap bounds only the runs that carry the field it names. A cap above the most Vayu itself will run is lowered to that maximum when you save it." />
+						<CollapsibleText text="Hard ceilings on agent-started load runs. A request over any cap is rejected before it reaches Vayu's engine, and each cap bounds only the runs that carry the field it names. A cap above the most Vayu itself will run is lowered to that maximum when you save it." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -909,7 +909,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{WRITES.label}</CardTitle>
 					</div>
 					<CardDescription>
-						<CollapsibleText text="When off (default), agents can read and send requests but cannot change saved data: no tool in the Write group above is offered to the agent at all - creating, renaming and deleting collections and saved requests, and editing environments and engine config. The switches above stay yours to set either way; they decide what an agent gets once writes are on. Turning it on grants no tool you switched off in Tools; the two switches are separate, and a delete still asks you to confirm each time, stating how much a collection contains before it goes. Sending requests and load runs are unaffected either way - the allowlist and the caps govern those." />
+						<CollapsibleText text="When off (default), agents can read and send requests but can't change saved data: no tool in the Write group above is offered to the agent at all - creating, renaming and deleting collections and saved requests, and editing environments and engine config. The switches above stay yours to set either way; they decide what an agent gets once writes are on. Turning it on grants no tool you switched off in Tools; the two switches are separate, and a delete still asks you to confirm each time, stating how much a collection contains before it goes. Sending requests and load runs are unaffected either way - the allowlist and the caps govern those." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

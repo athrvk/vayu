@@ -54,13 +54,13 @@ import { Eyebrow } from "@/components/ui/eyebrow";
  * is what used to orphan metrics against a deleted run id. Nothing is removed in
  * that case, so the right thing to tell the user is to try again shortly.
  *
- * The engine's error body is a bare `{"error": "..."}` string, which the shared
- * http client cannot read into `ApiError.message` (it looks for `error.message`),
- * so the wording lives here rather than being echoed from the response.
+ * The wording lives here, rather than being echoed from the response, so it
+ * reads as an instruction ("try again in a moment") instead of the engine's
+ * own wait-timed-out phrasing.
  */
 function deleteRunErrorMessage(error: unknown): string {
 	if (error instanceof ApiError && error.statusCode === 409) {
-		return "This run is still stopping - try deleting it again in a moment";
+		return "Couldn't delete this run yet - it's still stopping. Try again in a moment.";
 	}
 	return error instanceof Error ? `Couldn't delete run: ${error.message}` : "Couldn't delete run";
 }
@@ -257,7 +257,7 @@ export default function HistoryList() {
 							type="text"
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							placeholder="Search runs by api..."
+							placeholder="Search runs by API…"
 							className="pl-10 w-full"
 						/>
 					</div>
@@ -271,10 +271,10 @@ export default function HistoryList() {
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Types</SelectItem>
-								<SelectItem value="load">Load Test</SelectItem>
-								<SelectItem value="design">Design Mode</SelectItem>
-								<SelectItem value="scenario">Collection Run</SelectItem>
+								<SelectItem value="all">All types</SelectItem>
+								<SelectItem value="load">Load test</SelectItem>
+								<SelectItem value="design">Design mode</SelectItem>
+								<SelectItem value="scenario">Collection run</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -286,7 +286,7 @@ export default function HistoryList() {
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Status</SelectItem>
+								<SelectItem value="all">All status</SelectItem>
 								<SelectItem value="pending">Pending</SelectItem>
 								<SelectItem value="running">Running</SelectItem>
 								<SelectItem value="completed">Completed</SelectItem>
@@ -469,11 +469,12 @@ export default function HistoryList() {
 					open={!!deleteConfirmRunId}
 					onOpenChange={(open) => !open && setDeleteConfirmRunId(null)}
 					title="Delete run?"
+					confirmLabel="Delete run"
 					description={
 						<>
 							{deleteConfirmStopsRun
-								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
-								: "This run is removed permanently. This cannot be undone."}
+								? "This run is still in progress - deleting it stops it first, then removes it permanently. This can't be undone."
+								: "This run is removed permanently. This can't be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

@@ -215,7 +215,9 @@ export function useSaveManager({
 					return;
 				}
 				console.error("Save failed:", error);
-				failSave(error instanceof Error ? error.message : "Save failed");
+				failSave(
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				);
 
 				// A 4xx is the engine's verdict on this payload, not a hiccup - a
 				// timed-out or refused connection is the shape a dead engine

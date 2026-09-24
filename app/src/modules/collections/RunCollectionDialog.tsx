@@ -433,10 +433,10 @@ export default function RunCollectionDialog({
 				<DialogBody className="space-y-4 py-2">
 					<div className="flex items-center justify-between gap-4">
 						<Label htmlFor="run-collection-recursive" className="leading-snug">
-							Include sub-folders
+							Include nested collections
 							<span className="block text-xs font-normal text-muted-foreground">
-								Descend into nested collections. Each sub-folder runs before this
-								folder&apos;s own requests, top to bottom as the sidebar shows them.
+								Descend into nested collections. Each one runs before its
+								parent&apos;s own requests, top to bottom as the sidebar shows them.
 							</span>
 						</Label>
 						<Switch
@@ -479,7 +479,10 @@ export default function RunCollectionDialog({
 									step={1}
 									value={virtualUsers}
 									onChange={(e) => setVirtualUsers(e.target.value)}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: the field holds a virtual-user
+									// count, a text measure that should not narrow at the
+									// Default density the way `w-24`'s `--spacing` unit does.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!virtualUsersValid}
 								/>
 							</div>
@@ -498,7 +501,9 @@ export default function RunCollectionDialog({
 									step={1}
 									value={durationSeconds}
 									onChange={(e) => setDurationSeconds(e.target.value)}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: same text-measure reasoning as
+									// virtual users above.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!durationValid}
 								/>
 							</div>
@@ -697,7 +702,9 @@ export default function RunCollectionDialog({
 										iterationsTouched.current = true;
 										setIterations(e.target.value);
 									}}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: same text-measure reasoning as
+									// virtual users above.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!iterationsValid}
 								/>
 							</div>
@@ -760,7 +767,7 @@ export default function RunCollectionDialog({
 					/>
 
 					{error && (
-						<Callout severity="blocking" title="Could not start the run">
+						<Callout severity="blocking" title="Couldn't start the run">
 							{error instanceof Error ? error.message : "The engine refused it."}
 						</Callout>
 					)}

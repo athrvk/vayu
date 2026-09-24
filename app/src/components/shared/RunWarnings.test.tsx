@@ -61,7 +61,7 @@ describe("RunWarnings", () => {
 				]}
 			/>
 		);
-		expect(screen.getByText("Pre-request script will not run")).toBeTruthy();
+		expect(screen.getByText("Pre-request script won't run")).toBeTruthy();
 	});
 
 	it("renders one callout per warning when a run carries both", () => {
@@ -83,6 +83,6 @@ describe("RunWarnings", () => {
 			/>
 		);
 		expect(screen.getByText("Unresolved variables were sent")).toBeTruthy();
-		expect(screen.getByText("Pre-request script will not run")).toBeTruthy();
+		expect(screen.getByText("Pre-request script won't run")).toBeTruthy();
 	});
 });

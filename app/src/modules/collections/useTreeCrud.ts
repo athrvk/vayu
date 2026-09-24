@@ -146,19 +146,25 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Report a failed mutation through the same channel the rename path already
-	 * uses - `failSave` puts "Save failed" in the Dock.
+	 * Report a failed create, duplicate or delete as a plain error toast.
 	 *
-	 * Rename was the only handler here that caught anything. Create and delete
-	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
-	 * nothing else: a failed delete closed the confirm dialog, un-dimmed the row
-	 * and left the collection sitting there with no explanation, which reads as
-	 * "the click didn't register" rather than "the delete failed".
+	 * Not `failSave`: that is the save-state machine's failure, and it parks
+	 * the Dock on "Not saved" until the next successful save. None of these
+	 * is an unsaved edit - nothing is pending, nothing will retry - so routing
+	 * them there left a "Not saved" line describing no edit at all, stuck
+	 * until some unrelated save cleared it. The renames below are saves
+	 * (`startSaving` first), and keep `failSave`.
+	 *
+	 * The fallback leads even when the engine sent a message: its message says
+	 * why ("database is locked"), never what was being attempted.
 	 */
 	const reportFailure = useCallback(
 		(error: unknown, fallback: string) =>
-			failSave(error instanceof Error ? error.message : fallback),
-		[failSave]
+			showToast(
+				error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+				"error"
+			),
+		[showToast]
 	);
 
 	const handleCollectionClick = useCallback(
@@ -201,7 +207,7 @@ export function useTreeCrud({
 				name: newCollectionName.trim(),
 			});
 		} catch (error) {
-			reportFailure(error, "Failed to create collection");
+			reportFailure(error, "Couldn't create the collection");
 			return; // Keep the form open with the typed name so it can be retried.
 		}
 		handleCancelNewCollectionForm();
@@ -224,7 +230,7 @@ export function useTreeCrud({
 					parentId: parentId,
 				});
 			} catch (error) {
-				reportFailure(error, "Failed to create folder");
+				reportFailure(error, "Couldn't create the collection");
 				return;
 			}
 			handleCancelSubfolder();
@@ -253,7 +259,7 @@ export function useTreeCrud({
 					url: "",
 				});
 			} catch (error) {
-				reportFailure(error, "Failed to create request");
+				reportFailure(error, "Couldn't create the request");
 				return;
 			}
 
@@ -315,7 +321,8 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Failed to rename collection");
+				const fallback = "Couldn't rename the collection";
+				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 			}
 		},
 		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
@@ -359,7 +366,8 @@ export function useTreeCrud({
 				});
 				completeSaveThenIdle();
 			} catch (error) {
-				failSave(error instanceof Error ? error.message : "Failed to rename request");
+				const fallback = "Couldn't rename the request";
+				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 			}
 		},
 		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
@@ -402,7 +410,7 @@ export function useTreeCrud({
 				});
 				openTab({ type: "request", entityId: copy.id });
 			} catch (error) {
-				reportFailure(error, "Failed to duplicate request");
+				reportFailure(error, "Couldn't duplicate the request");
 			}
 		},
 		[createRequestMutation, openTab, reportFailure, showToast]
@@ -517,8 +525,9 @@ export function useTreeCrud({
 				const notice = restoreNotice(restored, name);
 				if (notice) showToast({ message: notice, variant: "info" });
 			} catch (error) {
+				const fallback = `Couldn't restore "${name}"`;
 				showToast(
-					error instanceof Error ? error.message : `Couldn't restore "${name}"`,
+					error instanceof Error ? `${fallback} - ${error.message}` : fallback,
 					"error"
 				);
 			}
@@ -583,12 +592,19 @@ export function useTreeCrud({
 				closeTabsForEntities(affected);
 				offerUndo(collectionId, name, "collection", restoreClientState);
 			} catch (error) {
-				reportFailure(error, "Failed to delete collection");
+				reportFailure(error, "Couldn't delete the collection");
 				return;
 			} finally {
 				// Only now: the dialog stays up, with its confirm button spinning,
-				// for as long as the delete is actually running.
-				setDeleteConfirm(null);
+				// for as long as the delete is actually running. Guarded rather than
+				// unconditional: a second delete requested while this one was in
+				// flight is refused by `handleConfirmDelete` above and sits in
+				// `deleteConfirm` waiting its turn, so clearing unconditionally here
+				// would drop it on the floor with no dialog and no toast to show for
+				// it (the row simply stays, deleted-looking request gone silently).
+				setDeleteConfirm((current) =>
+					current?.type === "collection" && current.id === collectionId ? null : current
+				);
 				setDeletingCollectionId(null);
 			}
 
@@ -605,8 +621,8 @@ export function useTreeCrud({
 				if (failedCount > 0) {
 					showToast(
 						failedCount === 1
-							? "A mock server for the deleted collection could not be stopped."
-							: `${failedCount} mock servers for the deleted collection could not be stopped.`,
+							? "Couldn't stop a mock server for the deleted collection."
+							: `Couldn't stop ${failedCount} mock servers for the deleted collection.`,
 						"error"
 					);
 				}
@@ -635,9 +651,13 @@ export function useTreeCrud({
 				closeTabsForEntities([requestId]);
 				offerUndo(requestId, name, "request", restoreClientState);
 			} catch (error) {
-				reportFailure(error, "Failed to delete request");
+				reportFailure(error, "Couldn't delete the request");
 			} finally {
-				setDeleteConfirm(null);
+				// See the matching guard in `handleDeleteCollection`: a delete queued
+				// behind this one during the mutation must survive this clear.
+				setDeleteConfirm((current) =>
+					current?.type === "request" && current.id === requestId ? null : current
+				);
 				setDeletingRequestId(null);
 			}
 		},
@@ -695,12 +715,12 @@ export function useTreeCrud({
 				onSelect: () => handleRenameCollection(collection),
 			},
 			{
-				label: "Add Request",
+				label: "Add request",
 				icon: Plus,
 				onSelect: () => void handleCreateRequest(collection.id),
 			},
 			{
-				label: "Add Folder",
+				label: "Add collection",
 				icon: FolderPlus,
 				onSelect: () => {
 					expandCollection(collection.id);

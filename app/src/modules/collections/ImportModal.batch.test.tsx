@@ -177,7 +177,7 @@ describe("dropping several files", () => {
 		drop(file("good.json", postman), file("junk.json", '{"x":1}'));
 
 		await waitFor(() => expect(screen.getByText("2 files")).toBeInTheDocument());
-		expect(within(row("junk.json")).getByText(/Unrecognised format/i)).toBeInTheDocument();
+		expect(within(row("junk.json")).getByText(/Unrecognized format/i)).toBeInTheDocument();
 		// Errors are visible but excluded - the honest refusal, per file.
 		expect(screen.getByLabelText("junk.json")).not.toBeChecked();
 		expect(screen.getByLabelText("good.json")).toBeChecked();
@@ -225,7 +225,7 @@ describe("a file the engine refuses", () => {
 		// closing on a partial failure would be the silent half of the same bug.
 		expect(within(row("two.json")).getByText(/engine said no: two\.json/)).toBeInTheDocument();
 		expect(within(row("one.json")).getByText(/Imported/)).toBeInTheDocument();
-		expect(screen.getByText(/1 of 3 files failed/i)).toBeInTheDocument();
+		expect(screen.getByText(/Couldn't import 1 of 3 files/i)).toBeInTheDocument();
 	});
 
 	it("never lets an applied file be sent twice", async () => {
@@ -311,7 +311,7 @@ describe("importing a folder", () => {
 		expect(
 			within(row("pet.json")).getByText(/Referenced by openapi\.json/)
 		).toBeInTheDocument();
-		expect(screen.queryByText(/Vayu could not read/i)).toBeNull();
+		expect(screen.queryByText(/Vayu couldn't read/i)).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: /^Import/i }));
 		await waitFor(() => expect(applied.names).toEqual(["openapi.json"]));

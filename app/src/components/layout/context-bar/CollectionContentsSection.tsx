@@ -15,12 +15,13 @@
  */
 
 import { useCollectionsQuery, useRequestsQuery } from "@/queries";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 
 /** "1 request" / "3 requests" - the pane header's wording, not a second one. */
 function count(n: number, noun: string): string {
-	return `${n} ${noun}${n === 1 ? "" : "s"}`;
+	return `${n} ${pluralize(n, noun)}`;
 }
 
 export function CollectionContentsSection({ tab }: ContextBarSectionProps) {

@@ -61,6 +61,7 @@ import {
 } from "@/modules/request-builder/utils/execute-mapping";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
+import { ApiError } from "@/services";
 import { seedFromRun, scriptPartToElement } from "./design-run-seed";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import type { Run, ScriptPart, ResolvedElement } from "@/types";
@@ -297,7 +298,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 				if (result.errorCode === "AUTH_REQUIRED") {
 					showToast(
-						"OAuth 2.0 token required - open the Auth tab and click Get Token",
+						"This request needs an OAuth 2.0 token. Open the Auth tab to get one.",
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
@@ -305,7 +306,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					showToast(
 						result.errorMessage
 							? humanizeOAuth2Error(result.errorMessage)
-							: "OAuth 2.0 token request failed",
+							: "Couldn't get an OAuth 2.0 token. Check the Auth tab's token settings.",
 						"error"
 					);
 				}
@@ -341,7 +342,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					bodyType: "text",
 					time: 0,
 					size: 0,
-					errorCode: "INTERNAL_ERROR",
+					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
 					errorMessage: errorMsg,
 				};
 			}
@@ -386,7 +387,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		return (
 			<ErrorState
 				title="Couldn't load this run's request"
-				detail={detail ?? "The request behind this run could not be fetched."}
+				detail={detail ?? "The request behind this run couldn't be fetched."}
 				onRetry={() => void refetchRequest()}
 			/>
 		);
@@ -438,7 +439,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 								className="size-icon-sm mr-1.5"
 								data-icon-motion={ICON_MOTION.press}
 							/>
-							Save this run to the request
+							Save to request
 						</Button>
 					)}
 				</div>

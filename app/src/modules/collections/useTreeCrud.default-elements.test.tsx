@@ -91,7 +91,7 @@ describe("new-entity creation sends no seeded elements", () => {
 
 		const addRequest = result.current.rows
 			.getCollectionActions(collections[0])
-			.find((a) => a.label === "Add Request");
+			.find((a) => a.label === "Add request");
 		await act(async () => addRequest?.onSelect());
 
 		expect(createRequest).toHaveBeenCalledTimes(1);

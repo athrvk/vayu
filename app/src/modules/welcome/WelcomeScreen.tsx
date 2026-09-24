@@ -88,7 +88,7 @@ export default function WelcomeScreen() {
 				) : isEmpty ? (
 					hasFailed ? (
 						<ErrorState
-							title="Couldn't load your workspace"
+							title="Couldn't load your collections and runs"
 							detail={failureDetail}
 							onRetry={retry}
 						/>

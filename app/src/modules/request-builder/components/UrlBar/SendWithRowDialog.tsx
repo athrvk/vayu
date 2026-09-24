@@ -79,6 +79,7 @@ import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { dataCellText, type DataFileRow } from "@/services/data-files";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { SendWithRowState } from "../../hooks/useSendWithRow";
 
 export interface SendWithRowDialogProps {
@@ -144,7 +145,7 @@ function parseRowEntry(text: string, total: number): RowEntry {
 	if (oneBased < 1 || oneBased > total) {
 		return {
 			kind: "error",
-			message: `The file has ${total.toLocaleString()} ${total === 1 ? "row" : "rows"}.`,
+			message: `The file has ${total.toLocaleString()} ${pluralize(total, "row")}.`,
 		};
 	}
 	return { kind: "row", index: oneBased - 1 };
@@ -462,7 +463,7 @@ export default function SendWithRowDialog({
 				)}
 
 				{rows.error && (
-					<Callout severity="blocking" title="Could not read the data file">
+					<Callout severity="blocking" title="Couldn't read the data file">
 						{rows.error}
 					</Callout>
 				)}
@@ -499,7 +500,11 @@ export default function SendWithRowDialog({
 									placeholder={`1 - ${total.toLocaleString()}`}
 									aria-label="Send with a row by number"
 									aria-invalid={typed.kind === "error"}
-									className="h-7 w-28 font-mono text-xs"
+									// Fixed rem, not `w-28`: the field holds a row number
+									// (the placeholder reads e.g. "1 - 500"), a text measure
+									// that should not narrow at the Default density the way
+									// `w-28`'s `--spacing` unit does.
+									className="h-7 w-[7rem] font-mono text-xs"
 								/>
 							</label>
 						</div>
@@ -610,7 +615,7 @@ export default function SendWithRowDialog({
 										} match.`
 									: hasMore
 										? `Showing ${rendered.length.toLocaleString()} of ${total.toLocaleString()} rows - scroll for more.`
-										: `All ${total.toLocaleString()} ${total === 1 ? "row" : "rows"}.`}
+										: `All ${total.toLocaleString()} ${pluralize(total, "row")}.`}
 							</p>
 							<DialogCancelButton size="sm" onClick={() => onOpenChange(false)} />
 							{/* Names the row it will send, so a row reached by typing a

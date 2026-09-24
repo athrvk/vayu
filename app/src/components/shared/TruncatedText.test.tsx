@@ -119,4 +119,13 @@ describe("TruncatedText", () => {
 		expect(el).toHaveClass("truncate");
 		expect(el).toHaveClass("text-sm");
 	});
+
+	it("is a block box, since an inline one cannot clip or ellipse", () => {
+		// The default tag is a `span`. Under a non-flex parent - the Trash row's
+		// name column - it stayed inline, and `overflow: hidden` does nothing on
+		// an inline box: the name ran under the row's buttons and was cut
+		// mid-word with no ellipsis.
+		render(<TruncatedText>Name</TruncatedText>);
+		expect(screen.getByText("Name")).toHaveClass("block");
+	});
 });

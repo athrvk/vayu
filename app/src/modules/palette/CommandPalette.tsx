@@ -180,15 +180,15 @@ export function CommandPalette() {
 					<span className="flex items-center gap-1">
 						<Kbd size="sm">↑</Kbd>
 						<Kbd size="sm">↓</Kbd>
-						<span>navigate</span>
+						<span>Navigate</span>
 					</span>
 					<span className="flex items-center gap-1">
 						<Kbd size="sm">↵</Kbd>
-						<span>open</span>
+						<span>Open</span>
 					</span>
 					<span className="flex items-center gap-1">
 						<Kbd size="sm">esc</Kbd>
-						<span>close</span>
+						<span>Close</span>
 					</span>
 				</CommandFooter>
 			</CommandDialog>

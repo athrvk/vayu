@@ -27,6 +27,7 @@
  */
 
 import { useMemo } from "react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
 import { DrawerPanel, ErrorState } from "@/components/shared";
@@ -176,7 +177,7 @@ export default function SettingsCategoryTree() {
 					 * the whole point of typing.
 					 */
 					<>
-						<SectionHeading>{`${results.length} result${results.length === 1 ? "" : "s"}`}</SectionHeading>
+						<SectionHeading>{`${results.length} ${pluralize(results.length, "result")}`}</SectionHeading>
 						{results.length === 0 ? (
 							<p className="px-4 py-2 text-xs text-muted-foreground">
 								No settings match “{trimmedQuery}”.
@@ -213,7 +214,7 @@ export default function SettingsCategoryTree() {
 					</>
 				) : (
 					<>
-						<SectionHeading>App Settings</SectionHeading>
+						<SectionHeading>App settings</SectionHeading>
 						<div className="space-y-1 mb-4">
 							{APP_SETTINGS_PANELS.map((panel) => renderCategory(panel.id))}
 						</div>
@@ -221,7 +222,7 @@ export default function SettingsCategoryTree() {
 						{/* Engine Settings Section - depends on the engine `/config` query, so
 					    its loading/error states are scoped here. App Settings above always
 					    render (client-side), so Settings stays usable when the engine is down. */}
-						<SectionHeading icon={Settings}>Engine Settings</SectionHeading>
+						<SectionHeading icon={Settings}>Engine settings</SectionHeading>
 						{isLoading ? (
 							<div className="space-y-2 px-3">
 								<Skeleton className="h-9 w-full" />

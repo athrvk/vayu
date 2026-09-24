@@ -89,7 +89,7 @@ describe("GeneralPanel - clear run history", () => {
 		// Nothing is deleted merely by asking.
 		expect(deleteRun).not.toHaveBeenCalled();
 
-		fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^clear history$/i }));
 
 		await waitFor(() => expect(deleteRun).toHaveBeenCalledTimes(runs.length));
 		expect(confirmSpy).not.toHaveBeenCalled();
@@ -108,7 +108,7 @@ describe("GeneralPanel - clear run history", () => {
 
 		render(<GeneralPanel />);
 		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
-		fireEvent.click(await screen.findByRole("button", { name: /^delete$/i }));
+		fireEvent.click(await screen.findByRole("button", { name: /^clear history$/i }));
 
 		await waitFor(() =>
 			expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r2"])

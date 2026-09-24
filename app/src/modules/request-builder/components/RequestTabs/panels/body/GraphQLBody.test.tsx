@@ -138,7 +138,7 @@ describe("the schema badge", () => {
 		renderBody();
 
 		expect(schemaWord()).toBe("Schema stale");
-		expect(schemaTitle()).toMatch(/could not be reached/i);
+		expect(schemaTitle()).toMatch(/couldn.t reach the endpoint/i);
 		expect(schemaTitle()).toMatch(/1m ago/);
 	});
 

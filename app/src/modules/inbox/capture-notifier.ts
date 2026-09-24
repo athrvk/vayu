@@ -36,6 +36,7 @@
 import { createThrottledBatcher, type ThrottledBatcher } from "@/services/throttled-batcher";
 import { NOTIFY_KINDS, systemNotify } from "@/services/notify";
 import { inboxNotifiesOnCapture } from "@/stores";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { InboxCapture } from "@/types";
 
 /**
@@ -69,8 +70,8 @@ export function captureNotification(batch: readonly InboxCapture[]): {
 		return { title: "Inbox received a request", body: where };
 	}
 	return {
-		title: `Inbox received ${batch.length} requests`,
-		body: `${batch.length} requests captured - latest ${where}`,
+		title: `Inbox received ${batch.length} ${pluralize(batch.length, "request")}`,
+		body: `${batch.length} ${pluralize(batch.length, "request")} captured - latest ${where}`,
 	};
 }
 

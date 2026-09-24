@@ -12,6 +12,7 @@
  * makes for the run tab's sections.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Run } from "@/types";
 
 /**
@@ -41,7 +42,7 @@ export const RUN_STATUS_TONE: Record<Run["status"], { label: string; className: 
 export function scenarioSizeLabel(run: Run): string | null {
 	const scenario = run.summary?.scenario;
 	if (scenario?.stepCount == null) return null;
-	const steps = `${scenario.stepCount} step${scenario.stepCount === 1 ? "" : "s"}`;
+	const steps = `${scenario.stepCount} ${pluralize(scenario.stepCount, "step")}`;
 	return scenario.iterations != null && scenario.iterations > 1
 		? `${steps} × ${scenario.iterations}`
 		: steps;

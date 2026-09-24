@@ -97,7 +97,7 @@ export interface BulkEditorProps {
 	 * mean handing the rows straight back for a second pass.
 	 */
 	onCommit: (text: string) => void;
-	/** "Headers" / "Query Parameters" - names the textarea. */
+	/** "Headers" / "Query parameters" - names the textarea. */
 	label: string;
 	placeholder: string;
 	/** The syntax note under the field. Headers and params differ here. */

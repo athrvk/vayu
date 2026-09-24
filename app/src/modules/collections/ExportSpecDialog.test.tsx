@@ -349,7 +349,7 @@ describe("ExportSpecDialog", () => {
 		);
 		open();
 
-		expect(await screen.findByText("The document could not be assembled")).toBeTruthy();
+		expect(await screen.findByText("Couldn't assemble the document")).toBeTruthy();
 		expect(screen.getByText(/unexpected end of document/)).toBeTruthy();
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true
@@ -415,7 +415,7 @@ describe("ExportSpecDialog", () => {
 		// Keeping the previous answer is for a read that is still coming, not one
 		// that failed: what is on screen has to be the format on the toggle, and
 		// there is nothing to download for it.
-		expect(await screen.findByText("The document could not be assembled")).toBeTruthy();
+		expect(await screen.findByText("Couldn't assemble the document")).toBeTruthy();
 		expect(screen.queryByText(/values updated/)).toBeNull();
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true

@@ -241,14 +241,17 @@ export default function InboxView() {
 	 * brush - whichever landed second was to skip it.
 	 */
 	const reportFailure = (fallback: string) => (mutationError: unknown) =>
-		showToast(mutationError instanceof Error ? mutationError.message : fallback, "error");
+		showToast(
+			mutationError instanceof Error ? `${fallback} - ${mutationError.message}` : fallback,
+			"error"
+		);
 
 	const start = () => {
 		startInbox.mutate(
 			{},
 			{
 				onSuccess: (started) => show(started.inboxId),
-				onError: reportFailure("Could not start the inbox"),
+				onError: reportFailure("Couldn't start the inbox"),
 			}
 		);
 	};
@@ -260,7 +263,7 @@ export default function InboxView() {
 			// recorded since the last fetch, so the next unseen capture sits at
 			// exactly this index (see the mutation's own note).
 			{ inboxId: inbox.inboxId, offset: captures.length },
-			{ onError: reportFailure("Could not load more captures") }
+			{ onError: reportFailure("Couldn't load more captures") }
 		);
 	};
 
@@ -276,7 +279,7 @@ export default function InboxView() {
 		return (
 			<EmptyState
 				icon={InboxIcon}
-				title="No inbox running"
+				title="No inbox running."
 				description="Start one to get a local URL that records every request sent to it - no tunnel, no third party."
 				action={
 					<Button onClick={start} disabled={startInbox.isPending}>
@@ -365,7 +368,7 @@ export default function InboxView() {
 							size="sm"
 							onClick={() =>
 								stopInbox.mutate(inbox.inboxId, {
-									onError: reportFailure("Could not stop the inbox"),
+									onError: reportFailure("Couldn't stop the inbox"),
 								})
 							}
 							disabled={stopInbox.isPending}
@@ -396,14 +399,14 @@ export default function InboxView() {
 				title="Clear captures?"
 				description={`All ${captures.length} recorded ${
 					captures.length === 1 ? "request" : "requests"
-				} in this inbox are removed. This cannot be undone.`}
+				} in this inbox are removed. This can't be undone.`}
 				confirmLabel="Clear"
 				onConfirm={() =>
 					clearCaptures.mutate(inbox.inboxId, {
 						onSuccess: () => setConfirmClearOpen(false),
 						onError: (error) => {
 							setConfirmClearOpen(false);
-							reportFailure("Could not clear the captures")(error);
+							reportFailure("Couldn't clear the captures")(error);
 						},
 					})
 				}
@@ -463,7 +466,8 @@ export default function InboxView() {
 						{captures.length === 0 ? (
 							<EmptyState
 								variant="inline"
-								title="Nothing received yet. Point a webhook at the URL above."
+								title="No captures yet."
+								description="Point a webhook at the URL above."
 							/>
 						) : (
 							<>

@@ -162,21 +162,15 @@ std::optional<Error> validate_transferable (const Request& request) {
     // transport that moves it into the URL is GET's alone (issue #1228).
     const bool has_body = vayu::http::has_wire_body (request.body);
     if (has_body && request.method == HttpMethod::HEAD) {
-        Error error;
-        error.code = ErrorCode::InvalidMethod;
-        error.message =
-        "HEAD requests cannot carry a body - remove the body or use GET";
-        return error;
+        return Error{ ErrorCode::InvalidMethod,
+            "HEAD requests cannot carry a body - remove the body or use GET" };
     }
     // A file part that cannot be read is refused here rather than encoded and
     // left to fail on the wire: libcurl would report a read error naming
     // nothing, and an omitted part is the silence this feature exists to end.
     // Costs one open per transfer, and only for a body that has a file part.
     if (auto problem = vayu::http::unsendable_file_part (request.body)) {
-        Error error;
-        error.code    = ErrorCode::InternalError;
-        error.message = *problem;
-        return error;
+        return Error{ ErrorCode::InternalError, std::move (*problem) };
     }
     // Header text that would end or truncate the line it is written into. Here
     // rather than in `build_request_header_list` because that function has no
@@ -187,10 +181,7 @@ std::optional<Error> validate_transferable (const Request& request) {
     // credential, an import, a raw `POST /execute` payload. See header_text.hpp
     // for why the rule is a refusal and where its other layers live.
     if (auto problem = vayu::http::unsendable_header_text (request)) {
-        Error error;
-        error.code    = ErrorCode::InternalError;
-        error.message = *problem;
-        return error;
+        return Error{ ErrorCode::InternalError, std::move (*problem) };
     }
     return std::nullopt;
 }
@@ -724,12 +715,14 @@ const std::string& url) {
  * codes. An enumeration would be a list to extend every time a backend spread
  * one event across another code - the trap `proxy_refused_tunnel` above exists
  * to avoid - and it is consulted only where the mapping has already run out of
- * meanings, so nothing with an answer of its own reaches it.
+ * meanings, or where its meaning ("the target failed the exchange") is the
+ * very one this shape refines, so nothing with a more specific answer reaches
+ * it.
  *
  * What it costs: an https endpoint that accepts a connection and hangs up
- * before answering for a reason of its own now reads as a TLS error. It read
- * as an *internal* error before, which is worse - nothing inside this engine
- * failed - and libcurl's own message travels with the code either way.
+ * before answering for a reason of its own reads as a TLS error rather than
+ * a connection failure; libcurl's own message travels with the code either
+ * way.
  */
 bool tls_connection_never_answered (CURL* curl) {
     if (!curl) {
@@ -780,9 +773,22 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     // an endpoint that was never the problem (issue #705).
     case CURLE_COULDNT_RESOLVE_PROXY:
     case CURLE_PROXY: error.code = ErrorCode::ProxyError; break;
-    case CURLE_COULDNT_CONNECT:
-    case CURLE_COULDNT_RESOLVE_HOST:
-        error.code = ErrorCode::ConnectionFailed;
+    case CURLE_COULDNT_RESOLVE_HOST: error.code = ErrorCode::DnsError; break;
+    case CURLE_COULDNT_CONNECT: error.code = ErrorCode::ConnectionFailed; break;
+    // The target was reached and then failed the exchange: an empty reply, a
+    // reset mid-transfer, a redirect loop, a body its own `Content-Encoding`
+    // cannot decode, a reply that is not HTTP. The target's or the network's
+    // doing, never this engine's, so not `InternalError`. The TLS shape still
+    // wins here: a client-certificate refusal under TLS 1.3 arrives as
+    // `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802).
+    case CURLE_GOT_NOTHING:
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_TOO_MANY_REDIRECTS:
+    case CURLE_BAD_CONTENT_ENCODING:
+    case CURLE_WEIRD_SERVER_REPLY:
+        error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
+                                                            ErrorCode::ConnectionFailed;
         break;
     case CURLE_SSL_CONNECT_ERROR:
     case CURLE_SSL_CERTPROBLEM:

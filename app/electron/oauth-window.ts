@@ -127,7 +127,7 @@ export function createAuthWindowFlow(
 			void transport.loadUrl(params.authorizeUrl).catch((err: unknown) => {
 				if (loadErrorCode(err) === ERR_ABORTED) return;
 				finish({
-					error: `Could not load authorization page: ${describeLoadError(err)}`,
+					error: `Couldn't load the authorization page: ${describeLoadError(err)}`,
 				});
 			});
 		},
@@ -140,7 +140,7 @@ export function createAuthWindowFlow(
 
 		onLoadFailure: (errorCode, description) => {
 			if (errorCode === ERR_ABORTED) return;
-			finish({ error: `Could not load authorization page: ${description}` });
+			finish({ error: `Couldn't load the authorization page: ${description}` });
 		},
 
 		onClosed: () => finish({ error: "Authorization window was closed" }),

@@ -75,7 +75,7 @@ describe("the Dock's response-position button", () => {
 		renderDockOn(type);
 		expect(button()).not.toBeInTheDocument();
 		// The centred status is untouched: the strip on those tabs is today's.
-		expect(screen.getByText("Connected")).toBeInTheDocument();
+		expect(screen.getByText("Engine connected")).toBeInTheDocument();
 	});
 
 	it("is absent with no tab at all", () => {

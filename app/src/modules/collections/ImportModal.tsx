@@ -65,6 +65,7 @@ import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
@@ -316,7 +317,7 @@ export function ImportModal() {
 			// Outside Electron there is no gated channel to read the path
 			// through, and no path here is safe to fetch as a URL instead.
 			patchTab("file", at, {
-				error: "Could not read this file outside the desktop app.",
+				error: "Couldn't read this file outside the desktop app.",
 				phase: "error",
 			});
 			return;
@@ -340,7 +341,7 @@ export function ImportModal() {
 			// refuses - whichever it is, the message it rejected with already
 			// names it in words a user can act on.
 			patchTab("file", at, {
-				error: e instanceof Error ? e.message : "Could not read this file.",
+				error: e instanceof Error ? e.message : "Couldn't read this file.",
 				phase: "error",
 			});
 		}
@@ -445,7 +446,7 @@ export function ImportModal() {
 					relativePath,
 					specPath,
 					text: "",
-					readError: "Could not read file",
+					readError: "Couldn't read the file",
 				});
 			reader.readAsText(file);
 		});
@@ -643,8 +644,8 @@ export function ImportModal() {
 					// Several: the count, because each row carries its own message.
 					error:
 						outcomes.size === 1
-							? (failures[0]?.message ?? "Import failed")
-							: `${failures.length} of ${outcomes.size} files failed to import.`,
+							? (failures[0]?.message ?? "Couldn't import this file")
+							: `Couldn't import ${failures.length} of ${outcomes.size} files.`,
 				},
 			};
 		});
@@ -847,7 +848,7 @@ export function ImportModal() {
 								disabled={!pasteText.trim() || isBusy}
 								className="mt-2"
 							>
-								Detect &amp; Preview
+								Detect and preview
 							</Button>
 						</div>
 					)}
@@ -916,7 +917,7 @@ export function ImportModal() {
 			>
 				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-rule px-5 py-4">
 					<DialogTitle className="text-sm font-bold tracking-tight">
-						Import Collection
+						Import collection
 					</DialogTitle>
 				</DialogHeader>
 
@@ -1141,7 +1142,7 @@ function PreviewView({
 			    examples" is the answer for a file that carried none, which is
 			    different from a preview that does not mention them. */}
 			<p className="text-label text-muted-foreground">
-				{meta.requestCount} requests · {meta.folderCount} folders · {meta.exampleCount}{" "}
+				{meta.requestCount} requests · {meta.folderCount} collections · {meta.exampleCount}{" "}
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
@@ -1244,8 +1245,8 @@ function BatchRow({
 				</span>
 				{result && (
 					<span className="block text-label text-muted-foreground">
-						{result.meta.requestCount} requests · {result.meta.folderCount} folders ·{" "}
-						{result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
+						{result.meta.requestCount} requests · {result.meta.folderCount} collections
+						· {result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
 						environments · {result.meta.globalCount} globals
 					</span>
 				)}
@@ -1314,7 +1315,7 @@ function NoticeList({
 }
 
 function varCountLabel(n: number): string {
-	return `${n} ${n === 1 ? "variable" : "variables"}`;
+	return `${n} ${pluralize(n, "variable")}`;
 }
 
 function TreeNode({

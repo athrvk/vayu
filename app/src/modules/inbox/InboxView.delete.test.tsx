@@ -149,7 +149,9 @@ describe("deleting the inbox the tab shows", () => {
 		expect(await screen.findByText(/2 recorded requests/i)).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 
-		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+		fireEvent.click(
+			within(screen.getByRole("dialog")).getByRole("button", { name: "Delete inbox" })
+		);
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
 	});
 
@@ -158,7 +160,7 @@ describe("deleting the inbox the tab shows", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
-		expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/can.t be undone/i)).not.toBeInTheDocument();
 	});
 
 	/*

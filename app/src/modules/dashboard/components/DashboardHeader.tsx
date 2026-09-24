@@ -91,15 +91,15 @@ function DashboardHeader({
 			{isStreaming ? (
 				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
 					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
-					LIVE
+					Running
 				</span>
 			) : mode === "completed" ? (
 				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
-					COMPLETED
+					Completed
 				</span>
 			) : mode === "stopped" ? (
 				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
-					STOPPED
+					Stopped
 				</span>
 			) : null}
 

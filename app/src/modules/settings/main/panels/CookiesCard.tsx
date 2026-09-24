@@ -33,6 +33,7 @@ import {
 	CardTitle,
 	DeleteConfirmDialog,
 } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useCookiesQuery, useClearCookiesMutation, useEnvironmentsQuery } from "@/queries";
 import { useToastStore } from "@/stores";
 import type { CookieScope } from "@/types";
@@ -85,11 +86,11 @@ export function CookiesCard() {
 				target === "all" ? undefined : { environmentId: target.environmentId }
 			);
 			showToast(
-				`Cleared ${result.cleared} cookie${result.cleared === 1 ? "" : "s"}`,
+				`Cleared ${result.cleared} ${pluralize(result.cleared, "cookie")}`,
 				"success"
 			);
 		} catch {
-			showToast("Could not clear cookies", "error");
+			showToast("Couldn't clear cookies", "error");
 		}
 	};
 

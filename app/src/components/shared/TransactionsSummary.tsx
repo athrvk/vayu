@@ -20,6 +20,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunTransactionSummary } from "@/types/domain";
 
 function formatMs(value: number): string {
@@ -49,9 +50,9 @@ export function TransactionsSummary({ transactions, className }: TransactionsSum
 							<span className="text-muted-foreground">
 								<span className="font-mono">{transaction.name}</span>
 								<span className="ml-1.5 text-xs">
-									({transaction.count} run{transaction.count === 1 ? "" : "s"}
+									({transaction.count} {pluralize(transaction.count, "run")}
 									{transaction.errors > 0
-										? `, ${transaction.errors} error${transaction.errors === 1 ? "" : "s"}`
+										? `, ${transaction.errors} ${pluralize(transaction.errors, "error")}`
 										: ""}
 									)
 								</span>

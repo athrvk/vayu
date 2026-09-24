@@ -117,7 +117,7 @@ describe("History Overview - a load run's test outcomes", () => {
 		);
 
 		expect(screen.getByText("Test Validation")).toBeInTheDocument();
-		expect(screen.getByText("Samples Tested")).toBeInTheDocument();
+		expect(screen.getByText("Samples tested")).toBeInTheDocument();
 		expect(screen.getByText("100")).toBeInTheDocument();
 		expect(screen.getByText("13")).toBeInTheDocument();
 	});

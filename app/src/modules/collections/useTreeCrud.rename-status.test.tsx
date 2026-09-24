@@ -125,7 +125,7 @@ describe("collection tree rename and the shared save status", () => {
 		expect(useSaveStore.getState().status).toBe("error");
 		expect(useToastStore.getState().toasts).toHaveLength(1);
 		expect(useToastStore.getState().toasts[0]).toMatchObject({
-			message: "Request name already taken",
+			message: "Couldn't rename the request - Request name already taken",
 			variant: "error",
 		});
 	});

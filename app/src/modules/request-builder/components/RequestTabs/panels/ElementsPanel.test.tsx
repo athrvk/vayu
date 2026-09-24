@@ -49,7 +49,7 @@ function kindSchema(
 const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
-	kindSchema("script.pre", "Pre-request Script", "script"),
+	kindSchema("script.pre", "Pre-request script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
 	// script.setup / script.teardown (issue #1499): collection-only, so a
 	// request's own Add menu must never offer them.
@@ -264,7 +264,7 @@ describe("ElementsPanel", () => {
 			});
 
 			render(<ElementsPanel />);
-			expandRow("Pre-request Script");
+			expandRow("Pre-request script");
 
 			expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 			expect(screen.getByText("token")).toBeInTheDocument();

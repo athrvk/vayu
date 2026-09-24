@@ -51,6 +51,7 @@ import type { KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { DesignRunSeed } from "./design-run-seed";
 
 /** How one key/value entry differs between the request and the run. */
@@ -250,7 +251,7 @@ function entriesLabel(entries: EntryChange[]): string {
 		const word = [...kinds][0]; // added | removed | changed
 		return `${n} ${word}`;
 	}
-	return `${n} ${n === 1 ? "change" : "changes"}`;
+	return `${n} ${pluralize(n, "change")}`;
 }
 
 /** Field-level state for a key/value field: the single kind, or "changed" if mixed. */
@@ -266,7 +267,7 @@ function changedLineLabel(from: string, to: string): string {
 	const n = Math.max(a.length, b.length);
 	let changed = 0;
 	for (let i = 0; i < n; i++) if ((a[i] ?? "") !== (b[i] ?? "")) changed++;
-	return `${changed} ${changed === 1 ? "line" : "lines"}`;
+	return `${changed} ${pluralize(changed, "line")}`;
 }
 
 /**

@@ -153,19 +153,19 @@ describe("the list", () => {
 	});
 
 	it("says what the delete took with it, so a restore's size is visible", () => {
-		// A folder in the trash is indistinguishable from an empty one without
-		// this - and restoring it is a very different act at 11 requests.
+		// A collection in the trash is indistinguishable from an empty one
+		// without this - and restoring it is a very different act at 11 requests.
 		state.items = [collectionEntry({ collections: 2, requests: 11 })];
 		renderTrash();
 
-		expect(screen.getByText(/with 2 folders, 11 requests/)).toBeInTheDocument();
+		expect(screen.getByText(/with 2 collections, 11 requests/)).toBeInTheDocument();
 	});
 
 	it("does not pluralise a single child", () => {
 		state.items = [collectionEntry({ collections: 1, requests: 1 })];
 		renderTrash();
 
-		expect(screen.getByText(/with 1 folder, 1 request$/)).toBeInTheDocument();
+		expect(screen.getByText(/with 1 collection, 1 request$/)).toBeInTheDocument();
 	});
 
 	it("states the retention window it read from the engine's config", () => {
@@ -173,7 +173,7 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(
-			screen.getByText("Items are deleted for good 30 days after they land here.")
+			screen.getByText("Items are permanently deleted 30 days after they land here.")
 		).toBeInTheDocument();
 	});
 
@@ -182,7 +182,7 @@ describe("the list", () => {
 		state.items = [collectionEntry()];
 		renderTrash();
 
-		expect(screen.queryByText(/deleted for good/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/permanently deleted/)).not.toBeInTheDocument();
 	});
 
 	it("offers the empty state rather than a bare panel", () => {
@@ -269,7 +269,7 @@ describe("delete forever", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 
-		expect(await screen.findByText("Delete forever?")).toBeInTheDocument();
+		expect(await screen.findByText('Delete "Billing" forever?')).toBeInTheDocument();
 		expect(purge).not.toHaveBeenCalled();
 	});
 
@@ -301,7 +301,9 @@ describe("delete forever", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 		fireEvent.click(await screen.findByRole("button", { name: /^Cancel$/ }));
 
-		await waitFor(() => expect(screen.queryByText("Delete forever?")).not.toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.queryByText('Delete "Billing" forever?')).not.toBeInTheDocument()
+		);
 		expect(purge).not.toHaveBeenCalled();
 	});
 

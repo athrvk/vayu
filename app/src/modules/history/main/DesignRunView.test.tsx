@@ -267,11 +267,11 @@ describe("DesignRunView - a run that failed", () => {
 
 		renderView(failed);
 
-		expect(screen.getByText(/could not get a response/i)).toBeTruthy();
+		expect(screen.getByText(/couldn.t resolve the host name/i)).toBeTruthy();
 		// The engine's own words, not a generic "request failed".
 		expect(screen.getAllByText(/could not resolve host/i).length).toBeGreaterThan(0);
 		// ClientErrorView's per-code tip - the hint the brief asks for.
-		expect(screen.getByText(/check if the domain name is correct/i)).toBeTruthy();
+		expect(screen.getByText(/check the domain for typos/i)).toBeTruthy();
 		expect(screen.getByText(/DNS_ERROR/)).toBeTruthy();
 	});
 });
@@ -409,7 +409,7 @@ describe("DesignRunView - saving back to the request", () => {
 	it("offers Save while the request still exists", () => {
 		renderView(designRun());
 
-		expect(screen.getByRole("button", { name: /save this run to the request/i })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /save to request/i })).toBeTruthy();
 	});
 
 	it("shows the auth mode the run recorded, read-only", () => {
@@ -444,7 +444,7 @@ describe("DesignRunView - saving back to the request", () => {
 
 		renderView(designRun());
 
-		expect(screen.queryByRole("button", { name: /save this run to the request/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: /save to request/i })).toBeNull();
 	});
 
 	it("replays the recorded Authorization when the request is gone", async () => {

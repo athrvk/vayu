@@ -126,12 +126,12 @@ describe("PerformanceTab percentile series", () => {
 		// The count above would also hold if the card had silently stopped
 		// rendering - then the transform would run zero times, not twice.
 		const { getByText } = renderTab(withLatency(6));
-		expect(getByText("Response Time Percentiles Over Time")).toBeTruthy();
+		expect(getByText("Response time percentiles over time")).toBeTruthy();
 	});
 
 	it("builds nothing, and hides the card, when no tick reports a p99", () => {
 		const { queryByText } = renderTab(withoutLatency(6));
-		expect(queryByText("Response Time Percentiles Over Time")).toBeNull();
+		expect(queryByText("Response time percentiles over time")).toBeNull();
 		expect(spies.buildPercentileChartData).not.toHaveBeenCalled();
 	});
 
@@ -140,7 +140,7 @@ describe("PerformanceTab percentile series", () => {
 		// `ResponseTimeVsConcurrencyChart`, which builds no percentile series at
 		// all - so the only remaining caller would be a gate.
 		const { getByText } = renderTab(withLatency(6), "ramp_up");
-		expect(getByText("Response Time vs Concurrency")).toBeTruthy();
+		expect(getByText("Response time vs concurrency")).toBeTruthy();
 		expect(spies.buildPercentileChartData).not.toHaveBeenCalled();
 	});
 });

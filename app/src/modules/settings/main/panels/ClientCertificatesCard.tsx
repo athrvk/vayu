@@ -254,9 +254,12 @@ export function ClientCertificatesCard() {
 		} catch (error) {
 			// The engine's message names what is wrong - an unreadable file, a
 			// host that carries a scheme, a target already registered - and it is
-			// the only thing that can, so it is shown rather than replaced.
+			// the only thing that can, so it is kept alongside the fallback
+			// context rather than replaced by it.
 			showToast(
-				error instanceof Error ? error.message : "Could not register the certificate",
+				error instanceof Error
+					? `Couldn't register the certificate - ${error.message}`
+					: "Couldn't register the certificate",
 				"error"
 			);
 		}
@@ -268,7 +271,7 @@ export function ClientCertificatesCard() {
 			await deleteCertificate.mutateAsync(certificate.id);
 			showToast(`Removed the certificate for ${targetLabel(certificate)}`, "success");
 		} catch {
-			showToast("Could not remove the certificate", "error");
+			showToast("Couldn't remove the certificate", "error");
 		}
 	};
 

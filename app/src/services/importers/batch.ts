@@ -53,7 +53,7 @@ import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "
  * about specs. It is **not** applied to a drop or an explicit multi-select:
  * there the user named the files, and dropping one for its extension would be
  * the silent discard this whole change exists to remove. Those arrive as an
- * "Unrecognised format" row instead, which says so.
+ * "Unrecognized format" row instead, which says so.
  */
 export const IMPORTABLE_EXTENSIONS = [".json", ".yaml", ".yml", ".jmx"] as const;
 
@@ -161,7 +161,12 @@ function reporter(onProgress?: (progress: BatchProgress) => void) {
 
 /** A parse or bundle failure, in the words the dialog shows. */
 function failureMessage(e: unknown): string {
-	if (e instanceof UnrecognisedFormatError) return "Unrecognised format";
+	// American spelling for the user-facing row (docs/ux-writing.md); the
+	// engine's own string this error is matched against (`import_document.cpp`)
+	// keeps its British spelling untouched, since that's a comparison key, not
+	// UI text (see `factory.ts`'s `UNRECOGNISED`).
+	if (e instanceof UnrecognisedFormatError)
+		return "Unrecognized format - Vayu reads OpenAPI, Postman, Insomnia and JMeter.";
 	return (e as Error).message;
 }
 
@@ -350,7 +355,7 @@ export async function detectBatch(
 		const bundledInto = key ? (consumed.get(key) ?? null) : null;
 		if (bundledInto) {
 			// Not parsed at all: it is a fragment of somebody else's document, and
-			// "Unrecognised format" would be a false accusation against a file that
+			// "Unrecognized format" would be a false accusation against a file that
 			// imported perfectly well - as part of the spec that named it.
 			return { ...base, result: null, error: null, bundledInto, included: false };
 		}

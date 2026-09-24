@@ -91,7 +91,7 @@ describe("the payload", () => {
 		useSessionStore.setState({ activeEnvironmentId: "env_9" });
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
-		fireEvent.click(screen.getByRole("switch", { name: /include sub-folders/i }));
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
 		fireEvent.change(screen.getByRole("spinbutton", { name: /iterations/i }), {
 			target: { value: "3" },
 		});
@@ -227,7 +227,7 @@ describe("after the engine answers", () => {
 		startRunState.error = new Error("Step 3 'Checkout' failed to compose: unknown variable");
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
-		expect(screen.getByText(/could not start the run/i)).toBeTruthy();
+		expect(screen.getByText(/couldn't start the run/i)).toBeTruthy();
 		expect(screen.getByText(/unknown variable/i)).toBeTruthy();
 	});
 });
@@ -244,7 +244,7 @@ describe("opening it again", () => {
 			<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
 		);
 
-		fireEvent.click(screen.getByRole("switch", { name: /include sub-folders/i }));
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
 		fireEvent.change(screen.getByRole("spinbutton", { name: /iterations/i }), {
 			target: { value: "5" },
 		});

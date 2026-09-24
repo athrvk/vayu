@@ -73,11 +73,11 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 			);
 		}
 		// Both values, not just the true one: whether the run descended into
-		// sub-folders is what decides which requests were in it, so "No" is as
+		// nested collections is what decides which requests were in it, so "No" is as
 		// much of an answer as "Yes" and a missing row would read as neither.
 		if (scenario.recursive != null) {
 			rows.push(
-				<Row key="recursive" label="Sub-folders">
+				<Row key="recursive" label="Nested collections">
 					{scenario.recursive ? "Included" : "Excluded"}
 				</Row>
 			);

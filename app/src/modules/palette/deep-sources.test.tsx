@@ -258,12 +258,12 @@ describe("settings entries", () => {
 		renderPalette();
 		open();
 
-		// "Theme Mode" lives in Appearance; "dark mode" is in its keywords only.
+		// "Theme mode" lives in Appearance; "dark mode" is in its keywords only.
 		typeQuery("dark mode");
 
 		// Across the list, not under "Settings": matching this well is exactly
 		// what gets a row promoted out of its own section.
-		expect(resultRows()).toContain("Theme Mode");
+		expect(resultRows()).toContain("Theme mode");
 	});
 
 	it("does not list a panel twice - the registry already offers every section", () => {

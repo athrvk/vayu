@@ -2098,7 +2098,9 @@ unconditional `title={name}` - the obvious version - pops a tooltip on every
 hover, including names that are already fully readable, telling the user
 something they can see. The tooltip appears when the name is cut off and
 disappears when the drawer is widened enough to read it; `useOverflowTitle`
-re-measures on resize via `ResizeObserver`.
+re-measures on resize via `ResizeObserver`. It renders a block box whatever tag
+it is given: `overflow` and `text-overflow` do nothing on an inline one, so a
+`span` under a non-flex parent never ellipsed at all.
 
 Do not hand-write `title={name}` alongside `truncate`. That is the pattern this
 component replaced, and it drifts - some rows get it, some do not, and the ones
@@ -3017,6 +3019,14 @@ declared surface falls back to the invisible default.
 its right edge. See **Geometry** for why that is a token and not a literal. It
 also clears dialogs at `z-50` on `z-[100]`, which is hit-tested rather than
 assumed, since a dialog portals to `body` while the viewport lives in `#root`.
+
+**The stack is `w-xs` (20rem) at both densities.** Its width is a text measure,
+not rhythm, so it stays off `--spacing`: the `w-80` it replaced was 240px at the
+Default density, a ~160px text column that wrapped `Moved "<name>" to the Trash`
+for almost any name. Inside it, the action sits at its own width (`self-start`
+in the text column, which is a `flex-col` and would otherwise stretch it), and
+the title and message take `break-words`, since the toast is `overflow-hidden`
+and a name can be one unbroken operation id.
 
 Durations are floors, not limits - the primitive pauses them on hover, focus and
 window blur. A failure gets longer than a confirmation because it often carries a

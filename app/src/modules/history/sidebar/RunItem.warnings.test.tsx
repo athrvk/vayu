@@ -50,7 +50,7 @@ describe("RunItem warning glyph", () => {
 			/>
 		);
 		expect(
-			screen.getByRole("img", { name: "This run has warnings - see its report" })
+			screen.getByRole("img", { name: "This run has warnings - see its report." })
 		).toBeInTheDocument();
 	});
 
@@ -64,7 +64,7 @@ describe("RunItem warning glyph", () => {
 			/>
 		);
 		expect(
-			screen.queryByRole("img", { name: "This run has warnings - see its report" })
+			screen.queryByRole("img", { name: "This run has warnings - see its report." })
 		).not.toBeInTheDocument();
 	});
 
@@ -80,7 +80,7 @@ describe("RunItem warning glyph", () => {
 			/>
 		);
 		expect(
-			screen.queryByRole("img", { name: "This run has warnings - see its report" })
+			screen.queryByRole("img", { name: "This run has warnings - see its report." })
 		).not.toBeInTheDocument();
 	});
 
@@ -94,7 +94,7 @@ describe("RunItem warning glyph", () => {
 			/>
 		);
 		expect(
-			screen.queryByRole("img", { name: "This run has warnings - see its report" })
+			screen.queryByRole("img", { name: "This run has warnings - see its report." })
 		).not.toBeInTheDocument();
 	});
 });

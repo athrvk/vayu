@@ -183,7 +183,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 					{firstRead && <SummarySkeleton />}
 
 					{exported.error && (
-						<Callout severity="blocking" title="The document could not be assembled">
+						<Callout severity="blocking" title="Couldn't assemble the document">
 							{errorText(exported.error)}
 						</Callout>
 					)}
@@ -273,7 +273,7 @@ function describe(notes: ExportNotes): { title: string; body?: string } {
 	if (notes.direction === "skeleton") {
 		return {
 			title: "New OpenAPI document",
-			body: "A starting point. Folders, scripts and variables are included so Vayu can re-import it.",
+			body: "A starting point. Collections, scripts and variables are included so Vayu can re-import it.",
 		};
 	}
 	if (notes.boundMode === "full") {

@@ -12,6 +12,8 @@
  * components` is what it is for.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
+
 /**
  * The suffix a deletion needs beyond "removed permanently" (issue #1689).
  *
@@ -41,6 +43,25 @@ export function deleteConfirmCopy(
 	const suffix = scope === "cascade" ? " and everything inside it" : "";
 	return {
 		title: `Delete ${subject}?`,
-		description: `${subject}${suffix} is removed permanently. This cannot be undone.`,
+		description: `${subject}${suffix} is removed permanently. This can't be undone.`,
 	};
+}
+
+/**
+ * The description an environment's delete dialog needs beyond the generic
+ * template (docs/ux-writing.md's calibration example for this exact flow):
+ * how many variables go with it, and that requests using them fall back to
+ * sending the literal `{{token}}` text rather than failing to send at all.
+ * Both environment-delete call sites (the header's own dialog and the
+ * sidebar row menu's) build their description from this one function so
+ * their copy can never drift apart.
+ */
+export function environmentDeleteDescription(environment: {
+	variables: Record<string, unknown>;
+}): string {
+	const count = Object.keys(environment.variables).length;
+	return (
+		`Its ${count} ${pluralize(count, "variable")} ${pluralize(count, "is", "are")} removed. ` +
+		"Requests that use them will send the literal `{{variableName}}` text. This can't be undone."
+	);
 }

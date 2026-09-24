@@ -31,7 +31,7 @@ import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
 import type { Collection } from "@/types";
 
-const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
+const CREATE_FAILED = "Couldn't create the request. Check that Vayu's engine is running.";
 
 /**
  * A request to create with fields already filled in, rather than the blank

@@ -91,7 +91,7 @@ export function generateFetch(
 			}
 			if (prepared.body.files.length > 0) {
 				notes.push(
-					`fetch cannot read a local path: ${prepared.body.files
+					`fetch can't read a local path: ${prepared.body.files
 						.map((f) => f.key)
 						.join(", ")} must be attached as a File or Blob.`
 				);

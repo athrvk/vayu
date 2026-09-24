@@ -76,7 +76,7 @@ export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
 							<span className="font-medium text-warning-text">Host asleep</span>
 							<span className="flex-1 text-muted-foreground">
 								The machine slept for {formatSleepDuration(sleep.durationMs)}; the
-								run could not send during it
+								run couldn't send during it
 							</span>
 							<span className="font-mono text-xs text-muted-foreground">
 								{at(sleep.startSeconds)}

@@ -153,7 +153,9 @@ describe("detectBatch - every picked file gets a row", () => {
 			intake()
 		);
 
-		expect(entries[1]?.error).toBe("Unrecognised format");
+		expect(entries[1]?.error).toBe(
+			"Unrecognized format - Vayu reads OpenAPI, Postman, Insomnia and JMeter."
+		);
 		// Errors are visible but never selected: an import the user did not ask for
 		// is the other half of the honest-refusal rule.
 		expect(entries[1]?.included).toBe(false);
@@ -238,7 +240,7 @@ describe("detectBatch - siblings come from the batch", () => {
 		expect(entries[1]?.bundledInto).toBe("openapi.json");
 		expect(entries[2]?.bundledInto).toBe("openapi.json");
 		// A bare schema map is not a spec: without the mark it would have been an
-		// "Unrecognised format" row, which is a false accusation against a file
+		// "Unrecognized format" row, which is a false accusation against a file
 		// that imported perfectly - as part of the document that referenced it.
 		expect(entries[1]?.error).toBeNull();
 		expect(applicableEntries(entries).map((e) => e.fileName)).toEqual(["openapi.json"]);
@@ -340,7 +342,7 @@ describe("detectBatch - a document the engine could not store", () => {
 
 		expect(entries).toHaveLength(1);
 		expect(entries[0].result).toBeNull();
-		expect(entries[0].error).toMatch(/over the 2048.*maxSpecDocumentBytes/s);
+		expect(entries[0].error).toMatch(/over the 2\.0 KB.*Max OpenAPI Document Size/s);
 		expect(applicableEntries(entries)).toEqual([]);
 	});
 

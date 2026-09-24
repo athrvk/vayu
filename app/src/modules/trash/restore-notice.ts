@@ -27,5 +27,5 @@ import type { RestoreTrashResponse } from "@/types";
  */
 export function restoreNotice(restored: RestoreTrashResponse, name: string): string | null {
 	if (!restored.reparentedToRoot) return null;
-	return `Restored "${name}" to the top level - the folder it was in is gone.`;
+	return `Restored "${name}" to the top level - its parent collection is gone.`;
 }

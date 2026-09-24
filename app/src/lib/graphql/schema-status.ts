@@ -35,10 +35,10 @@ export const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
 	auth: "Credentials were rejected. Check the request's auth, then refresh.",
 	unsupported: "This endpoint does not allow introspection, so only syntax is checked.",
 	http: "The endpoint answered with an error status.",
-	network: "The endpoint could not be reached.",
+	network: "Couldn't reach the endpoint.",
 	parse: "The answer was not an introspection result.",
 	"too-large": "The schema is too large to load.",
-	unknown: "Introspection failed.",
+	unknown: "Couldn't complete introspection.",
 };
 
 export function schemaStatusTitle(entry: SchemaEntry | null): string {

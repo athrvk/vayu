@@ -45,8 +45,14 @@ export function DetailSkeleton({ label, rows = 4, className }: DetailSkeletonPro
 		// gets the label once instead of reading a fake heading and four fake rows.
 		<div className={cn("enter-fade flex-1 p-6", className)} role="status" aria-label={label}>
 			<div className="space-y-3" aria-hidden="true">
-				<Skeleton className="h-6 w-48 rounded-md" />
-				<Skeleton className="h-4 w-72 rounded-md" />
+				{/* `w-[12rem]` / `w-2xs`, not `w-48` / `w-72`: these bars preview a
+				    heading and a subtitle, both text measures, and `w-48`/`w-72` ride
+				    `--spacing` - narrower at the Default density than the text they
+				    stand in for. `w-[12rem]` is a literal rem value because no named
+				    container-scale step sits below `3xs` (16rem); `w-2xs` (18rem)
+				    is the closest step to the subtitle bar's intended 288px. */}
+				<Skeleton className="h-6 w-[12rem] rounded-md" />
+				<Skeleton className="h-4 w-2xs rounded-md" />
 				<div className="space-y-2 pt-4">
 					{Array.from({ length: rows }, (_, i) => (
 						<Skeleton key={i} className="h-9 w-full rounded-md" />

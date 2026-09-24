@@ -138,7 +138,7 @@ export default function DataTab({ collection }: DataTabProps) {
 				setReadFailure(
 					e instanceof DataFileError || e instanceof Error
 						? e.message
-						: "The declared file could not be read - pick it again to compare."
+						: "Couldn't read the declared file - pick it again to compare."
 				);
 			});
 

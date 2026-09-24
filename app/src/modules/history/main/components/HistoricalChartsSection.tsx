@@ -60,7 +60,7 @@ export default function HistoricalChartsSection({
 				<CardContent className="flex items-center justify-center py-12">
 					<div className="flex flex-col items-center gap-2 text-muted-foreground">
 						<Loader2 className="h-8 w-8 animate-spin" />
-						<p>Loading time-series data...</p>
+						<p>Loading time-series data…</p>
 					</div>
 				</CardContent>
 			</Card>
@@ -85,7 +85,7 @@ export default function HistoricalChartsSection({
 				<div className="enter-fade flex items-center gap-2 text-sm text-muted-foreground">
 					<Loader2 className="size-icon animate-spin" />
 					<span>
-						Loading more data... ({progress.loaded.toLocaleString()} /{" "}
+						Loading more data… ({progress.loaded.toLocaleString()} /{" "}
 						{progress.total.toLocaleString()} points)
 					</span>
 				</div>
@@ -93,7 +93,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle>Request Rate (throughput vs send rate)</CardTitle>
+					<CardTitle>Request rate (throughput vs send rate)</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<RequestRateChart
@@ -109,7 +109,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle>Active Connections</CardTitle>
+					<CardTitle>Active connections</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<ConnectionsChart
@@ -125,7 +125,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle>Status Codes Over Time</CardTitle>
+					<CardTitle>Status codes over time</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<StatusCodesOverTimeChart history={data} isCompleted syncKey={SYNC_KEY} />
@@ -137,7 +137,7 @@ export default function HistoricalChartsSection({
 			{monitorSamples.length > 0 && (
 				<Card className="enter-fade">
 					<CardHeader className="pb-2">
-						<CardTitle>Server Vitals</CardTitle>
+						<CardTitle>Server vitals</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<ServerVitalsChart
@@ -157,7 +157,7 @@ export default function HistoricalChartsSection({
 			{data.some(hasCustomMetrics) && (
 				<Card className="enter-fade">
 					<CardHeader className="pb-2">
-						<CardTitle>Custom Metrics</CardTitle>
+						<CardTitle>Custom metrics</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<CustomMetricsChart history={data} isCompleted syncKey={SYNC_KEY} />

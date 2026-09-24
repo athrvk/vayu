@@ -25,10 +25,10 @@ export function DroppedRequestsCard({
 
 	return (
 		<HeroCardShell
-			label="Dropped Requests"
+			label="Dropped requests"
 			tip={
 				<>
-					Requests the generator could not submit because its in-flight pool filled up.
+					Requests the generator couldn't submit because its in-flight pool filled up.
 					Root cause is usually slow server responses tying up curl handles. Lowering{" "}
 					<code>targetRps</code> or raising <code>maxInFlight</code> defers drops in
 					exchange for higher queue wait - but the server is still the bottleneck.

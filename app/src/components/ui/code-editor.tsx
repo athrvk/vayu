@@ -143,7 +143,7 @@ export interface CodeEditorProps {
 	value: string;
 	language: string;
 	/**
-	 * What this editor is, for a screen reader - "Request body", "Test script".
+	 * What this editor is, for a screen reader - "Request body", "Post-request script".
 	 *
 	 * Required rather than optional, and per call site rather than derived from
 	 * `language`: two editors can share a language and never the same job (the
@@ -236,7 +236,7 @@ export function CodeEditor({
 			<div role="alert" style={{ height }} className={className}>
 				<ErrorState
 					variant="inline"
-					title="Editor failed to load. Reopen the app to try again."
+					title="Couldn't load the editor. Reopen the app to try again."
 					className="h-full p-3"
 				/>
 			</div>

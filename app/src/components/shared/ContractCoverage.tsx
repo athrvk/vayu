@@ -32,6 +32,7 @@
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { httpStatusClass, STATUS_CLASS_STYLE } from "@/constants/http-status";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunCoverage, RunCoverageOperation } from "@/types/domain";
 
 export interface ContractCoverageProps {
@@ -96,13 +97,9 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 					{coverage.declaredResponsesHit} of {coverage.declaredResponsesTotal} declared
 					responses seen ({formatPct(coverage.declaredResponseCoveragePct)}).
 					{coverage.undeclaredStatusesSeen > 0 &&
-						` ${coverage.undeclaredStatusesSeen} undeclared status${
-							coverage.undeclaredStatusesSeen === 1 ? "" : "es"
-						} observed.`}
+						` ${coverage.undeclaredStatusesSeen} ${pluralize(coverage.undeclaredStatusesSeen, "undeclared status", "undeclared statuses")} observed.`}
 					{coverage.undeclaredOperationRequests !== undefined &&
-						` ${coverage.undeclaredOperationRequests} request${
-							coverage.undeclaredOperationRequests === 1 ? "" : "s"
-						} went to operations this document does not declare.`}
+						` ${coverage.undeclaredOperationRequests} ${pluralize(coverage.undeclaredOperationRequests, "request")} went to operations this document does not declare.`}
 				</p>
 				{/*
 				 * Every number above and below is exact. Said here rather than
@@ -211,9 +208,7 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 				{operation.statusesTruncated !== undefined && (
 					<span
 						className="text-xs text-muted-foreground"
-						title={`${operation.statusesTruncated} more status${
-							operation.statusesTruncated === 1 ? "" : "es"
-						} observed and not shown - the per-operation status list is capped`}
+						title={`${operation.statusesTruncated} ${pluralize(operation.statusesTruncated, "more status", "more statuses")} observed and not shown - the per-operation status list is capped`}
 					>
 						+{operation.statusesTruncated} more
 					</span>

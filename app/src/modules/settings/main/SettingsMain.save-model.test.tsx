@@ -140,6 +140,23 @@ describe("the save-model statement", () => {
 		expect(screen.getByRole("button", { name: /Save Changes/i })).toBeInTheDocument();
 		expect(screen.getByText(/staged here and written when you save/i)).toBeInTheDocument();
 	});
+
+	it("gives the header text its own column, so it never runs into the Save bar", () => {
+		// jsdom has no layout, so this reads the rendered classes. Without the gap
+		// and the shrinkable text column, Core's description wrapped flush against
+		// "Reset to defaults" in the running app.
+		renderCategory("general_engine");
+
+		const text = screen.getByRole("heading", { level: 1 }).parentElement!;
+		const buttons = screen.getByRole("button", { name: /Save Changes/i }).parentElement!;
+		const row = text.parentElement!;
+		expect(buttons.parentElement).toBe(row);
+		expect(row.className).toMatch(/\bgap-x-4\b/);
+		expect(row.className).toMatch(/\bflex-wrap\b/);
+		expect(text.className).toMatch(/\bmin-w-0\b/);
+		expect(text.className).toMatch(/\bflex-1\b/);
+		expect(buttons.className).toMatch(/\bshrink-0\b/);
+	});
 });
 
 describe("the engine category registry", () => {

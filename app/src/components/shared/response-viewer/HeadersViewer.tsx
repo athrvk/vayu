@@ -98,7 +98,7 @@ export default function HeadersViewer({
 					)}
 				</div>
 				<h3 className={EYEBROW_CLASS}>
-					{title || (variant === "response" ? "Response Headers" : "Request Headers")}
+					{title || (variant === "response" ? "Response headers" : "Request headers")}
 				</h3>
 				<Badge variant="outline" className="ml-auto text-xs">
 					{entries.length}

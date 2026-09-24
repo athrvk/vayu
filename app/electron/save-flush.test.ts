@@ -305,7 +305,7 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 			failed: 1,
 			pending: 0,
 		});
-		expect(closePrompt.message).toContain("One edit");
+		expect(closePrompt.message).toContain("one edit");
 		expect(closePrompt.buttons).toEqual(["Close anyway", "Keep working"]);
 	});
 

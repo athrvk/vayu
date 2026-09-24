@@ -409,9 +409,9 @@ function DiffReport({
 			</div>
 
 			{unresolvedRefs > 0 && (
-				<Callout severity="warning" title="Some references could not be read">
+				<Callout severity="warning" title="Couldn't read some references">
 					{unresolvedRefs} reference{unresolvedRefs === 1 ? "" : "s"} to another file
-					could not be followed, so whatever they describe is missing from this
+					couldn&apos;t be followed, so whatever they describe is missing from this
 					comparison.
 				</Callout>
 			)}

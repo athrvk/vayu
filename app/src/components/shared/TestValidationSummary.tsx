@@ -70,7 +70,7 @@ export function TestValidationSummary({
 					<>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
-								<p className="text-sm text-muted-foreground">Samples Tested</p>
+								<p className="text-sm text-muted-foreground">Samples tested</p>
 								<p className="font-bold">{testValidation.samplesTested}</p>
 							</div>
 							<div>
@@ -86,7 +86,7 @@ export function TestValidationSummary({
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Success Rate</p>
+								<p className="text-sm text-muted-foreground">Success rate</p>
 								<p className="font-bold">
 									{testValidation.successRate.toFixed(1)}%
 								</p>
@@ -110,7 +110,7 @@ export function TestValidationSummary({
 				{hasFailures && (
 					<div className={cn("space-y-1", testValidation && "mt-4")}>
 						<p className="text-xs font-medium text-muted-foreground">
-							Failed Tests
+							Failed tests
 							{failuresTotal !== undefined && (
 								<span className="ml-1">({failuresTotal})</span>
 							)}

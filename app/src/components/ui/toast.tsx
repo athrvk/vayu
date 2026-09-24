@@ -73,8 +73,12 @@ function ToastViewport({
 				 * "Connected" and the version string. Measured: viewport bottom at
 				 * 704px against a Dock top of 688px. The same trap waits at the top
 				 * edge, where the tab strip lives.
+				 *
+				 * `w-xs` (20rem, Tailwind's container scale) rather than `w-80`: the
+				 * width is a text measure, not rhythm, and `w-80` rides `--spacing`,
+				 * which made the stack 240px at the Default density.
 				 */
-				"fixed z-[100] flex max-h-screen w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
+				"fixed z-[100] flex max-h-screen w-xs max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
 				/*
 				 * The edge offsets are no longer here: the stack is user-positioned
 				 * (Settings -> Notifications), so which corner it anchors to and
@@ -156,7 +160,7 @@ function ToastTitle({ className, ...props }: React.ComponentProps<typeof ToastPr
 	return (
 		<ToastPrimitives.Title
 			data-slot="toast-title"
-			className={cn("text-sm font-medium leading-snug", className)}
+			className={cn("text-sm font-medium leading-snug break-words", className)}
 			{...props}
 		/>
 	);
@@ -169,7 +173,7 @@ function ToastDescription({
 	return (
 		<ToastPrimitives.Description
 			data-slot="toast-description"
-			className={cn("text-sm leading-snug", className)}
+			className={cn("text-sm leading-snug break-words", className)}
 			{...props}
 		/>
 	);
@@ -182,7 +186,7 @@ function ToastAction({ className, ...props }: React.ComponentProps<typeof ToastP
 			// `h-control-sm` (issue #1679, 24px - was `h-7`/21px, under the WCAG
 			// 2.2 SC 2.5.8 floor).
 			className={cn(
-				"mt-1.5 inline-flex h-control-sm shrink-0 items-center rounded-md border border-border px-2.5",
+				"mt-1.5 inline-flex h-control-sm shrink-0 items-center self-start rounded-md border border-border px-2.5",
 				"text-xs font-medium transition-colors hover:bg-muted",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-popover",
 				className

@@ -2887,6 +2887,10 @@ never turn into a `500`.
   asked for) and the size when the upstream declared one.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
   (connection error, transport failure).
+- `502` `The server answered HTTP <status>` - the upstream answered, but with a
+  status outside `2xx`. Its body is not the document, so it is not returned as
+  `content`: handed on, a `404` or `500` page would reach the format reader and
+  be reported as an unrecognised format.
 
 **With `Accept: text/event-stream` the same fetch answers as a stream**
 (issue [#882](https://github.com/athrvk/vayu/issues/882)), reporting the

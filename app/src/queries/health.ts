@@ -178,7 +178,9 @@ export function useHealthQuery() {
 				return;
 			}
 			const errorMessage =
-				query.error instanceof Error ? query.error.message : "Cannot connect to engine";
+				query.error instanceof Error
+					? query.error.message
+					: "Couldn't connect to Vayu's engine.";
 			setEngineError(errorMessage);
 			// The transition, never each failed poll (#1358): a poll that fails is
 			// already on the fast cadence, so re-posting would put one notification

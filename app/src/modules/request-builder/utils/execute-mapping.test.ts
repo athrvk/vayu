@@ -139,7 +139,7 @@ describe("execIdentity", () => {
 		const request = createDefaultRequestState();
 		expect(request.id).toBeNull();
 
-		expect(execIdentity(request)).toEqual({ requestName: "Untitled Request" });
+		expect(execIdentity(request)).toEqual({ requestName: "Untitled request" });
 	});
 
 	it("omits the field entirely for an unnamed request", () => {

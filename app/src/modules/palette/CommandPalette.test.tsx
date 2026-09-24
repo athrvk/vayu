@@ -37,6 +37,7 @@ import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands"
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
 import { chordKeys, isMac } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/format-time";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { RECENT_LIMIT } from "./ranking";
 
 /**
@@ -284,11 +285,13 @@ describe("searching", () => {
 		expect(rowsUnder("Quick actions")).toContain("Import collection");
 		// Suggestions are not results: the announcement still says the query
 		// narrowed everything away.
-		expect(screen.getByText(/searchable results$/).textContent).toBe("0 searchable results");
+		expect(screen.getByText(/searchable results?$/).textContent).toBe(
+			`0 searchable ${pluralize(0, "result")}`
+		);
 	});
 
 	/*
-	 * The reported symptom (#1175), end to end. "theme" scores Theme Mode at
+	 * The reported symptom (#1175), end to end. "theme" scores Theme mode at
 	 * 0.99 and the request rows at 0.01-0.10, and the user saw the requests:
 	 * the sections rendered in a fixed order no score could cross. Put the
 	 * wrapper back in charge - drop the promotion in `ranking.ts` - and the
@@ -300,7 +303,7 @@ describe("searching", () => {
 
 		typeQuery("theme");
 
-		expect(visibleRows()[0]).toBe("Theme Mode");
+		expect(visibleRows()[0]).toBe("Theme mode");
 		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
 			(el) => el.textContent
 		);
@@ -335,8 +338,10 @@ describe("searching", () => {
 
 		typeQuery("theme");
 
-		const announced = screen.getByText(/searchable results$/).textContent ?? "";
-		expect(announced).toBe(`${visibleRows().length} searchable results`);
+		const announced = screen.getByText(/searchable results?$/).textContent ?? "";
+		expect(announced).toBe(
+			`${visibleRows().length} searchable ${pluralize(visibleRows().length, "result")}`
+		);
 	});
 
 	it("switches to an open tab rather than opening a second one", async () => {
@@ -486,8 +491,10 @@ describe("the launcher sections", () => {
 		renderPalette();
 		open();
 
-		const announced = screen.getByText(/^\d+ results$/).textContent ?? "";
-		expect(announced).toBe(`${visibleRows().length} results`);
+		const announced = screen.getByText(/^\d+ results?$/).textContent ?? "";
+		expect(announced).toBe(
+			`${visibleRows().length} ${pluralize(visibleRows().length, "result")}`
+		);
 	});
 
 	it("caps Recents, keeping the newest", () => {
@@ -598,7 +605,7 @@ describe("the launcher sections", () => {
 
 		const footer = document.querySelector('[data-slot="command-footer"]')!;
 		expect(footer).toBeInTheDocument();
-		expect(footer.textContent).toContain("navigate");
+		expect(footer.textContent).toContain("Navigate");
 		// Inside `CommandList` the hints would scroll away with the results
 		// they describe - which is the whole reason the band exists (#773).
 		expect(footer.closest('[data-slot="command-list"]')).toBeNull();

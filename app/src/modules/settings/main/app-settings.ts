@@ -91,9 +91,8 @@ export const APP_SETTINGS = [
 	{
 		anchor: "workspace-backup",
 		panel: "general",
-		label: "Workspace backup",
-		searchText:
-			"Take a complete copy of the workspace database, and where the snapshot was written.",
+		label: "Backup",
+		searchText: "Take a complete copy of the database and show where the snapshot was written.",
 		keywords: ["backup", "snapshot", "restore", "export database", "copy"],
 	},
 	{
@@ -107,7 +106,7 @@ export const APP_SETTINGS = [
 	{
 		anchor: "storage-paths",
 		panel: "general",
-		label: "Storage Paths",
+		label: "Storage paths",
 		searchText: "Where the app keeps its data, database and logs on disk.",
 		keywords: ["directory", "folder", "location", "logs"],
 	},
@@ -123,14 +122,14 @@ export const APP_SETTINGS = [
 	{
 		anchor: "theme-mode",
 		panel: "appearance",
-		label: "Theme Mode",
+		label: "Theme mode",
 		searchText: "The app's light or dark palette, or following the operating system.",
 		keywords: ["dark mode", "light mode", "night"],
 	},
 	{
 		anchor: "color-scheme",
 		panel: "appearance",
-		label: "Color Scheme",
+		label: "Color scheme",
 		searchText: "The accent color used by buttons, highlights and primary UI elements.",
 		keywords: ["accent", "colour", "primary"],
 	},

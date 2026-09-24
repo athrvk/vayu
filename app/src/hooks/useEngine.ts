@@ -63,7 +63,7 @@ export function useEngine(): UseEngineReturn {
 				return result;
 			} catch (err) {
 				const errorMessage =
-					err instanceof Error ? err.message : "Failed to connect to engine";
+					err instanceof Error ? err.message : "Couldn't connect to the engine.";
 				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
 
 				setError(errorMessage);
@@ -92,7 +92,10 @@ export function useEngine(): UseEngineReturn {
 			await apiService.stopRun(runId);
 			return true;
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : "Failed to stop load test";
+			const errorMessage =
+				err instanceof Error
+					? `Couldn't stop the load test - ${err.message}`
+					: "Couldn't stop the load test.";
 			setError(errorMessage);
 			return false;
 		}

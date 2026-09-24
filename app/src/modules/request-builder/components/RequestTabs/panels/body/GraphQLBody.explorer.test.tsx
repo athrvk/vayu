@@ -434,7 +434,7 @@ describe("what the pane says out loud", () => {
 		const view = mount("");
 		insert("Subscription (not executable)", "postAdded");
 
-		expect(view.announcement()).toContain("Subscriptions cannot be run here");
+		expect(view.announcement()).toContain("Subscriptions can't be run here");
 		expect(view.bodies).toHaveLength(0);
 	});
 
@@ -502,8 +502,8 @@ describe("what the pane says out loud", () => {
 		// The live region still says it; the point is that a sighted user now
 		// sees why the click did nothing.
 		const notice = screen.getByTestId("explorer-notice");
-		expect(notice.textContent).toContain("Subscriptions cannot be run here");
-		expect(view.announcement()).toContain("Subscriptions cannot be run here");
+		expect(notice.textContent).toContain("Subscriptions can't be run here");
+		expect(view.announcement()).toContain("Subscriptions can't be run here");
 	});
 
 	it("clears the refusal once an insertion lands, so it answers this click", () => {

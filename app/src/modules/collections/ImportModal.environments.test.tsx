@@ -107,7 +107,7 @@ function selectTab(name: RegExp) {
 async function pasteAndPreview(raw: string) {
 	selectTab(/Paste JSON/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: raw } });
-	fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 	await waitFor(() => expect(screen.getByRole("button", { name: /^Import/i })).toBeVisible());
 }
 
@@ -124,7 +124,7 @@ describe("ImportModal with a Postman environment export", () => {
 		expect(screen.getByText("Sample Staging")).toBeVisible();
 		expect(screen.getByText("5 variables")).toBeVisible();
 		expect(
-			screen.getByText(/0 requests · 0 folders · 0 examples · 1 environments/)
+			screen.getByText(/0 requests · 0 collections · 0 examples · 1 environments/)
 		).toBeVisible();
 	});
 

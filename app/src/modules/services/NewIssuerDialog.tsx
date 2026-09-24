@@ -83,8 +83,10 @@ function parseClaims(text: string): { claims?: Record<string, unknown>; error?: 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(trimmed);
-	} catch (error) {
-		return { error: error instanceof Error ? error.message : "Claims must be valid JSON" };
+	} catch (e) {
+		return {
+			error: e instanceof Error ? `Invalid JSON: ${e.message}` : "Claims must be valid JSON",
+		};
 	}
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
 		return { error: 'Claims must be a JSON object, e.g. {"sub": "alice"}' };
@@ -130,7 +132,12 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 			{
 				onSuccess: (issuer) => {
 					onStarted?.(issuer.issuerId);
-					showToast("Mock issuer started", "success");
+					// The start reply carries the URLs but not the port on its own
+					// (`StartMockIssuerResponse`) - `issuerUrl` is where it lives.
+					showToast(
+						`OAuth issuer started on port ${new URL(issuer.issuerUrl).port}`,
+						"success"
+					);
 					onOpenChange(false);
 				},
 			}
@@ -184,7 +191,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 						</div>
 						<FieldError id="new-issuer-expiry-error">
 							{!expiresInValid &&
-								`A whole number of seconds, 1 to ${MAX_EXPIRES_IN_SECONDS}.`}
+								`A whole number of seconds, 1 to ${MAX_EXPIRES_IN_SECONDS.toLocaleString()}.`}
 						</FieldError>
 					</div>
 
@@ -201,7 +208,16 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 								setFailureMode(value as MockIssuerFailureMode)
 							}
 						>
-							<SelectTrigger id="new-issuer-failure-mode" className="w-40 shrink-0">
+							<SelectTrigger
+								id="new-issuer-failure-mode"
+								/*
+								 * `w-40` rode `--spacing`: at the Default density it rendered
+								 * as 120px, and "Invalid client" (the longest option) truncated
+								 * to "Invalid cl…". `w-[10rem]` is the fixed 160px the trigger
+								 * needs to hold every label, at both densities.
+								 */
+								className="w-[10rem] shrink-0"
+							>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -240,7 +256,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 							</div>
 							<FieldError id="new-issuer-slow-error">
 								{!slowMsValid &&
-									`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+									`A whole number of milliseconds, 0 to ${MAX_SLOW_MS.toLocaleString()}.`}
 							</FieldError>
 						</div>
 					)}
@@ -270,7 +286,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 					    is - a toast would take the message away from the form the
 					    user has to correct. */}
 					{engineError && (
-						<Callout severity="blocking" title="Could not start the issuer">
+						<Callout severity="blocking" title="Couldn't start the issuer">
 							{engineError instanceof Error ? engineError.message : "Unknown error"}
 						</Callout>
 					)}

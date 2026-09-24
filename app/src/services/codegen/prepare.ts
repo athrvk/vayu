@@ -64,7 +64,7 @@ export interface PreparedRequest {
 
 /** What a mode's credentials are called, for the note when we cannot send them. */
 const UNREPRODUCIBLE_AUTH: Record<string, string> = {
-	oauth2: "OAuth 2.0 - the engine fetches and attaches the token at send time",
+	oauth2: "OAuth 2.0 - Vayu's engine fetches and attaches the token at send time",
 	digest: "Digest - the challenge/response happens on the wire",
 	aws: "AWS Signature - the signature covers this exact request and is computed at send time",
 	ntlm: "NTLM - the handshake happens on the wire",

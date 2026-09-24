@@ -8,6 +8,7 @@
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { pluralize } from "../../utils/format";
 
 /**
  * What a streaming load run's transfers delivered - from `report.stream`
@@ -74,8 +75,12 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				</p>
 			) : stream.capped > 0 ? (
 				<p className="text-label text-muted-foreground">
-					{fmtCount(stream.capped)} of {fmtCount(stream.completions)} streams were ended
-					by a cap; the rest were closed by the server.
+					{fmtCount(stream.capped)} of {fmtCount(stream.completions)}{" "}
+					{pluralize(stream.completions, "stream")}{" "}
+					{pluralize(stream.capped, "was", "were")} ended by a cap
+					{stream.capped < stream.completions
+						? "; the rest were closed by the server."
+						: "."}
 				</p>
 			) : (
 				<p className="text-label text-muted-foreground">

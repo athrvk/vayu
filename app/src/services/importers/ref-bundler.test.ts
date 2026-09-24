@@ -322,7 +322,7 @@ describe("bundleExternalRefs - the engine's cap", () => {
 		).rejects.toThrow(SpecBundleTooLargeError);
 		await expect(
 			bundleExternalRefs(entryRaw, { maxBytes: 2048, parseDocument, readSibling })
-		).rejects.toThrow(/over the 2048 one document may hold.*maxSpecDocumentBytes/s);
+		).rejects.toThrow(/over the 2\.0 KB one document may hold.*Max OpenAPI Document Size/s);
 	});
 
 	/**
@@ -340,7 +340,7 @@ describe("bundleExternalRefs - the engine's cap", () => {
 		).rejects.toThrow(SpecBundleTooLargeError);
 		await expect(
 			bundleExternalRefs(oversized, { maxBytes: 2048, parseDocument, readSibling })
-		).rejects.toThrow(/The spec is 4096 bytes, over the 2048.*maxSpecDocumentBytes/s);
+		).rejects.toThrow(/The spec is 4\.0 KB, over the 2\.0 KB.*Max OpenAPI Document Size/s);
 		// Before parse, and before a single ref is followed: the point of moving
 		// the check is that nothing downstream runs on a document that cannot be
 		// stored.

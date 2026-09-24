@@ -61,7 +61,7 @@ function kindSchema(kind: string, label: string): ElementKindSchema {
 }
 
 const KINDS: ElementKindSchema[] = [
-	kindSchema("script.pre", "Pre-request Script"),
+	kindSchema("script.pre", "Pre-request script"),
 	kindSchema("extract.json", "Extract JSON"),
 ];
 
@@ -110,7 +110,7 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		renderNotice({ collectionId: "leaf" });
 
 		expect(screen.getByText("Acme")).toBeInTheDocument();
-		expect(screen.getByText("Pre-request Script")).toBeInTheDocument();
+		expect(screen.getByText("Pre-request script")).toBeInTheDocument();
 	});
 
 	it("skips a disabled element", () => {
@@ -156,7 +156,7 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		renderNotice({ collectionId: "root" });
 
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
-		expect(screen.getByText("A collection will run before your own.")).toBeInTheDocument();
+		expect(screen.getByText("1 element is inherited from a collection.")).toBeInTheDocument();
 	});
 
 	it("falls back to the raw kind string when the catalogue has no label for it", () => {
