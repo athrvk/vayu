@@ -35,6 +35,36 @@ import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
+/**
+ * Display labels for `report.errors.types` keys (`error_type_name` in the
+ * engine's `load_strategy.cpp`, one entry per `vayu::ErrorCode`).
+ *
+ * Not `errorType.replace(/_/g, " ")` through `capitalize`: that renders
+ * protocol acronyms as "Ssl Error" / "Dns Failed" / "Invalid Url", losing
+ * the casing SSL/DNS/URL carry everywhere else in the UI. A key this map
+ * does not carry (a future `ErrorCode`) falls back to the same
+ * underscore-to-space, sentence-cased rendering rather than the raw token.
+ */
+const ERROR_TYPE_LABELS: Record<string, string> = {
+	timeout: "Timeout",
+	connection_failed: "Connection failed",
+	dns_failed: "DNS failed",
+	ssl_error: "SSL error",
+	invalid_url: "Invalid URL",
+	invalid_method: "Invalid method",
+	script_error: "Script error",
+	data_binding_failed: "Data binding failed",
+	proxy_error: "Proxy error",
+	internal_error: "Internal error",
+	unknown: "Unknown",
+};
+
+function errorTypeLabel(errorType: string): string {
+	if (ERROR_TYPE_LABELS[errorType]) return ERROR_TYPE_LABELS[errorType];
+	const spaced = errorType.replace(/_/g, " ");
+	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export default function OverviewTab({ report, runId, derived, anomalies }: TabProps) {
 	// Read by run id rather than passed down: `PerformanceTab` reads the same
 	// list for the chart marks, and one prop drilled through `LoadTestDetail`
@@ -204,9 +234,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 										key={errorType}
 										className="flex justify-between items-center p-2 bg-muted rounded-md text-sm"
 									>
-										<span className="capitalize">
-											{errorType.replace(/_/g, " ")}
-										</span>
+										<span>{errorTypeLabel(errorType)}</span>
 										<span className="font-medium">
 											{formatNumber(count as number)}
 										</span>
@@ -229,7 +257,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 											>
 												<span className="font-mono">
 													{code === "0"
-														? "Network/connection"
+														? "No response (status 0)"
 														: `HTTP ${code}`}
 												</span>
 												<span className="font-medium">
