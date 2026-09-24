@@ -131,7 +131,9 @@ describe("SelectSettingRow - the compact variant", () => {
 	it("keeps the trigger's fixed width by default", () => {
 		render(<SelectSettingRow label="Field" value="body" onChange={vi.fn()} options={ONE} />);
 
-		expect(screen.getByRole("combobox", { name: "Field" }).className).toContain("w-48");
+		expect(screen.getByRole("combobox", { name: "Field" }).className).toContain(
+			"max-w-[12rem]"
+		);
 	});
 
 	it("lets a compact trigger fill whatever holds it", () => {
@@ -141,7 +143,7 @@ describe("SelectSettingRow - the compact variant", () => {
 
 		const trigger = screen.getByRole("combobox", { name: "Field" });
 		expect(trigger.className).toContain("w-full");
-		expect(trigger.className).not.toContain("w-48");
+		expect(trigger.className).not.toContain("max-w-[12rem]");
 	});
 });
 

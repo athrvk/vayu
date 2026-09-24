@@ -283,9 +283,9 @@ interface SelectSettingRowProps {
 	disabled?: boolean;
 	/**
 	 * The denser variant - see {@link ToggleRow}'s `compact`. The trigger drops
-	 * the `w-48` cap with it, because a compact row is laid out by whatever
-	 * holds it (a half-width grid column in the element card's form), and a
-	 * fixed width there would overflow the column rather than fill it.
+	 * the `max-w-[12rem]` cap with it, because a compact row is laid out by
+	 * whatever holds it (a half-width grid column in the element card's form),
+	 * and a fixed width there would overflow the column rather than fill it.
 	 */
 	compact?: boolean;
 }
@@ -305,12 +305,14 @@ interface SelectSettingRowProps {
  * reader, because Radix renders a button whose text is the *chosen option*, not
  * the setting.
  *
- * The trigger's width is the row's, not the caller's: `w-48` is what
- * {@link NumberSettingRow}'s input already caps at (`max-w-[12rem]`), so the
- * two control types line up down an engine settings card instead of ending at
- * different places. It holds every option label the two consumers have -
- * "From environment", the longest, at ~16 characters - so a knob would be a
- * setting with one value.
+ * The trigger's width is the row's, not the caller's: `max-w-[12rem]` is what
+ * {@link NumberSettingRow}'s input already caps at, so the two control types
+ * line up down an engine settings card instead of ending at different places.
+ * It holds every option label the two consumers have - "From environment",
+ * the longest, at ~16 characters - so a knob would be a setting with one
+ * value. It was `w-48` until that rode `--spacing`: at the Default density
+ * 144px, 48px short of the input's fixed 192px cap, so the two stopped
+ * lining up.
  */
 export function SelectSettingRow({
 	label,
@@ -341,7 +343,7 @@ export function SelectSettingRow({
 			<Select value={value} onValueChange={onChange} disabled={disabled}>
 				<SelectTrigger
 					id={triggerId}
-					className={cn("text-sm", compact ? "h-8 w-full" : "h-9 w-48")}
+					className={cn("text-sm", compact ? "h-8 w-full" : "h-9 max-w-[12rem]")}
 					aria-label={label}
 					aria-describedby={description ? descriptionId : undefined}
 				>
@@ -452,7 +454,7 @@ interface NumberSettingRowProps {
 	/**
 	 * The denser variant - see {@link ToggleRow}'s `compact`. The input drops
 	 * its `max-w-[12rem]` with it and fills the row instead, for the same
-	 * reason {@link SelectSettingRow}'s trigger drops `w-48`.
+	 * reason {@link SelectSettingRow}'s trigger drops its own `max-w-[12rem]`.
 	 */
 	compact?: boolean;
 }
