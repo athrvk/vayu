@@ -29,6 +29,21 @@
  */
 export const APP_USER_MODEL_ID = "io.github.athrvk.vayu";
 
+/**
+ * The name Electron itself thinks the app has - `app.getName()`'s default is
+ * `package.json`'s `name` field, `"vayu-client"` (the npm package), not
+ * `electron-builder.json`'s `productName`, `"Vayu"` (the packaged bundle's
+ * display name). electron-builder patches the *bundle* - Info.plist, the
+ * Windows executable's metadata - but never the asar's `package.json`, so
+ * `app.getName()` keeps returning the npm name at runtime on every platform,
+ * dev and packaged alike. macOS is where this is visible: the app menu's
+ * label and its "About Vayu" / "Quit Vayu" roles are titled from `app.name`,
+ * so without this every one of them read "vayu-client" instead. Must equal
+ * `productName` in `electron-builder.json` - `app-name.test.ts` compares the
+ * two so they cannot drift.
+ */
+export const APP_NAME = "Vayu";
+
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
 export const ENGINE_PORT = 9876;
