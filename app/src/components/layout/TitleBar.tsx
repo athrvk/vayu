@@ -390,7 +390,11 @@ function EnvSwitcher() {
 						// rounded-md, not rounded-full: this is an interactive control,
 						// so its corners follow the Appearance → Roundedness setting.
 						// rounded-full is reserved for non-interactive indicators.
-						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
+						// `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-44`:
+						// this bounds how long an environment name can grow before it
+						// truncates, not chrome rhythm, and `max-w-44` rode `--spacing`,
+						// truncating names shorter at the Default density.
+						"flex items-center gap-1.5 max-w-3xs text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
 						// Explicit property list, not `transition-colors`: a hand-rolled
 						// button carries no `[data-slot="button"]`, so it misses the
 						// baseline's `scale` press-feedback transition (`index.css`) -
@@ -435,7 +439,9 @@ function EnvSwitcher() {
 					<ChevronDown className="size-icon-sm shrink-0" />
 				</button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="min-w-44">
+			{/* `min-w-3xs` (16rem, Tailwind's container scale), not `min-w-44`: see
+			    the switcher pill above - the same rode-`--spacing` bug. */}
+			<DropdownMenuContent align="end" className="min-w-3xs">
 				<DropdownMenuItem
 					onClick={() => void createNewEnvironment()}
 					// `group`: the menu item is the owner whose hover the glyph
