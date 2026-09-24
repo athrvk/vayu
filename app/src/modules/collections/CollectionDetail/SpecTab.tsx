@@ -157,7 +157,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const bindSpec = useBindSpecMutation();
 
 	const [picked, setPicked] = useState<PickedSpec | null>(null);
-	const [pickError, setPickError] = useState<string | null>(null);
+	// `title` carries which of the two failure sources this is: a local file
+	// that didn't read, or a URL fetch that never got a document back. Both
+	// land here rather than in `describeQuery` because that query only ever
+	// runs once a document's bytes are already in hand (issue #869) - the two
+	// cases above it are Vayu never having bytes to describe.
+	const [pickError, setPickError] = useState<{ title: string; message: string } | null>(null);
 	const [url, setUrl] = useState("");
 	const [exporting, setExporting] = useState(false);
 	const [fetching, setFetching] = useState(false);
@@ -221,7 +226,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				path: window.electronAPI?.getFilePath(file) ?? "",
 			});
 		};
-		reader.onerror = () => setPickError("Couldn't read that file.");
+		reader.onerror = () =>
+			setPickError({ title: "Couldn't read that file", message: "Couldn't read that file." });
 		reader.readAsText(file);
 	};
 
@@ -233,7 +239,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			const { content } = await apiService.importFetch(url, specMaxBytes);
 			setPicked({ content, token: nextPickToken(), sourceUrl: url });
 		} catch (e) {
-			setPickError((e as Error).message);
+			// A fetch that never got a document back - a bad host, a refused
+			// connection, the engine itself unreachable - is not a document that
+			// failed to read: nothing was ever read. Kept apart from
+			// `describeQuery`'s "Couldn't read that document" below, which only
+			// fires once bytes are already in hand.
+			setPickError({ title: "Couldn't fetch that URL", message: (e as Error).message });
 		} finally {
 			setFetching(false);
 		}
@@ -375,8 +386,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					</div>
 
 					{pickError && (
-						<Callout severity="blocking" title="Couldn't read that document">
-							{pickError}
+						<Callout severity="blocking" title={pickError.title}>
+							{pickError.message}
 						</Callout>
 					)}
 
