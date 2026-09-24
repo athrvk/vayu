@@ -13,6 +13,23 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
+/**
+ * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence -
+ * `Error invoking remote method '<channel>': Error: <message>` - which is
+ * Electron's doing, not this preload's. `readDataFile` and `readSpecFile`
+ * throw already-clean, user-facing messages on the main-process side
+ * (`data-file.ts`, `spec-file.ts` - a missing file, an over-cap document, a
+ * refused extension), so callers on the renderer side
+ * (`read-declared.ts`, `ImportModal.tsx`) can show them as-is. Left wrapped,
+ * that promise breaks: this strips Electron's own prefix back off so the
+ * message a caller sees is the one the handler actually threw.
+ */
+function unwrapIpcError(error: unknown): Error {
+	const message = error instanceof Error ? error.message : String(error);
+	const stripped = message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "");
+	return new Error(stripped || message);
+}
+
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -288,7 +305,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// the whole answer. Bytes, not text: the renderer decodes with the same
 	// module the picker uses, so the two paths cannot disagree about a file.
 	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string }> =>
-		ipcRenderer.invoke("dataFile:read", path),
+		ipcRenderer.invoke("dataFile:read", path).catch((e: unknown) => {
+			throw unwrapIpcError(e);
+		}),
 
 	// Read a file an imported OpenAPI document references (issue #649). Two
 	// arguments and not a composed path: the renderer holds the picked
@@ -301,7 +320,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		specPath: string,
 		refPath: string
 	): Promise<{ bytes: Uint8Array; fileName: string }> =>
-		ipcRenderer.invoke("specFile:read", specPath, refPath),
+		ipcRenderer.invoke("specFile:read", specPath, refPath).catch((e: unknown) => {
+			throw unwrapIpcError(e);
+		}),
 
 	// Re-resolve the operating system's proxy and push it to the engine (#708).
 	// The renderer asks for this when it has reason to think the answer moved -
