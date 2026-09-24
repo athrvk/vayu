@@ -48,7 +48,7 @@ function LifecycleRow({
 					failed ? "text-destructive-text" : "text-status-success-text"
 				)}
 			>
-				{failed ? (outcome.message ?? "Failed") : "Ran successfully"}
+				{failed ? (outcome.message ?? "Failed") : "Ran"}
 			</span>
 		</li>
 	);

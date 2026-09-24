@@ -40,7 +40,7 @@ describe("ScriptLifecycleSummary", () => {
 	it("shows a successful setup as having run", () => {
 		render(<ScriptLifecycleSummary lifecycle={{ setup: [outcome()] }} />);
 		expect(screen.getByText("Setup")).toBeTruthy();
-		expect(screen.getByText("Ran successfully")).toBeTruthy();
+		expect(screen.getByText("Ran")).toBeTruthy();
 	});
 
 	it("shows a failed teardown's message without touching the run's status", () => {
