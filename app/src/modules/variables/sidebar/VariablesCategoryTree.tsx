@@ -822,7 +822,9 @@ export default function VariablesCategoryTree() {
 				onOpenChange={(open) => !open && setDeleteConfirmEnvId(null)}
 				title={envToDelete ? `Delete "${envToDelete.name}"?` : "Delete environment?"}
 				description={
-					envToDelete ? environmentDeleteDescription(envToDelete) : "This can't be undone."
+					envToDelete
+						? environmentDeleteDescription(envToDelete)
+						: "This can't be undone."
 				}
 				onConfirm={handleConfirmDelete}
 				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
