@@ -39,7 +39,7 @@ isn't the same:
    - `Couldn't connect to localhost:3000 (ECONNREFUSED). Nothing is listening
      on that port - is your server running?`
    - `No response after 30s from api.example.com. Raise the timeout in
-     Settings › Requests or check the server.`
+     Settings › Network & connectivity or check the server.`
 3. **Vayu itself failing** (disk full, engine crash, local storage): name the
    actual failure. Never blur it into the same shape as a network error - a
    full disk and a refused connection are different problems with different
@@ -68,7 +68,8 @@ already consistent in the codebase, plus fixing the one real overload.
 | Assertions on a response | **Tests** (tab), **Test Validation** (results) | The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
 | A pre-request/post-request script | **Script**, living under the **Elements** tab | Keep "Elements" as the tab name (the consolidation from separate Pre-request/Tests tabs was deliberate), but individual script errors/labels keep saying "Pre-request script" / "Post-request script" (sentence case, matching the engine's own labels in `script_kinds.cpp`) - renaming those to "Elements" would lose information the label carries. |
 | The mock-server feature | **Mock server** | Sentence-case mid-sentence, Title Case only in headings - this is normal casing variance, not a naming split. |
-| Multi-project container | *(doesn't exist)* | "Workspace" isn't a Vayu concept. Don't introduce it as filler vocabulary during a string rewrite even where a sentence seems to want one. |
+| Vayu's own backend process (the daemon on port 9876) | **Vayu's engine** | Bare "the engine" isn't wrong grammatically, but avoid it as a sentence's opening word or its subject noun with nothing attached - "Vayu's engine" is what tells the reader whose process failed rather than leaving "engine" to mean the request's own target server. |
+| Multi-project container | *(doesn't exist)* | "Workspace" isn't a Vayu concept. Don't introduce it as filler vocabulary during a string rewrite even where a sentence seems to want one. The one exception is **Backup** (Settings › General), a feature that used to be called "Workspace backup" - "Backup" alone is the locked term now, and "Workspace" should not reappear as a qualifier for it. |
 
 ## Decision rules
 
@@ -113,7 +114,7 @@ scattered strings land the same way.
 
 | Before | After |
 |---|---|
-| "Request failed" | "No response after 30s. The server at api.example.com accepted the connection but didn't reply. Raise the timeout in Settings › Requests or check the server." |
+| "Request failed" | "No response after 30s. The server at api.example.com accepted the connection but didn't reply. Raise the timeout in Settings › Network & connectivity or check the server." |
 | "Failed to fetch" | "Couldn't connect to localhost:3000 (ECONNREFUSED). Nothing is listening on that port - is your server running?" |
 | "No collections yet" | Heading: "No collections yet." Body: "Group related requests and share variables across them." Buttons: [New collection] [Import]. |
 | "Are you sure?" / [OK] | Title: "Delete 'Prod API'?" Body: "Its 12 variables are removed. Requests that use them will send the literal `{{baseUrl}}`. This can't be undone." Buttons: [Cancel] [Delete environment]. |
