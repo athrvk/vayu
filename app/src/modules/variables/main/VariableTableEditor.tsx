@@ -809,7 +809,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					confirmLabel="Delete environment"
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
-					confirmLabel="Delete environment"
 				/>
 			)}
 
