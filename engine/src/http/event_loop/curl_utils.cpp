@@ -162,21 +162,15 @@ std::optional<Error> validate_transferable (const Request& request) {
     // transport that moves it into the URL is GET's alone (issue #1228).
     const bool has_body = vayu::http::has_wire_body (request.body);
     if (has_body && request.method == HttpMethod::HEAD) {
-        Error error;
-        error.code = ErrorCode::InvalidMethod;
-        error.message =
-        "HEAD requests cannot carry a body - remove the body or use GET";
-        return error;
+        return Error{ ErrorCode::InvalidMethod,
+            "HEAD requests cannot carry a body - remove the body or use GET" };
     }
     // A file part that cannot be read is refused here rather than encoded and
     // left to fail on the wire: libcurl would report a read error naming
     // nothing, and an omitted part is the silence this feature exists to end.
     // Costs one open per transfer, and only for a body that has a file part.
     if (auto problem = vayu::http::unsendable_file_part (request.body)) {
-        Error error;
-        error.code    = ErrorCode::InternalError;
-        error.message = *problem;
-        return error;
+        return Error{ ErrorCode::InternalError, std::move (*problem) };
     }
     // Header text that would end or truncate the line it is written into. Here
     // rather than in `build_request_header_list` because that function has no
@@ -187,10 +181,7 @@ std::optional<Error> validate_transferable (const Request& request) {
     // credential, an import, a raw `POST /execute` payload. See header_text.hpp
     // for why the rule is a refusal and where its other layers live.
     if (auto problem = vayu::http::unsendable_header_text (request)) {
-        Error error;
-        error.code    = ErrorCode::InternalError;
-        error.message = *problem;
-        return error;
+        return Error{ ErrorCode::InternalError, std::move (*problem) };
     }
     return std::nullopt;
 }
