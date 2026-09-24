@@ -120,7 +120,7 @@ describe("httpClient error bodies", () => {
 /**
  * A transport failure never reaches the pane as itself: it is rewritten into a
  * sentence a user can act on, and that sentence drops every detail of what
- * actually failed - "Couldn't reach the engine in time" does not say which
+ * actually failed - "Couldn't reach Vayu's engine in time" does not say which
  * socket gave up. The detail survives on `cause` and only because something
  * puts it there, so there is a case per branch of the ladder.
  */
@@ -131,7 +131,7 @@ describe("httpClient transport failures", () => {
 		rejectWith(aborted);
 
 		const error = await failedGet();
-		expect(error.message).toBe("Couldn't reach the engine in time.");
+		expect(error.message).toBe("Couldn't reach Vayu's engine in time.");
 		expect(error.cause).toBe(aborted);
 	});
 
@@ -140,7 +140,7 @@ describe("httpClient transport failures", () => {
 		rejectWith(refused);
 
 		const error = await failedGet();
-		expect(error.message).toBe("Couldn't reach the engine (fetch failed).");
+		expect(error.message).toBe("Couldn't reach Vayu's engine (fetch failed).");
 		expect(error.cause).toBe(refused);
 	});
 
@@ -148,7 +148,7 @@ describe("httpClient transport failures", () => {
 		rejectWith("socket hang up");
 
 		const error = await failedGet();
-		expect(error.message).toBe("Couldn't reach the engine (unknown error).");
+		expect(error.message).toBe("Couldn't reach Vayu's engine (unknown error).");
 		expect(error.cause).toBe("socket hang up");
 	});
 });

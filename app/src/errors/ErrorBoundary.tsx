@@ -252,7 +252,7 @@ export class ErrorBoundary extends Component<Props, State> {
 							</div>
 
 							<p className="text-xs text-muted-foreground text-center">
-								If this issue persists, please copy the error info and report it.
+								If this issue persists, copy the error info and report it.
 							</p>
 						</CardContent>
 					</Card>

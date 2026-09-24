@@ -161,20 +161,20 @@ describe("httpClient.stream", () => {
 		streamOf(["never arrives"], 10_000); // Opens, then says nothing.
 
 		await expect(drain("/import/fetch", { idleTimeout: 50 })).rejects.toThrow(
-			"Couldn't reach the engine in time."
+			"Couldn't reach Vayu's engine in time."
 		);
 	});
 
 	it("keeps the abort that stalled it as the timeout's cause", async () => {
 		// The streaming path rewrites its failures through the same translation
 		// the buffered one uses, so the abort that ended the read survives on
-		// `cause` here too - "Couldn't reach the engine in time." alone says
+		// `cause` here too - "Couldn't reach Vayu's engine in time." alone says
 		// nothing about it.
 		streamOf(["never arrives"], 10_000);
 
 		await expect(drain("/import/fetch", { idleTimeout: 50 })).rejects.toThrow(
 			expect.objectContaining({
-				message: "Couldn't reach the engine in time.",
+				message: "Couldn't reach Vayu's engine in time.",
 				cause: expect.objectContaining({ name: "AbortError" }) as Error,
 			}) as Error
 		);
@@ -219,8 +219,8 @@ describe("httpClient.stream", () => {
 	it("stops when the caller aborts, and says so as an abort", async () => {
 		// Closing the import dialog has to stop the engine downloading, and the
 		// only thing that reaches it is this cancel. Distinct from the idle
-		// timeout on purpose: a deliberate abort surfaced as "Couldn't reach the
-		// engine in time." would leave a banner about a failure nobody had.
+		// timeout on purpose: a deliberate abort surfaced as "Couldn't reach
+		// Vayu's engine in time." would leave a banner about a failure nobody had.
 		const released = streamOf(["never arrives"], 10_000);
 		const controller = new AbortController();
 
@@ -240,7 +240,7 @@ describe("httpClient.stream", () => {
 
 		await expect(
 			drain("/import/fetch", { idleTimeout: 50, signal: new AbortController().signal })
-		).rejects.toThrow("Couldn't reach the engine in time.");
+		).rejects.toThrow("Couldn't reach Vayu's engine in time.");
 	});
 
 	it("does not open the request at all when the signal is already aborted", async () => {

@@ -103,7 +103,7 @@ function abortError(): Error {
  * shows, shared by the plain request path and the streaming one.
  *
  * Every branch carries the original as `cause`. The messages here are written
- * for a user - "Couldn't reach the engine in time" says nothing about which
+ * for a user - "Couldn't reach Vayu's engine in time" says nothing about which
  * socket gave up - so without the chain the underlying failure is not
  * recoverable from what was thrown, which is what `preserve-caught-error` is
  * about.
@@ -111,11 +111,11 @@ function abortError(): Error {
 function asTransportError(error: unknown): Error {
 	if (error instanceof Error) {
 		if (error.name === "AbortError") {
-			return new Error("Couldn't reach the engine in time.", { cause: error });
+			return new Error("Couldn't reach Vayu's engine in time.", { cause: error });
 		}
-		return new Error(`Couldn't reach the engine (${error.message}).`, { cause: error });
+		return new Error(`Couldn't reach Vayu's engine (${error.message}).`, { cause: error });
 	}
-	return new Error("Couldn't reach the engine (unknown error).", { cause: error });
+	return new Error("Couldn't reach Vayu's engine (unknown error).", { cause: error });
 }
 
 /**
