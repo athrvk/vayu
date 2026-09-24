@@ -55,8 +55,15 @@ import {
 import { useSaveStore, useSessionStore } from "@/stores";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
-import { Button, Badge, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
+import {
+	Button,
+	Badge,
+	DeleteConfirmDialog,
+	TooltipIconButton,
+	environmentDeleteDescription,
+} from "@/components/ui";
 import { Callout, ErrorState } from "@/components/shared";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
 import {
@@ -758,7 +765,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									onClick={handleSetActiveEnvironment}
 									className="min-w-30 border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
 								>
-									Set Active
+									Set active
 								</Button>
 							) : (
 								<Badge
@@ -797,7 +804,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				<DeleteConfirmDialog
 					open={showDeleteConfirm}
 					onOpenChange={(open) => !open && setShowDeleteConfirm(false)}
-					name={environment.name}
+					title={`Delete "${environment.name}"?`}
+					description={environmentDeleteDescription(environment)}
+					confirmLabel="Delete environment"
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
 					confirmLabel="Delete environment"
@@ -881,7 +890,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			{/* Footer */}
 			{!embedded && (
 				<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
-					{variables.filter((v) => v.key && !v.isNew).length} variable(s)
+					{(() => {
+						const savedCount = variables.filter((v) => v.key && !v.isNew).length;
+						return `${savedCount} ${pluralize(savedCount, "variable")}`;
+					})()}
 				</div>
 			)}
 		</div>

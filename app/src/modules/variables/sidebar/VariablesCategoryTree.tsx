@@ -67,7 +67,14 @@ import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy } from "lucide
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
-import { Badge, Button, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
+import {
+	Badge,
+	Button,
+	Input,
+	DeleteConfirmDialog,
+	TooltipIconButton,
+	environmentDeleteDescription,
+} from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 /**
@@ -813,9 +820,10 @@ export default function VariablesCategoryTree() {
 			<DeleteConfirmDialog
 				open={!!deleteConfirmEnvId}
 				onOpenChange={(open) => !open && setDeleteConfirmEnvId(null)}
-				title={envToDelete ? undefined : "Delete environment?"}
-				description={envToDelete ? undefined : "This can't be undone."}
-				name={envToDelete?.name}
+				title={envToDelete ? `Delete "${envToDelete.name}"?` : "Delete environment?"}
+				description={
+					envToDelete ? environmentDeleteDescription(envToDelete) : "This can't be undone."
+				}
 				onConfirm={handleConfirmDelete}
 				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}

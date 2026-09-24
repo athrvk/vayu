@@ -54,7 +54,7 @@ export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRun
 					<span className="text-md font-semibold text-foreground">Vayu</span>
 				</div>
 				<p className="text-sm text-muted-foreground">
-					Send API requests, script them, and load test them from one place.
+					Send API requests, script them, and run load tests against them from one place.
 				</p>
 			</div>
 
