@@ -369,7 +369,9 @@ function IssuerRow({
 			{
 				onError: (error) =>
 					showToast(
-						error instanceof Error ? error.message : "Couldn't update the issuer",
+						error instanceof Error
+							? `Couldn't update the issuer - ${error.message}`
+							: "Couldn't update the issuer",
 						"error"
 					),
 			}
@@ -579,7 +581,7 @@ function IssuerDelayControl({
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>
 			<FieldError id={errorId} className="pt-1">
-				{!valid && `A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+				{!valid && `A whole number of milliseconds, 0 to ${MAX_SLOW_MS.toLocaleString()}.`}
 			</FieldError>
 		</div>
 	);
@@ -720,7 +722,9 @@ export default function ServicesPanel() {
 				},
 				onError: (error) =>
 					showToast(
-						error instanceof Error ? error.message : "Couldn't start the inbox",
+						error instanceof Error
+							? `Couldn't start the inbox - ${error.message}`
+							: "Couldn't start the inbox",
 						"error"
 					),
 			}

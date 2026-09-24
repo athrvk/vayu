@@ -39,8 +39,10 @@ export function failureModeSummary(issuer: MockIssuer): string {
 	const parts = [`Tokens expire in ${issuer.expiresInSeconds}s`];
 	if (issuer.failureMode === "slow") {
 		parts.push(`answers after ${issuer.slowMs}ms`);
-	} else if (issuer.failureMode !== "none") {
-		parts.push(`answers ${FAILURE_MODE_LABELS[issuer.failureMode].toLowerCase()}`);
+	} else if (issuer.failureMode === "server_error") {
+		parts.push("answers with a server error");
+	} else if (issuer.failureMode === "invalid_client") {
+		parts.push("rejects every client id");
 	}
 	parts.push(
 		issuer.clientCount === 0
