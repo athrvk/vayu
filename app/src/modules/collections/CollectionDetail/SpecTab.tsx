@@ -559,7 +559,10 @@ function BoundSpec({
 					{/* The icon is part of the claim - a link icon beside a skeleton would
 					    already be saying the document came from a URL. */}
 					{loading ? (
-						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-64" />
+						// `w-3xs` (16rem, the container scale), not `w-64`: the skeleton
+						// stands in for a line of source text, not a row's rhythm, and
+						// `w-64` rides `--spacing` the way the toast viewport's `w-80` did.
+						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-3xs" />
 					) : (
 						<>
 							{sourceUrl ? (
@@ -587,7 +590,14 @@ function BoundSpec({
 						<dt>Operations mapped</dt>
 						<dd className="text-foreground">
 							{requestsLoading ? (
-								<Skeleton data-testid="spec-mapped-skeleton" className="h-3 w-28" />
+								// Fixed rem, not `w-28`: a placeholder for a short count
+								// string ("3 of 10 requests"), which does not get longer or
+								// shorter with the density setting. No container-scale token
+								// is this small, so the width is spelled out directly.
+								<Skeleton
+									data-testid="spec-mapped-skeleton"
+									className="h-3 w-[7rem]"
+								/>
 							) : (
 								<>
 									{mappedCount} of {requestCount} request
@@ -600,9 +610,11 @@ function BoundSpec({
 						<dt>Fetched</dt>
 						<dd className="text-foreground">
 							{loading ? (
+								// Fixed rem: stands in for a relative-time string ("2 hours
+								// ago"), a text measure, not `w-20`'s density unit.
 								<Skeleton
 									data-testid="spec-fetched-skeleton"
-									className="h-3 w-20"
+									className="h-3 w-[5rem]"
 								/>
 							) : (
 								formatRelative(epochToIso(fetchedAt))
@@ -617,7 +629,12 @@ function BoundSpec({
 						<dt>Size</dt>
 						<dd className="text-foreground">
 							{loading ? (
-								<Skeleton data-testid="spec-size-skeleton" className="h-3 w-16" />
+								// Fixed rem: stands in for a size string ("128 KB"), a text
+								// measure, not `w-16`'s density unit.
+								<Skeleton
+									data-testid="spec-size-skeleton"
+									className="h-3 w-[4rem]"
+								/>
 							) : (
 								formatDocumentSize(contentBytes)
 							)}
