@@ -116,7 +116,10 @@ export function StartMockServerDialog({
 								step={50}
 								value={latency}
 								onChange={(e) => setLatency(e.target.value)}
-								className="w-28 shrink-0"
+								// Fixed rem, not `w-28`: the field holds a number of
+								// milliseconds, a text measure that should not narrow at
+								// the Default density the way `w-28`'s `--spacing` unit does.
+								className="w-[7rem] shrink-0"
 								aria-invalid={!!latencyError}
 								aria-describedby={latencyError ? "mock-latency-error" : undefined}
 							/>
@@ -142,7 +145,9 @@ export function StartMockServerDialog({
 								step={1}
 								value={errorRate}
 								onChange={(e) => setErrorRate(e.target.value)}
-								className="w-28 shrink-0"
+								// Fixed rem, not `w-28`: same text-measure reasoning as
+								// the latency field above.
+								className="w-[7rem] shrink-0"
 								aria-invalid={!!errorRateError}
 								aria-describedby={
 									errorRateError ? "mock-error-rate-error" : undefined

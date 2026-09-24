@@ -479,7 +479,10 @@ export default function RunCollectionDialog({
 									step={1}
 									value={virtualUsers}
 									onChange={(e) => setVirtualUsers(e.target.value)}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: the field holds a virtual-user
+									// count, a text measure that should not narrow at the
+									// Default density the way `w-24`'s `--spacing` unit does.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!virtualUsersValid}
 								/>
 							</div>
@@ -498,7 +501,9 @@ export default function RunCollectionDialog({
 									step={1}
 									value={durationSeconds}
 									onChange={(e) => setDurationSeconds(e.target.value)}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: same text-measure reasoning as
+									// virtual users above.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!durationValid}
 								/>
 							</div>
@@ -697,7 +702,9 @@ export default function RunCollectionDialog({
 										iterationsTouched.current = true;
 										setIterations(e.target.value);
 									}}
-									className="w-24 shrink-0"
+									// Fixed rem, not `w-24`: same text-measure reasoning as
+									// virtual users above.
+									className="w-[6rem] shrink-0"
 									aria-invalid={!iterationsValid}
 								/>
 							</div>
