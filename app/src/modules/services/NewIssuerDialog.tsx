@@ -208,7 +208,16 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 								setFailureMode(value as MockIssuerFailureMode)
 							}
 						>
-							<SelectTrigger id="new-issuer-failure-mode" className="w-40 shrink-0">
+							<SelectTrigger
+								id="new-issuer-failure-mode"
+								/*
+								 * `w-40` rode `--spacing`: at the Default density it rendered
+								 * as 120px, and "Invalid client" (the longest option) truncated
+								 * to "Invalid cl…". `w-[10rem]` is the fixed 160px the trigger
+								 * needs to hold every label, at both densities.
+								 */
+								className="w-[10rem] shrink-0"
+							>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
