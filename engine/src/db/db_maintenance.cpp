@@ -745,11 +745,14 @@ void Database::init () {
     // which is what their restart-required flag promises.
     //
     // `cache_size` is per-connection state, so it cannot be applied once like
-    // the other two: it is handed to the open callback, which re-applies it to
-    // every connection sqlite_orm opens. Setting it before the first read below
-    // means that read already carries it.
+    // the other two: it is handed to the open callback, which applies it to
+    // every connection sqlite_orm opens - and applied here too, to the one the
+    // storage holds open, which was opened before this row could be read.
     impl_->cache_size_bytes.store (get_config_int (
     "dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
+    if (impl_->connection != nullptr) {
+        impl_->apply_cache_size (impl_->connection);
+    }
 
     // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
     int synchronous =
