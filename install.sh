@@ -1060,13 +1060,18 @@ do_uninstall() {
 
 uninstall_macos() {
 	local support prefs logs caches savedstate paths
-	local legacy_prefs legacy_caches legacy_savedstate
+	local legacy_support legacy_prefs legacy_caches legacy_savedstate
 	# Every copy, not just the default one: leaving the other behind is how
 	# "I uninstalled it" turns into an app that still launches. Falls back to
 	# the default path so a nothing-installed run still says what it looked for.
 	paths="$(existing_app_paths)"
 	[ -n "$paths" ] || paths="$APP_PATH"
-	support="$HOME/Library/Application Support/vayu-client"
+	# The directory the app names itself (USER_DATA_DIR_NAME in
+	# app/electron/constants.ts), and the one every release up to 0.36 wrote -
+	# where an install keeps everything until its first launch after upgrading.
+	# The legacy half goes with the app's migration (#1758).
+	support="$HOME/Library/Application Support/Vayu"
+	legacy_support="$HOME/Library/Application Support/vayu-client"
 	prefs="$HOME/Library/Preferences/$APP_BUNDLE_ID.plist"
 	logs="$HOME/Library/Logs/vayu-client"
 	caches="$HOME/Library/Caches/$APP_BUNDLE_ID"
@@ -1088,6 +1093,7 @@ uninstall_macos() {
 	if [ "${PURGE:-0}" = "1" ]; then
 		log 'Purging user data...'
 		run rm -rf "$support"
+		run rm -rf "$legacy_support"
 		run rm -f "$prefs"
 		run rm -rf "$logs"
 		run rm -rf "$caches"
@@ -1099,6 +1105,7 @@ uninstall_macos() {
 	else
 		log 'Vayu removed. User data was kept at:'
 		printf '  %s\n' "$support"
+		if [ -d "$legacy_support" ]; then printf '  %s\n' "$legacy_support"; fi
 		printf '  %s\n' "$prefs"
 		printf '  %s\n' "$logs"
 		log 'Re-run with --uninstall --purge to remove these too.'
@@ -1106,10 +1113,14 @@ uninstall_macos() {
 }
 
 uninstall_linux() {
-	local config cache
-	# Electron derives these from the package name, not productName, which is
-	# why they are vayu-client and not vayu.
-	config="${XDG_CONFIG_HOME:-$HOME/.config}/vayu-client"
+	local config legacy_config cache
+	# The app names its data directory itself (USER_DATA_DIR_NAME in
+	# app/electron/constants.ts); every release up to 0.36 let Electron derive
+	# it from the package name, and an install keeps that one until its first
+	# launch after upgrading (#1758 removes the legacy half). The
+	# cache is still Electron's own, named after the package.
+	config="${XDG_CONFIG_HOME:-$HOME/.config}/Vayu"
+	legacy_config="${XDG_CONFIG_HOME:-$HOME/.config}/vayu-client"
 	cache="${XDG_CACHE_HOME:-$HOME/.cache}/vayu-client"
 
 	log 'Removing Vayu...'
@@ -1134,11 +1145,13 @@ uninstall_linux() {
 	if [ "${PURGE:-0}" = "1" ]; then
 		log 'Purging user data...'
 		run rm -rf "$config"
+		run rm -rf "$legacy_config"
 		run rm -rf "$cache"
 		log 'Vayu and its data have been removed.'
 	else
 		log 'Vayu removed. User data was kept at:'
 		printf '  %s\n' "$config"
+		if [ -d "$legacy_config" ]; then printf '  %s\n' "$legacy_config"; fi
 		printf '  %s\n' "$cache"
 		log 'Re-run with --uninstall --purge to remove these too.'
 	fi

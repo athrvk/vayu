@@ -69,6 +69,7 @@ import {
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
+import { resolveUserDataDirectory } from "./user-data-dir.js";
 import { clearResponseCacheOnUpgrade } from "./response-cache-clear.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
 import { revealWhenReady } from "./window-reveal.js";
@@ -156,14 +157,17 @@ app.commandLine.appendSwitch("use-mock-keychain");
 // documented requirement is "before app is ready".
 app.setAppUserModelId(APP_USER_MODEL_ID);
 
-// Pinned before the rename below, never after it. Electron derives `userData`
-// from `app.name` on its first read and keeps that answer, and every install
-// already has its workspace, window state and Chromium profile under the
-// package name's directory ("vayu-client"). The pin used to be an accident of
-// import order - a settings store read the path while `main.ts`'s imports were
-// still evaluating - so a store that read it later, or an engine started
-// earlier, silently moved everything to a fresh "Vayu" directory.
-app.setPath("userData", app.getPath("userData"));
+// Named explicitly, never left to Electron: it derives `userData` from
+// `app.name` on the first read, so the directory used to depend on whether
+// anything happened to read it before the rename below. Set before anything
+// opens a file there - Chromium's profile, the single-instance lock further
+// down, the settings stores, the engine - which is also what makes moving an
+// older install's directory here safe (see `user-data-dir.ts`).
+const userDataResolution = resolveUserDataDirectory(app.getPath("appData"));
+app.setPath("userData", userDataResolution.path);
+if (userDataResolution.outcome === "migrated" || userDataResolution.outcome === "kept-legacy") {
+	appLogger().info("main", "Resolved the data directory", { ...userDataResolution });
+}
 
 // `app.getName()` otherwise answers the npm package's name, "vayu-client",
 // which is what macOS titles the app menu and its "About"/"Quit" roles from -

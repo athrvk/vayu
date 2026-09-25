@@ -44,6 +44,28 @@ export const APP_USER_MODEL_ID = "io.github.athrvk.vayu";
  */
 export const APP_NAME = "Vayu";
 
+/**
+ * The directory under the OS's app-data root (`app.getPath("appData")`) that
+ * holds everything the app owns: in a packaged build the engine's database and
+ * logs, and in every build the renderer's settings, window state and Chromium's
+ * profile. Named for the product, the same on every platform - set explicitly
+ * by `main.ts` rather than left to Electron, which derives it from whatever
+ * `app.name` is on the first read and so changed with import order.
+ *
+ * `install.sh`, `installer.nsh` and the CI shell-script check read this name;
+ * `user-data-dir.test.ts` and `installer-nsh-paths.test.ts` hold them to it.
+ */
+export const USER_DATA_DIR_NAME = APP_NAME;
+
+/**
+ * Where every release up to 0.36 kept that directory: the npm package's name,
+ * which Electron picked because nothing named one. `resolveUserDataDirectory`
+ * moves it to `USER_DATA_DIR_NAME` on the first launch after an upgrade, and
+ * the uninstallers still clean it up for installs that never launched since.
+ * Goes with the migration (#1758).
+ */
+export const LEGACY_USER_DATA_DIR_NAME = "vayu-client";
+
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
 export const ENGINE_PORT = 9876;

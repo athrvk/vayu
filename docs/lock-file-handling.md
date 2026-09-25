@@ -11,13 +11,15 @@ This document describes how lock files (`vayu.lock`) are handled during installa
 
 The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from running simultaneously. It contains the PID of the running engine process and is located at:
 
-- **Windows**: `%APPDATA%\vayu-client\vayu.lock`
-- **macOS**: `~/Library/Application Support/vayu-client/vayu.lock`
-- **Linux**: `~/.config/vayu-client/vayu.lock`
+- **Windows**: `%APPDATA%\Vayu\vayu.lock`
+- **macOS**: `~/Library/Application Support/Vayu/vayu.lock`
+- **Linux**: `~/.config/Vayu/vayu.lock`
 
-The directory is `app.getPath("userData")`, which Electron derives from the
-`name` in `app/package.json` (`vayu-client`) rather than from the product name,
-so it is `vayu-client` on every platform. `engineDataDirectory()`
+The directory is `app.getPath("userData")`, which `main.ts` sets to
+`USER_DATA_DIR_NAME` (`app/electron/constants.ts`) before anything opens a file
+there. Releases up to 0.36 used `vayu-client`; the first launch of a later
+release renames that directory, lock file included, and the uninstallers clean
+up both names. `engineDataDirectory()`
 (`app/electron/sidecar.ts`) is the one place that resolves it; anything else
 naming a directory is a copy that can drift.
 
@@ -136,14 +138,14 @@ If needed, users can manually remove the lock file:
 
 **Windows:**
 ```powershell
-Remove-Item "$env:APPDATA\vayu-client\vayu.lock"
+Remove-Item "$env:APPDATA\Vayu\vayu.lock"
 ```
 
 **macOS/Linux:**
 ```bash
-rm ~/.config/vayu-client/vayu.lock
+rm ~/.config/Vayu/vayu.lock
 # or on macOS:
-rm ~/Library/Application\ Support/vayu-client/vayu.lock
+rm ~/Library/Application\ Support/Vayu/vayu.lock
 ```
 
 ## Implementation Details

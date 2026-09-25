@@ -49,21 +49,27 @@ describe("the app's display name", () => {
 
 	/*
 	 * Electron derives `userData` from `app.name` on its first read and keeps
-	 * it, and every install's workspace, window state and Chromium profile live
-	 * under the package name's directory. Renaming first would move all of it
-	 * to an empty "Vayu" directory - measured on a packaged build, where it did
-	 * once nothing read the path before the rename. Mutation check: move the
-	 * pin below `setName` and this reddens.
+	 * it, so the directory used to depend on whether anything read it before
+	 * the rename - an accident of import order that moved everything on one
+	 * build. It is named explicitly now, and it has to be named before anything
+	 * opens a file there: the rename, the single-instance lock (which lives in
+	 * that directory) and the engine start all come after it. Mutation check:
+	 * move the `setPath` below `setName` or below the instance lock and this
+	 * reddens.
 	 */
-	it("pins userData before the rename, so the data directory keeps the package name", () => {
-		const pinAt = main.indexOf('app.setPath("userData", app.getPath("userData"));');
-		const setAt = main.indexOf("app.setName(APP_NAME);");
+	it("names userData explicitly, before the rename and before the instance lock", () => {
+		const setAt = main.indexOf('app.setPath("userData", userDataResolution.path);');
+		const resolveAt = main.indexOf('resolveUserDataDirectory(app.getPath("appData"))');
+		const nameAt = main.indexOf("app.setName(APP_NAME);");
+		const lockAt = main.indexOf("app.requestSingleInstanceLock()");
 
-		expect(pinAt).toBeGreaterThan(-1);
-		expect(pinAt).toBeLessThan(setAt);
-		// Nothing above the pin may read the path: that read would be the one
-		// Electron keeps, and it is only right because it precedes the rename.
-		const beforePin = main.slice(0, pinAt).replace(/^\s*(\/\/|\*).*$/gm, "");
-		expect(beforePin).not.toMatch(/getPath\(\s*["']userData["']/);
+		expect(resolveAt).toBeGreaterThan(-1);
+		expect(setAt).toBeGreaterThan(resolveAt);
+		expect(setAt).toBeLessThan(nameAt);
+		expect(setAt).toBeLessThan(lockAt);
+		// Nothing above it may read the path: that read would be the one
+		// Electron keeps.
+		const before = main.slice(0, setAt).replace(/^\s*(\/\/|\*).*$/gm, "");
+		expect(before).not.toMatch(/getPath\(\s*["']userData["']/);
 	});
 });
