@@ -367,7 +367,11 @@ setDataFile(collectionId, { path, fileName });
 **Two things this store deliberately is not.** It is not the *contract* - the
 declared columns are the same on every machine, so they live on the engine's
 collection row as `dataSchema` and travel through import; a path is true of one
-filesystem only and stays here, never reaching the engine, an export or MCP. And
+filesystem only and stays here, never reaching the engine or an export. Its one
+reader outside the renderer is the app's own MCP server: `useDataFileLocationMirror`
+(mounted in `App.tsx`) publishes the whole map to the main process over
+`dataFile:locations` on launch and on every change, and `list_collections`
+names a collection's file from that copy (issue #1742). And
 it never holds **rows**: a data file's contents are user data of unknown
 sensitivity and are persisted nowhere in Vayu, which `data-file-store.test.ts`
 asserts against the persisted payload rather than against the store's surface.

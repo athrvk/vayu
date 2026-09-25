@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
+import { DataFileLocations } from "./data-file-locations.js";
 import { readSpecFile } from "./spec-file.js";
 import {
 	defaultProxyResolutionSystem,
@@ -174,6 +175,12 @@ let mcpListener: McpListener | null = null;
 // mcp/index.ts), built by the first request the listener receives - null until
 // then, and read as "not loaded yet" by the Settings IPC below.
 let mcpService: VayuMcpService | null = null;
+/**
+ * The renderer's remembered data-file paths, published over
+ * `dataFile:locations` so MCP can name them (#1742). Module-level because the
+ * MCP service is built lazily and a renderer reload re-publishes into it.
+ */
+const dataFileLocations = new DataFileLocations();
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -910,6 +917,7 @@ async function startMcp() {
 					version: app.getVersion(),
 					safety: loadPersistedSafety(),
 					onDataChanged: sendMcpDataChanged,
+					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
 					log: mcpLogger(),
 				});
 				mcpService = service;
@@ -1321,6 +1329,13 @@ function setupIpcHandlers() {
 	// alternative that was rejected, are in data-file.ts.
 	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
 		return await readDataFile(String(filePath ?? ""));
+	});
+
+	// The renderer's whole map of remembered data-file paths, on launch and on
+	// every change (#1742). Only MCP reads it; the payload is rebuilt, not
+	// trusted - see data-file-locations.ts.
+	ipcMain.on("dataFile:locations", (_event, locations: unknown) => {
+		dataFileLocations.replace(locations);
 	});
 
 	// Read a file an imported OpenAPI document references (issue #649). The

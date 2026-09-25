@@ -309,6 +309,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			throw unwrapIpcError(e);
 		}),
 
+	// Every remembered data-file location, published whole on launch and on each
+	// change so the MCP server can name a collection's file (issue #1742).
+	// One-way; the main process rebuilds the payload (data-file-locations.ts).
+	publishDataFileLocations: (locations: unknown): void =>
+		ipcRenderer.send("dataFile:locations", locations),
+
 	// Read a file an imported OpenAPI document references (issue #649). Two
 	// arguments and not a composed path: the renderer holds the picked
 	// document's path and the ref's text, and the main process resolves one
