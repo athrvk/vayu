@@ -145,6 +145,10 @@ HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to 
 `tools/list`. Both are safe on HTTP, just not instantaneous. See
 [Design notes](#design-notes).
 
+The other way round, a collection's remembered data-file path (`dataFile`) is
+answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
+holds that record. See [Data files](#data-files).
+
 ## Tools
 
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
@@ -163,7 +167,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
-| `list_collections`     | read     | `GET /collections`                           | - (a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`) |
+| `list_collections`     | read     | `GET /collections`                           | - (a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary |
@@ -1307,6 +1311,25 @@ does not make MCP a second **composition** path, which is the split that is
 load-bearing: `resolve_variables` reports stored definitions and substitutes no
 `{{tokens}}` - `POST /compose` remains the only place a request is composed.
 
+### Data files
+
+A collection's declared data file reaches MCP in two parts (issue #1742).
+`dataSchema` is the contract - column names, the file's name, when it was
+declared - and is the same on every machine, so it rides the engine row.
+`dataFile: { path, fileName }` is where that file is **on this machine**, and
+comes from the app's renderer (`stores/data-file-store.ts`), which publishes
+its whole map to the main process over `dataFile:locations`
+(`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
+keeping only an absolute path with an extension `dataFile:read` would open).
+
+A path is true of one filesystem only, which is why it never reaches the engine
+or an export. It may reach MCP because the Electron-hosted server listens on
+loopback (`MCP_HOST`): every client that can read the answer runs on the machine
+the path names, and can open the file with its own access, the way a person
+would. The stdio CLI runs without the app, so it has no record and never names
+a path. **The rows are never sent:** no tool reads the file, so an agent that
+wants the data opens it itself, and a run still takes its rows inline as `data`.
+
 ## Resources
 
 Read-only Vayu data an agent can attach as context (`resources.ts`):
@@ -1314,7 +1337,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
-| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key). |
+| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`). |
 | `vayu://environments`       | All environments.                |
 | `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
 | `vayu://config`             | Engine configuration entries.    |
@@ -1671,6 +1694,12 @@ One channel runs the other way, main → renderer:
 | Channel            | Purpose                                                       |
 | ------------------ | ------------------------------------------------------------- |
 | `mcp:data-changed` | A successful call changed engine data; invalidate its queries. |
+
+And one runs renderer → main for MCP's sake:
+
+| Channel              | Purpose                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the
 main process, which no renderer query can observe (`refetchOnWindowFocus` is off

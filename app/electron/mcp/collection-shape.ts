@@ -20,9 +20,18 @@
  * list), restated because `electron/` cannot import from `app/src`;
  * `collection-shape.conformance.test.ts` holds the two to the same answers.
  *
- * Only the column names ride this: the file's path and its rows never reach
- * the engine (`data-file-store.ts`), so there is nothing else to show.
+ * Beside it, `dataFile: { path, fileName }` names the file the app remembers
+ * for that collection on this machine, when the host has that record (the
+ * Electron-hosted server; never the stdio CLI). Why a path may be named at
+ * all is in `data-file-locations.ts`. The rows are never read here.
  */
+
+import type { DataFileLocation } from "../data-file-locations.js";
+
+/** The one piece of the tool context this module reads. */
+interface DataFileLookup {
+	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
+}
 
 export interface DataContract {
 	columns: string[];
@@ -48,19 +57,28 @@ export function readDataContract(schema: unknown): DataContract | null {
 	};
 }
 
-/** One collection row with its `dataSchema` stated or dropped. Anything else passes through. */
-export function presentCollection(row: unknown): unknown {
-	if (!isRecord(row) || !("dataSchema" in row)) return row;
+/**
+ * One collection row with its `dataSchema` stated or dropped, and its
+ * remembered `dataFile` added when @p ctx knows one. Anything else passes
+ * through.
+ */
+export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
+	if (!isRecord(row)) return row;
 	const { dataSchema, ...rest } = row;
 	const contract = readDataContract(dataSchema);
-	return contract ? { ...rest, dataSchema: contract } : rest;
+	const location = typeof row.id === "string" ? ctx?.dataFileLocation?.(row.id) : undefined;
+	return {
+		...rest,
+		...(contract ? { dataSchema: contract } : {}),
+		...(location ? { dataFile: { path: location.path, fileName: location.fileName } } : {}),
+	};
 }
 
 /** {@link presentCollection} over a list; a non-list answer passes through untouched. */
-export function presentCollections(list: unknown): unknown {
-	return Array.isArray(list) ? list.map(presentCollection) : list;
+export function presentCollections(list: unknown, ctx?: DataFileLookup): unknown {
+	return Array.isArray(list) ? list.map((row) => presentCollection(row, ctx)) : list;
 }
 
 /** What list_collections and `vayu://collections` say about the field. */
 export const DATA_CONTRACT_SENTENCE =
-	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. The file's path and rows stay in the app and are never exposed.";
+	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName }`: read the file yourself to build the `data` rows. Vayu never returns the file's rows.";

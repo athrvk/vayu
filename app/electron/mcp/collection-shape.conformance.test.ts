@@ -34,12 +34,20 @@ const DECLARED = {
 // whose contract was cleared.
 const NONE = { id: "col_none", name: "Health", dataSchema: {} };
 
-function ctxWith(client: Partial<Record<keyof EngineClient, unknown>>): ToolContext {
+function ctxWith(
+	client: Partial<Record<keyof EngineClient, unknown>>,
+	extra: Partial<ToolContext> = {}
+): ToolContext {
 	return {
 		client: client as unknown as EngineClient,
 		config: resolveSafetyConfig({ allowWrites: true }),
+		...extra,
 	};
 }
+
+const USERS_FILE = { path: "/data/users.csv", fileName: "users.csv" };
+/** What the Electron host hands a tool: the app remembers a file for `col_data` only. */
+const remembered = (id: string) => (id === "col_data" ? USERS_FILE : undefined);
 
 const parsed = (r: { content: Array<{ text: string }> }) =>
 	JSON.parse(r.content[0].text) as unknown;
@@ -105,5 +113,71 @@ describe("readDataContract agrees with the renderer's hasDataContract", () => {
 		// A table where every row agrees on `false` proves nothing about `true`.
 		const answers = new Set(CASES.map(([, s]) => readDataContract(s) !== null));
 		expect(answers).toEqual(new Set([true, false]));
+	});
+});
+
+describe("the remembered data file on the MCP surface (Part B)", () => {
+	test("list_collections names the file the app remembers, and only for that collection", async () => {
+		const ctx = ctxWith(
+			{ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) },
+			{ dataFileLocation: remembered }
+		);
+		const rows = parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
+			Record<string, unknown>
+		>;
+		// Mutation check: drop the `dataFile` spread in presentCollection and this fails.
+		expect(rows[0].dataFile).toEqual(USERS_FILE);
+		expect(rows[1]).not.toHaveProperty("dataFile");
+	});
+
+	test("the resource and the write tools' results carry it the same way", async () => {
+		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
+		const listed = (await resource.read(
+			ctxWith(
+				{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
+				{ dataFileLocation: remembered }
+			)
+		)) as Array<Record<string, unknown>>;
+		expect(listed[0].dataFile).toEqual(USERS_FILE);
+
+		const updated = parsed(
+			await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_data", name: "Checkout" },
+				ctxWith(
+					{ updateCollection: vi.fn().mockResolvedValue(DECLARED) },
+					{ dataFileLocation: remembered }
+				)
+			)
+		) as Record<string, unknown>;
+		expect(updated.dataFile).toEqual(USERS_FILE);
+	});
+
+	test("a host with no record of paths (the stdio CLI) names none", async () => {
+		const ctx = ctxWith({ listCollections: vi.fn().mockResolvedValue([DECLARED]) });
+		const rows = parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
+			Record<string, unknown>
+		>;
+		expect(rows[0]).not.toHaveProperty("dataFile");
+		expect(rows[0].dataSchema).toEqual(DECLARED.dataSchema);
+	});
+
+	test("it rides a read tool, answered with writes off, and reads no file", async () => {
+		const tool = TOOLS.find((t) => t.name === "list_collections")!;
+		expect(tool.category).toBe("read");
+		expect(tool.annotations.readOnlyHint).toBe(true);
+		const ctx: ToolContext = {
+			client: {
+				listCollections: vi.fn().mockResolvedValue([DECLARED]),
+			} as unknown as EngineClient,
+			config: resolveSafetyConfig({ allowWrites: false }),
+			dataFileLocation: remembered,
+		};
+		const result = await dispatchTool("list_collections", {}, ctx);
+		expect(result.isError).toBeFalsy();
+		// A path, never contents: nothing in the answer holds a row.
+		expect(
+			Object.keys((parsed(result) as Array<Record<string, unknown>>)[0].dataFile as object)
+		).toEqual(["path", "fileName"]);
 	});
 });

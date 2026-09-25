@@ -330,6 +330,15 @@ interface ElectronAPI {
 	readDataFile: (path: string) => Promise<{ bytes: Uint8Array; fileName: string }>;
 
 	/**
+	 * Hand the main process every remembered data-file location (issue #1742),
+	 * so the MCP server can name the file a collection declared. The whole map
+	 * each time, never a diff: the main process keeps no copy of its own.
+	 */
+	publishDataFileLocations: (
+		locations: Record<string, { path: string; fileName: string }>
+	) => void;
+
+	/**
 	 * Read a file an imported OpenAPI document references (issue #649), given the
 	 * picked document's path and the `$ref` target as the document wrote it - the
 	 * main process resolves the second against the first's directory. Rejects

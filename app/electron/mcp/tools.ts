@@ -28,6 +28,7 @@ import {
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
 import type { Logger } from "../log.js";
+import type { DataFileLocation } from "../data-file-locations.js";
 import {
 	checkAllowlist,
 	checkLoadCaps,
@@ -221,6 +222,12 @@ export interface ToolContext {
 	 * transport and the stdio CLI) always provide one.
 	 */
 	log?: Logger;
+	/**
+	 * Where a collection's declared data file lives on this machine, as the app
+	 * remembers it (#1742). Absent in the stdio CLI, which runs without the app
+	 * and so has no record of any path.
+	 */
+	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 }
 
 export interface ToolResult {
@@ -4206,7 +4213,10 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
-			callEngine(() => ctx.client.listCollections(signal), presentCollections),
+			callEngine(
+				() => ctx.client.listCollections(signal),
+				(rows) => presentCollections(rows, ctx)
+			),
 	},
 	{
 		name: "list_requests",
@@ -4778,7 +4788,7 @@ export const TOOLS: McpTool[] = [
 			}
 			return callEngine(
 				() => ctx.client.createCollection(payload, signal),
-				presentCollection
+				(row) => presentCollection(row, ctx)
 			);
 		},
 	},
@@ -4880,7 +4890,7 @@ export const TOOLS: McpTool[] = [
 			}
 			const result = await callEngine(
 				() => ctx.client.updateCollection(collectionId, payload, signal),
-				presentCollection
+				(row) => presentCollection(row, ctx)
 			);
 			return result.isError
 				? result

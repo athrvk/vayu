@@ -72,7 +72,8 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` Full model: ${VARIABLE_RESOLUTION_URI}. ` +
 			DATA_CONTRACT_SENTENCE,
-		read: async (ctx, signal) => presentCollections(await ctx.client.listCollections(signal)),
+		read: async (ctx, signal) =>
+			presentCollections(await ctx.client.listCollections(signal), ctx),
 	},
 	{
 		name: "environments",
