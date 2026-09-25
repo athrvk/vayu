@@ -38,6 +38,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -57,29 +58,35 @@ using nlohmann::json;
 using vayu::http::routes::read_transient_flag;
 using vayu::http::routes::record_design_result;
 
-TEST (TransientFlag, AbsentMeansRecorded) {
-    auto flag = read_transient_flag (json{ { "method", "GET" }, { "url", "http://x/" } });
-    EXPECT_TRUE (flag.ok);
-    EXPECT_FALSE (flag.value);
+struct TransientFlagCase {
+    const char* name;
+    const char* payload;
+    bool expected_ok;
+    bool expected_value;
+};
+
+constexpr auto TRANSIENT_FLAG_CASES = std::to_array<TransientFlagCase> ({
+{ "AbsentMeansRecorded", R"({"method":"GET","url":"http://x/"})", true, false },
+{ "NullMeansRecorded", R"({"transient":null})", true, false },
+{ "TrueOptsOut", R"({"transient":true})", true, true },
+{ "FalseIsExplicitlyRecorded", R"({"transient":false})", true, false },
+});
+
+class TransientFlagAccepted : public ::testing::TestWithParam<TransientFlagCase> {};
+
+TEST_P (TransientFlagAccepted, ReadsTheExpectedValue) {
+    const auto& c = GetParam ();
+    auto flag     = read_transient_flag (json::parse (c.payload));
+    EXPECT_EQ (flag.ok, c.expected_ok);
+    EXPECT_EQ (flag.value, c.expected_value);
 }
 
-TEST (TransientFlag, NullMeansRecorded) {
-    auto flag = read_transient_flag (json{ { "transient", nullptr } });
-    EXPECT_TRUE (flag.ok);
-    EXPECT_FALSE (flag.value);
-}
-
-TEST (TransientFlag, TrueOptsOut) {
-    auto flag = read_transient_flag (json{ { "transient", true } });
-    EXPECT_TRUE (flag.ok);
-    EXPECT_TRUE (flag.value);
-}
-
-TEST (TransientFlag, FalseIsExplicitlyRecorded) {
-    auto flag = read_transient_flag (json{ { "transient", false } });
-    EXPECT_TRUE (flag.ok);
-    EXPECT_FALSE (flag.value);
-}
+INSTANTIATE_TEST_SUITE_P (TransientFlag,
+TransientFlagAccepted,
+::testing::ValuesIn (TRANSIENT_FLAG_CASES),
+[] (const ::testing::TestParamInfo<TransientFlagCase>& info) {
+    return std::string (info.param.name);
+});
 
 // The loud half. A client that sends the string "true" is asking for an
 // execution that leaves nothing behind; answering `false` and filing the run

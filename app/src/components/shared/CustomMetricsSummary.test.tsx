@@ -16,15 +16,10 @@ import type { RunReport } from "@/types/domain";
 type CustomMetrics = NonNullable<RunReport["customMetrics"]>;
 
 describe("CustomMetricsSummary", () => {
-	it("renders nothing when the run recorded no custom metrics", () => {
-		// Absent - a pre-#1500 report, or a run that never called pm.metrics -
-		// has to read as no card, not an empty one.
-		const { container } = render(<CustomMetricsSummary customMetrics={undefined} />);
-		expect(container).toBeEmptyDOMElement();
-	});
-
-	it("renders nothing for an empty object", () => {
-		const { container } = render(<CustomMetricsSummary customMetrics={{}} />);
+	// Absent - a pre-#1500 report, or a run that never called pm.metrics - has
+	// to read as no card, not an empty one, and so does an empty object.
+	it.each([undefined, {}])("renders nothing when the custom metrics are %j", (customMetrics) => {
+		const { container } = render(<CustomMetricsSummary customMetrics={customMetrics} />);
 		expect(container).toBeEmptyDOMElement();
 	});
 

@@ -194,19 +194,16 @@ describe("ContractCoverage", () => {
 			expect(screen.getByRole("listitem").textContent).toMatch(/200.*503.*599/);
 		});
 
-		it("discloses statuses the engine's per-row cap dropped", () => {
-			// A list shorter than the count it belongs to, rendered as complete,
-			// is what the truncation-disclosure discipline forbids. The number is
-			// distinct statuses hidden, and the label has to say so (issue #786).
-			render(<ContractCoverage coverage={withStatuses({ statusesTruncated: 7 })} />);
-			expect(screen.getByText("+7 more").getAttribute("title")).toBe(
-				"7 more statuses observed and not shown - the per-operation status list is capped"
-			);
-		});
-
-		it("counts one hidden status in the singular", () => {
-			render(<ContractCoverage coverage={withStatuses({ statusesTruncated: 1 })} />);
-			expect(screen.getByText("+1 more").getAttribute("title")).toMatch(/1 more status /);
+		// A list shorter than the count it belongs to, rendered as complete,
+		// is what the truncation-disclosure discipline forbids. The number is
+		// distinct statuses hidden, and the label has to say so, in the singular
+		// for one (issue #786).
+		it.each([
+			[7, "7 more statuses observed and not shown - the per-operation status list is capped"],
+			[1, "1 more status observed and not shown - the per-operation status list is capped"],
+		])("discloses %i status(es) the engine's per-row cap dropped", (hidden, title) => {
+			render(<ContractCoverage coverage={withStatuses({ statusesTruncated: hidden })} />);
+			expect(screen.getByText(`+${hidden} more`).getAttribute("title")).toBe(title);
 		});
 
 		it("counts responses whose status no class describes", () => {

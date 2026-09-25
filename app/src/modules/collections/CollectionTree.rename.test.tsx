@@ -91,21 +91,53 @@ beforeEach(() => {
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
 });
 
-describe("renaming a collection", () => {
+/** The cases a collection row and a request row share: same field, same rules. */
+const ROW_KINDS = [
+	{
+		kind: "collection",
+		selector: '[data-collection-id="c1"]',
+		update: updateCollection,
+		id: "c1",
+		newName: "Payments",
+	},
+	{
+		kind: "request",
+		selector: '[data-request-id="r1"]',
+		update: updateRequest,
+		id: "r1",
+		newName: "List users",
+	},
+];
+
+describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName }) => {
 	it("sends nothing when the name is unchanged", async () => {
 		renderTree();
-		const field = startRename('[data-collection-id="c1"]');
+		const field = startRename(selector);
 
 		fireEvent.blur(field);
 
-		await waitFor(() =>
-			expect(document.querySelector('[data-collection-id="c1"] input')).toBeNull()
-		);
-		expect(updateCollection).not.toHaveBeenCalled();
+		await waitFor(() => expect(document.querySelector(`${selector} input`)).toBeNull());
+		expect(update).not.toHaveBeenCalled();
 		// Nothing was saved, so nothing may claim it was.
 		expect(useSaveStore.getState().status).toBe("idle");
 	});
 
+	it("sends exactly one PUT when Enter is followed by the blur it causes", async () => {
+		renderTree();
+		const field = startRename(selector);
+
+		fireEvent.change(field, { target: { value: newName } });
+		fireEvent.keyDown(field, { key: "Enter" });
+		// The real field blurs as it unmounts; firing it explicitly is the
+		// worst case, and the one that used to send a second PUT.
+		fireEvent.blur(field);
+
+		await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+		expect(update).toHaveBeenCalledWith({ id, name: newName });
+	});
+});
+
+describe("renaming a collection", () => {
 	it("sends nothing when the name is only whitespace", async () => {
 		renderTree();
 		const field = startRename('[data-collection-id="c1"]');
@@ -117,20 +149,6 @@ describe("renaming a collection", () => {
 			expect(document.querySelector('[data-collection-id="c1"] input')).toBeNull()
 		);
 		expect(updateCollection).not.toHaveBeenCalled();
-	});
-
-	it("sends exactly one PUT when Enter is followed by the blur it causes", async () => {
-		renderTree();
-		const field = startRename('[data-collection-id="c1"]');
-
-		fireEvent.change(field, { target: { value: "Payments" } });
-		fireEvent.keyDown(field, { key: "Enter" });
-		// The real field blurs as it unmounts; firing it explicitly is the
-		// worst case, and the one that used to send a second PUT.
-		fireEvent.blur(field);
-
-		await waitFor(() => expect(updateCollection).toHaveBeenCalledTimes(1));
-		expect(updateCollection).toHaveBeenCalledWith({ id: "c1", name: "Payments" });
 	});
 
 	it("sends nothing when Escape cancels, blur or no blur", async () => {
@@ -175,32 +193,6 @@ describe("renaming a collection", () => {
 
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
 		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
-	});
-});
-
-describe("renaming a request", () => {
-	it("sends nothing when the name is unchanged", async () => {
-		renderTree();
-		const field = startRename('[data-request-id="r1"]');
-
-		fireEvent.blur(field);
-
-		await waitFor(() =>
-			expect(document.querySelector('[data-request-id="r1"] input')).toBeNull()
-		);
-		expect(updateRequest).not.toHaveBeenCalled();
-	});
-
-	it("sends exactly one PUT when Enter is followed by the blur it causes", async () => {
-		renderTree();
-		const field = startRename('[data-request-id="r1"]');
-
-		fireEvent.change(field, { target: { value: "List users" } });
-		fireEvent.keyDown(field, { key: "Enter" });
-		fireEvent.blur(field);
-
-		await waitFor(() => expect(updateRequest).toHaveBeenCalledTimes(1));
-		expect(updateRequest).toHaveBeenCalledWith({ id: "r1", name: "List users" });
 	});
 });
 

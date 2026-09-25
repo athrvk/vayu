@@ -24,9 +24,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -110,35 +112,6 @@ TEST (ElementsTimersRegistryTest, TimerPacingIsRegisteredAsATimerThatTracksScope
     EXPECT_TRUE (found);
 }
 
-TEST (ElementsTimersRegistryTest, TimerPacingConfigMissingEveryMsIsRejected) {
-    const json elements = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.pacing" }, { "config", json::object () } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerPacingEveryMsOfZeroIsRejected) {
-    const json elements = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.pacing" }, { "config", { { "everyMs", 0 } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ())
-    << "the schema's minimum is 1 - a 'pace every 0ms' config is meaningless";
-}
-
-// `additionalProperties: false` is what keeps `_elementId` / `_scopeEntry`
-// unwritable by a client - if the schema is ever loosened to admit them (to
-// add a new client-facing field, say, without noticing these two ride along)
-// this must start failing.
-TEST (ElementsTimersRegistryTest, TimerPacingRefusesAClientSuppliedElementId) {
-    const json elements = json::array ({ json{ { "id", "el_1" }, { "kind", "timer.pacing" },
-    { "config", { { "everyMs", 300 }, { "_elementId", "sneaky" } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerPacingRefusesAClientSuppliedScopeEntry) {
-    const json elements = json::array ({ json{ { "id", "el_1" }, { "kind", "timer.pacing" },
-    { "config", { { "everyMs", 300 }, { "_scopeEntry", true } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
 TEST (ElementsTimersRegistryTest, TimerThroughputIsRegisteredAsATimerThatTracksScopeOccurrence) {
     const auto* kind = Registry::instance ().find ("timer.throughput");
     ASSERT_NE (kind, nullptr)
@@ -153,97 +126,121 @@ TEST (ElementsTimersRegistryTest, TimerThroughputIsRegisteredAsATimerThatTracksS
     EXPECT_EQ (kind->phases[0], vayu::core::Phase::StepBefore);
 }
 
-TEST (ElementsTimersRegistryTest, TimerThroughputConfigMissingTargetPerMinuteIsRejected) {
+/// One timer element's `(kind, config)` through `Registry::validate`, and
+/// whether the schema refuses it. `config` is JSON text, parsed in the test
+/// body, so the table stays a `constexpr` array rather than a namespace-scope
+/// `json`.
+struct TimerConfigCase {
+    const char* name;
+    const char* kind;
+    const char* config;
+    bool expect_rejected;
+};
+
+constexpr auto TIMER_CONFIG_CASES = std::to_array<TimerConfigCase> ({
+{ "TimerPacingConfigMissingEveryMsIsRejected", "timer.pacing", "{}", true },
+// The schema's minimum is 1 - a "pace every 0ms" config is meaningless.
+{ "TimerPacingEveryMsOfZeroIsRejected", "timer.pacing", R"({"everyMs":0})", true },
+// `additionalProperties: false` is what keeps `_elementId` / `_scopeEntry`
+// unwritable by a client (both are stamped by the plan compiler) - if the
+// schema is ever loosened to admit them (to add a new client-facing field,
+// say, without noticing these two ride along) these rows, and the
+// `timer.throughput` one below, must start failing.
+{ "TimerPacingRefusesAClientSuppliedElementId", "timer.pacing",
+R"({"everyMs":300,"_elementId":"sneaky"})", true },
+{ "TimerPacingRefusesAClientSuppliedScopeEntry", "timer.pacing",
+R"({"everyMs":300,"_scopeEntry":true})", true },
+{ "TimerThroughputConfigMissingTargetPerMinuteIsRejected", "timer.throughput", "{}", true },
+// The schema's exclusiveMinimum is 0 - a rate of nothing per minute is not a
+// rate.
+{ "TimerThroughputTargetPerMinuteOfZeroIsRejected", "timer.throughput",
+R"({"targetPerMinute":0})", true },
+// perUser is optional - it defaults to false, the shared rate this kind
+// exists for.
+{ "TimerThroughputAcceptsAFractionalRateWithPerUserOmitted", "timer.throughput",
+R"({"targetPerMinute":0.5})", false },
+{ "TimerThroughputAcceptsAnExplicitBooleanPerUser", "timer.throughput",
+R"({"targetPerMinute":50,"perUser":true})", false },
+{ "TimerThroughputRefusesANonBooleanPerUser", "timer.throughput",
+R"({"targetPerMinute":50,"perUser":"yes"})", true },
+{ "TimerThroughputRefusesAClientSuppliedScopeEntry", "timer.throughput",
+R"({"targetPerMinute":50,"_scopeEntry":true})", true },
+{ "TimerThinkAcceptsAWellFormedGaussianConfig", "timer.think",
+R"({"gaussian":{"meanMs":500,"deviationMs":100}})", false },
+{ "TimerThinkRefusesGaussianMissingDeviationMs", "timer.think",
+R"({"gaussian":{"meanMs":500}})", true },
+// Both meanMs and deviationMs are required - neither is present here.
+{ "TimerThinkRefusesAnEmptyGaussianObject", "timer.think", R"({"gaussian":{}})", true },
+});
+
+class ElementsTimersRegistryConfigTest
+: public ::testing::TestWithParam<TimerConfigCase> {};
+
+TEST_P (ElementsTimersRegistryConfigTest, ValidatesTheConfigAgainstTheKindsSchema) {
+    const auto& c       = GetParam ();
     const json elements = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.throughput" }, { "config", json::object () } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
+    { "kind", c.kind }, { "config", json::parse (c.config) } } });
+    const auto reason   = Registry::instance ().validate (elements);
+    EXPECT_EQ (reason.has_value (), c.expect_rejected)
+    << c.kind << " " << c.config << ": " << reason.value_or ("(accepted)");
 }
 
-TEST (ElementsTimersRegistryTest, TimerThroughputTargetPerMinuteOfZeroIsRejected) {
-    const json elements = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.throughput" }, { "config", { { "targetPerMinute", 0 } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ())
-    << "the schema's exclusiveMinimum is 0 - a rate of nothing per minute is "
-       "not a rate";
-}
-
-TEST (ElementsTimersRegistryTest, TimerThroughputAcceptsAFractionalRateAndAnOptionalPerUser) {
-    const json rate_only = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.throughput" }, { "config", { { "targetPerMinute", 0.5 } } } } });
-    EXPECT_FALSE (Registry::instance ().validate (rate_only).has_value ())
-    << "perUser is optional - it defaults to false, the shared rate this kind "
-       "exists for";
-
-    const json with_per_user =
-    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
-    { "config", { { "targetPerMinute", 50 }, { "perUser", true } } } } });
-    EXPECT_FALSE (Registry::instance ().validate (with_per_user).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerThroughputRefusesANonBooleanPerUser) {
-    const json elements =
-    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
-    { "config", { { "targetPerMinute", 50 }, { "perUser", "yes" } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
-// The same `additionalProperties: false` rule TimerPacingRefusesAClientSupplied*
-// above states: these two names are stamped by the plan compiler, never
-// written by a client.
-TEST (ElementsTimersRegistryTest, TimerThroughputRefusesAClientSuppliedScopeEntry) {
-    const json elements =
-    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
-    { "config", { { "targetPerMinute", 50 }, { "_scopeEntry", true } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerThinkAcceptsAWellFormedGaussianConfig) {
-    const json elements = json::array ({ json{ { "id", "el_1" }, { "kind", "timer.think" },
-    { "config", { { "gaussian", { { "meanMs", 500 }, { "deviationMs", 100 } } } } } } });
-    EXPECT_FALSE (Registry::instance ().validate (elements).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerThinkRefusesGaussianMissingDeviationMs) {
-    const json elements = json::array ({ json{ { "id", "el_1" }, { "kind", "timer.think" },
-    { "config", { { "gaussian", { { "meanMs", 500 } } } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
-}
-
-TEST (ElementsTimersRegistryTest, TimerThinkRefusesAnEmptyGaussianObject) {
-    const json elements = json::array ({ json{ { "id", "el_1" },
-    { "kind", "timer.think" }, { "config", { { "gaussian", json::object () } } } } });
-    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ())
-    << "both meanMs and deviationMs are required - neither is present here";
-}
+INSTANTIATE_TEST_SUITE_P (ElementsTimersRegistryTest,
+ElementsTimersRegistryConfigTest,
+::testing::ValuesIn (TIMER_CONFIG_CASES),
+[] (const ::testing::TestParamInfo<TimerConfigCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ============================================================================
 // B. apply_timers_override - a direct call, no pipeline or run needed.
 // ============================================================================
 
-TEST (ApplyTimersOverrideTest, ANullOverrideReturnsOwnWaitUnchanged) {
-    EXPECT_EQ (vayu::core::apply_timers_override (nullptr, 500, nullptr), 500);
+/// One `apply_timers_override` call. `has_override: false` passes a null
+/// override (the run named none); otherwise an override in `mode` (with
+/// `fixed_ms` for `Fixed`) is passed. `expected` empty means silenced.
+struct TimersOverrideCase {
+    const char* name;
+    bool has_override;
+    vayu::core::TimersOverride::Mode mode;
+    int64_t fixed_ms;
+    int64_t own_wait_ms;
+    std::optional<int64_t> expected;
+};
+
+constexpr auto TIMERS_OVERRIDE_CASES = std::to_array<TimersOverrideCase> ({
+{ "ANullOverrideReturnsOwnWaitUnchanged", false,
+vayu::core::TimersOverride::Mode::AsConfigured, 0, 500, 500 },
+{ "AsConfiguredModeReturnsOwnWaitUnchanged", true,
+vayu::core::TimersOverride::Mode::AsConfigured, 0, 777, 777 },
+{ "OffModeSilencesANonZeroOwnWait", true, vayu::core::TimersOverride::Mode::Off,
+0, 999, std::nullopt },
+{ "OffModeSilencesAZeroOwnWait", true, vayu::core::TimersOverride::Mode::Off, 0, 0, std::nullopt },
+{ "FixedModeReplacesAShorterOwnWait", true,
+vayu::core::TimersOverride::Mode::Fixed, 250, 10, 250 },
+{ "FixedModeReplacesALongerOwnWait", true,
+vayu::core::TimersOverride::Mode::Fixed, 250, 10000, 250 },
+});
+
+class ApplyTimersOverrideModeTest : public ::testing::TestWithParam<TimersOverrideCase> {
+};
+
+TEST_P (ApplyTimersOverrideModeTest, ReturnsTheModesWait) {
+    const auto& c = GetParam ();
+    vayu::core::TimersOverride override_;
+    override_.mode     = c.mode;
+    override_.fixed_ms = c.fixed_ms;
+    EXPECT_EQ (vayu::core::apply_timers_override (
+               c.has_override ? &override_ : nullptr, c.own_wait_ms, nullptr),
+    c.expected);
 }
 
-TEST (ApplyTimersOverrideTest, AsConfiguredModeReturnsOwnWaitUnchanged) {
-    vayu::core::TimersOverride override_;
-    override_.mode = vayu::core::TimersOverride::Mode::AsConfigured;
-    EXPECT_EQ (vayu::core::apply_timers_override (&override_, 777, nullptr), 777);
-}
-
-TEST (ApplyTimersOverrideTest, OffModeSilencesRegardlessOfOwnWait) {
-    vayu::core::TimersOverride override_;
-    override_.mode = vayu::core::TimersOverride::Mode::Off;
-    EXPECT_FALSE (vayu::core::apply_timers_override (&override_, 999, nullptr).has_value ());
-    EXPECT_FALSE (vayu::core::apply_timers_override (&override_, 0, nullptr).has_value ());
-}
-
-TEST (ApplyTimersOverrideTest, FixedModeReturnsTheFixedValueRegardlessOfOwnWait) {
-    vayu::core::TimersOverride override_;
-    override_.mode     = vayu::core::TimersOverride::Mode::Fixed;
-    override_.fixed_ms = 250;
-    EXPECT_EQ (vayu::core::apply_timers_override (&override_, 10, nullptr), 250);
-    EXPECT_EQ (vayu::core::apply_timers_override (&override_, 10000, nullptr), 250);
-}
+INSTANTIATE_TEST_SUITE_P (ApplyTimersOverrideTest,
+ApplyTimersOverrideModeTest,
+::testing::ValuesIn (TIMERS_OVERRIDE_CASES),
+[] (const ::testing::TestParamInfo<TimersOverrideCase>& info) {
+    return std::string (info.param.name);
+});
 
 TEST (ApplyTimersOverrideTest, RangeModeWithEqualBoundsReturnsThatValueWithNoDraw) {
     vayu::core::TimersOverride override_;

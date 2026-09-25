@@ -22,6 +22,8 @@
  * site, which sits above `ctx.db.create_run (run)` in execution.cpp.
  */
 
+#include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -115,85 +117,69 @@ TEST (RunConfigValidation, SampleRateOfOneIsAccepted) {
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
 
-// --- 2. Concurrency: negative became ~1.8e19 eager curl handles ------------
+// --- 2. Concurrency and the in-flight ceiling: negative became ~1.8e19 -----
 
-TEST (RunConfigValidation, NegativeConcurrencyIsRejected) {
-    // `{"concurrency": -1}` is the natural "unlimited" guess, and was the
-    // fastest way to OOM the daemon before any traffic flowed.
-    auto config           = valid_config ();
-    config["concurrency"] = -1;
-    expect_rejected (config, "concurrency");
-}
+namespace {
 
-TEST (RunConfigValidation, ZeroConcurrencyIsRejected) {
-    auto config           = valid_config ();
-    config["concurrency"] = 0;
-    expect_rejected (config, "concurrency");
-}
+/// One integer field `validate_run_config` holds to an inclusive
+/// `[min, max]`. `mode`, when set, is written beside the field because the
+/// field only means something in that mode.
+struct BoundedCountCase {
+    const char* name;
+    const char* key;
+    const char* mode;
+    int64_t min;
+    int64_t max;
+};
 
-TEST (RunConfigValidation, HugeConcurrencyIsRejected) {
-    auto config           = valid_config ();
-    config["concurrency"] = 100000000;
-    expect_rejected (config, "concurrency");
-}
-
-TEST (RunConfigValidation, ConcurrencyBoundsAreInclusive) {
-    auto config           = valid_config ();
-    config["concurrency"] = 1;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["concurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["concurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY + 1;
-    expect_rejected (config, "concurrency");
-}
-
+constexpr auto BOUNDED_COUNT_CASES = std::to_array<BoundedCountCase> ({
+// `{"concurrency": -1}` is the natural "unlimited" guess, and was the fastest
+// way to OOM the daemon before any traffic flowed.
+{ "Concurrency", "concurrency", nullptr, 1, vayu::core::constants::run_config::MAX_CONCURRENCY },
 // `startConcurrency` seeds the ramp before the first duration check, and the
 // MCP cap could not see it at all until it was checked here too.
-TEST (RunConfigValidation, NegativeStartConcurrencyIsRejected) {
-    auto config                = valid_config ();
-    config["mode"]             = "ramp_up";
-    config["startConcurrency"] = -1;
-    expect_rejected (config, "startConcurrency");
+{ "StartConcurrency", "startConcurrency", "ramp_up", 1,
+vayu::core::constants::run_config::MAX_CONCURRENCY },
+// `maxInFlight` is the only field here that bounds work *downward*: the harm
+// of a bad value is not an allocation, it is the ceiling silently
+// disappearing, so an open-loop run against a hanging target accumulates
+// in-flight requests for its whole duration. 0 would be "drop everything",
+// not "no cap" - either reading is a run that does not do what the caller
+// asked, so it is rejected rather than guessed.
+{ "MaxInFlight", "maxInFlight", nullptr, 1, vayu::core::constants::run_config::MAX_IN_FLIGHT },
+});
+
+class RunConfigBoundedCount : public ::testing::TestWithParam<BoundedCountCase> {
+    protected:
+    static nlohmann::json config_with (const BoundedCountCase& c, int64_t value) {
+        auto config = valid_config ();
+        if (c.mode != nullptr) {
+            config["mode"] = c.mode;
+        }
+        config[c.key] = value;
+        return config;
+    }
+};
+
+} // namespace
+
+TEST_P (RunConfigBoundedCount, BoundsAreInclusiveAndEverythingOutsideIsRejected) {
+    const auto& c = GetParam ();
+    EXPECT_FALSE (validate_run_config (config_with (c, c.min)).has_value ())
+    << c.key << " = " << c.min;
+    EXPECT_FALSE (validate_run_config (config_with (c, c.max)).has_value ())
+    << c.key << " = " << c.max;
+    expect_rejected (config_with (c, -1), c.key);
+    expect_rejected (config_with (c, c.min - 1), c.key);
+    expect_rejected (config_with (c, c.max + 1), c.key);
 }
 
-TEST (RunConfigValidation, StartConcurrencyBoundsAreInclusive) {
-    auto config                = valid_config ();
-    config["mode"]             = "ramp_up";
-    config["startConcurrency"] = 1;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["startConcurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["startConcurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY + 1;
-    expect_rejected (config, "startConcurrency");
-}
-
-// `maxInFlight` is the only field here that bounds work *downward*: the harm of
-// a bad value is not an allocation, it is the ceiling silently disappearing, so
-// an open-loop run against a hanging target accumulates in-flight requests for
-// its whole duration.
-TEST (RunConfigValidation, NegativeMaxInFlightIsRejected) {
-    auto config           = valid_config ();
-    config["maxInFlight"] = -1;
-    expect_rejected (config, "maxInFlight");
-}
-
-TEST (RunConfigValidation, ZeroMaxInFlightIsRejected) {
-    // 0 would be "drop everything", not "no cap" - either reading is a run that
-    // does not do what the caller asked, so it is rejected rather than guessed.
-    auto config           = valid_config ();
-    config["maxInFlight"] = 0;
-    expect_rejected (config, "maxInFlight");
-}
-
-TEST (RunConfigValidation, MaxInFlightBoundsAreInclusive) {
-    auto config           = valid_config ();
-    config["maxInFlight"] = 1;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["maxInFlight"] = vayu::core::constants::run_config::MAX_IN_FLIGHT;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["maxInFlight"] = vayu::core::constants::run_config::MAX_IN_FLIGHT + 1;
-    expect_rejected (config, "maxInFlight");
-}
+INSTANTIATE_TEST_SUITE_P (RunConfigValidation,
+RunConfigBoundedCount,
+::testing::ValuesIn (BOUNDED_COUNT_CASES),
+[] (const ::testing::TestParamInfo<BoundedCountCase>& info) {
+    return std::string (info.param.name);
+});
 
 // The backpressure ceiling is not the connection guard, and the two are not
 // interchangeable: `MAX_CONCURRENCY` bounds an eager per-worker curl-handle

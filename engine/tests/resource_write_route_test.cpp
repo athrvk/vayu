@@ -49,6 +49,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -189,27 +190,44 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateGeneratesIdWhenAbsent) {
     << "engine-generated ids carry the resource prefix";
 }
 
-TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsClientId) {
+// A body `id` the engine did not assign, as a string and as null. Presence is
+// the trigger: the null-vs-absent rule does not reach `id`, because a caller
+// sending null still believes the field is honoured.
+struct BodyIdCase {
+    const char* name;
+    /// The body's `id`; nullptr sends JSON null.
+    const char* id;
+};
+
+json body_id (const BodyIdCase& c) {
+    return c.id == nullptr ? json (nullptr) : json (c.id);
+}
+
+constexpr auto CREATE_BODY_ID_CASES = std::to_array<BodyIdCase> ({
+{ "ClientId", "col_fixed" },
+{ "NullClientId", nullptr },
+});
+
+class CollectionCreateBodyIdTest : public ResourceWriteRouteTest,
+                                   public ::testing::WithParamInterface<BodyIdCase> {};
+
+TEST_P (CollectionCreateBodyIdTest, CollectionCreateRejects) {
     auto [status, body] = create_collection_response (
-    *db_, json{ { "id", "col_fixed" }, { "name", "New" } });
+    *db_, json{ { "id", body_id (GetParam ()) }, { "name", "New" } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
-    EXPECT_FALSE (db_->get_collection ("col_fixed").has_value ())
-    << "a rejected create must not persist anything";
 
-    // Nothing was created under a generated id either - the whole write is off.
+    // A rejected create persists nothing - not under the body id, and not
+    // under a generated one either: the whole write is off.
     EXPECT_TRUE (db_->get_collections ().empty ());
 }
 
-TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsNullClientId) {
-    // Presence is the trigger: the null-vs-absent rule does not reach `id`,
-    // because a caller sending null still believes the field is honoured.
-    auto [status, body] =
-    create_collection_response (*db_, json{ { "id", nullptr }, { "name", "New" } });
-    EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
-    EXPECT_TRUE (db_->get_collections ().empty ());
-}
+INSTANTIATE_TEST_SUITE_P (PerBodyId,
+CollectionCreateBodyIdTest,
+::testing::ValuesIn (CREATE_BODY_ID_CASES),
+[] (const ::testing::TestParamInfo<BodyIdCase>& info) {
+    return std::string (info.param.name);
+});
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsRejected) {
     // The upsert this replaced merged two records into one when the ids
@@ -227,19 +245,37 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsRejected) {
     EXPECT_EQ (stored->name, "Original");
 }
 
-TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsMismatchedBodyId) {
+// An update's identity is the path, so a body `id` that is not that id - one
+// naming another record, or null - is refused rather than written through
+// the path id.
+constexpr auto UPDATE_BODY_ID_CASES = std::to_array<BodyIdCase> ({
+{ "MismatchedBodyId", "col_somewhere_else" },
+{ "NullBodyId", nullptr },
+});
+
+class CollectionUpdateBodyIdTest : public ResourceWriteRouteTest,
+                                   public ::testing::WithParamInterface<BodyIdCase> {};
+
+TEST_P (CollectionUpdateBodyIdTest, CollectionUpdateRejects) {
     const std::string id = make_collection ("Original");
 
     auto [status, body] = update_collection_response (
-    *db_, id, json{ { "id", "col_somewhere_else" }, { "name", "Renamed" } });
+    *db_, id, json{ { "id", body_id (GetParam ()) }, { "name", "Renamed" } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
     std::string::npos);
     const auto stored_collection = db_->get_collection (id);
     ASSERT_HAS_VALUE (stored_collection);
     EXPECT_EQ (stored_collection->name, "Original")
-    << "a body id naming another record must not write through the path id";
+    << "a rejected body id must not write through the path id";
 }
+
+INSTANTIATE_TEST_SUITE_P (PerBodyId,
+CollectionUpdateBodyIdTest,
+::testing::ValuesIn (UPDATE_BODY_ID_CASES),
+[] (const ::testing::TestParamInfo<BodyIdCase>& info) {
+    return std::string (info.param.name);
+});
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateAcceptsMatchingBodyId) {
     // Redundant but not contradictory: the path and the body agree on which
@@ -253,19 +289,6 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateAcceptsMatchingBodyId) {
     const auto stored_collection = db_->get_collection (id);
     ASSERT_HAS_VALUE (stored_collection);
     EXPECT_EQ (stored_collection->name, "Renamed");
-}
-
-TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsNullBodyId) {
-    const std::string id = make_collection ("Original");
-
-    auto [status, body] = update_collection_response (
-    *db_, id, json{ { "id", nullptr }, { "name", "Renamed" } });
-    EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
-    std::string::npos);
-    const auto stored_collection = db_->get_collection (id);
-    ASSERT_HAS_VALUE (stored_collection);
-    EXPECT_EQ (stored_collection->name, "Original");
 }
 
 TEST_F (ResourceWriteRouteTest, UpdateRejectsBodyIdBeforeLookingTheRecordUp) {

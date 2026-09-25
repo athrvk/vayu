@@ -502,27 +502,22 @@ describe("an issuer row", () => {
 		).toBeInTheDocument();
 	});
 
-	it("summarises a server-error issuer in its own words, not the Select label lowercased", async () => {
-		listMockIssuers.mockResolvedValue([issuer({ failureMode: "server_error" })]);
-		renderPanel();
-		fireEvent.click(
-			await screen.findByRole("button", { name: /expand issuer on port 42000/i })
-		);
-		expect(
-			screen.getByText(/Tokens expire in 3600s · answers with a server error · /)
-		).toBeInTheDocument();
-	});
-
-	it("summarises an invalid-client issuer in its own words, not the Select label lowercased", async () => {
-		listMockIssuers.mockResolvedValue([issuer({ failureMode: "invalid_client" })]);
-		renderPanel();
-		fireEvent.click(
-			await screen.findByRole("button", { name: /expand issuer on port 42000/i })
-		);
-		expect(
-			screen.getByText(/Tokens expire in 3600s · rejects every client id · /)
-		).toBeInTheDocument();
-	});
+	it.each([
+		["server_error", "answers with a server error"],
+		["invalid_client", "rejects every client id"],
+	] as const)(
+		"summarises a %s issuer in its own words, not the Select label lowercased",
+		async (failureMode, summary) => {
+			listMockIssuers.mockResolvedValue([issuer({ failureMode })]);
+			renderPanel();
+			fireEvent.click(
+				await screen.findByRole("button", { name: /expand issuer on port 42000/i })
+			);
+			expect(
+				screen.getByText(`Tokens expire in 3600s · ${summary} · `, { exact: false })
+			).toBeInTheDocument();
+		}
+	);
 
 	it("flips a running issuer into a failure mode without restarting it", async () => {
 		listMockIssuers.mockResolvedValue([issuer()]);

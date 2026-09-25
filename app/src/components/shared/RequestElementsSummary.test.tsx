@@ -27,15 +27,13 @@ function tally(overrides: Partial<RunScenarioStepElementTally> = {}): RunScenari
 }
 
 describe("RequestElementsSummary", () => {
-	it("says nothing when the report has no elements section", () => {
-		const { container } = render(<RequestElementsSummary elements={undefined} />);
-		expect(container.firstChild).toBeNull();
-	});
-
-	it("says nothing when the elements array is empty", () => {
-		const { container } = render(<RequestElementsSummary elements={[]} />);
-		expect(container.firstChild).toBeNull();
-	});
+	it.each([{ elements: undefined }, { elements: [] }])(
+		"says nothing when the elements section is $elements",
+		({ elements }) => {
+			const { container } = render(<RequestElementsSummary elements={elements} />);
+			expect(container.firstChild).toBeNull();
+		}
+	);
 
 	it("shows a passing element's kind and count", () => {
 		render(<RequestElementsSummary elements={[tally({ passed: 42 })]} />);

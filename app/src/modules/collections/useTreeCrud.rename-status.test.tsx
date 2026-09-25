@@ -79,29 +79,35 @@ describe("collection tree rename and the shared save status", () => {
 		updateRequest.mockResolvedValue(undefined);
 	});
 
-	it("does not report 'Saved' for a collection rename while an editor is dirty", async () => {
-		registerDirtyRequestContext();
-		const { result } = renderCrud();
+	it.each([
+		{
+			kind: "collection",
+			submit: "onRenameSubmit",
+			update: updateCollection,
+			id: "c-1",
+			name: "Acme Corp",
+		},
+		{
+			kind: "request",
+			submit: "onRequestRenameSubmit",
+			update: updateRequest,
+			id: "r-1",
+			name: "List accounts",
+		},
+	] as const)(
+		"does not report 'Saved' for a $kind rename while an editor is dirty",
+		async ({ submit, update, id, name }) => {
+			registerDirtyRequestContext();
+			const { result } = renderCrud();
 
-		await act(async () => {
-			await result.current.rows.onRenameSubmit("c-1", "Acme Corp");
-		});
+			await act(async () => {
+				await result.current.rows[submit](id, name);
+			});
 
-		expect(updateCollection).toHaveBeenCalledWith({ id: "c-1", name: "Acme Corp" });
-		expect(useSaveStore.getState().status).toBe("pending");
-	});
-
-	it("does not report 'Saved' for a request rename while an editor is dirty", async () => {
-		registerDirtyRequestContext();
-		const { result } = renderCrud();
-
-		await act(async () => {
-			await result.current.rows.onRequestRenameSubmit("r-1", "List accounts");
-		});
-
-		expect(updateRequest).toHaveBeenCalledWith({ id: "r-1", name: "List accounts" });
-		expect(useSaveStore.getState().status).toBe("pending");
-	});
+			expect(update).toHaveBeenCalledWith({ id, name });
+			expect(useSaveStore.getState().status).toBe("pending");
+		}
+	);
 
 	it("still reports 'Saved' for a rename with nothing else unsaved", async () => {
 		const { result } = renderCrud();

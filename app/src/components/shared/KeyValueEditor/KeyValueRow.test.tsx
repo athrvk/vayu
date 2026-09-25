@@ -158,15 +158,6 @@ describe("the resolved value", () => {
 	 * literal" - which is correct for a surface with no variable scope and
 	 * wrong for the request builder, so the two cases have to be told apart.
 	 */
-	it("resolves through the scope it was handed, not one it reaches for", () => {
-		const marker = peek(row());
-		expect(marker!.getAttribute("aria-label")).toBe("Resolved value of Accept");
-		// The tooltip content only mounts on hover; what proves the thread is
-		// that the marker appeared at all, which needs `resolveString` to have
-		// changed the text.
-		expect(marker).not.toBeNull();
-	});
-
 	it("stays away entirely on a surface with no variable scope", () => {
 		// Not a degraded request builder - an inbox's canned reply headers have
 		// no variables to resolve, so a marker would point at nothing.

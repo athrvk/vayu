@@ -157,7 +157,7 @@ TEST (InboxParseStart, ALoopbackLookingHostnameIsNotLoopback) {
     EXPECT_TRUE (vayu::http::is_loopback_bind ("127.000.000.001"));
 }
 
-TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
+TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValueAndInvalidStatusIsRejected) {
     InboxCannedResponse current;
     current.status   = 500;
     current.body     = "boom";

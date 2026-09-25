@@ -67,22 +67,16 @@ afterEach(() => {
 });
 
 describe("View menu zoom", () => {
-	it("raises the persisted setting one step and applies it", () => {
+	it.each([
+		["in", 1.1],
+		["out", 0.9],
+	] as const)("zoom %s moves the persisted setting one step and applies it", (command, scale) => {
 		render(<Harness />);
-		fireZoom("in");
+		fireZoom(command);
 
-		expect(useAppearanceStore.getState().scale).toBe(1.1);
-		expect(localStorage.getItem(STORAGE_KEYS.UI_SCALE)).toBe("1.1");
-		expect(setZoomFactor).toHaveBeenLastCalledWith(1.1);
-	});
-
-	it("lowers it one step the same way", () => {
-		render(<Harness />);
-		fireZoom("out");
-
-		expect(useAppearanceStore.getState().scale).toBe(0.9);
-		expect(localStorage.getItem(STORAGE_KEYS.UI_SCALE)).toBe("0.9");
-		expect(setZoomFactor).toHaveBeenLastCalledWith(0.9);
+		expect(useAppearanceStore.getState().scale).toBe(scale);
+		expect(localStorage.getItem(STORAGE_KEYS.UI_SCALE)).toBe(String(scale));
+		expect(setZoomFactor).toHaveBeenLastCalledWith(scale);
 	});
 
 	it("steps without accumulating float drift", () => {

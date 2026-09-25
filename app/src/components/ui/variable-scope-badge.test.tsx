@@ -94,11 +94,9 @@ describe("neither variant is interactive", () => {
 	 * the pointer. A source scan cannot catch this one: the background arrives
 	 * through `config.tint`, not a literal in the JSX.
 	 */
-	it.each(SCOPES)("compact %s has no hover background", (scope) => {
-		expect(badgeFor(scope, "compact").className).not.toMatch(/hover:bg-/);
-	});
-
-	it.each(SCOPES)("full %s has no hover background", (scope) => {
-		expect(badgeFor(scope, "full").className).not.toMatch(/hover:bg-/);
+	it.each(
+		SCOPES.flatMap((scope) => (["compact", "full"] as const).map((v) => [v, scope] as const))
+	)("%s %s has no hover background", (variant, scope) => {
+		expect(badgeFor(scope, variant).className).not.toMatch(/hover:bg-/);
 	});
 });

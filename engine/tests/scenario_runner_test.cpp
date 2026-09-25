@@ -24,6 +24,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -2293,39 +2294,53 @@ TEST_F (ScenarioRunnerTest, ARunWithoutDataStampsNoRowIndexAndBindsNothing) {
 // `{{data.column}}` - the row reaching the request itself (issue #402)
 // ============================================================================
 
+/// Which request field carries a `{{data.v}}` token, and where the mock
+/// server's record of that field shows what reached the wire.
+struct DataTokenFieldCase {
+    const char* name;
+    const char* path;    // appended to the mock server's origin
+    const char* headers; // the request's stored headers; "" for none
+    std::string SeenRequest::* seen_field;
+    const char* expected_prefix; // what precedes the row's value in that field
+};
+
+constexpr auto DATA_TOKEN_FIELD_CASES = std::to_array<DataTokenFieldCase> ({
 // The headline case: the row drives where the request goes, without a script.
 // `pm.iterationData` cannot do this - it is read after the request was built.
-TEST_F (ScenarioRunnerTest, ADataTokenInTheUrlResolvesPerIteration) {
-    seed_collection ("col_1");
-    seed_request ("req_a", 0, "", "", "", server_->url ("/ok?user={{data.user}}"));
+{ "InTheUrl", "/ok?v={{data.v}}", "", &SeenRequest::target, "/ok?v=" },
+{ "InAHeader", "/ok", R"([{"key":"X-Marker","value":"{{data.v}}","enabled":true}])",
+&SeenRequest::marker, "" },
+});
 
-    const auto run_id = start_with_data (
-    json::array ({ { { "user", "ada" } }, { { "user", "grace" } } }));
+class ScenarioRunnerDataTokenTest
+: public ScenarioRunnerTest,
+  public ::testing::WithParamInterface<DataTokenFieldCase> {};
+
+TEST_P (ScenarioRunnerDataTokenTest, ResolvesPerIteration) {
+    const auto& c = GetParam ();
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, c.path, "", "", "", "", c.headers);
+
+    const auto run_id =
+    start_with_data (json::array ({ { { "v", "row-0" } }, { { "v", "row-1" } } }));
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
     auto seen = server_->requests ();
     ASSERT_EQ (seen.size (), 2u);
     // Two halves, and reverting either one fails this: without the reserved
-    // namespace the token is eaten at composition and both read `user=`;
-    // without the runner's pass the literal `{{data.user}}` reaches the wire.
-    EXPECT_EQ (seen[0].target, "/ok?user=ada");
-    EXPECT_EQ (seen[1].target, "/ok?user=grace");
+    // namespace the token is eaten at composition and both carry an empty
+    // value; without the runner's pass the literal `{{data.v}}` reaches the
+    // wire.
+    EXPECT_EQ (seen[0].*c.seen_field, std::string (c.expected_prefix) + "row-0");
+    EXPECT_EQ (seen[1].*c.seen_field, std::string (c.expected_prefix) + "row-1");
 }
 
-TEST_F (ScenarioRunnerTest, ADataTokenInAHeaderResolvesPerIteration) {
-    seed_collection ("col_1");
-    seed_request ("req_a", 0, "/ok", "", "", "", "",
-    R"([{"key":"X-Marker","value":"{{data.marker}}","enabled":true}])");
-
-    const auto run_id = start_with_data (
-    json::array ({ { { "marker", "row-0" } }, { { "marker", "row-1" } } }));
-    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
-
-    auto seen = server_->requests ();
-    ASSERT_EQ (seen.size (), 2u);
-    EXPECT_EQ (seen[0].marker, "row-0");
-    EXPECT_EQ (seen[1].marker, "row-1");
-}
+INSTANTIATE_TEST_SUITE_P (ADataToken,
+ScenarioRunnerDataTokenTest,
+::testing::ValuesIn (DATA_TOKEN_FIELD_CASES),
+[] (const ::testing::TestParamInfo<DataTokenFieldCase>& info) {
+    return std::string (info.param.name);
+});
 
 // A token naming a column the row does not carry never reaches the wire. The
 // alternative - substituting "" - is a request quietly pointing somewhere else,

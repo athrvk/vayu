@@ -14,18 +14,16 @@ import { TransactionsSummary } from "./TransactionsSummary";
 import type { RunTransactionSummary } from "@/types/domain";
 
 describe("TransactionsSummary", () => {
-	it("renders nothing when the run closed no transaction", () => {
-		// Absent - a collection with no control.transaction element, or a
-		// report from an engine that predates #1515 - has to read as no
-		// card, not an empty one.
-		const { container } = render(<TransactionsSummary transactions={undefined} />);
-		expect(container).toBeEmptyDOMElement();
-	});
-
-	it("renders nothing for an empty array", () => {
-		const { container } = render(<TransactionsSummary transactions={[]} />);
-		expect(container).toBeEmptyDOMElement();
-	});
+	// Absent - a collection with no control.transaction element, or a report
+	// from an engine that predates #1515 - has to read as no card, not an
+	// empty one, and so does an empty array.
+	it.each([{ transactions: undefined }, { transactions: [] }])(
+		"renders nothing when the transactions are $transactions",
+		({ transactions }) => {
+			const { container } = render(<TransactionsSummary transactions={transactions} />);
+			expect(container).toBeEmptyDOMElement();
+		}
+	);
 
 	it("shows a transaction's name, count and percentiles", () => {
 		const transactions: RunTransactionSummary[] = [

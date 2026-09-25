@@ -8,7 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <sstream>
+#include <string>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -244,29 +246,37 @@ TEST (JsonTest, HandlesAllHttpMethods) {
     }
 }
 
-TEST (JsonRequest, ParsesHttpVersion) {
-    auto json = nlohmann::json::parse (
-    R"({"method":"GET","url":"https://x/y","httpVersion":"http2"})");
-    auto result = vayu::json::deserialize_request (json);
+struct HttpVersionParseCase {
+    const char* name;
+    const char* json;
+    vayu::HttpVersion expected;
+};
+
+constexpr auto HTTP_VERSION_PARSE_CASES = std::to_array<HttpVersionParseCase> ({
+{ "ParsesAStoredValue", R"({"method":"GET","url":"https://x/y","httpVersion":"http2"})",
+vayu::HttpVersion::Http2 },
+{ "DefaultsWhenAbsent", R"({"method":"GET","url":"https://x/y"})", vayu::DEFAULT_HTTP_VERSION },
+// A corrupted or downgraded row must not execute as something arbitrary.
+{ "CoercesAGarbageStoredValueToAuto",
+R"({"method":"GET","url":"https://x/y","httpVersion":"quic"})", vayu::HttpVersion::Auto },
+});
+
+class JsonRequestHttpVersion : public ::testing::TestWithParam<HttpVersionParseCase> {};
+
+TEST_P (JsonRequestHttpVersion, DeserializesTheExpectedVersion) {
+    const auto& c = GetParam ();
+    auto json     = nlohmann::json::parse (c.json);
+    auto result   = vayu::json::deserialize_request (json);
     ASSERT_TRUE (result.is_ok ());
-    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Http2);
+    EXPECT_EQ (result.value ().http_version, c.expected);
 }
 
-TEST (JsonRequest, DefaultsHttpVersionWhenAbsent) {
-    auto json = nlohmann::json::parse (R"({"method":"GET","url":"https://x/y"})");
-    auto result = vayu::json::deserialize_request (json);
-    ASSERT_TRUE (result.is_ok ());
-    EXPECT_EQ (result.value ().http_version, vayu::DEFAULT_HTTP_VERSION);
-}
-
-TEST (JsonRequest, CoercesAGarbageStoredValueToAuto) {
-    // A corrupted or downgraded row must not execute as something arbitrary.
-    auto json = nlohmann::json::parse (
-    R"({"method":"GET","url":"https://x/y","httpVersion":"quic"})");
-    auto result = vayu::json::deserialize_request (json);
-    ASSERT_TRUE (result.is_ok ());
-    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Auto);
-}
+INSTANTIATE_TEST_SUITE_P (JsonRequest,
+JsonRequestHttpVersion,
+::testing::ValuesIn (HTTP_VERSION_PARSE_CASES),
+[] (const ::testing::TestParamInfo<HttpVersionParseCase>& info) {
+    return std::string (info.param.name);
+});
 
 TEST (JsonRequest, SerializesHttpVersion) {
     vayu::Request req;

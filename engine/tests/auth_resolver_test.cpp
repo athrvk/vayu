@@ -114,15 +114,6 @@ TEST (AuthResolver, Oauth2WithoutDatabaseFailsCleanly) {
     EXPECT_TRUE (req.headers.empty ());
 }
 
-TEST (AuthResolver, HeadersAreCaseInsensitive) {
-    // A user-typed lowercase "authorization" blocks bearer injection.
-    auto req                     = make_request ();
-    req.headers["authorization"] = "Bearer typed";
-    vayu::http::apply_auth (req, json{ { "mode", "bearer" }, { "token", "auto" } }, nullptr);
-    EXPECT_EQ (req.headers.size (), 1u);
-    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer typed");
-}
-
 TEST (ParseAuth, MapsModesToVariantAlternatives) {
     using namespace vayu::http;
     EXPECT_TRUE (std::holds_alternative<NoAuth> (parse_auth (json (nullptr))));

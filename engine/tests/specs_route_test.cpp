@@ -458,7 +458,7 @@ TEST_F (SpecsRouteTest, AnUpdateThatBindsIsStampedTheSameWay) {
     EXPECT_GT (body["openapi"]["syncedAt"].get<int64_t> (), 0);
 }
 
-TEST_F (SpecsRouteTest, AStampFillsWhatIsMissingAndOverwritesNothing) {
+TEST_F (SpecsRouteTest, AStampLeavesAnAlreadyCompleteBindingAlone) {
     const std::string spec_id = store_spec ();
     // A binding whose recorded version the document has since moved past is a
     // real state - it is what a run reports as `hash_mismatch` - so a write must

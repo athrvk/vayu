@@ -57,19 +57,6 @@ describe("resource writes use POST to create and PUT to update", () => {
 		put.mockResolvedValue(row as never);
 	});
 
-	it("creates a collection with POST /collections and no id in the path", async () => {
-		await apiService.createCollection({ name: "New" });
-		expect(put).not.toHaveBeenCalled();
-		expect(post).toHaveBeenCalledWith("/collections", { name: "New" });
-	});
-
-	it("updates a collection with PUT /collections/:id, id in the path only", async () => {
-		await apiService.updateCollection({ id: "col_1", name: "Renamed" });
-		expect(post).not.toHaveBeenCalled();
-		expect(put).toHaveBeenCalledWith("/collections/col_1", { name: "Renamed" });
-		expect(put.mock.calls[0][1]).not.toHaveProperty("id");
-	});
-
 	it("sends parentId: null through to the wire for a move to the root", async () => {
 		// Absent means "keep the parent" to the engine, so a move out of a folder
 		// exists only as a null that survives serialization. `UpdateCollectionRequest.parentId`
@@ -84,71 +71,61 @@ describe("resource writes use POST to create and PUT to update", () => {
 		expect(put).toHaveBeenCalledWith("/requests/req_1", { collectionId: "col_2" });
 	});
 
-	it("creates a request with POST /requests", async () => {
-		await apiService.createRequest({
-			collectionId: "col_1",
-			name: "R",
-			method: "GET",
-			url: "https://example.com",
+	describe.each([
+		{
+			resource: "collections",
+			create: (body: object) => apiService.createCollection(body as never),
+			update: (body: object) => apiService.updateCollection(body as never),
+			createBody: { name: "New" },
+			id: "col_1",
+			patch: { name: "Renamed" },
+		},
+		{
+			resource: "requests",
+			create: (body: object) => apiService.createRequest(body as never),
+			update: (body: object) => apiService.updateRequest(body as never),
+			createBody: {
+				collectionId: "col_1",
+				name: "R",
+				method: "GET",
+				url: "https://example.com",
+			},
+			id: "req_1",
+			patch: { url: "https://example.com/v2" },
+		},
+		{
+			resource: "environments",
+			create: (body: object) => apiService.createEnvironment(body as never),
+			update: (body: object) => apiService.updateEnvironment(body as never),
+			createBody: { name: "Dev", variables: {} },
+			id: "env_1",
+			patch: { name: "Prod" },
+		},
+	])("$resource", ({ resource, create, update, createBody, id, patch }) => {
+		it(`creates with POST /${resource} and no id in the path`, async () => {
+			await create(createBody);
+			expect(put).not.toHaveBeenCalled();
+			expect(post).toHaveBeenCalledWith(`/${resource}`, createBody);
 		});
-		expect(put).not.toHaveBeenCalled();
-		expect(post.mock.calls[0][0]).toBe("/requests");
-	});
 
-	it("updates a request with PUT /requests/:id, id in the path only", async () => {
-		await apiService.updateRequest({ id: "req_1", url: "https://example.com/v2" });
-		expect(post).not.toHaveBeenCalled();
-		expect(put).toHaveBeenCalledWith("/requests/req_1", { url: "https://example.com/v2" });
-		expect(put.mock.calls[0][1]).not.toHaveProperty("id");
-	});
+		it(`updates with PUT /${resource}/:id, id in the path only`, async () => {
+			await update({ id, ...patch });
+			expect(post).not.toHaveBeenCalled();
+			expect(put).toHaveBeenCalledWith(`/${resource}/${id}`, patch);
+			expect(put.mock.calls[0][1]).not.toHaveProperty("id");
+		});
 
-	it("creates an environment with POST /environments", async () => {
-		await apiService.createEnvironment({ name: "Dev", variables: {} });
-		expect(put).not.toHaveBeenCalled();
-		expect(post).toHaveBeenCalledWith("/environments", { name: "Dev", variables: {} });
-	});
-
-	it("updates an environment with PUT /environments/:id, id in the path only", async () => {
-		await apiService.updateEnvironment({ id: "env_1", name: "Prod" });
-		expect(post).not.toHaveBeenCalled();
-		expect(put).toHaveBeenCalledWith("/environments/env_1", { name: "Prod" });
-		expect(put.mock.calls[0][1]).not.toHaveProperty("id");
-	});
-
-	// Every create strips `id`, whatever the caller passed. A payload builder
-	// that spreads a whole record is the case the types cannot catch: the
-	// `Create*Request` types declare `id?: never`, but that only fires on an
-	// object literal, so the runtime strip is what actually holds. Each of these
-	// would fail with the strip removed - the engine's 400 would surface as a
-	// broken save instead.
-	it("strips a client-supplied id from a collection create", async () => {
-		await apiService.createCollection({ id: "col_temp", name: "Imported" } as never);
-		expect(put).not.toHaveBeenCalled();
-		expect(post).toHaveBeenCalledWith("/collections", { name: "Imported" });
-		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
-	});
-
-	it("strips a client-supplied id from a request create", async () => {
-		await apiService.createRequest({
-			id: "req_temp",
-			collectionId: "col_1",
-			name: "R",
-			method: "GET",
-			url: "https://example.com",
-		} as never);
-		expect(put).not.toHaveBeenCalled();
-		expect(post.mock.calls[0][0]).toBe("/requests");
-		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
-	});
-
-	it("strips a client-supplied id from an environment create", async () => {
-		await apiService.createEnvironment({
-			id: "env_temp",
-			name: "Dev",
-			variables: {},
-		} as never);
-		expect(put).not.toHaveBeenCalled();
-		expect(post).toHaveBeenCalledWith("/environments", { name: "Dev", variables: {} });
-		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
+		// Every create strips `id`, whatever the caller passed. A payload builder
+		// that spreads a whole record is the case the types cannot catch: the
+		// `Create*Request` types declare `id?: never`, but that only fires on an
+		// object literal, so the runtime strip is what actually holds. This fails
+		// with the strip removed - the engine's 400 would surface as a broken save
+		// instead.
+		it("strips a client-supplied id from a create", async () => {
+			await create({ id: "temp_1", ...createBody });
+			expect(put).not.toHaveBeenCalled();
+			expect(post).toHaveBeenCalledWith(`/${resource}`, createBody);
+			expect(post.mock.calls[0][1]).not.toHaveProperty("id");
+		});
 	});
 });

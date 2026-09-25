@@ -129,35 +129,51 @@ vayu::http::AuthRefreshPlan plan_for (std::string value, int64_t expires_at_ms) 
 // The schedule
 // ---------------------------------------------------------------------------
 
-TEST (AuthRefreshDelay, RefreshesTheConfiguredLeadBeforeExpiry) {
-    vayu::core::AuthRefreshTuning tuning;
-    tuning.lead_ms = 60'000;
-    // 1000s of life left, refreshing 60s early -> sleep 940s.
-    EXPECT_EQ (auth_refresh_delay_ms (1'000'000, 0, tuning), 940'000);
-}
+namespace {
 
-// A token whose whole lifetime is shorter than the lead is *always* inside its
-// refresh window. Without the floor the watchdog would re-acquire in a tight
-// loop and hammer the token endpoint on the run's behalf.
-TEST (AuthRefreshDelay, FloorsTheWaitForATokenShorterThanTheLead) {
-    vayu::core::AuthRefreshTuning tuning;
-    tuning.lead_ms         = 60'000;
-    tuning.min_interval_ms = 1'500;
+struct RefreshDelayCase {
+    const char* name;
+    int64_t lead_ms;
+    int64_t min_interval_ms;
+    int64_t expires_at_ms;
+    int64_t now_ms;
+    int64_t expected_delay_ms;
+};
 
-    EXPECT_EQ (auth_refresh_delay_ms (2'000, 0, tuning), 1'500);
-    // Already expired: same floor, not a negative sleep.
-    EXPECT_EQ (auth_refresh_delay_ms (1'000, 5'000, tuning), 1'500);
-}
-
+constexpr auto REFRESH_DELAY_CASES = std::to_array<RefreshDelayCase> ({
+// 1000s of life left, refreshing 60s early -> sleep 940s.
+{ "RefreshesTheConfiguredLeadBeforeExpiry", 60'000,
+vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS, 1'000'000, 0, 940'000 },
+// A token whose whole lifetime is shorter than the lead is *always* inside
+// its refresh window. Without the floor the watchdog would re-acquire in a
+// tight loop and hammer the token endpoint on the run's behalf.
+{ "FloorsTheWaitForATokenShorterThanTheLead", 60'000, 1'500, 2'000, 0, 1'500 },
+// Already expired: same floor, not a negative sleep.
+{ "FloorsTheWaitForAnAlreadyExpiredToken", 60'000, 1'500, 1'000, 5'000, 1'500 },
 // The floor is the user's setting, not a constant baked into the schedule -
 // mutation check for reading `min_interval_ms` rather than the default.
-TEST (AuthRefreshDelay, TheFloorFollowsTheConfiguredMinimumInterval) {
-    vayu::core::AuthRefreshTuning tuning;
-    tuning.lead_ms         = 60'000;
-    tuning.min_interval_ms = 250;
+{ "TheFloorFollowsTheConfiguredMinimumInterval", 60'000, 250, 2'000, 0, 250 },
+});
 
-    EXPECT_EQ (auth_refresh_delay_ms (2'000, 0, tuning), 250);
+class AuthRefreshDelay : public ::testing::TestWithParam<RefreshDelayCase> {};
+
+} // namespace
+
+TEST_P (AuthRefreshDelay, WaitsTheScheduledDelay) {
+    const auto& c = GetParam ();
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms         = c.lead_ms;
+    tuning.min_interval_ms = c.min_interval_ms;
+
+    EXPECT_EQ (auth_refresh_delay_ms (c.expires_at_ms, c.now_ms, tuning), c.expected_delay_ms);
 }
+
+INSTANTIATE_TEST_SUITE_P (Schedule,
+AuthRefreshDelay,
+::testing::ValuesIn (REFRESH_DELAY_CASES),
+[] (const ::testing::TestParamInfo<RefreshDelayCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ---------------------------------------------------------------------------
 // The swap the submitting thread performs

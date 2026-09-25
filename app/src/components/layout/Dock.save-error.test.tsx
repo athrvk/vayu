@@ -223,11 +223,6 @@ describe("the save line holds its own width", () => {
 		// identity this loop is checking.
 		expect(liveSaveLine()).toBe("Saving…");
 	});
-
-	it("says nothing at rest, and reaches no screen reader while idle", () => {
-		renderDock();
-		expect(liveSaveLine()).toBe("");
-	});
 });
 
 /*

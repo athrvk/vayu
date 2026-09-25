@@ -129,30 +129,25 @@ describe("ClientCertificatesCard", () => {
 		expect(screen.getByText("client.pem")).toBeInTheDocument();
 	});
 
-	it("sends a blank port as null, which is what 'every port' is", async () => {
+	// A blank port is `null`, which is what "every port" is: `0` or `""` there
+	// registers an entry that can never match a transfer.
+	it.each([
+		["a blank port as null", undefined, null],
+		["a typed port as a number", "8443", 8443],
+	])("sends %s", async (_label, port, expected) => {
 		renderCard();
-		fillDraft({ host: "api.example.com" });
+		fillDraft({ host: "api.example.com", port });
 		fireEvent.click(screen.getByRole("button", { name: /^add certificate$/i }));
 
 		await waitFor(() => expect(createMutate).toHaveBeenCalled());
-		// `0` or `""` here registers an entry that can never match a transfer.
 		expect(createMutate).toHaveBeenCalledWith({
 			host: "api.example.com",
-			port: null,
+			port: expected,
 			certPath: "/certs/client.pem",
 			certFormat: "pem",
 			keyPath: "/certs/client.key",
 			passphrase: undefined,
 		});
-	});
-
-	it("sends a typed port as a number", async () => {
-		renderCard();
-		fillDraft({ host: "api.example.com", port: "8443" });
-		fireEvent.click(screen.getByRole("button", { name: /^add certificate$/i }));
-
-		await waitFor(() => expect(createMutate).toHaveBeenCalled());
-		expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ port: 8443 }));
 	});
 
 	it("shows the engine's reason when a create is refused", async () => {

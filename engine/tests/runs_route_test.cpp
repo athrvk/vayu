@@ -991,19 +991,6 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheBoundedStoresDropped) {
     EXPECT_EQ (body["sampling"]["responseSamplesDropped"].get<size_t> (), 900u);
 }
 
-// A run recorded before retention was reported has no section - which is not
-// the same claim as "this run dropped nothing".
-TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
-    seed ({ .id = "run_old_summary", .start_time = 1000 });
-    auto summary = vayu::core::build_run_summary_payload (summary_inputs ());
-    summary.erase ("sampling");
-    db_->update_run_summary ("run_old_summary", summary.dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_old_summary");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("sampling"));
-}
-
 // Issue #1503: what a run did not do survives the summary -> report round
 // trip, and a run with nothing to report carries no key at all rather than
 // an empty array every run would otherwise show.
@@ -1060,24 +1047,6 @@ TEST_F (RunsRouteTest, ReportSaysWhetherTheResponseSampleBudgetWasSpent) {
     EXPECT_FALSE (uniform["sampling"]["responseSampleBudgetSpent"].get<bool> ());
 }
 
-// A run recorded between the byte budget (#1155) and its marker (#1192) had
-// the budget and no record of whether it spent it. That is not the same claim
-// as "it kept its uniformity", so the key is left out rather than reported
-// false - the same absent-vs-zero rule the section itself follows.
-TEST_F (RunsRouteTest, ReportOmitsTheBudgetMarkerWhenTheSummaryPredatesIt) {
-    seed ({ .id = "run_no_marker", .start_time = 1000 });
-    auto summary = vayu::core::build_run_summary_payload (summary_inputs ());
-    summary["sampling"].erase ("response_sample_budget_spent");
-    db_->update_run_summary ("run_no_marker", summary.dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_marker");
-    ASSERT_EQ (status, 200);
-    ASSERT_TRUE (body.contains ("sampling"));
-    EXPECT_FALSE (body["sampling"].contains ("responseSampleBudgetSpent"));
-    EXPECT_EQ (body["sampling"]["responseSamplesDropped"].get<size_t> (), 900u)
-    << "the rest of the section still reads";
-}
-
 // Server vitals survive the summary -> report round trip in the shape the
 // scrape wrote them, so the section a reader sees is the one the run recorded.
 TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
@@ -1097,34 +1066,6 @@ TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
     EXPECT_EQ (body["monitor"]["samples"].get<size_t> (), 2u);
     EXPECT_EQ (body["monitor"]["failures"].get<size_t> (), 1u);
     EXPECT_DOUBLE_EQ (body["monitor"]["series"]["node_cpu"]["avg"].get<double> (), 2.0);
-}
-
-// The absence twin: a run that configured no monitor reports no section, rather
-// than a target that reported nothing.
-TEST_F (RunsRouteTest, ReportOmitsMonitorWhenNoneWasConfigured) {
-    seed ({ .id = "run_no_monitor", .start_time = 1000 });
-    auto inputs    = summary_inputs ();
-    inputs.monitor = std::nullopt;
-    db_->update_run_summary (
-    "run_no_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_monitor");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("monitor"));
-}
-
-// A run without script validation keeps the section out entirely, rather than
-// reporting a run of zero tests that all passed.
-TEST_F (RunsRouteTest, ReportOmitsTestValidationWhenNoScriptRan) {
-    seed ({ .id = "run_no_tests", .start_time = 1000 });
-    auto inputs  = summary_inputs ();
-    inputs.tests = std::nullopt;
-    db_->update_run_summary (
-    "run_no_tests", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_tests");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("testValidation"));
 }
 
 // The aggregate verdict a per-response script cannot give, round-tripped
@@ -1191,19 +1132,6 @@ TEST_F (RunsRouteTest, ReportCarriesCustomMetrics) {
     EXPECT_EQ (ttfb2["type"].get<std::string> (), "trend");
     EXPECT_EQ (ttfb2["count"].get<size_t> (), 42u);
     EXPECT_DOUBLE_EQ (ttfb2["p95"].get<double> (), 40.0);
-}
-
-// A run that recorded no custom metric leaves the section out entirely,
-// rather than reporting an empty object.
-TEST_F (RunsRouteTest, ReportOmitsCustomMetricsWhenNoneWereRecorded) {
-    seed ({ .id = "run_no_custom_metrics", .start_time = 1000 });
-    db_->update_run_summary ("run_no_custom_metrics",
-    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
-
-    auto [status, body] =
-    vayu::http::routes::run_report_response (*db_, "run_no_custom_metrics");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("customMetrics"));
 }
 
 // Issue #1484: a run whose every request errored before completing has no
@@ -1295,33 +1223,6 @@ TEST_F (RunsRouteTest, ReportCarriesTheCoverageBlockTheRunComputed) {
     EXPECT_EQ (coverage["operations"][0]["sent"].get<size_t> (), 0u);
 }
 
-// The not-measured rule, in both shapes it arrives in: a run whose summary
-// carries no coverage at all, and one carrying an object with no rows (an older
-// or a partial writer). Neither reports a contract of zero operations.
-TEST_F (RunsRouteTest, ReportOmitsCoverageForARunNotMeasuredAgainstAContract) {
-    seed ({ .id = "run_no_coverage", .start_time = 1000 });
-    auto inputs     = summary_inputs ();
-    inputs.coverage = std::nullopt;
-    db_->update_run_summary (
-    "run_no_coverage", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_coverage");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("coverage")) << body.dump ();
-
-    seed ({ .id = "run_empty_coverage", .start_time = 1000 });
-    auto empty     = summary_inputs ();
-    empty.coverage = nlohmann::json{ { "operationsTotal", 0 },
-        { "operations", nlohmann::json::array () } };
-    db_->update_run_summary (
-    "run_empty_coverage", vayu::core::build_run_summary_payload (empty).dump ());
-
-    auto [empty_status, empty_body] =
-    vayu::http::routes::run_report_response (*db_, "run_empty_coverage");
-    ASSERT_EQ (empty_status, 200);
-    EXPECT_FALSE (empty_body.contains ("coverage")) << empty_body.dump ();
-}
-
 // ---------------------------------------------------------------------------
 // Single-request run element outcomes (issues #1594, #1641)
 // ---------------------------------------------------------------------------
@@ -1351,39 +1252,6 @@ TEST_F (RunsRouteTest, ReportCarriesTheElementsBlockTheRunComputed) {
     EXPECT_EQ (elements[0]["passed"].get<size_t> (), 9u);
     EXPECT_EQ (elements[0]["failed"].get<size_t> (), 1u);
     EXPECT_EQ (elements[1]["kind"].get<std::string> (), "extract.json");
-}
-
-// The not-measured rule, in both shapes it arrives in: a run whose summary
-// carries no `elements` at all (declared none, or is a scenario run, which
-// never writes this key), and one carrying an empty array (a stored summary
-// from an engine that filtered it, or one hand-edited). Neither reports an
-// element that did not run.
-TEST_F (RunsRouteTest, ReportOmitsElementsForARunThatDeclaredNoneOrRanNone) {
-    seed ({ .id = "run_no_elements", .start_time = 1000 });
-    auto inputs     = summary_inputs ();
-    inputs.elements = std::nullopt;
-    db_->update_run_summary (
-    "run_no_elements", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_elements");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("elements")) << body.dump ();
-
-    // A stored summary carrying an empty `elements` array directly - the
-    // shape `build_run_summary_payload` itself never writes (it omits the
-    // key rather than writing `[]`), but the route's own guard must not
-    // trust that upstream discipline blindly.
-    seed ({ .id = "run_empty_elements", .start_time = 1000 });
-    auto without_elements     = summary_inputs ();
-    without_elements.elements = std::nullopt;
-    auto empty_summary = vayu::core::build_run_summary_payload (without_elements);
-    empty_summary["elements"] = nlohmann::json::array ();
-    db_->update_run_summary ("run_empty_elements", empty_summary.dump ());
-
-    auto [empty_status, empty_body] =
-    vayu::http::routes::run_report_response (*db_, "run_empty_elements");
-    ASSERT_EQ (empty_status, 200);
-    EXPECT_FALSE (empty_body.contains ("elements")) << empty_body.dump ();
 }
 
 // ---------------------------------------------------------------------------
@@ -1432,36 +1300,6 @@ TEST_F (RunsRouteTest, ReportCarriesTheSchemaValidationBlockTheRunComputed) {
     EXPECT_EQ (validation["failures"][0]["step"].get<std::string> (), "get pet");
 }
 
-// The absent-not-zeros gate, in both shapes it arrives in: a run whose summary
-// carries no block, and one carrying an object that checked nothing. Neither
-// reports a contract nothing failed.
-//
-// Mutation-check: drop the `sampled > 0` condition in the route's reader and
-// the second half reddens - the report gains a block claiming a clean run.
-TEST_F (RunsRouteTest, ReportOmitsSchemaValidationForARunThatCheckedNothing) {
-    seed ({ .id = "run_no_schema", .start_time = 1000 });
-    auto inputs              = summary_inputs ();
-    inputs.schema_validation = std::nullopt;
-    db_->update_run_summary (
-    "run_no_schema", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_schema");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("schemaValidation")) << body.dump ();
-
-    seed ({ .id = "run_empty_schema", .start_time = 1000 });
-    auto empty              = summary_inputs ();
-    empty.schema_validation = nlohmann::json{ { "sampled", 0 },
-        { "checked", 0 }, { "valid", 0 }, { "failed", 0 } };
-    db_->update_run_summary (
-    "run_empty_schema", vayu::core::build_run_summary_payload (empty).dump ());
-
-    auto [empty_status, empty_body] =
-    vayu::http::routes::run_report_response (*db_, "run_empty_schema");
-    ASSERT_EQ (empty_status, 200);
-    EXPECT_FALSE (empty_body.contains ("schemaValidation")) << empty_body.dump ();
-}
-
 // The anchor coverage is read against, asserted at the route for the first time
 // (noted on #629 when phase 1 closed): the report echoes the *snapshot's*
 // binding, so a reader can say which document a coverage block was computed
@@ -1486,20 +1324,6 @@ TEST_F (RunsRouteTest, ReportEchoesTheSpecTheRunWasPlannedAgainst) {
     EXPECT_FALSE (unbound["metadata"].contains ("openapi")) << unbound.dump ();
 }
 
-// A run that declared no budgets keeps the section out entirely - and so does
-// every run recorded before budgets existed, which is the same stored shape.
-TEST_F (RunsRouteTest, ReportOmitsThresholdValidationWhenNoBudgetWasDeclared) {
-    seed ({ .id = "run_no_budgets", .start_time = 1000 });
-    auto inputs       = summary_inputs ();
-    inputs.thresholds = std::nullopt;
-    db_->update_run_summary (
-    "run_no_budgets", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_budgets");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("thresholdValidation"));
-}
-
 // Mid-run OAuth 2.0 refresh (#478), round-tripped through the stored summary:
 // the section is what explains 401s that appear partway through a run, so it
 // has to survive the write/read pair, not merely be produced.
@@ -1521,23 +1345,6 @@ TEST_F (RunsRouteTest, ReportCarriesTheAuthRefreshSection) {
     EXPECT_DOUBLE_EQ (auth["refreshes"][0]["atSeconds"].get<double> (), 3620.4);
     EXPECT_EQ (auth["refreshFailures"].get<size_t> (), 1u);
     EXPECT_EQ (auth["lastError"].get<std::string> (), "oauth2_provider_error: invalid_grant");
-}
-
-// A run that could not refresh at all keeps the section out entirely - and so
-// does every run recorded before mid-run refresh existed. "Never watching" and
-// "watched and never needed to" are different answers; only the absent section
-// can say the first.
-TEST_F (RunsRouteTest, ReportOmitsAuthWhenTheRunCouldNotRefresh) {
-    seed ({ .id = "run_no_auth_section", .start_time = 1000 });
-    auto inputs = summary_inputs ();
-    inputs.auth = std::nullopt;
-    db_->update_run_summary ("run_no_auth_section",
-    vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] =
-    vayu::http::routes::run_report_response (*db_, "run_no_auth_section");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("auth"));
 }
 
 // What a capacity search found, round-tripped through the stored summary. The
@@ -1599,21 +1406,6 @@ TEST_F (RunsRouteTest, ReportOmitsTheKneeWhenNoLevelBreached) {
     EXPECT_EQ (body["capacity"]["maxHealthyConcurrency"].get<size_t> (), 8u);
 }
 
-// Every other mode. The section is absent, not zeroed - a fixed-target run
-// measured a point, and a knee of 0 would read as a service that collapses at
-// no concurrency at all.
-TEST_F (RunsRouteTest, ReportOmitsCapacityForEveryOtherMode) {
-    seed ({ .id = "run_not_capacity", .start_time = 1000 });
-    auto inputs     = summary_inputs ();
-    inputs.capacity = std::nullopt;
-    db_->update_run_summary (
-    "run_not_capacity", vayu::core::build_run_summary_payload (inputs).dump ());
-
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_not_capacity");
-    ASSERT_EQ (status, 200);
-    EXPECT_FALSE (body.contains ("capacity"));
-}
-
 // Per-phase percentiles round-trip from the histogram bank into the report,
 // under `timingBreakdown` beside the averages (issue #476).
 TEST_F (RunsRouteTest, ReportCarriesPerPhasePercentiles) {
@@ -1652,22 +1444,174 @@ TEST_F (RunsRouteTest, ReportCarriesPerPhasePercentiles) {
     EXPECT_EQ (reported["tls"]["count"].get<size_t> (), 4321u);
 }
 
-// The absence twin. A run that recorded no distribution reports no `phases`
-// key - five zeroed rows would claim every phase was instant. The averages
-// half is unaffected, which is what keeps the two independently present.
-TEST_F (RunsRouteTest, ReportOmitsPhasesWhenNoneWereRecorded) {
-    seed ({ .id = "run_no_phases", .start_time = 1000 });
-    auto inputs   = summary_inputs ();
-    inputs.phases = std::nullopt;
-    db_->update_run_summary (
-    "run_no_phases", vayu::core::build_run_summary_payload (inputs).dump ());
+// ---------------------------------------------------------------------------
+// The absent-not-zeros rule, one case per report section
+// ---------------------------------------------------------------------------
 
-    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_phases");
+// Every optional section of the report is left out when the run has nothing to
+// say, rather than reported as zeros, an empty object or an empty array - a
+// zero is a claim ("this run dropped nothing", "no test failed", "every phase
+// was instant"), and an absent section is the only way to say "not measured".
+// Each case stores `summary_inputs ()` shaped one way and names the key that
+// must be missing from the report, under `parent` when it is nested.
+struct ReportOmitsCase {
+    const char* name;
+    /// How this run's inputs differ from `summary_inputs ()`; nullptr for none.
+    void (*shape_inputs) (vayu::core::RunSummaryInputs&);
+    /// An edit to the stored summary JSON after it is built, for a shape
+    /// `build_run_summary_payload` never writes itself (an older engine's
+    /// summary, a partial writer); nullptr for none.
+    void (*shape_summary) (nlohmann::json&);
+    /// The section `absent` is looked for in, asserted present; nullptr for the
+    /// top level of the report.
+    const char* parent;
+    const char* absent;
+    /// A key of `parent` that must still be there, so the case proves one key
+    /// went missing rather than the whole section; nullptr for none.
+    const char* sibling;
+    /// Seed one sampled result carrying phase timings, which is what makes the
+    /// `timingBreakdown` averages half (and so the object itself) present.
+    bool seed_timed_result;
+};
+
+constexpr auto REPORT_OMITS_CASES = std::to_array<ReportOmitsCase> ({
+// A run recorded before retention was reported has no section - which is not
+// the same claim as "this run dropped nothing".
+{ "ReportOmitsSamplingWhenTheSummaryPredatesIt", nullptr,
+[] (nlohmann::json& summary) { summary.erase ("sampling"); }, nullptr, "sampling", nullptr, false },
+// A run recorded between the byte budget (#1155) and its marker (#1192) had
+// the budget and no record of whether it spent it. That is not the same claim
+// as "it kept its uniformity", so the key is left out rather than reported
+// false - and the rest of the section still reads.
+{ "ReportOmitsTheBudgetMarkerWhenTheSummaryPredatesIt", nullptr,
+[] (nlohmann::json& summary) {
+    summary["sampling"].erase ("response_sample_budget_spent");
+},
+"sampling", "responseSampleBudgetSpent", "responseSamplesDropped", false },
+// A run that configured no monitor reports no section, rather than a target
+// that reported nothing.
+{ "ReportOmitsMonitorWhenNoneWasConfigured",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.monitor = std::nullopt; },
+nullptr, nullptr, "monitor", nullptr, false },
+// Not a run of zero tests that all passed.
+{ "ReportOmitsTestValidationWhenNoScriptRan",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.tests = std::nullopt; },
+nullptr, nullptr, "testValidation", nullptr, false },
+// `summary_inputs ()` records no custom metric; not an empty object.
+{ "ReportOmitsCustomMetricsWhenNoneWereRecorded", nullptr, nullptr, nullptr,
+"customMetrics", nullptr, false },
+// The not-measured rule for coverage, in both shapes it arrives in: no
+// coverage at all, and an object with no rows (an older or a partial
+// writer). Neither reports a contract of zero operations.
+{ "ReportOmitsCoverageForARunNotMeasuredAgainstAContract",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.coverage = std::nullopt; },
+nullptr, nullptr, "coverage", nullptr, false },
+{ "ReportOmitsCoverageForARunNotMeasuredAgainstAContract_Empty",
+[] (vayu::core::RunSummaryInputs& inputs) {
+    inputs.coverage = nlohmann::json{ { "operationsTotal", 0 },
+        { "operations", nlohmann::json::array () } };
+},
+nullptr, nullptr, "coverage", nullptr, false },
+// The same for single-request elements (#1594, #1641): no `elements` at all
+// (declared none, or a scenario run, which never writes the key), and an
+// empty array written straight into the stored summary - the shape
+// `build_run_summary_payload` itself never writes, but the route's own guard
+// must not trust that upstream discipline blindly.
+{ "ReportOmitsElementsForARunThatDeclaredNoneOrRanNone",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.elements = std::nullopt; },
+nullptr, nullptr, "elements", nullptr, false },
+{ "ReportOmitsElementsForARunThatDeclaredNoneOrRanNone_Empty",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.elements = std::nullopt; },
+[] (nlohmann::json& summary) { summary["elements"] = nlohmann::json::array (); },
+nullptr, "elements", nullptr, false },
+// And for sampled schema validation (#682): no block, and a block that
+// checked nothing. Neither reports a contract nothing failed. Mutation-check:
+// drop the `sampled > 0` condition in the route's reader and the `_Empty`
+// case reddens - the report gains a block claiming a clean run.
+{ "ReportOmitsSchemaValidationForARunThatCheckedNothing",
+[] (vayu::core::RunSummaryInputs& inputs) {
+    inputs.schema_validation = std::nullopt;
+},
+nullptr, nullptr, "schemaValidation", nullptr, false },
+{ "ReportOmitsSchemaValidationForARunThatCheckedNothing_Empty",
+[] (vayu::core::RunSummaryInputs& inputs) {
+    inputs.schema_validation = nlohmann::json{ { "sampled", 0 },
+        { "checked", 0 }, { "valid", 0 }, { "failed", 0 } };
+},
+nullptr, nullptr, "schemaValidation", nullptr, false },
+// No budgets declared - and so every run recorded before budgets existed,
+// which is the same stored shape.
+{ "ReportOmitsThresholdValidationWhenNoBudgetWasDeclared",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.thresholds = std::nullopt; },
+nullptr, nullptr, "thresholdValidation", nullptr, false },
+// A run that could not refresh at all (#478), and every run recorded before
+// mid-run refresh existed. "Never watching" and "watched and never needed
+// to" are different answers; only the absent section can say the first.
+{ "ReportOmitsAuthWhenTheRunCouldNotRefresh",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.auth = std::nullopt; },
+nullptr, nullptr, "auth", nullptr, false },
+// Every mode but a capacity search. A fixed-target run measured a point, and
+// a knee of 0 would read as a service that collapses at no concurrency.
+{ "ReportOmitsCapacityForEveryOtherMode",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.capacity = std::nullopt; },
+nullptr, nullptr, "capacity", nullptr, false },
+// A run that recorded no phase distribution reports no `phases` key - five
+// zeroed rows would claim every phase was instant. The averages half of
+// `timingBreakdown` comes from the sampled traces and is unaffected, which is
+// what keeps the two independently present: the seeded timed result keeps
+// the object there, so this checks `phases` inside it rather than passing
+// because the whole object went missing.
+{ "ReportOmitsPhasesWhenNoneWereRecorded",
+[] (vayu::core::RunSummaryInputs& inputs) { inputs.phases = std::nullopt; },
+nullptr, "timingBreakdown", "phases", "avgDnsMs", true },
+});
+
+class RunsReportOmitsTest : public RunsRouteTest,
+                            public ::testing::WithParamInterface<ReportOmitsCase> {};
+
+TEST_P (RunsReportOmitsTest, LeavesTheSectionOut) {
+    const auto& c = GetParam ();
+    seed ({ .id = "run_omits", .start_time = 1000 });
+    if (c.seed_timed_result) {
+        vayu::db::Result result;
+        result.run_id      = "run_omits";
+        result.timestamp   = 2000;
+        result.status_code = 200;
+        result.status_text = "OK";
+        result.latency_ms  = 10.0;
+        result.trace_data =
+        R"({"dnsMs":1.0,"connectMs":2.0,"tlsMs":3.0,"firstByteMs":4.0,"downloadMs":5.0})";
+        db_->add_result (result);
+    }
+
+    auto inputs = summary_inputs ();
+    if (c.shape_inputs != nullptr) {
+        c.shape_inputs (inputs);
+    }
+    auto summary = vayu::core::build_run_summary_payload (inputs);
+    if (c.shape_summary != nullptr) {
+        c.shape_summary (summary);
+    }
+    db_->update_run_summary ("run_omits", summary.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_omits");
     ASSERT_EQ (status, 200);
-    if (body.contains ("timingBreakdown")) {
-        EXPECT_FALSE (body["timingBreakdown"].contains ("phases"));
+    if (c.parent != nullptr) {
+        ASSERT_TRUE (body.contains (c.parent)) << body.dump ();
+    }
+    const auto& section = c.parent == nullptr ? body : body.at (c.parent);
+    EXPECT_FALSE (section.contains (c.absent)) << body.dump ();
+    if (c.sibling != nullptr) {
+        EXPECT_TRUE (section.contains (c.sibling)) << body.dump ();
     }
 }
+
+INSTANTIATE_TEST_SUITE_P (PerSection,
+RunsReportOmitsTest,
+::testing::ValuesIn (REPORT_OMITS_CASES),
+[] (const ::testing::TestParamInfo<ReportOmitsCase>& info) {
+    return std::string (info.param.name);
+});
 
 // A summary that is not a JSON object is treated as absent. There is no second
 // aggregate source any more, so the report stands on the run's sampled results

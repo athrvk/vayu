@@ -77,24 +77,14 @@ beforeEach(() => {
 });
 
 describe("CodeEditor theme", () => {
-	it("uses the app's dark theme, not Monaco's", async () => {
-		setMode(true);
+	it.each([
+		[true, "vayu-dark", "vs-dark"],
+		[false, "vayu-light", "vs"],
+	])("dark=%s uses the app's %s theme, not Monaco's", async (dark, theme, base) => {
+		setMode(dark);
 		await renderEditor();
-		expect(lastTheme).toBe("vayu-dark");
-		expect(defineTheme).toHaveBeenCalledWith(
-			"vayu-dark",
-			expect.objectContaining({ base: "vs-dark" })
-		);
-	});
-
-	it("uses the app's light theme, not Monaco's", async () => {
-		setMode(false);
-		await renderEditor();
-		expect(lastTheme).toBe("vayu-light");
-		expect(defineTheme).toHaveBeenCalledWith(
-			"vayu-light",
-			expect.objectContaining({ base: "vs" })
-		);
+		expect(lastTheme).toBe(theme);
+		expect(defineTheme).toHaveBeenCalledWith(theme, expect.objectContaining({ base }));
 	});
 
 	it("follows a mode switch with the definition, then the name", async () => {

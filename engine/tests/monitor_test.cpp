@@ -562,7 +562,8 @@ TEST_F (MonitorRunTest, AHangingEndpointStallsNeitherTheRunNorTheTicks) {
 // also thins the data. Raising `monitorScrapeTimeoutMs` clears it at the same
 // cadence. Mutation-check: put the hardcoded `max(100, interval*3/4)` back in
 // `collect_monitor` and the second half of this test records nothing.
-TEST_F (MonitorRunTest, ASlowExpositionScrapesOnceTheBudgetIsRaisedAtTheSameCadence) {
+TEST_F (MonitorRunTest,
+ASlowExpositionScrapesNothingOnTheDerivedBudgetAndScrapesOnceItIsRaisedAtTheSameCadence) {
     const json monitor = json{ { "url", server->vitals_slow_url () },
         { "intervalMs", SlowMockServer::VITALS_SLOW_INTERVAL_MS },
         { "series", json::array ({ "vayu_test_cpu" }) } };

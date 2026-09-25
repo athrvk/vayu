@@ -22,6 +22,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
+#include <string>
+
 namespace vayu::http::routes {
 // Declared in execution.cpp.
 nlohmann::json build_result_trace (const vayu::Request& request,
@@ -170,19 +173,6 @@ TEST (ExecutionTrace, AnUncutResponseStoresNoReadCapFlag) {
     EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
 }
 
-// Same invariant style as the timing test above: whatever key
-// serialize(Response) puts on the live /execute wire for httpVersion is also
-// what the stored trace carries.
-TEST (ExecutionTrace, StoredHttpVersionMatchesTheLiveWireKey) {
-    auto response         = make_response ();
-    response.http_version = "HTTP/1.1";
-
-    auto trace = build_result_trace (make_request (), response);
-    auto live  = vayu::json::serialize (response);
-
-    EXPECT_EQ (trace["response"]["httpVersion"], live["httpVersion"]);
-}
-
 // ============================================================================
 // rawRequest - the wire message, stored (issue #348)
 //
@@ -269,18 +259,6 @@ TEST (ExecutionTrace, StoresTheSentHeadersBesideTheComposedMap) {
     EXPECT_EQ (trace["request"]["headers"]["Content-Type"], "multipart/form-data");
 }
 
-// Same invariant style as the timing and rawRequest tests above: what
-// serialize(Response) puts on the live /execute wire is what the stored trace
-// carries, so the live and restored Headers tabs cannot drift apart again.
-TEST (ExecutionTrace, StoredSentHeadersMatchTheLiveWireKey) {
-    auto response = make_response_with_sent_headers ();
-
-    auto trace = build_result_trace (make_multipart_request (), response);
-    auto live  = vayu::json::serialize (response);
-
-    EXPECT_EQ (trace["request"]["sentHeaders"], live["requestHeaders"]);
-}
-
 // Omitted, not stored empty - for the reason the rawRequest omission has: the
 // reader prefers this key when present, so an empty object would suppress the
 // composed-map fallback that is the right answer both for a step that sent
@@ -290,18 +268,6 @@ TEST (ExecutionTrace, OmitsSentHeadersWhenNothingWasRecorded) {
     auto trace = build_result_trace (make_multipart_request (), make_response ());
 
     EXPECT_FALSE (trace["request"].contains ("sentHeaders"));
-}
-
-// The same invariant style as the timing and httpVersion tests above: what
-// serialize(Response) puts on the live /execute wire is what the stored trace
-// carries, so the live and restored raw views cannot drift apart again.
-TEST (ExecutionTrace, StoredRawRequestMatchesTheLiveWireKey) {
-    auto response = make_response_with_wire_request ();
-
-    auto trace = build_result_trace (make_request (), response);
-    auto live  = vayu::json::serialize (response);
-
-    EXPECT_EQ (trace["request"]["rawRequest"], live["rawRequest"]);
 }
 
 // A step that sent nothing (`pm.execution.skipRequest()`) hands this a default
@@ -347,22 +313,11 @@ TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
     EXPECT_TRUE (trace.contains ("firstByteMs"));
 }
 
-// The client certificate the exchange presented (issue #707). Same
-// live-equals-stored invariant as the two above, and one thing the others do
-// not need: it survives a *failed* transfer, because a handshake refused by the
-// server is the exchange where "which certificate did we send" is the whole
-// question - and that one stores no `response` node at all.
-TEST (ExecutionTrace, StoredClientCertificateMatchesTheLiveKey) {
-    auto response               = make_response ();
-    response.client_certificate = "api.example.com:8443";
-
-    auto trace = build_result_trace (make_request (), response);
-    auto live  = vayu::json::serialize (response);
-
-    EXPECT_EQ (trace["clientCertificate"], "api.example.com:8443");
-    EXPECT_EQ (trace["clientCertificate"], live["clientCertificate"]);
-}
-
+// The client certificate the exchange presented (issue #707). Beyond the
+// live-equals-stored invariant (`StoredFieldMatchesTheLiveWireKey` below), it
+// survives a *failed* transfer, because a handshake refused by the server is
+// the exchange where "which certificate did we send" is the whole question -
+// and that one stores no `response` node at all.
 TEST (ExecutionTrace, StoresTheClientCertificateOnAFailedExchangeToo) {
     auto response               = make_response ();
     response.status_code        = 0;
@@ -385,6 +340,75 @@ TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
     EXPECT_FALSE (trace.contains ("clientCertificate"));
     EXPECT_EQ (vayu::json::serialize (make_response ())["clientCertificate"], "");
 }
+
+// ============================================================================
+// Stored equals live, field by field
+//
+// The invariant the timing test above holds for every timing key, held here
+// for each other field the live /execute wire and the stored trace both carry:
+// whatever serialize(Response) puts on the wire is what the trace stores, so
+// the live and restored views of the same exchange cannot drift apart again.
+// ============================================================================
+
+vayu::Response make_response_with_http_version () {
+    auto response         = make_response ();
+    response.http_version = "HTTP/1.1";
+    return response;
+}
+
+vayu::Response make_response_with_client_certificate () {
+    auto response               = make_response ();
+    response.client_certificate = "api.example.com:8443";
+    return response;
+}
+
+struct StoredEqualsLiveCase {
+    const char* name;
+    vayu::Request (*request_of) ();
+    /// Sets the field under test; the rest is `make_response`'s exchange.
+    vayu::Response (*response_of) ();
+    /// JSON pointers into the stored trace and into serialize(Response).
+    const char* trace_path;
+    const char* live_path;
+};
+
+constexpr auto STORED_EQUALS_LIVE_CASES = std::to_array<StoredEqualsLiveCase> ({
+{ "HttpVersion", make_request, make_response_with_http_version, "/response/httpVersion", "/httpVersion" },
+{ "SentHeaders", make_multipart_request, make_response_with_sent_headers,
+"/request/sentHeaders", "/requestHeaders" },
+{ "RawRequest", make_request, make_response_with_wire_request, "/request/rawRequest", "/rawRequest" },
+{ "ClientCertificate", make_request, make_response_with_client_certificate,
+"/clientCertificate", "/clientCertificate" },
+});
+
+class ExecutionTraceStoredEqualsLive
+: public ::testing::TestWithParam<StoredEqualsLiveCase> {};
+
+TEST_P (ExecutionTraceStoredEqualsLive, StoredFieldMatchesTheLiveWireKey) {
+    const auto& c       = GetParam ();
+    const auto response = c.response_of ();
+
+    const auto trace = build_result_trace (c.request_of (), response);
+    const auto live  = vayu::json::serialize (response);
+
+    const nlohmann::json::json_pointer trace_path (c.trace_path);
+    const nlohmann::json::json_pointer live_path (c.live_path);
+    ASSERT_TRUE (live.contains (live_path)) << "live key missing: " << c.live_path;
+    ASSERT_TRUE (trace.contains (trace_path)) << "stored key missing: " << c.trace_path;
+    // The case sets the field, so an equality between two empty values would
+    // prove nothing about the writers agreeing.
+    ASSERT_FALSE (live[live_path].is_null () || live[live_path].empty () ||
+    live[live_path] == nlohmann::json::object ())
+    << "the case left " << c.live_path << " empty";
+    EXPECT_EQ (trace[trace_path], live[live_path]);
+}
+
+INSTANTIATE_TEST_SUITE_P (ExecutionTrace,
+ExecutionTraceStoredEqualsLive,
+::testing::ValuesIn (STORED_EQUALS_LIVE_CASES),
+[] (const ::testing::TestParamInfo<StoredEqualsLiveCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ============================================================================
 // The `scripts` node's assertion list (issue #810)

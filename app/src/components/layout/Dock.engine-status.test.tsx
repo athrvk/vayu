@@ -71,11 +71,12 @@ describe("the engine status indicator", () => {
 		expect(document.querySelector("[tabindex='0'] .lucide-info")).toBeNull();
 	});
 
-	it("carries the health-poll error, reachable by keyboard", async () => {
-		useEngineStore.setState({
-			engineStatus: "unreachable",
-			engineError: "fetch failed: ECONNREFUSED 127.0.0.1:9876",
-		});
+	it("carries the whole health-poll error, reachable by keyboard", async () => {
+		// The full text is what identifies the failure - a port, a path, a TLS
+		// error. The tooltip wraps; nothing here clips it to a fixed length.
+		const reason =
+			"request to http://127.0.0.1:9876/health failed, reason: connect ETIMEDOUT after 5000ms";
+		useEngineStore.setState({ engineStatus: "unreachable", engineError: reason });
 		renderDock();
 
 		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
@@ -85,23 +86,7 @@ describe("the engine status indicator", () => {
 		// Radix renders the content twice - the visible bubble and a
 		// visually-hidden copy carrying `role="tooltip"` for screen readers - so
 		// this counts "at least one", not "exactly one".
-		await waitFor(() => {
-			expect(
-				screen.getAllByText("fetch failed: ECONNREFUSED 127.0.0.1:9876").length
-			).toBeGreaterThan(0);
-		});
-	});
-
-	it("does not truncate the reason the transport produced", async () => {
-		// The full text is what identifies the failure - a port, a path, a TLS
-		// error. The tooltip wraps; nothing here clips it to a fixed length.
-		const long =
-			"request to http://127.0.0.1:9876/health failed, reason: connect ETIMEDOUT after 5000ms";
-		useEngineStore.setState({ engineStatus: "unreachable", engineError: long });
-		renderDock();
-
-		fireEvent.focus(screen.getByText("Engine disconnected").closest("[tabindex='0']")!);
-		await waitFor(() => expect(screen.getAllByText(long).length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByText(reason).length).toBeGreaterThan(0));
 	});
 
 	it("keeps the connected state a plain label", () => {
