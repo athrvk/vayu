@@ -465,18 +465,21 @@ TEST_F (DbRecoveryTest, AFinishedRefreshWritesNothingAndKeepsThePreviousBackup) 
 }
 
 TEST_F (DbRecoveryTest, ABackgroundRefreshLandsAWholeBackup) {
+    // Built once, outside the wait loop: GCC 13 at -O3 reports a spurious
+    // -Warray-bounds on `std::string + ".bak"` inlined into a loop condition,
+    // which the prod presets' -Werror turns into a build failure.
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
     {
         vayu::db::Database db (DB_PATH);
         db.init ();
         db.start_recovery_backup_refresh ();
         // The destructor joins it: `finish_recovery_backup_refresh` would
         // cancel a refresh this test wants to see complete.
-        for (int i = 0;
-        i < 500 && !std::filesystem::exists (std::string (DB_PATH) + ".bak"); ++i) {
+        for (int i = 0; i < 500 && !std::filesystem::exists (backup); ++i) {
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
     }
-    ASSERT_TRUE (std::filesystem::exists (std::string (DB_PATH) + ".bak"));
+    ASSERT_TRUE (std::filesystem::exists (backup));
     EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak.tmp"));
 
     // Whole means recovery can use it.
