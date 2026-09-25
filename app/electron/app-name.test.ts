@@ -38,7 +38,7 @@ describe("the app's display name", () => {
 
 	it("is set at module scope, before the app is ready", () => {
 		const setAt = main.indexOf("app.setName(APP_NAME);");
-		const readyAt = main.indexOf("app.whenReady()");
+		const readyAt = main.indexOf("app.whenReady().then(");
 
 		expect(setAt).toBeGreaterThan(-1);
 		expect(readyAt).toBeGreaterThan(-1);

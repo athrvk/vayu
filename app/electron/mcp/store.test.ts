@@ -214,7 +214,7 @@ describe("main.ts startup ordering", () => {
 
 	/** The `app.whenReady()` handler body, up to the first listener after it. */
 	function whenReadyBody(): string {
-		const start = main.indexOf("app.whenReady()");
+		const start = main.indexOf("app.whenReady().then(");
 		const end = main.indexOf('app.on("window-all-closed"', start);
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);

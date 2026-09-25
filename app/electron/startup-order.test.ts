@@ -34,11 +34,45 @@ describe("startup ordering", () => {
 		// deeper-indented one is the macOS activate handler rebuilding a closed
 		// window, which runs long after startup and says nothing about ordering.
 		const windowAt = main.indexOf("\n\tcreateWindow();");
-		const engineAt = main.indexOf("\n\tawait startEngine();");
+		const engineAt = main.indexOf("\n\tawait engineStartup;");
 
 		expect(windowAt).toBeGreaterThan(-1);
 		expect(engineAt).toBeGreaterThan(-1);
 		expect(windowAt).toBeLessThan(engineAt);
+	});
+
+	it("begins the engine's start before app.whenReady, not after the window", () => {
+		// The engine's own startup - the database opened and checked before it
+		// listens - is the longest wait between launch and data, and none of it
+		// needs Chromium. Begun inside the `whenReady` handler it could only
+		// start once Chromium had booted and the window had been built; begun
+		// with the instance lock it overlaps both. Mutation check: move the
+		// assignment into the handler and the begin sits after `whenReady`.
+		const begunAt = main.indexOf("\n\tengineStartup = startEngine();");
+		const readyAt = main.indexOf("app.whenReady().then(");
+		const lockAt = main.indexOf("app.requestSingleInstanceLock()");
+
+		expect(begunAt).toBeGreaterThan(-1);
+		expect(readyAt).toBeGreaterThan(-1);
+		expect(begunAt).toBeLessThan(readyAt);
+		// Inside the primary-instance branch: a losing second instance must not
+		// start an engine on top of the one it is handing over to.
+		expect(begunAt).toBeGreaterThan(lockAt);
+		expect(main.slice(lockAt, begunAt)).toContain("} else {");
+		// And only once: the handler awaits the start, it does not begin another.
+		expect(main.match(/\bstartEngine\(\);/g)).toHaveLength(1);
+	});
+
+	it("waits for a ready app before it reports a failed start", () => {
+		// A start begun before `whenReady` can fail before it; a dialog cannot
+		// be shown until then.
+		const start = main.indexOf("async function startEngine()");
+		const readyAt = main.indexOf("await app.whenReady();", start);
+		const dialogAt = main.indexOf("showErrorBox", start);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(readyAt).toBeGreaterThan(start);
+		expect(readyAt).toBeLessThan(dialogAt);
 	});
 
 	it("still starts MCP after the window, which is why the ordering rule existed", () => {

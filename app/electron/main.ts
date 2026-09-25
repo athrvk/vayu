@@ -169,6 +169,13 @@ const __dirname = path.dirname(__filename);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
+/**
+ * The launch's engine start, begun by the primary instance before
+ * `app.whenReady` and awaited once the window exists. `startEngine` never
+ * rejects - it reports its own failure - so an unawaited stretch of this
+ * promise cannot surface as an unhandled rejection.
+ */
+let engineStartup: Promise<void> | null = null;
 // The MCP port, bound while the server is enabled. See mcp/listener.ts.
 let mcpListener: McpListener | null = null;
 // The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
@@ -866,6 +873,9 @@ async function startEngine() {
 
 		appLogger().error("main", "Failed to start engine", { error: String(error) });
 		appLogger().applyFloor("debug");
+		// The start is begun before `app.whenReady` (see `engineStartup`), and
+		// a dialog needs a ready app.
+		await app.whenReady();
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
@@ -1416,6 +1426,17 @@ if (!isPrimaryInstance) {
 		event.preventDefault();
 		openIntents.offer({ kind: "import", path: filePath });
 	});
+
+	// The engine starts here, as soon as this process knows it is the one that
+	// owns it - not after `app.whenReady` and the window. Its own startup
+	// (opening and checking the database, before it listens) is the longest
+	// wait between launch and data on screen, and nothing about it needs
+	// Chromium: the sidecar spawns a process and polls it over HTTP. Begun here
+	// it runs alongside Chromium's own bootstrap and the window's first paint
+	// instead of after them, so the renderer's first `/health` poll more often
+	// finds an engine already listening. A failure still waits for a ready app
+	// to report itself (`startEngine`).
+	engineStartup = startEngine();
 }
 
 app.whenReady().then(async () => {
@@ -1508,8 +1529,9 @@ app.whenReady().then(async () => {
 
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the
 	// engine, and the updater and MCP both read state the engine owns. The window
-	// is already loading throughout, which was the point.
-	await startEngine();
+	// is already loading throughout, which was the point; the start itself was
+	// begun before `app.whenReady` (see `engineStartup`).
+	await engineStartup;
 
 	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
 	// throws and never blocks on the network - the resolution is local to
