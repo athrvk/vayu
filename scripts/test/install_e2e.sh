@@ -220,26 +220,31 @@ printf 'PASS: a failed download leaves the install intact\n'
 
 # --- uninstall ---------------------------------------------------------------
 
-mkdir -p "$ROOT/.config/vayu-client" "$ROOT/Library/Application Support/vayu-client"
+# Both data directories: the one the app names (Vayu) and the one releases up
+# to 0.36 wrote (vayu-client), which an install keeps until its first launch
+# after upgrading. A purge that knew only one would leave the other's whole
+# workspace behind.
+for dir in Vayu vayu-client; do
+	mkdir -p "$ROOT/.config/$dir" "$ROOT/Library/Application Support/$dir"
+done
 out="$(installer --uninstall 2>&1)" || fail "uninstall failed: $out"
 [ -e "$target" ] && fail "uninstall left the app at $target"
 
 case "$OS" in
-	Darwin)
-		[ -d "$ROOT/Library/Application Support/vayu-client" ] \
-			|| fail "a plain uninstall must keep user data"
-		;;
+	Darwin) data_root="$ROOT/Library/Application Support" ;;
 	*)
 		[ -e "$ROOT/.local/share/applications/vayu.desktop" ] && fail "the desktop entry survived uninstall"
-		[ -d "$ROOT/.config/vayu-client" ] || fail "a plain uninstall must keep user data"
+		data_root="$ROOT/.config"
 		;;
 esac
+for dir in Vayu vayu-client; do
+	[ -d "$data_root/$dir" ] || fail "a plain uninstall must keep user data ($dir)"
+done
 
 out="$(installer --uninstall --purge 2>&1)" || fail "purge failed: $out"
-case "$OS" in
-	Darwin) [ -d "$ROOT/Library/Application Support/vayu-client" ] && fail "purge should remove user data" ;;
-	*)      [ -d "$ROOT/.config/vayu-client" ] && fail "purge should remove user data" ;;
-esac
+for dir in Vayu vayu-client; do
+	[ -d "$data_root/$dir" ] && fail "purge should remove user data ($dir)"
+done
 
 printf 'PASS: real uninstall\n'
 
