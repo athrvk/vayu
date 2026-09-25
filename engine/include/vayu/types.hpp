@@ -1582,6 +1582,10 @@ struct ConfigEntry {
     // positional seeds free of `-Wmissing-field-initializers`.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<std::string> depends_on{};
+
+    // Every field, so `ConfigSeeder` can tell an entry whose metadata is
+    // already current from one it has to rewrite.
+    bool operator== (const ConfigEntry&) const = default;
 };
 
 /**

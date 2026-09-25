@@ -133,7 +133,13 @@ class ConfigSeeder {
             ConfigEntry updated = new_entry;
             updated.value       = it->second.value;     // Keep user's value
             updated.updated_at = it->second.updated_at; // Keep original timestamp
-            replace_ (updated);
+            // Only an entry whose metadata changed is written. Every start
+            // reseeds, so rewriting all ~65 rows made each one a database
+            // write, before the engine listened, for a catalogue that changes
+            // only when an engine upgrade does.
+            if (updated != it->second) {
+                replace_ (updated);
+            }
         } else {
             // New entry - use defaults
             replace_ (new_entry);
