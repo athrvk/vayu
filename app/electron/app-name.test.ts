@@ -46,4 +46,24 @@ describe("the app's display name", () => {
 		// would run after the app menu (built from `app.name`) may already exist.
 		expect(setAt).toBeLessThan(readyAt);
 	});
+
+	/*
+	 * Electron derives `userData` from `app.name` on its first read and keeps
+	 * it, and every install's workspace, window state and Chromium profile live
+	 * under the package name's directory. Renaming first would move all of it
+	 * to an empty "Vayu" directory - measured on a packaged build, where it did
+	 * once nothing read the path before the rename. Mutation check: move the
+	 * pin below `setName` and this reddens.
+	 */
+	it("pins userData before the rename, so the data directory keeps the package name", () => {
+		const pinAt = main.indexOf('app.setPath("userData", app.getPath("userData"));');
+		const setAt = main.indexOf("app.setName(APP_NAME);");
+
+		expect(pinAt).toBeGreaterThan(-1);
+		expect(pinAt).toBeLessThan(setAt);
+		// Nothing above the pin may read the path: that read would be the one
+		// Electron keeps, and it is only right because it precedes the rename.
+		const beforePin = main.slice(0, pinAt).replace(/^\s*(\/\/|\*).*$/gm, "");
+		expect(beforePin).not.toMatch(/getPath\(\s*["']userData["']/);
+	});
 });

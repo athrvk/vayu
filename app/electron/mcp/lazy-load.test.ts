@@ -21,7 +21,7 @@
  * evaluated to nothing fails here instead of rendering an empty tool list.
  *
  * `electron` is faked for the reason store.test.ts fakes it: the barrel
- * re-exports the store, which builds an `electron-store` over `app.getPath`.
+ * re-exports the store, which builds a JSON store over `app.getPath`.
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -40,8 +40,7 @@ vi.mock("electron", () => {
 		ipcMain: { on: () => {} },
 		shell: { openPath: async () => "" },
 	};
-	// electron-store reaches for the default export.
-	return { ...api, default: api };
+	return api;
 });
 
 fake.userData = mkdtempSync(join(tmpdir(), "vayu-mcp-lazy-"));

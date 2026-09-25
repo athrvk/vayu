@@ -90,7 +90,7 @@ import { registerLogIpc } from "./log-ipc.js";
  * window, on every launch including the ones where MCP is switched off.
  *
  * `config`, `store`, `connect` and `listener` reach none of that
- * (`electron-store`, `node:child_process` and `node:http` are their heaviest
+ * (`node:fs`, `node:child_process` and `node:http` are their heaviest
  * dependencies), so the startup gate, the Settings IPC and the port itself cost
  * nothing. The two symbols that do pull the SDK - the service and the tool
  * catalog - are loaded on demand by `loadMcp()` below: the catalog when Settings
@@ -155,6 +155,15 @@ app.commandLine.appendSwitch("use-mock-keychain");
 // at module scope, because it must precede the first notification and the
 // documented requirement is "before app is ready".
 app.setAppUserModelId(APP_USER_MODEL_ID);
+
+// Pinned before the rename below, never after it. Electron derives `userData`
+// from `app.name` on its first read and keeps that answer, and every install
+// already has its workspace, window state and Chromium profile under the
+// package name's directory ("vayu-client"). The pin used to be an accident of
+// import order - a settings store read the path while `main.ts`'s imports were
+// still evaluating - so a store that read it later, or an engine started
+// earlier, silently moved everything to a fresh "Vayu" directory.
+app.setPath("userData", app.getPath("userData"));
 
 // `app.getName()` otherwise answers the npm package's name, "vayu-client",
 // which is what macOS titles the app menu and its "About"/"Quit" roles from -

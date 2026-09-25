@@ -16,16 +16,12 @@
  * recorded, skip if it already matches, otherwise act and record.
  */
 
-import Store from "electron-store";
+import { createJsonStore } from "./json-store.js";
 import type { Session } from "electron";
 
-const store = new Store<{ lastCacheClearVersion?: string }>({
-	name: "response-cache-clear",
-	// Same reasoning as window-state.ts's flag: this Store is read at
-	// `app.whenReady`, well after `window-state.ts` already proved a corrupt
-	// config file must not stop the app from starting.
-	clearInvalidConfig: true,
-});
+// Read at `app.whenReady`; a corrupt file is an empty store, for the reason
+// window-state.ts gives.
+const store = createJsonStore<{ lastCacheClearVersion?: string }>("response-cache-clear");
 
 /** Whether `version` has not yet had its one-time cache clear recorded. */
 export function needsCacheClear(lastClearedVersion: string | undefined, version: string): boolean {
