@@ -268,12 +268,14 @@ there. Pass `-jN` to override. See
   - Lock file: `engine/data/vayu.lock`
 
 ### Production
-- **macOS**: `~/Library/Application Support/vayu-client/`
-- **Linux**: `~/.config/vayu-client/`
-- **Windows**: `%APPDATA%\vayu-client\`
+- **macOS**: `~/Library/Application Support/Vayu/`
+- **Linux**: `~/.config/Vayu/`
+- **Windows**: `%APPDATA%\Vayu\`
 
-The directory name is `app/package.json`'s `name`, which is what Electron gives
-`app.getPath("userData")` - not the product name.
+The directory name is `USER_DATA_DIR_NAME` in `app/electron/constants.ts`, set
+on `app.getPath("userData")` by `main.ts` before anything opens a file there.
+Releases up to 0.36 used `vayu-client`; the first launch of a later release
+renames that directory (`app/electron/user-data-dir.ts`).
 
 ## Troubleshooting
 

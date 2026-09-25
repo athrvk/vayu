@@ -38,9 +38,9 @@ const isDev = process.env.NODE_ENV === "development";
  * The directory the engine keeps its state in - logs, database and lock file.
  *
  * Production:
- *   - macOS: ~/Library/Application Support/vayu-client
- *   - Windows: %APPDATA%/vayu-client
- *   - Linux: ~/.config/vayu-client
+ *   - macOS: ~/Library/Application Support/Vayu
+ *   - Windows: %APPDATA%/Vayu
+ *   - Linux: ~/.config/Vayu
  * Development: <repo>/engine/data
  *
  * Module-level rather than a method because callers outside the sidecar need it

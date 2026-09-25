@@ -603,11 +603,15 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **macOS**: `Vayu.app/Contents/Resources/bin/vayu-engine`
 - **Windows**: `resources/bin/vayu-engine.exe`
 - **Linux**: `resources/bin/vayu-engine`
-- **Data Directory** (`app.getPath("userData")`, named after `app/package.json`'s
-  `name` rather than the product name):
-  - macOS: `~/Library/Application Support/vayu-client/`
-  - Windows: `%APPDATA%/vayu-client/`
-  - Linux: `~/.config/vayu-client/`
+- **Data Directory** (`app.getPath("userData")`, named by `main.ts` from
+  `USER_DATA_DIR_NAME` in `app/electron/constants.ts`):
+  - macOS: `~/Library/Application Support/Vayu/`
+  - Windows: `%APPDATA%/Vayu/`
+  - Linux: `~/.config/Vayu/`
+
+  Releases up to 0.36 used `vayu-client` (the npm package's name) instead;
+  `app/electron/user-data-dir.ts` renames that directory on the first launch
+  that finds it.
 
 ---
 
