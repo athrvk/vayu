@@ -33,7 +33,10 @@ export function useScriptCompletionProvider() {
 	// happens then. `@monaco-editor/react`'s `useMonaco` would load it from here,
 	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
 	const monaco = useLoadedMonaco();
-	const { data } = useScriptCompletionsQuery();
+	// Fetched once there is an editor to register with: `App` mounts this at
+	// launch, and until then the list would be one more request in the boot
+	// burst for nothing to read it.
+	const { data } = useScriptCompletionsQuery({ enabled: monaco !== null });
 	const completions = data?.completions;
 
 	useEffect(() => {

@@ -20,8 +20,9 @@ import { QUERY_CACHE } from "@/config/cache";
  * Fetch script completions for Monaco editor
  * These rarely change, so we cache for a long time.
  */
-export function useScriptCompletionsQuery() {
+export function useScriptCompletionsQuery({ enabled = true }: { enabled?: boolean } = {}) {
 	return useQuery({
+		enabled,
 		queryKey: queryKeys.scriptCompletions.all,
 		queryFn: () => apiService.getScriptCompletions(),
 		// Script completions don't change, cache for a long time
