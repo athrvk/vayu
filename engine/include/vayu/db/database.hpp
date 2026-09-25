@@ -293,6 +293,11 @@ class Database {
     std::optional<Request> get_request (const std::string& id);
     /// Live only, and empty for a deleted collection (issue #988).
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
+    /// Every live request of every live collection, grouped by collection and
+    /// in each group the order `get_requests_in_collection` answers with: what
+    /// a client building the whole tree needs, in one query rather than one
+    /// per collection.
+    std::vector<Request> get_requests_in_live_collections ();
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
     /// takes them with it.

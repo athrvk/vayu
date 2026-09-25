@@ -67,9 +67,8 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
  * response. Extracted for requests_route_test.cpp, same as
  * get_request_response above.
  */
-std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id) {
-    auto requests = db.get_requests_in_collection (collection_id);
-
+namespace {
+std::string serialize_request_list (const std::vector<vayu::db::Request>& requests) {
     std::ostringstream out;
     out << "[";
     bool is_first = true;
@@ -91,6 +90,15 @@ std::string list_requests_body (vayu::db::Database& db, const std::string& colle
     }
     out << "]";
     return out.str ();
+}
+} // namespace
+
+std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id) {
+    return serialize_request_list (db.get_requests_in_collection (collection_id));
+}
+
+std::string list_all_requests_body (vayu::db::Database& db) {
+    return serialize_request_list (db.get_requests_in_live_collections ());
 }
 
 /**
@@ -547,9 +555,12 @@ const nlohmann::json& json) {
 void register_request_routes (RouteContext& ctx) {
     /**
      * GET /requests
-     * Retrieves all requests belonging to a specific collection, ordered by
-     * their `order` field (matching GET /collections).
-     * Query params: collectionId (required) - The collection ID to fetch requests from.
+     * Retrieves the requests of one collection, or of every live collection,
+     * ordered by their `order` field (matching GET /collections).
+     * Query params: collectionId (optional) - The collection ID to fetch
+     * requests from. Absent, every live request of every live collection,
+     * grouped by `collectionId`: the app builds its whole tree from this at
+     * launch, which used to be one call per collection.
      * Returns: Array of request objects with method, url, headers, body, scripts, etc.
      */
     ctx.server.Get ("/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -557,13 +568,11 @@ void register_request_routes (RouteContext& ctx) {
             if (req.has_param ("collectionId")) {
                 std::string collection_id =
                 req.get_param_value ("collectionId");
-                vayu::utils::log_info ("http",
+                vayu::utils::log_debug ("http",
                 "GET /requests - Fetching requests for collection: " + collection_id);
                 res.set_content (list_requests_body (ctx.db, collection_id), "application/json");
             } else {
-                vayu::utils::log_warning (
-                "http", "GET /requests - Missing required param: collectionId");
-                send_error (res, 400, "collectionId required");
+                res.set_content (list_all_requests_body (ctx.db), "application/json");
             }
         } catch (const std::exception& e) {
             vayu::utils::log_error (
