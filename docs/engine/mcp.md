@@ -1663,7 +1663,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
 | `cli.ts`           | Standalone stdio server (env-configured).                                   |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
+| `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
@@ -1672,7 +1672,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 on quit, and exposes IPC the Settings panel uses.
 
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
-`connect.ts` are self-contained (`electron-store` and `node:child_process` are
+`connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
 reachable from `index.ts` - the SDK, zod, `tools.ts` and its 73 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside

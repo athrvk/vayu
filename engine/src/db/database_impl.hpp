@@ -39,6 +39,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -534,11 +535,60 @@ struct Database::Impl {
     /// `VACUUM INTO` of a large workspace must not stall every other endpoint.
     std::atomic<bool> backup_running{ false };
 
+    /// Whether this start validated the database it opened, which is the one
+    /// condition under which `<db>.bak` may be refreshed from it: a start that
+    /// took the recovery branch instead must leave the backup it judged alone.
+    /// Written once by the constructor, before any thread can read it.
+    bool recovery_backup_due = false;
+
+    /// The background refresh of `<db>.bak` (`Database::start_recovery_backup_refresh`).
+    /// The connection is published for as long as its `VACUUM INTO` runs so a
+    /// shutdown can `sqlite3_interrupt` it; the mutex orders that interrupt
+    /// against the close, and `recovery_backup_cancelled` refuses a refresh
+    /// that had not reached its copy yet.
+    std::mutex recovery_backup_mutex;
+    sqlite3* recovery_backup_connection = nullptr;
+    bool recovery_backup_cancelled      = false;
+    std::thread recovery_backup_thread;
+
     /// The file `storage` was opened on, for `Database::path`. Named for the
     /// file rather than `db_path`, which the constructor below already uses for
     /// the parsed `std::filesystem::path` - MSVC builds this /W4 /WX and a
     /// shadowed member is C4458, an error here.
     std::string opened_file;
+
+    /// The connection `storage` holds open (see `open_forever` in the
+    /// constructor), or null before it is opened. Touched only under `mutex`
+    /// once the constructor has returned.
+    sqlite3* connection = nullptr;
+
+    /// Applies `cache_size_bytes` to @p db and records what SQLite reports
+    /// back in `applied_cache_size_bytes`.
+    void apply_cache_size (sqlite3* db) {
+        // SQLite cache_size PRAGMA uses negative KB values (e.g., -64000 = 64MB)
+        const std::string sql =
+        "PRAGMA cache_size = " + std::to_string (-(cache_size_bytes.load () / 1024)) + ";";
+        char* err_msg = nullptr;
+        if (sqlite3_exec (db, sql.c_str (), nullptr, nullptr, &err_msg) != SQLITE_OK && err_msg) {
+            vayu::utils::log_warning (
+            "db", "Failed to set cache_size: " + std::string (err_msg));
+        }
+        sqlite3_free (err_msg);
+
+        // Read the size back instead of trusting the write: a rejected
+        // PRAGMA is silent, and only the connection can say what it holds.
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2 (db, "PRAGMA cache_size;", -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step (stmt) == SQLITE_ROW) {
+                // Negative means KB, positive means pages - we always set
+                // the negative form, so a positive answer means the write
+                // did not take and the size in bytes is not knowable here.
+                const int reported = sqlite3_column_int (stmt, 0);
+                applied_cache_size_bytes.store (reported < 0 ? -reported * 1024 : 0);
+            }
+            sqlite3_finalize (stmt);
+        }
+    }
 
     Impl (const std::string& path)
     : storage (make_vayu_storage (path)), opened_file (path) {
@@ -552,6 +602,11 @@ struct Database::Impl {
         // three are engine defaults with no user story (their config entries
         // were retired in #519) and stay compile-time constants.
         storage.on_open = [this] (sqlite3* db) {
+            // The storage's one connection (`open_forever` below), recorded so
+            // `Database::init` can re-apply `cache_size` to it once the config
+            // row that sizes it can be read.
+            connection = db;
+
             char* err_msg = nullptr;
             std::stringstream sql;
 
@@ -559,35 +614,10 @@ struct Database::Impl {
             size_t mmap_size = vayu::core::constants::database::MMAP_SIZE_BYTES;
             int wal_checkpoint = vayu::core::constants::database::WAL_AUTOCHECKPOINT;
 
-            // Apply optimizations
-            // SQLite cache_size PRAGMA uses negative KB values (e.g., -64000 = 64MB)
-            int cache_size_kb = -(cache_size_bytes.load () / 1024);
-            sql << "PRAGMA cache_size = " << cache_size_kb << ";";
-            int rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
-            if (rc != SQLITE_OK && err_msg) {
-                vayu::utils::log_warning (
-                "db", "Failed to set cache_size: " + std::string (err_msg));
-                sqlite3_free (err_msg);
-                err_msg = nullptr;
-            }
-            sql.str ("");
-
-            // Read the size back instead of trusting the write: a rejected
-            // PRAGMA is silent, and only the connection can say what it holds.
-            sqlite3_stmt* stmt = nullptr;
-            if (sqlite3_prepare_v2 (db, "PRAGMA cache_size;", -1, &stmt, nullptr) == SQLITE_OK) {
-                if (sqlite3_step (stmt) == SQLITE_ROW) {
-                    // Negative means KB, positive means pages - we always set
-                    // the negative form, so a positive answer means the write
-                    // did not take and the size in bytes is not knowable here.
-                    const int reported = sqlite3_column_int (stmt, 0);
-                    applied_cache_size_bytes.store (reported < 0 ? -reported * 1024 : 0);
-                }
-                sqlite3_finalize (stmt);
-            }
+            apply_cache_size (db);
 
             sql << "PRAGMA temp_store = " << temp_store << ";";
-            rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
+            int rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning (
                 "db", "Failed to set temp_store: " + std::string (err_msg));
@@ -642,6 +672,17 @@ struct Database::Impl {
         // does not remember, is in the callback instead.
         storage.pragma.journal_mode (journal_mode::WAL);
         storage.pragma.synchronous (vayu::core::constants::database::SYNCHRONOUS);
+
+        // One connection for the storage's lifetime. Without this sqlite_orm
+        // opens a connection per call outside a transaction and closes it after,
+        // and closing the last connection of a WAL database checkpoints and
+        // deletes the `-wal`: every endpoint re-ran `on_open` above, re-parsed
+        // the schema and re-created the WAL (measured: 42 opens of the file
+        // between exec and six requests). Sharing one connection across threads
+        // is safe here because every `Database::` member holds `impl_->mutex`
+        // around its storage access, which is also what already made the
+        // connection sqlite_orm shares for the length of a transaction safe.
+        storage.open_forever ();
     }
 };
 

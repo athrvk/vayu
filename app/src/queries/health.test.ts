@@ -145,11 +145,9 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		const flushAll = vi
 			.spyOn(useSaveStore.getState(), "flushAll")
 			.mockResolvedValue({ saved: 0, failed: 0, pending: 0 });
-		// Twice: the hook sets `retry: 1`, so one rejection is absorbed by the
-		// retry and never reaches an error state.
-		getHealth
-			.mockRejectedValueOnce(new Error("Network error: fetch failed"))
-			.mockRejectedValueOnce(new Error("Network error: fetch failed"));
+		// Once: inside a launch's start window the hook does not retry, so the
+		// first rejection is the error state.
+		getHealth.mockRejectedValueOnce(new Error("Network error: fetch failed"));
 		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
 
 		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
@@ -194,15 +192,61 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		expect(flushAll).not.toHaveBeenCalled();
 	});
 
-	it("polls hard while disconnected and cheaply once connected", () => {
-		expect(healthPollIntervalMs("error")).toBe(TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS);
-		expect(healthPollIntervalMs("success")).toBe(TIMING.HEALTH_CHECK_INTERVAL_MS);
-		expect(healthPollIntervalMs("pending")).toBe(TIMING.HEALTH_CHECK_INTERVAL_MS);
-		// The whole point of the fast branch: a launch must not sit disconnected
-		// for the connected cadence after the engine is already serving.
+	it("polls hardest while starting, hard while disconnected and cheaply once connected", () => {
+		expect(healthPollIntervalMs("error", true)).toBe(TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS);
+		expect(healthPollIntervalMs("error", false)).toBe(TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS);
+		for (const starting of [true, false]) {
+			expect(healthPollIntervalMs("success", starting)).toBe(TIMING.HEALTH_CHECK_INTERVAL_MS);
+			expect(healthPollIntervalMs("pending", starting)).toBe(TIMING.HEALTH_CHECK_INTERVAL_MS);
+		}
+		// The whole point of the fast branches: a launch must not sit disconnected
+		// for the connected cadence after the engine is already serving, and a
+		// start must not wait out the reconnect cadence either.
 		expect(TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS).toBeLessThan(
 			TIMING.HEALTH_CHECK_INTERVAL_MS
 		);
+		expect(TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS).toBeLessThan(
+			TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS
+		);
+	});
+
+	it("surfaces a failed poll during a start without retrying it first", async () => {
+		// The retry waited TanStack's default second before the failure could
+		// reach the startup poll or the refetch of the queries that raced the
+		// engine - so this client keeps that default delay. Mutation check:
+		// restore `retry: 1` and the error state arrives after the one-second
+		// retry, past this bound.
+		const client = new QueryClient();
+		getHealth.mockRejectedValue(new Error("Network error: fetch failed"));
+
+		const { result, unmount } = renderHook(() => useHealthQuery(), {
+			wrapper: wrapperFor(client),
+		});
+		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 500 });
+
+		expect(useEngineStore.getState().engineStatus).toBe("starting");
+		unmount();
+		client.clear();
+	});
+
+	it("keeps its one retry for an engine that was already serving", async () => {
+		// Outside a start window - the first answer closes it - a single dropped
+		// poll is not a lost engine.
+		const client = makeClient();
+		getHealth
+			.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 })
+			.mockRejectedValueOnce(new Error("Network error: fetch failed"))
+			.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
+
+		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
+
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		expect(result.current.isError).toBe(false);
+		expect(getHealth).toHaveBeenCalledTimes(3);
 	});
 });
 

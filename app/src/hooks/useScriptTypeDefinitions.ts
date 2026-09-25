@@ -111,7 +111,9 @@ export function useScriptTypeDefinitions() {
 	// happens then. `@monaco-editor/react`'s `useMonaco` would load it from here,
 	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
 	const monaco = useLoadedMonaco();
-	const { data } = useScriptTypeDefinitionsQuery();
+	// Same gate as `useScriptCompletionProvider`: nothing reads the
+	// declarations until Monaco has loaded, so neither is fetched at launch.
+	const { data } = useScriptTypeDefinitionsQuery({ enabled: monaco !== null });
 	const typeDefinitions = data?.typeDefinitions;
 	const libUri = data?.libUri;
 

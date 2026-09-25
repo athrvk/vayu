@@ -9,11 +9,12 @@
  * @file store.ts
  * @brief Disk persistence for the MCP safety config, so an allowlist / caps the
  *        user sets in Settings survive an app restart. Main-process only (uses
- *        electron-store) - the shared tool registry and the stdio CLI never
- *        import this; the CLI takes its config from environment variables.
+ *        `userData` through `json-store.ts`) - the shared tool registry and the
+ *        stdio CLI never import this; the CLI takes its config from environment
+ *        variables.
  */
 
-import Store from "electron-store";
+import { createJsonStore, type JsonStore } from "../json-store.js";
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./config.js";
 
 interface McpStoreShape {
@@ -22,26 +23,17 @@ interface McpStoreShape {
 	enabled: boolean;
 }
 
-let store: Store<McpStoreShape> | null = null;
+let store: JsonStore<McpStoreShape> | null = null;
 
 // Lazily created so the store is only touched once Electron's `app` is ready and
-// `userData` resolves - mirrors how window-state is persisted.
-function getStore(): Store<McpStoreShape> {
-	if (!store)
-		store = new Store<McpStoreShape>({
-			name: "mcp-config",
-			/*
-			 * conf reads and parses the file inside its constructor and rethrows the
-			 * SyntaxError when this flag is off - and this store is first touched
-			 * during startup, before the window exists (main.ts's startMcp). A corrupt
-			 * mcp-config.json would therefore leave the user with an engine running
-			 * headless and no window at all, on every launch until they found and
-			 * deleted a hidden file. Same fix, same reason as window-state.ts: an
-			 * empty store is the right failure mode here, because both readers below
-			 * resolve safe defaults from one (locked-down safety config, server on).
-			 */
-			clearInvalidConfig: true,
-		});
+// `userData` resolves - mirrors how window-state is persisted. First read during
+// startup (main.ts's startMcp), which is why a corrupt
+// mcp-config.json has to be an empty store rather than a throw: a throw here
+// left the user with an engine running headless and no window at all, on every
+// launch until they found and deleted a hidden file. Both readers below resolve
+// safe defaults from an empty store (locked-down safety config, server on).
+function getStore(): JsonStore<McpStoreShape> {
+	store ??= createJsonStore<McpStoreShape>("mcp-config");
 	return store;
 }
 

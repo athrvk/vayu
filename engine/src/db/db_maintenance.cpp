@@ -24,13 +24,17 @@
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <vector>
 
 #include "config_seeds/seed.hpp"
@@ -745,11 +749,14 @@ void Database::init () {
     // which is what their restart-required flag promises.
     //
     // `cache_size` is per-connection state, so it cannot be applied once like
-    // the other two: it is handed to the open callback, which re-applies it to
-    // every connection sqlite_orm opens. Setting it before the first read below
-    // means that read already carries it.
+    // the other two: it is handed to the open callback, which applies it to
+    // every connection sqlite_orm opens - and applied here too, to the one the
+    // storage holds open, which was opened before this row could be read.
     impl_->cache_size_bytes.store (get_config_int (
     "dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
+    if (impl_->connection != nullptr) {
+        impl_->apply_cache_size (impl_->connection);
+    }
 
     // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
     int synchronous =
@@ -1070,11 +1077,23 @@ bool is_backup_file_name (const std::string& name) {
  * The destination is *bound*, not concatenated: a path is user data on every
  * platform and a quote in a directory name would otherwise be a SQL fragment.
  */
-std::string vacuum_into (const std::string& source, const std::string& destination) {
+/**
+ * @param on_connection told the connection once it is open, and `nullptr`
+ *        just before it closes, so a caller on another thread can
+ *        `sqlite3_interrupt` the copy; answering false refuses the copy
+ *        before it starts. Empty for a caller with nothing to interrupt.
+ */
+std::string vacuum_into (const std::string& source,
+const std::string& destination,
+const std::function<bool (sqlite3*)>& on_connection = {}) {
     std::string message;
     sqlite3* connection = open_workspace_connection (source, message);
     if (connection == nullptr) {
         return message;
+    }
+    if (on_connection && !on_connection (connection)) {
+        sqlite3_close (connection);
+        return "cancelled before the copy started";
     }
 
     sqlite3_stmt* statement = nullptr;
@@ -1093,6 +1112,9 @@ std::string vacuum_into (const std::string& source, const std::string& destinati
         message = sqlite3_errmsg (connection);
     }
     sqlite3_finalize (statement);
+    if (on_connection) {
+        on_connection (nullptr);
+    }
     sqlite3_close (connection);
     return message;
 }
@@ -1145,6 +1167,157 @@ int64_t prune_backup_files (const fs::path& directory, int keep) {
 }
 
 } // namespace
+
+// Whether the database at `path` opens and carries this build's schema.
+//
+// The same probe answers for the main file and for the `.bak` beside it
+// (issue #984): the backup used to be restored on the strength of its
+// existence alone - "we assume the backup itself is valid" - so a torn copy
+// was written over the only other copy of the user's data. An
+// `integrity_check` pragma would answer a narrower question (pages, not
+// schema) and would not answer the one that matters here, which is whether
+// *this engine* can open the file it is about to commit to. The refresh of
+// that `.bak` asks it of its own snapshot too, before the snapshot replaces
+// the backup it would otherwise have to be trusted over.
+bool Database::probe_database (const std::string& path) {
+    try {
+        // Ahead of `Impl`'s own construction, never after: `Impl`'s
+        // constructor already opens a connection and sets
+        // `journal_mode`, and `sync_schema ()` below is what would
+        // `DROP COLUMN` the pre-cutover script columns before this
+        // migration ever got to read them (issue #1514).
+        migrate_before_sync (path);
+        Impl probe (path);
+        probe.storage.sync_schema ();
+        return true;
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "db", "Database validation failed for " + path + ": " + e.what ());
+        return false;
+    }
+}
+
+namespace {
+/// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
+/// every caller is clearing a path it is about to write, or one it has just
+/// decided is not a snapshot, and a leftover is the next attempt's to clear.
+void remove_db_file_set (const fs::path& file) {
+    std::error_code ec;
+    fs::remove (file, ec);
+    fs::remove (fs::path (file.string () + "-wal"), ec);
+    fs::remove (fs::path (file.string () + "-shm"), ec);
+}
+} // namespace
+
+std::expected<void, std::string> Database::refresh_recovery_backup () {
+    if (!impl_->recovery_backup_due) {
+        return std::unexpected (
+        std::string ("this start did not validate the database, so the backup "
+                     "is left as it is"));
+    }
+    const auto started      = std::chrono::steady_clock::now ();
+    const fs::path db_file  = impl_->opened_file;
+    const fs::path backup   = fs::path (db_file.string () + ".bak");
+    const fs::path snapshot = fs::path (db_file.string () + ".bak.tmp");
+
+    try {
+        // `VACUUM INTO` refuses a destination that exists, and one left by a
+        // process that died mid-snapshot is exactly that.
+        remove_db_file_set (snapshot);
+
+        const std::string refusal = vacuum_into (
+        db_file.string (), snapshot.string (), [this] (sqlite3* connection) {
+            std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
+            if (connection != nullptr && impl_->recovery_backup_cancelled) {
+                return false;
+            }
+            impl_->recovery_backup_connection = connection;
+            return true;
+        });
+        if (!refusal.empty ()) {
+            remove_db_file_set (snapshot);
+            return std::unexpected ("the snapshot did not complete: " + refusal);
+        }
+        if (!probe_database (snapshot.string ())) {
+            remove_db_file_set (snapshot);
+            return std::unexpected (
+            std::string ("the snapshot did not validate"));
+        }
+
+        // A `-wal` beside the backup belongs to the copy being replaced: the
+        // file-copy backup this supersedes carried its sidecars along, and
+        // `recover_database` copies a `.bak-wal` back with the `.bak`. Left in
+        // place it would be replayed over a snapshot it was never written for.
+        std::error_code ec;
+        fs::remove (fs::path (backup.string () + "-wal"), ec);
+        fs::remove (fs::path (backup.string () + "-shm"), ec);
+        // One rename, so the backup path always names a whole database: the
+        // previous one until this returns, this one after.
+        fs::rename (snapshot, backup, ec);
+        if (ec) {
+            remove_db_file_set (snapshot);
+            return std::unexpected (
+            "the snapshot could not replace the backup: " + ec.message ());
+        }
+    } catch (const std::exception& e) {
+        remove_db_file_set (snapshot);
+        return std::unexpected (std::string (e.what ()));
+    }
+
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started)
+                            .count ();
+    std::error_code size_ec;
+    const auto size = fs::file_size (backup, size_ec);
+    vayu::utils::log_debug ("db", "Recovery backup refreshed",
+    { { "path", backup.string () }, { "ms", elapsed_ms },
+    { "bytes", size_ec ? 0 : static_cast<int64_t> (size) } });
+    return {};
+}
+
+void Database::start_recovery_backup_refresh () {
+    std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
+    if (impl_->recovery_backup_thread.joinable () || impl_->recovery_backup_cancelled) {
+        return;
+    }
+    impl_->recovery_backup_thread = std::thread ([this] () {
+        // `refresh_recovery_backup` reports rather than throws; nothing here
+        // may escape a thread, which would terminate the engine.
+        const auto outcome = refresh_recovery_backup ();
+        if (!outcome) {
+            bool cancelled = false;
+            {
+                std::lock_guard<std::mutex> guard (impl_->recovery_backup_mutex);
+                cancelled = impl_->recovery_backup_cancelled;
+            }
+            // A shutdown that interrupted the snapshot is not news: the
+            // previous backup stands, which is what it was asked to do.
+            const std::string line =
+            "The recovery backup was not refreshed: " + outcome.error ();
+            if (cancelled) {
+                vayu::utils::log_debug ("db", line);
+            } else {
+                vayu::utils::log_warning ("db", line);
+            }
+        }
+    });
+}
+
+void Database::finish_recovery_backup_refresh () {
+    if (!impl_) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
+        impl_->recovery_backup_cancelled = true;
+        if (impl_->recovery_backup_connection != nullptr) {
+            sqlite3_interrupt (impl_->recovery_backup_connection);
+        }
+    }
+    if (impl_->recovery_backup_thread.joinable ()) {
+        impl_->recovery_backup_thread.join ();
+    }
+}
 
 std::string Database::backups_directory () const {
     return (fs::path (impl_->opened_file).parent_path () / "backups").string ();

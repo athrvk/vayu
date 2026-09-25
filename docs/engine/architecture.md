@@ -1221,7 +1221,7 @@ Default configuration values (from `constants.hpp`):
 data/
 ├── db/
 │   ├── vayu.db          # SQLite database
-│   ├── vayu.db.bak      # Rewritten on every clean start - crash recovery, not a user backup
+│   ├── vayu.db.bak      # Re-snapshotted after every clean start - crash recovery, not a user backup
 │   └── backups/
 │       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
 ├── logs/

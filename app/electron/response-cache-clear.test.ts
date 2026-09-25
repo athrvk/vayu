@@ -25,8 +25,7 @@ vi.mock("electron", () => {
 		app: { getPath: () => fake.userData, getVersion: () => "0.0.0-test" },
 		ipcMain: { on: () => {} },
 	};
-	// electron-store reaches for the default export.
-	return { ...api, default: api };
+	return api;
 });
 
 /**

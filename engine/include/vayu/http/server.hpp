@@ -10,6 +10,7 @@
 #include <httplib.h>
 
 #include <atomic>
+#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -108,6 +109,9 @@ class Server {
     RunSummaryCache run_summary_cache_;
     httplib::Server server_;
     std::thread server_thread_;
+    /// Ready once `server_thread_`'s accept loop has returned, so `stop()` can
+    /// join the moment it does instead of re-checking on a fixed quantum.
+    std::future<void> server_thread_exited_;
     std::atomic<bool> is_running_{ false };
     std::unique_ptr<routes::RouteContext> route_ctx_;
     routes::ShutdownCallback shutdown_callback_;

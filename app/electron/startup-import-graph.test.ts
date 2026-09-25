@@ -121,6 +121,15 @@ describe("main process startup import graph", () => {
 		);
 	});
 
+	it("does not evaluate electron-updater, whose first check waits a minute anyway", () => {
+		// ~60 ms of eager requires and an updater constructed on first read, all
+		// ahead of `app.whenReady` while main.ts imported it statically.
+		// `loadUpdater()` is the only way in; a static import of `updater.ts`
+		// anywhere on the graph puts the package back.
+		expect([...packages]).not.toContain("electron-updater");
+		expect(relative).not.toContain("updater.ts");
+	});
+
 	/*
 	 * The exclusion above is only worth anything if the cheap half is still
 	 * reached - a lazy load that also stopped reading the preference would pass

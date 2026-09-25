@@ -1208,12 +1208,17 @@ startup sweep does once `trashRetentionDays` has passed.
 
 ### GET /requests
 
-List requests in a collection. Results are ordered by `order`, then `createdAt`,
-then `id` - the same contract `GET /collections` has for collections. See
-[Ordering](#ordering) for why the tiebreak is part of the contract.
+List requests in a collection, or in every live collection. Results are
+ordered by `order`, then `createdAt`, then `id` - the same contract
+`GET /collections` has for collections. See [Ordering](#ordering) for why the
+tiebreak is part of the contract.
 
 **Query Parameters:**
-- `collectionId` (required): Collection ID to fetch requests from
+- `collectionId` (optional): Collection ID to fetch requests from. Absent, the
+  response is every live request of every live collection, grouped by
+  `collectionId` and ordered within each group exactly as that collection's own
+  list is - nothing in the trash. The app builds its whole tree from this one
+  call at launch instead of one call per collection.
 
 **Response:** An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of

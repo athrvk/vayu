@@ -13,7 +13,9 @@
 #include "vayu/http/server.hpp"
 
 #include <chrono>
+#include <future>
 #include <iostream>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -81,10 +83,15 @@ bool Server::start () {
         return false;
     }
 
-    is_running_    = true;
-    server_thread_ = std::thread ([this] () {
+    is_running_ = true;
+    // Shared with the thread rather than a member it writes through, because
+    // a thread `stop()` gave up on and detached may outlive this object.
+    auto exited           = std::make_shared<std::promise<void>> ();
+    server_thread_exited_ = exited->get_future ();
+    server_thread_        = std::thread ([this, exited] () {
         server_.listen_after_bind ();
         is_running_ = false;
+        exited->set_value ();
     });
 
     // `stop()` racing ahead of the accept loop is missed by cpp-httplib and the
@@ -101,27 +108,18 @@ void Server::stop () {
     if (is_running_) {
         server_.stop ();
 
-        // Give the server thread a chance to exit gracefully
+        // Give the server thread a chance to exit gracefully. Waited on rather
+        // than polled: the 100 ms re-check this replaces was the whole of
+        // "Server stopped in 100ms" on every shutdown, since the accept loop
+        // is gone within a keep-alive check interval of `stop()`.
         if (server_thread_.joinable ()) {
-            auto join_start = std::chrono::steady_clock::now ();
-            while (server_thread_.joinable ()) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds> (
-                std::chrono::steady_clock::now () - join_start)
-                               .count ();
-
-                if (elapsed >= 3) {
-                    vayu::utils::log_warning ("shutdown",
-                    "Server thread did not exit after 3 seconds, detaching...");
-                    server_thread_.detach ();
-                    break;
-                }
-
-                if (!is_running_) {
-                    server_thread_.join ();
-                    break;
-                }
-
-                std::this_thread::sleep_for (std::chrono::milliseconds (100));
+            if (server_thread_exited_.wait_for (std::chrono::seconds (3)) ==
+            std::future_status::ready) {
+                server_thread_.join ();
+            } else {
+                vayu::utils::log_warning ("shutdown",
+                "Server thread did not exit after 3 seconds, detaching...");
+                server_thread_.detach ();
             }
         }
         is_running_ = false;
