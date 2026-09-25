@@ -177,7 +177,7 @@ APP_PATH="$APP_PATH_SAVED"
 # uninstall (no purge): removes the app, keeps + reports data dirs
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -rf ${APP_PATH}" || fail "uninstall should remove the app bundle"
-echo "$out" | grep -q "Application Support/vayu-client" || fail "uninstall should mention the data dir"
+echo "$out" | grep -q "Application Support/Vayu$" || fail "uninstall should mention the data dir"
 echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
 # The hint has to be a command that works: `--purge` on its own is rejected,
 # so printing it alone sent people at an error.
@@ -185,7 +185,10 @@ echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should na
 
 # uninstall --purge: also removes data dirs
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf .*Application Support/vayu-client" || fail "purge should remove the data dir"
+echo "$out" | grep -q "rm -rf .*Application Support/Vayu'$" || fail "purge should remove the data dir"
+# Where every release up to 0.36 kept it; an install not launched since the
+# upgrade still has only this one (#1758).
+echo "$out" | grep -q "rm -rf .*Application Support/vayu-client'$" || fail "purge should remove the legacy data dir"
 echo "$out" | grep -q "rm -f .*io.github.athrvk.vayu.plist" || fail "purge should remove prefs"
 # The identifier builds before the rename ran under. macOS keyed their prefs,
 # caches and saved state by it, so a purge that only knew the current id would
@@ -366,7 +369,8 @@ echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should na
 if echo "$out" | grep -q '^\[dry-run\] sudo'; then fail "Linux uninstall must not run sudo"; fi
 
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf .*/vayu-client" || fail "purge should remove the config dir"
+echo "$out" | grep -q "rm -rf .*/Vayu$" || fail "purge should remove the config dir"
+echo "$out" | grep -q "rm -rf .*config/vayu-client$" || fail "purge should remove the legacy config dir"
 
 # A `vayu` on PATH that someone else put there must survive an uninstall.
 mkdir -p "$TMPROOT/bin"
