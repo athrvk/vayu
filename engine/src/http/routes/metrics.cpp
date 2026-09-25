@@ -86,8 +86,7 @@ int64_t offset) {
 
 /**
  * Testable core of the time-series JSON endpoint, returning {http_status,
- * json_body}. Serves both `GET /runs/:id/metrics` (canonical) and the legacy
- * `GET /stats/:id?format=json`, so the two paths cannot drift.
+ * json_body}, behind `GET /runs/:id/metrics`.
  *
  * A missing run is a definitive 404 with the `{"error": {"code", "message"}}`
  * shape `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
@@ -143,45 +142,6 @@ int64_t offset) {
 }
 
 namespace {
-
-/**
- * Fold one stored tick into the legacy `/stats/:id` SSE aggregate.
- *
- * That stream predates `metric_ticks` and read the EAV rows directly; every
- * field it carries comes from the tick object instead, one-for-one - except
- * `avgLatencyMs`, which the per-tick object has never carried (the canonical
- * `GET /runs/:id/live` stream serves it from the in-memory collector). Returns
- * false for an unreadable payload, leaving the aggregate untouched.
- */
-bool apply_tick_to_stream (const vayu::db::MetricTick& tick,
-nlohmann::json& aggregate,
-const std::string& run_id) {
-    nlohmann::json payload;
-    try {
-        payload = nlohmann::json::parse (tick.payload);
-    } catch (...) {
-        return false;
-    }
-    if (!payload.is_object ()) {
-        return false;
-    }
-
-    const int total_req            = payload.value ("requests_completed", 0);
-    const int errors               = payload.value ("requests_failed", 0);
-    aggregate["currentRps"]        = payload.value ("current_rps", 0.0);
-    aggregate["errorRate"]         = payload.value ("error_rate", 0.0);
-    aggregate["activeConnections"] = payload.value ("current_concurrency", 0);
-    aggregate["totalRequests"]     = total_req;
-    aggregate["sendRate"]          = payload.value ("send_rate", 0.0);
-    aggregate["throughput"]        = payload.value ("throughput", 0.0);
-    aggregate["backpressure"]      = payload.value ("backpressure", 0);
-    aggregate["totalErrors"]       = errors;
-    aggregate["totalSuccess"]   = total_req > errors ? total_req - errors : 0;
-    aggregate["elapsedSeconds"] = payload.value ("elapsed_seconds", 0.0);
-    aggregate["timestamp"]      = payload.value ("timestamp", tick.timestamp);
-    aggregate["runId"]          = run_id;
-    return true;
-}
 
 // Parse and clamp the pagination query params shared by the time-series routes.
 // Raw parsing stays here; the extracted core is handed clean, clamped ints.
@@ -254,159 +214,6 @@ void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib
     }
 }
 
-/** The counters a stats stream starts from, before the first tick lands. */
-nlohmann::json empty_stream_metrics () {
-    nlohmann::json aggregated_metrics;
-    aggregated_metrics["totalRequests"]     = 0;
-    aggregated_metrics["totalErrors"]       = 0;
-    aggregated_metrics["totalSuccess"]      = 0;
-    aggregated_metrics["errorRate"]         = 0.0;
-    aggregated_metrics["avgLatencyMs"]      = 0.0;
-    aggregated_metrics["currentRps"]        = 0.0;
-    aggregated_metrics["sendRate"]          = 0.0;
-    aggregated_metrics["throughput"]        = 0.0;
-    aggregated_metrics["backpressure"]      = 0;
-    aggregated_metrics["activeConnections"] = 0;
-    aggregated_metrics["elapsedSeconds"]    = 0.0;
-    return aggregated_metrics;
-}
-
-/** What one poll of the stats stream leaves the stream in. */
-enum class StreamStep : std::uint8_t {
-    Continue, ///< Wrote a frame (or a keep-alive); poll again.
-    Done,     ///< The run has finished and its completion event is written.
-    Closed,   ///< The client is gone - a write failed.
-};
-
-/**
- * One poll: the ticks since @p last_tick_id, or - when there are none - the
- * run's completion event or a keep-alive.
- */
-StreamStep write_stats_frame (vayu::db::Database& db,
-const std::string& run_id,
-int64_t& last_tick_id,
-nlohmann::json& aggregated_metrics,
-httplib::DataSink& sink) {
-    auto ticks = db.get_metric_ticks_since (run_id, last_tick_id);
-    if (!ticks.empty ()) {
-        bool tick_updates = false;
-        for (const auto& tick : ticks) {
-            last_tick_id = tick.id;
-            tick_updates |= apply_tick_to_stream (tick, aggregated_metrics, run_id);
-        }
-        if (tick_updates) {
-            std::string payload =
-            "event: metrics\ndata: " + aggregated_metrics.dump () + "\n\n";
-            if (!sink.write (payload.data (), payload.size ())) {
-                return StreamStep::Closed;
-            }
-        }
-        return StreamStep::Continue;
-    }
-
-    auto run = db.get_run (run_id);
-    if (run &&
-    (run->status == vayu::RunStatus::Completed || run->status == vayu::RunStatus::Stopped ||
-    run->status == vayu::RunStatus::Failed)) {
-        nlohmann::json completion_event;
-        completion_event["event"]  = "complete";
-        completion_event["runId"]  = run_id;
-        completion_event["status"] = to_string (run->status);
-        std::string payload = "event: complete\ndata: " + completion_event.dump () + "\n\n";
-        sink.write (payload.data (), payload.size ());
-        return StreamStep::Done;
-    }
-
-    std::string keep_alive = ": keep-alive\n\n";
-    if (!sink.write (keep_alive.data (), keep_alive.size ())) {
-        return StreamStep::Closed;
-    }
-    return StreamStep::Continue;
-}
-
-/**
- * The legacy `GET /stats/:id` stream, polled off the database.
- *
- * Always answers `false`: the provider is done when this returns, whether the
- * run finished, the client went away or a read threw.
- */
-bool stream_run_stats (vayu::db::Database& db, const std::string& run_id, httplib::DataSink& sink) {
-    int64_t last_tick_id              = 0; // metric_ticks cursor
-    nlohmann::json aggregated_metrics = empty_stream_metrics ();
-
-    while (sink.is_writable ()) {
-        StreamStep step = StreamStep::Done;
-        try {
-            step = write_stats_frame (db, run_id, last_tick_id, aggregated_metrics, sink);
-        } catch (const std::exception&) {
-            break;
-        }
-        if (step != StreamStep::Continue) {
-            break;
-        }
-        std::this_thread::sleep_for (std::chrono::milliseconds (500));
-    }
-
-    return false;
-}
-
-/** The `format=json` half of `GET /stats/:id` - the same core as GET /runs/:id/metrics. */
-void send_run_stats_json (RouteContext& ctx,
-const httplib::Request& req,
-httplib::Response& res,
-const std::string& run_id) {
-    vayu::utils::log_info ("http",
-    "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
-
-    auto [limit, offset] = parse_time_series_pagination (req);
-    try {
-        auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
-        if (status == 404) {
-            vayu::utils::log_warning ("http", "GET /stats/:id - Run not found: " + run_id);
-        }
-        res.status = status;
-        res.set_content (body.dump (), "application/json");
-    } catch (const std::exception& e) {
-        vayu::utils::log_error ("http",
-        "GET /stats/:id?format=json - Error: " + std::string (e.what ()));
-        send_error (res, 500, e.what ());
-    }
-}
-
-void handle_run_stats (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    std::string run_id = req.matches[1];
-
-    // Check for JSON format (batch retrieval for charts)
-    if (req.has_param ("format") && req.get_param_value ("format") == "json") {
-        send_run_stats_json (ctx, req, res, run_id);
-        return;
-    }
-
-    // SSE streaming mode (existing behavior). Debug, not info: which mode a
-    // poll took is internal detail the centralised request line (issue
-    // #1510) does not carry, not a state change worth `-v 1`.
-    vayu::utils::log_debug ("http", "Starting SSE stream for run: " + run_id);
-
-    try {
-        auto run = ctx.db.get_run (run_id);
-        if (!run) {
-            vayu::utils::log_warning ("http", "GET /stats/:id - Run not found: " + run_id);
-            send_error (res, 404, "Run not found");
-            return;
-        }
-    } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "http", "GET /stats/:id - Error: " + std::string (e.what ()));
-        send_error (res, 500, e.what ());
-        return;
-    }
-
-    res.set_content_provider ("text/event-stream",
-    [&db = ctx.db, run_id] (size_t, httplib::DataSink& sink) {
-        return stream_run_stats (db, run_id, sink);
-    });
-}
-
 /**
  * The live stream itself: every tick the run's topic has published from
  * @p start_offset on, then its completion event.
@@ -440,10 +247,9 @@ httplib::DataSink& sink) {
             completion_event["event"] = "complete";
             completion_event["runId"] = run_id;
             // The status, so the client can tell a failed run from a finished
-            // one without going back for the report (issue #1415). The stored
-            // stream's completion frame at write_stats_frame has always
-            // carried it; this one did not, and this is the frame an ordinary
-            // live run ends on, so nothing downstream could see a failure.
+            // one without going back for the report (issue #1415). This is the
+            // frame an ordinary live run ends on, so without it nothing
+            // downstream could see a failure.
             //
             // Omitted rather than guessed when the row is not terminal yet:
             // `closed` says the producer appended its last tick, which can
@@ -513,9 +319,7 @@ void register_metrics_routes (RouteContext& ctx) {
     /**
      * GET /runs/:runId/metrics
      * Returns the paginated time-series (JSON) for a load test run's charts.
-     * Always JSON - any `format` query param is ignored. This is the canonical
-     * replacement for the legacy `GET /stats/:id?format=json`; both call
-     * run_time_series_response so they cannot drift.
+     * Always JSON - any `format` query param is ignored.
      *
      * Query Parameters:
      * - limit: Max records per page (default 5000, capped at 50000)
@@ -541,32 +345,13 @@ void register_metrics_routes (RouteContext& ctx) {
     });
 
     /**
-     * GET /stats/:runId  (legacy, retained wholesale)
-     * Streams real-time statistics for a load test run using Server-Sent Events
-     * (SSE). Uses database polling for historical data.
-     *
-     * Query Parameters:
-     * - format=json: Return JSON instead of SSE (for historical chart data).
-     *   This branch is legacy; new callers should use GET /runs/:id/metrics,
-     *   which shares the same run_time_series_response core.
-     * - limit: Max records per page (default 5000, for format=json only)
-     * - offset: Skip N records (default 0, for format=json only)
-     */
-    ctx.server.Get (R"(/stats/([^/]+))",
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        handle_run_stats (ctx, req, res);
-    });
-
-    /**
-     * GET /runs/:runId/live  (alias: GET /metrics/live/:runId, deprecated)
+     * GET /runs/:runId/live
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
      */
-    httplib::Server::Handler live_metrics = [&ctx] (const httplib::Request& req,
-                                            httplib::Response& res) {
+    ctx.server.Get (R"(/runs/([^/]+)/live)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_live_metrics (ctx, req, res);
-    };
-    ctx.server.Get (R"(/runs/([^/]+)/live)", live_metrics);
-    ctx.server.Get (R"(/metrics/live/([^/]+))", deprecated_alias (live_metrics));
+    });
 }
 
 } // namespace vayu::http::routes

@@ -1203,7 +1203,7 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         register_run (run_id, context);
 
         // Sweep stale retained runs on each new registration so that headless /
-        // API-only usage (which never hits /metrics/live) doesn't accumulate them.
+        // API-only usage (which never hits /runs/:id/live) doesn't accumulate them.
         int retention_ms = db.get_config_int ("liveRetentionMs", 60000);
         sweep_retained (retention_ms);
 
@@ -2667,7 +2667,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Guard the entire body so that any exception (std::bad_alloc, json error,
     // etc.) is caught here rather than escaping the thread function (which would
     // call std::terminate).  `context->closed` is set unconditionally below the
-    // try/catch so that attached /metrics/live consumers always terminate cleanly.
+    // try/catch so that attached /runs/:id/live consumers always terminate cleanly.
     try {
         tick_interval_ms = db_ptr->get_config_int (
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);

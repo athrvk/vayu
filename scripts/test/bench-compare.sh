@@ -39,7 +39,7 @@ JSON
   [ -z "$rid" ] && { echo "ERR"; return; }
   last=""
   for _ in $(seq 1 80); do
-    data="$(curl -s -N --max-time 2 "$DAEMON/stats/$rid")"
+    data="$(curl -s -N --max-time 2 "$DAEMON/runs/$rid/live")"
     ml="$(echo "$data" | grep '^data:' | grep -v '"event"' | tail -1 | sed 's/^data: //')"
     [ -n "$ml" ] && last="$ml"
     echo "$data" | grep -q "event: complete" && break

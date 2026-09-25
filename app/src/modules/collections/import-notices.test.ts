@@ -46,7 +46,7 @@ describe("importNotices", () => {
 		);
 		expect(notice).toEqual({
 			tier: "action",
-			text: "5 requests: cookie not imported - add it to the cookie jar - A, B, C, +2 more",
+			text: "5 requests: cookie not imported - add it as a Cookie header - A, B, C, +2 more",
 		});
 	});
 

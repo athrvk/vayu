@@ -360,6 +360,26 @@ export class EngineClient {
 	}
 
 	/**
+	 * What a document declares, without storing it: `POST /specs/describe`. The
+	 * reader {@link bindSpec} derives its stamps from, so the operations a
+	 * preview matches are the ones the bind would.
+	 */
+	describeSpec(content: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/specs/describe", { content }, signal);
+	}
+
+	/**
+	 * Pair a collection's subtree with a set of operations, writing nothing:
+	 * `POST /specs/match`, the rule {@link bindSpec} matches with.
+	 */
+	matchSpec(
+		payload: { collectionId: string; operations: unknown },
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request("POST", "/specs/match", payload, signal);
+	}
+
+	/**
 	 * Parse an import document and persist it, in one call (`POST /import`,
 	 * issue #877).
 	 *
@@ -373,6 +393,16 @@ export class EngineClient {
 	 */
 	importDocument(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/import", payload, signal);
+	}
+
+	/**
+	 * Parse a document into the tree an import would create, storing nothing:
+	 * `POST /import/parse`. The same reader and the same arguments as
+	 * {@link importDocument}, so a preview and the import it previews cannot
+	 * disagree about what the document declares.
+	 */
+	parseImport(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/import/parse", payload, signal);
 	}
 
 	/**
@@ -1044,6 +1074,23 @@ export class EngineClient {
 	// interactive `authorization_code` exchange (`/oauth2/authorize/*`) is
 	// deliberately absent: it needs a browser and a loopback listener the app
 	// owns, and agent-driven browser auth is a non-goal of epic #753.
+
+	/**
+	 * Send one `HEAD` under the transport policy in force and report which hop
+	 * answered: `POST /diagnostics/connection`. The engine holds the probe to a
+	 * fixed 10-second deadline, inside this client's default budget.
+	 */
+	diagnoseConnection(url: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/diagnostics/connection", { url }, signal);
+	}
+
+	/**
+	 * Every registered client certificate: `GET /client-certificates`. The
+	 * engine never answers a passphrase, only whether one is stored.
+	 */
+	listClientCertificates(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/client-certificates", undefined, signal);
+	}
 
 	/**
 	 * Acquire or return a cached token: `POST /oauth2/token` `{config, force?}`.
