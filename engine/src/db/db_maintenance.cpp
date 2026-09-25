@@ -114,11 +114,10 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
 /**
  * Open a second connection on the workspace database at @p path.
  *
- * Two statements the engine runs on the workspace - the backup's `VACUUM INTO`
- * and the startup reclamation's `VACUUM` - cannot go through the connection
- * every write is serialized on: sqlite_orm exposes no way to run a statement on
- * the connection it holds. Both take one of these instead, so the flags and the
- * busy timeout are decided once rather than per caller.
+ * The backup's `VACUUM INTO` runs on one of these rather than on the
+ * connection every write is serialized on, so a large copy does not hold that
+ * connection (and the DB mutex) for its length; the flags and the busy timeout
+ * are decided here once rather than per caller.
  *
  * @return the connection, or `nullptr` with @p error set to what SQLite
  *         refused. The caller owns what it gets and closes it.
@@ -208,8 +207,7 @@ bool worth_reclaiming (int64_t freelist, int64_t pages, int64_t page_size) {
 /**
  * The decision and the rewrite, on an already-open @p connection.
  *
- * Split from the function below so the connection is closed on exactly one
- * path rather than on each of this one's four.
+ * Split from the function below, which measures the file first.
  */
 ReclaimOutcome
 reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t before_bytes) {
@@ -258,14 +256,15 @@ reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t bef
  * Return the database's freed pages to the filesystem, if it holds enough of
  * them to be worth the rewrite (issue #990).
  *
- * On a connection of its own, for the reason `open_workspace_connection` gives:
- * sqlite_orm exposes no way to run a statement on the connection it holds, and
- * neither `VACUUM` nor the three PRAGMAs this decides on are among the ones it
- * wraps. That costs nothing here - the caller runs before the HTTP listener
- * exists and the lock file has already refused a second engine, so this
- * connection is the only one doing anything.
+ * On @p connection, the one the storage holds open (`open_forever`), never on
+ * a second one: the checkpoint that shrinks the file has to truncate it, and
+ * Windows refuses to truncate a file another connection still has mapped
+ * (`mmap_size`), so from a second connection the rewrite committed and the
+ * file stayed its old size. SQLite unmaps its own view before truncating, so
+ * the holding connection is the one that can. The caller holds the DB mutex,
+ * so nothing else is using that connection meanwhile.
  */
-ReclaimOutcome reclaim_freed_pages (const std::string& path) {
+ReclaimOutcome reclaim_freed_pages (sqlite3* connection, const std::string& path) {
     ReclaimOutcome outcome;
     std::error_code ec;
     const auto size = fs::file_size (path, ec);
@@ -276,14 +275,11 @@ ReclaimOutcome reclaim_freed_pages (const std::string& path) {
     outcome.before_bytes = static_cast<int64_t> (size);
     outcome.after_bytes  = outcome.before_bytes;
 
-    sqlite3* connection = open_workspace_connection (path, outcome.error);
     if (connection == nullptr) {
+        outcome.error = "the storage has no open connection";
         return outcome;
     }
-
-    outcome = reclaim_on_connection (connection, path, outcome.before_bytes);
-    sqlite3_close (connection);
-    return outcome;
+    return reclaim_on_connection (connection, path, outcome.before_bytes);
 }
 
 /** Report what the pass above did, at the level its outcome deserves. */
@@ -867,7 +863,7 @@ void Database::init () {
     // gives the engine 45 seconds to answer `/health`. Best-effort like the
     // passes above - reclaiming disk must not be a daemon that will not start.
     try {
-        log_reclaim_outcome (reclaim_freed_pages (impl_->opened_file));
+        log_reclaim_outcome (reclaim_freed_pages (impl_->connection, impl_->opened_file));
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "db", "Startup database reclamation failed: " + std::string (e.what ()));
@@ -1066,9 +1062,8 @@ bool is_backup_file_name (const std::string& name) {
  * @return an empty string on success, or what SQLite refused.
  *
  * On a connection of its own rather than the one every write is serialized
- * through - `open_workspace_connection` says why, and the startup reclamation
- * takes one for the same reason. The second half of it is this function's
- * alone: a `VACUUM INTO` of a large workspace occupies its connection for as
+ * through - `open_workspace_connection` says why: a `VACUUM INTO` of a large
+ * workspace occupies its connection for as
  * long as the copy takes, and on the shared one that is every other endpoint
  * waiting behind a button someone pressed. Under WAL a second reader sees every
  * committed transaction and blocks no writer, so the snapshot is consistent and
