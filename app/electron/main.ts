@@ -38,7 +38,6 @@ import {
 } from "./proxy-resolution.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
-import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
@@ -677,7 +676,10 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => void checkForUpdatesNow("menu"),
+								click: () =>
+									void loadUpdater().then((updater) =>
+										updater.checkForUpdatesNow("menu")
+									),
 							},
 							{ type: "separator" as const },
 							{
@@ -836,7 +838,10 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => void checkForUpdatesNow("menu"),
+								click: () =>
+									void loadUpdater().then((updater) =>
+										updater.checkForUpdatesNow("menu")
+									),
 							},
 							{
 								label: "About Vayu",
@@ -884,6 +889,29 @@ async function startEngine() {
 		);
 		app.quit();
 	}
+}
+
+/**
+ * The updater, loaded at most once, after the engine.
+ *
+ * `electron-updater` constructs its platform updater the moment its export is
+ * read and eagerly requires fs-extra, js-yaml, semver and six updater classes on
+ * the way (measured: ~60 ms inside Electron), and the first check it exists for
+ * waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway - so a static import spent
+ * that on every launch before `app.whenReady`, ahead of the window. Cached as a
+ * promise for the same reason `loadMcp` is: the menu and the startup arming may
+ * ask at once, and a module that failed to load is a broken install.
+ */
+type UpdaterModule = typeof import("./updater.js");
+let updaterModulePromise: Promise<UpdaterModule> | null = null;
+let updaterModule: UpdaterModule | null = null;
+
+function loadUpdater(): Promise<UpdaterModule> {
+	updaterModulePromise ??= import("./updater.js").then((module) => {
+		updaterModule = module;
+		return module;
+	});
+	return updaterModulePromise;
 }
 
 /**
@@ -1559,7 +1587,11 @@ app.whenReady().then(async () => {
 	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not
 	// start while the window, the engine and the user's first requests are still
 	// competing for the link and the disk.
-	initAutoUpdater(() => mainWindow);
+	void loadUpdater()
+		.then((updater) => updater.initAutoUpdater(() => mainWindow))
+		.catch((error: unknown) => {
+			appLogger().error("main", "Could not load the updater", { error: String(error) });
+		});
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -1637,7 +1669,9 @@ app.on("before-quit", (event) => {
 // The quit is settled by now, so stop the periodic update check and answer a
 // check the user is still waiting on - its events will never arrive.
 app.on("will-quit", () => {
-	disposeAutoUpdater();
+	// Only a loaded updater has anything to stop; loading it now to dispose of
+	// it would be work for a process on its way out.
+	updaterModule?.disposeAutoUpdater();
 });
 
 // A signal is how anything outside the UI asks Vayu to stop, and Node's default

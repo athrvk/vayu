@@ -453,7 +453,8 @@ that belong under `dependencies` are the ones the unbundled main process imports
 at runtime:
 
 - **electron-store**: the `mcp-config.json` and `window-state.json` stores
-- **electron-updater**: the update check and download
+- **electron-updater**: the update check and download, loaded once the engine
+  is up (`loadUpdater` in `main.ts`) rather than on the startup import graph
 - **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
   schemas, loaded by the first request (see `docs/engine/mcp.md`)
 
