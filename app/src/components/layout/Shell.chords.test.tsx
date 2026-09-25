@@ -290,30 +290,16 @@ describe("moving between tabs without counting them", () => {
 
 	// Matched on `code`: ⇧] reports `}` on a US layout, and the shifted bracket
 	// is a different character again elsewhere. The position is what is stable.
-	it("moves to the next tab on mod+shift+]", () => {
+	it.each([
+		["moves to the next tab on mod+shift+]", "}", "BracketRight", SECOND, THIRD],
+		["moves to the previous tab on mod+shift+[", "{", "BracketLeft", SECOND, FIRST],
+		["wraps off the end to the first tab", "}", "BracketRight", THIRD, FIRST],
+		["wraps off the front to the last tab", "{", "BracketLeft", FIRST, THIRD],
+	])("%s", (_name, key, code, start, expected) => {
+		useTabsStore.setState({ activeTabId: start });
 		renderShell();
-		press({ key: "}", code: "BracketRight", shift: true });
-		expect(useTabsStore.getState().activeTabId).toBe(THIRD);
-	});
-
-	it("moves to the previous tab on mod+shift+[", () => {
-		renderShell();
-		press({ key: "{", code: "BracketLeft", shift: true });
-		expect(useTabsStore.getState().activeTabId).toBe(FIRST);
-	});
-
-	it("wraps off the end to the first tab", () => {
-		useTabsStore.setState({ activeTabId: THIRD });
-		renderShell();
-		press({ key: "}", code: "BracketRight", shift: true });
-		expect(useTabsStore.getState().activeTabId).toBe(FIRST);
-	});
-
-	it("wraps off the front to the last tab", () => {
-		useTabsStore.setState({ activeTabId: FIRST });
-		renderShell();
-		press({ key: "{", code: "BracketLeft", shift: true });
-		expect(useTabsStore.getState().activeTabId).toBe(THIRD);
+		press({ key, code, shift: true });
+		expect(useTabsStore.getState().activeTabId).toBe(expected);
 	});
 
 	it("does nothing with no tabs open", () => {

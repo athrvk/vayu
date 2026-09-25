@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -191,44 +192,47 @@ TEST (ControllerRegistry, ControlIfAcceptsEveryGrammarForm) {
     }
 }
 
-TEST (ControllerRegistry, ControlSwitchRequiresVariableAndCases) {
+/// One `(kind, config)` through `Registry::validate`, and whether the schema
+/// refuses it. `config` is JSON text, parsed in the test body, so the table
+/// stays a `constexpr` array rather than a namespace-scope `json`.
+struct ControllerConfigCase {
+    const char* name;
+    const char* kind;
+    const char* config;
+    bool expect_rejected;
+};
+
+constexpr auto CONTROLLER_CONFIG_CASES = std::to_array<ControllerConfigCase> ({
+// 'cases' is required alongside 'variable'.
+{ "ControlSwitchRequiresVariableAndCases", "control.switch", R"({"variable":"tier"})", true },
+{ "ControlOnceAcceptsAnEmptyConfig", "control.once", "{}", false },
+// Issue #1569: `perUser: false` shares one budget across every virtual user
+// of a scenario load run rather than keeping one per user.
+{ "ControlThroughputAcceptsPerUser", "control.throughput", R"({"perUser":false})", false },
+// Issue #1569: folds a between-member `timer.*` wait into the sum.
+{ "ControlTransactionAcceptsIncludeTimers", "control.transaction",
+R"({"name":"checkout","includeTimers":true})", false },
+{ "ControlLoopRequiresCount", "control.loop", "{}", true },
+{ "ControlTransactionRequiresName", "control.transaction", "{}", true },
+});
+
+class ControllerRegistryConfig : public ::testing::TestWithParam<ControllerConfigCase> {
+};
+
+TEST_P (ControllerRegistryConfig, ValidatesTheConfigAgainstTheKindsSchema) {
+    const auto& c     = GetParam ();
     const auto reason = Registry::instance ().validate (
-    json::array ({ element ("el_1", "control.switch", { { "variable", "tier" } }) }));
-    ASSERT_HAS_VALUE (reason) << "'cases' is required";
+    json::array ({ element ("el_1", c.kind, json::parse (c.config)) }));
+    EXPECT_EQ (reason.has_value (), c.expect_rejected)
+    << c.kind << " " << c.config << ": " << reason.value_or ("(accepted)");
 }
 
-TEST (ControllerRegistry, ControlOnceAcceptsAnEmptyConfig) {
-    EXPECT_FALSE (Registry::instance ()
-    .validate (json::array ({ element ("el_1", "control.once", json::object ()) }))
-    .has_value ());
-}
-
-TEST (ControllerRegistry, ControlThroughputAcceptsPerUser) {
-    // Issue #1569: `perUser: false` shares one budget across every virtual
-    // user of a scenario load run rather than keeping one per user.
-    const auto reason = Registry::instance ().validate (json::array (
-    { element ("el_1", "control.throughput", { { "perUser", false } }) }));
-    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
-}
-
-TEST (ControllerRegistry, ControlTransactionAcceptsIncludeTimers) {
-    // Issue #1569: folds a between-member `timer.*` wait into the sum.
-    const auto reason = Registry::instance ().validate (json::array ({ element ("el_1",
-    "control.transaction", { { "name", "checkout" }, { "includeTimers", true } }) }));
-    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
-}
-
-TEST (ControllerRegistry, ControlLoopRequiresCount) {
-    const auto reason = Registry::instance ().validate (
-    json::array ({ element ("el_1", "control.loop", json::object ()) }));
-    ASSERT_HAS_VALUE (reason);
-}
-
-TEST (ControllerRegistry, ControlTransactionRequiresName) {
-    const auto reason = Registry::instance ().validate (
-    json::array ({ element ("el_1", "control.transaction", json::object ()) }));
-    ASSERT_HAS_VALUE (reason);
-}
+INSTANTIATE_TEST_SUITE_P (ControllerRegistry,
+ControllerRegistryConfig,
+::testing::ValuesIn (CONTROLLER_CONFIG_CASES),
+[] (const ::testing::TestParamInfo<ControllerConfigCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ============================================================================
 // `find_load_incompatible_controller` - the load-path refusal, unit level

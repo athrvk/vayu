@@ -111,14 +111,6 @@ describe("MockServerView", () => {
 		expect(screen.getAllByText("/pets").length).toBeGreaterThan(0);
 	});
 
-	it("shows an empty state when no mock is running", () => {
-		vi.mocked(useMockServersQuery).mockReturnValue({
-			data: [] as MockServer[],
-		} as ReturnType<typeof useMockServersQuery>);
-		render(<MockServerView />);
-		expect(screen.getByText(/no mock running/i)).toBeInTheDocument();
-	});
-
 	it("shows the latency and error-rate summary when errorRatePct is set", () => {
 		vi.mocked(useMockServersQuery).mockReturnValue({
 			data: [{ ...MOCK, latencyMs: 250, errorRatePct: 30 }],

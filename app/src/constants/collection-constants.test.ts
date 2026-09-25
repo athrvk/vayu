@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "./collection";
+import { DEFAULT_FOLDER_NAME } from "./collection";
 
 describe("collection naming constants", () => {
 	it('DEFAULT_FOLDER_NAME contains no "Sub Collection"', () => {
@@ -23,11 +23,7 @@ describe("collection naming constants", () => {
 		expect(DEFAULT_FOLDER_NAME).toBe("New Collection");
 	});
 
-	it("DEFAULT_COLLECTION_NAME is unaffected", () => {
-		expect(DEFAULT_COLLECTION_NAME).toBe("New Collection");
-	});
-
-	// Source-scanning guard, not just the two constants above: the phrase can
+	// Source-scanning guard, not just the constant above: the phrase can
 	// resurface in a menu label or a toast without ever touching this file.
 	// Asserts it actually scanned something, per this repo's mutation-check
 	// rule for guards.

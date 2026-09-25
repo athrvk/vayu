@@ -18,8 +18,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -575,37 +578,51 @@ TEST (SseRing, DisclosesATruncatedEventInBand) {
 // The trace node
 // ---------------------------------------------------------------------------
 
-TEST (SseTrace, StoresUpToTheCapAndMarksTheRest) {
+struct SseTraceCase {
+    const char* name;
+    int event_count;
+    std::size_t cap;
+    SseEndReason end_reason;
+    const char* expected_end_reason;
+    bool expected_truncated;
+};
+
+// The second case is truthful rather than derived from the cap: a stream that
+// fit must not be reported as truncated, or the marker means nothing.
+constexpr auto SSE_TRACE_CASES = std::to_array<SseTraceCase> ({
+{ "StoresUpToTheCapAndMarksTheRest", 9, 3, SseEndReason::MaxEvents, "maxStreamEvents", true },
+{ "AStreamThatFitIsNotMarkedTruncated", 1, sse_constants::MAX_STORED_EVENTS,
+SseEndReason::Completed, "completed", false },
+});
+
+class SseTraceTest : public ::testing::TestWithParam<SseTraceCase> {};
+
+TEST_P (SseTraceTest, StoresUpToTheCapAndMarksTruncationTruthfully) {
+    const auto& c = GetParam ();
     vayu::http::SseLimits limits;
-    limits.max_stored_events = 3;
+    limits.max_stored_events = c.cap;
     SseStreamContext context ("run_test", limits);
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < c.event_count; ++i) {
         vayu::http::SseEvent event;
         event.data = std::to_string (i);
         context.record_event (event);
     }
-    context.close (SseEndReason::MaxEvents);
+    context.close (c.end_reason);
 
     const auto node = vayu::http::stream_trace_node (context);
-    EXPECT_EQ (node["items"].size (), 3u);
-    EXPECT_EQ (node["totalEvents"], 9);
-    EXPECT_TRUE (node["eventsTruncated"].get<bool> ());
-    EXPECT_EQ (node["endReason"], "maxStreamEvents");
+    EXPECT_EQ (node["items"].size (),
+    std::min (static_cast<std::size_t> (c.event_count), c.cap));
+    EXPECT_EQ (node["totalEvents"], c.event_count);
+    EXPECT_EQ (node["eventsTruncated"].get<bool> (), c.expected_truncated);
+    EXPECT_EQ (node["endReason"], c.expected_end_reason);
 }
 
-// Truthful rather than derived from the cap: a stream that fit must not be
-// reported as truncated, or the marker means nothing.
-TEST (SseTrace, AStreamThatFitIsNotMarkedTruncated) {
-    SseStreamContext context ("run_test", vayu::http::SseLimits{});
-    vayu::http::SseEvent event;
-    event.data = "only";
-    context.record_event (event);
-    context.close (SseEndReason::Completed);
-
-    const auto node = vayu::http::stream_trace_node (context);
-    EXPECT_EQ (node["items"].size (), 1u);
-    EXPECT_FALSE (node["eventsTruncated"].get<bool> ());
-}
+INSTANTIATE_TEST_SUITE_P (SseTrace,
+SseTraceTest,
+::testing::ValuesIn (SSE_TRACE_CASES),
+[] (const ::testing::TestParamInfo<SseTraceCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ---------------------------------------------------------------------------
 // The manager
@@ -844,31 +861,48 @@ TEST_F (RelayTest, ReplaysEveryRetainedFrameAndClosesWithTheReason) {
     EXPECT_NE (response->body.find ("\"totalEvents\":3"), std::string::npos);
 }
 
-// The dropped-consumer case: a client that saw through frame 1 asks for what
-// followed it, and must not be re-sent what it already rendered.
-TEST_F (RelayTest, ResumesAfterTheLastFrameSeen) {
-    ASSERT_NE (streamed (3), nullptr);
+struct RelayResumeCase {
+    std::string name;
+    int streamed_count;
+    std::string last_event_id;
+    std::vector<std::string> expected_absent_ids;
+    std::vector<std::string> expected_present_ids;
+};
 
-    auto response = client ().Get ("/runs/run_test/events?lastEventId=1");
+class RelayResumeTest : public RelayTest,
+                        public ::testing::WithParamInterface<RelayResumeCase> {};
+
+TEST_P (RelayResumeTest, ReplaysOnlyTheFramesAfterTheResumePoint) {
+    const auto& c = GetParam ();
+    ASSERT_NE (streamed (c.streamed_count), nullptr);
+
+    auto response = client ().Get ("/runs/run_test/events?lastEventId=" + c.last_event_id);
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 200);
-    EXPECT_EQ (response->body.find ("id: 0\n"), std::string::npos)
-    << "a resumed stream replayed a frame the client had already seen";
-    EXPECT_EQ (response->body.find ("id: 1\n"), std::string::npos);
-    EXPECT_NE (response->body.find ("id: 2\n"), std::string::npos);
+    for (const auto& id : c.expected_absent_ids) {
+        EXPECT_EQ (response->body.find ("id: " + id + "\n"), std::string::npos)
+        << "a resumed stream replayed frame " << id
+        << ", which the client had already seen";
+    }
+    for (const auto& id : c.expected_present_ids) {
+        EXPECT_NE (response->body.find ("id: " + id + "\n"), std::string::npos)
+        << "frame " << id << " is missing from the resumed stream";
+    }
     EXPECT_NE (response->body.find ("event: complete"), std::string::npos);
 }
 
+INSTANTIATE_TEST_SUITE_P (RelayTest,
+RelayResumeTest,
+::testing::Values (
+// The dropped-consumer case: a client that saw through frame 1 asks for what
+// followed it, and must not be re-sent what it already rendered.
+RelayResumeCase{ "ResumesAfterTheLastFrameSeen", 3, "1", { "0", "1" }, { "2" } },
 // Frame ids start at 0, so "0" is a real resume point rather than a stand-in
 // for absent - resuming from it must skip exactly the first frame.
-TEST_F (RelayTest, ResumingFromZeroSkipsOnlyTheFirstFrame) {
-    ASSERT_NE (streamed (2), nullptr);
-
-    auto response = client ().Get ("/runs/run_test/events?lastEventId=0");
-    ASSERT_TRUE (response);
-    EXPECT_EQ (response->body.find ("id: 0\n"), std::string::npos);
-    EXPECT_NE (response->body.find ("id: 1\n"), std::string::npos);
-}
+RelayResumeCase{ "ResumingFromZeroSkipsOnlyTheFirstFrame", 2, "0", { "0" }, { "1" } }),
+[] (const ::testing::TestParamInfo<RelayResumeCase>& info) {
+    return info.param.name;
+});
 
 TEST_F (RelayTest, AGarbledResumePointIs400RatherThanASilentReplay) {
     ASSERT_NE (streamed (2), nullptr);

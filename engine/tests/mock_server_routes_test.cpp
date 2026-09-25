@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -1382,22 +1383,32 @@ class MockActivityRouteTest : public ::testing::Test {
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
 };
 
-TEST_F (MockActivityRouteTest, LimitZeroIsRejected) {
-    const auto response = client ().Get ("/mock/whatever/activity?limit=0");
+struct BadLimitCase {
+    const char* name;
+    const char* limit;
+};
+
+constexpr auto BAD_LIMIT_CASES = std::to_array<BadLimitCase> ({
+{ "Zero", "0" },
+{ "NonNumeric", "abc" },
+{ "Negative", "-1" },
+});
+
+class MockActivityBadLimitTest : public MockActivityRouteTest,
+                                 public ::testing::WithParamInterface<BadLimitCase> {};
+
+TEST_P (MockActivityBadLimitTest, LimitIsRejected) {
+    const auto response =
+    client ().Get (std::string ("/mock/whatever/activity?limit=") + GetParam ().limit);
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 400);
 }
 
-TEST_F (MockActivityRouteTest, LimitNonNumericIsRejected) {
-    const auto response = client ().Get ("/mock/whatever/activity?limit=abc");
-    ASSERT_TRUE (response);
-    EXPECT_EQ (response->status, 400);
-}
-
-TEST_F (MockActivityRouteTest, LimitNegativeIsRejected) {
-    const auto response = client ().Get ("/mock/whatever/activity?limit=-1");
-    ASSERT_TRUE (response);
-    EXPECT_EQ (response->status, 400);
-}
+INSTANTIATE_TEST_SUITE_P (PerLimit,
+MockActivityBadLimitTest,
+::testing::ValuesIn (BAD_LIMIT_CASES),
+[] (const ::testing::TestParamInfo<BadLimitCase>& info) {
+    return std::string (info.param.name);
+});
 
 } // namespace

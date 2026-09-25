@@ -64,23 +64,25 @@ const elementsTab = () =>
 const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent || null;
 
 describe("the Elements tab badge", () => {
-	it("counts a real, enabled element", () => {
-		renderTabs([
+	it.each<[string, ElementDef, string | null]>([
+		[
+			"counts a real, enabled element",
 			{ id: "el_1", kind: "assert.status", enabled: true, config: { codes: [200] } },
-		]);
-		expect(countOf(elementsTab())).toBe("1");
-	});
-
-	it("excludes a blank script.pre", () => {
-		renderTabs([{ id: "el_1", kind: "script.pre", enabled: true, config: { script: "" } }]);
-		expect(countOf(elementsTab())).toBeNull();
-	});
-
-	it("excludes a whitespace-only script.post", () => {
-		renderTabs([
+			"1",
+		],
+		[
+			"excludes a blank script.pre",
+			{ id: "el_1", kind: "script.pre", enabled: true, config: { script: "" } },
+			null,
+		],
+		[
+			"excludes a whitespace-only script.post",
 			{ id: "el_1", kind: "script.post", enabled: true, config: { script: "  \n\t" } },
-		]);
-		expect(countOf(elementsTab())).toBeNull();
+			null,
+		],
+	])("%s", (_name, el, expected) => {
+		renderTabs([el]);
+		expect(countOf(elementsTab())).toBe(expected);
 	});
 
 	it("counts a script once it has real text", () => {

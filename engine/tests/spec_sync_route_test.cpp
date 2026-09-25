@@ -556,35 +556,34 @@ TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
     EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_USER);
 }
 
-TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
-    const std::string request =
-    create_request (root_, json{ { "specOperation", list_pets () } });
-    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0);
+// Both spellings of "no refresh": the key left out, and `false`, which is the
+// same state said out loud - what makes the decision expressible by a caller
+// that builds its payload from a table rather than by leaving keys out (a null
+// `decision` below means the key is absent). Mutation check: treat either
+// spelling as a refresh and the seeded imported row is replaced by the
+// document's two.
+TEST_F (SpecSyncRouteTest, ANoRefreshExamplesDecisionLeavesEveryExampleAlone) {
+    int order = 0;
+    for (const json& decision : { json (), json (false) }) {
+        SCOPED_TRACE (decision.is_null () ? "examples absent" : "examples: false");
+        const std::string request =
+        create_request (root_, json{ { "specOperation", list_pets () } });
+        // A distinct order per pass, because the seeded row's id is built from it.
+        seed_example (request,
+        vayu::core::constants::request_example::ORIGIN_IMPORT, order++, 500);
 
-    auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update",
-    json::array ({ json{ { "id", request }, { "name", "renamed" } } }) } }));
-    ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_request_examples (request).size (), 1u);
-}
+        json item = { { "id", request }, { "name", "renamed" } };
+        if (!decision.is_null ()) {
+            item["examples"] = decision;
+        }
+        auto [status, response] = routes::spec_sync_response (
+        *db_, body (json{ { "update", json::array ({ item }) } }));
+        ASSERT_EQ (status, 200) << response.dump ();
 
-// `false` is the same state as absent, said out loud - which is what makes the
-// decision expressible by a caller that builds its payload from a table rather
-// than by leaving keys out. Mutation check: treat a `false` as a refresh and the
-// seeded imported row is replaced by the document's two.
-TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
-    const std::string request =
-    create_request (root_, json{ { "specOperation", list_pets () } });
-    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 500);
-
-    auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update",
-    json::array ({ json{ { "id", request }, { "examples", false } } }) } }));
-    ASSERT_EQ (status, 200) << response.dump ();
-
-    auto rows = db_->get_request_examples (request);
-    ASSERT_EQ (rows.size (), 1u);
-    EXPECT_EQ (rows[0].status, 500);
+        auto rows = db_->get_request_examples (request);
+        ASSERT_EQ (rows.size (), 1u);
+        EXPECT_EQ (rows[0].status, 500);
+    }
 }
 
 // The rows are the document's, so a caller cannot state them (issue #869). A

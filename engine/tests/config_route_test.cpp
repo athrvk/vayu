@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <functional>
 #include <map>
@@ -65,69 +66,63 @@ class ConfigRouteTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// The design-mode read bound, from the shelf to the send (issue #1157)
+// The body-read bounds, from the shelf to the send
 // ---------------------------------------------------------------------------
 //
-// `design_response_body_bound` is the one place `maxDesignResponseBodyBytes` is
-// spelled, and both callers - `POST /execute` and the scenario runner - read it
-// through this. That matters because the failure mode of getting it wrong is
-// silent: a mistyped key falls back to the compiled-in default, so the Settings
-// control would go on reading as though a user could change what a send reads
-// while changing nothing at all. These two drive the setting the way the app
-// does, through the config route, rather than asserting the string.
+// Each bound has one accessor that is the one place its config key is spelled,
+// and the failure mode of getting one wrong is silent: a mistyped key falls
+// back to the compiled-in default, so the Settings control would go on reading
+// as though a user could change what a send reads while changing nothing at
+// all. These drive each setting the way the app does, through the config
+// route, rather than asserting the string.
+//
+// - `design_response_body_bound` (#1157): `maxDesignResponseBodyBytes`, read
+//   by both `POST /execute` and the scenario runner.
+// - `element_body_bound` (#1514's reopen): `maxElementBodyBytes` named a real
+//   config entry in `docs/engine/elements.md` and in two error messages, but
+//   no caller read it - `ElementContext::max_body_bytes` was always the
+//   compiled-in default.
+// - `load_response_body_bound` (#1188): the deferred `tests` pass reads
+//   `maxResponseBodyBytes` for what a script's own `pm.sendRequest` may pull.
+struct BodyBoundCase {
+    const char* name;
+    size_t (*bound) (vayu::db::Database&);
+    size_t compiled_in;
+    const char* config_key;
+};
 
-TEST_F (ConfigRouteTest, TheDesignReadBoundDefaultsToTheCompiledInLimit) {
-    EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_),
-    vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES);
+constexpr auto BODY_BOUND_CASES = std::to_array<BodyBoundCase> ({
+{ "DesignRead", &vayu::http::routes::design_response_body_bound,
+vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES, "maxDesignResponseBodyBytes" },
+{ "ElementBody", &vayu::http::routes::element_body_bound,
+vayu::core::constants::elements::MAX_BODY_BYTES, "maxElementBodyBytes" },
+{ "LoadRead", &vayu::http::routes::load_response_body_bound,
+vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES, "maxResponseBodyBytes" },
+});
+
+class ConfigBodyBoundTest : public ConfigRouteTest,
+                            public ::testing::WithParamInterface<BodyBoundCase> {};
+
+TEST_P (ConfigBodyBoundTest, DefaultsToTheCompiledInLimit) {
+    const auto& c = GetParam ();
+    EXPECT_EQ (c.bound (*db_), c.compiled_in);
 }
 
-TEST_F (ConfigRouteTest, TheDesignReadBoundFollowsTheSetting) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"maxDesignResponseBodyBytes":"4096"}})");
+TEST_P (ConfigBodyBoundTest, FollowsTheSetting) {
+    const auto& c = GetParam ();
+    const json update{ { "entries", { { c.config_key, "4096" } } } };
+    auto [status, body] = vayu::http::routes::apply_config_update (*db_, update.dump ());
     ASSERT_EQ (status, 200) << body.dump ();
 
-    EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_), 4096U);
+    EXPECT_EQ (c.bound (*db_), 4096U);
 }
 
-// Its element-pipeline sibling (issue #1514's reopen): before this,
-// `maxElementBodyBytes` named a real config entry in `docs/engine/elements.md`
-// and in two error-message strings, but no caller ever read it - the bound
-// `ElementContext::max_body_bytes` gates on was always the compiled-in
-// default. `element_body_bound` is the one place the key is spelled now, on
-// the same "drive it through the config route rather than assert the string"
-// reasoning as the design bound above.
-
-TEST_F (ConfigRouteTest, TheElementBodyBoundDefaultsToTheCompiledInLimit) {
-    EXPECT_EQ (vayu::http::routes::element_body_bound (*db_),
-    vayu::core::constants::elements::MAX_BODY_BYTES);
-}
-
-TEST_F (ConfigRouteTest, TheElementBodyBoundFollowsTheSetting) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"maxElementBodyBytes":"4096"}})");
-    ASSERT_EQ (status, 200) << body.dump ();
-
-    EXPECT_EQ (vayu::http::routes::element_body_bound (*db_), 4096U);
-}
-
-// Its load-path sibling, on the same reasoning (issue #1188): the deferred
-// `tests` pass reads `maxResponseBodyBytes` for what a script's own
-// `pm.sendRequest` may pull, so a mistyped key there would silently leave that
-// fetch on the compiled-in default while the Settings control read as though
-// it governed every read of the run.
-
-TEST_F (ConfigRouteTest, TheLoadReadBoundDefaultsToTheCompiledInLimit) {
-    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_),
-    vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES);
-}
-
-TEST_F (ConfigRouteTest, TheLoadReadBoundFollowsTheSetting) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"maxResponseBodyBytes":"4096"}})");
-    ASSERT_EQ (status, 200) << body.dump ();
-
-    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_), 4096U);
-}
+INSTANTIATE_TEST_SUITE_P (PerBound,
+ConfigBodyBoundTest,
+::testing::ValuesIn (BODY_BOUND_CASES),
+[] (const ::testing::TestParamInfo<BodyBoundCase>& info) {
+    return std::string (info.param.name);
+});
 
 TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, "not json");

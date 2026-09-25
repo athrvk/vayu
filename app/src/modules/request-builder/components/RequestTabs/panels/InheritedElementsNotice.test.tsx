@@ -113,31 +113,20 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		expect(screen.getByText("Pre-request script")).toBeInTheDocument();
 	});
 
-	it("skips a disabled element", () => {
+	it.each<[string, ElementDef]>([
+		[
+			"a disabled element",
+			element({
+				id: "r1",
+				kind: "script.pre",
+				enabled: false,
+				config: { script: "pm.log('x')" },
+			}),
+		],
+		["a blank script.pre", element({ id: "r1", kind: "script.pre", config: { script: "" } })],
+	])("skips %s", (_name, el) => {
 		chain.length = 0;
-		chain.push(
-			collection("root", "Acme", [
-				element({
-					id: "r1",
-					kind: "script.pre",
-					enabled: false,
-					config: { script: "pm.log('x')" },
-				}),
-			])
-		);
-
-		const { container } = renderNotice({ collectionId: "root" });
-
-		expect(container).toBeEmptyDOMElement();
-	});
-
-	it("skips a blank script.pre", () => {
-		chain.length = 0;
-		chain.push(
-			collection("root", "Acme", [
-				element({ id: "r1", kind: "script.pre", config: { script: "" } }),
-			])
-		);
+		chain.push(collection("root", "Acme", [el]));
 
 		const { container } = renderNotice({ collectionId: "root" });
 

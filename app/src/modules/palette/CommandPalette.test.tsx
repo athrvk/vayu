@@ -708,58 +708,40 @@ describe("commands", () => {
 	 * The join the two ends cannot prove on their own: the registry declares the
 	 * command available when a surface exists, the builder publishes one, and this
 	 * hook is what carries the second to the first. Drop the merge in
-	 * `useCommandSurfaces` and the row never appears.
+	 * `useCommandSurfaces` and the row never appears. One case per live slot;
+	 * `sendRequest` is the second (#1243).
 	 */
-	it("offers the load-test command only while a mounted builder contributes it", () => {
-		useTabsStore.setState({
-			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
-			activeTabId: "t1",
-			tabFocusedAt: {},
-		});
-		renderPalette();
-		open();
-		// Named after the tab, like the other contextual commands. The request
-		// query is stubbed empty here, so the strip calls this tab "Request".
-		expect(screen.queryByText('Load test "Request"')).not.toBeInTheDocument();
-		cleanup();
+	it.each([
+		["startLoadTest", "Load test"],
+		["sendRequest", "Send"],
+	] as const)(
+		"offers the %s command only while a mounted builder contributes it",
+		(slot, verb) => {
+			useTabsStore.setState({
+				openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+				activeTabId: "t1",
+				tabFocusedAt: {},
+			});
+			renderPalette();
+			open();
+			// Named after the tab, like the other contextual commands. The request
+			// query is stubbed empty here, so the strip calls this tab "Request".
+			expect(screen.queryByText(`${verb} "Request"`)).not.toBeInTheDocument();
+			cleanup();
 
-		const started = vi.fn();
-		useLiveCommandSurfaceStore.setState({ startLoadTest: started });
-		renderPalette();
-		open();
-		expect(screen.getByText('Load test "Request"')).toBeInTheDocument();
+			const invoked = vi.fn();
+			useLiveCommandSurfaceStore.setState({ [slot]: invoked });
+			renderPalette();
+			open();
+			expect(screen.getByText(`${verb} "Request"`)).toBeInTheDocument();
 
-		typeQuery('Load test "Req');
-		pressEnter();
+			typeQuery(`${verb} "Req`);
+			pressEnter();
 
-		expect(started).toHaveBeenCalledTimes(1);
-		expect(useLayoutStore.getState().paletteOpen).toBe(false);
-	});
-
-	/* The same join, for the second live slot (#1243). */
-	it("offers the send command only while a mounted builder contributes it", () => {
-		useTabsStore.setState({
-			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
-			activeTabId: "t1",
-			tabFocusedAt: {},
-		});
-		renderPalette();
-		open();
-		expect(screen.queryByText('Send "Request"')).not.toBeInTheDocument();
-		cleanup();
-
-		const sent = vi.fn();
-		useLiveCommandSurfaceStore.setState({ sendRequest: sent });
-		renderPalette();
-		open();
-		expect(screen.getByText('Send "Request"')).toBeInTheDocument();
-
-		typeQuery('Send "Req');
-		pressEnter();
-
-		expect(sent).toHaveBeenCalledTimes(1);
-		expect(useLayoutStore.getState().paletteOpen).toBe(false);
-	});
+			expect(invoked).toHaveBeenCalledTimes(1);
+			expect(useLayoutStore.getState().paletteOpen).toBe(false);
+		}
+	);
 
 	it("keeps the run dialog on screen after the pick closes the palette", () => {
 		useTabsStore.setState({

@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -259,35 +260,43 @@ TEST (SseParser, AnUntruncatedEventReportsItsTrueSize) {
 // UTF-8
 // ---------------------------------------------------------------------------
 
-TEST (SanitizeUtf8, PassesValidTextThrough) {
-    const std::string text = "ascii, \xC3\xA9, \xE2\x82\xAC, \xF0\x9F\x8E\x89";
-    EXPECT_EQ (sanitize_utf8 (text), text);
+struct SanitizeUtf8Case {
+    const char* name;
+    const char* input;
+    const char* expected;
+};
+
+constexpr auto SANITIZE_UTF8_CASES = std::to_array<SanitizeUtf8Case> ({
+{ "PassesValidTextThrough", "ascii, \xC3\xA9, \xE2\x82\xAC, \xF0\x9F\x8E\x89",
+"ascii, \xC3\xA9, \xE2\x82\xAC, \xF0\x9F\x8E\x89" },
+{ "ReplacesALoneContinuationByte", "a\x80z",
+"a\xEF\xBF\xBD"
+"z" },
+// A two-byte lead with no continuation: one bad byte, and the 'z' after it
+// must survive. Advancing by the announced length would eat it.
+{ "ReplacesATruncatedSequenceWithoutSwallowingWhatFollows", "\xC3z",
+"\xEF\xBF\xBD"
+"z" },
+// C0 80 is an overlong NUL - a byte pattern a decoder must reject rather
+// than pass through, which a length-only check would accept.
+{ "RejectsAnOverlongEncoding", "\xC0\x80", "\xEF\xBF\xBD\xEF\xBF\xBD" },
+// ED A0 80 encodes U+D800, which UTF-8 is not allowed to carry.
+{ "RejectsASurrogate", "\xED\xA0\x80", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD" },
+});
+
+class SanitizeUtf8Test : public ::testing::TestWithParam<SanitizeUtf8Case> {};
+
+TEST_P (SanitizeUtf8Test, ProducesTheExpectedText) {
+    const auto& c = GetParam ();
+    EXPECT_EQ (sanitize_utf8 (c.input), c.expected);
 }
 
-TEST (SanitizeUtf8, ReplacesALoneContinuationByte) {
-    EXPECT_EQ (sanitize_utf8 ("a\x80z"),
-    "a\xEF\xBF\xBD"
-    "z");
-}
-
-TEST (SanitizeUtf8, ReplacesATruncatedSequenceWithoutSwallowingWhatFollows) {
-    // A two-byte lead with no continuation: one bad byte, and the 'z' after it
-    // must survive. Advancing by the announced length would eat it.
-    EXPECT_EQ (sanitize_utf8 ("\xC3z"),
-    "\xEF\xBF\xBD"
-    "z");
-}
-
-TEST (SanitizeUtf8, RejectsAnOverlongEncoding) {
-    // C0 80 is an overlong NUL - a byte pattern a decoder must reject rather
-    // than pass through, which a length-only check would accept.
-    EXPECT_EQ (sanitize_utf8 ("\xC0\x80"), "\xEF\xBF\xBD\xEF\xBF\xBD");
-}
-
-TEST (SanitizeUtf8, RejectsASurrogate) {
-    // ED A0 80 encodes U+D800, which UTF-8 is not allowed to carry.
-    EXPECT_EQ (sanitize_utf8 ("\xED\xA0\x80"), "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD");
-}
+INSTANTIATE_TEST_SUITE_P (SanitizeUtf8,
+SanitizeUtf8Test,
+::testing::ValuesIn (SANITIZE_UTF8_CASES),
+[] (const ::testing::TestParamInfo<SanitizeUtf8Case>& info) {
+    return std::string (info.param.name);
+});
 
 TEST (SseParser, ReplacesInvalidUtf8InDispatchedText) {
     const auto events = parse_all ("event: t\xFFm\ndata: bad \xFF byte\n\n");

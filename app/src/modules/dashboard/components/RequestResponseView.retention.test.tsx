@@ -76,27 +76,33 @@ describe("RequestResponseView retention", () => {
 	});
 	afterEach(() => restoreLocale());
 
-	it("tells the reader the sampled list is a sample, not the whole run", () => {
-		renderReport({
-			errorsDropped: 0,
-			successTracesDropped: 29_000,
-			slowTracesDropped: 0,
-			responseSamplesDropped: 0,
-		});
+	it.each([
+		{
+			list: "the sampled list",
+			samplingField: "successTracesDropped",
+			dropped: 29_000,
+			expectedMessage: /29,000 further samples were displaced/,
+		},
+		{
+			list: "the responses validation graded",
+			samplingField: "responseSamplesDropped",
+			dropped: 2_999_000,
+			expectedMessage: /2,999,000 further responses were displaced/,
+		},
+	] as const)(
+		"tells the reader $list is a sample, not the whole run",
+		({ samplingField, dropped, expectedMessage }) => {
+			renderReport({
+				errorsDropped: 0,
+				successTracesDropped: 0,
+				slowTracesDropped: 0,
+				responseSamplesDropped: 0,
+				[samplingField]: dropped,
+			});
 
-		expect(screen.getByText(/29,000 further samples were displaced/)).toBeInTheDocument();
-	});
-
-	it("says the same for the responses validation graded", () => {
-		renderReport({
-			errorsDropped: 0,
-			successTracesDropped: 0,
-			slowTracesDropped: 0,
-			responseSamplesDropped: 2_999_000,
-		});
-
-		expect(screen.getByText(/2,999,000 further responses were displaced/)).toBeInTheDocument();
-	});
+			expect(screen.getByText(expectedMessage)).toBeInTheDocument();
+		}
+	);
 
 	it("stays silent on a run that retained everything", () => {
 		renderReport({

@@ -224,40 +224,42 @@ describe("VariablesSection - the commit target is the resolver's winner", () => 
 		expect(collections[0].variables.apiKey.value).toBe("ancestor-key");
 	});
 
-	it("refuses out loud when the source environment is gone", () => {
-		resolved = { token: { value: "b-token", scope: "environment", sourceId: "env_deleted" } };
+	it.each<{
+		name: string;
+		winner: Record<string, ResolvedVariable>;
+		shown: string;
+		mutate: typeof environmentMutate;
+	}>([
+		{
+			name: "refuses out loud when the source environment is gone",
+			winner: { token: { value: "b-token", scope: "environment", sourceId: "env_deleted" } },
+			shown: "b-token",
+			mutate: environmentMutate,
+		},
+		{
+			name: "refuses out loud when the source collection no longer holds the name",
+			winner: { ghost: { value: "gone", scope: "collection", sourceId: "col_leaf" } },
+			shown: "gone",
+			mutate: collectionMutate,
+		},
+		{
+			// The resolver always emits `sourceId` for these scopes. If it ever stops,
+			// the commit must refuse rather than pick something.
+			name: "refuses a non-global winner that names no source at all",
+			winner: { token: { value: "b-token", scope: "environment" } },
+			shown: "b-token",
+			mutate: environmentMutate,
+		},
+	])("$name", ({ winner, shown, mutate }) => {
+		resolved = winner;
 
 		renderSection();
-		const input = inputFor("b-token");
-		editAndBlur(input, "b-token-2");
+		const input = inputFor(shown);
+		editAndBlur(input, `${shown}-2`);
 
-		expect(environmentMutate).not.toHaveBeenCalled();
+		expect(mutate).not.toHaveBeenCalled();
 		expect(useToastStore.getState().toasts).toHaveLength(1);
-		expect(input.value).toBe("b-token");
-	});
-
-	it("refuses out loud when the source collection no longer holds the name", () => {
-		resolved = { ghost: { value: "gone", scope: "collection", sourceId: "col_leaf" } };
-
-		renderSection();
-		const input = inputFor("gone");
-		editAndBlur(input, "still-here");
-
-		expect(collectionMutate).not.toHaveBeenCalled();
-		expect(useToastStore.getState().toasts).toHaveLength(1);
-		expect(input.value).toBe("gone");
-	});
-
-	it("refuses a non-global winner that names no source at all", () => {
-		// The resolver always emits `sourceId` for these scopes. If it ever stops,
-		// the commit must refuse rather than pick something.
-		resolved = { token: { value: "b-token", scope: "environment" } };
-
-		renderSection();
-		editAndBlur(inputFor("b-token"), "b-token-2");
-
-		expect(environmentMutate).not.toHaveBeenCalled();
-		expect(useToastStore.getState().toasts).toHaveLength(1);
+		expect(input.value).toBe(shown);
 	});
 
 	it("keeps no unguarded parentId walk in the component or the commit path", () => {

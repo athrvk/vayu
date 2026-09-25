@@ -559,37 +559,38 @@ describe("the elements override", () => {
 		expect(mutate.mock.calls[0][0].elements).toEqual({ timers: "off" });
 	});
 
-	it("sends a Timers-only override when only Timers is changed on a load run", () => {
-		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
-		enableLoadTest();
-		const timers = screen.getByRole("radiogroup", { name: /^timers$/i });
-		fireEvent.click(within(timers).getByRole("radio", { name: /^off$/i }));
-		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+	it.each([
+		{ changed: "Timers only", timers: "off", scripts: null, expected: { timers: "off" } },
+		{
+			changed: "Scripts only",
+			timers: null,
+			scripts: /all inline/i,
+			expected: { scripts: "allInline" },
+		},
+		{
+			changed: "both Timers and Scripts",
+			timers: "off",
+			scripts: /all deferred/i,
+			expected: { timers: "off", scripts: "allDeferred" },
+		},
+	])(
+		"sends exactly the changed fields on a load run: $changed",
+		({ timers, scripts, expected }) => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			enableLoadTest();
+			if (timers) {
+				const group = screen.getByRole("radiogroup", { name: /^timers$/i });
+				fireEvent.click(within(group).getByRole("radio", { name: /^off$/i }));
+			}
+			if (scripts) {
+				const group = screen.getByRole("radiogroup", { name: /^scripts$/i });
+				fireEvent.click(within(group).getByRole("radio", { name: scripts }));
+			}
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 
-		expect(mutate.mock.calls[0][0].elements).toEqual({ timers: "off" });
-	});
-
-	it("sends a Scripts-only override when only Scripts is changed", () => {
-		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
-		enableLoadTest();
-		const scripts = screen.getByRole("radiogroup", { name: /^scripts$/i });
-		fireEvent.click(within(scripts).getByRole("radio", { name: /all inline/i }));
-		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
-
-		expect(mutate.mock.calls[0][0].elements).toEqual({ scripts: "allInline" });
-	});
-
-	it("sends both fields when both Timers and Scripts are changed", () => {
-		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
-		enableLoadTest();
-		const timers = screen.getByRole("radiogroup", { name: /^timers$/i });
-		const scripts = screen.getByRole("radiogroup", { name: /^scripts$/i });
-		fireEvent.click(within(timers).getByRole("radio", { name: /^off$/i }));
-		fireEvent.click(within(scripts).getByRole("radio", { name: /all deferred/i }));
-		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
-
-		expect(mutate.mock.calls[0][0].elements).toEqual({ timers: "off", scripts: "allDeferred" });
-	});
+			expect(mutate.mock.calls[0][0].elements).toEqual(expected);
+		}
+	);
 
 	it("picking All inline back to As marked drops the field again", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
@@ -674,7 +675,10 @@ describe("pass/fail budgets", () => {
 			).toBeInTheDocument();
 		});
 
-		it("sends a declared row under the engine's own key on a design-mode run", () => {
+		it.each([
+			{ run: "a design-mode run", loadTest: false },
+			{ run: "a load run", loadTest: true },
+		])("sends a declared row under the engine's own key on $run", ({ loadTest }) => {
 			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 			openBudgets();
 			addCustomRow();
@@ -684,22 +688,7 @@ describe("pass/fail budgets", () => {
 			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
 				target: { value: "120" },
 			});
-			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
-
-			expect(mutate.mock.calls[0][0].thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });
-		});
-
-		it("sends a declared row on a load run too", () => {
-			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
-			openBudgets();
-			addCustomRow();
-			fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
-				target: { value: "checkout_ttfb" },
-			});
-			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
-				target: { value: "120" },
-			});
-			fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+			if (loadTest) fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
 			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 
 			expect(mutate.mock.calls[0][0].thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });

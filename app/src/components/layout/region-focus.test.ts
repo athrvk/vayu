@@ -150,30 +150,26 @@ describe("cycling backward", () => {
 });
 
 describe("bands the cycle has to step over", () => {
-	it("skips one holding nothing focusable", () => {
+	// Each case builds the band between the banner and main; the cycle from the
+	// banner must land past it either way.
+	it.each([
+		{
+			name: "skips one holding nothing focusable",
+			// The context bar renders its frame with no controls in it - a real
+			// arrangement, since every section it holds can be collapsed.
+			band: () => region("drawer"),
+		},
+		{
+			name: "skips one that is hidden from assistive technology",
+			band: () => region("drawer", "drawer-first").setAttribute("aria-hidden", "true"),
+		},
+		{
+			name: "counts a closed band as absent - the drawer is not in the DOM at all",
+			band: () => {},
+		},
+	])("$name", ({ band }) => {
 		region("banner", "banner-search");
-		// The context bar renders its frame with no controls in it - a real
-		// arrangement, since every section it holds can be collapsed.
-		region("drawer");
-		region("main", "main-first");
-		document.getElementById("banner-search")?.focus();
-
-		expect(cycleRegionFocus(1)).toBe(true);
-		expect(activeId()).toBe("main-first");
-	});
-
-	it("skips one that is hidden from assistive technology", () => {
-		region("banner", "banner-search");
-		region("drawer", "drawer-first").setAttribute("aria-hidden", "true");
-		region("main", "main-first");
-		document.getElementById("banner-search")?.focus();
-
-		expect(cycleRegionFocus(1)).toBe(true);
-		expect(activeId()).toBe("main-first");
-	});
-
-	it("counts a closed band as absent - the drawer is not in the DOM at all", () => {
-		region("banner", "banner-search");
+		band();
 		region("main", "main-first");
 		document.getElementById("banner-search")?.focus();
 

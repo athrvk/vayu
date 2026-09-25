@@ -539,32 +539,24 @@ TEST (ImportParse, TrustsAnExplicitEnabledMarkerOverTheValuePresenceHeuristic) {
  * An operation declared `security: []` is OpenAPI's explicit "this operation
  * takes no auth" (issue #1444) - before this fix every operation imported as
  * `inherit` regardless, so a request the document says takes none would have
- * sent the collection's bearer token. Mutation check: dropping the empty-array
- * branch in `operation_auth_override` reds this back to `inherit`.
+ * sent the collection's bearer token. The optional-security spelling `[{}]` is
+ * answered the same as `[]`. Mutation check: dropping the empty-array branch
+ * in `operation_auth_override` reds the `[]` case back to `inherit`.
  */
-TEST (ImportParse, OperationSecurityEmptyArrayImportsWithNoAuth) {
-    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+TEST (ImportParse, OperationSecurityEmptyImportsWithNoAuth) {
+    for (const std::string security : { "[]", "[{}]" }) {
+        SCOPED_TRACE ("security: " + security);
+        const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
         "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
         "security":[{"bearerAuth":[]}],
-        "paths":{"/public":{"get":{"security":[],"responses":{}}}}})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const nlohmann::ordered_json& auth =
-    first_request (parsed.result.at ("collections")[0]).at ("auth");
-    EXPECT_EQ (auth.at ("mode"), "none");
-}
-
-/// The optional-security spelling `[{}]` is answered the same as `[]`.
-TEST (ImportParse, OperationSecurityEmptyRequirementImportsWithNoAuth) {
-    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
-        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
-        "security":[{"bearerAuth":[]}],
-        "paths":{"/public":{"get":{"security":[{}],"responses":{}}}}})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const nlohmann::ordered_json& auth =
-    first_request (parsed.result.at ("collections")[0]).at ("auth");
-    EXPECT_EQ (auth.at ("mode"), "none");
+        "paths":{"/public":{"get":{"security":)" +
+        security + R"(,"responses":{}}}}})",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const nlohmann::ordered_json& auth =
+        first_request (parsed.result.at ("collections")[0]).at ("auth");
+        EXPECT_EQ (auth.at ("mode"), "none");
+    }
 }
 
 /**

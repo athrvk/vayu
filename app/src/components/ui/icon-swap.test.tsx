@@ -30,17 +30,7 @@ describe("IconSwap", () => {
 		expect(live).toHaveClass("col-start-1", "row-start-1");
 	});
 
-	it("re-keys the live span on a state change, so .enter-fade fires again", () => {
-		const { container, rerender } = render(<IconSwap state="copy" icons={ICONS} />);
-		const before = container.querySelector(".enter-fade");
-		rerender(<IconSwap state="copied" icons={ICONS} />);
-		const after = container.querySelector(".enter-fade");
-		expect(after).not.toBeNull();
-		expect(after).not.toBe(before);
-		expect(after!.querySelector(".lucide-check")).not.toBeNull();
-	});
-
-	it("re-keys on the way back too - a round trip fades both directions", () => {
+	it("re-keys the live span on every state change, so .enter-fade fires both directions", () => {
 		const { container, rerender } = render(<IconSwap state="copy" icons={ICONS} />);
 		let previous = container.querySelector(".enter-fade");
 		const seen = new Set<Element>([previous!]);
@@ -50,6 +40,8 @@ describe("IconSwap", () => {
 			expect(current, `no live span after switching to "${state}"`).not.toBeNull();
 			expect(current, `"${state}" reused the previous node`).not.toBe(previous);
 			expect(seen.has(current!), `"${state}" reused a node from an earlier step`).toBe(false);
+			const glyph = state === "copied" ? ".lucide-check" : ".lucide-copy";
+			expect(current!.querySelector(glyph), `"${state}" shows the wrong icon`).not.toBeNull();
 			seen.add(current!);
 			previous = current;
 		}

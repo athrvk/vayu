@@ -196,37 +196,6 @@ describe("ModeElementForm - the mode on screen is the one the engine resolves", 
 		expect(screen.queryByText("Accepted codes")).not.toBeInTheDocument();
 	});
 
-	it("prefers `in` over `range` when a config carries both, as AssertStatusElement::apply does", () => {
-		// The priority case: the engine's `if (in) ... else if (range)` runs
-		// `in`, so the card must not claim the range is what will happen.
-		render(
-			<ModeElementForm
-				kind="assert.status"
-				schema={ASSERT_STATUS}
-				config={{ in: [200], range: { min: 500, max: 599 } }}
-				onChange={vi.fn()}
-			/>
-		);
-
-		expect(activeSegment()).toBe("Set of codes");
-		expect(screen.queryByLabelText("Minimum")).not.toBeInTheDocument();
-	});
-
-	it("prefers gaussian over a uniform range and a fixed wait, as resolve_own_wait_ms does", () => {
-		render(
-			<ModeElementForm
-				kind="timer.think"
-				schema={TIMER_THINK}
-				config={{ ms: 100, minMs: 10, maxMs: 20, gaussian: { meanMs: 50, deviationMs: 5 } }}
-				onChange={vi.fn()}
-			/>
-		);
-
-		expect(activeSegment()).toBe("Gaussian");
-		expect(screen.getByLabelText("Mean")).toBeInTheDocument();
-		expect(screen.queryByLabelText("Wait")).not.toBeInTheDocument();
-	});
-
 	it("reads timer.think's uniform range from either bound alone", () => {
 		// `config_.contains("minMs") || config_.contains("maxMs")` - one bound
 		// is enough, the other defaults engine-side.
@@ -243,50 +212,101 @@ describe("ModeElementForm - the mode on screen is the one the engine resolves", 
 		expect(screen.getByLabelText("Minimum wait")).toBeInTheDocument();
 	});
 
-	it("prefers exists over expected and regex, as AssertJsonPathElement::apply does", () => {
-		render(
-			<ModeElementForm
-				kind="assert.jsonpath"
-				schema={ASSERT_JSONPATH}
-				config={{ path: "$.id", exists: true, expected: "7", regex: "\\d" }}
-				onChange={vi.fn()}
-			/>
-		);
+	/*
+	 * The priority cases: a config carrying two strategies at once, where the
+	 * engine's own detection order picks one. Each title names the engine code
+	 * whose order the card has to agree with.
+	 */
+	const PRIORITY_CASES: {
+		title: string;
+		kind: string;
+		schema: ElementConfigSchema;
+		config: Record<string, unknown>;
+		/** The mode the card shows, as its segment (or, for `select`, its dropdown) reads. */
+		mode: string;
+		picker?: "select";
+		present: string[];
+		/** Gone as a labelled field. */
+		absentLabels?: string[];
+		/** Gone as text anywhere in the card. */
+		absentTexts?: string[];
+	}[] = [
+		{
+			// The engine's `if (in) ... else if (range)` runs `in`, so the card
+			// must not claim the range is what will happen.
+			title: "prefers `in` over `range` when a config carries both, as AssertStatusElement::apply does",
+			kind: "assert.status",
+			schema: ASSERT_STATUS,
+			config: { in: [200], range: { min: 500, max: 599 } },
+			mode: "Set of codes",
+			present: [],
+			absentLabels: ["Minimum"],
+		},
+		{
+			title: "prefers gaussian over a uniform range and a fixed wait, as resolve_own_wait_ms does",
+			kind: "timer.think",
+			schema: TIMER_THINK,
+			config: { ms: 100, minMs: 10, maxMs: 20, gaussian: { meanMs: 50, deviationMs: 5 } },
+			mode: "Gaussian",
+			present: ["Mean"],
+			absentLabels: ["Wait"],
+		},
+		{
+			title: "prefers exists over expected and regex, as AssertJsonPathElement::apply does",
+			kind: "assert.jsonpath",
+			schema: ASSERT_JSONPATH,
+			config: { path: "$.id", exists: true, expected: "7", regex: "\\d" },
+			mode: "Exists",
+			present: [],
+			absentTexts: ["Expected value", "Pattern"],
+		},
+		{
+			title: "prefers everyN over percent, as both ControlThroughputElement paths do",
+			kind: "control.throughput",
+			schema: CONTROL_THROUGHPUT,
+			config: { everyN: 3, percent: 25 },
+			mode: "Every Nth",
+			present: [],
+			absentLabels: ["Percent"],
+		},
+		{
+			// `header` comes before `latency` in the engine's fixed loop, so a
+			// source carrying both records the header, not the latency.
+			title: "prefers the earlier source key, as metric.record's source_kind loop does",
+			kind: "metric.record",
+			schema: METRIC_RECORD,
+			config: { name: "tok", type: "trend", source: { header: "X-Cost", latency: true } },
+			mode: "Header",
+			picker: "select",
+			present: ["Header name"],
+		},
+	];
 
-		expect(activeSegment()).toBe("Exists");
-		expect(screen.queryByText("Expected value")).not.toBeInTheDocument();
-		expect(screen.queryByText("Pattern")).not.toBeInTheDocument();
-	});
+	// A loop rather than `it.each`: `it.each`'s `$title` quotes and truncates
+	// a long string, and the engine citation is at the end of each title.
+	for (const c of PRIORITY_CASES) {
+		it(c.title, () => {
+			render(
+				<ModeElementForm
+					kind={c.kind}
+					schema={c.schema}
+					config={c.config}
+					onChange={vi.fn()}
+				/>
+			);
 
-	it("prefers everyN over percent, as both ControlThroughputElement paths do", () => {
-		render(
-			<ModeElementForm
-				kind="control.throughput"
-				schema={CONTROL_THROUGHPUT}
-				config={{ everyN: 3, percent: 25 }}
-				onChange={vi.fn()}
-			/>
-		);
-
-		expect(activeSegment()).toBe("Every Nth");
-		expect(screen.queryByLabelText("Percent")).not.toBeInTheDocument();
-	});
-
-	it("prefers the earlier source key, as metric.record's source_kind loop does", () => {
-		// `header` comes before `latency` in the engine's fixed loop, so a
-		// source carrying both records the header, not the latency.
-		render(
-			<ModeElementForm
-				kind="metric.record"
-				schema={METRIC_RECORD}
-				config={{ name: "tok", type: "trend", source: { header: "X-Cost", latency: true } }}
-				onChange={vi.fn()}
-			/>
-		);
-
-		expect(screen.getByRole("combobox", { name: "Source" })).toHaveTextContent("Header");
-		expect(screen.getByLabelText("Header name")).toBeInTheDocument();
-	});
+			if (c.picker === "select") {
+				expect(screen.getByRole("combobox", { name: "Source" })).toHaveTextContent(c.mode);
+			} else {
+				expect(activeSegment()).toBe(c.mode);
+			}
+			for (const label of c.present) expect(screen.getByLabelText(label)).toBeInTheDocument();
+			for (const label of c.absentLabels ?? [])
+				expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+			for (const text of c.absentTexts ?? [])
+				expect(screen.queryByText(text)).not.toBeInTheDocument();
+		});
+	}
 
 	// Mutation check: reverse any kind's `detectionOrder` in `element-modes.ts`
 	// and its priority case above reds naming the mode the engine would not run.

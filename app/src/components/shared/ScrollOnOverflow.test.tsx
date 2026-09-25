@@ -41,6 +41,7 @@ describe("ScrollOnOverflow", () => {
 	it("does not mark text that fits", () => {
 		stubWidths({ track: 80, viewport: 200 });
 		const { container } = render(<ScrollOnOverflow>Short</ScrollOnOverflow>);
+		expect(screen.getByText("Short")).toBeInTheDocument();
 		const viewport = container.firstElementChild!;
 		expect(viewport.className).not.toContain("scroll-on-overflow");
 		expect(viewport.firstElementChild!.getAttribute("style")).toBeNull();
@@ -71,11 +72,5 @@ describe("ScrollOnOverflow", () => {
 			return s;
 		};
 		expect(durationFor(600)).toBeGreaterThan(durationFor(260));
-	});
-
-	it("renders its children", () => {
-		stubWidths({ track: 80, viewport: 200 });
-		render(<ScrollOnOverflow>Requests</ScrollOnOverflow>);
-		expect(screen.getByText("Requests")).toBeInTheDocument();
 	});
 });

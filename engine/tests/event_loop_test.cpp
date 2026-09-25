@@ -410,25 +410,41 @@ TEST_F (ThreadPoolTest, MixedSuccessAndFailure) {
 
     std::vector<vayu::Request> requests;
 
-    // Add multiple successful requests to test concurrent batch execution
     vayu::Request good_req;
     good_req.method = vayu::HttpMethod::GET;
     good_req.url    = test_url;
 
+    vayu::Request bad_req;
+    bad_req.method     = vayu::HttpMethod::GET;
+    bad_req.url        = INVALID_URL;
+    bad_req.timeout_ms = 5000;
+
     requests.push_back (good_req);
-    requests.push_back (good_req);
+    requests.push_back (bad_req);
     requests.push_back (good_req);
 
     auto batch_result = pool.execute_batch (requests);
 
-    EXPECT_EQ (batch_result.responses.size (), 3u);
+    // Client::send never returns an Error: a transport failure is a status-0
+    // Response with error_code set, so it counts toward `successful` and the
+    // failure is read off the response itself.
+    ASSERT_EQ (batch_result.responses.size (), 3u);
     EXPECT_EQ (batch_result.successful, 3u);
     EXPECT_EQ (batch_result.failed, 0u);
 
     for (const auto& response : batch_result.responses) {
-        EXPECT_TRUE (response.is_ok ());
-        EXPECT_EQ (response.value ().status_code, 200);
+        ASSERT_TRUE (response.is_ok ());
     }
+
+    // Responses come back in submission order.
+    EXPECT_EQ (batch_result.responses[0].value ().status_code, 200);
+    EXPECT_FALSE (batch_result.responses[0].value ().has_error ());
+
+    EXPECT_EQ (batch_result.responses[1].value ().status_code, 0);
+    EXPECT_TRUE (batch_result.responses[1].value ().has_error ());
+
+    EXPECT_EQ (batch_result.responses[2].value ().status_code, 200);
+    EXPECT_FALSE (batch_result.responses[2].value ().has_error ());
 }
 
 // Regression guard for a lost-wakeup race in ThreadPool::Impl's destructor.
@@ -455,12 +471,15 @@ TEST_F (EventLoopTest, EventLoopFasterThanSequential) {
     vayu::http::EventLoop loop;
     loop.start ();
 
+    // Each request holds the server for 1s, so the sequential run has a floor
+    // of NUM_REQUESTS seconds while a concurrent batch takes about one. An
+    // instant endpoint would make the comparison noise on loopback.
     constexpr int NUM_REQUESTS = 5;
     std::vector<vayu::Request> requests;
     for (int i = 0; i < NUM_REQUESTS; ++i) {
         vayu::Request req;
         req.method = vayu::HttpMethod::GET;
-        req.url    = test_url;
+        req.url    = test_delay_url;
         requests.push_back (req);
     }
 
@@ -485,14 +504,12 @@ TEST_F (EventLoopTest, EventLoopFasterThanSequential) {
     std::chrono::duration<double, std::milli> (sequential_end - sequential_start)
     .count ();
 
-    // Event loop should be faster (or at least comparable for small batches)
-    // Due to network variance, we allow some tolerance
     std::cout << "Event loop time: " << event_loop_time << " ms\n";
     std::cout << "Sequential time: " << sequential_time << " ms\n";
     std::cout << "Speedup: " << sequential_time / event_loop_time << "x\n";
 
-    // Just verify both completed successfully
     EXPECT_EQ (batch_result.successful, static_cast<size_t> (NUM_REQUESTS));
+    EXPECT_LT (event_loop_time, sequential_time);
 }
 
 // ============================================================================

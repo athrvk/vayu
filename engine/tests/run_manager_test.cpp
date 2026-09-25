@@ -2,7 +2,9 @@
 #include "vayu/core/run_manager.hpp"
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
+#include <string>
 #include <thread>
 
 #include "mock_server.hpp"
@@ -657,7 +659,7 @@ TEST (RunManager, ConstructorIgnoresTheRetiredTestsField) {
 // so the two cases the byte-budget marker (issue #1192) exists to separate are
 // checked through the function that carries it, not off the collector alone.
 // Drop the assignment in read_retention and the first half reddens.
-TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerIntoTheSummary) {
+TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerWhetherOrNotItWasSpent) {
     MetricsCollectorConfig tight;
     tight.expected_requests         = 100;
     tight.response_sample_rate      = 1;
@@ -711,7 +713,30 @@ TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerIntoTheSummary) {
 // Failed."
 // ============================================================================
 
-class FailRunTest : public ::testing::Test {
+struct FailRunCase {
+    const char* name;
+    const char* run_id;
+    /// `true` sets `thresholds.failRun`; `false` leaves the key absent, the
+    /// shape a run that never opted in sends.
+    bool fail_run;
+    vayu::RunStatus expected_status;
+};
+
+// Mutation check: comment out the `final_status = vayu::RunStatus::Failed`
+// assignment in `finish_load_test` and the first case reddens to Completed.
+// The second is its companion: without `failRun`, the same missed budget is
+// still reported (this run's `thresholdValidation.verdict` is "failed",
+// asserted at the unit level in threshold_eval_test.cpp) but the terminal
+// status is untouched - the pre-existing history semantics nobody who did not
+// opt in should see change.
+constexpr auto FAIL_RUN_CASES = std::to_array<FailRunCase> ({
+{ "AFailedAssertionBudgetWithFailRunEndsTheRunFailed", "run-fail-run-e2e", true,
+vayu::RunStatus::Failed },
+{ "TheSameMissedBudgetWithoutFailRunStaysCompleted", "run-fail-run-optout-e2e",
+false, vayu::RunStatus::Completed },
+});
+
+class FailRunTest : public ::testing::TestWithParam<FailRunCase> {
     protected:
     static constexpr const char* DB_PATH = "test_run_manager_fail_run.db";
 
@@ -778,26 +803,22 @@ class FailRunTest : public ::testing::Test {
     std::unique_ptr<vayu::db::Database> db;
 };
 
-// Mutation check: comment out the `final_status = vayu::RunStatus::Failed`
-// assignment in `finish_load_test` and this reddens to Completed.
-TEST_F (FailRunTest, AFailedAssertionBudgetWithFailRunEndsTheRunFailed) {
-    auto config = base_config ();
-    config["thresholds"] = { { "maxAssertionFailureRatePct", 0 }, { "failRun", true } };
-
-    auto status = run_to_terminal_status ("run-fail-run-e2e", config);
-    ASSERT_HAS_VALUE (status);
-    EXPECT_EQ (*status, vayu::RunStatus::Failed);
-}
-
-// The companion: without `failRun`, the same missed budget is still reported
-// (this run's `thresholdValidation.verdict` is "failed", asserted at the unit
-// level in threshold_eval_test.cpp) but the terminal status is untouched - the
-// pre-existing history semantics nobody who did not opt in should see change.
-TEST_F (FailRunTest, TheSameMissedBudgetWithoutFailRunStaysCompleted) {
+TEST_P (FailRunTest, EndsWithTheExpectedTerminalStatus) {
+    const auto& c        = GetParam ();
     auto config          = base_config ();
     config["thresholds"] = { { "maxAssertionFailureRatePct", 0 } };
+    if (c.fail_run) {
+        config["thresholds"]["failRun"] = true;
+    }
 
-    auto status = run_to_terminal_status ("run-fail-run-optout-e2e", config);
+    auto status = run_to_terminal_status (c.run_id, config);
     ASSERT_HAS_VALUE (status);
-    EXPECT_EQ (*status, vayu::RunStatus::Completed);
+    EXPECT_EQ (*status, c.expected_status);
 }
+
+INSTANTIATE_TEST_SUITE_P (FailRun,
+FailRunTest,
+::testing::ValuesIn (FAIL_RUN_CASES),
+[] (const ::testing::TestParamInfo<FailRunCase>& info) {
+    return std::string (info.param.name);
+});

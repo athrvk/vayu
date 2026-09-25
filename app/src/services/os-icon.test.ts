@@ -30,22 +30,14 @@ afterEach(() => {
 });
 
 describe("osIcon", () => {
-	it("sends a capture", () => {
+	it.each([
+		{ method: "captured", expectedKind: "captured" },
+		{ method: "inboxOpened", expectedKind: "inboxOpened" },
+		{ method: "runFailed", expectedKind: "runFailed" },
+	] as const)("$method sends { kind: $expectedKind }", ({ method, expectedKind }) => {
 		const send = stubBridge();
-		osIcon.captured();
-		expect(send).toHaveBeenCalledWith({ kind: "captured" });
-	});
-
-	it("sends that the Inbox opened", () => {
-		const send = stubBridge();
-		osIcon.inboxOpened();
-		expect(send).toHaveBeenCalledWith({ kind: "inboxOpened" });
-	});
-
-	it("sends a run failure", () => {
-		const send = stubBridge();
-		osIcon.runFailed();
-		expect(send).toHaveBeenCalledWith({ kind: "runFailed" });
+		osIcon[method]();
+		expect(send).toHaveBeenCalledWith({ kind: expectedKind });
 	});
 
 	/*

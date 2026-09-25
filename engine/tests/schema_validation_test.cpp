@@ -222,7 +222,7 @@ TEST (ResponseSchemaIndexTest, EveryUncheckableCaseNamesItself) {
     EXPECT_EQ (*verdict.reason, UncheckedReason::BodyNotJson);
 }
 
-TEST (ResponseSchemaIndexTest, IdentityResolvesByOperationIdBeforeMethodAndPath) {
+TEST (ResponseSchemaIndexTest, IdentityResolvesByOperationIdBeforeThePath) {
     // The path moved and the operationId did not: the document still describes
     // this request, and following the operationId is what says so.
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));

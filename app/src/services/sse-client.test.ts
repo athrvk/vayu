@@ -52,82 +52,48 @@ describe("mapSseMetrics", () => {
 });
 
 describe("parseStepEvent", () => {
-	it("carries the data row when the run has one, and omits the key when it does not", () => {
-		const base = {
-			iteration: 1,
-			stepIndex: 0,
-			name: "Log in",
-			outcome: "passed",
-			statusCode: 200,
-			latencyMs: 42.7,
-		};
-
-		expect(parseStepEvent({ ...base, dataRowIndex: 2 })?.dataRowIndex).toBe(2);
+	/*
+	 * Each optional field of a step frame follows one rule: carried when the
+	 * frame has a well-formed value, and the key left absent - never defaulted -
+	 * when the value is missing or malformed.
+	 */
+	it.each([
 		// Absent, not 0 - a defaulted row index reads as "row 1 of a data file"
 		// for a run that had none.
-		expect(parseStepEvent(base)).not.toHaveProperty("dataRowIndex");
-	});
-
-	it("carries the request the step ran, and omits the key for an empty or missing id", () => {
-		const base = {
-			iteration: 1,
-			stepIndex: 0,
-			name: "Checkout",
-			outcome: "failed",
-			statusCode: 500,
-			latencyMs: 12,
-		};
-
-		expect(parseStepEvent({ ...base, requestId: "req_checkout" })?.requestId).toBe(
-			"req_checkout"
-		);
-		expect(parseStepEvent(base)).not.toHaveProperty("requestId");
+		{ field: "dataRowIndex", value: 2, malformed: ["2"] },
 		// An empty id is not a request: the step card keys its action off the
 		// field's presence, so carrying "" would offer a link to nothing.
-		expect(parseStepEvent({ ...base, requestId: "" })).not.toHaveProperty("requestId");
-		expect(parseStepEvent({ ...base, requestId: 7 })).not.toHaveProperty("requestId");
-	});
+		{ field: "requestId", value: "req_checkout", malformed: ["", 7] },
+		// An unbound collection produces no verdict, and an empty one here would
+		// render as "checked, and fine". A malformed node is not a verdict either.
+		{
+			field: "validation",
+			value: { checked: true, valid: false, failuresTotal: 1 },
+			malformed: ["nope"],
+		},
+		// A step whose script asserted nothing has no tally, and `0 passed` would
+		// read as a result rather than as silence. Half a tally is not a tally -
+		// the chip would render `NaN passed`.
+		{ field: "tests", value: { passed: 2, failed: 1 }, malformed: [{ passed: 2 }, "nope"] },
+	])(
+		"carries $field when present, and omits the key when absent or malformed",
+		({ field, value, malformed }) => {
+			const base = {
+				iteration: 1,
+				stepIndex: 0,
+				name: "Log in",
+				outcome: "passed",
+				statusCode: 200,
+				latencyMs: 42.7,
+			};
 
-	it("carries the schema verdict when the collection is bound, and no key when it is not", () => {
-		const base = {
-			iteration: 0,
-			stepIndex: 0,
-			name: "Get pet",
-			outcome: "passed",
-			statusCode: 200,
-			latencyMs: 12,
-		};
-
-		const verdict = { checked: true, valid: false, failuresTotal: 1 };
-		expect(parseStepEvent({ ...base, validation: verdict })?.validation).toEqual(verdict);
-		// Absent stays absent: an unbound collection produces no verdict, and an
-		// empty one here would render as "checked, and fine".
-		expect(parseStepEvent(base)).not.toHaveProperty("validation");
-		// A malformed node is not a verdict either.
-		expect(parseStepEvent({ ...base, validation: "nope" })).not.toHaveProperty("validation");
-	});
-
-	it("carries the assertion tally when the step made any, and no key when it did not", () => {
-		const base = {
-			iteration: 0,
-			stepIndex: 0,
-			name: "Get pet",
-			outcome: "failed",
-			statusCode: 200,
-			latencyMs: 12,
-		};
-
-		expect(parseStepEvent({ ...base, tests: { passed: 2, failed: 1 } })?.tests).toEqual({
-			passed: 2,
-			failed: 1,
-		});
-		// Absent stays absent: a step whose script asserted nothing has no
-		// tally, and `0 passed` would read as a result rather than as silence.
-		expect(parseStepEvent(base)).not.toHaveProperty("tests");
-		// Half a tally is not a tally - the chip would render `NaN passed`.
-		expect(parseStepEvent({ ...base, tests: { passed: 2 } })).not.toHaveProperty("tests");
-		expect(parseStepEvent({ ...base, tests: "nope" })).not.toHaveProperty("tests");
-	});
+			expect(parseStepEvent({ ...base, [field]: value })).toHaveProperty(field, value);
+			expect(parseStepEvent(base)).not.toHaveProperty(field);
+			for (const bad of malformed) {
+				expect(parseStepEvent({ ...base, [field]: bad })).not.toHaveProperty(field);
+			}
+		}
+	);
 
 	it("reads a scenario run's step event", () => {
 		expect(

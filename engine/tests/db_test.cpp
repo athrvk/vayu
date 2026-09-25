@@ -212,11 +212,6 @@ TEST_F (DatabaseTest, RequestsInCollectionSortedByOrder) {
 
 // ==================== Config Cleanup Tests ====================
 
-// "requestBatchSize" drove the removed batched request iteration. Seeding no
-// longer creates it, and - because the Settings UI renders engine entries
-// dynamically from GET /config - an upgraded database must lose the row too,
-// or the dead knob keeps showing up. Simulates the upgrade by planting the
-// row before re-running the seed.
 // `is_known_config_key` is the catalogue check `POST`/`GET /config` refuse an
 // unrecognised row by (issue #1492) - a row this build did not seed is not the
 // same as a row that does not exist, and only the seed pass can say which keys
@@ -251,61 +246,6 @@ TEST_F (DatabaseTest, ARowWithNoSeedingEntryIsNotAKnownConfigKey) {
     EXPECT_FALSE (db.is_known_config_key ("futureEngineOnlyKey"));
 }
 
-TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    ConfigEntry stale;
-    stale.key           = "requestBatchSize";
-    stale.value         = "5";
-    stale.type          = "integer";
-    stale.label         = "Request Batch Size";
-    stale.description   = "left behind by an older version";
-    stale.category      = "general_engine";
-    stale.default_value = "5";
-    stale.updated_at    = 1;
-    db.save_config_entry (stale);
-    ASSERT_HAS_VALUE (db.get_config_entry ("requestBatchSize"));
-
-    db.seed_default_config ();
-
-    EXPECT_FALSE (db.get_config_entry ("requestBatchSize").has_value ());
-}
-
-// "contextPoolSize" described "pre-initialized JS contexts" and accepted 1..256,
-// but the script context pool is grown lazily and never read the value (issue
-// #112) - a knob a user could turn with no effect anywhere. Same two guarantees
-// as the entry above: a fresh seed does not create it, and an upgraded database
-// sheds the row it was already carrying.
-TEST_F (DatabaseTest, SeedRemovesRetiredContextPoolSizeEntry) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    EXPECT_FALSE (db.get_config_entry ("contextPoolSize").has_value ())
-    << "a fresh seed must not create the retired key";
-
-    ConfigEntry stale;
-    stale.key           = "contextPoolSize";
-    stale.value         = "128";
-    stale.type          = "integer";
-    stale.label         = "Script Context Pool Size";
-    stale.description   = "left behind by an older version";
-    stale.category      = "scripting_sandbox";
-    stale.default_value = "64";
-    stale.updated_at    = 1;
-    db.save_config_entry (stale);
-    ASSERT_HAS_VALUE (db.get_config_entry ("contextPoolSize"));
-
-    db.seed_default_config ();
-
-    EXPECT_FALSE (db.get_config_entry ("contextPoolSize").has_value ());
-}
-
-// The 2026-08 sweep (#519) retired eleven more keys at once: nothing read them,
-// so a user could turn any of them and change nothing. Pinned as a list rather
-// than one test per key - the guarantee is identical for all of them, and a key
-// added to the retirement list without its row being deleted is the only way
-// this can regress.
 // A category can be retired too, and that is the more dangerous half: the app
 // renders one sidebar row per declared category and drops an entry whose
 // category it does not know, so a row left behind in "database_performance"
@@ -369,10 +309,18 @@ TEST_F (DatabaseTest, SeedRehomesAnAuditedEntryWithoutResettingItsValue) {
     << "a category move must not reset the value the user stored";
 }
 
-TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
-    const std::vector<std::string> retired = { "maxConnections",
-        "tcpKeepAliveIdle", "tcpKeepAliveInterval", "statsInterval",
-        "maxJsonFieldSize", "sseConnectTimeout", "sseMaxRetry",
+// Every retired key (`kRetiredConfigKeys`): requestBatchSize, contextPoolSize
+// (#112) and the eleven the 2026-08 sweep (#519) retired at once. Nothing read
+// them, so a user could turn any of them and change nothing - and because the
+// Settings UI renders engine entries dynamically from GET /config, an upgraded
+// database must lose the row too, or the dead knob keeps showing up. Pinned as
+// a list rather than one test per key - the guarantee is identical for all of
+// them, and a key added to the retirement list without its row being deleted
+// is the only way this can regress.
+TEST_F (DatabaseTest, SeedRemovesEveryRetiredEntry) {
+    const std::vector<std::string> retired = { "requestBatchSize", "contextPoolSize",
+        "maxConnections", "tcpKeepAliveIdle", "tcpKeepAliveInterval",
+        "statsInterval", "maxJsonFieldSize", "sseConnectTimeout", "sseMaxRetry",
         "sseSendLastEventId", "dbTempStore", "dbMmapSize", "dbWalAutocheckpoint" };
 
     Database db (TEST_DB_PATH);
@@ -519,8 +467,8 @@ TEST_F (DatabaseTest, ASeedInsideOneTransactionStillPreservesUserValues) {
 // it, so sync_schema must add the nullable column without a migration, and
 // re-seeding on an already-upgraded row must both preserve the user's chosen
 // value and backfill the options metadata that older row would be missing.
-// Simulates the upgrade the same way SeedRemovesRetiredRequestBatchSizeEntry
-// does: plant a pre-Task-4-shaped row (no options), then re-run the seed.
+// Simulates the upgrade the same way SeedRemovesEveryRetiredEntry does:
+// plant a pre-Task-4-shaped row (no options), then re-run the seed.
 TEST_F (DatabaseTest, SeedBackfillsOptionsOnUpgradeWithoutLosingUserValue) {
     Database db (TEST_DB_PATH);
     db.init ();
@@ -1709,44 +1657,61 @@ int64_t size_after_a_restart () {
 
 } // namespace
 
-TEST_F (DatabaseTest, StartupReclaimsAHeavilyPrunedDatabase) {
-    // 24 MiB down to one: past both thresholds, and by a wide enough margin
-    // that neither the page size nor the schema's own pages matter.
-    const int64_t grown = grow_then_prune (24, 1);
-    ASSERT_GT (grown, 12 * static_cast<int64_t> (MIB))
+struct ReclamationCase {
+    const char* name;
+    int total_mib;
+    int keep;
+    /// The grown file must exceed this, or the seeded bodies never reached it
+    /// and the case proves nothing.
+    int64_t min_grown_mib;
+    bool expect_reclaim;
+};
+
+constexpr auto RECLAMATION_CASES = std::to_array<ReclamationCase> ({
+// 24 MiB down to one: past both thresholds, and by a wide enough margin that
+// neither the page size nor the schema's own pages matter. Mutation check:
+// take the reclamation back out of `init` and the file is still `grown`.
+{ "ReclaimsAHeavilyPrunedDatabase", 24, 1, 12, true },
+// 4 MiB down to one: nearly all freelist, so the *fraction* is crossed
+// several times over and only the 10 MiB floor declines it. Mutation check:
+// drop VACUUM_MIN_RECLAIMABLE_BYTES to zero and this reddens.
+{ "LeavesADatabaseBelowTheByteFloorAlone", 4, 1, 2, false },
+// 60 MiB down to 48: twelve of them freed, which is past the 10 MiB floor
+// and a fifth of the file - so only the fraction declines it. Mutation check:
+// drop VACUUM_MIN_FREELIST_PERCENT to zero and this reddens.
+{ "LeavesADatabaseBelowTheFreelistFractionAlone", 60, 48, 55, false },
+});
+
+class StartupReclamationTest
+: public DatabaseTest,
+  public ::testing::WithParamInterface<ReclamationCase> {};
+
+TEST_P (StartupReclamationTest, ReclaimsOnlyPastBothThresholds) {
+    const auto& c       = GetParam ();
+    const int64_t grown = grow_then_prune (c.total_mib, c.keep);
+    ASSERT_GT (grown, c.min_grown_mib * static_cast<int64_t> (MIB))
     << "the seeded bodies never reached the file, so this proves nothing";
 
-    const int64_t reclaimed = size_after_a_restart ();
-    // Mutation check: take the reclamation back out of `init` and the file is
-    // still `grown` here.
-    EXPECT_LT (reclaimed, grown / 2)
-    << "the freed pages were not returned to the filesystem (" << grown
-    << " -> " << reclaimed << ")";
+    const int64_t after = size_after_a_restart ();
+    if (c.expect_reclaim) {
+        EXPECT_LT (after, grown / 2)
+        << "the freed pages were not returned to the filesystem (" << grown
+        << " -> " << after << ")";
+    } else {
+        // Never smaller - a rewrite would give most of the freelist back. Not
+        // byte-equal, because a start writes a page of its own.
+        EXPECT_GE (after, grown)
+        << "a database under a threshold was rewritten anyway (" << grown
+        << " -> " << after << ")";
+    }
 }
 
-TEST_F (DatabaseTest, StartupLeavesADatabaseBelowTheByteFloorAlone) {
-    // 4 MiB down to one: nearly all freelist, so the *fraction* is crossed
-    // several times over and only the 10 MiB floor declines it.
-    const int64_t grown = grow_then_prune (4, 1);
-    ASSERT_GT (grown, 2 * static_cast<int64_t> (MIB));
-
-    // Never smaller - a rewrite would give back three of these four megabytes.
-    // Not byte-equal, because a start writes a page of its own.
-    // Mutation check: drop VACUUM_MIN_RECLAIMABLE_BYTES to zero and this reddens.
-    EXPECT_GE (size_after_a_restart (), grown)
-    << "a database holding less than the byte floor was rewritten anyway";
-}
-
-TEST_F (DatabaseTest, StartupLeavesADatabaseBelowTheFreelistFractionAlone) {
-    // 60 MiB down to 48: twelve of them freed, which is past the 10 MiB floor
-    // and a fifth of the file - so only the fraction declines it.
-    const int64_t grown = grow_then_prune (60, 48);
-    ASSERT_GT (grown, 55 * static_cast<int64_t> (MIB));
-
-    // Mutation check: drop VACUUM_MIN_FREELIST_PERCENT to zero and this reddens.
-    EXPECT_GE (size_after_a_restart (), grown)
-    << "a database whose freelist is under the fraction was rewritten anyway";
-}
+INSTANTIATE_TEST_SUITE_P (Startup,
+StartupReclamationTest,
+::testing::ValuesIn (RECLAMATION_CASES),
+[] (const ::testing::TestParamInfo<ReclamationCase>& info) {
+    return std::string (info.param.name);
+});
 
 // ============================================================================
 // Metric ticks + the stored run summary (the wide-row time series)

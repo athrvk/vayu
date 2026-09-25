@@ -5,7 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -99,53 +102,50 @@ TEST_F (RateLimiterTest, EnforcesTargetRPS) {
 // target_rps is an aggregate budget, but each worker owns a private token
 // bucket and submissions are sharded round-robin - so the budget has to be
 // split N ways or the real cap is N x target_rps.
-TEST (PerWorkerConfigTest, SplitsTheAggregateBudgetAcrossWorkers) {
+struct PerWorkerConfigCase {
+    const char* name;
+    double target_rps;
+    double burst_size;
+    size_t workers;
+    double expected_target_rps;
+    double expected_burst_size;
+};
+
+constexpr auto PER_WORKER_CONFIG_CASES = std::to_array<PerWorkerConfigCase> ({
+{ "SplitsTheAggregateBudgetAcrossWorkers", 1000.0, 4000.0, 4, 250.0, 1000.0 },
+// burst_size 0 means "2x target_rps" (RateLimiter's own default), which
+// must be derived from the aggregate rate before it is split, not after.
+{ "DerivesTheDefaultBurstFromTheAggregateRate", 800.0, 0.0, 4, 200.0, 400.0 },
+// refill_tokens() clamps the bucket to burst_size, so a sub-token burst
+// could never reach the 1.0 needed to start a transfer - the worker would
+// wait forever rather than slowly. 2 rps over 8 workers is fewer than one
+// request per second per worker, and its derived burst (0.5) sits below
+// the floor.
+{ "FloorsTheBurstAtOneTokenSoAWorkerCanNeverStall", 2.0, 0.0, 8, 0.25, 1.0 },
+// target_rps 0 = rate limiting disabled
+{ "LeavesAnUnlimitedConfigAlone", 0.0, 0.0, 8, 0.0, 0.0 },
+{ "LeavesASingleWorkerConfigAlone", 500.0, 900.0, 1, 500.0, 900.0 },
+});
+
+class PerWorkerConfigTest : public ::testing::TestWithParam<PerWorkerConfigCase> {};
+
+TEST_P (PerWorkerConfigTest, ScalesTheConfigToOneWorker) {
+    const auto& c = GetParam ();
     EventLoopConfig config;
-    config.target_rps = 1000.0;
-    config.burst_size = 4000.0;
+    config.target_rps = c.target_rps;
+    config.burst_size = c.burst_size;
 
-    auto shard = detail::per_worker_config (config, 4);
-    EXPECT_DOUBLE_EQ (shard.target_rps, 250.0);
-    EXPECT_DOUBLE_EQ (shard.burst_size, 1000.0);
+    auto shard = detail::per_worker_config (config, c.workers);
+    EXPECT_DOUBLE_EQ (shard.target_rps, c.expected_target_rps);
+    EXPECT_DOUBLE_EQ (shard.burst_size, c.expected_burst_size);
 }
 
-TEST (PerWorkerConfigTest, DerivesTheDefaultBurstFromTheAggregateRate) {
-    // burst_size 0 means "2x target_rps" (RateLimiter's own default), which
-    // must be derived from the aggregate rate before it is split, not after.
-    EventLoopConfig config;
-    config.target_rps = 800.0;
-
-    auto shard = detail::per_worker_config (config, 4);
-    EXPECT_DOUBLE_EQ (shard.target_rps, 200.0);
-    EXPECT_DOUBLE_EQ (shard.burst_size, 400.0);
-}
-
-TEST (PerWorkerConfigTest, FloorsTheBurstAtOneTokenSoAWorkerCanNeverStall) {
-    // refill_tokens() clamps the bucket to burst_size, so a sub-token burst
-    // could never reach the 1.0 needed to start a transfer - the worker would
-    // wait forever rather than slowly.
-    EventLoopConfig config;
-    config.target_rps = 2.0; // fewer than one request per second per worker
-
-    auto shard = detail::per_worker_config (config, 8);
-    EXPECT_DOUBLE_EQ (shard.target_rps, 0.25);
-    EXPECT_GE (shard.burst_size, 1.0);
-}
-
-TEST (PerWorkerConfigTest, LeavesAnUnlimitedOrSingleWorkerConfigAlone) {
-    EventLoopConfig unlimited; // target_rps 0 = rate limiting disabled
-    unlimited.burst_size = 0.0;
-    auto unlimited_shard = detail::per_worker_config (unlimited, 8);
-    EXPECT_DOUBLE_EQ (unlimited_shard.target_rps, 0.0);
-    EXPECT_DOUBLE_EQ (unlimited_shard.burst_size, 0.0);
-
-    EventLoopConfig single;
-    single.target_rps = 500.0;
-    single.burst_size = 900.0;
-    auto single_shard = detail::per_worker_config (single, 1);
-    EXPECT_DOUBLE_EQ (single_shard.target_rps, 500.0);
-    EXPECT_DOUBLE_EQ (single_shard.burst_size, 900.0);
-}
+INSTANTIATE_TEST_SUITE_P (PerWorkerConfig,
+PerWorkerConfigTest,
+::testing::ValuesIn (PER_WORKER_CONFIG_CASES),
+[] (const ::testing::TestParamInfo<PerWorkerConfigCase>& info) {
+    return std::string (info.param.name);
+});
 
 // End-to-end counterpart to the unit tests above: the aggregate cap must hold
 // with several workers, which is exactly what EnforcesTargetRPS (num_workers=1)

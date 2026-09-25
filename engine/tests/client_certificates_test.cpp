@@ -255,7 +255,7 @@ TEST (ClientCertMatching, ThePortEntryOutranksTheHostEntry) {
     EXPECT_EQ (other->id, "cert_any");
 }
 
-TEST (ClientCertMatching, AnotherHostMatchesNothing) {
+TEST (ClientCertMatching, AnotherHostASubdomainOrAnEmptyHostMatchesNothing) {
     TransportPolicy policy;
     policy.client_certificates.push_back (rule ("cert_1", "api.example.com", std::nullopt));
 
@@ -555,7 +555,7 @@ TEST (ClientCertFormat, TheWireSpellingAndTheCurlTypeAreSeparate) {
     EXPECT_FALSE (client_cert_format_from_string ("").has_value ());
 }
 
-TEST (ClientCertValidation, APkcs12EntryCarriesItsOwnKeyAndMayNotNameOne) {
+TEST (ClientCertValidation, APkcs12EntryMayNotNameAKeyAndAPemEntryMust) {
     ScratchFile bundle{ "validation_bundle.p12", std::string (DER_SHAPED) };
     ScratchFile key{ "validation_bundle_key.pem" };
 

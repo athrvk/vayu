@@ -22,15 +22,13 @@ import { render, screen } from "@testing-library/react";
 import { RunWarnings } from "./RunWarnings";
 
 describe("RunWarnings", () => {
-	it("says nothing when the report has no warnings", () => {
-		const { container } = render(<RunWarnings warnings={undefined} />);
-		expect(container.firstChild).toBeNull();
-	});
-
-	it("says nothing when the warnings array is empty", () => {
-		const { container } = render(<RunWarnings warnings={[]} />);
-		expect(container.firstChild).toBeNull();
-	});
+	it.each([{ warnings: undefined }, { warnings: [] }])(
+		"says nothing when the warnings are $warnings",
+		({ warnings }) => {
+			const { container } = render(<RunWarnings warnings={warnings} />);
+			expect(container.firstChild).toBeNull();
+		}
+	);
 
 	it("names the unresolved variables and the affected request count", () => {
 		render(

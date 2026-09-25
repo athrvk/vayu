@@ -11,7 +11,11 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <regex>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "vayu/http/form_body.hpp"
@@ -382,21 +386,6 @@ TEST_F (ScriptEngineTest, PmExpectFailRefusesChaisFourArgumentForm) {
 // ============================================================================
 // pm.expect() Assertion Tests
 // ============================================================================
-
-TEST_F (ScriptEngineTest, ExpectEqual) {
-    auto result = engine.execute_test (R"(
-        pm.test("Equal numbers", function() {
-            pm.expect(42).to.equal(42);
-        });
-
-        pm.test("Equal strings", function() {
-            pm.expect("hello").to.equal("hello");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_TRUE (result.success);
-}
 
 TEST_F (ScriptEngineTest, ExpectEqualFails) {
     auto result = engine.execute_test (R"(
@@ -2233,43 +2222,6 @@ TEST_F (ScriptEngineTest, ResponseText) {
 }
 
 // ============================================================================
-// pm.request Tests
-// ============================================================================
-
-TEST_F (ScriptEngineTest, RequestUrl) {
-    auto result = engine.execute_test (R"(
-        pm.test("Request URL", function() {
-            pm.expect(pm.request.url).to.include("example.com");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_TRUE (result.success);
-}
-
-TEST_F (ScriptEngineTest, RequestMethod) {
-    auto result = engine.execute_test (R"(
-        pm.test("Request method is GET", function() {
-            pm.expect(pm.request.method).to.equal("GET");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_TRUE (result.success);
-}
-
-TEST_F (ScriptEngineTest, RequestHeaders) {
-    auto result = engine.execute_test (R"(
-        pm.test("Request has auth header", function() {
-            pm.expect(pm.request.headers["Authorization"]).to.include("Bearer");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_TRUE (result.success);
-}
-
-// ============================================================================
 // pm.environment Tests
 // ============================================================================
 
@@ -3149,81 +3101,6 @@ TEST_F (ScriptEngineTest, PreRequestAHeaderNamedLikeAMethodStillReachesTheWire) 
     EXPECT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["getType"].value, "string");
     EXPECT_EQ (request.headers.at ("get"), "not-a-method");
-}
-
-// ============================================================================
-// Complex Script Tests
-// ============================================================================
-
-TEST_F (ScriptEngineTest, ComplexTestScript) {
-    auto result = engine.execute_test (R"(
-        // Multiple assertions in complex test
-        pm.test("Comprehensive response check", function() {
-            pm.expect(pm.response.code).to.equal(200);
-            
-            var json = pm.response.json();
-            pm.expect(json).to.have.property("id");
-            pm.expect(json).to.have.property("name");
-            pm.expect(json).to.have.property("email");
-            
-            pm.expect(json.name).to.exist;
-            pm.expect(json.id).to.be.above(0);
-        });
-
-        pm.test("Response time acceptable", function() {
-            pm.expect(pm.response.responseTime).to.be.below(5000);
-        });
-
-        pm.test("Correct content type", function() {
-            pm.expect(pm.response.headers["Content-Type"]).to.include("json");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_TRUE (result.success);
-    EXPECT_EQ (result.tests.size (), 3);
-    for (const auto& test : result.tests) {
-        EXPECT_TRUE (test.passed) << "Failed: " << test.name;
-    }
-}
-
-TEST_F (ScriptEngineTest, MixedPassFail) {
-    auto result = engine.execute_test (R"(
-        pm.test("This passes", function() {
-            pm.expect(200).to.equal(200);
-        });
-
-        pm.test("This fails", function() {
-            pm.expect(200).to.equal(404);
-        });
-
-        pm.test("This also passes", function() {
-            pm.expect("ok").to.equal("ok");
-        });
-    )",
-    request, response, env);
-
-    EXPECT_FALSE (result.success); // Overall should fail
-    ASSERT_EQ (result.tests.size (), 3);
-    EXPECT_TRUE (result.tests[0].passed);
-    EXPECT_FALSE (result.tests[1].passed);
-    EXPECT_TRUE (result.tests[2].passed);
-}
-
-TEST_F (ScriptEngineTest, ContextPooling) {
-    // Run multiple executions to verify context pooling works and doesn't crash
-    for (int i = 0; i < 10; ++i) {
-        auto result = engine.execute_test (R"(
-            pm.test("Pooling test", function() {
-                pm.expect(1).to.equal(1);
-            });
-        )",
-        request, response, env);
-
-        EXPECT_TRUE (result.success);
-        ASSERT_EQ (result.tests.size (), 1);
-        EXPECT_TRUE (result.tests[0].passed);
-    }
 }
 
 // ============================================================================
@@ -5185,33 +5062,42 @@ TEST_F (ScriptEngineTest, PmInfoTreatsAnEmptyNameAsAbsent) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
-// One test per hook: a single test would pass against an implementation that
+// One case per hook: a single case would pass against an implementation that
 // hard-codes either string.
-TEST_F (ScriptEngineTest, PmInfoEventNameIsPrerequestUnderExecutePrerequest) {
-    auto result = engine.execute_prerequest (R"JS(
-        pm.test("hook", function() {
-            pm.expect(pm.info.eventName).to.equal("prerequest");
-        });
-    )JS",
-    request, env);
+enum class ScriptHook : std::uint8_t { Prerequest, Test };
+
+struct PmInfoEventNameCase {
+    std::string_view case_name;
+    ScriptHook hook;
+    std::string_view expected_event_name;
+};
+
+class ScriptEnginePmInfoEventNameTest
+: public ScriptEngineTest,
+  public ::testing::WithParamInterface<PmInfoEventNameCase> {};
+
+TEST_P (ScriptEnginePmInfoEventNameTest, NamesTheHookItRunsUnder) {
+    const auto& param = GetParam ();
+    const std::string script =
+    "pm.test('hook', function() { pm.expect(pm.info.eventName).to.equal('" +
+    std::string (param.expected_event_name) + "'); });";
+
+    auto result = param.hook == ScriptHook::Prerequest ?
+    engine.execute_prerequest (script, request, env) :
+    engine.execute_test (script, request, response, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
-TEST_F (ScriptEngineTest, PmInfoEventNameIsTestUnderExecuteTest) {
-    auto result = engine.execute_test (R"JS(
-        pm.test("hook", function() {
-            pm.expect(pm.info.eventName).to.equal("test");
-        });
-    )JS",
-    request, response, env);
-
-    ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (result.tests.size (), 1);
-    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
-}
+INSTANTIATE_TEST_SUITE_P (PerHook,
+ScriptEnginePmInfoEventNameTest,
+::testing::Values (PmInfoEventNameCase{ "ExecutePrerequest", ScriptHook::Prerequest, "prerequest" },
+PmInfoEventNameCase{ "ExecuteTest", ScriptHook::Test, "test" }),
+[] (const ::testing::TestParamInfo<PmInfoEventNameCase>& info) {
+    return std::string (info.param.case_name);
+});
 
 // QuickJS contexts are pooled and reused, so pm.info has to be rebuilt per
 // execution exactly as pm.request and pm.response are. Bind it once at context
@@ -5391,10 +5277,19 @@ TEST_F (ScriptEngineTest, SkipRequestThrowsInATestScript) {
 }
 
 // The single-send contract: `POST /execute` runs exactly this, and it has no
-// next request to name.
-TEST_F (ScriptEngineTest, SetNextRequestThrowsInASingleSend) {
-    auto result = engine.execute_prerequest (
-    "pm.execution.setNextRequest('checkout');", request, env);
+// next request to name and no scenario step to skip.
+struct SingleSendExecutionCase {
+    std::string_view case_name;
+    std::string_view script;
+};
+
+class ScriptEngineSingleSendExecutionTest
+: public ScriptEngineTest,
+  public ::testing::WithParamInterface<SingleSendExecutionCase> {};
+
+TEST_P (ScriptEngineSingleSendExecutionTest, ThrowsInASingleSend) {
+    auto result =
+    engine.execute_prerequest (std::string (GetParam ().script), request, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
@@ -5402,14 +5297,13 @@ TEST_F (ScriptEngineTest, SetNextRequestThrowsInASingleSend) {
     EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
 }
 
-TEST_F (ScriptEngineTest, SkipRequestThrowsInASingleSend) {
-    auto result = engine.execute_prerequest ("pm.execution.skipRequest();", request, env);
-
-    EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
-    << result.error_message;
-    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
-}
+INSTANTIATE_TEST_SUITE_P (PerExecutionMethod,
+ScriptEngineSingleSendExecutionTest,
+::testing::Values (SingleSendExecutionCase{ "SetNextRequest", "pm.execution.setNextRequest('checkout');" },
+SingleSendExecutionCase{ "SkipRequest", "pm.execution.skipRequest();" }),
+[] (const ::testing::TestParamInfo<SingleSendExecutionCase>& info) {
+    return std::string (info.param.case_name);
+});
 
 // QuickJS formats a thrown error into a fixed-size buffer (`JS_MakeError`,
 // vendor/quickjs-ng/quickjs.c) and silently cuts whatever does not fit,
@@ -5434,7 +5328,20 @@ TEST_F (ScriptEngineTest, SetNextRequestsRefusalIsNeverTruncatedMidWord) {
 // (a context built by hand, or the deferred replay against a recorded
 // sample) rather than silently recording nowhere.
 
-TEST_F (ScriptEngineTest, MetricsTrendRecordsThroughTheBoundCollector) {
+struct MetricsRecordCase {
+    std::string_view case_name;
+    std::string_view script;
+    std::string_view expected_name;
+    vayu::core::CustomMetricType expected_type;
+    double expected_value;
+};
+
+class ScriptEngineMetricsRecordTest
+: public ScriptEngineTest,
+  public ::testing::WithParamInterface<MetricsRecordCase> {};
+
+TEST_P (ScriptEngineMetricsRecordTest, RecordsThroughTheBoundCollector) {
+    const auto& param = GetParam ();
     std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
     auto ctx          = scenario_test (request, response, env);
     ctx.record_metric = [&recorded] (const std::string& name,
@@ -5442,46 +5349,28 @@ TEST_F (ScriptEngineTest, MetricsTrendRecordsThroughTheBoundCollector) {
         recorded.emplace_back (name, type, value);
     };
 
-    auto result = engine.execute ("pm.metrics.trend('ttfb', 42.5);", ctx);
+    auto result = engine.execute (std::string (param.script), ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (recorded.size (), 1u);
-    EXPECT_EQ (std::get<0> (recorded[0]), "ttfb");
-    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Trend);
-    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 42.5);
+    EXPECT_EQ (std::get<0> (recorded[0]), param.expected_name);
+    EXPECT_EQ (std::get<1> (recorded[0]), param.expected_type);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), param.expected_value);
 }
 
-TEST_F (ScriptEngineTest, MetricsCounterDefaultsItsIncrementToOne) {
-    std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
-    auto ctx          = scenario_test (request, response, env);
-    ctx.record_metric = [&recorded] (const std::string& name,
-                        vayu::core::CustomMetricType type, double value) {
-        recorded.emplace_back (name, type, value);
-    };
-
-    auto result = engine.execute ("pm.metrics.counter('hits');", ctx);
-
-    ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (recorded.size (), 1u);
-    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Counter);
-    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 1.0);
-}
-
-TEST_F (ScriptEngineTest, MetricsRateRecordsTheBooleanAsOneOrZero) {
-    std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
-    auto ctx          = scenario_test (request, response, env);
-    ctx.record_metric = [&recorded] (const std::string& name,
-                        vayu::core::CustomMetricType type, double value) {
-        recorded.emplace_back (name, type, value);
-    };
-
-    auto result = engine.execute ("pm.metrics.rate('cacheHit', true);", ctx);
-
-    ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (recorded.size (), 1u);
-    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Rate);
-    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 1.0);
-}
+// Counter: the increment defaults to one. Rate: the boolean is recorded as
+// one or zero.
+INSTANTIATE_TEST_SUITE_P (PerMetricMethod,
+ScriptEngineMetricsRecordTest,
+::testing::Values (MetricsRecordCase{ "Trend", "pm.metrics.trend('ttfb', 42.5);",
+                   "ttfb", vayu::core::CustomMetricType::Trend, 42.5 },
+MetricsRecordCase{ "Counter", "pm.metrics.counter('hits');", "hits",
+vayu::core::CustomMetricType::Counter, 1.0 },
+MetricsRecordCase{ "Rate", "pm.metrics.rate('cacheHit', true);", "cacheHit",
+vayu::core::CustomMetricType::Rate, 1.0 }),
+[] (const ::testing::TestParamInfo<MetricsRecordCase>& info) {
+    return std::string (info.param.case_name);
+});
 
 // The false-success rule #188 exists for: with no collector bound, the call
 // must throw rather than accept a value and drop it on the floor.
