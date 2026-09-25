@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
+import { DataFileLocations } from "./data-file-locations.js";
 import { readSpecFile } from "./spec-file.js";
 import {
 	defaultProxyResolutionSystem,
@@ -37,7 +38,6 @@ import {
 } from "./proxy-resolution.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
-import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
@@ -69,6 +69,7 @@ import {
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
+import { resolveUserDataDirectory } from "./user-data-dir.js";
 import { clearResponseCacheOnUpgrade } from "./response-cache-clear.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
 import { revealWhenReady } from "./window-reveal.js";
@@ -90,7 +91,7 @@ import { registerLogIpc } from "./log-ipc.js";
  * window, on every launch including the ones where MCP is switched off.
  *
  * `config`, `store`, `connect` and `listener` reach none of that
- * (`electron-store`, `node:child_process` and `node:http` are their heaviest
+ * (`node:fs`, `node:child_process` and `node:http` are their heaviest
  * dependencies), so the startup gate, the Settings IPC and the port itself cost
  * nothing. The two symbols that do pull the SDK - the service and the tool
  * catalog - are loaded on demand by `loadMcp()` below: the catalog when Settings
@@ -156,6 +157,18 @@ app.commandLine.appendSwitch("use-mock-keychain");
 // documented requirement is "before app is ready".
 app.setAppUserModelId(APP_USER_MODEL_ID);
 
+// Named explicitly, never left to Electron: it derives `userData` from
+// `app.name` on the first read, so the directory used to depend on whether
+// anything happened to read it before the rename below. Set before anything
+// opens a file there - Chromium's profile, the single-instance lock further
+// down, the settings stores, the engine - which is also what makes moving an
+// older install's directory here safe (see `user-data-dir.ts`).
+const userDataResolution = resolveUserDataDirectory(app.getPath("appData"));
+app.setPath("userData", userDataResolution.path);
+if (userDataResolution.outcome === "migrated" || userDataResolution.outcome === "kept-legacy") {
+	appLogger().info("main", "Resolved the data directory", { ...userDataResolution });
+}
+
 // `app.getName()` otherwise answers the npm package's name, "vayu-client",
 // which is what macOS titles the app menu and its "About"/"Quit" roles from -
 // see APP_NAME's own comment. Set at module scope, ahead of `createMenu()`,
@@ -168,12 +181,25 @@ const __dirname = path.dirname(__filename);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
+/**
+ * The launch's engine start, begun by the primary instance before
+ * `app.whenReady` and awaited once the window exists. `startEngine` never
+ * rejects - it reports its own failure - so an unawaited stretch of this
+ * promise cannot surface as an unhandled rejection.
+ */
+let engineStartup: Promise<void> | null = null;
 // The MCP port, bound while the server is enabled. See mcp/listener.ts.
 let mcpListener: McpListener | null = null;
 // The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
 // mcp/index.ts), built by the first request the listener receives - null until
 // then, and read as "not loaded yet" by the Settings IPC below.
 let mcpService: VayuMcpService | null = null;
+/**
+ * The renderer's remembered data-file paths, published over
+ * `dataFile:locations` so MCP can name them (#1742). Module-level because the
+ * MCP service is built lazily and a renderer reload re-publishes into it.
+ */
+const dataFileLocations = new DataFileLocations();
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -663,7 +689,10 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => void checkForUpdatesNow("menu"),
+								click: () =>
+									void loadUpdater().then((updater) =>
+										updater.checkForUpdatesNow("menu")
+									),
 							},
 							{ type: "separator" as const },
 							{
@@ -822,7 +851,10 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => void checkForUpdatesNow("menu"),
+								click: () =>
+									void loadUpdater().then((updater) =>
+										updater.checkForUpdatesNow("menu")
+									),
 							},
 							{
 								label: "About Vayu",
@@ -859,6 +891,9 @@ async function startEngine() {
 
 		appLogger().error("main", "Failed to start engine", { error: String(error) });
 		appLogger().applyFloor("debug");
+		// The start is begun before `app.whenReady` (see `engineStartup`), and
+		// a dialog needs a ready app.
+		await app.whenReady();
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
@@ -867,6 +902,29 @@ async function startEngine() {
 		);
 		app.quit();
 	}
+}
+
+/**
+ * The updater, loaded at most once, after the engine.
+ *
+ * `electron-updater` constructs its platform updater the moment its export is
+ * read and eagerly requires fs-extra, js-yaml, semver and six updater classes on
+ * the way (measured: ~60 ms inside Electron), and the first check it exists for
+ * waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway - so a static import spent
+ * that on every launch before `app.whenReady`, ahead of the window. Cached as a
+ * promise for the same reason `loadMcp` is: the menu and the startup arming may
+ * ask at once, and a module that failed to load is a broken install.
+ */
+type UpdaterModule = typeof import("./updater.js");
+let updaterModulePromise: Promise<UpdaterModule> | null = null;
+let updaterModule: UpdaterModule | null = null;
+
+function loadUpdater(): Promise<UpdaterModule> {
+	updaterModulePromise ??= import("./updater.js").then((module) => {
+		updaterModule = module;
+		return module;
+	});
+	return updaterModulePromise;
 }
 
 /**
@@ -910,6 +968,7 @@ async function startMcp() {
 					version: app.getVersion(),
 					safety: loadPersistedSafety(),
 					onDataChanged: sendMcpDataChanged,
+					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
 					log: mcpLogger(),
 				});
 				mcpService = service;
@@ -1323,6 +1382,13 @@ function setupIpcHandlers() {
 		return await readDataFile(String(filePath ?? ""));
 	});
 
+	// The renderer's whole map of remembered data-file paths, on launch and on
+	// every change (#1742). Only MCP reads it; the payload is rebuilt, not
+	// trusted - see data-file-locations.ts.
+	ipcMain.on("dataFile:locations", (_event, locations: unknown) => {
+		dataFileLocations.replace(locations);
+	});
+
 	// Read a file an imported OpenAPI document references (issue #649). The
 	// renderer passes the picked document's path and the ref's own text; this
 	// process resolves one against the other, so the web layer still names no
@@ -1401,6 +1467,17 @@ if (!isPrimaryInstance) {
 		event.preventDefault();
 		openIntents.offer({ kind: "import", path: filePath });
 	});
+
+	// The engine starts here, as soon as this process knows it is the one that
+	// owns it - not after `app.whenReady` and the window. Its own startup
+	// (opening and checking the database, before it listens) is the longest
+	// wait between launch and data on screen, and nothing about it needs
+	// Chromium: the sidecar spawns a process and polls it over HTTP. Begun here
+	// it runs alongside Chromium's own bootstrap and the window's first paint
+	// instead of after them, so the renderer's first `/health` poll more often
+	// finds an engine already listening. A failure still waits for a ready app
+	// to report itself (`startEngine`).
+	engineStartup = startEngine();
 }
 
 app.whenReady().then(async () => {
@@ -1493,8 +1570,9 @@ app.whenReady().then(async () => {
 
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the
 	// engine, and the updater and MCP both read state the engine owns. The window
-	// is already loading throughout, which was the point.
-	await startEngine();
+	// is already loading throughout, which was the point; the start itself was
+	// begun before `app.whenReady` (see `engineStartup`).
+	await engineStartup;
 
 	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
 	// throws and never blocks on the network - the resolution is local to
@@ -1522,7 +1600,11 @@ app.whenReady().then(async () => {
 	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not
 	// start while the window, the engine and the user's first requests are still
 	// competing for the link and the disk.
-	initAutoUpdater(() => mainWindow);
+	void loadUpdater()
+		.then((updater) => updater.initAutoUpdater(() => mainWindow))
+		.catch((error: unknown) => {
+			appLogger().error("main", "Could not load the updater", { error: String(error) });
+		});
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -1600,7 +1682,9 @@ app.on("before-quit", (event) => {
 // The quit is settled by now, so stop the periodic update check and answer a
 // check the user is still waiting on - its events will never arrive.
 app.on("will-quit", () => {
-	disposeAutoUpdater();
+	// Only a loaded updater has anything to stop; loading it now to dispose of
+	// it would be work for a process on its way out.
+	updaterModule?.disposeAutoUpdater();
 });
 
 // A signal is how anything outside the UI asks Vayu to stop, and Node's default

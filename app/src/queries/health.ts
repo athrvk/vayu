@@ -28,10 +28,14 @@ import { TIMING } from "@/config/timing";
  * them is on the startup path. Extracted so both branches are assertable
  * without driving a timer.
  */
-export function healthPollIntervalMs(status: "error" | "pending" | "success"): number {
-	return status === "error"
-		? TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS
-		: TIMING.HEALTH_CHECK_INTERVAL_MS;
+export function healthPollIntervalMs(
+	status: "error" | "pending" | "success",
+	starting: boolean
+): number {
+	if (status !== "error") return TIMING.HEALTH_CHECK_INTERVAL_MS;
+	return starting
+		? TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS
+		: TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS;
 }
 
 /**
@@ -61,6 +65,19 @@ export function engineStatusAfterFailedPoll(
 ): "starting" | "unreachable" {
 	if (windowOpenedAt === null) return "unreachable";
 	return now - windowOpenedAt < TIMING.ENGINE_STARTUP_GRACE_MS ? "starting" : "unreachable";
+}
+
+/**
+ * Whether a failed poll right now would still be a start rather than a lost
+ * engine. Read from the store when the query asks, never subscribed: the query
+ * options are evaluated per attempt, and a subscription would re-render the
+ * hook for a value only those two callbacks consult.
+ */
+function engineStarting(): boolean {
+	return (
+		engineStatusAfterFailedPoll(useEngineStore.getState().engineStartWindow, Date.now()) ===
+		"starting"
+	);
 }
 
 /**
@@ -110,9 +127,15 @@ export function useHealthQuery() {
 	const query = useQuery({
 		queryKey: queryKeys.health.status(),
 		queryFn: () => apiService.getHealth(),
-		// Hard while it is not answering, cheap once it is.
-		refetchInterval: (q) => healthPollIntervalMs(q.state.status),
-		retry: 1,
+		// Hard while it is not answering, hardest while it is still starting,
+		// cheap once it is.
+		refetchInterval: (q) => healthPollIntervalMs(q.state.status, engineStarting()),
+		// One retry absorbs a single dropped poll of an engine that was serving.
+		// None while a start is in flight: the retry waits TanStack's default
+		// second before the failure surfaces, and the failure is what hands the
+		// query to the startup poll and marks the queries that raced the engine
+		// for the refetch below.
+		retry: (failureCount) => !engineStarting() && failureCount < 1,
 		// Don't show stale data for health checks
 		staleTime: 0,
 	});

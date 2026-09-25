@@ -147,10 +147,10 @@ export const queryKeys = {
 		activity: (mockId: string) => [...queryKeys.mockServer.all, "activity", mockId] as const,
 	},
 
-	// Warm-cache pass over every collection's requests (see
-	// usePrefetchCollectionsAndRequests). Keyed here rather than inline so it
-	// can be invalidated when the set of collections changes - it succeeds once
-	// and would otherwise never re-run for a collection created mid-session.
+	// Warm-cache pass over every collection's requests, one `GET /requests`
+	// (see usePrefetchCollectionsAndRequests). Keyed here rather than inline so
+	// it can be invalidated when the set of collections changes - it succeeds
+	// once and would otherwise never re-run for a collection created mid-session.
 	prefetch: {
 		all: ["prefetch"] as const,
 		allRequests: () => [...queryKeys.prefetch.all, "all-requests"] as const,

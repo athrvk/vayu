@@ -110,7 +110,7 @@ describe("packaged dependencies", () => {
 		expect(sources.length).toBeGreaterThan(30);
 		// A package the main process genuinely needs - if this is missing the scan
 		// matched nothing and the equality below is a comparison of two blanks.
-		expect(packages).toContain("electron-store");
+		expect(packages).toContain("electron-updater");
 	});
 
 	it("lists exactly the packages the main process imports under `dependencies`", () => {

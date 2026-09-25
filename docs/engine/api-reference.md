@@ -47,17 +47,14 @@ http-client could not read - every validation message surfaced as a bare
 `HTTP 400` (issue #173). The client still accepts the flat shape so a newer app
 can read an older engine, but the engine no longer produces it.
 
-## Deprecated aliases
+## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,
-`/execute`, and `/runs/:id/metrics`. The old paths still work - each is
-registered as a deprecated alias of its canonical route (same handler, same
-behavior) and logs a `(deprecated alias)` marker per request. **These aliases
-will be removed in a future minor release**; new clients should use the
-canonical paths.
+`/execute`, and `/runs/:id/metrics` (#83). The pre-consolidation paths served as
+deprecated aliases for a release cycle and are now gone; each answers `404`.
 
-| Deprecated alias | Canonical route |
-|------------------|-----------------|
+| Removed | Use |
+|---------|-----|
 | `POST /request` | `POST /execute` |
 | `POST /run` | `POST /runs` |
 | `GET /run/:id` | `GET /runs/:id` |
@@ -66,15 +63,11 @@ canonical paths.
 | `GET /run/:id/report` | `GET /runs/:id/report` |
 | `GET /metrics/live/:id` | `GET /runs/:id/live` |
 | `GET /stats/:id?format=json` | `GET /runs/:id/metrics` |
+| `GET /stats/:id` (SSE) | `GET /runs/:id/live` while the run is retained, then `GET /runs/:id/report` |
 
-`GET /stats/:id` in its **SSE** mode is legacy DB-polling and is retained
-wholesale (no canonical rename); prefer `GET /runs/:id/live` for live metrics.
-
-`GET /runs` with **no query params** is likewise a deprecated shape: it returns
-the pre-pagination bare array of full-`configSnapshot` rows. Passing any
-pagination/filter param returns the `{data, pagination}` envelope with compact
-`summary` rows (see [GET /runs](#get-runs)). The no-param array is removed at the
-next minor release.
+`GET /runs` with no query parameters no longer returns the pre-pagination bare
+array: it answers the `{data, pagination}` envelope at the default page size, the
+same as any other call (see [GET /runs](#get-runs)).
 
 ## Resource writes: create vs update
 
@@ -1215,12 +1208,17 @@ startup sweep does once `trashRetentionDays` has passed.
 
 ### GET /requests
 
-List requests in a collection. Results are ordered by `order`, then `createdAt`,
-then `id` - the same contract `GET /collections` has for collections. See
-[Ordering](#ordering) for why the tiebreak is part of the contract.
+List requests in a collection, or in every live collection. Results are
+ordered by `order`, then `createdAt`, then `id` - the same contract
+`GET /collections` has for collections. See [Ordering](#ordering) for why the
+tiebreak is part of the contract.
 
 **Query Parameters:**
-- `collectionId` (required): Collection ID to fetch requests from
+- `collectionId` (optional): Collection ID to fetch requests from. Absent, the
+  response is every live request of every live collection, grouped by
+  `collectionId` and ordered within each group exactly as that collection's own
+  list is - nothing in the trash. The app builds its whole tree from this one
+  call at launch instead of one call per collection.
 
 **Response:** An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of
@@ -4560,7 +4558,6 @@ with specific codes:
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
 
-> Alias: `POST /request` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
 the pre-request script runs, so `pm.request` reflects the real outgoing headers.
@@ -5169,7 +5166,6 @@ that field must survive and who may stamp it.
 
 Start a load test run (Vayu Mode).
 
-> Alias: `POST /run` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 **Request:**
 ```json
@@ -6552,9 +6548,7 @@ keep-alive connection rather than the negative value it used to store.
 
 ### GET /runs/:runId/metrics
 
-Paginated **historical time-series** (JSON) for a run's charts. This is the
-canonical replacement for the legacy `GET /stats/:runId?format=json`; both call
-the same `run_time_series_response` core so they cannot drift. The response is
+Paginated **historical time-series** (JSON) for a run's charts. The response is
 **always JSON** - any `format` query param is ignored.
 
 **Query parameters:**
@@ -6657,44 +6651,7 @@ A run that configured no monitor returns `200` with an empty `data` array; only
 a run that does not exist is a `404`. Samples are deleted with the run, like
 every other child row.
 
-### GET /stats/:runId (deprecated)
-
-> **Prefer `GET /runs/:runId/live`** (above) for live dashboards - it replays a retained
-> in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path
-> and is retained wholesale (its SSE mode gets no canonical rename). Its historical
-> `?format=json&limit=&offset=` retrieval is a deprecated alias of `GET /runs/:runId/metrics`
-> (same core); new callers should use that path.
-
-Stream real-time metrics for a load test using Server-Sent Events (SSE).
-
-**Response:** SSE stream with events:
-
-```
-event: stats
-data: {"timestamp":1234567890,"totalRequests":1500,"totalErrors":5,"totalSuccess":1495,"errorRate":0.33,"avgLatencyMs":45.2,"currentRps":150.5,"activeConnections":100,"elapsedSeconds":10.5}
-
-event: complete
-data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5,"avgLatencyMs":42.1,"finalRps":100.0,"duration":60.0}
-```
-
-**Metrics included:**
-- `totalRequests`: Total requests completed
-- `totalErrors`: Total errors encountered
-- `totalSuccess`: Total successful requests
-- `errorRate`: Error rate as percentage
-- `avgLatencyMs`: Average latency in milliseconds
-- `currentRps`: Current requests per second
-- `activeConnections`: Active concurrent connections
-- `elapsedSeconds`: Elapsed time since test start
-
-This stream is fed from the run's `metric_ticks` rows; every field above comes
-from the stored tick except **`avgLatencyMs`, which stays `0`** -
-the per-tick object has never carried mean latency. `GET /runs/:runId/live` serves
-it (from the in-memory collector) and is the endpoint to use.
-
 ### GET /runs/:runId/live
-
-> Alias: `GET /metrics/live/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
 in-memory tick topic. The engine produces one wire-ready `metrics` tick per
@@ -6984,7 +6941,7 @@ is the one endpoint a visible client polls, and an info line here reached the
 console of every engine started at the default app verbosity, every five
 seconds.
 
-**Query parameters** (passing **any** of them opts into the paginated envelope):
+**Query parameters** (every one optional; the answer is always the paginated envelope):
 - `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
 - `offset` - rows to skip (default 0, negative floored to 0).
 - `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
@@ -7131,31 +7088,7 @@ a server.
 }
 ```
 
-**Legacy no-param behavior (deprecated, removed next minor).** A request with
-**no query params at all** returns today's bare array of full-`configSnapshot`
-rows unchanged, so external scripts keep working:
-```json
-[
-  {
-    "id": "run_1234567890",
-    "requestId": "req_1234567890",
-    "environmentId": "env_1234567890",
-    "type": "design",
-    "status": "completed",
-    "configSnapshot": "{}",
-    "startTime": 1234567890,
-    "endTime": 1234567891
-  }
-]
-```
-This legacy branch is a temporary alias (like those in
-[Deprecated aliases](#deprecated-aliases)) and is removed at the next minor
-release; new callers should always pass pagination params and read the
-`{data, pagination}` envelope.
-
 ### GET /runs/:runId
-
-> Alias: `GET /run/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Get details for a specific run.
 
@@ -7221,8 +7154,6 @@ recorded before this issue.
 
 ### POST /runs/:runId/stop
 
-> Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
-
 Stop a running load test. The engine signals the run, waits up to 5s for its
 worker to settle, and answers with a summary of what the run actually did.
 
@@ -7271,8 +7202,6 @@ already terminated keeps the reason it recorded rather than being rewritten as a
 user stop.
 
 ### GET /runs/:runId/report
-
-> Alias: `GET /run/:runId/report` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
@@ -7926,8 +7855,6 @@ field, so ignoring it would answer `200` to a request that changed nothing.
 **`404`** when no run has that id.
 
 ### DELETE /runs/:runId
-
-> Alias: `DELETE /run/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Delete a run and all associated metrics/results.
 

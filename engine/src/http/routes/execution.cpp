@@ -1757,7 +1757,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
 }
 
 /**
- * POST /execute  (alias: POST /request, deprecated)
+ * POST /execute
  * Executes a single HTTP request (Design Mode).
  *
  * Returns:
@@ -1816,7 +1816,7 @@ httplib::Response& res) {
 
 
 /**
- * POST /runs  (alias: POST /run, deprecated)
+ * POST /runs
  * Starts a load test run (Vayu Mode).
  *
  * Returns:
@@ -2213,19 +2213,12 @@ httplib::Response& res) {
 } // namespace
 
 void register_execution_routes (RouteContext& ctx) {
-    httplib::Server::Handler execute_request = [&ctx] (const httplib::Request& req,
-                                               httplib::Response& res) {
+    ctx.server.Post ("/execute", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_execute_request (ctx, req, res);
-    };
-    ctx.server.Post ("/execute", execute_request);
-    ctx.server.Post ("/request", deprecated_alias (execute_request));
-
-    httplib::Server::Handler start_load_test = [&ctx] (const httplib::Request& req,
-                                               httplib::Response& res) {
+    });
+    ctx.server.Post ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_start_load_test (ctx, req, res);
-    };
-    ctx.server.Post ("/runs", start_load_test);
-    ctx.server.Post ("/run", deprecated_alias (start_load_test));
+    });
 }
 
 } // namespace vayu::http::routes

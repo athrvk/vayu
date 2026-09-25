@@ -59,8 +59,8 @@ struct RequestBuild {
  * @brief Single request-construction pipeline for both execution paths.
  *
  * Deserializes the request from `config`, applies the resolved `timeout_ms`,
- * and resolves auth (headers/url) via apply_auth. Both the design (`/request`)
- * and load (`/run`) paths call this so request construction lives in one place.
+ * and resolves auth (headers/url) via apply_auth. Both the design (`/execute`)
+ * and load (`/runs`) paths call this so request construction lives in one place.
  *
  * @param config     The run config JSON (HTTP fields at the root, plus `auth`).
  * @param db         Database handle for token lookup (reserved for oauth2; may be null).

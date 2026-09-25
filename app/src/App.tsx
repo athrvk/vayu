@@ -31,6 +31,7 @@ import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
 import { useRunWatchers } from "./hooks/useRunWatchers";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
@@ -110,6 +111,10 @@ function App() {
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
+
+	// The other direction on the same seam: the data-file paths the app
+	// remembers live in renderer storage, and MCP names them (#1742).
+	useDataFileLocationMirror();
 
 	// A run an agent started reaches no surface of this app, so nothing used to
 	// watch it: no taskbar bar, no wake lock and no notification when it ended,

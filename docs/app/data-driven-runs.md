@@ -328,7 +328,7 @@ What that stores, and what it does not:
 |                     | Where it lives                          | Travels with the collection? |
 | ------------------- | --------------------------------------- | ---------------------------- |
 | The **columns**     | On the collection, as `dataSchema`      | Yes - and through import     |
-| The file's **path** | This machine only, in local app storage | No                           |
+| The file's **path** | This machine only, in local app storage | No - the app's own MCP server names it to a client on this machine |
 | The file's **rows** | Nowhere                                 | No                           |
 
 Declaring changes no binding rule - a token still binds from the row the run
@@ -400,6 +400,19 @@ run:
   request's own and the collection chain's, which run around every step - and
   the panel says so: a column name a script computes at run time cannot be seen
   from here.
+- **An agent can read them too.** Over [MCP](../engine/mcp.md),
+  `list_collections` and `vayu://collections` carry a declaring collection's
+  `dataSchema` (columns, file name, when it was declared), so an agent building
+  the `data` rows for `run_collection` or `start_load_run` knows which columns
+  to supply. Where the app remembers the file, the row also carries
+  `dataFile: { path, fileName }`, so an agent on this machine can open the file
+  itself, the way you would. A collection that declares nothing has neither -
+  the ancestor walk above is left to the reader, the same as it is for
+  variables. The rows never go over MCP: Vayu does not read the file for the
+  agent. The path is named only by the MCP server inside the running app, which
+  listens on loopback, so every client that sees it runs on the machine it is
+  true of; the standalone stdio server has no record of paths and never names
+  one.
 
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.

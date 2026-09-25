@@ -176,6 +176,22 @@ export const TIMING = {
 	HEALTH_RECONNECT_POLL_INTERVAL_MS: 1_000,
 
 	/**
+	 * Engine health poll interval while a launch's (or a restart's) start window
+	 * is open and the engine has not answered yet.
+	 *
+	 * Shorter than the reconnect poll because this is the wait between the
+	 * engine listening and the window showing any data. At the reconnect
+	 * cadence, plus the retry it replaced, a renderer that polled a moment
+	 * before the engine was up showed its data about a second after the engine
+	 * could have served it: measured on a 280 MB workspace, health answered at
+	 * 1.6-1.8s from launch for an engine that listened at ~0.4s. A refused
+	 * connect to a closed localhost port costs microseconds, and the window
+	 * closes at the first answer (or after `ENGINE_STARTUP_GRACE_MS`), so the
+	 * fast poll is bounded to the part of a launch that is waiting anyway.
+	 */
+	HEALTH_STARTUP_POLL_INTERVAL_MS: 100,
+
+	/**
 	 * How long a launch's first poll failures mean "still starting" rather than
 	 * "unreachable".
 	 *

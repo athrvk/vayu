@@ -15,7 +15,7 @@
  * handler before it ever reached `createWindow()`: no window, on every launch,
  * with the engine sidecar already running headless behind it.
  *
- * These drive the real electron-store against a temp userData directory rather
+ * These drive the real store (`json-store.ts`) against a temp userData directory rather
  * than a mock, because the defect is in what the library does with a file we
  * hand it - a mocked store would have "passed" against the bug. `electron`
  * itself is faked, since that is the part vitest cannot provide.
@@ -40,8 +40,7 @@ vi.mock("electron", () => {
 		ipcMain: { on: () => {} },
 		shell: { openPath: async () => "" },
 	};
-	// electron-store reaches for the default export.
-	return { ...api, default: api };
+	return api;
 });
 
 /** Seed the userData directory the next import will read, with raw file bytes. */
@@ -128,9 +127,9 @@ describe("a readable mcp-config.json", () => {
 	});
 
 	/*
-	 * Syntactically valid but wrong-shaped: clearInvalidConfig cannot see this,
-	 * only the sanitizer can, so it is the half of the guard that does not move
-	 * when the flag does.
+	 * Syntactically valid but wrong-shaped: the store's empty-on-unreadable rule
+	 * cannot see this, only the sanitizer can, so it is the half of the guard that
+	 * does not move when the store does.
 	 */
 	it.each([
 		["a string cap", { maxRps: "abc" }],
@@ -214,7 +213,7 @@ describe("main.ts startup ordering", () => {
 
 	/** The `app.whenReady()` handler body, up to the first listener after it. */
 	function whenReadyBody(): string {
-		const start = main.indexOf("app.whenReady()");
+		const start = main.indexOf("app.whenReady().then(");
 		const end = main.indexOf('app.on("window-all-closed"', start);
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);

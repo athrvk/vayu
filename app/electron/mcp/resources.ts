@@ -24,6 +24,7 @@
  *        All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
  */
 
+import { DATA_CONTRACT_SENTENCE, presentCollections } from "./collection-shape.js";
 import type { ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -69,8 +70,10 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		description:
 			"All request collections, each with its own `variables`. A request resolves against the whole chain from the root down, and a nested collection outranks its ancestors. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
-			` Full model: ${VARIABLE_RESOLUTION_URI}.`,
-		read: (ctx, signal) => ctx.client.listCollections(signal),
+			` Full model: ${VARIABLE_RESOLUTION_URI}. ` +
+			DATA_CONTRACT_SENTENCE,
+		read: async (ctx, signal) =>
+			presentCollections(await ctx.client.listCollections(signal), ctx),
 	},
 	{
 		name: "environments",

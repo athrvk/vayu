@@ -74,6 +74,21 @@ std::vector<Request> Database::get_requests_in_collection (const std::string& co
     order_by (&Request::id)));
 }
 
+std::vector<Request> Database::get_requests_in_live_collections () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // A deleted collection stamps its whole subtree, requests included, so the
+    // request's own stamp already excludes most of what the trash holds; the
+    // collection filter is what excludes a live request left inside a deleted
+    // collection by anything that stamped the collection alone. Same tie rule
+    // as `get_requests_in_collection` within each collection.
+    return impl_->storage.get_all<Request> (
+    where (is_null (&Request::deleted_at) &&
+    in (&Request::collection_id,
+    select (&Collection::id, where (is_null (&Collection::deleted_at))))),
+    multi_order_by (order_by (&Request::collection_id), order_by (&Request::order),
+    order_by (&Request::created_at), order_by (&Request::id)));
+}
+
 // Soft delete (issue #988): the row is stamped, not removed. Its examples stay
 // where they are - every read of them is by request id and goes through a
 // request this stamp has made unreadable, so they are as gone as the request

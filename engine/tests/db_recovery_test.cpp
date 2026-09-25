@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -199,9 +201,10 @@ TEST_F (DbRecoveryTest, HealthReportsTheOutcomeWithBothPaths) {
 }
 
 TEST_F (DbRecoveryTest, RestoringFromABackupIsADifferentOutcome) {
-    // A good database, closed, so the constructor has taken its `.bak` copy.
+    // A good database with its `.bak` refreshed, as a daemon start leaves it.
     {
         vayu::db::Database seed (DB_PATH);
+        ASSERT_HAS_VALUE (seed.refresh_recovery_backup ());
     }
     ASSERT_TRUE (std::filesystem::exists (std::string (DB_PATH) + ".bak"));
 
@@ -260,8 +263,8 @@ TEST_F (DbRecoveryTest, QuarantinedSetsAreKeptToTwo) {
         {
             vayu::db::Database db (DB_PATH);
         }
-        // Each round is the no-backup path: the fresh database the previous
-        // round created is valid, so its own start took a `.bak` copy.
+        // Each round is the no-backup path. Nothing here refreshes one, but a
+        // `.bak` left by anything else would turn a round into a restore.
         std::filesystem::remove (std::string (DB_PATH) + ".bak");
 
         const auto sets = vayu::db::quarantined_database_paths (DB_PATH);
@@ -358,6 +361,131 @@ TEST_F (DbRecoveryTest, AMarkerFromAnEngineThatDeletedStillReadsAsADeletion) {
     ASSERT_HAS_VALUE (record);
     EXPECT_TRUE (record->outcome == RecoveryOutcome::DeletedCorrupt);
     EXPECT_FALSE (record->quarantined_path.has_value ());
+}
+
+// ==================== The recovery backup's refresh ====================
+//
+// The `.bak` used to be a file copy the constructor took before the engine
+// listened - O(database size) on every clean start. It is now a snapshot the
+// daemon starts once it listens (`start_recovery_backup_refresh`).
+
+TEST_F (DbRecoveryTest, TheConstructorTakesNoBackup) {
+    // The startup cost this moved: a clean open of an existing, valid database
+    // writes nothing beside it. Mutation check: restore the `copy_db_files`
+    // call in the constructor's validated branch and this reddens.
+    {
+        vayu::db::Database first (DB_PATH);
+        first.init ();
+    }
+    std::filesystem::remove (std::string (DB_PATH) + ".bak");
+
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak"));
+}
+
+TEST_F (DbRecoveryTest, ARefreshedBackupIsWhatRecoveryRestores) {
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+        vayu::db::Collection col;
+        col.id    = "col_kept";
+        col.name  = "Kept";
+        col.order = 0;
+        db.create_collection (col);
+        const auto refreshed = db.refresh_recovery_backup ();
+        ASSERT_HAS_VALUE (refreshed) << refreshed.error ();
+    }
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak.tmp"))
+    << "the snapshot was left beside the backup instead of renamed over it";
+
+    write_corrupt_database ();
+    vayu::db::Database db (DB_PATH);
+
+    EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::RestoredFromBackup);
+    const auto collections = db.get_collections ();
+    ASSERT_EQ (collections.size (), 1u);
+    EXPECT_EQ (collections.front ().id, "col_kept");
+}
+
+TEST_F (DbRecoveryTest, ARefreshRemovesTheSidecarsOfTheBackupItReplaces) {
+    // `recover_database` copies a `.bak-wal` back along with the `.bak`, so
+    // one written for the previous backup would be replayed over a snapshot
+    // it was never part of.
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    write_corrupt_file (std::string (DB_PATH) + ".bak-wal", "-stale-wal");
+    write_corrupt_file (std::string (DB_PATH) + ".bak-shm", "-stale-shm");
+
+    ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
+
+    EXPECT_TRUE (std::filesystem::exists (std::string (DB_PATH) + ".bak"));
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak-wal"));
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak-shm"));
+}
+
+TEST_F (DbRecoveryTest, AStartThatRecoveredLeavesTheBackupItJudgedAlone) {
+    // The corrupt `.bak` is evidence the recovery branch kept; a snapshot of
+    // the fresh database that replaced it is not this start's to write over it.
+    write_corrupt_file (std::string (DB_PATH) + ".bak", "-backup");
+    const std::string backup_bytes = read_file (std::string (DB_PATH) + ".bak");
+    write_corrupt_database ();
+
+    vayu::db::Database db (DB_PATH);
+    ASSERT_TRUE (recorded_outcome (db) == RecoveryOutcome::BackupAlsoCorrupt);
+
+    EXPECT_FALSE (db.refresh_recovery_backup ().has_value ());
+    EXPECT_EQ (read_file (std::string (DB_PATH) + ".bak"), backup_bytes);
+}
+
+TEST_F (DbRecoveryTest, AFinishedRefreshWritesNothingAndKeepsThePreviousBackup) {
+    // A shutdown's `finish_recovery_backup_refresh` must leave the backup that
+    // was there, whole: a refresh it cancelled writes no snapshot and renames
+    // nothing, and a start after it is ignored.
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
+    const std::string previous = read_file (std::string (DB_PATH) + ".bak");
+    ASSERT_FALSE (previous.empty ());
+
+    vayu::db::Collection col;
+    col.id    = "col_after";
+    col.name  = "After";
+    col.order = 0;
+    db.create_collection (col);
+
+    db.finish_recovery_backup_refresh ();
+    db.start_recovery_backup_refresh ();
+    db.finish_recovery_backup_refresh ();
+    EXPECT_FALSE (db.refresh_recovery_backup ().has_value ());
+
+    EXPECT_EQ (read_file (std::string (DB_PATH) + ".bak"), previous);
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak.tmp"));
+}
+
+TEST_F (DbRecoveryTest, ABackgroundRefreshLandsAWholeBackup) {
+    // Built once, outside the wait loop: GCC 13 at -O3 reports a spurious
+    // -Warray-bounds on `std::string + ".bak"` inlined into a loop condition,
+    // which the prod presets' -Werror turns into a build failure.
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+        db.start_recovery_backup_refresh ();
+        // The destructor joins it: `finish_recovery_backup_refresh` would
+        // cancel a refresh this test wants to see complete.
+        for (int i = 0; i < 500 && !std::filesystem::exists (backup); ++i) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+    ASSERT_TRUE (std::filesystem::exists (backup));
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak.tmp"));
+
+    // Whole means recovery can use it.
+    write_corrupt_database ();
+    vayu::db::Database db (DB_PATH);
+    EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::RestoredFromBackup);
 }
 
 } // namespace

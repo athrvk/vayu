@@ -18,8 +18,9 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 
-export function useScriptTypeDefinitionsQuery() {
+export function useScriptTypeDefinitionsQuery({ enabled = true }: { enabled?: boolean } = {}) {
 	return useQuery({
+		enabled,
 		queryKey: queryKeys.scriptTypes.all,
 		queryFn: () => apiService.getScriptTypeDefinitions(),
 		staleTime: QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS,

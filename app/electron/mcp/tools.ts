@@ -28,6 +28,7 @@ import {
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
 import type { Logger } from "../log.js";
+import type { DataFileLocation } from "../data-file-locations.js";
 import {
 	checkAllowlist,
 	checkLoadCaps,
@@ -46,6 +47,11 @@ import {
 	type OriginScopes,
 	type StoredVariableBag,
 } from "./variable-origins.js";
+import {
+	DATA_CONTRACT_SENTENCE,
+	presentCollection,
+	presentCollections,
+} from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
 /** An auth block as stored/forwarded (discriminated by `mode`). */
@@ -216,6 +222,12 @@ export interface ToolContext {
 	 * transport and the stdio CLI) always provide one.
 	 */
 	log?: Logger;
+	/**
+	 * Where a collection's declared data file lives on this machine, as the app
+	 * remembers it (#1742). Absent in the stdio CLI, which runs without the app
+	 * and so has no record of any path.
+	 */
+	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 }
 
 export interface ToolResult {
@@ -2230,7 +2242,7 @@ const scenarioDataInput = z
 	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
-		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
 	);
 
 /**
@@ -4110,6 +4122,213 @@ function describeImport(answer: unknown): string {
 	return text;
 }
 
+/**
+ * What import_document and preview_import take: one schema, so a preview is
+ * always asked the question the import will be.
+ */
+const importDocumentInput = {
+	content: z
+		.string()
+		.describe(
+			"The document text, verbatim - JSON or YAML. Capped by the maxSpecDocumentBytes setting, which is what an over-large document is refused against."
+		),
+	importEnvironments: z
+		.boolean()
+		.optional()
+		.describe(
+			"Whether to create the environments and global variables the document carries. Defaults to true. Off, they are not created and the counts report 0 - the same toggle the import dialog offers."
+		),
+	importScripts: z
+		.boolean()
+		.optional()
+		.describe(
+			"Whether to import pre-request and post-request scripts. Defaults to true. Off, every script imports empty - a Postman collection's `event` blocks are code from a document you were handed."
+		),
+	sourceUrl: z
+		.string()
+		.optional()
+		.describe(
+			"Where the document was fetched from, if it came from a URL. Recorded on a stored OpenAPI document so a later sync knows what to re-fetch, and used to resolve a relative `servers[0].url`; omit it for a document you were handed as text."
+		),
+	fileName: z
+		.string()
+		.optional()
+		.describe("What the file is called, for the result's `meta` only. Never stored."),
+};
+
+/**
+ * The engine payload for an import or its preview.
+ *
+ * External `$ref`s are not followed: resolving one means fetching a URL or
+ * reading a file beside the document, which is the import dialog's business (a
+ * URL proxy and a gated IPC) and not an agent's. A document that names another
+ * file imports whole and says so - `meta.skipped` carries no `external_ref`
+ * count here, because nothing tried. An option the caller did not state is left
+ * absent rather than defaulted here: the engine's default is the one the import
+ * dialog offers, and restating it would be a second place for it to drift.
+ */
+function importPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const sourceUrl = str(args, "sourceUrl");
+	const fileName = str(args, "fileName");
+	const importEnvironments = bool(args, "importEnvironments");
+	const importScripts = bool(args, "importScripts");
+	return {
+		content: requireStr(args, "content"),
+		...(importEnvironments === undefined ? {} : { importEnvironments }),
+		...(importScripts === undefined ? {} : { importScripts }),
+		...(sourceUrl ? { sourceUrl } : {}),
+		...(fileName ? { fileName } : {}),
+	};
+}
+
+/**
+ * What an import would create, read off the parsed tree without handing the
+ * tree back: an OpenAPI spec parses into thousands of requests with bodies,
+ * and a preview is asked "what, and what not", which the counts and names
+ * answer. `meta` rides whole - it is what the import dialog shows.
+ */
+function summarizeImportTree(tree: unknown): Record<string, unknown> {
+	const answer = asRecord(tree);
+	const countRequests = (node: Record<string, unknown>): number =>
+		(Array.isArray(node.requests) ? node.requests.length : 0) +
+		(Array.isArray(node.children)
+			? node.children
+					.filter(isRecord)
+					.reduce((total, child) => total + countRequests(child), 0)
+			: 0);
+	const collections = (Array.isArray(answer.collections) ? answer.collections : [])
+		.filter(isRecord)
+		.map((c) => ({
+			name: typeof c.name === "string" ? c.name : "",
+			folders: Array.isArray(c.children) ? c.children.length : 0,
+			requests: countRequests(c),
+		}));
+	const environments = (Array.isArray(answer.environments) ? answer.environments : [])
+		.filter(isRecord)
+		.map((e) => (typeof e.name === "string" ? e.name : ""));
+	return {
+		collections,
+		environments,
+		globals: isRecord(answer.globals) ? Object.keys(answer.globals).length : 0,
+		clientCertificates: Array.isArray(answer.clientCertificates)
+			? answer.clientCertificates.length
+			: 0,
+		meta: isRecord(answer.meta) ? answer.meta : {},
+	};
+}
+
+/** One sentence for a preview, in the words describeImport uses for the import. */
+function describeImportPreview(summary: Record<string, unknown>): string {
+	const meta = asRecord(summary.meta);
+	const format = typeof meta.format === "string" ? meta.format : "the document";
+	const skipped = Array.isArray(meta.skipped) ? meta.skipped.filter(isRecord) : [];
+	let text = `Nothing was stored. Importing this ${format} would create ${num(meta.requestCount)} request(s) in ${num(meta.folderCount)} folder(s)`;
+	if (num(meta.environmentCount) > 0) text += ` and ${num(meta.environmentCount)} environment(s)`;
+	text += ".";
+	if (skipped.length > 0) {
+		text += ` It would not carry: ${skipped.map((e) => `${num(e.count)} ${String(e.kind)}`).join(", ")}.`;
+	}
+	return text;
+}
+
+/** A request row as a bind preview names it. */
+interface PreviewedRequest {
+	id: string;
+	name: string;
+}
+
+/**
+ * What binding @p content to @p collectionId would do, storing nothing
+ * (the app's Spec tab preview, issue #718 / #869).
+ *
+ * Describe, then match: the same two reads the Spec tab makes, so the preview
+ * and the bind share the engine's reader and its matching rule. `wouldClear` is
+ * the tab's "stale stamps": a request that carries an operation today and
+ * matches nothing in this document loses it on bind. The engine answers the
+ * match in ids, so which of them carry a stamp is read off the subtree's rows.
+ */
+async function previewSpecBind(
+	client: EngineClient,
+	collectionId: string,
+	content: string,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	const described = asRecord(await client.describeSpec(content, signal));
+	const operations = Array.isArray(described.operations) ? described.operations : [];
+	const match = asRecord(await client.matchSpec({ collectionId, operations }, signal));
+	const rows = readCollectionRows(await client.listCollections(signal));
+	const subtree = collectionSubtree(rows, collectionId) ?? [collectionId];
+	const lists = await Promise.all(subtree.map((id) => client.listRequests(id, signal)));
+	const byId = new Map<string, Record<string, unknown>>();
+	for (const list of lists) {
+		for (const row of Array.isArray(list) ? list.filter(isRecord) : []) {
+			if (typeof row.id === "string") byId.set(row.id, row);
+		}
+	}
+	const named = (id: string): PreviewedRequest => {
+		const row = byId.get(id);
+		return { id, name: typeof row?.name === "string" ? row.name : "" };
+	};
+	const unmatchedIds = (
+		Array.isArray(match.unmatchedRequests) ? match.unmatchedRequests : []
+	).filter((id): id is string => typeof id === "string");
+	const wouldClear = unmatchedIds.filter((id) => {
+		const stamp = byId.get(id)?.specOperation;
+		return isRecord(stamp) && Object.keys(stamp).length > 0;
+	});
+	const unmatchedOperations = Array.isArray(match.unmatchedOperations)
+		? match.unmatchedOperations
+		: [];
+	const cut = <T>(list: T[]) => list.slice(0, MAX_SPEC_DIFF_ENTRIES);
+	return {
+		format: described.format ?? null,
+		title: typeof described.title === "string" ? described.title : "",
+		operations: operations.length,
+		matched: Array.isArray(match.matched) ? match.matched.length : 0,
+		wouldClear: { count: wouldClear.length, requests: cut(wouldClear).map(named) },
+		unmatchedRequests: { count: unmatchedIds.length, requests: cut(unmatchedIds).map(named) },
+		unmatchedOperations: {
+			count: unmatchedOperations.length,
+			operations: cut(unmatchedOperations),
+		},
+	};
+}
+
+/** One sentence for a bind preview, in the words describeBind uses for the bind. */
+function describeBindPreview(preview: Record<string, unknown>): string {
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+	const countOf = (key: string) => num(asRecord(preview[key]).count);
+	const parts = [
+		`Nothing was stored. Binding would record identity on ${plural(num(preview.matched), "request")}.`,
+	];
+	if (countOf("wouldClear") > 0) {
+		parts.push(
+			`It would clear identity from ${plural(countOf("wouldClear"), "request")} - each names an operation this document does not declare.`
+		);
+	}
+	if (countOf("unmatchedRequests") > 0 || countOf("unmatchedOperations") > 0) {
+		parts.push(
+			`${plural(countOf("unmatchedRequests"), "request")} would match no operation, and ${plural(countOf("unmatchedOperations"), "operation")} no request.`
+		);
+	}
+	return parts.join(" ");
+}
+
+/**
+ * The setting a connection test's outcome points at. The engine's `outcome` is
+ * deliberately coarse - one value per setting to go and look at - so this is a
+ * lookup, not a diagnosis of its own.
+ */
+const CONNECTION_OUTCOME_HINTS: Record<string, string> = {
+	ok: "The connection works under the proxy, CA and client-certificate settings in force.",
+	proxy_failed:
+		"The proxy refused or could not be reached: check the proxy mode and URL in Vayu Settings -> Network.",
+	tls_failed:
+		"The TLS handshake failed: check the custom CA certificates and the client certificate registered for this host (list_client_certificates).",
+	timed_out: "Nothing answered within 10 seconds: check the host, the port and the network path.",
+	failed: "The connection failed before any hop answered: `detail` carries libcurl's own message.",
+};
+
 /** A count the engine reported, or 0 - never `NaN` in a sentence. */
 function num(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -4188,6 +4407,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob; a request resolves against the whole chain from the root down, not just its own collection. " +
+			DATA_CONTRACT_SENTENCE +
+			" " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
 			),
@@ -4198,7 +4419,11 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listCollections(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.listCollections(signal),
+				(rows) => presentCollections(rows, ctx)
+			),
 	},
 	{
 		name: "list_requests",
@@ -4768,7 +4993,10 @@ export const TOOLS: McpTool[] = [
 				}
 				if (elements.length > 0) payload.elements = elements;
 			}
-			return callEngine(() => ctx.client.createCollection(payload, signal));
+			return callEngine(
+				() => ctx.client.createCollection(payload, signal),
+				(row) => presentCollection(row, ctx)
+			);
 		},
 	},
 	{
@@ -4867,8 +5095,9 @@ export const TOOLS: McpTool[] = [
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			const result = await callEngine(() =>
-				ctx.client.updateCollection(collectionId, payload, signal)
+			const result = await callEngine(
+				() => ctx.client.updateCollection(collectionId, payload, signal),
+				(row) => presentCollection(row, ctx)
 			);
 			return result.isError
 				? result
@@ -5198,6 +5427,30 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "preview_import",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read a collection, environment or API spec document the way import_document would, and store nothing: the collections it would create (names, folder and request counts), the environments, the number of globals, and `meta` - the format, the counts, and `meta.skipped`, what the document declares that Vayu cannot carry, each with the requests it applies to. Takes exactly import_document's arguments, so preview first, show the user what would be left out, then import. Available with writes off.",
+		annotations: {
+			title: "Preview an import",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: importDocumentInput,
+		handler: async (args, ctx, signal) => {
+			const payload = importPayload(args);
+			let summary: Record<string, unknown>;
+			try {
+				summary = summarizeImportTree(await ctx.client.parseImport(payload, signal));
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return withCaveat(jsonResult(summary), `\n\n${describeImportPreview(summary)}`);
+		},
+	},
+	{
 		name: "import_document",
 		category: "write",
 		// All three families: a Postman collection creates collections and
@@ -5207,7 +5460,7 @@ export const TOOLS: McpTool[] = [
 		// would leave an open list showing a tree the import has already changed.
 		invalidates: ["collection", "request", "environment"],
 		description:
-			"Import a collection, environment or API spec from its document text. GUARDED: requires write access to be enabled in Vayu Settings. Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything.",
+			"Import a collection, environment or API spec from its document text. GUARDED: requires write access to be enabled in Vayu Settings. Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything. Call preview_import first with the same arguments to see what would be created and what would be left out, without storing anything.",
 		annotations: {
 			title: "Import a document",
 			readOnlyHint: false,
@@ -5219,64 +5472,14 @@ export const TOOLS: McpTool[] = [
 			idempotentHint: false,
 			openWorldHint: false,
 		},
-		inputSchema: {
-			content: z
-				.string()
-				.describe(
-					"The document text, verbatim - JSON or YAML. Capped by the maxSpecDocumentBytes setting, which is what an over-large document is refused against."
-				),
-			importEnvironments: z
-				.boolean()
-				.optional()
-				.describe(
-					"Whether to create the environments and global variables the document carries. Defaults to true. Off, they are not created and the counts report 0 - the same toggle the import dialog offers."
-				),
-			importScripts: z
-				.boolean()
-				.optional()
-				.describe(
-					"Whether to import pre-request and post-request scripts. Defaults to true. Off, every script imports empty - a Postman collection's `event` blocks are code from a document you were handed."
-				),
-			sourceUrl: z
-				.string()
-				.optional()
-				.describe(
-					"Where the document was fetched from, if it came from a URL. Recorded on a stored OpenAPI document so a later sync knows what to re-fetch, and used to resolve a relative `servers[0].url`; omit it for a document you were handed as text."
-				),
-			fileName: z
-				.string()
-				.optional()
-				.describe("What the file is called, for the result's `meta` only. Never stored."),
-		},
+		inputSchema: importDocumentInput,
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const content = requireStr(args, "content");
-			const sourceUrl = str(args, "sourceUrl");
-			const fileName = str(args, "fileName");
-			// External `$ref`s are not followed: resolving one means fetching a
-			// URL or reading a file beside the document, which is the import
-			// dialog's business (a URL proxy and a gated IPC) and not an agent's.
-			// A document that names another file imports whole and says so -
-			// `meta.skipped` carries no `external_ref` count here, because nothing
-			// tried.
-			// An option the caller did not state is left absent rather than
-			// defaulted here: the engine's default is the one the import dialog
-			// offers, and restating it would be a second place for it to drift.
-			const importEnvironments = bool(args, "importEnvironments");
-			const importScripts = bool(args, "importScripts");
+			const payload = importPayload(args);
 			let outcome: unknown;
 			try {
-				outcome = await ctx.client.importDocument(
-					{
-						content,
-						...(importEnvironments === undefined ? {} : { importEnvironments }),
-						...(importScripts === undefined ? {} : { importScripts }),
-						...(sourceUrl ? { sourceUrl } : {}),
-						...(fileName ? { fileName } : {}),
-					},
-					signal
-				);
+				outcome = await ctx.client.importDocument(payload, signal);
 			} catch (err) {
 				// The engine's own sentence: "Unrecognised format" for a file no
 				// format claims, a read failure naming the line for one that is
@@ -5284,6 +5487,44 @@ export const TOOLS: McpTool[] = [
 				return engineErrorResult(err);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeImport(outcome)}`);
+		},
+	},
+	{
+		name: "preview_spec_bind",
+		category: "read",
+		invalidates: [],
+		description:
+			"Say what bind_spec would do with a document, and store nothing: how many of the collection's requests it would record an operation on, which requests would LOSE the operation they carry today because this document does not declare it (`wouldClear`), which requests match no operation, and which operations match no request. Uses the engine's own reader and matching rule, the ones bind_spec uses, over the collection's whole subtree. Lists are capped at " +
+			MAX_SPEC_DIFF_ENTRIES +
+			" entries; each `count` is the true total. Available with writes off.",
+		annotations: {
+			title: "Preview an OpenAPI bind",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection to preview binding. Its whole subtree is matched, as bind_spec does."
+				),
+			content: z
+				.string()
+				.describe(
+					"The OpenAPI document text, JSON or YAML. Capped by the maxSpecDocumentBytes setting, as bind_spec is."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const content = requireStr(args, "content");
+			let preview: Record<string, unknown>;
+			try {
+				preview = await previewSpecBind(ctx.client, collectionId, content, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return withCaveat(jsonResult(preview), `\n\n${describeBindPreview(preview)}`);
 		},
 	},
 	{
@@ -5297,7 +5538,7 @@ export const TOOLS: McpTool[] = [
 		// changing any cached row.
 		invalidates: ["collection", "request"],
 		description:
-			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. GUARDED: requires write access to be enabled in Vayu Settings. Pass the document text (JSON or YAML) - the engine stores it, works out which of the collection's requests is which operation by method and path shape, and records that identity, all in one transaction: nothing is created or deleted, and a bind that fails writes nothing at all. RE-BINDING REPLACES THE CONTRACT: any request whose identity the new document does not account for has it cleared, because a stamp naming an operation of a document this collection is no longer bound to would be read as identity rather than as a gap. The result reports how many requests were stamped and how many cleared, plus the requests and operations nothing paired with.",
+			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. GUARDED: requires write access to be enabled in Vayu Settings. Pass the document text (JSON or YAML) - the engine stores it, works out which of the collection's requests is which operation by method and path shape, and records that identity, all in one transaction: nothing is created or deleted, and a bind that fails writes nothing at all. RE-BINDING REPLACES THE CONTRACT: any request whose identity the new document does not account for has it cleared, because a stamp naming an operation of a document this collection is no longer bound to would be read as identity rather than as a gap. The result reports how many requests were stamped and how many cleared, plus the requests and operations nothing paired with. Call preview_spec_bind first to see which requests would gain an operation and which would lose the one they carry, without storing anything.",
 		annotations: {
 			title: "Bind OpenAPI spec",
 			readOnlyHint: false,
@@ -7129,7 +7370,7 @@ export const TOOLS: McpTool[] = [
 				.array(z.record(z.string(), z.unknown()))
 				.optional()
 				.describe(
-					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
+					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
 				),
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name
@@ -7525,6 +7766,55 @@ export const TOOLS: McpTool[] = [
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
+		},
+	},
+	{
+		name: "list_client_certificates",
+		category: "read",
+		invalidates: [],
+		description:
+			'List the client certificates (mutual TLS) Vayu presents, one per host and optional port: `host` (or `*.example.com`), `port` (null for every port), `certPath`, `keyPath` ("" for a PKCS#12 bundle), `certFormat` and `hasPassphrase`. The passphrase itself is never returned. Read this when a host answers with a TLS handshake failure, or diagnose_connection reports `tls_failed`: a host with no entry sends no certificate. Entries are added in Vayu Settings.',
+		annotations: {
+			title: "List client certificates",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) =>
+			callEngine(() => ctx.client.listClientCertificates(signal)),
+	},
+	{
+		name: "diagnose_connection",
+		category: "execute",
+		invalidates: [],
+		description:
+			"Test whether Vayu can reach a URL under the proxy, custom CA and client-certificate settings in force, and say which hop failed. Sends one HEAD with certificate verification on, redirects off and a 10-second deadline, and returns `outcome` (ok, proxy_failed, tls_failed, timed_out, failed), the proxy mode and URL used, the client certificate that answered for the host (\"\" when none), and on failure the engine's error code and libcurl's message. Use it when requests fail with connection or TLS errors, before concluding the API is down. Never returns a response body or headers. GUARDED: the URL's host must be on Vayu's MCP allowlist.",
+		annotations: {
+			title: "Diagnose a connection",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: true,
+		},
+		inputSchema: {
+			url: z
+				.string()
+				.describe("The http or https URL to test, fully resolved - no {{variables}}."),
+		},
+		handler: async (args, ctx, signal) => {
+			const url = requireStr(args, "url");
+			const gate = checkAllowlist(url, ctx.config);
+			if (!gate.ok) return errorResult(gate.error!);
+			let answer: unknown;
+			try {
+				answer = await ctx.client.diagnoseConnection(url, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const outcome = asRecord(answer).outcome;
+			const hint =
+				typeof outcome === "string" ? CONNECTION_OUTCOME_HINTS[outcome] : undefined;
+			return withCaveat(jsonResult(answer), hint ? `\n\n${hint}` : "");
 		},
 	},
 	{

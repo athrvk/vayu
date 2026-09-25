@@ -12,7 +12,7 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UseQueryResult } from "@tanstack/react-query";
+import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
@@ -46,32 +46,83 @@ export function useCollectionsQuery() {
 }
 
 /**
+ * Every collection's request list, keyed by collection id, from one
+ * `GET /requests` - every collection the collections list names has an entry,
+ * an empty one included.
+ */
+type RequestsByCollection = Record<string, Request[]>;
+
+/**
+ * The warm-cache pass: every collection's request list, seeded into each
+ * collection's own `listByCollection` entry.
+ *
+ * One `GET /requests` for the whole workspace, fetched alongside the
+ * collections rather than after them. It used to be one list call per
+ * collection, issued once the collections had arrived: measured on a
+ * 300-collection workspace, 312 engine requests at launch and ~7s before the
+ * burst settled, every one of them serialized on the engine's database lock.
+ * The collections are fetched here too (joining the collections query, never
+ * duplicating it) so a collection with no requests gets its empty list seeded
+ * as well - a parent folder usually has none of its own, and an unseeded key
+ * is a fetch of its own the moment the tree mounts it.
+ */
+async function seedRequestsByCollection(queryClient: QueryClient): Promise<RequestsByCollection> {
+	const [collections, requests] = await Promise.all([
+		queryClient.fetchQuery({
+			queryKey: queryKeys.collections.list(),
+			queryFn: () => apiService.listCollections(),
+		}),
+		apiService.listRequests(),
+	]);
+	const byCollection: RequestsByCollection = {};
+	for (const collection of collections) byCollection[collection.id] = [];
+	for (const request of requests) {
+		(byCollection[request.collectionId] ??= []).push(request);
+	}
+	for (const [collectionId, list] of Object.entries(byCollection)) {
+		queryClient.setQueryData(queryKeys.requests.listByCollection(collectionId), list);
+	}
+	return byCollection;
+}
+
+/**
+ * One collection's request list, for its `listByCollection` query.
+ *
+ * Joins the warm-cache pass while it is in flight instead of issuing a list
+ * call of its own: the tree mounts one query per collection as soon as the
+ * collections arrive, which is before the pass lands, and each of those would
+ * otherwise put the per-collection fan-out straight back. Outside that window -
+ * a mutation invalidating one collection, say - it fetches just that list,
+ * because the pass's answer is then older than whatever made this refetch.
+ */
+function requestsForCollection(queryClient: QueryClient, collectionId: string): Promise<Request[]> {
+	const seed = queryClient.getQueryState(queryKeys.prefetch.allRequests());
+	if (seed?.fetchStatus === "fetching") {
+		return queryClient
+			.fetchQuery({
+				queryKey: queryKeys.prefetch.allRequests(),
+				queryFn: () => seedRequestsByCollection(queryClient),
+			})
+			.then((byCollection) => byCollection[collectionId] ?? []);
+	}
+	return apiService.listRequests({ collectionId });
+}
+
+/**
  * Prefetch all collections and their requests
  *
- * This hook fetches all collections and then prefetches requests for each.
- * Useful for app initialization to populate the cache.
+ * Mounted once by `App`, at launch. Invalidating `prefetch.allRequests` re-runs
+ * the whole pass as one call - a caller that also invalidates `requests.all`
+ * does this one first, so the lists that refetch join it (see
+ * `requestsForCollection`).
  */
 export function usePrefetchCollectionsAndRequests() {
 	const queryClient = useQueryClient();
 	const { data: collections = [] } = useCollectionsQuery();
 
-	// Prefetch requests for all collections when collections are loaded
 	useQuery({
 		queryKey: queryKeys.prefetch.allRequests(),
-		queryFn: async () => {
-			// Prefetch requests for each collection in parallel
-			await Promise.all(
-				collections.map((collection) =>
-					queryClient.prefetchQuery({
-						queryKey: queryKeys.requests.listByCollection(collection.id),
-						queryFn: () => apiService.listRequests({ collectionId: collection.id }),
-						staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
-					})
-				)
-			);
-			return true;
-		},
-		enabled: collections.length > 0,
+		queryFn: () => seedRequestsByCollection(queryClient),
 		staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS, // Re-prefetch once stale
 		refetchOnWindowFocus: false,
 	});
@@ -83,9 +134,10 @@ export function usePrefetchCollectionsAndRequests() {
  * Fetch requests for a specific collection
  */
 export function useRequestsQuery(collectionId: string | null) {
+	const queryClient = useQueryClient();
 	return useQuery({
 		queryKey: queryKeys.requests.listByCollection(collectionId ?? ""),
-		queryFn: () => apiService.listRequests({ collectionId: collectionId! }),
+		queryFn: () => requestsForCollection(queryClient, collectionId!),
 		enabled: !!collectionId,
 	});
 }
@@ -103,6 +155,7 @@ export function useRequestsQuery(collectionId: string | null) {
  * chevron click that had just collapsed it.
  */
 export function useMultipleCollectionRequests(collectionIds: string[]) {
+	const queryClient = useQueryClient();
 	// Callers build this array inline from the collections query, so it is a new
 	// array on every render. Pin it to its contents: it is what `combine` closes
 	// over, and `combine` has to keep a stable identity (see below).
@@ -140,7 +193,7 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 	return useQueries({
 		queries: stableCollectionIds.map((collectionId) => ({
 			queryKey: queryKeys.requests.listByCollection(collectionId),
-			queryFn: () => apiService.listRequests({ collectionId: collectionId }),
+			queryFn: () => requestsForCollection(queryClient, collectionId),
 		})),
 		combine,
 	});

@@ -18,7 +18,10 @@
  * - **It is not the contract.** The declared columns are collection state and
  *   ride the engine row (`Collection.dataSchema`), because they are the same on
  *   every machine and travel through import. A *path* is true of one filesystem
- *   only, so it stays here and never reaches the engine, an export or MCP.
+ *   only, so it stays here and never reaches the engine or an export. The one
+ *   reader outside the renderer is the app's own MCP server, which listens on
+ *   loopback and so only answers clients on this same machine
+ *   (`useDataFileLocationMirror` publishes it, issue #1742).
  * - **It never holds rows.** A data file's rows are user data of unknown
  *   sensitivity and are persisted nowhere in Vayu - not here, not engine-side,
  *   not in a run snapshot (which records `dataRowCount` and nothing else). Only

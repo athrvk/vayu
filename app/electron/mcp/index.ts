@@ -19,6 +19,7 @@ import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { McpDataChangedEvent, ToolContext } from "./tools.js";
 import type { Logger } from "../log.js";
+import type { DataFileLocation } from "../data-file-locations.js";
 
 export interface VayuMcpServiceOptions {
 	engineBaseUrl: string;
@@ -33,6 +34,8 @@ export interface VayuMcpServiceOptions {
 	onDataChanged?: (event: McpDataChangedEvent) => void;
 	/** Where a served call is logged (#1558), `src: "mcp"`. */
 	log?: Logger;
+	/** Where a collection's declared data file lives on this machine (#1742). */
+	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 }
 
 export class VayuMcpService {
@@ -52,6 +55,7 @@ export class VayuMcpService {
 				config: this.config,
 				onDataChanged: opts.onDataChanged,
 				log: opts.log,
+				dataFileLocation: opts.dataFileLocation,
 			}),
 		});
 	}

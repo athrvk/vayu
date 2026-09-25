@@ -128,11 +128,13 @@ const COPY: Partial<Record<string, Copy>> = {
 		many: "{n} webhooks skipped (the API calls you, not the reverse)",
 	},
 	deprecated_operation: HIDDEN,
+	// Not "the cookie jar": nothing in the app adds a cookie to it (it fills from
+	// responses and `pm.cookies.jar()`), so a header is what the user can write.
 	cookie_param: {
 		tier: "action",
-		named: "cookie not imported - add it to the cookie jar",
-		one: "1 cookie parameter not imported - use the cookie jar",
-		many: "{n} cookie parameters not imported - use the cookie jar",
+		named: "cookie not imported - add it as a Cookie header",
+		one: "1 cookie parameter not imported - add it as a Cookie header",
+		many: "{n} cookie parameters not imported - add them as a Cookie header",
 	},
 	// XML imports as `xml`; what reaches this is a binary or image body.
 	unmapped_body: {
@@ -170,9 +172,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	},
 	security_unmapped_apikey_cookie: {
 		tier: "action",
-		named: "API key goes in a cookie - add it to the cookie jar",
-		one: "1 request sends its API key in a cookie - add it to the cookie jar",
-		many: "{n} requests send their API key in a cookie - add it to the cookie jar",
+		named: "API key goes in a cookie - add it as a Cookie header",
+		one: "1 request sends its API key in a cookie - add it as a Cookie header",
+		many: "{n} requests send their API key in a cookie - add it as a Cookie header",
 	},
 	// A stale `state` is regenerated and a stashed token is fetched again by the grant.
 	oauth2_dropped_field: HIDDEN,

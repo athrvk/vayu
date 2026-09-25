@@ -194,6 +194,43 @@ TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
     server.stop ();
 }
 
+// The API listens on loopback only, where compressing a response is CPU spent
+// for no bandwidth anyone saves - and cpp-httplib's brotli ran at its default
+// quality, 11: measured on a 300-collection workspace, `/collections` went
+// from 2.6 ms to 175 ms and one collection's request list from 1.4 ms to
+// 16 ms for a renderer that advertises `br`, which put ~5 s of compression
+// into every launch. `vcpkg.json` builds cpp-httplib without its compression
+// features; this pins the outcome for the header a browser actually sends.
+// Mutation check: drop `"default-features": false` from the cpp-httplib entry
+// and the response comes back `Content-Encoding: br`.
+TEST_F (ServerBindTest, AResponseIsNeverCompressedForALoopbackClient) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    httplib::Client client ("127.0.0.1", port);
+    client.set_decompress (false);
+    const httplib::Headers browser = { { "Accept-Encoding", "gzip, deflate, br, zstd" } };
+    // The config catalogue: JSON, and large enough that a compressing server
+    // would compress it.
+    auto response = client.Get ("/config", browser);
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 200);
+    ASSERT_GT (response->body.size (), 4096u)
+    << "the body is too small to prove anything";
+    EXPECT_FALSE (response->has_header ("Content-Encoding"))
+    << "answered with Content-Encoding: "
+    << response->get_header_value ("Content-Encoding");
+
+    server.stop ();
+}
+
 // Issue #1510: the hook that replaces every route's hand-written entry line
 // with one centralised request line, proven against the real server rather
 // than against `install_request_logger` called by hand - `Server::setup_routes`

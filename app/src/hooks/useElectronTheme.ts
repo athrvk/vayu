@@ -73,15 +73,19 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 			const shouldMatchAccent = savedMatchAccent === "true";
 
 			if (window.electronAPI) {
-				// Get theme from Electron
-				const theme = await window.electronAPI.getTheme();
-				source = theme.themeSource as ThemeSource;
-
+				// Both asked at once: neither answer depends on the other, and in
+				// sequence the second round trip to the main process waited out the
+				// first while the window was painting its first frame.
+				//
 				// Check if accent color is supported. The main process answers
 				// `accent:get` on every platform, but only resolves a scheme on
 				// Windows/macOS - Linux has no OS accent color, so accentScheme
 				// comes back null there and the toggle must not appear at all.
-				const accentInfo = await window.electronAPI.getAccentScheme();
+				const [theme, accentInfo] = await Promise.all([
+					window.electronAPI.getTheme(),
+					window.electronAPI.getAccentScheme(),
+				]);
+				source = theme.themeSource as ThemeSource;
 				accentSupported = accentInfo.accentScheme !== null;
 
 				// Resolve once: when matching is on and the OS gave us a scheme, it

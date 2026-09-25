@@ -41,7 +41,7 @@ describe("the app's Windows identity", () => {
 
 	it("is set at module scope, before the app is ready", () => {
 		const setAt = main.indexOf(`app.setAppUserModelId(APP_USER_MODEL_ID);`);
-		const readyAt = main.indexOf("app.whenReady()");
+		const readyAt = main.indexOf("app.whenReady().then(");
 
 		expect(setAt).toBeGreaterThan(-1);
 		expect(readyAt).toBeGreaterThan(-1);

@@ -14,7 +14,7 @@
  * error handling - and Electron met the user with "A JavaScript error occurred
  * in the main process" on every launch.
  *
- * These drive the real electron-store against a temp userData directory rather
+ * These drive the real store (`json-store.ts`) against a temp userData directory rather
  * than a mock of it, because the defect was in what the library does with a file
  * we hand it: a mocked store would have "passed" against the bug. `electron`
  * itself is faked, since that is the part vitest cannot provide.
@@ -42,8 +42,7 @@ vi.mock("electron", () => {
 		shell: { openPath: async () => "" },
 		screen: { getAllDisplays: () => fake.displays },
 	};
-	// electron-store reaches for the default export; window-state.ts for the named ones.
-	return { ...api, default: api };
+	return api;
 });
 
 const DEFAULTS = { defaultWidth: 1400, defaultHeight: 900 };

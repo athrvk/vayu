@@ -97,6 +97,76 @@ TEST_F (ConfigSeedTest, MatchesTheGoldenCatalogue) {
     << "config_seeds/*.cpp file dropped, added or changed an entry";
 }
 
+// Every start reseeds, and the seed runs before the engine listens: an entry
+// read back from the table must compare equal to the one this build seeds, or
+// each start rewrites the whole catalogue for nothing. Driven over the real
+// round trip - seeded, stored, read back - because an equality that held only
+// for hand-built entries would say nothing about what SQLite hands back.
+// Mutation check: drop the `updated != it->second` guard in `seed.hpp` and
+// every entry is replaced here.
+TEST_F (ConfigSeedTest, AReseedOverAnUnchangedCatalogueWritesNothing) {
+    vayu::db::Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto stored = db.get_all_config_entries ();
+    ASSERT_GT (stored.size (), 40u)
+    << "catalogue empty or unseeded - nothing was compared";
+
+    std::unordered_set<std::string> known;
+    std::vector<std::string> replaced;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    std::move (stored), known,
+    [&replaced] (
+    const vayu::db::ConfigEntry& entry) { replaced.push_back (entry.key); },
+    [] (const std::string&) {});
+    const int64_t now = vayu::db::config_seeds::now_ms ();
+    vayu::db::config_seeds::seed_general (seed, now);
+    vayu::db::config_seeds::seed_network (seed, now);
+    vayu::db::config_seeds::seed_services (seed, now);
+    vayu::db::config_seeds::seed_observability (seed, now);
+    vayu::db::config_seeds::seed_data_retention (seed, now);
+    vayu::db::config_seeds::seed_limits (seed, now);
+    vayu::db::config_seeds::seed_scripting (seed, now);
+
+    ASSERT_GT (known.size (), 40u) << "the seed functions seeded nothing";
+    std::string joined;
+    for (const auto& key : replaced) {
+        joined += (joined.empty () ? "" : ", ") + key;
+    }
+    EXPECT_TRUE (replaced.empty ()) << "rewrote unchanged entries: " << joined;
+}
+
+TEST (ConfigSeederTest, RewritesAnEntryWhoseMetadataChangedAndKeepsTheUsersValue) {
+    vayu::db::ConfigEntry stored;
+    stored.key           = "someLimit";
+    stored.value         = "42"; // the user's
+    stored.type          = "integer";
+    stored.label         = "Old label";
+    stored.description   = "Old description.";
+    stored.category      = "limits";
+    stored.default_value = "10";
+    stored.updated_at    = 1234;
+
+    vayu::db::ConfigEntry seeded = stored;
+    seeded.value                 = seeded.default_value;
+    seeded.label                 = "New label";
+    seeded.updated_at            = 9999;
+
+    std::unordered_set<std::string> known;
+    std::vector<vayu::db::ConfigEntry> replaced;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    { stored }, known,
+    [&replaced] (
+    const vayu::db::ConfigEntry& entry) { replaced.push_back (entry); },
+    [] (const std::string&) {});
+    seed (seeded);
+
+    ASSERT_EQ (replaced.size (), 1u);
+    EXPECT_EQ (replaced.front ().label, "New label");
+    EXPECT_EQ (replaced.front ().value, "42");
+    EXPECT_EQ (replaced.front ().updated_at, 1234);
+}
+
 TEST (ConfigSeederTest, RefusesAKeySeededTwice) {
     std::unordered_set<std::string> known;
     vayu::db::config_seeds::ConfigSeeder seed (

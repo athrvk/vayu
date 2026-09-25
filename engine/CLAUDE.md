@@ -182,8 +182,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   workspace: select candidates with a SQL predicate, rewrite them inside one
   `transaction_guard` (the `seed_default_config` shape), record a done marker
   so the next start skips the scan, and write `<db>.pre-upgrade.bak`
-  immediately before the first rewrite. `<db>.bak` is not that copy: the next
-  clean start refreshes it from a file the repair has already rewritten.
+  immediately before the first rewrite. `<db>.bak` is not that copy: the same
+  start refreshes it, once it listens, from a file the repair has already
+  rewritten.
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.53), which runs before `init ()` and therefore
@@ -355,12 +356,10 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 
-The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id`,
-`GET /run/:id/report`, `POST /run/:id/stop`, `DELETE /run/:id`,
-`GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still work as
-**deprecated aliases** and will be removed in a future minor release;
-`GET /stats/:runId` in its SSE mode is retained wholesale. See
-`docs/engine/api-reference.md` (Deprecated aliases). An unresolved
+The pre-consolidation paths (`POST /request`, `POST /run`, `/run/:id...`,
+`GET /metrics/live/:runId`, `GET /stats/:runId`) are removed and answer `404`;
+`docs/engine/api-reference.md` (Removed route aliases) maps each to its
+replacement. An unresolved
 `{"mode":"inherit"}` reaching an execution endpoint is treated as no auth and
 logged as a warning: it means a client skipped composition.
 

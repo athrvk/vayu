@@ -43,7 +43,7 @@ before anything else uses the database, and what it does next depends on whether
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
-| Opens cleanly | The whole file set is copied to `<db>.bak` (sidecars included), so the backup is only ever taken from a database that validated | Nothing |
+| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy | Nothing |
 | Fails, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
 | Fails, `<db>.bak` fails the same validation | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
 | Fails, there is no backup | The corrupt file set is quarantined and a fresh empty database is created | `started_fresh_quarantined` |
@@ -63,9 +63,9 @@ up looking like a fresh install.
 
 > **`<db>.pre-upgrade.bak` is different: it is written once.** A one-time
 > repair pass (below) takes it immediately before its first rewrite, and
-> nothing after that touches it again - unlike `<db>.bak`, which the *next*
-> clean start would refresh from a file the repair has already rewritten. It
-> is the one place the pre-repair rows survive more than a single restart.
+> nothing after that touches it again - unlike `<db>.bak`, which the same start
+> refreshes, once it listens, from a file the repair has already rewritten. It
+> is the one place the pre-repair rows survive the start that repaired them.
 
 ### The quarantine (issue #984)
 

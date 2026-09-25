@@ -145,6 +145,10 @@ HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to 
 `tools/list`. Both are safe on HTTP, just not instantaneous. See
 [Design notes](#design-notes).
 
+The other way round, a collection's remembered data-file path (`dataFile`) is
+answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
+holds that record. See [Data files](#data-files).
+
 ## Tools
 
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
@@ -163,7 +167,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
-| `list_collections`     | read     | `GET /collections`                           | -                          |
+| `list_collections`     | read     | `GET /collections`                           | - (a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary |
@@ -172,20 +176,24 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
+| `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
 | `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
-| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar |
-| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it |
+| `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers |
+| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped as `list_collections` answers it |
+| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; returns the row shaped as `list_collections` answers it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
+| `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (`mode`: `contract` by default, `full` to write every edit into a bound document; document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry and how many secrets it left out) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
+| `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id |
@@ -1307,6 +1315,25 @@ does not make MCP a second **composition** path, which is the split that is
 load-bearing: `resolve_variables` reports stored definitions and substitutes no
 `{{tokens}}` - `POST /compose` remains the only place a request is composed.
 
+### Data files
+
+A collection's declared data file reaches MCP in two parts (issue #1742).
+`dataSchema` is the contract - column names, the file's name, when it was
+declared - and is the same on every machine, so it rides the engine row.
+`dataFile: { path, fileName }` is where that file is **on this machine**, and
+comes from the app's renderer (`stores/data-file-store.ts`), which publishes
+its whole map to the main process over `dataFile:locations`
+(`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
+keeping only an absolute path with an extension `dataFile:read` would open).
+
+A path is true of one filesystem only, which is why it never reaches the engine
+or an export. It may reach MCP because the Electron-hosted server listens on
+loopback (`MCP_HOST`): every client that can read the answer runs on the machine
+the path names, and can open the file with its own access, the way a person
+would. The stdio CLI runs without the app, so it has no record and never names
+a path. **The rows are never sent:** no tool reads the file, so an agent that
+wants the data opens it itself, and a run still takes its rows inline as `data`.
+
 ## Resources
 
 Read-only Vayu data an agent can attach as context (`resources.ts`):
@@ -1314,7 +1341,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
-| `vayu://collections`        | All request collections.         |
+| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`). |
 | `vayu://environments`       | All environments.                |
 | `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
 | `vayu://config`             | Engine configuration entries.    |
@@ -1636,7 +1663,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
 | `cli.ts`           | Standalone stdio server (env-configured).                                   |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
+| `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
@@ -1645,9 +1672,9 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 on quit, and exposes IPC the Settings panel uses.
 
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
-`connect.ts` are self-contained (`electron-store` and `node:child_process` are
+`connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, `tools.ts` and its 67 schemas built at
+reachable from `index.ts` - the SDK, zod, `tools.ts` and its 73 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
@@ -1671,6 +1698,12 @@ One channel runs the other way, main → renderer:
 | Channel            | Purpose                                                       |
 | ------------------ | ------------------------------------------------------------- |
 | `mcp:data-changed` | A successful call changed engine data; invalidate its queries. |
+
+And one runs renderer → main for MCP's sake:
+
+| Channel              | Purpose                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the
 main process, which no renderer query can observe (`refetchOnWindowFocus` is off

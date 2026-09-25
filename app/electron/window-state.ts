@@ -10,7 +10,7 @@
  * Persists and restores window size, position, and maximized state
  */
 
-import Store from "electron-store";
+import { createJsonStore } from "./json-store.js";
 import { BrowserWindow, screen } from "electron";
 import { WINDOW_STATE_SAVE_DEBOUNCE_MS } from "./constants.js";
 
@@ -27,19 +27,16 @@ interface WindowStateOptions {
 	defaultHeight: number;
 }
 
-const store = new Store<{ windowState: WindowState }>({
-	name: "window-state",
-	/*
-	 * conf reads and parses the file inside its constructor, and this Store is
-	 * constructed at module scope - which main.ts imports before `app.whenReady`.
-	 * Without this flag a corrupt window-state.json throws a SyntaxError during
-	 * module evaluation, so Electron shows "A JavaScript error occurred in the
-	 * main process" and the app never starts, on every launch until the user
-	 * finds and deletes a hidden file. Starting over from an empty store is the
-	 * right failure mode for a file whose only job is window geometry.
-	 */
-	clearInvalidConfig: true,
-});
+/*
+ * Read before the window is built, which is before `app.whenReady` resolves on
+ * a cold launch - so a corrupt window-state.json must be an empty store rather
+ * than a throw, or Electron shows "A JavaScript error occurred in the main
+ * process" and the app never starts, on every launch until the user finds and
+ * deletes a hidden file. `createJsonStore` answers every unreadable file that
+ * way; starting over is the right failure mode for a file whose only job is
+ * window geometry.
+ */
+const store = createJsonStore<{ windowState: WindowState }>("window-state");
 
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value);

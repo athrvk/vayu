@@ -17,7 +17,9 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -32,6 +34,8 @@ std::pair<int, nlohmann::json>
 get_request_response (vayu::db::Database& db, const std::string& id);
 // Defined in requests.cpp; returns the GET /requests JSON array body.
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
+// Defined in requests.cpp; the GET /requests body with no `collectionId`.
+std::string list_all_requests_body (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace {
@@ -132,6 +136,52 @@ TEST_F (RequestsRouteTest, ListBodyForUnknownCollectionIsEmptyArray) {
     json::parse (vayu::http::routes::list_requests_body (*db_, "col_nope"));
     ASSERT_TRUE (body.is_array ());
     EXPECT_TRUE (body.empty ());
+}
+
+// The launch fetch (one call, where the app used to make one per collection)
+// must answer with exactly the union of the per-collection lists: every row of
+// every live collection, each collection's rows in that collection's own
+// order, and nothing the trash holds. Compared against `list_requests_body`
+// rather than a hand-written expectation, so the two cannot drift apart.
+TEST_F (RequestsRouteTest, AllRequestsBodyIsEveryLiveCollectionsListAndNothingTrashed) {
+    for (const char* id : { "col_b", "col_a", "col_gone" }) {
+        vayu::db::Collection col;
+        col.id    = id;
+        col.name  = id;
+        col.order = 0;
+        db_->create_collection (col);
+    }
+    const std::vector<std::tuple<const char*, const char*, int>> rows = {
+        { "req_a2", "col_a", 1 }, { "req_b1", "col_b", 0 }, { "req_a1", "col_a", 0 },
+        { "req_gone", "col_gone", 0 }, { "req_deleted", "col_b", 1 }
+    };
+    for (const auto& [id, collection, order] : rows) {
+        vayu::db::Request r;
+        r.id            = id;
+        r.collection_id = collection;
+        r.name          = id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = std::string ("https://example.test/") + id;
+        r.order         = order;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db_->save_request (r);
+    }
+    db_->delete_request ("req_deleted");
+    db_->delete_collection ("col_gone");
+
+    const auto all = json::parse (vayu::http::routes::list_all_requests_body (*db_));
+    ASSERT_TRUE (all.is_array ());
+
+    json expected = json::array ();
+    for (const char* collection : { "col_a", "col_b" }) {
+        for (const auto& row :
+        json::parse (vayu::http::routes::list_requests_body (*db_, collection))) {
+            expected.push_back (row);
+        }
+    }
+    ASSERT_EQ (expected.size (), 3u) << "the fixture seeded the wrong rows";
+    EXPECT_EQ (all, expected);
 }
 
 TEST_F (RequestsRouteTest, PresentRequestIs200WithSerializedShape) {
