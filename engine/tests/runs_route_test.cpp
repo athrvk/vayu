@@ -6,9 +6,9 @@
  * Focus: the list must return the `{data, pagination}` envelope with compact
  * per-row `summary` objects (not the full config_snapshot), honour each filter
  * (type / status / requestId / collectionId / q), clamp limit/offset, and never
- * 500 on a malformed snapshot. The legacy no-param path (a bare array of full
- * configSnapshot rows) is preserved by vayu::json::serialize(Run), asserted
- * here too so a change to the row shape cannot silently break external scripts.
+ * 500 on a malformed snapshot. The full row GET /runs/:id answers comes from
+ * vayu::json::serialize(Run), asserted here too so the list's compact rows and
+ * the single run's full one cannot trade shapes.
  *
  * Covers the route's extracted core in isolation, matching the suite's other
  * route tests (no in-process HTTP server).
@@ -797,20 +797,19 @@ TEST_F (RunsRouteTest, DbCountMatchesFilter) {
     EXPECT_EQ (db_->count_runs ({}), 3); // no filter -> everything
 }
 
-// The legacy no-param path serializes runs with the full configSnapshot (and
-// no `summary`). This is what the route returns when called with zero query
-// params; asserting the serializer keeps that shape guards external scripts.
-TEST_F (RunsRouteTest, LegacySerializationKeepsConfigSnapshot) {
-    seed ({ .id = "run_legacy",
+// GET /runs/:id serializes a run with the full configSnapshot (and no
+// `summary`, which is the list row's compact stand-in for it).
+TEST_F (RunsRouteTest, FullRunSerializationKeepsConfigSnapshot) {
+    seed ({ .id = "run_full",
     .config_snapshot = R"({"url":"https://a/","method":"GET","headers":{"X":"1"}})" });
 
     auto runs = db_->get_all_runs ();
     ASSERT_EQ (runs.size (), 1u);
-    auto legacy = vayu::json::serialize (runs.front ());
-    EXPECT_TRUE (legacy.contains ("configSnapshot"));
-    EXPECT_FALSE (legacy.contains ("summary"));
+    auto full = vayu::json::serialize (runs.front ());
+    EXPECT_TRUE (full.contains ("configSnapshot"));
+    EXPECT_FALSE (full.contains ("summary"));
     // Full snapshot, including keys the summary would drop.
-    EXPECT_TRUE (legacy["configSnapshot"].contains ("headers"));
+    EXPECT_TRUE (full["configSnapshot"].contains ("headers"));
 }
 
 // GET /runs/:id/report's `configuration` object: same nine-key extension as

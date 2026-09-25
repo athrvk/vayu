@@ -1350,8 +1350,8 @@ class RunManager {
     std::map<std::string, std::shared_ptr<RunContext>> retained_runs_;
 
     // Background TTL sweeper. Without this, retained runs only get evicted when
-    // /metrics/live or start_run fires - headless API users (POST /run +
-    // GET /run/:id/report) never trigger either, and retained RunContexts
+    // /runs/:id/live or start_run fires - headless API users (POST /runs +
+    // GET /runs/:id/report) never trigger either, and retained RunContexts
     // (tick_buffer, HdrHistogram, counters - the execution machinery is
     // already released by retain_run) accumulate indefinitely.
     std::thread sweeper_thread_;
@@ -1419,7 +1419,7 @@ class RunManager {
     // RunContext::release_execution_resources(), so the event loop, the bound
     // rows and the plan are freed here rather than at the sweep (issue #1154).
     void retain_run (const std::string& run_id);
-    // Active OR retained-within-window. Used only by /metrics/live.
+    // Active OR retained-within-window. Used only by /runs/:id/live.
     std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);
     // Evict retained runs whose completed_at_ms is older than ttl_ms.
     void sweep_retained (int64_t ttl_ms);

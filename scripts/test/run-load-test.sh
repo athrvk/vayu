@@ -67,13 +67,9 @@ fi
 
 DAEMON_URL="http://127.0.0.1:9876"
 LIVE_METRICS_URL="$DAEMON_URL/runs/$RUN_ID/live"
-# Deliberately /stats/:id, not /runs/:id/metrics. This is streamed as SSE by
-# stream_sse below; /stats/:id in its SSE mode is legacy DB-polling that was
-# retained wholesale and has no canonical rename. /runs/:id/metrics is the
-# rename of /stats/:id?format=json only - it returns a {data,pagination} JSON
-# body, so swapping it in here would feed curl -N something with no
-# event:/data: lines and the fallback would silently stream nothing.
-STATS_URL="$DAEMON_URL/stats/$RUN_ID"
+# The stored report, for a run whose live stream has already been evicted
+# (liveRetentionMs after it finished) - the live stream then answers 404.
+REPORT_URL="$DAEMON_URL/runs/$RUN_ID/report"
 
 echo ""
 echo "Streaming live metrics from $LIVE_METRICS_URL..."
@@ -112,7 +108,7 @@ stream_sse() {
             fi
             echo "----------------------------------------"
             if [ "$show_full_report_hint" = "true" ]; then
-                echo "Full report available at: $STATS_URL"
+                echo "Full report available at: $REPORT_URL"
             fi
             return 0
         elif [[ "$line" == "event: error" ]]; then
@@ -139,9 +135,11 @@ if stream_sse "$LIVE_METRICS_URL" "true"; then
     exit 0
 fi
 
-# Fallback to stats endpoint for historical data
-echo "Live metrics not available, using stats endpoint..."
-if stream_sse "$STATS_URL" "false"; then
+# The live stream is gone once the run has been evicted; the report is not.
+echo "Live metrics not available, reading the stored report..."
+REPORT=$(curl -s -f "$REPORT_URL" 2>/dev/null)
+if [ -n "$REPORT" ]; then
+    echo "$REPORT" | format_json
     exit 0
 fi
 

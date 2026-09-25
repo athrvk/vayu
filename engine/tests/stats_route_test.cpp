@@ -2,8 +2,7 @@
  * @file tests/stats_route_test.cpp
  * @brief Tests for the time-series JSON core (run_time_series_response).
  *
- * This core backs both the canonical GET /runs/:id/metrics and the legacy
- * GET /stats/:id?format=json, so the two paths cannot drift. It must:
+ * This core backs GET /runs/:id/metrics. It must:
  *   - return a definitive 404 {"error": {"code", "message"}} for a missing run,
  *   - return 200 with an empty `data` array and a well-formed pagination
  *     envelope for a run that has no metrics yet,

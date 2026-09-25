@@ -328,26 +328,6 @@ inline void finalize_cors_expose_headers (httplib::Response& res) {
 }
 
 /**
- * @brief Wrap a handler so a deprecated-alias registration is distinguishable
- *        in the logs from its canonical counterpart.
- *
- * The renamed routes register one shared handler under both the canonical path
- * (first) and the legacy path (second). cpp-httplib handlers are copyable
- * std::functions, so the body is never duplicated; `req.matches[1]` is
- * identical under both patterns. The alias registration wraps the handler with
- * this so the per-request logs carry a ` (deprecated alias)` marker and the
- * actual `req.path` that was hit - the canonical registration logs unchanged.
- */
-inline httplib::Server::Handler deprecated_alias (httplib::Server::Handler handler) {
-    return [handler = std::move (handler)] (
-           const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("http",
-        req.method + " " + req.path + " (deprecated alias) - prefer the canonical path");
-        handler (req, res);
-    };
-}
-
-/**
  * The one null-vs-absent rule for resource writes (POST create / PUT update).
  *
  * Before issue #95 each resource - and in places each *field* - invented its

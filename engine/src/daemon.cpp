@@ -179,8 +179,8 @@ int run_daemon (std::span<char* const> args) {
     vayu::http::global_init ();
 
     // Create RunManager and start its background TTL sweeper so retained
-    // runs (completed but kept for /metrics/live replay) get evicted even in
-    // headless flows that never hit /metrics/live or /run. The provider is
+    // runs (completed but kept for /runs/:id/live replay) get evicted even in
+    // headless flows that never hit /runs/:id/live or POST /runs. The provider is
     // re-read each sweep tick, so changing liveRetentionMs from the UI takes
     // effect without restarting the daemon (0 = evict immediately).
     vayu::core::RunManager run_manager;

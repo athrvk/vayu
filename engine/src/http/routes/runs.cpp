@@ -1489,30 +1489,6 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
 namespace {
 
 void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    const bool wants_envelope = req.has_param ("limit") ||
-    req.has_param ("offset") || req.has_param ("type") || req.has_param ("status") ||
-    req.has_param ("requestId") || req.has_param ("collectionId") ||
-    req.has_param ("q") || req.has_param ("baseline");
-
-    if (!wants_envelope) {
-        // Legacy no-param path: today's bare array, byte-shape-identical.
-        try {
-            auto runs                = ctx.db.get_all_runs ();
-            nlohmann::json json_runs = nlohmann::json::array ();
-            for (const auto& run : runs) {
-                json_runs.push_back (vayu::json::serialize (run));
-            }
-            vayu::utils::log_debug ("run",
-            "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
-            res.set_content (json_runs.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "run", "GET /runs - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
-        return;
-    }
-
     // Parse + clamp pagination; validate filters (invalid enum -> ignored).
     int64_t limit = 50;
     if (req.has_param ("limit")) {
@@ -1820,45 +1796,37 @@ void register_run_routes (RouteContext& ctx) {
      * - q: case-insensitive substring over the stored config_snapshot text
      * - baseline: "true" lists only pinned baselines, "false" only unpinned
      *   ones; any other value is ignored, like an invalid type/status
-     *
-     * Back-compat (removed next minor): a request with *no* query params at all
-     * returns the legacy bare array of full-configSnapshot rows unchanged, so
-     * external scripts keep working. Any recognised param opts into the envelope.
      */
     ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_list_runs (ctx, req, res);
     });
 
     /**
-     * GET /runs/:runId  (alias: GET /run/:runId, deprecated)
+     * GET /runs/:runId
      * Retrieves details for a specific test run by its ID.
      */
-    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req,
-                                       httplib::Response& res) {
+    ctx.server.Get (R"(/runs/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_get_run (ctx, req, res);
-    };
-    ctx.server.Get (R"(/runs/([^/]+))", get_run);
-    ctx.server.Get (R"(/run/([^/]+))", deprecated_alias (get_run));
+    });
 
     /**
-     * DELETE /runs/:runId  (alias: DELETE /run/:runId, deprecated)
+     * DELETE /runs/:runId
      * Deletes a specific test run and all associated metrics/results. An active
      * run is stopped first and only deleted once its worker has settled; see
      * delete_run_response.
      */
-    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req,
-                                          httplib::Response& res) {
+    ctx.server.Delete (R"(/runs/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_delete_run (ctx, req, res);
-    };
-    ctx.server.Delete (R"(/runs/([^/]+))", delete_run);
-    ctx.server.Delete (R"(/run/([^/]+))", deprecated_alias (delete_run));
+    });
 
     /**
      * PUT /runs/:runId/baseline  - body {"baseline": true|false}
      * Pins or unpins a run as a baseline: the known-good run later runs are
      * compared against, and the one run retention will not expire. Answers the
      * updated list row; 404 when no such run, 400 on a body that does not carry
-     * a boolean `baseline`. No deprecated alias - the endpoint is new.
+     * a boolean `baseline`.
      */
     ctx.server.Put (R"(/runs/([^/]+)/baseline)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -1866,26 +1834,22 @@ void register_run_routes (RouteContext& ctx) {
     });
 
     /**
-     * POST /runs/:runId/stop  (alias: POST /run/:runId/stop, deprecated)
+     * POST /runs/:runId/stop
      * Stops a running load test.
      */
-    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req,
-                                        httplib::Response& res) {
+    ctx.server.Post (R"(/runs/([^/]+)/stop)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_stop_run (ctx, req, res);
-    };
-    ctx.server.Post (R"(/runs/([^/]+)/stop)", stop_run);
-    ctx.server.Post (R"(/run/([^/]+)/stop)", deprecated_alias (stop_run));
+    });
 
     /**
-     * GET /runs/:runId/report  (alias: GET /run/:runId/report, deprecated)
+     * GET /runs/:runId/report
      * Retrieves a detailed statistical report for a specific test run.
      */
-    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req,
-                                              httplib::Response& res) {
+    ctx.server.Get (R"(/runs/([^/]+)/report)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_get_run_report (ctx, req, res);
-    };
-    ctx.server.Get (R"(/runs/([^/]+)/report)", get_run_report);
-    ctx.server.Get (R"(/run/([^/]+)/report)", deprecated_alias (get_run_report));
+    });
 
     /**
      * GET /runs/:runId/samples?limit=&offset=

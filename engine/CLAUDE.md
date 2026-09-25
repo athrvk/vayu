@@ -355,12 +355,10 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 
-The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id`,
-`GET /run/:id/report`, `POST /run/:id/stop`, `DELETE /run/:id`,
-`GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still work as
-**deprecated aliases** and will be removed in a future minor release;
-`GET /stats/:runId` in its SSE mode is retained wholesale. See
-`docs/engine/api-reference.md` (Deprecated aliases). An unresolved
+The pre-consolidation paths (`POST /request`, `POST /run`, `/run/:id...`,
+`GET /metrics/live/:runId`, `GET /stats/:runId`) are removed and answer `404`;
+`docs/engine/api-reference.md` (Removed route aliases) maps each to its
+replacement. An unresolved
 `{"mode":"inherit"}` reaching an execution endpoint is treated as no auth and
 logged as a warning: it means a client skipped composition.
 
