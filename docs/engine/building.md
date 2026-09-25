@@ -455,7 +455,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
 | ryml (rapidyaml) | Reading a stored OpenAPI document, which is YAML as often as JSON (issue #853). Chosen over yaml-cpp and fkYAML by measurement: it is the only one of the three that reproduces js-yaml's reading of the same bytes on the corpus - yaml-cpp discards quoting (the string `"2.0"` comes back as the number 2.0, and `swagger: "2.0"` is what Swagger detection turns on) and fkYAML sorts mapping keys, losing the document order a coverage block prints. It is also 4-27x faster there, at a comparable binary cost. Pulls `c4core` with it. Only `engine/src/core/openapi_document.cpp` includes it |
-| cpp-httplib | HTTP server library - built with the `openssl` feature, which the test suite's HTTPS listener needs (custom-CA verification is asserted on a real handshake, not reasoned about) |
+| cpp-httplib | HTTP server library - built with `default-features: false` and the `openssl` feature, which the test suite's HTTPS listener needs (custom-CA verification is asserted on a real handshake, not reasoned about). The port's default `brotli` feature is off on purpose: with it, every response to a client advertising `br` was compressed at brotli's default quality, 11, which on a loopback-only server is CPU spent for no bandwidth saved - `/collections` for a 300-collection workspace went from 2.6 ms to 175 ms, and a launch spent ~5 s compressing. `server_bind_test.cpp` pins an uncompressed answer to a browser's `Accept-Encoding` |
 | sqlite3 | Embedded database |
 | sqlite-orm | C++ ORM for SQLite |
 | gtest | Unit testing framework |
@@ -661,7 +661,7 @@ those - so only the `kernel32` family matters:
 | libcurl's nine other version gates: `lib/cf-socket.c:193` (the `TCP_KEEP*` `setsockopt` gate, which is backend-independent), five more in `schannel.c`, three in `schannel_verify.c` | No - all evaluated at connect, handshake or verify time, after `Curl_win32_init()` resolved the ntdll pointer, so they read the true OS whatever the manifest says |
 | OpenSSL 3.6.3 | No - calls neither API |
 | SQLite (`sqlite3_win32_is_nt()`) | No - it calls `GetVersionEx[AW]`, but reads only `dwPlatformId` (NT vs Win9x), which the shim does not change; and the call compiles out entirely on this SDK target (`NTDDI_VERSION >= NTDDI_WINBLUE`), leaving `osIsNT()` a constant |
-| nghttp2, cpp-httplib, libsodium, zlib, brotli, sqlite-orm, GoogleTest, rapidyaml/c4core, valijson, quickjs-ng, HdrHistogram | No |
+| nghttp2, cpp-httplib, libsodium, zlib, sqlite-orm, GoogleTest, rapidyaml/c4core, valijson, quickjs-ng, HdrHistogram | No |
 
 The file itself is only the `supportedOS` ids - no `requestedExecutionLevel`
 (the engine is an unprivileged sidecar and must stay one), no DPI awareness (it
@@ -1494,8 +1494,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[core,http2,non-http,openssl] libsodium nlohmann-json ryml valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
-  (the leading `core` is what `default-features: false` spells on the command line, and it is load-bearing on Windows - see the dependency table above. `http2` is required, without it libcurl is built without nghttp2 and the HTTP/2 support test fails; `non-http` is a default feature the engine relies on and has to be named once the defaults are off; cpp-httplib's `openssl` is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile)
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[core,http2,non-http,openssl] libsodium nlohmann-json ryml valijson cpp-httplib[core,openssl] sqlite3 sqlite-orm gtest`
+  (the leading `core` is what `default-features: false` spells on the command line, and it is load-bearing on Windows - see the dependency table above. `http2` is required, without it libcurl is built without nghttp2 and the HTTP/2 support test fails; `non-http` is a default feature the engine relies on and has to be named once the defaults are off; cpp-httplib's `openssl` is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile; its `core` keeps the default `brotli` off, see the table)
 - On Windows, ensure Visual Studio C++ tools are installed
 
 ### Build Script Issues
