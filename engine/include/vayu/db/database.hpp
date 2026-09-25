@@ -835,6 +835,48 @@ class Database {
         bool held_ = false;
     };
 
+    // Recovery backup - the `<db>.bak` a failed validation restores from
+
+    /**
+     * @brief Replace `<db>.bak` with a snapshot of this database, if this start
+     *        validated it.
+     *
+     * The constructor used to take that copy itself, as a file copy, before the
+     * engine listened - O(database size) on every clean start. This is the
+     * same backup taken afterwards: `VACUUM INTO` a `.bak.tmp` on a connection
+     * of its own (a consistent snapshot under WAL, which a file copy of a live
+     * database is not), validated by the constructor's own probe, then renamed
+     * over the backup. A snapshot that fails at any step is removed and the
+     * previous backup is left exactly as it was, so the one copy recovery would
+     * reach for is never a partial one - which the in-place copy it replaces
+     * could leave behind if the process died mid-write.
+     *
+     * A no-op on a start that took the recovery branch: the backup that branch
+     * judged, restored or kept as evidence is not this call's to overwrite.
+     *
+     * @return why nothing was written, or nothing. Never throws.
+     */
+    std::expected<void, std::string> refresh_recovery_backup (); // db_maintenance.cpp
+
+    /**
+     * @brief Run @ref refresh_recovery_backup on a thread of its own.
+     *
+     * The daemon calls this once its listener is up, so the snapshot overlaps
+     * the app's first requests instead of delaying `/health`. At most one per
+     * `Database`; a second call is ignored.
+     */
+    void start_recovery_backup_refresh (); // db_maintenance.cpp
+
+    /**
+     * @brief Interrupt a running refresh and wait for its thread.
+     *
+     * A shutdown must not wait out a whole snapshot of a large workspace, and
+     * must not release the engine's lock while one is still reading the file.
+     * An interrupted snapshot is discarded; the previous backup stands.
+     * Idempotent, and called by the destructor as well.
+     */
+    void finish_recovery_backup_refresh (); // db_maintenance.cpp
+
     // Config Entries - Structured configuration with metadata; db_config.cpp
     void save_config_entry (const ConfigEntry& entry);
     /**
@@ -905,6 +947,13 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /**
+     * @brief Whether the database at @p path opens and carries this build's
+     *        schema: the constructor's validation of the file and of its
+     *        `.bak`, and @ref refresh_recovery_backup's of its own snapshot.
+     */
+    static bool probe_database (const std::string& path); // db_maintenance.cpp
 
     /// The startup recovery record, read from the marker file in the
     /// constructor. See `recovery()`.

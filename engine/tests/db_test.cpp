@@ -1930,11 +1930,12 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
         return names;
     };
 
-    // Opened twice: the backup is written from an *existing* database, so a
-    // single open would not produce the `.bak` this is here to catch.
-    for (int i = 0; i < 2; ++i) {
+    // Refreshed the way the daemon does once it listens, so the `.bak` (and
+    // any sidecar a refresh leaves) is among what this scan must see cleaned.
+    {
         Database db (stem.string ());
         db.init ();
+        ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
     }
 
     // The scan must have seen something, or "nothing left over" below is

@@ -48,40 +48,18 @@ Database::Database (const std::string& db_path) {
     fs::path backup_file = db_file;
     backup_file += ".bak";
 
-    // Whether the database at `path` opens and carries this build's schema.
-    //
-    // The same probe answers for the main file and for the `.bak` beside it
-    // (issue #984): the backup used to be restored on the strength of its
-    // existence alone - "we assume the backup itself is valid" - so a torn copy
-    // was written over the only other copy of the user's data. An
-    // `integrity_check` pragma would answer a narrower question (pages, not
-    // schema) and would not answer the one that matters here, which is whether
-    // *this engine* can open the file it is about to commit to.
-    auto probe_database = [] (const std::string& path) {
-        try {
-            // Ahead of `Impl`'s own construction, never after: `Impl`'s
-            // constructor already opens a connection and sets
-            // `journal_mode`, and `sync_schema ()` below is what would
-            // `DROP COLUMN` the pre-cutover script columns before this
-            // migration ever got to read them (issue #1514).
-            migrate_before_sync (path);
-            Impl probe (path);
-            probe.storage.sync_schema ();
-            return true;
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "db", "Database validation failed for " + path + ": " + e.what ());
-            return false;
-        }
-    };
-
     // 1. Validate current database
-    if (has_sqlite_header (db_file) && probe_database (db_path)) {
-        // 2. The database is valid. Update the backup for *next* time - only
-        // ever from a database that validated, so a bad one cannot overwrite a
-        // good backup.
-        vayu::utils::log_debug ("db", "Database validation successful. Updating backup...");
-        copy_db_files (db_file, backup_file);
+    const bool validated = has_sqlite_header (db_file) && probe_database (db_path);
+    if (validated) {
+        // 2. The database is valid, so the backup for *next* time may be
+        // refreshed from it - only ever from a database that validated, so a
+        // bad one cannot overwrite a good backup. Not here, though: the copy is
+        // O(database size) and this runs before the engine listens, so it was
+        // the one step of a clean start that grew with the user's data
+        // (measured: 177 ms warm and 1.1 s cold on a 280 MB workspace, every
+        // start). `start_recovery_backup_refresh` takes it once the listener is
+        // up, as a consistent snapshot rather than a file copy.
+        vayu::utils::log_debug ("db", "Database validation successful");
     } else {
         recover_database (db_file, backup_file, db_path, probe_database);
     }
@@ -95,6 +73,7 @@ Database::Database (const std::string& db_path) {
     impl_ = std::make_unique<Impl> (db_path);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
+    impl_->recovery_backup_due = validated;
 
     // 4. The recovery record this process reports. Read from the file rather
     // than kept from the branch above, so a marker written by an *earlier*
@@ -103,7 +82,11 @@ Database::Database (const std::string& db_path) {
     recovery_ = read_recovery_marker (db_path);
 }
 
-Database::~Database () = default;
+Database::~Database () {
+    // Before `impl_` goes: the refresh thread copies through a connection of
+    // its own but reads `impl_` for its paths and its cancellation state.
+    finish_recovery_backup_refresh ();
+}
 
 const std::string& Database::path () const {
     return impl_->opened_file;

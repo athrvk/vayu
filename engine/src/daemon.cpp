@@ -213,6 +213,12 @@ int run_daemon (std::span<char* const> args) {
                      "port, or pass --port, then start the engine again.\n";
         std::cerr.flush ();
         exit_code = 1;
+    } else {
+        // After the listener, never before it: the refresh is O(database size)
+        // and used to be taken in the `Database` constructor, ahead of the
+        // first `/health`. It reads through a connection of its own, so the
+        // app's first requests are served alongside it.
+        db.start_recovery_backup_refresh ();
     }
 
     // Wait for shutdown signal (either from OS signal or /shutdown endpoint)
@@ -242,6 +248,11 @@ int run_daemon (std::span<char* const> args) {
     // The order below is load-bearing: workers joined, then curl's global
     // teardown, then `server` / `run_manager` / `db` at scope exit.
     run_manager.shutdown ();
+
+    // Before the lock goes: a snapshot still reading the database must not
+    // overlap the next engine's start. Interrupted rather than waited out; the
+    // previous backup stands.
+    db.finish_recovery_backup_refresh ();
 
     vayu::http::global_cleanup ();
 

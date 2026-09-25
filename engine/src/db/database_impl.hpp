@@ -39,6 +39,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -533,6 +534,22 @@ struct Database::Impl {
     /// because the slot is deliberately taken *outside* the DB mutex - a
     /// `VACUUM INTO` of a large workspace must not stall every other endpoint.
     std::atomic<bool> backup_running{ false };
+
+    /// Whether this start validated the database it opened, which is the one
+    /// condition under which `<db>.bak` may be refreshed from it: a start that
+    /// took the recovery branch instead must leave the backup it judged alone.
+    /// Written once by the constructor, before any thread can read it.
+    bool recovery_backup_due = false;
+
+    /// The background refresh of `<db>.bak` (`Database::start_recovery_backup_refresh`).
+    /// The connection is published for as long as its `VACUUM INTO` runs so a
+    /// shutdown can `sqlite3_interrupt` it; the mutex orders that interrupt
+    /// against the close, and `recovery_backup_cancelled` refuses a refresh
+    /// that had not reached its copy yet.
+    std::mutex recovery_backup_mutex;
+    sqlite3* recovery_backup_connection = nullptr;
+    bool recovery_backup_cancelled      = false;
+    std::thread recovery_backup_thread;
 
     /// The file `storage` was opened on, for `Database::path`. Named for the
     /// file rather than `db_path`, which the constructor below already uses for

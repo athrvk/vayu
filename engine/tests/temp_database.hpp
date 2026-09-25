@@ -135,8 +135,11 @@ inline void remove_database_files (const std::string& path) {
     // is a third copy of the trio, written once by `strip_stored_managed_headers`
     // the first time it finds a row to rewrite (issue #1487) - most fixtures
     // never provoke it, but one that does must not leak it into the next test's
-    // scratch directory.
-    for (const std::string& base : { path, path + ".bak", path + ".pre-upgrade.bak" }) {
+    // scratch directory. `path.bak.tmp` is the recovery-backup refresh's
+    // snapshot before it is renamed over `path.bak`; only a refresh that
+    // failed or was interrupted leaves one.
+    for (const std::string& base :
+    { path, path + ".bak", path + ".bak.tmp", path + ".pre-upgrade.bak" }) {
         for (const char* suffix : { "", "-wal", "-shm" }) {
             std::error_code ec;
             std::filesystem::remove (base + suffix, ec);
