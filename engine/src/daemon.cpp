@@ -16,12 +16,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <mutex>
 #include <span>
 #include <string>
-#include <thread>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/daemon_args.hpp"
@@ -35,6 +36,23 @@
 
 namespace {
 std::atomic<bool> g_running{ true };
+
+// What the main loop waits on between checks of `g_running`. A signal handler
+// may only store the atomic - notifying a condition variable is not
+// async-signal-safe - so a signal is still seen on the loop's next check, but
+// `POST /shutdown` (how the app stops the engine on every platform) runs on an
+// ordinary thread and wakes the loop at once instead of waiting out the check.
+std::mutex g_wake_mutex;
+std::condition_variable g_wake;
+
+void request_stop () {
+    {
+        std::lock_guard<std::mutex> lock (g_wake_mutex);
+        g_running.store (false);
+    }
+    g_wake.notify_all ();
+}
+
 vayu::platform::LockHandle g_lock_handle = vayu::platform::INVALID_LOCK_HANDLE;
 
 bool acquire_lock (const std::string& lock_path) {
@@ -196,7 +214,7 @@ int run_daemon (std::span<char* const> args) {
     server.set_shutdown_callback ([&] () {
         vayu::utils::log_info (
         "shutdown", "Shutdown callback invoked - signaling main loop to exit");
-        g_running.store (false);
+        request_stop ();
     });
 
     // A listener that never came up and one that was asked to stop both leave
@@ -221,9 +239,14 @@ int run_daemon (std::span<char* const> args) {
         db.start_recovery_backup_refresh ();
     }
 
-    // Wait for shutdown signal (either from OS signal or /shutdown endpoint)
-    while (g_running && server.is_running ()) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+    // Wait for shutdown signal (either from OS signal or /shutdown endpoint).
+    // The timeout is the signal path's check interval and the listener-died
+    // check; `/shutdown` wakes the wait directly (see `request_stop`).
+    {
+        std::unique_lock<std::mutex> lock (g_wake_mutex);
+        while (g_running && server.is_running ()) {
+            g_wake.wait_for (lock, std::chrono::milliseconds (100));
+        }
     }
 
     // Graceful shutdown

@@ -89,15 +89,15 @@ void register_health_routes (RouteContext& ctx) {
         response["message"] = "Shutdown initiated";
         res.set_content (response.dump (), "application/json");
 
-        // Schedule callback after response is sent so client gets 200 OK
-        std::thread ([&ctx] () {
-            std::this_thread::sleep_for (std::chrono::milliseconds (100));
-            if (ctx.on_shutdown) {
-                vayu::utils::log_debug ("http", "Invoking shutdown callback");
-                ctx.on_shutdown ();
-            }
-        })
-        .detach ();
+        // Called inline: the callback only signals the daemon's wait, and the
+        // teardown that follows cannot overtake this response - `server.stop()`
+        // joins httplib's worker pool, and this handler's worker writes the
+        // 200 before it returns to the pool. The 100 ms sleep that used to sit
+        // here bought nothing that ordering does not already guarantee.
+        if (ctx.on_shutdown) {
+            vayu::utils::log_debug ("http", "Invoking shutdown callback");
+            ctx.on_shutdown ();
+        }
     });
 }
 
