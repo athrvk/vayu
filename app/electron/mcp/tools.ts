@@ -46,6 +46,11 @@ import {
 	type OriginScopes,
 	type StoredVariableBag,
 } from "./variable-origins.js";
+import {
+	DATA_CONTRACT_SENTENCE,
+	presentCollection,
+	presentCollections,
+} from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
 /** An auth block as stored/forwarded (discriminated by `mode`). */
@@ -2230,7 +2235,7 @@ const scenarioDataInput = z
 	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
-		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
 	);
 
 /**
@@ -4188,6 +4193,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob; a request resolves against the whole chain from the root down, not just its own collection. " +
+			DATA_CONTRACT_SENTENCE +
+			" " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
 			),
@@ -4198,7 +4205,8 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listCollections(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(() => ctx.client.listCollections(signal), presentCollections),
 	},
 	{
 		name: "list_requests",
@@ -4768,7 +4776,10 @@ export const TOOLS: McpTool[] = [
 				}
 				if (elements.length > 0) payload.elements = elements;
 			}
-			return callEngine(() => ctx.client.createCollection(payload, signal));
+			return callEngine(
+				() => ctx.client.createCollection(payload, signal),
+				presentCollection
+			);
 		},
 	},
 	{
@@ -4867,8 +4878,9 @@ export const TOOLS: McpTool[] = [
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			const result = await callEngine(() =>
-				ctx.client.updateCollection(collectionId, payload, signal)
+			const result = await callEngine(
+				() => ctx.client.updateCollection(collectionId, payload, signal),
+				presentCollection
 			);
 			return result.isError
 				? result
@@ -7129,7 +7141,7 @@ export const TOOLS: McpTool[] = [
 				.array(z.record(z.string(), z.unknown()))
 				.optional()
 				.describe(
-					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
+					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
 				),
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name

@@ -400,6 +400,14 @@ run:
   request's own and the collection chain's, which run around every step - and
   the panel says so: a column name a script computes at run time cannot be seen
   from here.
+- **An agent can read them too.** Over [MCP](../engine/mcp.md),
+  `list_collections` and `vayu://collections` carry a declaring collection's
+  `dataSchema` (columns, file name, when it was declared), so an agent building
+  the `data` rows for `run_collection` or `start_load_run` knows which columns
+  to supply. A collection that declares nothing has no `dataSchema` at all -
+  the ancestor walk above is left to the reader, the same as it is for
+  variables. The path and the rows are not on MCP, for the reasons in the
+  table above.
 
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
