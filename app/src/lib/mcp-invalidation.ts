@@ -62,20 +62,19 @@ const INVALIDATORS: Record<
 	 * pass succeeds once and would stay fresh forever, so a collection an agent
 	 * created mid-session never gets one - the same invalidation
 	 * `useCreateCollectionMutation` and `useRestoreTrashMutation` already do. The
-	 * cost is knowingly the largest here: the pass fans out one list fetch per
-	 * collection, and `requests.all` above has just marked every one of them
-	 * stale, so a collection event refetches the whole set rather than the
-	 * mounted part of it. That is the trade the two app-side callers already
-	 * make, and this family's tools are the coarse, occasional ones (a create, an
-	 * import, a spec sync), not the ones an agent loops over row by row - which
-	 * is exactly why the `request` family below does *not* take this key.
+	 * pass is one `GET /requests` for the whole workspace, invalidated ahead of
+	 * `requests.all` so the mounted lists that refetch join it rather than each
+	 * making a call of their own (`requestsForCollection`). This family's tools
+	 * are the coarse, occasional ones (a create, an import, a spec sync), not the
+	 * ones an agent loops over row by row - which is exactly why the `request`
+	 * family below does *not* take this key.
 	 */
 	collection: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 	},
 
 	/*
