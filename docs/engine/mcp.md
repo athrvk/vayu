@@ -176,20 +176,24 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
+| `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
 | `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
+| `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; returns the row shaped as `list_collections` answers it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
+| `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (`mode`: `contract` by default, `full` to write every edit into a bound document; document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry and how many secrets it left out) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
+| `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id |
@@ -1670,7 +1674,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`electron-store` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, `tools.ts` and its 67 schemas built at
+reachable from `index.ts` - the SDK, zod, `tools.ts` and its 73 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
