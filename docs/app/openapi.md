@@ -396,7 +396,9 @@ field afterward, so anything there is yours from that point on.
 ## Export - back out to a document
 
 Any collection exports as an OpenAPI document, from its ⋯ menu in the sidebar or
-from the **Export as OpenAPI** button on the Spec tab. The document is assembled
+from the Spec tab's **Export** menu (**OpenAPI…**). The same menu also writes a
+Postman Collection v2.1 - see
+[Exporting to Postman](import-collections/postman.md#exporting-to-postman). The document is assembled
 by the engine, from what is stored, and written to a file you choose the format
 of - JSON or YAML, the same document either way. Nothing is sent anywhere, and
 nothing is written: an export is a read of what the collection already is.

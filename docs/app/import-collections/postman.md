@@ -255,6 +255,29 @@ All defined in `engine/src/core/import_document.cpp` (except `normalize_template
 | [`join_exec`](./README.md#join_exec) | `event.script.exec` → joined script string |
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | rewrite `{{ x }}` / `{{ _.x }}` template syntax to Vayu `{{x}}` (`path_template.cpp`); applied to URLs, values, vars, and auth fields. Called **without** `pathTemplates`, so a literal single-brace `{x}` is left alone - in Postman only `{{x}}` is a template, and rewriting `/tags/{beta}` or `fields=friends{name}` invented a variable that resolved to nothing |
 
+## Exporting to Postman
+
+The way back is an export, not a parse: any collection writes out as a Postman
+Collection v2.1 file, from its ⋯ menu in the sidebar (**Export as Postman
+Collection**) or from the Spec tab's **Export** menu (**Postman Collection
+v2.1…**). The engine assembles the document
+(`POST /export/postman`) from what is stored - folders, requests, variables,
+auth and scripts - and the dialog offers **Copy** or **Download**, saving
+`<collection name>.postman_collection.json`. Nothing is sent anywhere, and
+nothing is written: an export is a read of what the collection already is.
+
+**Credentials stay out by default.** With **Include credentials** off, auth
+secrets and variables marked secret are written empty, and the dialog says how
+many. Turn it on to write them as stored, which is what Postman's own export
+does - only for a file that stays with you.
+
+**What Postman has no place for is listed, not dropped.** Before you download,
+the dialog states how many requests and folders the file carries and names each
+kind of thing the export could not carry, with a count, in the engine's words.
+
+An agent can ask for the same document over MCP (`export_postman`), which always
+leaves credentials out.
+
 ## Related
 
 - [Import pipeline index](./README.md)
