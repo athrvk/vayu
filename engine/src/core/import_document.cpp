@@ -1550,9 +1550,15 @@ json pm_request (const json* item, PostmanCounts& counts) {
     json body                             = pm_body (prop (rq, "body"), counts);
     json examples                         = pm_examples (item, counts);
 
-    const std::string* description = as_str (prop (rq, "description"));
-    const std::string* nested = as_str (prop (prop (rq, "description"), "content"));
-    const json* name = prop (item, "name");
+    // The request's own description, else the item's: the schema allows
+    // either, generated collections write the item's, and Postman's own export
+    // writes the request's - which is where the exporter puts it back.
+    const json* declared_description = truthy (prop (rq, "description")) ?
+    prop (rq, "description") :
+    prop (item, "description");
+    const std::string* description   = as_str (declared_description);
+    const std::string* nested = as_str (prop (declared_description, "content"));
+    const json* name          = prop (item, "name");
 
     bool unsupported_method = false;
     json request;

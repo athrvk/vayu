@@ -1614,6 +1614,20 @@ TEST (PostmanImport, KeepsAHeaderRowsTypeAndAQueryRowsEquals) {
     EXPECT_EQ (request.at ("url"), "https://x.com/a?expand");
 }
 
+TEST (PostmanImport, ReadsAnItemLevelDescriptionWhenTheRequestHasNone) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Item","description":"On the item","request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Both","description":"On the item",
+            "request":{"method":"GET","url":"https://x.com","description":{"content":"On the request"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("description"), "On the item");
+    EXPECT_EQ (requests[1].at ("description"), "On the request");
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

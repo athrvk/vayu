@@ -91,7 +91,7 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | Postman (`item` / `item.request`) | Vayu `RequestDraft` | Notes |
 |-----------------------------------|---------------------|-------|
 | `item.name` | `name` | fallback `"Untitled"` |
-| `request.description` | `description` | string used directly; if object, `.content`; else `""` |
+| `request.description`, else `item.description` | `description` | string used directly; if object, `.content`; else `""`. The schema allows either place and generated collections use the item's; the export writes it on the request, where Postman's own export puts it |
 | `request.method` | `method` | `toMethod`: upper-cased; if not one of GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS → `GET`, counted as `unsupported_method` (a custom verb such as `PROPFIND` or `PURGE`) |
 | `request.url` | `url`, `params` | via `pmUrl` (see [URL handling](#url-handling)) |
 | `request.header[]` | `headers` | via `map_key_values`; a row's `type` other than `"text"` (recent Postman writes `"default"`) is kept on the row for the export to write back |
