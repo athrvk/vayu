@@ -22,6 +22,7 @@ import {
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import ExportSpecDialog from "./ExportSpecDialog";
+import ExportPostmanDialog from "./ExportPostmanDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
@@ -476,10 +477,16 @@ export default function CollectionTree() {
 
 				{/* Mounted on the same terms as the run dialog above, and for the
 				    same reasons: one per panel, only once a folder has been chosen,
-				    and the mount is what resets the format choice. */}
-				{panel.exportTarget && (
+				    and the mount is what resets the format and credentials choices. */}
+				{panel.exportTarget?.format === "openapi" && (
 					<ExportSpecDialog
-						collection={panel.exportTarget}
+						collection={panel.exportTarget.collection}
+						onOpenChange={(open) => !open && panel.dismissExportDialog()}
+					/>
+				)}
+				{panel.exportTarget?.format === "postman" && (
+					<ExportPostmanDialog
+						collection={panel.exportTarget.collection}
 						onOpenChange={(open) => !open && panel.dismissExportDialog()}
 					/>
 				)}

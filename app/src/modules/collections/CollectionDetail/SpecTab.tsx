@@ -51,9 +51,27 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
+import {
+	ChevronDown,
+	Download,
+	FileJson,
+	FileOutput,
+	Link2,
+	Loader2,
+	Trash2,
+	Upload,
+} from "lucide-react";
 
-import { Button, Input, Skeleton, ICON_MOTION } from "@/components/ui";
+import {
+	Button,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+	Input,
+	Skeleton,
+	ICON_MOTION,
+} from "@/components/ui";
 import { Callout, FieldError } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
@@ -73,6 +91,7 @@ import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
+import ExportPostmanDialog from "@/modules/collections/ExportPostmanDialog";
 import { hasSpecBinding, type Collection } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 import { formatRelative } from "./format";
@@ -164,7 +183,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	// cases above it are Vayu never having bytes to describe.
 	const [pickError, setPickError] = useState<{ title: string; message: string } | null>(null);
 	const [url, setUrl] = useState("");
-	const [exporting, setExporting] = useState(false);
+	// Which export dialog is open, if either. One field: the menu opens one.
+	const [exporting, setExporting] = useState<"openapi" | "postman" | null>(null);
 	const [fetching, setFetching] = useState(false);
 	// The bound the fetch below carries: this tab only ever fetches a document
 	// it is about to bind, so it is the same cap the engine will store it under
@@ -467,14 +487,48 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			{bound && (
 				<div>
 					<SectionLabel>Export</SectionLabel>
-					<Button variant="outline" onClick={() => setExporting(true)}>
-						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
-						Export as OpenAPI
-					</Button>
+					{/* One control with a menu rather than a row of buttons: the
+					    formats are alternatives for one act, and the menu is where
+					    a third would go. */}
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button variant="outline">
+								<Download
+									className="mr-2 size-icon"
+									data-icon-motion={ICON_MOTION.drop}
+								/>
+								Export
+								<ChevronDown
+									className="ml-1 size-icon-sm"
+									data-icon-motion={ICON_MOTION.nudgeY}
+								/>
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start">
+							<DropdownMenuItem
+								onClick={() => setExporting("openapi")}
+								// `group`: the item is the owner whose hover the glyph
+								// answers - a DropdownMenuItem is not a
+								// `[data-slot="button"]`.
+								className="group gap-2 text-sm"
+							>
+								<FileJson className="size-icon shrink-0" />
+								OpenAPI…
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								onClick={() => setExporting("postman")}
+								className="group gap-2 text-sm"
+							>
+								<FileOutput className="size-icon shrink-0" />
+								Postman Collection v2.1…
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<p className="mt-1 text-label text-muted-foreground">
-						Writes this collection's own document back out, updated: operations it no
-						longer has removed, stored examples written in, and everything Vayu does not
-						model left exactly as it is.
+						OpenAPI writes this collection's own document back out, updated: operations
+						it no longer has removed, stored examples written in, and everything Vayu
+						does not model left exactly as it is. Postman writes the collection as a
+						file Postman imports.
 					</p>
 				</div>
 			)}
@@ -496,13 +550,19 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				</div>
 			)}
 
-			{/* Mounted only while open, the way the tree mounts it: the same dialog
-			    the collection's ⋯ menu opens, so there is one export flow and not
-			    two that can disagree. */}
-			{exporting && (
+			{/* Mounted only while open, the way the tree mounts them: the same
+			    dialogs the collection's ⋯ menu opens, so there is one export flow
+			    per format and not two that can disagree. */}
+			{exporting === "openapi" && (
 				<ExportSpecDialog
 					collection={collection}
-					onOpenChange={(open) => !open && setExporting(false)}
+					onOpenChange={(open) => !open && setExporting(null)}
+				/>
+			)}
+			{exporting === "postman" && (
+				<ExportPostmanDialog
+					collection={collection}
+					onOpenChange={(open) => !open && setExporting(null)}
 				/>
 			)}
 		</div>

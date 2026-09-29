@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, Trash2, Edit2, FileJson, FolderPlus, Play } from "lucide-react";
+import { Plus, Trash2, Edit2, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
 import { useTabsStore, useSaveStore, useToastStore, useDataFileStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
@@ -63,11 +63,19 @@ export interface TreeCrudPanel {
 	runTarget: Collection | null;
 	dismissRunDialog: () => void;
 	/**
-	 * The collection the OpenAPI export dialog is pointed at, or null when it is
-	 * closed - the whole object for the same reason `runTarget` is (issue #630).
+	 * The collection an export dialog is pointed at and which of the two
+	 * formats it writes, or null when both are closed - the whole object for
+	 * the same reason `runTarget` is (issue #630). One field rather than one per
+	 * format: only one export dialog is ever open.
 	 */
-	exportTarget: Collection | null;
+	exportTarget: ExportTarget | null;
 	dismissExportDialog: () => void;
+}
+
+/** Which export dialog a row's menu opened, and for which collection. */
+export interface ExportTarget {
+	collection: Collection;
+	format: "openapi" | "postman";
 }
 
 export interface DeleteConfirmTarget {
@@ -131,7 +139,7 @@ export function useTreeCrud({
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmTarget | null>(null);
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
-	const [exportTarget, setExportTarget] = useState<Collection | null>(null);
+	const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
 
 	// Memoised because the callbacks below list them as dependencies: redefined
 	// each render, they would rebuild every handler that opens a tab.
@@ -734,7 +742,16 @@ export function useTreeCrud({
 				// skeleton (issue #630).
 				label: "Export as OpenAPI",
 				icon: FileJson,
-				onSelect: () => setExportTarget(collection),
+				onSelect: () => setExportTarget({ collection, format: "openapi" }),
+			},
+			{
+				// Beside its sibling rather than in a submenu: `RowAction` is one
+				// flat list drawn by both the ⋯ menu and the right-click menu, and
+				// two entries do not earn a nesting level either would have to
+				// learn.
+				label: "Export as Postman Collection",
+				icon: FileOutput,
+				onSelect: () => setExportTarget({ collection, format: "postman" }),
 			},
 			{
 				label: "Delete",
