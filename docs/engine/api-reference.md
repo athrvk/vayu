@@ -1734,10 +1734,43 @@ Create one example. **Create only**, and the engine owns the id - see
   "origin": "import",        // Optional, "import" | "user". Default "import"
   "bodyTruncated": false,    // Optional. Default false - true when `body` is
                              // only the first slice of the captured response
-  "postmanResponse": null    // Optional. The Postman saved response an import
+  "postmanResponse": null,   // Optional. The Postman saved response an import
                              // took this from, as JSON text; null = none
+  "savedFrom": null          // Optional, create only. What a save in the app
+                             // says produced the response (see below); null = none
 }
 ```
+
+`savedFrom` is what the app's save-as-example sends from a live response
+(#1763): the request as written when it was sent (`{{variables}}`
+unresolved) and the server's own reason phrase. The engine builds the
+example's Postman saved response from it with the exporter's own mapping, so
+`POST /export/postman` writes that request as `originalRequest` even after the
+request is edited.
+
+```json
+"savedFrom": {
+  "request": {                          // Required; the request columns' own shapes
+    "method": "POST",                   // Required, an HTTP method (any case)
+    "url": "{{baseUrl}}/users/:id",     // Required string, as written
+    "params": [],                       // Optional array, default []; path rows too
+    "headers": [],                      // Optional array, default []
+    "body": {"mode": "none"}            // Optional object, default {"mode":"none"}
+  },
+  "statusText": "Totally Fine",         // Required string; "" = the status table's
+  "responseTimeMs": 123                 // Optional number, 0 or more; absent = null
+}
+```
+
+The stored copy holds `name` (`null`), `originalRequest` (method, headers,
+body and url as the export writes a request's, with no `auth`), `status`
+(`statusText`), `code`, `_postman_previewlanguage`, `header` (the example's
+own rows), `cookie` (one entry per cookie the `Set-Cookie` rows set: `key`,
+`value`, `domain`, `path`, `httpOnly`, `secure`, `hostOnly`, `expires` when
+stated), `responseTime` (whole milliseconds) and `body` (`null`). When it
+would be over the 1 MiB cap (a large request body) the example is still
+created, without it, and a warning is logged; the export then regenerates
+those members. `PUT` ignores a `savedFrom` key.
 
 `postmanResponse` is what the Postman importer sends (schema version 2): the
 `item.response[]` entry as JSON **text** in the source's member order, `name`
@@ -1758,7 +1791,13 @@ to survive.
 rather than clamped - a stored `700` would be re-served as a status line nobody
 can send), on a malformed `headers` entry, on an `origin` that is neither
 `"import"` nor `"user"`, on a `body` over the cap, or on a `postmanResponse` that
-is not a string holding a JSON object or is over its cap. `409` when the request
+is not a string holding a JSON object or is over its cap. `400` naming the field
+on a `savedFrom` that is not an object, whose `request` is not an object, whose
+`method` is missing or not an HTTP method, whose `url` is not a string, whose
+`params` or `headers` is not an array, whose `body` is not an object, whose
+`statusText` is not a string or whose `responseTimeMs` is negative or not a
+number, and on a `savedFrom` beside a non-null `postmanResponse` (two writers of
+one column). `409` when the request
 already holds the maximum number of examples.
 
 ### PUT /requests/:id/examples/:exampleId
@@ -3423,7 +3462,9 @@ skips it, as Vayu does); saved examples are
 that sends a body carries `disableBodyPruning: true`.
 
 **Saved examples.** An example imported from Postman carries the saved
-response it came from (`request_examples.postman_response`) and is written back
+response it came from (`request_examples.postman_response`), and so does one
+saved in the app from a live response (`savedFrom` on
+[`POST /requests/:id/examples`](#post-requestsidexamples)); either is written back
 from it in the source's member order: `originalRequest` (the request as it was
 recorded, not the request's current state), `cookie`, `responseTime`,
 `_postman_previewtype` and any other member as stored; `name`, `code` and
@@ -3437,7 +3478,8 @@ recorded request's `auth` is written in v2.1's attribute-array shape (a v2.0
 file states it as an object, which the v2.1 schema refuses), and with
 `includeSecrets: false` it is blanked like any other credential and counted in
 `secretsOmitted`. An example with no stored response
-(saved in Vayu, or imported from OpenAPI) gets `originalRequest` from the
+(saved in Vayu before #1763 or from a response restored from a stored run, or
+imported from OpenAPI) gets `originalRequest` from the
 request's current state, the status text from the engine's reason-phrase table
 and `_postman_previewlanguage` from its Content-Type (`Text` when it states
 none), with `cookie: []`.
