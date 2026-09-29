@@ -88,7 +88,17 @@ export interface KeyValueEntry {
 	description?: string;
 	/** Present only on a row an app setting or the engine's own repair pass wrote; absent on one the user typed. */
 	source?: HeaderRowSource;
+	/**
+	 * Where a params row is sent (issue #1764). Absent means `"query"`. A
+	 * `"path"` row names a `:key` segment of the URL (`key` without the colon)
+	 * and never reaches the query string; the engine substitutes its value at
+	 * compose time. Meaningless on any other kind of row.
+	 */
+	in?: ParamLocation;
 }
+
+/** See {@link KeyValueEntry.in}. */
+export type ParamLocation = "query" | "path";
 
 /**
  * Variable value with enabled flag and optional type hint.

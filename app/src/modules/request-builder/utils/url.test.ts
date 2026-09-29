@@ -16,7 +16,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { appendParamsToUrl, buildUrlWithParams, mergeParamsFromUrl, parseQueryParams } from "./url";
+import {
+	appendParamsToUrl,
+	buildUrlWithParams,
+	mergeParamsFromUrl,
+	paramsFromUrl,
+	parseQueryParams,
+} from "./url";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 
 const kv = (key: string, value: string, enabled = true): KeyValueEntry => ({
@@ -143,5 +149,78 @@ describe("mergeParamsFromUrl", () => {
 		const existing = [item("1", "a", "1", true), item("2", "gone", "x", true)];
 		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1");
 		expect(merged.map((p) => p.key)).toEqual(["a"]);
+	});
+});
+
+/**
+ * Path rows (issue #1764) live in the same `params` array as the query rows,
+ * and neither join rule may write one into the query string.
+ */
+describe("path rows", () => {
+	const pathRow = (key: string, value: string): KeyValueEntry => ({
+		key,
+		value,
+		enabled: true,
+		in: "path",
+	});
+
+	it("never reach the query, whichever join rule runs", () => {
+		const params = [kv("page", "1"), pathRow("id", "42")];
+		expect(buildUrlWithParams("https://x/users/:id", params)).toBe(
+			"https://x/users/:id?page=1"
+		);
+		expect(appendParamsToUrl("https://x/users/:id", params)).toBe("https://x/users/:id?page=1");
+		expect(buildUrlWithParams("https://x/users/:id?page=1", [pathRow("id", "42")])).toBe(
+			"https://x/users/:id"
+		);
+	});
+
+	it("follow the URL's segments through a merge, after the query rows", () => {
+		const existing = [
+			item("q", "page", "1"),
+			item("p", "id", "42", true, { in: "path", description: "user" }),
+		];
+		const merged = mergeParamsFromUrl(existing, "https://x/users/:id/posts/:postId?page=2");
+		expect(merged.map(({ key, value, in: at }) => ({ key, value, in: at }))).toEqual([
+			{ key: "page", value: "2", in: undefined },
+			{ key: "id", value: "42", in: "path" },
+			{ key: "postId", value: "", in: "path" },
+		]);
+		// The kept row is the same row, description and id included.
+		expect(merged[1]).toBe(existing[1]);
+	});
+
+	it("are renamed with their value when a segment is edited, and dropped when it goes", () => {
+		const existing = [item("p", "id", "42", true, { in: "path" })];
+		expect(mergeParamsFromUrl(existing, "https://x/users/:userId")).toEqual([
+			{ ...existing[0], key: "userId" },
+		]);
+		expect(mergeParamsFromUrl(existing, "https://x/users")).toEqual([]);
+	});
+
+	it("are never matched by a same-named query key", () => {
+		// `?id=1` is a query row; the `:id` row stays a path row with its value.
+		const existing = [item("p", "id", "42", true, { in: "path" })];
+		const merged = mergeParamsFromUrl(existing, "https://x/:id?id=1");
+		expect(merged.map(({ key, value, in: at }) => ({ key, value, in: at }))).toEqual([
+			{ key: "id", value: "1", in: undefined },
+			{ key: "id", value: "42", in: "path" },
+		]);
+	});
+});
+
+describe("paramsFromUrl", () => {
+	it("states the query, then an empty path row per segment", () => {
+		expect(
+			paramsFromUrl("https://x/:id?a=1").map(({ key, value, in: at }) => ({
+				key,
+				value,
+				in: at,
+			}))
+		).toEqual([
+			{ key: "a", value: "1", in: undefined },
+			{ key: "id", value: "", in: "path" },
+		]);
+		expect(paramsFromUrl("https://x/y?a=1").every((p) => p.in === undefined)).toBe(true);
 	});
 });

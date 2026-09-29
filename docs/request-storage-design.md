@@ -40,8 +40,8 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 editor, disabled entries included.**
 
 `url` is the wire truth: every execution path - design Send, collection scenario
-run, load run - sends it verbatim, and no engine path reads a query row of
-`params[]` (it is builder display state, see
+run, load run - sends its query verbatim, and no engine path reads the query
+rows of `params[]` (they are builder display state, see
 [engine/api-reference.md](engine/api-reference.md)). The Params table maintains
 the invariant on the app's side by rewriting `url` on every edit, keeping
 disabled rows in `params[]` only.
@@ -57,6 +57,16 @@ the parsed query into `params[]` rather than replacing the list, so a disabled
 row (invisible in the query by design) survives, and a key removed from the URL
 is removed from `params[]` too, rather than left behind as a row the URL no
 longer carries (`mergeParamsFromUrl`, issue #1482).
+
+**Path variables are the one kind of row the engine reads** (issue #1764). A
+row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`
+without the colon), and never reaches the query: the query builders skip it,
+and at compose time the engine puts each enabled row's value into its segment,
+percent-encoded; an empty or disabled row leaves `:name` literal. An inline
+`POST /compose` carries the editor's path rows as `request.params`, since the
+editor may be ahead of the saved row. The URL bar keeps the rows in step with
+the segments, a renamed segment keeping its row's value (`syncPathRows` in
+`modules/request-builder/utils/path-variables.ts`).
 
 A writer that stores the query *only* in `params[]` therefore stores a request
 that sends nothing of it. That was issue #590: every importer split the query

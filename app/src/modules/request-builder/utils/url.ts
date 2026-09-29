@@ -12,6 +12,13 @@
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import { containsVariableToken } from "@/constants/variables";
+import {
+	isPathRow,
+	pathRowsFromUrl,
+	pathRowsOf,
+	queryRowsOf,
+	syncPathRows,
+} from "./path-variables";
 
 /**
  * Render the enabled, keyed rows as a query string, without a leading `?`.
@@ -21,10 +28,13 @@ import { containsVariableToken } from "@/constants/variables";
  *
  * A segment holding a `{{variable}}` is left unencoded: it is resolved at
  * request time, and percent-encoding the braces here would send them literally.
+ *
+ * A path row (`in: "path"`, issue #1764) is never part of the query: its value
+ * goes into a `:name` segment, which the URL already carries.
  */
 function toQueryString(params: readonly KeyValueEntry[]): string {
 	return params
-		.filter((p) => p.enabled && p.key.trim())
+		.filter((p) => p.enabled && p.key.trim() && !isPathRow(p))
 		.map((p) => {
 			const key = containsVariableToken(p.key) ? p.key : encodeURIComponent(p.key);
 			const value = containsVariableToken(p.value) ? p.value : encodeURIComponent(p.value);
@@ -97,6 +107,15 @@ export function parseQueryParams(url: string): KeyValueItem[] {
 }
 
 /**
+ * The params rows a URL states on its own, for a request that arrives with a
+ * URL and no rows: its query, then a path row (empty value) per `:name`
+ * segment (issue #1764).
+ */
+export function paramsFromUrl(url: string): KeyValueItem[] {
+	return [...parseQueryParams(url), ...pathRowsFromUrl(url)];
+}
+
+/**
  * Merge the URL's query into the existing params rows, in place of replacing
  * them outright.
  *
@@ -106,13 +125,16 @@ export function parseQueryParams(url: string): KeyValueItem[] {
  * remove the enabled rows it used to carry (issue #1482). Existing rows keep
  * their position, id, description and `source`; a key the URL no longer
  * carries is dropped, and a key new to the URL is appended at the end.
+ *
+ * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
+ * `syncPathRows`, and come after the query rows.
  */
 export function mergeParamsFromUrl(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
 	const fromUrl = parseQueryParams(url);
 	const consumed = new Array(fromUrl.length).fill(false);
 
 	const merged: KeyValueItem[] = [];
-	for (const row of existing) {
+	for (const row of queryRowsOf(existing)) {
 		if (!row.enabled) {
 			merged.push(row);
 			continue;
@@ -127,7 +149,7 @@ export function mergeParamsFromUrl(existing: readonly KeyValueItem[], url: strin
 		if (!consumed[i]) merged.push(p);
 	});
 
-	return merged;
+	return [...merged, ...syncPathRows(pathRowsOf(existing), url)];
 }
 
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */

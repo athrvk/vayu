@@ -22,7 +22,7 @@
 import type { Run, Request, RequestAuth, ScriptPart, ElementDef, KeyValueEntry } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
-import { parseQueryParams } from "@/modules/request-builder/utils/url";
+import { paramsFromUrl } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
@@ -171,7 +171,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			collectionId: null,
 			method: (snapshot.method ?? "GET") as RequestState["method"],
 			url: snapshot.url ?? "",
-			params: parseQueryParams(snapshot.url ?? ""),
+			params: paramsFromUrl(snapshot.url ?? ""),
 			headers,
 			bodyMode,
 			body: body?.content ?? "",

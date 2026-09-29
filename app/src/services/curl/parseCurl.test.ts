@@ -328,6 +328,20 @@ describe("parseCommand - curl", () => {
 		);
 	});
 
+	test("a `:name` path segment becomes an empty path row, after the query (#1764)", () => {
+		const r = parseCommand(`curl 'https://x.com:8443/users/:id?a=1'`)!;
+		expect(r.url).toBe("https://x.com:8443/users/:id?a=1");
+		expect(r.params).toEqual([
+			expect.objectContaining({ key: "a", value: "1", enabled: true }),
+			expect.objectContaining({ key: "id", value: "", enabled: true, in: "path" }),
+		]);
+	});
+
+	test("a URL with no `:name` segment makes no path row", () => {
+		const r = parseCommand(`curl 'http://localhost:8080/users?next=/:id'`)!;
+		expect(r.params.some((p) => p.in === "path")).toBe(false);
+	});
+
 	test("ignored flags don't swallow the URL", () => {
 		const r = parseCommand(`curl -sL --compressed -o out.txt https://x.com`)!;
 		expect(r.url).toBe("https://x.com");
