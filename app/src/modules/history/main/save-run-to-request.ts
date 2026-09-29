@@ -51,6 +51,7 @@ import type { KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
+import { isPathRow } from "@/modules/request-builder/utils/path-variables";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { DesignRunSeed } from "./design-run-seed";
 
@@ -166,6 +167,15 @@ function entryMap(entries: KeyValueEntry[]): Map<string, string> {
 		map.set(e.key, e.value);
 	}
 	return map;
+}
+
+/**
+ * Params rows keyed for the diff: a path row (#1764) as `:name`, the way the
+ * URL writes it, so it neither collides with nor reads as a same-named query
+ * parameter.
+ */
+function paramsForDiff(entries: KeyValueEntry[]): KeyValueEntry[] {
+	return entries.map((e) => (isPathRow(e) ? { ...e, key: `:${e.key}` } : e));
 }
 
 /**
@@ -341,7 +351,7 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 
 	scalar("Method", live.method, patch.method ?? live.method);
 	scalar("URL", live.url, patch.url ?? live.url);
-	keyValues("Params", live.params ?? [], patch.params ?? []);
+	keyValues("Params", paramsForDiff(live.params ?? []), paramsForDiff(patch.params ?? []));
 	keyValues("Headers", live.headers ?? [], patch.headers ?? []);
 	// A truncated run stores only a slice of its request body, so the body is not
 	// written (applyRunToRequest omits it). Shown as a kept row with the reason,
