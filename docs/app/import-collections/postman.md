@@ -333,7 +333,11 @@ leaves credentials out.
 keeps, beside what Vayu uses, what the export needs to write a Postman document
 back unchanged: every event in its order, a disabled one still disabled; a raw
 body's declared language, or its absence (`rawLanguage`); a header's
-`type: "default"` and a query row's `equals`; a variable's `string` / `number`
+`type: "default"` and a query row's `equals`; a request's path variables
+(issue #1764), which export as the `:name` segments of `raw` and `path[]` and
+their rows as `url.variable[]` (`key`, `value`, then a `type` and
+`description` the import kept, and `disabled`), written after the query rows
+and never into `query[]`; a variable's `string` / `number`
 / `boolean` type and its description; an item-level description; and the
 document's own `auth` block whenever the mapped auth alone would not give it
 back (`auth.postman`) - an `oauth2` block holding only a seeded token, the

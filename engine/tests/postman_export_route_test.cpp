@@ -134,7 +134,7 @@ TEST_F (PostmanExportRouteTest, TheRoundTripFixtureComesBackByteForByte) {
     json body            = export_ok (id);
     EXPECT_EQ (without_postman_id (body["text"].get<std::string> ()), fixture);
     EXPECT_EQ (body["fileName"], "Round Trip.postman_collection.json");
-    EXPECT_EQ (body["notes"]["requestsExported"], 21);
+    EXPECT_EQ (body["notes"]["requestsExported"], 23);
     EXPECT_EQ (body["notes"]["foldersExported"], 4);
     EXPECT_EQ (body["notes"]["notCarried"], json::array ());
     EXPECT_EQ (body["notes"]["secretsOmitted"], 0);
