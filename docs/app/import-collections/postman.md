@@ -320,6 +320,40 @@ kind of thing the export could not carry, with a count, in the engine's words.
 An agent can ask for the same document over MCP (`export_postman`), which always
 leaves credentials out.
 
+**What an imported collection gives back as Postman wrote it.** The import
+keeps, beside what Vayu uses, what the export needs to write a Postman document
+back unchanged: every event in its order, a disabled one still disabled; a raw
+body's declared language, or its absence (`rawLanguage`); a header's
+`type: "default"` and a query row's `equals`; a variable's `string` / `number`
+/ `boolean` type and its description; an item-level description; and the
+document's own `auth` block whenever the mapped auth alone would not give it
+back (`auth.postman`) - an `oauth2` block holding only a seeded token, the
+attributes Vayu has no field for, attribute order and types, and the
+Hawk, OAuth 1.0, EdgeGrid and JWT types Vayu keeps as data. Each is written
+back only while it still describes what Vayu holds; after an edit in Vayu the
+export writes the edit.
+
+**What still comes back differently**, and why:
+
+- **Method case.** A `get` or `post` typed in lower case exports upper case.
+  Vayu stores the method as one of its seven verbs, and both Postman's runtime
+  and Vayu's composer send it upper-cased, so the wire is the same.
+- **`url.raw` is rebuilt** from the stored URL: the query rows Postman sends
+  (a stale `raw` a generator left without an enabled row gains it), percent-
+  encoded the way Vayu joins them (`filter[type]` as `filter%5Btype%5D`). The
+  `query[]` rows themselves come back as written.
+- **Path variables.** `:id` segments come back as `{{id}}` and `url.variable[]`
+  is not written: the import turns a path variable into a collection variable,
+  counted as `path_variables`.
+- **Variable order** within a collection or folder follows name order, the
+  order the stored variables object keeps.
+- **`protocolProfileBehavior`** keys other than the redirect and TLS settings
+  are not stored (the unhonoured ones are counted as `protocol_behavior`), so a
+  `disableBodyPruning` Postman wrote on a request with no GET-or-HEAD body is
+  not written back.
+- **Empty-name rows** (a disabled header with no key, an editor's trailing
+  blank row) are not imported.
+
 ## Related
 
 - [Import pipeline index](./README.md)
