@@ -31,6 +31,7 @@ import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
+import type { KeyValueItem } from "@/types";
 import RequestTabs from "./index";
 
 // The panels pull in Monaco, the variable inputs and the auth editors; none of
@@ -52,9 +53,13 @@ vi.mock("./panels/BodyPanel", () => ({ default: () => null }));
 vi.mock("./panels/AuthPanel", () => ({ default: () => null }));
 vi.mock("./panels/SettingsPanel", () => ({ default: () => null }));
 
-function renderTabs(description?: string) {
+function renderTabs(description?: string, params?: KeyValueItem[]) {
 	const value = {
-		request: { ...createDefaultRequestState(), description },
+		request: {
+			...createDefaultRequestState(),
+			description,
+			...(params ? { params } : {}),
+		},
 		activeTab: "info",
 		setActiveTab: vi.fn(),
 	} as unknown as RequestBuilderContextValue;
@@ -116,5 +121,22 @@ describe("the Info tab", () => {
 	it("treats a whitespace-only description as none", () => {
 		renderTabs("   \n  ");
 		expect(countOf(screen.getAllByRole("tab")[0])).toBeNull();
+	});
+});
+
+/*
+ * Not the Info tab's, but the same file has the harness. The Params count is
+ * both tables' enabled rows (#1764): a path row with no value yet is still a
+ * row the tab shows and one the user has to fill in.
+ */
+describe("the Params count", () => {
+	it("counts path rows beside the query rows, valued or not", () => {
+		renderTabs(undefined, [
+			{ id: "q", key: "page", value: "1", enabled: true },
+			{ id: "p1", key: "id", value: "42", enabled: true, in: "path" },
+			{ id: "p2", key: "postId", value: "", enabled: true, in: "path" },
+			{ id: "p3", key: "off", value: "1", enabled: false, in: "path" },
+		]);
+		expect(countOf(screen.getByRole("tab", { name: /^Params/ }))).toBe("3");
 	});
 });

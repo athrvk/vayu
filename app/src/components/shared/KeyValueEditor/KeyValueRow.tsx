@@ -203,7 +203,9 @@ function KeyValueRow({
 				<Checkbox
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
-					disabled={keyReadOnly || !canDisable}
+					// Its own gate, not the key's: a path-variable row (#1764) takes
+					// its key from the URL yet is still the user's to switch off.
+					disabled={readOnly || !canDisable}
 					// Named after the row it governs. Without this it announced as
 					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
@@ -296,26 +298,32 @@ function KeyValueRow({
 				)}
 			</div>
 
-			<Button
-				size="icon"
-				variant="rowActionDestructive"
-				onClick={() => onRemove(item.id)}
-				disabled={keyReadOnly || !canRemove}
-				aria-label="Remove row"
-				className={cn(
+			{/*
+			 * A row the caller says cannot be removed (a path variable, #1764,
+			 * which goes when its URL segment does) gets no button at all, only
+			 * the column's width. `opacity-0` on a disabled button did not hide
+			 * it: the variant's `disabled:opacity-50` wins, so every such row
+			 * showed a greyed trash can that did nothing.
+			 */}
+			{canRemove ? (
+				<Button
+					size="icon"
+					variant="rowActionDestructive"
+					onClick={() => onRemove(item.id)}
+					disabled={keyReadOnly}
+					aria-label="Remove row"
 					// `focus-visible:opacity-100` is not decoration. The button was
 					// revealed on hover only, so a keyboard user tabbing through a
 					// headers table landed on a fully transparent control - including
 					// its focus ring - once per row, and Enter there silently deleted
 					// the row they could not see they were on.
-					"h-7 w-7 transition-opacity focus-visible:opacity-100",
-					!canRemove
-						? "opacity-0 cursor-not-allowed"
-						: "opacity-0 group-hover:opacity-100"
-				)}
-			>
-				<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
-			</Button>
+					className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+				>
+					<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
+				</Button>
+			) : (
+				<div className="h-7 w-7" />
+			)}
 		</div>
 	);
 }
