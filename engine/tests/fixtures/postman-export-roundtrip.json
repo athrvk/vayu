@@ -1336,13 +1336,14 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{baseUrl}}/users/:id",
+					"raw": "{{baseUrl}}/users/:id/:section",
 					"host": [
 						"{{baseUrl}}"
 					],
 					"path": [
 						"users",
-						":id"
+						":id",
+						":section"
 					],
 					"variable": [
 						{

@@ -296,8 +296,9 @@ TEST (ImportParse, StepsOverACycleInAnInsomniaFolderTree) {
  * `/:name` segment at send time (`applyPathParametersToUrl`), so they import
  * as that request's own path rows (issue #1764): the URL keeps `:userId`, the
  * value rides on an `in: "path"` row, and nothing is promoted to a
- * workspace or folder variable. A `:name` with no declared parameter gets an
- * empty row, as Insomnia's own editor shows one.
+ * workspace or folder variable. A `:name` with no declared parameter gets no
+ * row: the Params tab shows one for it without a stored row, and an invented
+ * row would be exported as a variable the source never declared.
  */
 TEST (InsomniaImport, KeepsAPathParameterAsTheRequestsOwnPathRow) {
     const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
@@ -318,8 +319,7 @@ TEST (InsomniaImport, KeepsAPathParameterAsTheRequestsOwnPathRow) {
     EXPECT_EQ (request.at ("url"), "https://api.example.com/users/:userId/:extra?q=1");
     EXPECT_EQ (request.at ("params"), json::parse (R"([
         {"key":"q","value":"1","enabled":true},
-        {"key":"userId","value":"42","enabled":true,"in":"path"},
-        {"key":"extra","value":"","enabled":true,"in":"path"}])"));
+        {"key":"userId","value":"42","enabled":true,"in":"path"}])"));
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
 }
@@ -1304,7 +1304,9 @@ TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
  * A Postman `:name` segment stays in the URL and its `url.variable[]` entry
  * becomes the request's own path row (issue #1764): value, description,
  * `type` and the disabled state kept, nothing promoted to a collection
- * variable, and no `path_variables` notice - nothing was lost.
+ * variable, and no `path_variables` notice - nothing was lost. A declared
+ * entry no segment uses is kept (it is exported again); a segment no entry
+ * declares (`:postId`) gets no row, so the export does not invent one.
  */
 TEST (PostmanImport, KeepsAPathVariableAsTheRequestsOwnPathRow) {
     const ImportParse parsed =
@@ -1328,8 +1330,7 @@ TEST (PostmanImport, KeepsAPathVariableAsTheRequestsOwnPathRow) {
         {"key":"x","value":"1","enabled":true},
         {"key":"userId","value":"{{who}}","enabled":true,"in":"path",
          "type":"string","description":"the user"},
-        {"key":"unused","value":"u","enabled":false,"in":"path"},
-        {"key":"postId","value":"","enabled":true,"in":"path"}])"));
+        {"key":"unused","value":"u","enabled":false,"in":"path"}])"));
     EXPECT_TRUE (collection.at ("variables").empty ());
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
@@ -1362,10 +1363,11 @@ TEST (PostmanImport, TwoRequestsOnOnePathVariableKeepTheirOwnValues) {
     }
 }
 
-/// A v2.0 string URL carries no `url.variable[]`, so each `:name` gets an
-/// empty row, as Postman's `Url.parse` declares one per name; a v2.0 entry
-/// naming itself by `id` alone is read by that name.
-TEST (PostmanImport, DeclaresAnEmptyRowForAnUndeclaredPathVariable) {
+/// A v2.0 string URL carries no `url.variable[]`, so it declares no path row -
+/// the `:name` segments stay in the URL and the Params tab shows a row for
+/// each without one being stored; a v2.0 entry naming itself by `id` alone is
+/// read by that name.
+TEST (PostmanImport, StoresNoRowForAnUndeclaredPathVariable) {
     const ImportParse parsed = parse_import (R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},"item":[
         {"name":"S","request":{"method":"GET","url":"https://api.example.com/:a/:a/:b?t=1:2"}},
         {"name":"V","request":{"method":"GET","url":{"raw":"https://api.example.com/:c",
@@ -1376,9 +1378,7 @@ TEST (PostmanImport, DeclaresAnEmptyRowForAnUndeclaredPathVariable) {
     const json& requests = parsed.result.at ("collections")[0].at ("requests");
     EXPECT_EQ (requests[0].at ("url"), "https://api.example.com/:a/:a/:b?t=1%3A2");
     EXPECT_EQ (requests[0].at ("params"), json::parse (R"([
-        {"key":"t","value":"1:2","enabled":true},
-        {"key":"a","value":"","enabled":true,"in":"path"},
-        {"key":"b","value":"","enabled":true,"in":"path"}])"));
+        {"key":"t","value":"1:2","enabled":true}])"));
     EXPECT_EQ (requests[1].at ("params"), json::parse (R"([
         {"key":"c","value":"3","enabled":true,"in":"path"}])"));
 }

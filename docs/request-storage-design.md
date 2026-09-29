@@ -68,8 +68,13 @@ empty value or no enabled row leaves `:name` literal. An inline
 (`[]` when there are none), since the editor may be ahead of the saved row and
 an absent key falls back to the stored rows. A row keeps every member it
 arrived with (`type`, `description` from a Postman import) through edits. The URL bar keeps the rows in step with
-the segments, a renamed segment keeping its row's value (`syncPathRows` in
-`modules/request-builder/utils/path-variables.ts`).
+the segments, but only on an edit that changes them: a query-only edit leaves
+every path row alone (a declared row no segment uses included), and a segment
+renamed on its own keeps its row's value (`syncPathRows` in
+`modules/request-builder/utils/path-variables.ts`). A `:name` with no stored
+row is not given one until its value is edited: the Params tab shows an empty
+row for it (`displayPathRows`), so opening a request does not change it, and
+an import stores only the rows the source declares.
 
 A writer that stores the query *only* in `params[]` therefore stores a request
 that sends nothing of it. That was issue #590: every importer split the query

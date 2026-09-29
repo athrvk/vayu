@@ -1219,23 +1219,17 @@ std::string host_path_url (const json* url) {
 /**
  * A request's path variables as Params rows (issue #1764): @p declared -
  * already table rows, in the order the source lists them - each marked
- * `in: "path"`, then an empty row for every `:name` @p url spells that none of
- * them declares, which is what Postman's and Insomnia's own editors show for
- * one. The URL keeps its `:name` segments verbatim; composition writes each
- * row's value into its segment at send time, so two requests on the same name
- * keep their own values rather than sharing one variable.
+ * `in: "path"`. Only what the source declares: a `:name` the URL spells with
+ * no declared entry gets no row here, because the Params tab shows one for it
+ * without a stored row (`displayPathRows`), and a synthesised row would be
+ * exported back as a `url.variable` entry the source never had. The URL keeps
+ * its `:name` segments verbatim; composition writes each row's value into its
+ * segment at send time, so two requests on the same name keep their own
+ * values rather than sharing one variable.
  */
-json path_variable_rows (const std::string& url, json declared) {
-    std::set<std::string> named;
+json path_variable_rows (json declared) {
     for (json& row : declared) {
         row["in"] = "path";
-        named.insert (row.at ("key").get<std::string> ());
-    }
-    for (const auto& segment : vayu::core::path_variable_segments (url)) {
-        if (named.insert (segment.name).second) {
-            declared.push_back (json{ { "key", segment.name }, { "value", "" },
-            { "enabled", true }, { "in", "path" } });
-        }
     }
     return declared;
 }
@@ -1271,9 +1265,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
         json params = question == std::string::npos ?
         json::array () :
         query_entries (text.substr (question + 1), counts);
-        for (json& row : path_variable_rows (base, json::array ())) {
-            params.push_back (std::move (row));
-        }
+        // A string URL has no `url.variable[]`, so it declares no path row.
         return { base, std::move (params) };
     }
     const std::string* declared = as_str (prop (url, "raw"));
@@ -1295,8 +1287,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     json params = (!structured.empty () || question == std::string::npos) ?
     std::move (structured) :
     query_entries (raw.substr (question + 1), counts);
-    for (json& row :
-    path_variable_rows (base, postman_path_variables (prop (url, "variable")))) {
+    for (json& row : path_variable_rows (postman_path_variables (prop (url, "variable")))) {
         params.push_back (std::move (row));
     }
     return { base, std::move (params) };
@@ -2276,7 +2267,7 @@ class InsomniaTree {
         const std::string url = normalize_vars (as_string (prop (resource, "url")));
         request["url"]    = url;
         request["params"] = map_key_values (&params);
-        for (json& row : path_variable_rows (url, declared_path_rows)) {
+        for (json& row : path_variable_rows (declared_path_rows)) {
             request["params"].push_back (std::move (row));
         }
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
