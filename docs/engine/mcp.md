@@ -192,6 +192,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (`mode`: `contract` by default, `full` to write every edit into a bound document; document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry and how many secrets it left out) |
+| `export_postman`       | read     | `POST /export/postman`                       | - (secrets always omitted, counted in `notes.secretsOmitted` - including them is a choice the app's dialog asks a person for; `notes.notCarried` names what Postman has no place for; document text capped at 32 KB, with `contentBytes` for the true size) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
@@ -1674,7 +1675,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, `tools.ts` and its 73 schemas built at
+reachable from `index.ts` - the SDK, zod, `tools.ts` and its 74 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is

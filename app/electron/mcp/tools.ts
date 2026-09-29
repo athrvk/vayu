@@ -5652,6 +5652,48 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "export_postman",
+		category: "read",
+		invalidates: [],
+		description:
+			"Export a collection as a Postman Collection v2.1 document - its folders, requests, variables, auth and scripts, in the JSON Postman imports. Reads only: nothing is stored, and the collection is left exactly as it is. Auth secrets and variables marked secret are always written empty here, and `notes.secretsOmitted` counts them; the app's export dialog is where a person can choose to include them. `notes` also lists what Postman has no place for (`notCarried`, one entry per kind with a count and the engine's sentence), so nothing is dropped without saying so. The document text is capped at 32 KB, with `contentBytes` reporting the true size.",
+		annotations: {
+			title: "Export collection as Postman",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe("Collection to export. Its whole subtree is read, folders included."),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			let exported: unknown;
+			try {
+				// No `includeSecrets` argument: a tool result is text an agent may
+				// quote or paste anywhere, and a person choosing to hand over
+				// credentials is a choice the dialog asks for, not one an agent
+				// makes for them.
+				exported = await ctx.client.exportPostman(collectionId, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const answer = isRecord(exported) ? exported : {};
+			const text = typeof answer.text === "string" ? answer.text : "";
+			const { text: bounded, truncated } = boundText(text);
+			return jsonResult({
+				collectionId,
+				fileName: answer.fileName ?? null,
+				notes: answer.notes ?? null,
+				document: bounded,
+				documentTruncated: truncated,
+				contentBytes: Buffer.byteLength(text, "utf8"),
+			});
+		},
+	},
+	{
 		name: "unbind_spec",
 		category: "write",
 		invalidates: ["collection"],

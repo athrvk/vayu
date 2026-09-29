@@ -456,6 +456,23 @@ export class EngineClient {
 	}
 
 	/**
+	 * A collection as a Postman Collection v2.1 document (`POST /export/postman`).
+	 *
+	 * A POST that writes nothing, like `exportSpec`. Always asked for with
+	 * secrets omitted - see the `export_postman` tool for why. A 404 (no such
+	 * collection) arrives as an {@link EngineRequestError} carrying the engine's
+	 * sentence.
+	 */
+	exportPostman(collectionId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"POST",
+			"/export/postman",
+			{ collectionId, includeSecrets: false },
+			signal
+		);
+	}
+
+	/**
 	 * A page of run history (newest first), bounded so a caller never pulls
 	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
 	 * carry the compact `summary`, not the full config_snapshot.
