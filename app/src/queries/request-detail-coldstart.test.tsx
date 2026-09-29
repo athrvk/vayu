@@ -24,13 +24,16 @@
  * That is the bug the old `.catch(() => [])` scan could not avoid.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useRequestQuery, isRequestNotFound } from "./collections";
 import { queryKeys } from "./keys";
+import { QUERY_CACHE } from "@/config/cache";
 import { ApiError } from "@/services";
+import { EngineUnreachableError } from "@/services/http-client";
+import { useEngineStore } from "@/stores/engine-store";
 
 const getRequest = vi.fn();
 
@@ -131,6 +134,55 @@ describe("a transport failure is not a deletion", () => {
 
 		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
 		expect(isRequestNotFound(result.current.error)).toBe(false);
+	});
+});
+
+/**
+ * A restored tab looks its request up at first paint, which is before the engine
+ * listens (#1144). Its own budget - a few retries 100ms apart - ran out in well
+ * under a second, so an ordinary launch showed "Couldn't load this request"
+ * until the health poll's reconnect refetch replaced it.
+ *
+ * Mutation-check: drop the `isEngineStartFailure` term from
+ * `requestDetailOptions`' retry and the first case sees `error`.
+ */
+describe("a restored tab racing an engine that is still starting", () => {
+	afterEach(() => {
+		useEngineStore.setState({ engineStartWindow: null });
+	});
+
+	it("keeps loading until the engine answers, then shows the request", async () => {
+		useEngineStore.setState({ engineStartWindow: Date.now() });
+		const refusals = 8; // Twice the lookup's own budget.
+		for (let i = 0; i < refusals; i++) {
+			getRequest.mockRejectedValueOnce(new EngineUnreachableError("refused"));
+		}
+		getRequest.mockResolvedValue(REQ);
+		const statuses: string[] = [];
+		const { result } = renderHook(
+			() => {
+				const query = useRequestQuery("req_2");
+				statuses.push(query.status);
+				return query;
+			},
+			{ wrapper: wrapper(makeClient()) }
+		);
+
+		await waitFor(() => expect(result.current.data).toMatchObject({ id: "req_2" }), {
+			timeout: 3000,
+		});
+		expect(getRequest).toHaveBeenCalledTimes(refusals + 1);
+		expect(statuses).not.toContain("error");
+	});
+
+	it("still fails on its own budget once nothing is starting", async () => {
+		getRequest.mockRejectedValue(new EngineUnreachableError("refused"));
+		const { result } = renderHook(() => useRequestQuery("req_2"), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		expect(getRequest).toHaveBeenCalledTimes(QUERY_CACHE.REQUEST_LOOKUP_RETRY + 1);
 	});
 });
 

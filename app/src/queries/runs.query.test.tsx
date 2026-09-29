@@ -47,6 +47,9 @@ import {
 } from "./runs";
 import { queryKeys } from "./keys";
 import { ApiError } from "@/services";
+import { EngineUnreachableError } from "@/services/http-client";
+import { useEngineStore } from "@/stores/engine-store";
+import { QUERY_CACHE } from "@/config/cache";
 import type { RunListResponse } from "@/types";
 
 const listRuns = vi.fn();
@@ -608,6 +611,27 @@ describe("runDetailOptions", () => {
 
 		expect(retry(0, new RunNotFoundError("run_1"))).toBe(false);
 		expect(retry(0, new Error("Failed to fetch"))).toBe(true);
+	});
+
+	/**
+	 * A restored run tab looks its run up before the engine listens (#1144).
+	 * Mutation-check: drop the `isEngineStartFailure` term from the predicate
+	 * and the past-budget refusal stops being retried while starting.
+	 */
+	it("does not spend its budget on an engine that is still starting", () => {
+		const { retry } = runDetailOptions("run_1");
+		const refused = new EngineUnreachableError("refused");
+		const pastBudget = QUERY_CACHE.DEFAULT_QUERY_RETRY;
+
+		try {
+			useEngineStore.setState({ engineStartWindow: Date.now() });
+			expect(retry(pastBudget, refused)).toBe(true);
+			// Starting or not, a deletion is still final.
+			expect(retry(0, new RunNotFoundError("run_1"))).toBe(false);
+		} finally {
+			useEngineStore.setState({ engineStartWindow: null });
+		}
+		expect(retry(pastBudget, refused)).toBe(false);
 	});
 
 	it("discriminates by type, not by message", () => {

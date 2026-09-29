@@ -23,6 +23,7 @@ import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { isEngineStartFailure } from "@/lib/query-client";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { Run, RunListResponse, StartScenarioRunRequest } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
@@ -237,9 +238,11 @@ export function runDetailOptions(runId: string | null) {
 		enabled: !!runId,
 		// Never retry a real deletion - a 404 is final, and a zombie run tab
 		// retrying it forever is exactly what the global retry produced. A
-		// transport failure still gets the default budget.
+		// transport failure still gets the default budget, and an engine that is
+		// still starting does not spend it.
 		retry: (count: number, error: unknown) =>
-			!isRunNotFound(error) && count < QUERY_CACHE.DEFAULT_QUERY_RETRY,
+			!isRunNotFound(error) &&
+			(isEngineStartFailure(error) || count < QUERY_CACHE.DEFAULT_QUERY_RETRY),
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
 	};
 }

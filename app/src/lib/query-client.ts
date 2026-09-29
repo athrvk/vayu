@@ -13,7 +13,8 @@
 
 import { QueryClient } from "@tanstack/react-query";
 import { QUERY_CACHE } from "@/config/cache";
-import { ApiError } from "@/services/http-client";
+import { ApiError, EngineUnreachableError } from "@/services/http-client";
+import { engineStarting } from "./engine-start-window";
 
 /**
  * A 4xx from the engine is a verdict, not a hiccup: a 404 for a deleted row
@@ -26,10 +27,46 @@ function isFinalError(error: unknown): boolean {
 }
 
 /**
+ * An engine that has not arrived yet, rather than one that failed.
+ *
+ * The window paints while the engine is still starting (#1144), and every query
+ * mounted at first paint - collections, runs, a restored tab's request - fires
+ * into a port nothing is listening on yet. Spending the retry budget there turns
+ * an ordinary launch into error panes ("Couldn't load this request") beside a
+ * Dock that correctly says "Starting…", until the health poll's reconnect
+ * refetch replaces them. So while a start is in flight a refused connection is
+ * not counted against the budget: the query stays loading, and it is the start
+ * window's own expiry (`engine-start-window.ts`) that lets the failure through,
+ * the same moment the Dock turns `unreachable`. An `ApiError` is never this: an
+ * engine answered.
+ *
+ * Exported for the queries that bring their own `retry` predicate, which do not
+ * inherit this from `shouldRetryQuery`.
+ */
+export function isEngineStartFailure(error: unknown): boolean {
+	return error instanceof EngineUnreachableError && engineStarting();
+}
+
+/**
  * Exported so a query with its own retry rule can be checked against this one.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
-	return !isFinalError(error) && failureCount < QUERY_CACHE.DEFAULT_QUERY_RETRY;
+	if (isFinalError(error)) return false;
+	return isEngineStartFailure(error) || failureCount < QUERY_CACHE.DEFAULT_QUERY_RETRY;
+}
+
+/**
+ * How long a query waits before the next attempt.
+ *
+ * While the engine is starting, the short fixed `ENGINE_START_RETRY_DELAY_MS`:
+ * `invalidateQueries` does not cut short a retry that is already sleeping for a
+ * query with no data yet, so this delay is how long data lags an engine that has
+ * just started listening. Otherwise TanStack's own default, restated because the
+ * library does not export it: doubling from one second, capped at thirty.
+ */
+export function queryRetryDelay(failureCount: number, error: unknown): number {
+	if (isEngineStartFailure(error)) return QUERY_CACHE.ENGINE_START_RETRY_DELAY_MS;
+	return Math.min(1000 * 2 ** failureCount, 30_000);
 }
 
 /**
@@ -48,6 +85,7 @@ export const queryClient = new QueryClient({
 			staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
 			gcTime: QUERY_CACHE.DEFAULT_GC_TIME_MS,
 			retry: shouldRetryQuery,
+			retryDelay: queryRetryDelay,
 			// Don't refetch on window focus for desktop app
 			refetchOnWindowFocus: false,
 			// Refetch on reconnect

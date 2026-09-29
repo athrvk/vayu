@@ -22,6 +22,13 @@ export const QUERY_CACHE = {
 	DEFAULT_GC_TIME_MS: 5 * MINUTE,
 	DEFAULT_QUERY_RETRY: 2,
 	DEFAULT_MUTATION_RETRY: 1,
+	/**
+	 * A query's retry delay while the engine is starting (`queryRetryDelay`).
+	 * Bounds how long data lags an engine that has just begun listening; a
+	 * refused connect to a closed localhost port costs microseconds, so the
+	 * attempts it adds are free.
+	 */
+	ENGINE_START_RETRY_DELAY_MS: 250,
 
 	/** Engine /config rarely changes while the app is open. */
 	CONFIG_STALE_TIME_MS: 1 * MINUTE,

@@ -33,6 +33,19 @@ export class ApiError extends Error {
 }
 
 /**
+ * The engine did not answer at all: the connection was refused or dropped, or
+ * the call ran out of time before any response arrived.
+ *
+ * Its own class, not a bare `Error`, because what it means depends on when it
+ * happens: while an engine is starting it is the ordinary state of the port,
+ * not a failure (`lib/query-client.ts` retries it through the start window
+ * instead of spending the default budget). An `ApiError` is the opposite case,
+ * an engine that answered. `name` is left as `Error` so a message rendered with
+ * `String(error)` reads exactly as it did before this class existed.
+ */
+export class EngineUnreachableError extends Error {}
+
+/**
  * One message from a streamed engine call (issue #882).
  *
  * `event` is an SSE frame, in the order the engine wrote it. `buffered` is the
@@ -108,14 +121,20 @@ function abortError(): Error {
  * recoverable from what was thrown, which is what `preserve-caught-error` is
  * about.
  */
-function asTransportError(error: unknown): Error {
+function asTransportError(error: unknown): EngineUnreachableError {
 	if (error instanceof Error) {
 		if (error.name === "AbortError") {
-			return new Error("Couldn't reach Vayu's engine in time.", { cause: error });
+			return new EngineUnreachableError("Couldn't reach Vayu's engine in time.", {
+				cause: error,
+			});
 		}
-		return new Error(`Couldn't reach Vayu's engine (${error.message}).`, { cause: error });
+		return new EngineUnreachableError(`Couldn't reach Vayu's engine (${error.message}).`, {
+			cause: error,
+		});
 	}
-	return new Error("Couldn't reach Vayu's engine (unknown error).", { cause: error });
+	return new EngineUnreachableError("Couldn't reach Vayu's engine (unknown error).", {
+		cause: error,
+	});
 }
 
 /**

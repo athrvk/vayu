@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { httpClient, ApiError } from "./http-client";
+import { httpClient, ApiError, EngineUnreachableError } from "./http-client";
 
 /** A fetch that answers once with the given status and body. */
 function respondWith(status: number, body: unknown, ok = false) {
@@ -150,5 +150,23 @@ describe("httpClient transport failures", () => {
 		const error = await failedGet();
 		expect(error.message).toBe("Couldn't reach Vayu's engine (unknown error).");
 		expect(error.cause).toBe("socket hang up");
+	});
+
+	/**
+	 * The class is what the query retry policy reads to keep a query loading
+	 * while the engine is still starting (`lib/query-client.ts`); a bare `Error`
+	 * here would silently put the launch-time error panes back.
+	 */
+	it("throws every branch as EngineUnreachableError, never as an ApiError", async () => {
+		const aborted = new Error("The operation was aborted");
+		aborted.name = "AbortError";
+		for (const rejection of [aborted, new TypeError("fetch failed"), "socket hang up"]) {
+			rejectWith(rejection);
+			const error = await failedGet();
+			expect(error).toBeInstanceOf(EngineUnreachableError);
+			expect(error).not.toBeInstanceOf(ApiError);
+			// Rendered exactly as before the class existed.
+			expect(String(error)).toBe(`Error: ${error.message}`);
+		}
 	});
 });

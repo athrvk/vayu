@@ -1547,15 +1547,29 @@ The window loads alongside the engine rather than after it, so an ordinary
 launch spends its first seconds starting rather than connected; polling that
 state at the 30s cadence could leave a launch showing it for half a minute
 after the engine was already serving. A poll that succeeds right after one that
-failed also triggers `queryClient.invalidateQueries()` once - collections, runs
-and config gave up after two retries while the engine was down, a connection
-refused by a closed port is a plain `Error` rather than an `ApiError`, and
-`refetchOnReconnect` only fires on the browser's online/offline event, which
-localhost never changes - so nothing else would ever revisit their error state
-once the engine came back.
+failed also triggers `queryClient.invalidateQueries()` once - an engine that
+stopped with nothing starting costs collections, runs and config their two
+retries, a connection refused by a closed port is an `EngineUnreachableError`
+rather than an `ApiError`, and `refetchOnReconnect` only fires on the browser's
+online/offline event, which localhost never changes - so nothing else would ever
+revisit their error state once the engine came back.
+
+A launch does not spend those retries. While the start window below is open, the
+shared retry policy (`shouldRetryQuery` and `queryRetryDelay` in
+`lib/query-client.ts`, via `isEngineStartFailure`) keeps retrying a refused
+connection every `QUERY_CACHE.ENGINE_START_RETRY_DELAY_MS` (250ms) without
+counting it, so every query mounted at first paint - the collection tree, the
+Launcher, a restored tab's request or run - stays loading beside the Dock's
+"Starting…" and loads within that delay of the engine listening. It used to
+settle into "Couldn't reach Vayu's engine" panes a few hundred milliseconds to
+three seconds into an ordinary launch, and flash them until the reconnect
+refetch above replaced them. The failure still surfaces, on the same clock as
+the Dock: the first refused attempt after the window expires is not retried.
+`requestDetailOptions` and `runDetailOptions` bring their own `retry`, so they
+compose `isEngineStartFailure` in themselves.
 
 A failed poll does not mean `engineStatus` becomes `unreachable` outright:
-`engineStatusAfterFailedPoll` (`queries/health.ts`) reads `starting` while an
+`engineStatusAfterFailedPoll` (`lib/engine-start-window.ts`) reads `starting` while an
 engine is known to be coming up and is still inside
 `TIMING.ENGINE_STARTUP_GRACE_MS` (45s) of the moment it began, and `unreachable`
 otherwise - past that window, or after an engine that had answered stops

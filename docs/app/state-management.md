@@ -566,8 +566,10 @@ reports as failed, after which the next failed poll owes the user its reason
 again. A window nobody closes is spent rather than cleared - an engine that
 never arrives leaves its opening time in place, expired - so this is not an "is
 something starting" flag and must not be read as one: only
-`engineStatusAfterFailedPoll` interprets it, and to that an expired timestamp
-and a `null` mean the same thing.
+`engineStatusAfterFailedPoll` (`lib/engine-start-window.ts`) interprets it, and
+to that an expired timestamp and a `null` mean the same thing. Two things ask
+it: `useHealthQuery`, for `engineStatus`, and the shared query retry policy,
+which keeps queries loading rather than failed while it answers `starting`.
 
 **Non-persisted** (cleared on app restart).
 
@@ -2008,8 +2010,13 @@ until it names a reader. The emitting side is documented in
 not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
 deleted row answers identically every time, so retrying it only delays the error
 the caller is waiting on. 4xx is never retried; everything else (5xx, timeout,
-unreachable engine - which `http-client.ts` throws as a plain `Error`, not an
-`ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
+unreachable engine - which `http-client.ts` throws as an `EngineUnreachableError`,
+not an `ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget. The one exception is
+an engine that is still starting: while `engineStartWindow` is open, an
+`EngineUnreachableError` is retried without counting against the budget, every
+`ENGINE_START_RETRY_DELAY_MS` (`queryRetryDelay`), so a launch shows loading
+rather than error panes until the engine answers or the window expires
+(`docs/app/api-integration.md`, Health Checking).
 
 **Cache policy lives in `config/cache.ts` (`QUERY_CACHE`), not in the call
 sites.** Name the constant when you need a duration; restating the number here
