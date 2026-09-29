@@ -204,6 +204,19 @@ export const queryKeys = {
 			[...queryKeys.specs.all, "export", collectionId, format, mode, opened] as const,
 	},
 
+	// Collections written out in another tool's format. Not under `specs`: a
+	// Postman document is not a spec and reads no binding.
+	exports: {
+		all: ["exports"] as const,
+		/**
+		 * One collection as a Postman Collection v2.1 document. Keyed by
+		 * `includeSecrets` because the two answers carry different text, and by
+		 * `opened` for the reason `specs.export` is - see `usePostmanExportQuery`.
+		 */
+		postman: (collectionId: string, includeSecrets: boolean, opened: number) =>
+			[...queryKeys.exports.all, "postman", collectionId, includeSecrets, opened] as const,
+	},
+
 	// Environments
 	environments: {
 		all: ["environments"] as const,

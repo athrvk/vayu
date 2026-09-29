@@ -369,6 +369,7 @@ apiService.matchSpecOperations(payload)                  // POST /specs/match
 apiService.diffSpec(payload): Promise<SpecDiffResponse>  // POST /specs/diff
 apiService.bindSpec(payload): Promise<SpecBindResponse>  // POST /specs/bind
 apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
+apiService.exportPostman(payload): Promise<PostmanExportResponse> // POST /export/postman
 ```
 
 `describeSpec` is the read that replaced the last parse this app did of a spec
@@ -400,6 +401,14 @@ examples and the bound document - which is the point, since a bound export
 and the notes the dialog prints. A `409` there is a binding whose document is
 not stored, or stored bytes that will not read as OpenAPI; the renderer prints
 the engine's sentence rather than falling back to a skeleton.
+
+`exportPostman` is the same kind of read for the other way out: a collection id
+and `includeSecrets` (default `false`, which writes auth secrets and secret
+variables empty and counts them in `notes.secretsOmitted`). The answer is the
+Postman Collection v2.1 text, a `<name>.postman_collection.json` file name, and
+notes with the request and folder counts plus `notCarried` - one entry per kind
+of thing Postman has no place for, each with a count and the engine's sentence,
+which the dialog prints as written.
 
 **Neither index is sent on any write that stores a document** - not by
 `createSpec`, `syncSpec` or the `specs` section of `importCollection` below. The
