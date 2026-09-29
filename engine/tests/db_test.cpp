@@ -11,8 +11,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -2255,10 +2255,13 @@ TEST_F (DatabaseTest, ADatabaseStampedWithTheNextSchemaIsRefusedUntouched) {
         db.init ();
     }
     set_user_version (TEST_DB_PATH, vayu::db::SCHEMA_VERSION + 1);
+    // Through `rdbuf ()`, not a pair of `istreambuf_iterator`s: GCC 13 at -O2
+    // reports those as a potential null dereference (see db_recovery_test.cpp).
     const auto read_bytes = [] {
         std::ifstream in (TEST_DB_PATH, std::ios::binary);
-        return std::string ((std::istreambuf_iterator<char> (in)),
-        std::istreambuf_iterator<char> ());
+        std::ostringstream buffer;
+        buffer << in.rdbuf ();
+        return buffer.str ();
     };
     const std::string before = read_bytes ();
     ASSERT_FALSE (before.empty ());
