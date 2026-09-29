@@ -3286,6 +3286,109 @@ Messages, by case:
 - `500` `<detail>` - the transaction itself failed; nothing was
   written.
 
+## Export
+
+### POST /export/postman
+
+A collection and everything beneath it as a Postman Collection v2.1.0
+document, written the way Postman's own "Export > Collection v2.1" writes one
+(`core/postman_export.hpp`). It is the inverse of the Postman importer: a
+collection imported from a Postman export and exported again gives back the
+same document, `_postman_id` aside, and exporting, importing and exporting
+again is byte-identical.
+
+**Reads only.** Nothing is stored. The whole subtree is exported, with no stop
+at a collection bound to another OpenAPI document.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",   // Required, non-empty
+  "includeSecrets": false          // Optional - default false
+}
+```
+
+`includeSecrets: false` writes every credential as `""`: a bearer token, a
+basic or digest or NTLM password, an API-key value, an OAuth 2.0 client secret
+or password-grant password, an AWS key pair or session token, and the value of
+a variable marked secret. A value that is exactly one `{{variable}}`
+reference names a secret without being one and is kept. Each blanked value is
+counted in `secretsOmitted`. `true` writes them as stored, which is what
+Postman's own export does.
+
+**Response:**
+```json
+{
+  "text": "{\n\t\"info\": {\n\t\t\"_postman_id\": \"9a1f...\",\n ...",
+  "fileName": "Pet Store.postman_collection.json",
+  "notes": {
+    "requestsExported": 12,
+    "foldersExported": 3,
+    "secretsOmitted": 2,
+    "notCarried": [
+      { "code": "vayu_elements", "count": 4,
+        "message": "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" }
+    ]
+  }
+}
+```
+
+- `text` is `JSON.stringify(document, null, "\t")`: tab-indented, no trailing
+  newline, keys in the order Postman writes them. `info.schema` is
+  `https://schema.getpostman.com/json/collection/v2.1.0/collection.json`;
+  `info._postman_id` is the collection id when that is a UUID, the UUID an
+  engine id ends in (`col_<uuid>`), or else a version-8 UUID derived from the
+  id. No `_exporter_id` or `_collection_link` is written.
+- `fileName` is `<collection name>.postman_collection.json`, with every
+  character a filesystem refuses (`<>:"/\|?*` and control characters)
+  replaced by `_`.
+- `foldersExported` counts the folders beneath the collection, not the
+  collection itself.
+- `notCarried` has one entry per kind of stored thing the format cannot carry,
+  in a fixed code order, each with its count and a short phrase; an empty
+  array means everything was carried.
+
+| Code | Written when the collection holds |
+|------|-----------------------------------|
+| `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
+| `disabled_scripts` | A turned-off script; Postman would run it, so it is left out |
+| `merged_scripts` | More than one pre-request (or post-response) script on one level, joined into its single Postman script |
+| `script_settings` | A script with a name or the load-test `inline` setting |
+| `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
+| `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
+| `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
+| `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
+| `form_file_names` | A form-data file part whose file name differs from its path's own |
+| `http_version` | A request's HTTP version other than `auto` |
+| `event_stream` | A request consumed as an event stream |
+| `mock_response_mode` | A mock response mode other than `first` |
+| `truncated_examples` | An example saved from a cut-off response, written with the partial body |
+| `example_content_types` | An example content type no Content-Type header row states |
+| `variable_types` | A variable typed `json` (`number` and `boolean` are written as Postman's own types) |
+| `data_contracts` | A collection or folder data-file contract |
+| `spec_bindings` | A collection or folder bound to an OpenAPI document |
+| `spec_operations` | A request stamped as an OpenAPI operation |
+| `rows_without_key` | A header, param or form row with a value but no name, left out |
+
+What maps where: folders are item groups (folders before requests, each in
+stored order); a request's `inherit` auth is an absent `auth` and its `none` is
+`noauth`, while a collection's or folder's `none` is an absent `auth` and its
+`noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
+are `raw` with that `options.raw.language`, `graphql` is `graphql` with the
+variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
+`form-data` is `formdata` with a file part's `src`; `script.pre` /
+`script.post` are the `prerequest` / `test` events; saved examples are
+`response` entries with an `originalRequest`; `followRedirects: false`,
+`maxRedirects` other than 10 and `verifySSL: false` are
+`protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD
+that sends a body carries `disableBodyPruning: true`.
+
+**Errors:**
+- `400` `Invalid body: must be an object`.
+- `400` `Invalid 'collectionId': must be a non-empty string`.
+- `400` `Invalid 'includeSecrets': must be true or false`.
+- `404` `Collection not found`.
+
 ## Environments
 
 ### GET /environments

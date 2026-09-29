@@ -353,6 +353,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (#854); reads only, applying is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (#862): the document, the binding and every stamp, written **and cleared**, in one transaction |
 | POST | `/specs/export` | A collection back out as an OpenAPI document (#855): its bound document patched, or a skeleton when it binds none; reads only |
+| POST | `/export/postman` | A collection's subtree as a Postman Collection v2.1.0 document in the shape Postman's own export writes (`core/postman_export.hpp`, the Postman importer's inverse); credentials blanked unless `includeSecrets`, everything the format cannot carry listed in `notes.notCarried`; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 

@@ -1292,6 +1292,7 @@ void register_spec_diff_routes (RouteContext& ctx);
 void register_spec_describe_routes (RouteContext& ctx);
 void register_spec_bind_routes (RouteContext& ctx);
 void register_spec_export_routes (RouteContext& ctx);
+void register_postman_export_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);

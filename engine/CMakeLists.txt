@@ -740,6 +740,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/spec_describe.cpp
         src/http/routes/spec_bind.cpp
         src/http/routes/spec_export.cpp
+        src/http/routes/postman_export.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/client_certificates.cpp
