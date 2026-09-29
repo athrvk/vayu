@@ -1765,9 +1765,12 @@ request is edited.
 The stored copy holds `name` (`null`), `originalRequest` (method, headers,
 body and url as the export writes a request's, with no `auth`), `status`
 (`statusText`), `code`, `_postman_previewlanguage`, `header` (the example's
-own rows), `cookie` (one entry per cookie the `Set-Cookie` rows set: `key`,
-`value`, `domain`, `path`, `httpOnly`, `secure`, `hostOnly`, `expires` when
-stated), `responseTime` (whole milliseconds) and `body` (`null`). When it
+own rows), `cookie` (one entry per cookie the enabled `Set-Cookie` rows set,
+in Postman's member order: `expires`, `hostOnly`, `httpOnly`, `domain`, `path`,
+`secure`, `session`, `value`, `key`; `expires` is JavaScript's date text in
+UTC, from `Max-Age` counted from the save when there is one, else `Expires`,
+and `"Invalid Date"` with `session: true` for a cookie with neither),
+`responseTime` (whole milliseconds) and `body` (`null`). When it
 would be over the 1 MiB cap (a large request body) the example is still
 created, without it, and a warning is logged; the export then regenerates
 those members. `PUT` ignores a `savedFrom` key.
@@ -3466,11 +3469,13 @@ response it came from (`request_examples.postman_response`), and so does one
 saved in the app from a live response (`savedFrom` on
 [`POST /requests/:id/examples`](#post-requestsidexamples)); either is written back
 from it in the source's member order: `originalRequest` (the request as it was
-recorded, not the request's current state), `cookie`, `responseTime`,
+recorded, not the request's current state), `responseTime`,
 `_postman_previewtype` and any other member as stored; `name`, `code` and
 `body` from the example's own fields. The status text is the stored one while
 `status` is still the code it was recorded with, `header[]` (its `name` fields
-and number values included) while `headers` still reads the same, and the
+and number values included) and `cookie` while `headers` still reads the same
+(after an edit `cookie` is rebuilt from the enabled `Set-Cookie` rows, so a
+removed row's value is not exported), and the
 preview language and type while the declared Content-Type is unchanged; an
 edit to any of those regenerates the part it made stale. A member the source
 left out (`code`, `status`) stays out until an edit gives it a value. The

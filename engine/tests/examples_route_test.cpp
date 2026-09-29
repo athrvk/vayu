@@ -477,8 +477,11 @@ TEST_F (ExamplesRouteTest, CreateWithSavedFromRecordsTheSavedResponse) {
     const auto& cookies = blob["cookie"];
     ASSERT_EQ (cookies.size (), 2u) << cookies.dump ();
     EXPECT_EQ (member_names (cookies[0]),
-    (std::vector<std::string>{
-    "key", "value", "domain", "path", "httpOnly", "secure", "hostOnly" }));
+    (std::vector<std::string>{ "expires", "hostOnly", "httpOnly", "domain",
+    "path", "secure", "session", "value", "key" }))
+    << "Postman's own member order";
+    EXPECT_EQ (cookies[0]["expires"], "Invalid Date");
+    EXPECT_EQ (cookies[0]["session"], true);
     EXPECT_EQ (cookies[0]["key"], "s");
     EXPECT_EQ (cookies[0]["value"], "1");
     EXPECT_EQ (cookies[0]["domain"], "");
@@ -491,8 +494,9 @@ TEST_F (ExamplesRouteTest, CreateWithSavedFromRecordsTheSavedResponse) {
     EXPECT_EQ (cookies[1]["path"], "/");
     EXPECT_EQ (cookies[1]["secure"], true);
     EXPECT_EQ (cookies[1]["hostOnly"], false);
-    EXPECT_EQ (cookies[1]["expires"], "Wed, 21 Oct 2037 07:28:00 GMT")
+    EXPECT_EQ (cookies[1]["expires"], "Wed Oct 21 2037 07:28:00 GMT+0000 (Coordinated Universal Time)")
     << "the comma inside Expires is not a cookie boundary";
+    EXPECT_EQ (cookies[1]["session"], false);
 
     // Still never a display field.
     auto [list_status, list] = routes::list_request_examples_response (*db_, "req_1");

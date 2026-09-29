@@ -14,6 +14,8 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <ctime>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -838,6 +840,55 @@ PostmanExportExample recorded_example (const ordered& recorded) {
         "nope", "text/plain", false, recorded };
 }
 
+// A saved response's cookies in Postman's shape: the `expires` Postman writes
+// (JavaScript's date text; `Invalid Date` for a session cookie), `Max-Age`
+// counted from when the response came in and winning over `Expires`, and a
+// turned-off Set-Cookie row setting nothing. Mutation checks: drop the
+// `row_enabled` test in `postman_cookies` and the count reds; ignore
+// `Max-Age` and the two expiry assertions red.
+TEST (PostmanExport, ASavedResponsesCookiesAreWrittenAsPostmanWritesThem) {
+    PostmanExportExample example;
+    example.headers = ordered::array ({ row ("Set-Cookie", "a=1; Max-Age=60; Path=/p"),
+    row ("Set-Cookie", "b=2; Max-Age=3600; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Domain=x.test"),
+    row ("Set-Cookie", "c=3; Expires=not a date; HttpOnly"),
+    row ("Set-Cookie", "off=4; Max-Age=60", false) });
+    // 2026-01-01T00:00:00Z.
+    constexpr std::time_t RECEIVED = 1767225600;
+    const auto text                = vayu::core::postman_saved_response_text (
+    request ("r", "u"), example, "", std::nullopt, RECEIVED);
+    ASSERT_HAS_VALUE (text);
+    const ordered cookies = ordered::parse (*text).at ("cookie");
+    ASSERT_EQ (cookies.size (), 3u) << cookies.dump ();
+    EXPECT_EQ (cookies[0].dump (),
+    R"cookie({"expires":"Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)",)cookie"
+    R"("hostOnly":true,"httpOnly":false,"domain":"","path":"/p","secure":false,)"
+    R"("session":false,"value":"1","key":"a"})");
+    EXPECT_EQ (cookies[1]["expires"], "Thu Jan 01 2026 01:00:00 GMT+0000 (Coordinated Universal Time)")
+    << "Max-Age wins over Expires";
+    EXPECT_EQ (cookies[1]["hostOnly"], false);
+    EXPECT_EQ (cookies[2]["expires"], "Invalid Date")
+    << "an Expires that does not parse is no expiry";
+    EXPECT_EQ (cookies[2]["session"], true);
+    EXPECT_EQ (cookies[2]["httpOnly"], true);
+}
+
+// A stored `cookie[]` is written as recorded only while the header rows are;
+// an edit rebuilds it from the Set-Cookie rows, so a removed row's value does
+// not outlive it. Mutation check: write the stored `cookie` unconditionally
+// and the first assertion reds.
+TEST (PostmanExport, EditedHeadersRegenerateTheCookies) {
+    PostmanExportRequest entry   = request ("r", "u");
+    PostmanExportExample example = recorded_example (recorded_response ());
+    example.headers              = ordered::array (
+    { row ("Content-Type", "text/plain"), row ("Set-Cookie", "new=v; Secure") });
+    entry.examples.push_back (example);
+    const ordered response = only_item (entry)["response"][0];
+    ASSERT_EQ (response["cookie"].size (), 1u) << response["cookie"].dump ();
+    EXPECT_EQ (response["cookie"][0]["key"], "new");
+    EXPECT_EQ (response["cookie"][0].value ("secure", false), true);
+    EXPECT_EQ (response.dump ().find ("abc"), std::string::npos);
+}
+
 // Every member of a stored saved response comes back in its own order, with
 // the columns' values in the `name` / `body` / `code` positions. Mutation
 // check: return the regenerated response even when `postman_response` is
@@ -976,8 +1027,8 @@ TEST (PostmanExport, ASavedResponsesHeaderReadsBackAsTheExamplesRows) {
     { row ("Content-Type", "text/html"), row ("X-Off", "0", false), noted });
     PostmanExportRequest sent = request ("r", "{{baseUrl}}/a");
 
-    const auto text =
-    vayu::core::postman_saved_response_text (sent, example, "Short And Stout", 7.0);
+    const auto text = vayu::core::postman_saved_response_text (
+    sent, example, "Short And Stout", 7.0, 0);
     ASSERT_HAS_VALUE (text);
     const ordered recorded = ordered::parse (*text);
     const ordered rows =

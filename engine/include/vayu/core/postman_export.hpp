@@ -27,6 +27,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <ctime>
 #include <optional>
 #include <string>
 #include <vector>
@@ -155,7 +156,8 @@ const nlohmann::ordered_json& auth);
  * `auth`. `header` is @p example's rows through the export's own row mapping,
  * so the export's check that the column still says what was recorded reads it
  * as unchanged until an edit. @p status_text is the server's reason phrase;
- * empty falls back to the status table. Nothing when the text would be over
+ * empty falls back to the status table. `cookie` lists what the enabled
+ * `Set-Cookie` rows set, a `Max-Age` counted from @p received_at. Nothing when the text would be over
  * `MAX_POSTMAN_RESPONSE_BYTES`: the example is then kept without it and the
  * export regenerates these members, as it does for an import.
  */
@@ -163,7 +165,8 @@ const nlohmann::ordered_json& auth);
 const PostmanExportRequest& sent,
 const PostmanExportExample& example,
 const std::string& status_text,
-std::optional<double> response_time_ms);
+std::optional<double> response_time_ms,
+std::time_t received_at);
 
 /// `PostmanExportNotes` as the route answers with it.
 [[nodiscard]] nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes);

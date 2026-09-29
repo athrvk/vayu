@@ -690,9 +690,9 @@ against (`originalRequest`, which differs per example and from the request's
 current state), the status text the server sent, the editor's preview
 language and type, cookies, the response time, and the header rows as written
 (`name` fields, numeric values). The Postman export is the one reader
-(`core/postman_export.cpp`): it writes `originalRequest`, `cookie`,
+(`core/postman_export.cpp`): it writes `originalRequest`,
 `responseTime` and unknown members back as stored, and the status text,
-`header[]` and preview members only while `status` and `headers` still say
+`header[]`, `cookie` and preview members only while `status` and `headers` still say
 what was imported, regenerating them otherwise - so an edit made in Vayu is
 never contradicted by a stale copy. An import or a save in the app writes
 it: `POST /import/apply` and `POST /requests/:id/examples` accept a string that

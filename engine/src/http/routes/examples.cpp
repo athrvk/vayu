@@ -27,6 +27,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <ctime>
 #include <optional>
 #include <string>
 #include <utility>
@@ -359,8 +360,8 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
     if (!example.headers.is_array ()) {
         example.headers = nlohmann::ordered_json::array ();
     }
-    x.postman_response = vayu::core::postman_saved_response_text (
-    saved.request, example, saved.status_text, saved.response_time_ms);
+    x.postman_response = vayu::core::postman_saved_response_text (saved.request,
+    example, saved.status_text, saved.response_time_ms, std::time (nullptr));
     if (!x.postman_response) {
         vayu::utils::log_warning ("http",
         "Saved example kept without its recorded request: over the size limit",
