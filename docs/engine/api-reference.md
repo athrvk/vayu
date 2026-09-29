@@ -4650,15 +4650,31 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
   passes through and every other byte is `%XX` with uppercase hex, so a `/`,
   `?`, `#` or a bare `%` in a value is data, not structure. A `%XX` triplet
   already in the value is sent as written (`postman-url-encoder`'s
-  `isPreEncoded`), so an imported `a%40b.com` is not encoded twice. A `{{token}}` still
-  unresolved (a bound data column, a deferred `{{$guid}}`) is kept verbatim for
-  the per-iteration bind or the residual pass.
+  `isPreEncoded`), so an imported `a%40b.com` is not encoded twice.
+- A value that still holds a `{{token}}` after that resolution - a bound data
+  column, a deferred `{{$guid}}`, a name a pre-request script sets - is **not
+  written yet**: its segment stays `:name` in the composed `url`, and the row
+  goes out in the composed payload's `params` as
+  `{"key": "id", "value": "{{username}}", "in": "path"}`, its value resolved as
+  far as composition could. Whatever answers the token later - the
+  per-iteration bind, or the residual pass after the pre-request script -
+  writes the answer into the segment through the same encoding, so a data cell
+  `a b/c` goes out as `/users/a%20b%2Fc`, never as two raw segments. A token
+  nothing answers is written verbatim, as composition keeps one. Until then a
+  pre-request script reads `pm.request.url` with the `:name` still in it.
 - A value that resolves to the **empty string leaves the segment literal**
   (`:id` goes out as written), as Postman's `Url.getPath` (it writes only a
   non-empty string) and Insomnia's `applyPathParametersToUrl` both do.
 
-The composed payload's `url` is the substituted URL; `/execute`, `/runs` and a
-scenario plan step (which is composed through this same path) send it as is.
+The composed payload's `url` is the substituted URL, and its `params` holds
+exactly the path rows still waiting (absent when none is; an inline request's
+own `params` is consumed, never echoed). `/execute`, `/runs` and a scenario
+plan step (which is composed through this same path) read that `params` back
+and write each waiting value into its `:name` segment once it is answered, at
+the latest just before the send: a run with no residual pass writes it after
+the bind, or once at the start for a load run that binds nothing. A caller
+posting its own `params` path rows to `/execute` or `/runs` gets the same
+writing.
 
 **What gets resolved:** the URL, header keys and values, body `content` and
 `fields`, and every string inside the winning auth block - after `inherit` is
@@ -4773,7 +4789,9 @@ canonical imported auth pattern work: a pre-request script does
 {{token}}` carries the fresh value, rather than the previous run's token or
 `""` on the first run. It resolves the same fields composition does - the URL,
 header names and values, body content, and the five strings a form field
-carries - by the same resolver and the same rules (scope precedence, nested
+carries, plus the value of a `:name` path variable composition left waiting
+(written into its segment, encoded, as the pass ends; see
+[Path variables](#path-variables)) - by the same resolver and the same rules (scope precedence, nested
 resolution, cycles, the 8-level bound); a value composition already
 substituted is finished text and is not touched again. `{{data.column}}` is
 left alone here too - the data namespace is bound per iteration by whoever owns

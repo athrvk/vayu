@@ -114,4 +114,32 @@ TEST (SubstitutePathVariables, AnswersOnlyEnabledPathRowsAndLeavesTheRestLiteral
     "https://h/:id");
 }
 
+TEST (SettlePathVariables, WritesAnAnsweredValueAsOneSegmentAndLeavesATokenWaiting) {
+    vayu::Request request;
+    request.url = "https://h/:a/:b/:c/:a";
+    request.path_variables = { { "a", "x y/z" }, { "b", "{{later}}" }, { "c", "" } };
+    vayu::core::settle_path_variables (request, vayu::core::PathSettle::Answered);
+    // An empty value leaves its segment literal, as composition does.
+    EXPECT_EQ (request.url, "https://h/x%20y%2Fz/:b/:c/x%20y%2Fz");
+    ASSERT_EQ (request.path_variables.size (), 1u);
+    EXPECT_EQ (request.path_variables[0].key, "b");
+
+    vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
+    EXPECT_EQ (request.url, "https://h/x%20y%2Fz/{{later}}/:c/x%20y%2Fz");
+    EXPECT_TRUE (request.path_variables.empty ());
+}
+
+TEST (PendingPathVariablesOf, KeepsTheAnsweringPathRowOfEachKey) {
+    const json rows    = json::parse (R"([
+        {"key":"q","value":"query"},
+        {"key":"id","value":"first","in":"path"},
+        {"key":"id","value":"last","in":"path"},
+        {"key":"off","value":"x","enabled":false,"in":"path"}
+    ])");
+    const auto pending = vayu::core::pending_path_variables_of (rows);
+    ASSERT_EQ (pending.size (), 1u);
+    EXPECT_EQ (pending[0].key, "id");
+    EXPECT_EQ (pending[0].value, "last");
+}
+
 } // namespace

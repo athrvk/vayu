@@ -1486,9 +1486,13 @@ TEST_F (RequestComposerTest, ARequestWithoutPathRowsKeepsItsColonSegmentLiteral)
     EXPECT_EQ (payload["url"], "https://api.test/v1/:x/var");
 }
 
-/// A token the composition cannot answer (a data column bound per iteration)
-/// survives inside the substituted segment unencoded, for the bind to find.
-TEST_F (RequestComposerTest, KeepsABoundColumnTokenInAPathValueForTheRowBind) {
+/// A value holding a token the composition cannot answer (a data column
+/// bound per iteration) is not written: its segment stays `:id` and the row
+/// goes out as the payload's `params`, the value resolved as far as it can
+/// be, for the pass that answers the token to encode the answer. Mutation
+/// check: write every resolved value into the URL and this reads
+/// `/users/u%20{{username}}`.
+TEST_F (RequestComposerTest, LeavesAPathValueHoldingATokenForThePassThatAnswersIt) {
     seed_collection ("col", "");
     auto r   = make_request ("req_1", "col");
     r.url    = "https://api.test/users/:id";
@@ -1500,5 +1504,30 @@ TEST_F (RequestComposerTest, KeepsABoundColumnTokenInAPathValueForTheRowBind) {
     auto [status, payload] = vayu::http::compose_request_core (*db_,
     json{ { "requestId", "req_1" }, { "dataColumns", json::array ({ "username" }) } });
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["url"], "https://api.test/users/u%20{{username}}");
+    EXPECT_EQ (payload["url"], "https://api.test/users/:id");
+    EXPECT_EQ (payload["params"],
+    json::parse (R"([{"key":"id","value":"u {{username}}","in":"path"}])"));
+
+    // `/execute` and `/runs` read it back onto the request they send.
+    const auto request = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (request.is_ok ());
+    ASSERT_EQ (request.value ().path_variables.size (), 1u);
+    EXPECT_EQ (request.value ().path_variables[0].key, "id");
+    EXPECT_EQ (request.value ().path_variables[0].value, "u {{username}}");
+}
+
+/// A composition that finished every path value carries no `params`: the
+/// inline request's own rows are consumed, not echoed.
+TEST_F (RequestComposerTest, ACompositionThatFinishedItsPathCarriesNoParams) {
+    seed_collection ("col", "");
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "collectionId", "col" },
+    { "request",
+    { { "method", "GET" }, { "url", "https://api.test/:a" },
+    { "params",
+    json::array ({ { { "key", "a" }, { "value", "1" }, { "enabled", true },
+    { "in", "path" } } }) } } } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/1");
+    EXPECT_FALSE (payload.contains ("params"));
 }

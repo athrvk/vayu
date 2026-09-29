@@ -36,6 +36,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/types.hpp"
+
 namespace vayu::core {
 
 /**
@@ -93,6 +95,10 @@ struct PathVariableSegment {
  * `.json` suffix kept on the wire); an empty name (`:` or `:.x`) is none.
  */
 [[nodiscard]] std::vector<PathVariableSegment> path_variable_segments (std::string_view url);
+
+/// Whether @p text holds a whole `{{...}}` token (`/{{[^{}]*}}/`) - the one a
+/// path value keeps verbatim, and the reason its segment waits.
+[[nodiscard]] bool holds_template_token (std::string_view text);
 
 /// Whether a Params row is a path variable (`"in": "path"`) rather than a
 /// query row (`in` absent, `"query"`, or anything else).
@@ -167,5 +173,38 @@ const Resolve& resolve) {
     out.append (url, copied);
     return out;
 }
+
+/**
+ * @brief The path variables of a request payload's `params` still to be
+ *        written into its URL (`vayu::Request::path_variables`).
+ *
+ * One entry per key among the `in: "path"` rows, first-appearance order, each
+ * holding the row that answers it (@ref find_path_variable_row); a key whose
+ * rows are all disabled has none. Query rows are ignored: the URL holds them.
+ */
+[[nodiscard]] std::vector<vayu::PendingPathVariable> pending_path_variables_of (
+const nlohmann::json& rows);
+
+/// Which of a request's waiting path variables @ref settle_path_variables writes.
+enum class PathSettle : std::uint8_t {
+    /// Those whose value no longer holds a token - after a bind, which answers
+    /// some tokens and leaves the rest for the residual pass.
+    Answered,
+    /// Every one, tokens still in a value written verbatim - the last pass
+    /// before the send, after which nothing answers a token any more.
+    All,
+};
+
+/**
+ * @brief Write @p request's waiting path variables into their `:name`
+ *        segments, each value encoded as one segment, and forget them.
+ *
+ * The same writing composition does (@ref substitute_path_variables with the
+ * value already resolved), deferred to the pass that answered the value: a
+ * data cell `a b/c` bound into `/users/:id` goes out as `/users/a%20b%2Fc`,
+ * where joining it into a composed `/users/{{id}}` would have sent two raw
+ * segments. An empty value leaves its segment literal, as at composition.
+ */
+void settle_path_variables (vayu::Request& request, PathSettle which);
 
 } // namespace vayu::core

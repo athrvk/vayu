@@ -22,6 +22,7 @@
 #include <chrono>
 #include <utility>
 
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_names.hpp"
@@ -382,6 +383,11 @@ bool holds_a_token (const std::string& text) {
 std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     std::vector<std::string*> targets;
     targets.push_back (&request.url);
+    // The value of a `:name` segment composition left waiting (issue #1764),
+    // resolved here and then written into the URL by `settle_path_variables`.
+    for (auto& variable : request.path_variables) {
+        targets.push_back (&variable.value);
+    }
     for (auto& [name, value] : request.headers) {
         (void)name;
         targets.push_back (&value);
@@ -509,7 +515,12 @@ const vayu::http::VariableValues& vars) {
     std::any_of (targets.begin (), targets.end (),
     [] (const std::string* text) { return holds_a_token (*text); });
     if (!anything_left) {
-        return std::nullopt; // composition answered everything - the ordinary case
+        // Composition answered everything - the ordinary case. A path value
+        // still waiting holds a token, so it is not this branch; one that
+        // arrived token-free (a raw `/execute` payload's own path rows) is
+        // written in all the same.
+        vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
+        return std::nullopt;
     }
 
     for (std::string* text : targets) {
@@ -527,6 +538,9 @@ const vayu::http::VariableValues& vars) {
     if (auto refusal = resolve_header_names (request.headers, vars)) {
         return refusal;
     }
+    // The last pass before the send: every path value is written now, a token
+    // nothing answered kept verbatim in its segment as composition keeps one.
+    vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
     return std::nullopt;
 }
 

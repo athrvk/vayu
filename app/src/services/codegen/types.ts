@@ -45,7 +45,8 @@ export interface SnippetRequest {
 	 * The request's params rows, read for its path rows only (issue #1764): a
 	 * `:name` segment of `url` is substituted from them exactly as the engine
 	 * composes it (`substitutePathVariables`). The query is already in `url`.
-	 * Absent on a composed payload, whose URL the engine has substituted.
+	 * On a composed payload, the path rows composition left waiting (a value
+	 * holding a token only a run answers), whose `:name` is still in `url`.
 	 */
 	params?: readonly KeyValueEntry[];
 	headers?: Record<string, string>;

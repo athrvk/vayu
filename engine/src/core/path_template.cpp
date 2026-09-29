@@ -232,6 +232,16 @@ std::vector<PathVariableSegment> path_variable_segments (std::string_view url) {
     return out;
 }
 
+bool holds_template_token (std::string_view text) {
+    for (std::size_t at = text.find ("{{"); at != std::string_view::npos;
+    at                  = text.find ("{{", at + 1)) {
+        if (token_end (text, at) != std::string_view::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_path_variable_row (const nlohmann::json& row) {
     if (!row.is_object ()) {
         return false;
@@ -307,6 +317,58 @@ std::string encode_path_segment_value (std::string_view value) {
     }
     append_encoded (out, value.substr (plain));
     return out;
+}
+
+std::vector<vayu::PendingPathVariable> pending_path_variables_of (const nlohmann::json& rows) {
+    std::vector<vayu::PendingPathVariable> out;
+    if (!rows.is_array ()) {
+        return out;
+    }
+    for (const auto& row : rows) {
+        if (!is_path_variable_row (row)) {
+            continue;
+        }
+        const auto key = row.find ("key");
+        if (key == row.end () || !key->is_string ()) {
+            continue;
+        }
+        const std::string& name = key->get_ref<const std::string&> ();
+        if (std::any_of (out.begin (), out.end (), [&] (const vayu::PendingPathVariable& seen) {
+                return seen.key == name;
+            })) {
+            continue;
+        }
+        const nlohmann::json* answering = find_path_variable_row (rows, name);
+        if (answering == nullptr) {
+            continue;
+        }
+        const auto value = answering->find ("value");
+        out.push_back ({ name,
+        value != answering->end () && value->is_string () ? value->get<std::string> () :
+                                                            std::string () });
+    }
+    return out;
+}
+
+void settle_path_variables (vayu::Request& request, PathSettle which) {
+    if (request.path_variables.empty ()) {
+        return;
+    }
+    nlohmann::json rows = nlohmann::json::array ();
+    std::vector<vayu::PendingPathVariable> waiting;
+    for (auto& variable : request.path_variables) {
+        if (which == PathSettle::Answered && holds_template_token (variable.value)) {
+            waiting.push_back (std::move (variable));
+            continue;
+        }
+        rows.push_back ({ { "key", std::move (variable.key) },
+        { "value", std::move (variable.value) }, { "in", "path" } });
+    }
+    request.path_variables = std::move (waiting);
+    if (!rows.empty ()) {
+        request.url = substitute_path_variables (
+        request.url, rows, [] (const std::string& value) { return value; });
+    }
 }
 
 } // namespace vayu::core

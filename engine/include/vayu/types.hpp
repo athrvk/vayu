@@ -273,11 +273,37 @@ struct StreamBounds {
 };
 
 /**
+ * @brief A `:name` path variable composition could not finish (issue #1764):
+ *        its row's value still holds a `{{token}}` something later answers.
+ */
+struct PendingPathVariable {
+    std::string key;
+    /// The value as composition resolved it, the unanswered tokens verbatim.
+    std::string value;
+};
+
+/**
  * @brief HTTP Request definition
  */
 struct Request {
     HttpMethod method = HttpMethod::GET;
     std::string url;
+    /**
+     * @brief The `:name` segments of `url` still waiting for their value.
+     *
+     * Composition writes a path variable's value into its segment, encoded as
+     * one segment (`core::encode_path_segment_value`). A value that still holds
+     * a token after composition - a data column bound per iteration, a deferred
+     * `{{$guid}}`, a variable the pre-request script sets - cannot be encoded
+     * yet, because encoding is a property of the *answer*: joined into the URL
+     * afterwards, `a b/c` would go out as two raw segments. So its segment
+     * stays `:name` in `url` and the value waits here, read from the payload's
+     * `params` (the `in: "path"` rows composition left), until the bind or the
+     * residual pass answers it and `core::settle_path_variables` writes it in.
+     * Empty for every request whose path composition finished, which is
+     * nearly all of them.
+     */
+    std::vector<PendingPathVariable> path_variables;
     Headers headers;
     Body body;
 

@@ -17,6 +17,7 @@
 #include <string_view>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/form_body.hpp"
 
@@ -1004,6 +1005,11 @@ Result<Request> deserialize_request (const Json& json) {
             return Error{ ErrorCode::InvalidUrl, "Missing 'url' field" };
         }
         request.url = json["url"].get<std::string> ();
+        // The `:name` segments composition left for a later pass to fill
+        // (issue #1764): the path rows the composed payload still carries.
+        if (const auto params = json.find ("params"); params != json.end ()) {
+            request.path_variables = vayu::core::pending_path_variables_of (*params);
+        }
 
         // Headers (optional)
         if (json.contains ("headers") && json["headers"].is_object ()) {

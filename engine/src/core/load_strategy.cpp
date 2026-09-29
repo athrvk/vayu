@@ -24,6 +24,7 @@
 #include <unordered_set>
 
 #include "vayu/core/load_pacing.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -521,10 +522,27 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 // A run without mid-run refresh (the common case - see plan_auth_refresh) never
 // enters the swap at all: `current()` is then a relaxed load short-circuited on
 // a null state.
+/**
+ * Whether every submission of this run sends the shared request as it stands:
+ * nothing to bind, no credential to apply, no `step.before` kind to write into
+ * it - so no per-submission copy, and no residual pass either.
+ */
+bool sends_the_shared_request (const RunContext& context) {
+    return context.load_data == nullptr && context.load_template.empty () &&
+    context.load_auth.credentials.empty () && !context.step_elements_have_step_before;
+}
+
 class SubmissionRequest {
     public:
     SubmissionRequest (const std::shared_ptr<RunContext>& context, vayu::Request request)
     : state_ (context->auth_refresh), request_ (std::move (request)) {
+        // A path value composition left waiting (issue #1764) is answered by a
+        // bind or the residual pass, and a run that sends the shared request
+        // runs neither: nothing will ever answer its token, so it is written
+        // now, once, exactly as the residual pass would have written it.
+        if (sends_the_shared_request (*context)) {
+            settle_path_variables (request_, PathSettle::All);
+        }
     }
 
     const vayu::Request& current () {
@@ -831,8 +849,7 @@ SubmissionRequest& live) {
     // request itself, which - unlike a `step.after`-only kind, which only ever
     // reads it back - needs a per-submission copy to isolate concurrent
     // submissions from each other.
-    if (data == nullptr && context->load_template.empty () &&
-    context->load_auth.credentials.empty () && !context->step_elements_have_step_before) {
+    if (sends_the_shared_request (*context)) {
         if (!context->load_unresolved_tokens.empty ()) {
             context->metrics_collector->record_unresolved_token (context->load_unresolved_tokens);
         }
@@ -895,9 +912,15 @@ SubmissionRequest& live) {
             std::vector<std::string>{ refusal->error.message } :
             std::move (still_unresolved));
         }
-    } else if (auto names = vayu::http::routes::unresolved_token_names (request);
-    !names.empty ()) {
-        context->metrics_collector->record_unresolved_token (names);
+    } else {
+        // No residual pass on this run, so the bind above was the last thing
+        // to answer a path value (issue #1764): whatever still waits is
+        // written now, its token verbatim.
+        settle_path_variables (request, PathSettle::All);
+        if (auto names = vayu::http::routes::unresolved_token_names (request);
+        !names.empty ()) {
+            context->metrics_collector->record_unresolved_token (names);
+        }
     }
 
     auto sent_request =

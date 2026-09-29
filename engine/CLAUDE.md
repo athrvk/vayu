@@ -817,7 +817,10 @@ auth (collection-chain walk; `noauth` terminates, `none` steps over) and
 returns the execute-ready payload `POST /execute` / `POST /runs` accept
 unchanged. It also writes a request's `:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
-`core/path_template.hpp`, Postman's segment rule; empty value stays literal),
+`core/path_template.hpp`, Postman's segment rule; empty value stays literal;
+a value still holding a token after resolution is not joined into the URL but
+waits in the payload's `params` / `vayu::Request::path_variables` until the bind
+or the residual pass answers it, `core::settle_path_variables`),
 which is the only place a Params row reaches the wire. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
