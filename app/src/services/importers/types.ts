@@ -245,6 +245,13 @@ export interface SkippedItem {
 		 */
 		| "proxy_config"
 		/**
+		 * A Postman request whose `protocolProfileBehavior` turns off one of
+		 * Postman's own default headers (`disabledSystemHeaders`), its cookie
+		 * jar (`disableCookies`) or URL encoding (`disableUrlEncoding`) - none
+		 * of which Vayu stores per request.
+		 */
+		| "protocol_behavior"
+		/**
 		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
 		 * failed the element registry - an unknown kind, a config the wrong shape -
 		 * once the document was hand-edited (issue #1518). Dropped and counted

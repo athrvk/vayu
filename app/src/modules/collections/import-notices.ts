@@ -206,6 +206,12 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 per-request proxy setting not imported",
 		many: "{n} per-request proxy settings not imported",
 	},
+	protocol_behavior: {
+		tier: "note",
+		named: "Postman request setting not imported (system headers, cookies or URL encoding)",
+		one: "1 request's Postman setting not imported (system headers, cookies or URL encoding)",
+		many: "{n} requests' Postman settings not imported (system headers, cookies or URL encoding)",
+	},
 	elements_invalid: {
 		tier: "action",
 		named: "script or check dropped (invalid)",

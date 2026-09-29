@@ -1715,6 +1715,23 @@ TEST (PostmanImport, KeepsAnAuthBlockOnlyWhenTheExportWouldNotGiveItBack) {
     EXPECT_FALSE (grant.at ("config").contains ("accessToken"));
 }
 
+TEST (PostmanImport, CountsAProtocolBehaviourVayuDoesNotHonour) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Headers","protocolProfileBehavior":{"disabledSystemHeaders":{"accept":true}},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Pruning","protocolProfileBehavior":{"disableBodyPruning":true},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Cookies","protocolProfileBehavior":{"disableCookies":true,"disableUrlEncoding":true},
+            "request":{"method":"GET","url":"https://x.com"}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    // Once per request; body pruning is not one - Vayu always sends the body.
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("protocol_behavior"), 2);
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

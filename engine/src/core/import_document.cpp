@@ -893,6 +893,9 @@ struct PostmanCounts {
     int disabled_body              = 0;
     int skipped_certificate        = 0;
     int skipped_proxy              = 0;
+    // An item-level `protocolProfileBehavior` setting Vayu neither stores nor
+    // honours - see `pm_redirects`.
+    int skipped_protocol_behavior = 0;
     // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
     // see `map_postman_oauth2` (issue #1460).
@@ -1396,10 +1399,23 @@ void set_event_elements (json& item, const std::vector<const json*>& events) {
  * being the opposite of it. `strictSSL` follows the same rule onto
  * `verifySSL`, which likewise defaults to `true`.
  */
-void pm_redirects (const json* item, json& request) {
+void pm_redirects (const json* item, json& request, int& skipped_protocol_behavior) {
     const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
     if (behavior == nullptr) {
         return;
+    }
+    // Settings that change what Postman sends and that Vayu has no per-request
+    // place for: its own default headers turned off, the cookie jar ignored,
+    // the URL sent unencoded. Counted once per request that states any
+    // (`disableBodyPruning` is not among them: Vayu always sends a body).
+    for (const char* unhonoured :
+    { "disabledSystemHeaders", "disableCookies", "disableUrlEncoding" }) {
+        if (const json* value = prop (behavior, unhonoured); value != nullptr &&
+        ((value->is_boolean () && value->get<bool> ()) ||
+        (value->is_object () && !value->empty ()))) {
+            skipped_protocol_behavior += 1;
+            break;
+        }
     }
     if (const json* follow = prop (behavior, "followRedirects");
     follow != nullptr && follow->is_boolean ()) {
@@ -1573,6 +1589,7 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "disabled_body", &PostmanCounts::disabled_body },
 { "certificate", &PostmanCounts::skipped_certificate },
 { "proxy_config", &PostmanCounts::skipped_proxy },
+{ "protocol_behavior", &PostmanCounts::skipped_protocol_behavior },
 { "non_executable_auth", &PostmanCounts::non_executable },
 });
 
@@ -1654,7 +1671,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (counts.options.import_scripts) {
         set_event_elements (request, events);
     }
-    pm_redirects (item, request);
+    pm_redirects (item, request, counts.skipped_protocol_behavior);
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -1761,6 +1778,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("disabled_body", counts.disabled_body);
     tally.add ("certificate", counts.skipped_certificate);
     tally.add ("proxy_config", counts.skipped_proxy);
+    tally.add ("protocol_behavior", counts.skipped_protocol_behavior);
     for (const auto& [kind, names] : counts.named) {
         tally.name_requests (kind, names);
     }
