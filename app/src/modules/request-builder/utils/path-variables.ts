@@ -199,10 +199,26 @@ const encoder = new TextEncoder();
 /** RFC 3986's unreserved set, the only bytes a path segment value keeps. */
 const UNRESERVED = /[A-Za-z0-9\-._~]/;
 
-/** Every byte outside the unreserved set as `%XX` (uppercase), over UTF-8. */
+/** A `%XX` triplet at the start: already encoded, so copied as written. */
+const PRE_ENCODED = /^%[0-9A-Fa-f]{2}/;
+
+/**
+ * Every byte outside the unreserved set as `%XX` (uppercase), over UTF-8 -
+ * except a `%XX` triplet already in `text`, copied as written
+ * (`postman-url-encoder`'s `isPreEncoded`), so `a%40b.com` is not sent as
+ * `a%2540b.com`. A `%` that starts no triplet is data and is encoded.
+ */
 function urlEncode(text: string): string {
 	let out = "";
-	for (const char of text) {
+	for (let at = 0; at < text.length;) {
+		const triplet = PRE_ENCODED.exec(text.slice(at, at + 3));
+		if (triplet) {
+			out += triplet[0];
+			at += 3;
+			continue;
+		}
+		const char = String.fromCodePoint(text.codePointAt(at) ?? 0);
+		at += char.length;
 		if (UNRESERVED.test(char)) {
 			out += char;
 			continue;
@@ -217,7 +233,8 @@ function urlEncode(text: string): string {
 /**
  * `value` percent-encoded as one path segment, with every `{{variable}}` token
  * in it kept verbatim - the engine's `encode_path_segment_value`. A `/`, `?`,
- * `#` or `%` in a value is data in one segment rather than structure; a token
+ * `#` or a bare `%` in a value is data in one segment rather than structure, a
+ * `%XX` already in it is sent as written; a token
  * is kept whole because something after composition still has to answer it
  * (a data column, a deferred `{{$guid}}`), and `%7B%7B` would be a name
  * nothing can find.

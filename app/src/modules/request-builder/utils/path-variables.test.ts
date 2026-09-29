@@ -92,6 +92,11 @@ describe("EncodePathSegmentValue", () => {
 	it("EncodesEverythingButTheUnreservedSetAndKeepsTokens", () => {
 		expect(encodePathSegmentValue("a-b_c.d~e")).toBe("a-b_c.d~e");
 		expect(encodePathSegmentValue("a b/c?d#e%f")).toBe("a%20b%2Fc%3Fd%23e%25f");
+		// A `%XX` triplet is already encoded and is sent as written; a `%` that
+		// starts none (`%g1`, `%4`, a trailing `%`) is data.
+		expect(encodePathSegmentValue("a%40b.com")).toBe("a%40b.com");
+		expect(encodePathSegmentValue("%2f%2F/%")).toBe("%2f%2F%2F%25");
+		expect(encodePathSegmentValue("%g1 %4")).toBe("%25g1%20%254");
 		expect(encodePathSegmentValue("\u00E9")).toBe("%C3%A9");
 		expect(encodePathSegmentValue("x {{data.id}}/y")).toBe("x%20{{data.id}}%2Fy");
 		// A lone `{{` is no token and is encoded.

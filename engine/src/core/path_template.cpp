@@ -265,6 +265,33 @@ find_path_variable_row (const nlohmann::json& rows, std::string_view name) {
     return nullptr;
 }
 
+namespace {
+
+bool is_hex_digit (char ch) {
+    return std::isxdigit (static_cast<unsigned char> (ch)) != 0;
+}
+
+/// @p text through `url_encode`, except that a `%XX` triplet already in it is
+/// copied as written - `postman-url-encoder`'s `isPreEncoded` - so a value
+/// imported pre-encoded (`a%40b.com`) is sent as it was, not as `a%2540b.com`.
+/// A `%` that starts no triplet is data and is encoded.
+void append_encoded (std::string& out, std::string_view text) {
+    std::size_t plain = 0;
+    for (std::size_t at = 0; at + 2 < text.size (); ++at) {
+        if (text[at] != '%' || !is_hex_digit (text[at + 1]) ||
+        !is_hex_digit (text[at + 2])) {
+            continue;
+        }
+        out += vayu::utils::url_encode (text.substr (plain, at - plain));
+        out += text.substr (at, 3);
+        plain = at + 3;
+        at += 2;
+    }
+    out += vayu::utils::url_encode (text.substr (plain));
+}
+
+} // namespace
+
 std::string encode_path_segment_value (std::string_view value) {
     std::string out;
     std::size_t plain = 0;
@@ -274,11 +301,11 @@ std::string encode_path_segment_value (std::string_view value) {
             ++at;
             continue;
         }
-        out += vayu::utils::url_encode (value.substr (plain, at - plain));
+        append_encoded (out, value.substr (plain, at - plain));
         out += value.substr (at, end - at);
         plain = at = end;
     }
-    out += vayu::utils::url_encode (value.substr (plain));
+    append_encoded (out, value.substr (plain));
     return out;
 }
 

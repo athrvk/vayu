@@ -84,6 +84,11 @@ TEST (EncodePathSegmentValue, EncodesEverythingButTheUnreservedSetAndKeepsTokens
     using vayu::core::encode_path_segment_value;
     EXPECT_EQ (encode_path_segment_value ("a-b_c.d~e"), "a-b_c.d~e");
     EXPECT_EQ (encode_path_segment_value ("a b/c?d#e%f"), "a%20b%2Fc%3Fd%23e%25f");
+    // A `%XX` triplet is already encoded and is sent as written; a `%` that
+    // starts none (`%g1`, `%4`, a trailing `%`) is data.
+    EXPECT_EQ (encode_path_segment_value ("a%40b.com"), "a%40b.com");
+    EXPECT_EQ (encode_path_segment_value ("%2f%2F/%"), "%2f%2F%2F%25");
+    EXPECT_EQ (encode_path_segment_value ("%g1 %4"), "%25g1%20%254");
     EXPECT_EQ (encode_path_segment_value ("\xC3\xA9"), "%C3%A9");
     EXPECT_EQ (encode_path_segment_value ("x {{data.id}}/y"), "x%20{{data.id}}%2Fy");
     // A lone `{{` is no token and is encoded.

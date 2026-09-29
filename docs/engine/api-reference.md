@@ -4648,7 +4648,9 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
 - The value is `{{var}}`-resolved exactly as the URL is, then written as **one
   percent-encoded segment**: RFC 3986's unreserved set (`A-Z a-z 0-9 - _ . ~`)
   passes through and every other byte is `%XX` with uppercase hex, so a `/`,
-  `?`, `#` or `%` in a value is data, not structure. A `{{token}}` still
+  `?`, `#` or a bare `%` in a value is data, not structure. A `%XX` triplet
+  already in the value is sent as written (`postman-url-encoder`'s
+  `isPreEncoded`), so an imported `a%40b.com` is not encoded twice. A `{{token}}` still
   unresolved (a bound data column, a deferred `{{$guid}}`) is kept verbatim for
   the per-iteration bind or the residual pass.
 - A value that resolves to the **empty string leaves the segment literal**

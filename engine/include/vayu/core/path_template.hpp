@@ -103,8 +103,11 @@ struct PathVariableSegment {
  *        `{{variable}}` token in it kept verbatim.
  *
  * RFC 3986's unreserved set passes through and every other byte is `%XX`
- * (`vayu::utils::url_encode`), so a `/`, `?`, `#` or `%` in a value is data in
- * one segment rather than structure. A token is kept whole because something
+ * (`vayu::utils::url_encode`), so a `/`, `?`, `#` or a bare `%` in a value is
+ * data in one segment rather than structure. A `%XX` triplet already in the
+ * value is copied as written, as `postman-url-encoder` does: a value imported
+ * pre-encoded (`a%40b.com`) goes out as Postman sends it, not encoded twice.
+ * A token is kept whole because something
  * after composition still has to answer it - a data column bound per
  * iteration, a deferred `{{$guid}}`, the residual pass after a pre-request
  * script - and an encoded `%7B%7B` would be a name nothing can find.
