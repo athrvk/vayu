@@ -27,6 +27,7 @@
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -475,36 +476,25 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
     std::string grant_type = "client_credentials";
     bool pkce              = false;
     if (const std::string* declared = detail_of (detail, "grant_type")) {
-        if (*declared == "authorization_code") {
-            grant_type = "authorization_code";
-        } else if (*declared == "authorization_code_with_pkce" || *declared == "implicit") {
-            // Two spellings, one outcome: PKCE is what the first asks for, and
-            // Vayu has no implicit grant to offer the second - auth code with
-            // PKCE is the nearest thing it can actually run.
-            grant_type = "authorization_code";
-            pkce       = true;
-        } else if (*declared == "password_credentials") {
-            grant_type = "password";
-        } else if (*declared == "client_credentials") {
-            grant_type = "client_credentials";
+        for (const postman::OAuth2Grant& grant : postman::OAUTH2_GRANTS) {
+            if (*declared == grant.postman) {
+                grant_type = grant.vayu;
+                pkce       = grant.pkce;
+                break;
+            }
         }
     }
     if (stated ("challengeAlgorithm")) {
         pkce = true;
     }
 
-    json config                = default_oauth2_config ();
-    config["grantType"]        = grant_type;
-    config["pkce"]             = pkce;
-    config["authorizationUrl"] = detail_text (detail, "authUrl");
-    config["accessTokenUrl"]   = detail_text (detail, "accessTokenUrl");
-    config["refreshTokenUrl"]  = detail_text (detail, "refreshTokenUrl");
-    config["callbackUrl"]      = detail_text (detail, "redirect_uri");
-    config["clientId"]         = detail_text (detail, "clientId");
-    config["clientSecret"]     = detail_text (detail, "clientSecret");
-    config["scope"]            = detail_text (detail, "scope");
-    config["username"]         = detail_text (detail, "username");
-    config["password"]         = detail_text (detail, "password");
+    json config         = default_oauth2_config ();
+    config["grantType"] = grant_type;
+    config["pkce"]      = pkce;
+    for (const postman::OAuth2Field& field : postman::OAUTH2_STRING_FIELDS) {
+        config[std::string (field.vayu)] =
+        detail_text (detail, std::string (field.postman).c_str ());
+    }
     config["credentialsPlacement"] =
     detail_is (detail, "client_authentication", "body") ? "body" : "basic_auth_header";
     config["tokenPlacement"] =
@@ -709,12 +699,15 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
     // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum) and
     // `aws` internally; the two names diverge, so matching on `"aws"` here is
     // what silently dropped every real SigV4 export.
-    if (*type == "awsv4" || *type == "digest" || *type == "ntlm") {
+    for (const postman::ConfigAuthType& named : postman::CONFIG_AUTH_TYPES) {
+        if (*type != named.postman) {
+            continue;
+        }
         json config = json::object ();
         for (const auto& [key, value] : detail) {
             config[key] = value;
         }
-        return json{ { "mode", *type == "awsv4" ? "aws" : *type },
+        return json{ { "mode", std::string (named.vayu) },
             { "config", std::move (config) } };
     }
     if (*type == "inherit") {
@@ -889,9 +882,9 @@ json raw_body (const std::string& content, const std::string* language) {
         // `xml` is what gets an imported SOAP request its `application/xml`:
         // `text` requires no Content-Type, so before this the envelope went out
         // as libcurl's `x-www-form-urlencoded`.
-        for (const char* mode : { "json", "text", "xml" }) {
+        for (const std::string_view mode : postman::RAW_LANGUAGES) {
             if (*language == mode) {
-                return json{ { "mode", mode }, { "content", content } };
+                return json{ { "mode", std::string (mode) }, { "content", content } };
             }
         }
     }
