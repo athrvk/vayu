@@ -783,10 +783,10 @@ TEST (ImportParse, NamesTheRequestsACountIsAbout) {
     const ImportParse postman = parse_import (R"({"info":{"name":"P",
         "schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
         "item":[{"name":"Signed","request":{"method":"GET","url":"https://x.test",
-                 "auth":{"type":"hawk"}}},
+                 "auth":{"type":"kerberos"}}},
                 {"name":"Plain","request":{"method":"GET","url":"https://x.test"}},
                 {"name":"Also signed","request":{"method":"GET","url":"https://x.test",
-                 "auth":{"type":"oauth1"}}},
+                 "auth":{"type":"negotiate"}}},
                 {"name":"Digest","request":{"method":"GET","url":"https://x.test",
                  "auth":{"type":"digest"}}}]})",
     {}, {});
@@ -1305,7 +1305,7 @@ TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"A","request":{"method":"GET","url":"https://x.com/a",
-            "auth":{"type":"hawk","hawk":[]}}},
+            "auth":{"type":"custom","custom":[]}}},
         {"name":"B","request":{"method":"GET","url":"https://x.com/b",
             "auth":{"type":"noauth"}}}
     ]})",
@@ -1318,6 +1318,34 @@ TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
     // "send nothing", which is exactly what it mapped to.
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_auth"), 1);
+}
+
+/// Every auth type Postman's schema defines that Vayu cannot sign is kept as
+/// data, like AWS, Digest and NTLM always were: stored, not sent, counted.
+TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"H","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"hawk","hawk":[{"key":"authId","value":"id"},
+                {"key":"includePayloadHash","value":true,"type":"boolean"}]}}},
+        {"name":"O","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"oauth1","oauth1":[{"key":"consumerKey","value":"ck"}]}}},
+        {"name":"E","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"edgegrid","edgegrid":[{"key":"clientToken","value":"ct"}]}}},
+        {"name":"J","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"jwt","jwt":[{"key":"algorithm","value":"HS256"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("auth").at ("mode"), "hawk");
+    EXPECT_EQ (requests[0].at ("auth").at ("config").at ("authId"), "id");
+    EXPECT_EQ (requests[1].at ("auth").at ("mode"), "oauth1");
+    EXPECT_EQ (requests[2].at ("auth").at ("mode"), "edgegrid");
+    EXPECT_EQ (requests[3].at ("auth").at ("mode"), "jwt");
+    EXPECT_EQ (parsed.result.at ("meta").at ("nonExecutableAuth"), 4);
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
 }
 
 TEST (PostmanImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {

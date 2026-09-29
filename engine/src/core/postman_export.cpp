@@ -384,7 +384,9 @@ enum class AuthLevel : std::uint8_t { Request, Collection };
 /// Attributes Postman's auth helpers declare boolean, which an import stores
 /// as the text `"true"` / `"false"`.
 constexpr auto BOOLEAN_ATTRIBUTES = std::to_array<std::string_view> (
-{ "disableRetryRequest", "addAuthDataToQuery", "showPassword", "useBrowser" });
+{ "disableRetryRequest", "addAuthDataToQuery", "showPassword", "useBrowser",
+"includePayloadHash", "addParamsToHeader", "addEmptyParamsToSign",
+"includeBodyHash", "disableHeaderEncoding", "isSecretBase64Encoded" });
 
 json attribute (const std::string& key, const json& value) {
     json out;

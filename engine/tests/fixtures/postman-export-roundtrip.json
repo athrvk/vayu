@@ -750,6 +750,48 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Signed with Hawk",
+					"request": {
+						"auth": {
+							"type": "hawk",
+							"hawk": [
+								{
+									"key": "includePayloadHash",
+									"value": true,
+									"type": "boolean"
+								},
+								{
+									"key": "algorithm",
+									"value": "sha256",
+									"type": "string"
+								},
+								{
+									"key": "authKey",
+									"value": "{{hawkKey}}",
+									"type": "string"
+								},
+								{
+									"key": "authId",
+									"value": "dh37fgj492je",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/hawk",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"hawk"
+							]
+						}
+					},
+					"response": []
 				}
 			],
 			"description": "What an export gives back as Postman wrote it.",

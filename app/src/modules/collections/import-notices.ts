@@ -155,9 +155,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	},
 	unsupported_auth: {
 		tier: "action",
-		named: "imported without auth (Hawk, OAuth 1 and EdgeGrid are not supported)",
-		one: "1 request imported without auth (Hawk, OAuth 1 and EdgeGrid are not supported)",
-		many: "{n} requests imported without auth (Hawk, OAuth 1 and EdgeGrid are not supported)",
+		named: "imported without auth (an auth type Vayu does not recognise)",
+		one: "1 request imported without auth (an auth type Vayu does not recognise)",
+		many: "{n} requests imported without auth (an auth type Vayu does not recognise)",
 	},
 	security_unmapped_or: collectionAuth("the spec allows several"),
 	security_unmapped_and: collectionAuth("the spec wants several at once"),
@@ -309,7 +309,8 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 		});
 	}
 	if (meta.nonExecutableAuth > 0) {
-		const phrase = "auth imported but not sent (AWS, Digest and NTLM are not supported)";
+		const phrase =
+			"auth imported but not sent (Vayu does not sign AWS, Digest, NTLM, Hawk, OAuth 1, EdgeGrid or JWT)";
 		notices.push({
 			tier: "action",
 			text:

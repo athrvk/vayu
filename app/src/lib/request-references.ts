@@ -88,6 +88,10 @@ export function authCredentials(auth: Exclude<RequestAuth, { mode: "inherit" }>)
 		case "digest":
 		case "aws":
 		case "ntlm":
+		case "hawk":
+		case "oauth1":
+		case "edgegrid":
+		case "jwt":
 			return [];
 	}
 }

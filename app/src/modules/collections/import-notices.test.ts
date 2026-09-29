@@ -65,7 +65,7 @@ describe("importNotices", () => {
 		).toEqual([
 			{
 				tier: "action",
-				text: "Sign in: auth imported but not sent (AWS, Digest and NTLM are not supported)",
+				text: "Sign in: auth imported but not sent (Vayu does not sign AWS, Digest, NTLM, Hawk, OAuth 1, EdgeGrid or JWT)",
 			},
 		]);
 	});

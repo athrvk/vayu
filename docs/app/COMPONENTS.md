@@ -2042,7 +2042,7 @@ there is no editor-local vocabulary and nothing to translate at the boundary.
 
 What stays with each host: the mode picker (only the request offers `inherit`),
 the collection's per-mode inheritance hints, and the "stored but not editable"
-warning for `digest`/`aws`/`ntlm` - modes the engine cannot resolve, which both
+warning for `digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt` - modes the engine cannot resolve, which both
 editors surface rather than collapse to "none". `AuthFields` renders nothing for
 them and carries their config through untouched.
 

@@ -39,12 +39,17 @@ struct ConfigAuthType {
     std::string_view postman;
 };
 
-/// AWS Signature is `awsv4` on the wire and `aws` in Vayu; the other two
-/// share a name.
+/// AWS Signature is `awsv4` on the wire and `aws` in Vayu; the others share
+/// a name. None of them is executed: each is stored as data (`config`) and
+/// sent without auth, counted as `nonExecutableAuth` on import.
 constexpr auto CONFIG_AUTH_TYPES = std::to_array<ConfigAuthType> ({
 { "aws", "awsv4" },
 { "digest", "digest" },
 { "ntlm", "ntlm" },
+{ "hawk", "hawk" },
+{ "oauth1", "oauth1" },
+{ "edgegrid", "edgegrid" },
+{ "jwt", "jwt" },
 });
 
 /// An `oauth2` attribute that is one `OAuth2Config` string field.

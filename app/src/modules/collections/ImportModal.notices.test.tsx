@@ -150,7 +150,7 @@ describe("the import preview's notices", () => {
 		await waitFor(() =>
 			expect(
 				screen.getByText(
-					"2 requests: imported without auth (Hawk, OAuth 1 and EdgeGrid are not supported) - Get user, Put user"
+					"2 requests: imported without auth (an auth type Vayu does not recognise) - Get user, Put user"
 				)
 			).toBeInTheDocument()
 		);

@@ -507,12 +507,20 @@ TEST (PostmanExport, ConfigAuthTypesInPostmansAttributeOrder) {
 
 TEST (PostmanExport, UnknownAuthModeIsANote) {
     PostmanExportRequest entry = request ("r", "u");
-    entry.auth                 = ordered{ { "mode", "hawk" } };
+    entry.auth                 = ordered{ { "mode", "kerberos" } };
     PostmanExportFolder root   = collection ();
     root.requests.push_back (entry);
     const auto outcome = run (root);
     EXPECT_FALSE (ordered::parse (outcome.text)["item"][0]["request"].contains ("auth"));
     EXPECT_EQ (losses (outcome), (json{ { "unsupported_auth", 1 } }));
+}
+
+TEST (PostmanExport, DataOnlyAuthTypesAreTheirPostmanType) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth                 = ordered{ { "mode", "hawk" },
+                        { "config", { { "authId", "id" }, { "includePayloadHash", "true" } } } };
+    EXPECT_EQ (only_item (entry)["request"]["auth"].dump (),
+    R"({"type":"hawk","hawk":[{"key":"authId","value":"id","type":"string"},{"key":"includePayloadHash","value":true,"type":"boolean"}]})");
 }
 
 ordered oauth2 (const ordered& config) {

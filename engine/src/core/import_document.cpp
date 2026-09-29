@@ -739,8 +739,8 @@ json map_swagger_oauth2 (const json* scheme) {
 
 /// `mapPostmanAuth(auth)`: a Postman `auth` object (collection, folder or
 /// request) as a Vayu auth. @p skipped_unsupported_auth counts a scheme Vayu
-/// cannot execute and has no config shape for (`hawk`, `oauth1`, `edgegrid`,
-/// or a non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
+/// has no config shape for (a type the schema does not define, or a
+/// non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
 /// the correct mapping rather than a loss. @p oauth2_dropped_field is
 /// `map_postman_oauth2`'s counter, threaded through (issue #1460).
 json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
@@ -791,8 +791,8 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
     if (*type == "noauth") {
         return json{ { "mode", "none" } };
     }
-    // `hawk`, `oauth1`, `edgegrid` - schemes Postman defines and Vayu has no
-    // mode for, unlike `awsv4`/`digest`/`ntlm` above, which import as data.
+    // A type Postman's schema does not define (the table above holds every
+    // one it does bar `apikey`, `basic`, `bearer`, `oauth2` and `noauth`).
     skipped_unsupported_auth += 1;
     return json{ { "mode", "none" } };
 }
@@ -1608,7 +1608,10 @@ json pm_request (const json* item, PostmanCounts& counts) {
     map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
     prop (rq, "auth"));
     const std::string mode = auth.at ("mode").get<std::string> ();
-    if (mode == "digest" || mode == "aws" || mode == "ntlm") {
+    if (std::any_of (postman::CONFIG_AUTH_TYPES.begin (),
+        postman::CONFIG_AUTH_TYPES.end (), [&mode] (const postman::ConfigAuthType& named) {
+            return mode == named.vayu;
+        })) {
         counts.non_executable += 1;
     }
     counts.requests += 1;

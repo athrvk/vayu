@@ -45,8 +45,9 @@ constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json",
 "text", "graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded" });
 
 /// Vayu's auth modes (`AuthMode` in `domain.ts`).
-constexpr auto AUTH_MODES = std::to_array<std::string_view> ({ "none", "noauth",
-"inherit", "bearer", "basic", "apikey", "oauth2", "digest", "aws", "ntlm" });
+constexpr auto AUTH_MODES =
+std::to_array<std::string_view> ({ "none", "noauth", "inherit", "bearer", "basic",
+"apikey", "oauth2", "digest", "aws", "ntlm", "hawk", "oauth1", "edgegrid", "jwt" });
 
 /// The `httpVersion` values the request routes accept.
 constexpr auto HTTP_VERSIONS =

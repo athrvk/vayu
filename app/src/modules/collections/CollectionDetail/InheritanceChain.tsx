@@ -70,6 +70,11 @@ function describeAuth(c: Collection): string {
 		case "aws":
 		case "ntlm":
 			return auth.mode.toUpperCase();
+		case "hawk":
+		case "oauth1":
+		case "edgegrid":
+		case "jwt":
+			return AUTH_MODE_LABELS[auth.mode];
 		default:
 			return AUTH_MODE_LABELS.none;
 	}
