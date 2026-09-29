@@ -597,6 +597,159 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Seeded token",
+					"request": {
+						"auth": {
+							"type": "oauth2",
+							"oauth2": [
+								{
+									"key": "accessToken",
+									"value": "{{ctp_access_token}}",
+									"type": "string"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "tokenType",
+									"value": "Bearer",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/carts",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"carts"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Consented grant",
+					"request": {
+						"auth": {
+							"type": "oauth2",
+							"oauth2": [
+								{
+									"key": "useBrowser",
+									"value": false,
+									"type": "boolean"
+								},
+								{
+									"key": "state",
+									"value": "",
+									"type": "string"
+								},
+								{
+									"key": "accessTokenUrl",
+									"value": "https://login.example.com/token",
+									"type": "string"
+								},
+								{
+									"key": "authUrl",
+									"value": "https://login.example.com/authorize",
+									"type": "string"
+								},
+								{
+									"key": "grant_type",
+									"value": "authorization_code",
+									"type": "string"
+								},
+								{
+									"key": "clientId",
+									"value": "{{clientId}}",
+									"type": "string"
+								},
+								{
+									"key": "scope",
+									"value": "files.read offline_access",
+									"type": "string"
+								},
+								{
+									"key": "tokenName",
+									"value": "Graph",
+									"type": "string"
+								},
+								{
+									"key": "authRequestParams",
+									"value": [
+										{
+											"key": "prompt",
+											"value": "consent",
+											"enabled": true,
+											"send_as": "request_url"
+										}
+									],
+									"type": "any"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "client_authentication",
+									"value": "body",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/drives",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"drives"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Password first",
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{password}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "ada",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"profile"
+							]
+						}
+					},
+					"response": []
 				}
 			],
 			"description": "What an export gives back as Postman wrote it.",

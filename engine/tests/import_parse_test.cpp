@@ -1628,6 +1628,65 @@ TEST (PostmanImport, ReadsAnItemLevelDescriptionWhenTheRequestHasNone) {
     EXPECT_EQ (requests[1].at ("description"), "On the request");
 }
 
+/// The first request's auth of a one-request Postman collection whose request
+/// auth is @p auth.
+json request_auth_of (const std::string& auth) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[{"name":"R","request":{"method":"GET","url":"https://x.com","auth":)" +
+    auth + "}}]}",
+    {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return json ();
+    }
+    return json::parse (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").dump ());
+}
+
+TEST (PostmanImport, ASeededOAuth2TokenIsSentAsPostmanSendsItAndKeepsItsBlock) {
+    // commercetools' shape (a v2.0 detail object): no grant, a seeded token.
+    const json bearer = request_auth_of (
+    R"({"type":"oauth2","oauth2":{"accessToken":"{{t}}","addTokenTo":"header","tokenType":"Bearer"}})");
+    EXPECT_EQ (bearer.at ("mode"), "bearer");
+    EXPECT_EQ (bearer.at ("token"), "{{t}}");
+    // The block rides beside it in v2.1 form, types as Postman converts them.
+    EXPECT_EQ (bearer.at ("postman"), json::parse (R"({"type":"oauth2","oauth2":[
+        {"key":"accessToken","value":"{{t}}","type":"string"},
+        {"key":"addTokenTo","value":"header","type":"string"},
+        {"key":"tokenType","value":"Bearer","type":"string"}]})"));
+
+    // Placed in the query, or under another prefix, Postman sends something a
+    // bearer token cannot: an API key in the right place says it exactly.
+    const json query = request_auth_of (
+    R"({"type":"oauth2","oauth2":[{"key":"accessToken","value":"t"},{"key":"addTokenTo","value":"queryParams"}]})");
+    EXPECT_EQ (query.at ("mode"), "apikey");
+    EXPECT_EQ (query.at ("key"), "access_token");
+    EXPECT_EQ (query.at ("in"), "query");
+    EXPECT_EQ (query.at ("value"), "t");
+    const json prefixed = request_auth_of (
+    R"({"type":"oauth2","oauth2":[{"key":"accessToken","value":"t"},{"key":"headerPrefix","value":"Token"}]})");
+    EXPECT_EQ (prefixed.at ("mode"), "apikey");
+    EXPECT_EQ (prefixed.at ("key"), "Authorization");
+    EXPECT_EQ (prefixed.at ("value"), "Token t");
+}
+
+TEST (PostmanImport, KeepsAnAuthBlockOnlyWhenTheExportWouldNotGiveItBack) {
+    // Exactly what the exporter writes for this bearer token: nothing kept.
+    EXPECT_FALSE (request_auth_of (R"({"type":"bearer","bearer":[{"key":"token","value":"{{t}}","type":"string"}]})")
+    .contains ("postman"));
+    // An oauth2 grant carrying what the config has no field for (`state`,
+    // a seeded token): kept, so the export writes those back.
+    const json grant = request_auth_of (R"({"type":"oauth2","oauth2":[
+        {"key":"state","value":"s","type":"string"},
+        {"key":"grant_type","value":"client_credentials","type":"string"},
+        {"key":"accessTokenUrl","value":"https://a.example.com/t","type":"string"},
+        {"key":"accessToken","value":"seed","type":"string"}]})");
+    EXPECT_EQ (grant.at ("mode"), "oauth2");
+    EXPECT_EQ (grant.at ("postman").at ("oauth2")[0].at ("key"), "state");
+    EXPECT_FALSE (grant.at ("config").contains ("accessToken"));
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

@@ -588,6 +588,35 @@ TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
 // Secrets
 // ---------------------------------------------------------------------------
 
+TEST (PostmanExport, AnImportedAuthBlockIsWrittenBackWhileItStillDescribesTheAuth) {
+    // What the importer stores for an `oauth2` block holding only a seeded
+    // token: the bearer token Postman sends, with the block as its source.
+    const ordered source = ordered::parse (R"({"type":"oauth2","oauth2":[
+        {"key":"accessToken","value":"tok-1","type":"string"},
+        {"key":"addTokenTo","value":"header","type":"string"},
+        {"key":"tokenType","value":"Bearer","type":"string"}]})");
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth =
+    ordered{ { "mode", "bearer" }, { "token", "tok-1" }, { "postman", source } };
+    EXPECT_EQ (only_item (entry)["request"]["auth"], source);
+
+    // Without credentials the block is blanked the way any auth is.
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 1);
+    ordered written =
+    ordered::parse (blanked.text)["item"][0]["request"]["auth"];
+    EXPECT_EQ (written["oauth2"][0]["value"], "");
+    EXPECT_EQ (written["oauth2"][2]["value"], "Bearer");
+
+    // Edited in Vayu since: the block no longer describes the auth, so what
+    // Vayu holds is written instead.
+    entry.auth["token"] = "tok-2";
+    EXPECT_EQ (only_item (entry)["request"]["auth"].dump (),
+    R"({"type":"bearer","bearer":[{"key":"token","value":"tok-2","type":"string"}]})");
+}
+
 TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
     PostmanExportFolder root = collection ();
     root.auth = ordered{ { "mode", "bearer" }, { "token", "{{token}}" } };

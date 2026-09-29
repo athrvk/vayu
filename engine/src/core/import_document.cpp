@@ -27,6 +27,7 @@
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -524,7 +525,21 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
     const bool has_grant_config =
     stated ("grant_type") || stated ("accessTokenUrl") || stated ("authUrl");
     if (!has_grant_config && stated ("accessToken")) {
-        return json{ { "mode", "bearer" }, { "token", detail_text (detail, "accessToken") } };
+        // A seeded token Postman sends as is, with no grant to fetch another:
+        // what Vayu sends it as, placed and prefixed the way Postman would.
+        // The oauth2 block itself rides beside it as the auth's `postman`
+        // source (`with_postman_source`), so an export gives it back.
+        const std::string token = detail_text (detail, "accessToken");
+        if (detail_is (detail, "addTokenTo", "queryParams")) {
+            return json{ { "mode", "apikey" }, { "key", "access_token" },
+                { "value", token }, { "in", "query" } };
+        }
+        const std::string prefix = detail_text (detail, "headerPrefix");
+        if (stated ("headerPrefix") && prefix != "Bearer") {
+            return json{ { "mode", "apikey" }, { "key", "Authorization" },
+                { "value", prefix + " " + token }, { "in", "header" } };
+        }
+        return json{ { "mode", "bearer" }, { "token", token } };
     }
     if (has_grant_config && stated ("accessToken")) {
         dropped_field += 1;
@@ -780,6 +795,64 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
     // mode for, unlike `awsv4`/`digest`/`ntlm` above, which import as data.
     skipped_unsupported_auth += 1;
     return json{ { "mode", "none" } };
+}
+
+/// The attribute `type` Postman's v2.0-to-v2.1 conversion gives a value.
+const char* attribute_type_of (const json& value) {
+    if (value.is_string ()) {
+        return "string";
+    }
+    return value.is_boolean () ? "boolean" : "any";
+}
+
+/**
+ * A Postman `auth` object in the v2.1 shape: `{type, <type>: [{key, value,
+ * type}]}`. A v2.0 detail object becomes that attribute array the way
+ * Postman's own v2.0-to-v2.1 conversion writes it (a string `string`, a
+ * boolean `boolean`, anything else `any`); a v2.1 array is kept verbatim.
+ */
+json postman_auth_source (const json& node, const std::string& type) {
+    json source;
+    source["type"]       = type;
+    json attributes      = json::array ();
+    const json* declared = prop (&node, type);
+    if (declared != nullptr && declared->is_array ()) {
+        attributes = *declared;
+    } else if (declared != nullptr && declared->is_object ()) {
+        for (auto entry = declared->begin (); entry != declared->end (); ++entry) {
+            const json& value = entry.value ();
+            attributes.push_back ({ { "key", entry.key () }, { "value", value },
+            { "type", attribute_type_of (value) } });
+        }
+    }
+    source[type] = std::move (attributes);
+    return source;
+}
+
+/**
+ * @p mapped with the Postman `auth` it came from as its `postman` member,
+ * when the exporter would not write that block back from @p mapped alone:
+ * attributes Vayu has no field for (`tokenType`, `state`, a seeded
+ * `accessToken` beside a grant, `authRequestParams`), a type Vayu stores as
+ * another mode (an `oauth2` block holding only a seeded token, sent as a
+ * bearer token), attribute order and types, or `{{ x }}` spacing the
+ * importer tightened. Nothing sends it: the exporter writes it verbatim
+ * while mapping it again still gives the stored auth, and falls back to
+ * the stored auth once the user has changed it (`postman_export.cpp`).
+ */
+json with_postman_source (json mapped, const json* auth) {
+    const json* node = as_record (auth);
+    const std::string* type = node == nullptr ? nullptr : as_str (prop (node, "type"));
+    const std::string& mode = mapped.at ("mode").get_ref<const std::string&> ();
+    if (type == nullptr || mode == "inherit" || mode == "none" || mode == "noauth") {
+        return mapped;
+    }
+    json source                        = postman_auth_source (*node, *type);
+    const std::optional<json> exported = postman_auth_written (mapped);
+    if (!exported || *exported != source) {
+        mapped["postman"] = std::move (source);
+    }
+    return mapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -1527,12 +1600,13 @@ json pm_request_named (const json* item, PostmanCounts& counts) {
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared   = as_record (prop (item, "request"));
-    const json empty       = json::object ();
-    const json* rq         = declared == nullptr ? &empty : declared;
-    auto [url, params]     = pm_url (prop (rq, "url"), counts);
-    json auth              = map_postman_auth (prop (rq, "auth"),
-                 counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
+    const json* declared = as_record (prop (item, "request"));
+    const json empty     = json::object ();
+    const json* rq       = declared == nullptr ? &empty : declared;
+    auto [url, params]   = pm_url (prop (rq, "url"), counts);
+    json auth            = with_postman_source (
+    map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
+    prop (rq, "auth"));
     const std::string mode = auth.at ("mode").get<std::string> ();
     if (mode == "digest" || mode == "aws" || mode == "ntlm") {
         counts.non_executable += 1;
@@ -1595,7 +1669,9 @@ json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oaut
         return json{ { "mode", "noauth" } };
     }
     json mapped = map_postman_auth (auth, skipped_unsupported_auth, oauth2_dropped_field);
-    return mapped.at ("mode") == "inherit" ? json{ { "mode", "none" } } : mapped;
+    return mapped.at ("mode") == "inherit" ?
+    json{ { "mode", "none" } } :
+    with_postman_source (std::move (mapped), auth);
 }
 
 json pm_folder (const json* node, PostmanCounts& counts) {
@@ -3772,6 +3848,12 @@ json& specs) {
 }
 
 } // namespace
+
+nlohmann::ordered_json postman_auth_mapping (const nlohmann::ordered_json& auth) {
+    int unsupported = 0;
+    int dropped     = 0;
+    return map_postman_auth (&auth, unsupported, dropped);
+}
 
 ImportParse parse_import (const std::string& text,
 const ImportOptions& options,

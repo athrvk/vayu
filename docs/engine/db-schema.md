@@ -464,6 +464,12 @@ mode, so an unlabelled body exports without `options` as Postman wrote it.
 {"mode":"oauth2","config":{ /* OAuth2Config */ }}
 ```
 
+A Postman import may add `postman` to any of these: the document's own `auth`
+block (`{"type":"oauth2","oauth2":[{"key","value","type"}]}`), kept when the
+Postman exporter could not otherwise write it back as it was. Nothing sends
+it; the exporter writes it verbatim while it still maps to the stored auth,
+and every secret-blanking export blanks its credential attributes.
+
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The

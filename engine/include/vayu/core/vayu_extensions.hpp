@@ -69,6 +69,14 @@ constexpr std::string_view INVALID_KIND = "vayu_extension_invalid";
  */
 [[nodiscard]] Json redact_auth (const Json& auth, int& omitted);
 
+/**
+ * A Postman `auth` block (`{type, <type>: [{key, value, type}]}`) with every
+ * credential attribute's value blanked, in place - the `postman` source a
+ * Postman import keeps on a stored auth. Adds one to @p omitted per value
+ * blanked; a whole-value `{{variable}}` reference is kept.
+ */
+void redact_postman_auth (Json& source, int& omitted);
+
 /// A stored variables object with every `secret: true` value blanked.
 [[nodiscard]] Json redact_variables (const Json& variables, int& omitted);
 

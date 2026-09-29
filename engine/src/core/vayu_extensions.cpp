@@ -34,7 +34,11 @@ namespace {
  */
 constexpr auto SECRET_AUTH_KEYS = std::to_array<std::string_view> (
 { "token", "password", "value", "clientSecret", "secretKey", "accessKey",
-"sessionToken", "accessToken", "refreshToken", "idToken", "secret" });
+"sessionToken", "accessToken", "refreshToken", "idToken", "secret",
+// Postman's names for the credentials of the auth types Vayu keeps as data
+// only: Hawk's key, OAuth 1.0's consumer and token secrets, EdgeGrid's
+// client token, a JWT's private key.
+"authKey", "consumerSecret", "tokenSecret", "clientToken", "privateKey" });
 
 /// Vayu's body modes (`RequestBody["mode"]` in the app's `domain.ts`).
 constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json",
@@ -77,7 +81,21 @@ bool is_variable_reference (std::string_view text) {
     inner.find_first_not_of (' ') != std::string_view::npos;
 }
 
-/// Blanks every secret member of one auth level, and recurses into `config`.
+/// Blanks @p value when it is a credential worth blanking, counting it.
+void blank_secret (Json& value, int& omitted) {
+    if (!value.is_string ()) {
+        return;
+    }
+    const auto& text = value.get_ref<const std::string&> ();
+    if (text.empty () || is_variable_reference (text)) {
+        return;
+    }
+    value = "";
+    omitted += 1;
+}
+
+/// Blanks every secret member of one auth level, and recurses into `config`
+/// and a Postman import's `postman` source.
 void redact_level (Json& node, int& omitted) {
     if (!node.is_object ()) {
         return;
@@ -85,6 +103,10 @@ void redact_level (Json& node, int& omitted) {
     for (auto member = node.begin (); member != node.end (); ++member) {
         if (member.key () == "config") {
             redact_level (member.value (), omitted);
+            continue;
+        }
+        if (member.key () == "postman") {
+            redact_postman_auth (member.value (), omitted);
             continue;
         }
         if (!one_of (SECRET_AUTH_KEYS, member.key ()) || !member->is_string ()) {
@@ -150,6 +172,26 @@ rows_with (const Json& value, const std::array<std::string_view, N>& extra) {
 }
 
 } // namespace
+
+void redact_postman_auth (Json& source, int& omitted) {
+    if (!source.is_object ()) {
+        return;
+    }
+    for (auto member = source.begin (); member != source.end (); ++member) {
+        if (!member->is_array ()) {
+            continue;
+        }
+        for (Json& attribute : *member) {
+            if (!attribute.is_object () || !is_string_member (attribute, "key") ||
+            !one_of (SECRET_AUTH_KEYS, attribute.at ("key").get<std::string> ())) {
+                continue;
+            }
+            if (const auto value = attribute.find ("value"); value != attribute.end ()) {
+                blank_secret (*value, omitted);
+            }
+        }
+    }
+}
 
 Json redact_auth (const Json& auth, int& omitted) {
     Json out = auth;

@@ -41,6 +41,19 @@ TEST (VayuExtensions, BlanksEveryCredentialAndKeepsWhatDescribesIt) {
     EXPECT_EQ (omitted, 3);
 }
 
+TEST (VayuExtensions, BlanksTheCredentialsOfAPostmanImportsAuthSource) {
+    int omitted = 0;
+    const Json redacted = ext::redact_auth (Json::parse (R"({"mode":"bearer","token":"t",
+        "postman":{"type":"oauth2","oauth2":[{"key":"accessToken","value":"t"},
+            {"key":"clientSecret","value":"{{secret}}"},{"key":"tokenType","value":"Bearer"}]}})"),
+    omitted);
+    EXPECT_EQ (redacted["token"], "");
+    EXPECT_EQ (redacted["postman"]["oauth2"][0]["value"], "");
+    EXPECT_EQ (redacted["postman"]["oauth2"][1]["value"], "{{secret}}");
+    EXPECT_EQ (redacted["postman"]["oauth2"][2]["value"], "Bearer");
+    EXPECT_EQ (omitted, 2);
+}
+
 TEST (VayuExtensions, KeepsAValueThatIsOnlyAVariableReference) {
     // `{{token}}` names where the secret lives; it is not the secret.
     int omitted         = 0;

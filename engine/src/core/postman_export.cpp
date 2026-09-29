@@ -587,6 +587,72 @@ std::optional<json> credential_auth (const json& auth, const json& original, Wal
     return config_auth (mode, config);
 }
 
+/// @p node with `key` and `value` first, then the rest in stored order, at
+/// every depth: how Postman orders an attribute and a request parameter.
+json key_value_first (const json& node) {
+    if (node.is_array ()) {
+        json out = json::array ();
+        for (const json& entry : node) {
+            out.push_back (key_value_first (entry));
+        }
+        return out;
+    }
+    if (!node.is_object ()) {
+        return node;
+    }
+    json out;
+    for (const char* first : { "key", "value" }) {
+        if (const auto found = node.find (first); found != node.end ()) {
+            out[first] = key_value_first (*found);
+        }
+    }
+    for (auto member = node.begin (); member != node.end (); ++member) {
+        if (member.key () != "key" && member.key () != "value") {
+            out[member.key ()] = key_value_first (member.value ());
+        }
+    }
+    return out;
+}
+
+/// A kept auth block in Postman's key order: `type`, then its attributes.
+/// The stored column went through a sorted-key writer, so the order is
+/// restored rather than read.
+json postman_ordered (const json& source) {
+    const std::string type = text_of (source, "type");
+    json out;
+    out["type"] = type;
+    for (auto member = source.begin (); member != source.end (); ++member) {
+        if (member.key () != "type") {
+            out[member.key ()] = key_value_first (member.value ());
+        }
+    }
+    return out;
+}
+
+/**
+ * The Postman `auth` block an import kept as @p stored's `postman` source,
+ * while it still describes @p stored: mapping it through the importer again
+ * gives the stored auth, so the user has not changed it since. Written
+ * verbatim, it gives back everything the importer had no field for, in the
+ * order and with the attribute types Postman wrote.
+ */
+std::optional<json> standing_source (const json& stored) {
+    const auto found = stored.find ("postman");
+    if (found == stored.end () || !found->is_object () ||
+    text_of (*found, "type").empty ()) {
+        return std::nullopt;
+    }
+    json own = stored;
+    own.erase ("postman");
+    // Key order aside: the stored column went through a sorted-key writer.
+    const nlohmann::json remapped =
+    nlohmann::json::parse (postman_auth_mapping (*found).dump ());
+    if (remapped != nlohmann::json::parse (own.dump ())) {
+        return std::nullopt;
+    }
+    return std::make_optional (postman_ordered (*found));
+}
+
 /// A stored auth as Postman's `auth`, or nothing to write - an inheriting
 /// request, a collection or folder configuring none, or a mode Postman lacks.
 std::optional<json> postman_auth (const json& stored, AuthLevel level, Walk& walk) {
@@ -603,9 +669,17 @@ std::optional<json> postman_auth (const json& stored, AuthLevel level, Walk& wal
     if (mode == "none") {
         return std::nullopt;
     }
+    if (std::optional<json> source = standing_source (stored)) {
+        if (!walk.include_secrets) {
+            vayu_ext::redact_postman_auth (*source, walk.secrets_omitted);
+        }
+        return source;
+    }
+    json own = stored;
+    own.erase ("postman");
     const json auth =
-    walk.include_secrets ? stored : vayu_ext::redact_auth (stored, walk.secrets_omitted);
-    std::optional<json> mapped = credential_auth (auth, stored, walk);
+    walk.include_secrets ? own : vayu_ext::redact_auth (own, walk.secrets_omitted);
+    std::optional<json> mapped = credential_auth (auth, own, walk);
     if (!mapped) {
         walk.lose (Loss::UnsupportedAuth);
     }
@@ -1149,6 +1223,13 @@ std::string postman_collection_uuid (const std::string& collection_id) {
     const std::string hex = std::format ("{:016x}{:016x}", high, low);
     return hex.substr (0, 8) + "-" + hex.substr (8, 4) + "-" +
     hex.substr (12, 4) + "-" + hex.substr (16, 4) + "-" + hex.substr (20);
+}
+
+std::optional<nlohmann::ordered_json> postman_auth_written (
+const nlohmann::ordered_json& auth) {
+    Walk walk;
+    walk.include_secrets = true;
+    return postman_auth (auth, AuthLevel::Request, walk);
 }
 
 PostmanExportOutcome export_postman (const PostmanExportFolder& root,

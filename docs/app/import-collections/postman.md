@@ -215,12 +215,26 @@ Auth is mapped by `mapPostmanAuth(auth)` (`import_document.cpp`). It reads `auth
 | `bearer` | `{ mode: "bearer", token }` | `token` normalized |
 | `basic` | `{ mode: "basic", username, password }` | both normalized |
 | `apikey` | `{ mode: "apikey", key, value, in }` | `in` = `"query"` only if detail `in === "query"`, else `"header"` |
-| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized, minimal `accessToken`-only exports become a bearer token. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. `state` is never stored (Vayu generates and validates its own per authorization attempt) and a pre-fetched `accessToken` alongside an explicit grant config has nowhere to seed a fetch that always runs through that grant; both are counted as `oauth2_dropped_field` rather than silently discarded (issue #1460) |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. A block holding only a seeded `accessToken` (no grant, token URL or auth URL - commercetools writes one on every request) is what Postman sends as is, so it imports as what sends the same bytes: a bearer token, or, when `addTokenTo` is `queryParams` or `headerPrefix` is not `Bearer`, an API key (`access_token` in the query, or `Authorization: <prefix> <token>`). `state` (Vayu generates and validates its own per authorization attempt) and a seeded `accessToken` beside an explicit grant (Vayu fetches through the grant) are not used when sending and are counted as `oauth2_dropped_field` (issue #1460); both are kept in the block's `postman` source below, so an export writes them back |
 | `awsv4` | `{ mode: "aws", config }` | `awsv4` is the schema's enum value for AWS Signature; Vayu's internal mode is `aws`, so the name is translated rather than passed through. Matching on `"aws"` here dropped every real SigV4 export to `{mode:"none"}` *and* suppressed the `nonExecutableAuth` warning |
 | `digest` / `ntlm` | `{ mode: type, config }` | `config` is the raw flattened detail map; **not executed** by Vayu (counted as `nonExecutableAuth` per request, as `aws` is) |
 | `inherit` | `{ mode: "inherit" }` | |
 | `noauth` | `{ mode: "none" }` | on a **request**; a collection/folder `noauth` is terminal - see below; this is the correct mapping, not a drop, so it is not counted |
 | `hawk` / `oauth1` / `edgegrid` / non-string `type` | `{ mode: "none" }` | counted as `unsupported_auth` - schemes Postman defines that Vayu has no mode for, unlike `awsv4`/`digest`/`ntlm`, which import as data |
+
+**The block itself, kept for the export (`with_postman_source`).** When the
+Postman exporter would not write a request's or collection's `auth` back
+exactly as the document had it - an attribute Vayu has no field for
+(`tokenType`, `state`, `authRequestParams`), a type stored as another mode
+(the seeded-token `oauth2` above), a different attribute order or attribute
+`type`, `{{ x }}` spacing the importer tightened - the document's block is
+stored beside the mapped auth as `postman`, in v2.1 form (a v2.0 detail object
+becomes the attribute array Postman's own conversion writes). Nothing sends
+it. The exporter writes it back verbatim, key order restored, while mapping it
+through `map_postman_auth` again still gives the stored auth; once the auth is
+edited in Vayu the block no longer describes it and the stored auth is written
+instead. Its credentials are blanked like any other when an export leaves
+credentials out.
 
 **`authDetail` - v2.1 array vs v2.0 object:** Postman stores auth detail either as an array of `{ key, value }` entries (v2.1) or as a plain object (v2.0). `authDetail` handles both: arrays are folded into a `{ key: value }` map (skipping entries without `key`); objects have every entry coerced to a string. The result is the same flat string map regardless of source version, so the rest of `map_postman_auth` is version-agnostic.
 

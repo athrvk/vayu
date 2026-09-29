@@ -86,6 +86,16 @@ const std::string* content_type);
 [[nodiscard]] nlohmann::ordered_json
 postman_raw_body (const std::string& content, const std::string* language);
 
+/**
+ * A Postman `auth` object (`{type, <type>: attributes}`, either schema
+ * version) as the Vayu auth the importer stores for a request, without the
+ * `postman` source it may add. The Postman exporter calls it to tell whether
+ * a stored auth's `postman` source still describes that auth - mapping it
+ * again gives the auth, so the user has not changed it since.
+ */
+[[nodiscard]] nlohmann::ordered_json postman_auth_mapping (
+const nlohmann::ordered_json& auth);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {

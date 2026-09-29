@@ -3368,6 +3368,10 @@ Postman's own export does.
 | `spec_operations` | A request stamped as an OpenAPI operation |
 | `rows_without_key` | A header, param or form row with a value but no name, left out |
 
+An auth a Postman import kept its original block for (`auth.postman`, see
+`docs/engine/db-schema.md`) is written as that block, while it still maps to
+the stored auth; everything below describes the rest.
+
 What maps where: folders are item groups (folders before requests, each in
 stored order); a request's `inherit` auth is an absent `auth` and its `none` is
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its

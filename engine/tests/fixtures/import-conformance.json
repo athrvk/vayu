@@ -21,6 +21,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -124,6 +133,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "elements": [
@@ -228,6 +246,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -323,6 +350,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             }
           },
@@ -696,6 +732,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{ token }}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -726,9 +771,18 @@
                       "content": "<x/>"
                     },
                     "auth": {
-                      "mode": "aws",
                       "config": {
                         "region": "eu-1"
+                      },
+                      "mode": "aws",
+                      "postman": {
+                        "awsv4": [
+                          {
+                            "key": "region",
+                            "value": "eu-1"
+                          }
+                        ],
+                        "type": "awsv4"
                       }
                     },
                     "examples": [
@@ -885,6 +939,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{ token }}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             }
           },
@@ -1017,9 +1080,18 @@
             },
             "bodyType": "xml",
             "auth": {
-              "mode": "aws",
               "config": {
                 "region": "eu-1"
+              },
+              "mode": "aws",
+              "postman": {
+                "awsv4": [
+                  {
+                    "key": "region",
+                    "value": "eu-1"
+                  }
+                ],
+                "type": "awsv4"
               }
             },
             "examples": [

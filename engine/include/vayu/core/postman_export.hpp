@@ -27,6 +27,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -124,6 +125,15 @@ struct PostmanExportOptions {
 /// @brief @p root and everything beneath it as a Postman v2.1.0 document.
 [[nodiscard]] PostmanExportOutcome export_postman (const PostmanExportFolder& root,
 const PostmanExportOptions& options);
+
+/**
+ * The Postman `auth` a request's stored @p auth exports as, credentials
+ * included, or nothing (an inheriting auth, a mode Postman lacks). The
+ * importer calls it to keep a document's own auth block beside the mapped
+ * auth only when this would not write the block back as it was.
+ */
+[[nodiscard]] std::optional<nlohmann::ordered_json> postman_auth_written (
+const nlohmann::ordered_json& auth);
 
 /// `PostmanExportNotes` as the route answers with it.
 [[nodiscard]] nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes);
