@@ -127,9 +127,14 @@ export function paramsFromUrl(url: string): KeyValueItem[] {
  * carries is dropped, and a key new to the URL is appended at the end.
  *
  * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
- * `syncPathRows`, and come after the query rows.
+ * `syncPathRows`, which reads `previousUrl` to tell an edit of those segments
+ * from one that leaves them alone, and come after the query rows.
  */
-export function mergeParamsFromUrl(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
+export function mergeParamsFromUrl(
+	existing: readonly KeyValueItem[],
+	url: string,
+	previousUrl: string
+): KeyValueItem[] {
 	const fromUrl = parseQueryParams(url);
 	const consumed = new Array(fromUrl.length).fill(false);
 
@@ -149,7 +154,7 @@ export function mergeParamsFromUrl(existing: readonly KeyValueItem[], url: strin
 		if (!consumed[i]) merged.push(p);
 	});
 
-	return [...merged, ...syncPathRows(pathRowsOf(existing), url)];
+	return [...merged, ...syncPathRows(pathRowsOf(existing), url, previousUrl)];
 }
 
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */

@@ -159,38 +159,58 @@ function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string)
 	return undefined;
 }
 
+/** Two name lists as the same `:name` segments, in the same order. */
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((name, i) => name === b[i]);
+}
+
 /**
- * The path rows the URL now calls for, carried over from `existing`.
+ * The path rows after the URL changed from `previousUrl` to `url`, carried
+ * over from `existing`.
  *
- * A name still in the URL keeps its row (value, description, enabled, id, and
- * any member an import carried). A name that left the URL loses its row -
- * unless a new name arrived in its place, in which case the row is renamed and
- * keeps its value: Postman's behaviour, and what typing `:userId` over `:id`
- * one keystroke at a time needs, since every keystroke is a rename. Leftover
- * names pair with leftover rows by position; a name with no row left to take
- * gets an empty one. The result follows the URL's order.
+ * An edit that leaves the URL's `:name` segments as they were - the query, the
+ * host, a literal path segment - changes no row: a declared row whose segment
+ * is not in the URL (a Postman `url.variable` entry nothing uses) is data the
+ * edit did not touch, and it is still exported.
+ *
+ * An edit that changes them makes the rows follow the URL, as Postman's own
+ * editor does: a name still in the URL keeps its row (value, description,
+ * enabled, id, and any member an import carried), a name new to it gets an
+ * empty row, and a row whose name is not in it is dropped. One exception keeps
+ * a value across a rename: when exactly one name left and exactly one arrived
+ * (typing `:userId` over `:id` one keystroke at a time), the row that left is
+ * renamed rather than replaced. Any other combination pairs nothing, since a
+ * row matched to a name by position alone would send one variable's value
+ * (a secret, say) as another's. The result follows the URL's order.
  *
  * Unlike a query row, a disabled path row is still in the URL (the segment is
  * there whether or not the value is sent), so it is matched like any other.
  * Several rows with one key collapse to the one that answers it at send time
  * (the last enabled, else the last), so the value that was sent survives.
  */
-export function syncPathRows(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
+export function syncPathRows(
+	existing: readonly KeyValueItem[],
+	url: string,
+	previousUrl: string
+): KeyValueItem[] {
 	const names = pathVariableNames(url);
+	const previous = pathVariableNames(previousUrl);
+	if (sameNames(names, previous)) return [...existing];
+
 	const byName = new Map<string, KeyValueItem>();
 	for (const row of existing) {
 		const held = byName.get(row.key);
 		if (!held || row.enabled !== false || held.enabled === false) byName.set(row.key, row);
 	}
+	const left = previous.filter((name) => !names.includes(name));
+	const arrived = names.filter((name) => !previous.includes(name));
+	const renamed = left.length === 1 && arrived.length === 1 ? byName.get(left[0]) : undefined;
 
-	const leftoverRows = existing.filter(
-		(row) => byName.get(row.key) === row && !names.includes(row.key)
-	);
 	return names.map((name) => {
 		const kept = byName.get(name);
 		if (kept) return kept;
-		const renamed = leftoverRows.shift();
-		return renamed ? { ...renamed, key: name } : newPathRow(name);
+		if (renamed && name === arrived[0]) return { ...renamed, key: name };
+		return newPathRow(name);
 	});
 }
 

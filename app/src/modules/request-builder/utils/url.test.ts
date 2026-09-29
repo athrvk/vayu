@@ -109,7 +109,7 @@ describe("mergeParamsFromUrl", () => {
 		// Mutation check: replacing wholesale with parseQueryParams(url) instead
 		// of merging drops the disabled row here.
 		const existing = [item("1", "a", "1", true), item("2", "b", "2", false)];
-		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&c=3");
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&c=3", "https://x/y");
 		expect(merged.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
 			{ key: "a", value: "1", enabled: true },
 			{ key: "b", value: "2", enabled: false },
@@ -121,7 +121,7 @@ describe("mergeParamsFromUrl", () => {
 		// Mutation check: restoring the `newParams.length > 0` guard leaves the
 		// stale enabled row in place here.
 		const existing = [item("1", "a", "1", true), item("2", "b", "2", false)];
-		const merged = mergeParamsFromUrl(existing, "https://x/y");
+		const merged = mergeParamsFromUrl(existing, "https://x/y", "https://x/y");
 		expect(merged.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
 			{ key: "b", value: "2", enabled: false },
 		]);
@@ -131,7 +131,7 @@ describe("mergeParamsFromUrl", () => {
 		const existing = [
 			item("keep-me", "a", "1", true, { description: "note", source: "body-mode" }),
 		];
-		const merged = mergeParamsFromUrl(existing, "https://x/y?a=9");
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=9", "https://x/y");
 		expect(merged).toEqual([
 			item("keep-me", "a", "9", true, { description: "note", source: "body-mode" }),
 		]);
@@ -139,7 +139,7 @@ describe("mergeParamsFromUrl", () => {
 
 	it("appends a brand-new key at the end with a fresh id", () => {
 		const existing = [item("1", "a", "1", true)];
-		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&z=9");
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&z=9", "https://x/y");
 		expect(merged[0].id).toBe("1");
 		expect(merged[1]).toMatchObject({ key: "z", value: "9", enabled: true });
 		expect(merged[1].id).not.toBe("1");
@@ -147,7 +147,7 @@ describe("mergeParamsFromUrl", () => {
 
 	it("never lists an enabled row the URL does not carry", () => {
 		const existing = [item("1", "a", "1", true), item("2", "gone", "x", true)];
-		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1");
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1", "https://x/y");
 		expect(merged.map((p) => p.key)).toEqual(["a"]);
 	});
 });
@@ -180,7 +180,11 @@ describe("path rows", () => {
 			item("q", "page", "1"),
 			item("p", "id", "42", true, { in: "path", description: "user" }),
 		];
-		const merged = mergeParamsFromUrl(existing, "https://x/users/:id/posts/:postId?page=2");
+		const merged = mergeParamsFromUrl(
+			existing,
+			"https://x/users/:id/posts/:postId?page=2",
+			"https://x/users/:id?page=1"
+		);
 		expect(merged.map(({ key, value, in: at }) => ({ key, value, in: at }))).toEqual([
 			{ key: "page", value: "2", in: undefined },
 			{ key: "id", value: "42", in: "path" },
@@ -192,16 +196,29 @@ describe("path rows", () => {
 
 	it("are renamed with their value when a segment is edited, and dropped when it goes", () => {
 		const existing = [item("p", "id", "42", true, { in: "path" })];
-		expect(mergeParamsFromUrl(existing, "https://x/users/:userId")).toEqual([
-			{ ...existing[0], key: "userId" },
-		]);
-		expect(mergeParamsFromUrl(existing, "https://x/users")).toEqual([]);
+		expect(
+			mergeParamsFromUrl(existing, "https://x/users/:userId", "https://x/users/:id")
+		).toEqual([{ ...existing[0], key: "userId" }]);
+		expect(mergeParamsFromUrl(existing, "https://x/users", "https://x/users/:id")).toEqual([]);
+	});
+
+	it("are left alone by an edit that does not touch the path's segments", () => {
+		// A declared row no segment uses (a Postman `url.variable` entry) is
+		// exported; a query-only edit must not drop it. Mutation check: syncing
+		// the path rows on every URL edit drops `unused` here.
+		const existing = [
+			item("q", "x", "1"),
+			item("a", "a", "1", true, { in: "path" }),
+			item("u", "unused", "SECRET", true, { in: "path" }),
+		];
+		const merged = mergeParamsFromUrl(existing, "https://x/:a?x=2", "https://x/:a?x=1");
+		expect(merged.slice(1)).toEqual(existing.slice(1));
 	});
 
 	it("are never matched by a same-named query key", () => {
 		// `?id=1` is a query row; the `:id` row stays a path row with its value.
 		const existing = [item("p", "id", "42", true, { in: "path" })];
-		const merged = mergeParamsFromUrl(existing, "https://x/:id?id=1");
+		const merged = mergeParamsFromUrl(existing, "https://x/:id?id=1", "https://x/:id");
 		expect(merged.map(({ key, value, in: at }) => ({ key, value, in: at }))).toEqual([
 			{ key: "id", value: "1", in: undefined },
 			{ key: "id", value: "42", in: "path" },

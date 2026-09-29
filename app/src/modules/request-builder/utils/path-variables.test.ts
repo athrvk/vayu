@@ -205,34 +205,65 @@ describe("pathRowsFromUrl", () => {
 describe("syncPathRows", () => {
 	it("adds a row for a new segment, keeping the others as they were", () => {
 		const existing = [row("1", "id", "42", { description: "user" })];
-		const synced = syncPathRows(existing, "https://x/:id/posts/:postId");
+		const synced = syncPathRows(existing, "https://x/:id/posts/:postId", "https://x/:id");
 		expect(synced[0]).toBe(existing[0]);
 		expect(synced[1]).toMatchObject({ key: "postId", value: "", in: "path" });
 	});
 
 	it("drops the row of a segment that left the URL", () => {
 		const existing = [row("1", "id", "42"), row("2", "postId", "7")];
-		expect(syncPathRows(existing, "https://x/:id/posts").map((r) => r.key)).toEqual(["id"]);
-		expect(syncPathRows(existing, "https://x/users")).toEqual([]);
+		const before = "https://x/:id/posts/:postId";
+		expect(syncPathRows(existing, "https://x/:id/posts", before).map((r) => r.key)).toEqual([
+			"id",
+		]);
+		expect(syncPathRows(existing, "https://x/users", before)).toEqual([]);
 	});
 
 	it("renames the row of an edited segment and keeps its value", () => {
 		// One keystroke at a time: `:id` -> `:i` -> `:iX`.
 		const existing = [row("1", "id", "42", { description: "user", enabled: false })];
-		const once = syncPathRows(existing, "https://x/:i");
+		const once = syncPathRows(existing, "https://x/:i", "https://x/:id");
 		expect(once).toEqual([{ ...existing[0], key: "i" }]);
-		const twice = syncPathRows(once, "https://x/:iX");
+		const twice = syncPathRows(once, "https://x/:iX", "https://x/:i");
 		expect(twice).toEqual([{ ...existing[0], key: "iX" }]);
+	});
+
+	it("pairs no row with a new name unless exactly one name left for it", () => {
+		// Mutation check: pairing leftover rows by position gives `c` the
+		// SECRET that belonged to `unused`.
+		const existing = [row("1", "a", "1"), row("2", "b", "2"), row("3", "unused", "SECRET")];
+		const synced = syncPathRows(existing, "https://x/a/:b/c/:a/:c", "https://x/:a/:b");
+		expect(synced.map(({ key, value }) => ({ key, value }))).toEqual([
+			{ key: "b", value: "2" },
+			{ key: "a", value: "1" },
+			{ key: "c", value: "" },
+		]);
+		// Two names swapped for two others: neither is a rename.
+		const two = syncPathRows(existing.slice(0, 2), "https://x/:c/:d", "https://x/:a/:b");
+		expect(two.map(({ key, value }) => ({ key, value }))).toEqual([
+			{ key: "c", value: "" },
+			{ key: "d", value: "" },
+		]);
+	});
+
+	it("changes nothing when the edit leaves the segments as they were", () => {
+		// Mutation check: syncing on every edit drops the declared-but-unused row.
+		const existing = [row("1", "a", "1"), row("2", "unused", "SECRET")];
+		const synced = syncPathRows(existing, "https://x/:a?x=2", "https://x/:a?x=1");
+		expect(synced).toEqual(existing);
+		expect(syncPathRows(existing, "https://y/v2/:a#f", "https://x/:a")).toEqual(existing);
 	});
 
 	it("follows the URL's order when segments move", () => {
 		const existing = [row("1", "a", "1"), row("2", "b", "2")];
-		expect(syncPathRows(existing, "https://x/:b/:a").map((r) => r.id)).toEqual(["2", "1"]);
+		expect(
+			syncPathRows(existing, "https://x/:b/:a", "https://x/:a/:b").map((r) => r.id)
+		).toEqual(["2", "1"]);
 	});
 
 	it("keeps a disabled row whose segment is still in the URL", () => {
 		const existing = [row("1", "id", "42", { enabled: false })];
-		expect(syncPathRows(existing, "https://x/:id")).toEqual(existing);
+		expect(syncPathRows(existing, "https://x/:id/:y", "https://x/:id")[0]).toBe(existing[0]);
 	});
 
 	it("collapses rows sharing a key to the one that answers it", () => {
@@ -241,18 +272,18 @@ describe("syncPathRows", () => {
 			row("2", "id", "answers"),
 			row("3", "id", "off", { enabled: false }),
 		];
-		expect(syncPathRows(existing, "https://x/:id")).toEqual([existing[1]]);
+		expect(syncPathRows(existing, "https://x/:id", "https://x/:id/:x")).toEqual([existing[1]]);
 		const allOff = [
 			row("1", "id", "a", { enabled: false }),
 			row("2", "id", "b", { enabled: false }),
 		];
-		expect(syncPathRows(allOff, "https://x/:id")).toEqual([allOff[1]]);
+		expect(syncPathRows(allOff, "https://x/:id", "https://x/:id/:x")).toEqual([allOff[1]]);
 	});
 
 	it("keeps members it does not know on a kept or renamed row", () => {
 		const existing = [{ ...row("1", "id", "42"), type: "any" } as unknown as KeyValueItem];
-		expect(syncPathRows(existing, "https://x/:id")[0]).toBe(existing[0]);
-		expect(syncPathRows(existing, "https://x/:userId")[0]).toMatchObject({
+		expect(syncPathRows(existing, "https://x/:id/:y", "https://x/:id")[0]).toBe(existing[0]);
+		expect(syncPathRows(existing, "https://x/:userId", "https://x/:id")[0]).toMatchObject({
 			key: "userId",
 			value: "42",
 			type: "any",
@@ -260,7 +291,7 @@ describe("syncPathRows", () => {
 	});
 
 	it("keeps one row for a repeated name", () => {
-		const synced = syncPathRows([], "https://x/:id/copy/:id");
+		const synced = syncPathRows([], "https://x/:id/copy/:id", "https://x/");
 		expect(synced.map((r) => r.key)).toEqual(["id"]);
 	});
 });
