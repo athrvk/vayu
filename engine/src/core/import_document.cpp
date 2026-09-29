@@ -23,6 +23,7 @@
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
@@ -1432,12 +1433,36 @@ void pm_redirects (const json* item, json& request, int& skipped_protocol_behavi
 }
 
 /**
+ * The saved response @p saved as `request_examples.postman_response` holds it
+ * (schema version 2): every member verbatim, in the source's order, except
+ * `name` and `body`, which keep only their position (`null`) because the
+ * example's own columns are their values. Nothing when the text would be over
+ * `MAX_POSTMAN_RESPONSE_BYTES` - the export regenerates what it would have
+ * carried, which beats refusing the whole import over one recorded request.
+ */
+std::optional<std::string> pm_stored_response (const json& saved) {
+    json kept = saved;
+    for (const char* member : { "name", "body" }) {
+        if (kept.contains (member)) {
+            kept[member] = nullptr;
+        }
+    }
+    std::string text = kept.dump (-1, ' ', false, json::error_handler_t::replace);
+    if (text.size () > vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES) {
+        return std::nullopt;
+    }
+    return std::make_optional (std::move (text));
+}
+
+/**
  * `pmExamples(item)`: Postman's saved responses (`item.response[]`).
  *
  * Read by nothing until the engine had a table to hold them, so importing a
  * collection whose whole value was its documented responses produced one with
  * none. A saved response with no `code` documents a 200, which is what Postman
- * shows for one.
+ * shows for one. What no column models - the request it was recorded against,
+ * the status text, preview settings, cookies, response time, the header rows
+ * as written - rides along as `postmanResponse` for the Postman export.
  */
 json pm_examples (const json* item, PostmanCounts& counts) {
     json out              = json::array ();
@@ -1473,6 +1498,9 @@ json pm_examples (const json* item, PostmanCounts& counts) {
         // `_postman_previewlanguage`, but that is an editor mode rather
         // than a media type.
         { "contentType", content_type } });
+        if (std::optional<std::string> stored = pm_stored_response (*saved)) {
+            out.back ()["postmanResponse"] = std::move (*stored);
+        }
     }
     return out;
 }
@@ -3966,6 +3994,10 @@ const ImportSource& source) {
         { { "kind", "external_ref" }, { "count", source.unresolved_refs } });
     }
     return parsed;
+}
+
+nlohmann::ordered_json postman_header_rows (const nlohmann::ordered_json& rows) {
+    return map_key_values (&rows);
 }
 
 nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& result) {

@@ -389,6 +389,14 @@ export interface ExampleDraft {
 	 * the source says nothing - not a guess.
 	 */
 	contentType: string;
+	/**
+	 * The Postman saved response this came from, as the engine's parse wrote it:
+	 * JSON text in the source's member order, forwarded untouched so
+	 * `POST /export/postman` can write back what no field here models (the
+	 * recorded request, status text, preview settings, cookies). Postman
+	 * imports only; absent otherwise and when over the engine's size cap.
+	 */
+	postmanResponse?: string;
 }
 
 export interface RequestDraft {

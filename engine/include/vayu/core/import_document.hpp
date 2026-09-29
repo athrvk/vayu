@@ -163,6 +163,15 @@ const ImportOptions& options,
 const ImportSource& source);
 
 /**
+ * A Postman row array (`header[]`, `query[]`) as the importer stores it: the
+ * `key`/`value`/`enabled`/`description` rows `map_key_values` builds. The
+ * Postman export compares a stored saved response's `header[]` through this
+ * against the example's `headers` column, so "still what was imported" is
+ * decided by the same reading the import made.
+ */
+[[nodiscard]] nlohmann::ordered_json postman_header_rows (const nlohmann::ordered_json& rows);
+
+/**
  * @brief An `ImportResult` as the `POST /import/apply` payload that persists it.
  *
  * The other half of what the renderer kept when the parse moved: `assign-ids.ts`

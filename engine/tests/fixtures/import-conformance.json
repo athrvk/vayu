@@ -797,7 +797,8 @@
                           }
                         ],
                         "body": "<y/>",
-                        "contentType": "application/xml"
+                        "contentType": "application/xml",
+                        "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
                       }
                     ]
                   }
@@ -1106,7 +1107,8 @@
                   }
                 ],
                 "body": "<y/>",
-                "contentType": "application/xml"
+                "contentType": "application/xml",
+                "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
               }
             ],
             "order": 0

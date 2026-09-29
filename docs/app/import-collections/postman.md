@@ -131,8 +131,11 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 | `header[]` | `headers` | via `map_key_values` - source order and duplicates (`Set-Cookie`) preserved |
 | `body` | `body` | stored verbatim |
 | `header[]` `Content-Type` | `contentType` | `""` when the recorded response carried none |
+| the whole entry | `postmanResponse` | JSON text, source member order, `name` and `body` as `null` placeholders; left out when over 1 MiB |
 
 `_postman_previewlanguage` is deliberately **not** read into `contentType`: it is an editor mode (`"json"`, `"html"`), not a media type, and storing it would put a value in that field which is not one.
+
+`postmanResponse` keeps what no example field models - the request the response was recorded against (`originalRequest`, which usually differs per example: its own query values, headers, body and path variables), the status text as recorded, `_postman_previewlanguage` / `_postman_previewtype`, `cookie[]`, `responseTime`, and the header rows as written (`name` fields, number values) - so an export writes them back. It is stored in `request_examples.postman_response` and read only by the Postman export; nothing is lost, so nothing is counted in `meta.skipped`. An entry whose text would pass the cap is imported without it and its export regenerates those members.
 
 An entry that is not an object counts toward `malformed_item`, the same treatment `pmFolder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
 
