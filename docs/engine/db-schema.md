@@ -445,6 +445,11 @@ across a reload; retyping the row's key or value clears it (issues #1481, #1491)
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 ```
+A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:
+the `options.raw.language` the document declared when it named no Vayu mode
+(`"javascript"`, `"html"`), or `""` when it declared none. Nothing sends it;
+the Postman exporter writes it back while the body still sniffs to its stored
+mode, so an unlabelled body exports without `options` as Postman wrote it.
 
 **auth** - discriminated union (same shape as collection auth, plus `inherit`):
 ```json

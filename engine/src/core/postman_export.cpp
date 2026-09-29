@@ -641,12 +641,34 @@ json graphql_body (const std::string& content) {
     return json{ { "mode", "graphql" }, { "graphql", std::move (graphql) } };
 }
 
+/// A raw body; an empty @p language writes no `options`, as Postman does for a
+/// body whose language was never chosen.
 json raw_body (const std::string& content, std::string_view language) {
     json body;
     body["mode"] = "raw";
     body["raw"]  = content;
-    body["options"] = json{ { "raw", json{ { "language", std::string (language) } } } };
+    if (!language.empty ()) {
+        body["options"] =
+        json{ { "raw", json{ { "language", std::string (language) } } } };
+    }
     return body;
+}
+
+/**
+ * The language a stored raw body is written with: the `rawLanguage` an import
+ * kept (`""` for none declared) while importing it again would still give the
+ * stored mode, else the mode's own name. The check is what keeps a body edited
+ * into another mode since from being labelled as what it was.
+ */
+std::string raw_language (const json& body, const std::string& mode, const std::string& content) {
+    const auto kept = body.find ("rawLanguage");
+    if (kept == body.end () || !kept->is_string ()) {
+        return mode;
+    }
+    const std::string declared = kept->get<std::string> ();
+    const json reimported =
+    postman_raw_body (content, declared.empty () ? nullptr : &declared);
+    return text_of (reimported, "mode") == mode ? declared : mode;
 }
 
 /// One form-data part. A file part names the path it uploads.
@@ -697,7 +719,8 @@ std::optional<json> postman_body (const json& body, Walk& walk) {
     }
     for (const std::string_view language : postman::RAW_LANGUAGES) {
         if (mode == language) {
-            return std::make_optional (raw_body (content, language));
+            return std::make_optional (
+            raw_body (content, raw_language (body, mode, content)));
         }
     }
     if (mode == "jsonrpc") {

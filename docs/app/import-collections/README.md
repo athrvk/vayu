@@ -506,10 +506,12 @@ OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
 Grant/field normalization is shared here so the parsers agree. Only `digest`/`aws`/`ntlm`
 remain non-executable and are counted in `meta.nonExecutableAuth`.
 
-### raw_body
-`raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
+### postman_raw_body
+`postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
 directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
-`text`) and never guesses `xml`.
+`text`) and never guesses `xml`, keeping the declared language (or `""` for none) as
+`rawLanguage`. Public in `import_document.hpp`: the Postman exporter calls it to decide
+whether a kept `rawLanguage` still describes the stored body.
 
 ### join_exec
 `join_exec(event)` - a Postman event entry → a single script string. Joins

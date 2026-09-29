@@ -168,7 +168,7 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 
 | Postman `body.mode` | Vayu `RequestBody` | Notes |
 |---------------------|--------------------|-------|
-| `raw` | `rawBody(body.raw, body.options.raw.language)` | see raw sniffing below |
+| `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)` |
 | `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. Only a file entry naming no path adds to `ctx.skippedFileBody`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
@@ -181,14 +181,22 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 
 **GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** a GraphQL body is a JSON envelope, so the request needs `Content-Type: application/json` - and Vayu's request builder adds that header only when you *pick* GraphQL, which an import never does. The header was therefore absent, and libcurl defaults to `application/x-www-form-urlencoded`, which most GraphQL servers answer with a `400`; nothing in the app said why. The header is now written at import, through the same `contentTypeToAdd` rule the mode picker uses: a Content-Type the collection declares wins (including a deliberate `application/graphql`), and a **disabled** row does not count as declaring one.
 
-**Raw language sniffing (`raw_body` in `import_document.cpp`):**
+**Raw language sniffing (`postman_raw_body` in `import_document.cpp`):**
 
 | `options.raw.language` | Result |
 |------------------------|--------|
 | `"json"` | `{ mode: "json", content }` |
 | `"text"` | `{ mode: "text", content }` |
 | `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `with_required_content_type` rule GraphQL uses (below) |
-| absent / other | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` |
+| absent / other | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` - with `rawLanguage` beside it: the declared language (`"javascript"`, `"html"`), or `""` when none was declared |
+
+`rawLanguage` changes nothing about what is sent - the sniffed mode decides
+that, as before. It is what the Postman export reads to write the body's
+`options` back as the document had them: none at all for an unlabelled body
+(the common shape in generated collections), the declared language otherwise.
+`postman_raw_body` is the one mapping both directions call, so the exporter
+writes a kept `rawLanguage` only while importing the body again would still
+give its stored mode.
 
 An unlabelled body is never sniffed into `xml`: without Postman's language, a
 `<`-shaped document is as likely to be HTML, and guessing would hand the request
@@ -262,7 +270,7 @@ All defined in `engine/src/core/import_document.cpp` (except `normalize_template
 | [`to_var_record`](./README.md#to_var_record) | collection/folder `variable[]` → `CollectionDraft.variables` |
 | [`map_key_values`](./README.md#map_key_values) | `header[]`, `query[]`, `urlencoded[]`, `formdata[]` → `KeyValueEntry[]` (preserves disabled + duplicates) |
 | [`map_postman_auth`](./README.md#map_postman_auth) | `auth` object → `RequestAuth` (request and, via `collectionAuth`, collection/folder) |
-| [`raw_body`](./README.md#raw_body) | raw-mode body → `RequestBody` with JSON/text language sniffing |
+| `postman_raw_body` | raw-mode body → `RequestBody` with JSON/text language sniffing, keeping a declared language Vayu has no mode for (shared with the exporter) |
 | [`join_exec`](./README.md#join_exec) | `event.script.exec` → joined script string |
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | rewrite `{{ x }}` / `{{ _.x }}` template syntax to Vayu `{{x}}` (`path_template.cpp`); applied to URLs, values, vars, and auth fields. Called **without** `pathTemplates`, so a literal single-brace `{x}` is left alone - in Postman only `{{x}}` is a template, and rewriting `/tags/{beta}` or `fields=friends{name}` invented a variable that resolved to nothing |
 

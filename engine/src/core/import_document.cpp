@@ -78,6 +78,28 @@ std::string file_base_name (const std::string& path) {
  * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
  * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
  */
+nlohmann::ordered_json
+postman_raw_body (const std::string& content, const std::string* language) {
+    if (language != nullptr) {
+        // `xml` is what gets an imported SOAP request its `application/xml`:
+        // `text` requires no Content-Type, so before this the envelope went out
+        // as libcurl's `x-www-form-urlencoded`.
+        for (const std::string_view mode : postman::RAW_LANGUAGES) {
+            if (*language == mode) {
+                return nlohmann::ordered_json{ { "mode", std::string (mode) },
+                    { "content", content } };
+            }
+        }
+    }
+    // No language Vayu has a mode for: sniff JSON, and keep what was declared
+    // so the export can say it again rather than the mode's own name.
+    const nlohmann::ordered_json parsed =
+    nlohmann::ordered_json::parse (content, nullptr, false);
+    return nlohmann::ordered_json{ { "mode", parsed.is_discarded () ? "text" : "json" },
+        { "content", content },
+        { "rawLanguage", language == nullptr ? std::string () : *language } };
+}
+
 nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
 const std::string& src,
 const std::string* content_type) {
@@ -876,24 +898,6 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
     return out;
 }
 
-/// `rawBody(content, language)`: Postman's raw body.
-json raw_body (const std::string& content, const std::string* language) {
-    if (language != nullptr) {
-        // `xml` is what gets an imported SOAP request its `application/xml`:
-        // `text` requires no Content-Type, so before this the envelope went out
-        // as libcurl's `x-www-form-urlencoded`.
-        for (const std::string_view mode : postman::RAW_LANGUAGES) {
-            if (*language == mode) {
-                return json{ { "mode", std::string (mode) }, { "content", content } };
-            }
-        }
-    }
-    // No explicit language: sniff JSON.
-    const json parsed = json::parse (content, nullptr, false);
-    return json{ { "mode", parsed.is_discarded () ? "text" : "json" },
-        { "content", content } };
-}
-
 json pm_body (const json* body, PostmanCounts& counts) {
     const json* node = as_record (body);
     if (node == nullptr || !truthy (prop (node, "mode"))) {
@@ -912,7 +916,7 @@ json pm_body (const json* body, PostmanCounts& counts) {
     const std::string named = mode == nullptr ? std::string () : *mode;
     if (named == "raw") {
         const std::string* text = as_str (prop (node, "raw"));
-        return raw_body (text == nullptr ? std::string () : *text,
+        return postman_raw_body (text == nullptr ? std::string () : *text,
         as_str (prop (prop (prop (node, "options"), "raw"), "language")));
     }
     if (named == "urlencoded") {

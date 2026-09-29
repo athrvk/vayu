@@ -508,6 +508,59 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Unlabelled body",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"note\": \"no language chosen\"}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/notes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notes"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Script body",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "console.log(1);",
+							"options": {
+								"raw": {
+									"language": "javascript"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/eval",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"eval"
+							]
+						}
+					},
+					"response": []
 				}
 			],
 			"description": "What an export gives back as Postman wrote it."

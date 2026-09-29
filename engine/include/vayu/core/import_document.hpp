@@ -71,6 +71,21 @@ namespace vayu::core {
 const std::string& src,
 const std::string* content_type);
 
+/**
+ * A Postman raw body as the Vayu body the importer stores: `{mode, content}`,
+ * where a declared `options.raw.language` that is a Vayu mode (`json`, `text`,
+ * `xml`) is that mode and anything else - no language at all included - is
+ * sniffed (JSON that parses is `json`, the rest `text`). A sniffed body also
+ * keeps what was declared as `rawLanguage`, `""` for none, so the exporter
+ * can write the body's `options` back as Postman had them.
+ *
+ * Shared with the exporter (`postman_export.cpp`), which writes a stored
+ * `rawLanguage` back only while this mapping still gives the stored mode, so
+ * a body edited into another mode since is written the way its mode says.
+ */
+[[nodiscard]] nlohmann::ordered_json
+postman_raw_body (const std::string& content, const std::string* language);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {

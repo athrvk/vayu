@@ -307,6 +307,24 @@ TEST (PostmanExport, RawModesCarryTheirLanguage) {
     }
 }
 
+TEST (PostmanExport, ARawLanguageAnImportKeptIsWrittenBackWhileItStillHolds) {
+    // Declared none: no `options` at all, as Postman wrote it.
+    EXPECT_EQ (
+    body_of ({ { "mode", "json" }, { "content", "{}" }, { "rawLanguage", "" } }).dump (),
+    R"({"mode":"raw","raw":"{}"})");
+    // A language Vayu has no mode for, sniffed into `text`.
+    EXPECT_EQ (body_of ({ { "mode", "text" }, { "content", "let a;" },
+                        { "rawLanguage", "javascript" } })
+               .dump (),
+    R"({"mode":"raw","raw":"let a;","options":{"raw":{"language":"javascript"}}})");
+    // Edited since: the content no longer sniffs to the stored mode, so the
+    // kept language would mislabel it and the mode's own name is written.
+    EXPECT_EQ (
+    body_of ({ { "mode", "json" }, { "content", "not json" }, { "rawLanguage", "" } })
+    .dump (),
+    R"({"mode":"raw","raw":"not json","options":{"raw":{"language":"json"}}})");
+}
+
 TEST (PostmanExport, NoBodyWritesNoBodyKey) {
     EXPECT_TRUE (body_of ({ { "mode", "none" } }).is_null ());
     EXPECT_TRUE (body_of (ordered::object ()).is_null ());

@@ -1555,6 +1555,28 @@ TEST (PostmanImport, KeepsEveryEventInDocumentOrderAndADisabledOneTurnedOff) {
     EXPECT_EQ (elements[2].at ("config").at ("script"), "u()");
 }
 
+TEST (PostmanImport, KeepsARawBodysUndeclaredLanguageWithoutChangingItsMode) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"None","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{\"a\":1}"}}},
+        {"name":"Js","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"let a;","options":{"raw":{"language":"javascript"}}}}},
+        {"name":"Json","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{}","options":{"raw":{"language":"json"}}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    // Still sniffed - what Vayu sends is unchanged - with "declared none" kept.
+    EXPECT_EQ (requests[0].at ("body"),
+    (json{ { "mode", "json" }, { "content", "{\"a\":1}" }, { "rawLanguage", "" } }));
+    EXPECT_EQ (requests[1].at ("body"),
+    (json{ { "mode", "text" }, { "content", "let a;" }, { "rawLanguage", "javascript" } }));
+    // A language that is a Vayu mode needs nothing kept beside it.
+    EXPECT_FALSE (requests[2].at ("body").contains ("rawLanguage"));
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

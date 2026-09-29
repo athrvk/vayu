@@ -3372,7 +3372,9 @@ What maps where: folders are item groups (folders before requests, each in
 stored order); a request's `inherit` auth is an absent `auth` and its `none` is
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its
 `noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
-are `raw` with that `options.raw.language`, `graphql` is `graphql` with the
+are `raw` with that `options.raw.language` (or the language a Postman import
+kept as `rawLanguage`, none at all for `""`, while the body still sniffs to its
+mode), `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `form-data` is `formdata` with a file part's `src`; `script.pre` /
 `script.post` are the `prerequest` / `test` events, one event per element in
