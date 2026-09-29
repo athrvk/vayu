@@ -19,6 +19,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -337,6 +338,72 @@ TEST_F (ExamplesRouteTest, UpdateBodyTruncatedFollowsTheNullVsAbsentRule) {
     EXPECT_FALSE (stored_example2->body_truncated);
 }
 
+// `postmanResponse` (schema version 2) is the source's text, kept as a string
+// so its member order survives a body parsed into sorted `nlohmann::json`.
+// Mutation check: store `parsed.dump ()` instead of the text in
+// `apply_postman_response_field` and the byte assertion reds.
+TEST_F (ExamplesRouteTest, CreateKeepsAPostmanResponseByteForByte) {
+    const std::string text =
+    R"({"name":null,"status":"Unprocessable Entity","code":422,"body":null})";
+    const std::string id = create_example ("req_1",
+    json{ { "name", "Invalid" }, { "status", 422 }, { "postmanResponse", text } });
+    const auto stored    = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    EXPECT_EQ (*stored->postman_response, text);
+
+    // Not a display field: the list does not carry it.
+    auto [list_status, list] = routes::list_request_examples_response (*db_, "req_1");
+    ASSERT_EQ (list_status, 200);
+    ASSERT_EQ (list.size (), 1u);
+    EXPECT_FALSE (list[0].contains ("postmanResponse"));
+}
+
+TEST_F (ExamplesRouteTest, CreateRejectsAPostmanResponseThatIsNotAJsonObject) {
+    for (const json& bad :
+    { json ("[1,2]"), json ("{not json"), json (42), json{ { "name", nullptr } } }) {
+        auto [status, body] = routes::create_request_example_response (
+        *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", bad } });
+        EXPECT_EQ (status, 400) << bad.dump () << " -> " << body.dump ();
+    }
+    const std::string oversized = "{\"x\":\"" +
+    std::string (vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a') +
+    "\"}";
+    auto [status, body] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", oversized } });
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_TRUE (db_->get_request_examples ("req_1").empty ());
+}
+
+// The edit rule: an update never authors a stored Postman response - it may
+// only clear it. An edit to anything else keeps it (the export decides per
+// member whether it still describes the row). Mutation check: drop the
+// `!is_create` refusal in `apply_postman_response_field` and the 400 reds.
+TEST_F (ExamplesRouteTest, UpdateCanOnlyClearAPostmanResponse) {
+    const std::string text = R"({"name":null,"status":"OK"})";
+    const std::string id =
+    create_example ("req_1", json{ { "name", "OK" }, { "postmanResponse", text } });
+
+    auto [refused_status, refused] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "postmanResponse", R"({"status":"Changed"})" } });
+    EXPECT_EQ (refused_status, 400) << refused.dump ();
+
+    auto [kept_status, kept] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "status", 201 } });
+    ASSERT_EQ (kept_status, 200) << kept.dump ();
+    auto after_edit = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (after_edit);
+    ASSERT_HAS_VALUE (after_edit->postman_response);
+    EXPECT_EQ (*after_edit->postman_response, text);
+
+    auto [cleared_status, cleared] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "postmanResponse", nullptr } });
+    ASSERT_EQ (cleared_status, 200) << cleared.dump ();
+    auto after_clear = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (after_clear);
+    EXPECT_FALSE (after_clear->postman_response.has_value ());
+}
+
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
@@ -583,6 +650,25 @@ TEST_F (ExamplesRouteTest, ImportApplyWritesNestedExamples) {
     // is the assertion that keeps the two paths from disagreeing about it.
     EXPECT_EQ (stored[0].origin, "import");
     EXPECT_EQ (stored[1].origin, "import");
+}
+
+// The importer's Postman saved response rides the bulk path through the same
+// applier, text intact.
+TEST_F (ExamplesRouteTest, ImportApplyStoresANestedPostmanResponse) {
+    const std::string text = R"({"name":null,"originalRequest":{"method":"GET"},"cookie":[]})";
+    auto [status, body] = routes::import_apply_response (*db_,
+    json{ { "collections", json::array ({ json{ { "tempId", "c1" }, { "name", "Imported" } } }) },
+    { "requests",
+    json::array ({ json{ { "tempId", "r1" }, { "collectionTempId", "c1" },
+    { "name", "Get user" }, { "method", "GET" }, { "url", "https://example.test/user" },
+    { "examples", json::array ({ json{ { "name", "200 OK" }, { "postmanResponse", text } } }) } } }) } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto stored =
+    db_->get_request_examples (body["idMap"]["r1"].get<std::string> ());
+    ASSERT_EQ (stored.size (), 1u);
+    const std::optional<std::string>& recorded = stored[0].postman_response;
+    ASSERT_HAS_VALUE (recorded);
+    EXPECT_EQ (*recorded, text);
 }
 
 TEST_F (ExamplesRouteTest, ImportApplyRejectsABadExampleAndWritesNothing) {

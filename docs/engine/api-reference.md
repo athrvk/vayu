@@ -1721,10 +1721,19 @@ Create one example. **Create only**, and the engine owns the id - see
   "contentType": "",         // Optional. Default ""
   "order": 0,                // Optional, appended after the request's examples if omitted
   "origin": "import",        // Optional, "import" | "user". Default "import"
-  "bodyTruncated": false     // Optional. Default false - true when `body` is
+  "bodyTruncated": false,    // Optional. Default false - true when `body` is
                              // only the first slice of the captured response
+  "postmanResponse": null    // Optional. The Postman saved response an import
+                             // took this from, as JSON text; null = none
 }
 ```
+
+`postmanResponse` is what the Postman importer sends (schema version 2): the
+`item.response[]` entry as JSON **text** in the source's member order, `name`
+and `body` replaced by `null` placeholders. A string rather than an object so the
+order survives a parse into sorted JSON on the way here; it must parse as a JSON
+object, and it is capped at 1 MiB. `POST /export/postman` is its reader, and no
+read route returns it.
 
 `headers` is an array of `KeyValueEntry`, the same shape a request's headers
 use - not a JSON object. A stored example is re-served rather than only
@@ -1737,7 +1746,8 @@ to survive.
 `id`, if `name` is missing or `null`, on a `status` outside `100`-`599` (rejected
 rather than clamped - a stored `700` would be re-served as a status line nobody
 can send), on a malformed `headers` entry, on an `origin` that is neither
-`"import"` nor `"user"`, or on a `body` over the cap. `409` when the request
+`"import"` nor `"user"`, on a `body` over the cap, or on a `postmanResponse` that
+is not a string holding a JSON object or is over its cap. `409` when the request
 already holds the maximum number of examples.
 
 ### PUT /requests/:id/examples/:exampleId
@@ -1745,7 +1755,9 @@ already holds the maximum number of examples.
 Update one example. **Update only** - a `404` when the example does not exist,
 and the same `404` when it exists under a different request. Merge-patch body:
 absent keeps, `null` resets to the field's default (`name` has none, so `null`
-is a `400`).
+is a `400`). `postmanResponse` accepts only `null`, which clears it; any other
+value is a `400` - it records what a file said, and the export already
+regenerates each part of it an edit to `status` or `headers` makes stale.
 
 **Response:** the updated example object.
 
