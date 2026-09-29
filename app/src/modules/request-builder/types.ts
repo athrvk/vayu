@@ -321,8 +321,10 @@ export interface ResponseState {
 	 *
 	 * Set on a live send only, by `RequestBuilderProvider` rather than by
 	 * either response funnel: neither `/execute` nor a stored trace carries
-	 * the unresolved request, so a restored response has no snapshot and its
-	 * example regenerates on export, as one saved before this field did.
+	 * the unresolved request. A stream's copy reloaded at its end gets the
+	 * snapshot of the Send whose run id it carries; any other restored
+	 * response has none, and its example regenerates on export, as one saved
+	 * before this field did.
 	 */
 	sentRequest?: ExampleSentRequest;
 	errorCode?: string;

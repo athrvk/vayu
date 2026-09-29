@@ -20,7 +20,8 @@
  * own reason phrase and the response time (issue #1763): the engine turns that
  * into the Postman saved response once, so an export describes the request
  * that produced this response rather than whatever the request has become. A
- * response restored from a stored run has no snapshot and sends no `savedFrom`.
+ * response fetched with no Send to match it to (the last run after a restart,
+ * one opened from History) has no snapshot and sends no `savedFrom`.
  */
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
