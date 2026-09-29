@@ -40,6 +40,8 @@ export function templatedRequest(
 	return {
 		method: request.method,
 		url: request.url,
+		// Its path rows fill the URL's `:name` segments (#1764), as compose does.
+		params: request.params,
 		headers: flatHeaders(request.headers),
 		body: request.body,
 		auth: resolveAuthForSend(request.auth, ancestors),

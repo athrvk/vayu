@@ -26,6 +26,7 @@ import {
 	type SnippetBody,
 	type SnippetRequest,
 } from "./types";
+import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -222,7 +223,9 @@ export function prepareRequest(
 	const masker = maskerFor(options.secrets, options.mask);
 	const notes: string[] = [];
 
-	let url = request.url ?? "";
+	// Path variables first, as the engine composes them (issue #1764), so a
+	// query-located API key appended below lands after the substituted path.
+	let url = substitutePathVariables(request.url ?? "", request.params ?? []);
 	const headers: Array<[string, string]> = Object.entries(request.headers ?? {});
 	let basicAuth: { username: string; password: string } | null = null;
 

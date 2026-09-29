@@ -184,6 +184,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 			const snippet = generateCurl({
 				method: request.method,
 				url: request.url,
+				params: request.params,
 				headers: toFlatHeaders(request.headers),
 				body: toBodyPayload(request),
 				/*

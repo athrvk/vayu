@@ -16,6 +16,8 @@
  * the call site needs no conversion.
  */
 
+import type { KeyValueEntry } from "@/types";
+
 /**
  * The body shape the engine takes on `/compose`, `/execute` and `/runs`
  * (`ExecBody` in the request builder) and hands back composed. Field-based
@@ -39,6 +41,13 @@ export interface SnippetBody {
 export interface SnippetRequest {
 	method: string;
 	url: string;
+	/**
+	 * The request's params rows, read for its path rows only (issue #1764): a
+	 * `:name` segment of `url` is substituted from them exactly as the engine
+	 * composes it (`substitutePathVariables`). The query is already in `url`.
+	 * Absent on a composed payload, whose URL the engine has substituted.
+	 */
+	params?: readonly KeyValueEntry[];
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
