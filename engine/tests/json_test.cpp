@@ -286,6 +286,8 @@ TEST (JsonRequest, SerializesHttpVersion) {
     EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
 }
 
+// GET /runs/:id: the full configSnapshot, nested keys included, and no
+// `summary` (the list row's compact stand-in for it).
 TEST (JsonTest, SerializesRun) {
     vayu::db::Run run;
     run.id              = "run_123";
@@ -293,7 +295,7 @@ TEST (JsonTest, SerializesRun) {
     run.status          = vayu::RunStatus::Running;
     run.start_time      = 1000;
     run.end_time        = 2000;
-    run.config_snapshot = R"({"rps": 100})";
+    run.config_snapshot = R"({"rps": 100, "headers": {"X": "1"}})";
     run.request_id      = "req_1";
     run.environment_id  = "env_1";
 
@@ -305,6 +307,8 @@ TEST (JsonTest, SerializesRun) {
     EXPECT_EQ (json["startTime"], 1000);
     EXPECT_EQ (json["endTime"], 2000);
     EXPECT_EQ (json["configSnapshot"]["rps"], 100);
+    EXPECT_EQ (json["configSnapshot"]["headers"]["X"], "1");
+    EXPECT_FALSE (json.contains ("summary"));
     EXPECT_EQ (json["requestId"], "req_1");
     EXPECT_EQ (json["environmentId"], "env_1");
 }
