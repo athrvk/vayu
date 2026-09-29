@@ -17,50 +17,107 @@
 
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
-import { containsVariableToken } from "@/constants/variables";
 
 /**
- * A whole path segment that is a path variable: `:` then one or more of
- * `[A-Za-z0-9_.-]`. The engine's composer and importer use the same class.
+ * A path segment that is a path variable: `:` then a name running to the first
+ * `.` (the rest of the segment is a suffix kept on the wire, so `:id.json`
+ * sends `7.json`). Any other character is allowed in the name; `:` alone and
+ * `:.x` are not variables. Postman's `parsePathVariable`, and the engine's
+ * `path_variable_segments` (`engine/src/core/path_template.cpp`).
  */
-export const PATH_VARIABLE_SEGMENT = /^:([A-Za-z0-9_.-]+)$/;
+export const PATH_VARIABLE_SEGMENT = /^:([^.]+)/;
 
-interface PathVariableOccurrence {
+/**
+ * One `:name` path variable in a URL: where the `:name` text sits (the colon
+ * included, a `.suffix` after the name excluded) and the name it spells.
+ */
+export interface PathVariableSegment {
+	offset: number;
+	length: number;
 	name: string;
-	/** Offset of the `:` in the URL. */
-	start: number;
-	/** Offset one past the segment's last character. */
-	end: number;
 }
 
 /**
- * Every `:name` segment of the URL's path, in order, repeats included.
- *
- * The path starts at the first `/` after the authority (after `://` when the
- * URL has a scheme, else at the first `/`), so a port (`host:8080`) and a
- * `{{baseUrl}}` host are never segments. It ends at the first `?` or `#`, so a
- * `:x` in the query or the fragment is never one either.
+ * The end of the `{{...}}` token starting at `at`, or -1 when none starts
+ * there: `postman-url-encoder`'s `/{{[^{}]*}}/`.
  */
-function occurrences(url: string): PathVariableOccurrence[] {
-	const queryOrHash = url.search(/[?#]/);
-	const end = queryOrHash === -1 ? url.length : queryOrHash;
-	const scheme = url.slice(0, end).indexOf("://");
-	const pathStart = url.indexOf("/", scheme === -1 ? 0 : scheme + 3);
-	if (pathStart === -1 || pathStart >= end) return [];
+function tokenEnd(text: string, at: number): number {
+	if (!text.startsWith("{{", at)) return -1;
+	for (let scan = at + 2; scan < text.length; scan++) {
+		if (text[scan] === "{") return -1;
+		if (text[scan] === "}") return text.startsWith("}}", scan) ? scan + 2 : -1;
+	}
+	return -1;
+}
 
-	const found: PathVariableOccurrence[] = [];
-	let offset = pathStart + 1;
-	for (const segment of url.slice(pathStart + 1, end).split("/")) {
-		const match = PATH_VARIABLE_SEGMENT.exec(segment);
-		if (match) found.push({ name: match[1], start: offset, end: offset + segment.length });
-		offset += segment.length + 1;
+/**
+ * `text` with every `{{...}}` token's characters replaced by `_`, the same
+ * length, so offsets into it are offsets into `text` and a separator inside a
+ * token is no longer one.
+ */
+function maskTokens(text: string): string {
+	let out = "";
+	let copied = 0;
+	for (let at = 0; at < text.length;) {
+		const end = tokenEnd(text, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		out += text.slice(copied, at) + "_".repeat(end - at);
+		copied = at = end;
+	}
+	return out + text.slice(copied);
+}
+
+const isSlash = (c: string | undefined) => c === "/" || c === "\\";
+
+/**
+ * Every `:name` segment of the URL's path, in order, repeats included - the
+ * engine's `path_variable_segments`, step for step.
+ *
+ * Leading whitespace is skipped; a `{{variable}}` token is opaque; the fragment
+ * (from the first `#`) and then the query (from the first `?`) are cut off; a
+ * backslash is a `/`; `scheme://` and the slashes after it are skipped (`file:`
+ * keeps one); and the path is what follows the first `/` after that. So a port
+ * (`host:8080`) and a `:` in the query or the fragment are never variables.
+ */
+export function pathVariableSegments(url: string): PathVariableSegment[] {
+	const found: PathVariableSegment[] = [];
+	const view = maskTokens(url);
+
+	let begin = view.search(/[^ \t\r\n\f\v]/);
+	if (begin === -1) return found;
+	const hash = view.indexOf("#", begin);
+	let end = hash === -1 ? view.length : hash;
+	const query = view.indexOf("?", begin);
+	if (query !== -1) end = Math.min(query, end);
+
+	const scheme = view.indexOf("://", begin);
+	if (scheme !== -1 && scheme + 3 <= end) {
+		let after = scheme + 3;
+		while (after < end && isSlash(view[after])) after++;
+		// `file:///path` keeps one slash: the path starts at it.
+		if (after > scheme + 3 && view.slice(begin, scheme).toLowerCase() === "file") after--;
+		begin = after;
+	}
+	let cursor = begin;
+	while (cursor < end && !isSlash(view[cursor])) cursor++;
+	// Everything before the first slash is the authority; no slash, no path.
+	while (cursor < end) {
+		const start = cursor + 1;
+		let stop = start;
+		while (stop < end && !isSlash(view[stop])) stop++;
+		const match = PATH_VARIABLE_SEGMENT.exec(url.slice(start, stop));
+		if (match) found.push({ offset: start, length: 1 + match[1].length, name: match[1] });
+		cursor = stop;
 	}
 	return found;
 }
 
 /** The path-variable names in the URL, first occurrence order, each once. */
 export function pathVariableNames(url: string): string[] {
-	return [...new Set(occurrences(url).map((o) => o.name))];
+	return [...new Set(pathVariableSegments(url).map((segment) => segment.name))];
 }
 
 export function isPathRow(row: Pick<KeyValueEntry, "in">): boolean {
@@ -74,21 +131,6 @@ export function queryRowsOf<T extends Pick<KeyValueEntry, "in">>(rows: readonly 
 
 export function pathRowsOf<T extends Pick<KeyValueEntry, "in">>(rows: readonly T[]): T[] {
 	return rows.filter(isPathRow);
-}
-
-/**
- * The path rows as the stored/sent shape (no editor `id`), for an inline
- * `POST /compose` - the engine reads them from `request.params`, the same
- * member a stored request carries them in.
- */
-export function pathEntriesOf(rows: readonly KeyValueEntry[]): KeyValueEntry[] {
-	return pathRowsOf(rows).map(({ key, value, enabled, description, in: location }) => ({
-		key,
-		value,
-		enabled,
-		...(description ? { description } : {}),
-		in: location,
-	}));
 }
 
 const newPathRow = (name: string): KeyValueItem => ({
@@ -105,23 +147,41 @@ export function pathRowsFromUrl(url: string): KeyValueItem[] {
 }
 
 /**
+ * The path row that answers `name`: the last enabled one with that key, as
+ * Postman's `VariableList` and the engine's `find_path_variable_row` pick it.
+ * An `enabled` that is absent (or not a boolean) counts as enabled.
+ */
+function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string): T | undefined {
+	for (let i = rows.length - 1; i >= 0; i--) {
+		const row = rows[i];
+		if (isPathRow(row) && row.key === name && row.enabled !== false) return row;
+	}
+	return undefined;
+}
+
+/**
  * The path rows the URL now calls for, carried over from `existing`.
  *
- * A name still in the URL keeps its row (value, description, enabled, id). A
- * name that left the URL loses its row - unless a new name arrived in its
- * place, in which case the row is renamed and keeps its value: Postman's
- * behaviour, and what typing `:userId` over `:id` one keystroke at a time
- * needs, since every keystroke is a rename. Leftover names pair with leftover
- * rows by position; a name with no row left to take gets an empty one. The
- * result follows the URL's order.
+ * A name still in the URL keeps its row (value, description, enabled, id, and
+ * any member an import carried). A name that left the URL loses its row -
+ * unless a new name arrived in its place, in which case the row is renamed and
+ * keeps its value: Postman's behaviour, and what typing `:userId` over `:id`
+ * one keystroke at a time needs, since every keystroke is a rename. Leftover
+ * names pair with leftover rows by position; a name with no row left to take
+ * gets an empty one. The result follows the URL's order.
  *
  * Unlike a query row, a disabled path row is still in the URL (the segment is
  * there whether or not the value is sent), so it is matched like any other.
+ * Several rows with one key collapse to the one that answers it at send time
+ * (the last enabled, else the last), so the value that was sent survives.
  */
 export function syncPathRows(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
 	const names = pathVariableNames(url);
 	const byName = new Map<string, KeyValueItem>();
-	for (const row of existing) if (!byName.has(row.key)) byName.set(row.key, row);
+	for (const row of existing) {
+		const held = byName.get(row.key);
+		if (!held || row.enabled !== false || held.enabled === false) byName.set(row.key, row);
+	}
 
 	const leftoverRows = existing.filter(
 		(row) => byName.get(row.key) === row && !names.includes(row.key)
@@ -134,53 +194,99 @@ export function syncPathRows(existing: readonly KeyValueItem[], url: string): Ke
 	});
 }
 
-/**
- * Percent-encode a value as one path segment: everything but RFC 3986's
- * unreserved set (`A-Za-z0-9-._~`), so a `/` in a value cannot become a second
- * segment. Stricter than `encodeURIComponent`, which leaves `!'()*` alone.
- */
-function encodeSegment(value: string): string {
-	return encodeURIComponent(value).replace(
-		/[!'()*]/g,
-		(c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
-	);
-}
+const encoder = new TextEncoder();
 
-/**
- * The URL with each `:name` segment replaced by its row's value - what the
- * engine sends.
- *
- * Only an enabled path row with a non-empty value substitutes; anything else
- * leaves the segment literal (`:id` goes out as written, as Postman sends it).
- * A value holding a `{{variable}}` is left unencoded, the query builder's own
- * rule: it resolves later, and encoding the braces would send them literally.
- */
-export function substitutePathVariables(url: string, rows: readonly KeyValueEntry[]): string {
-	const values = new Map<string, string>();
-	for (const row of rows) {
-		if (!isPathRow(row) || !row.enabled || !row.value || values.has(row.key)) continue;
-		values.set(row.key, row.value);
-	}
-	if (values.size === 0) return url;
+/** RFC 3986's unreserved set, the only bytes a path segment value keeps. */
+const UNRESERVED = /[A-Za-z0-9\-._~]/;
 
-	let out = url;
-	for (const o of occurrences(url).reverse()) {
-		const value = values.get(o.name);
-		if (value === undefined) continue;
-		const written = containsVariableToken(value) ? value : encodeSegment(value);
-		out = out.slice(0, o.start) + written + out.slice(o.end);
+/** Every byte outside the unreserved set as `%XX` (uppercase), over UTF-8. */
+function urlEncode(text: string): string {
+	let out = "";
+	for (const char of text) {
+		if (UNRESERVED.test(char)) {
+			out += char;
+			continue;
+		}
+		for (const byte of encoder.encode(char)) {
+			out += `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+		}
 	}
 	return out;
 }
 
 /**
- * The `params` member an inline `POST /compose` request carries: the path rows
- * alone, so the engine can fill the `:name` segments of the editor's URL, which
- * may be ahead of the saved row. The query rows are not sent - the URL already
- * holds them. Spread into the request; nothing when there are no path rows, so
- * a request without them composes exactly as before.
+ * `value` percent-encoded as one path segment, with every `{{variable}}` token
+ * in it kept verbatim - the engine's `encode_path_segment_value`. A `/`, `?`,
+ * `#` or `%` in a value is data in one segment rather than structure; a token
+ * is kept whole because something after composition still has to answer it
+ * (a data column, a deferred `{{$guid}}`), and `%7B%7B` would be a name
+ * nothing can find.
  */
-export function composePathParams(rows: readonly KeyValueEntry[]): { params?: KeyValueEntry[] } {
-	const params = pathEntriesOf(rows);
-	return params.length > 0 ? { params } : {};
+export function encodePathSegmentValue(value: string): string {
+	let out = "";
+	let plain = 0;
+	for (let at = 0; at < value.length;) {
+		const end = tokenEnd(value, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		out += urlEncode(value.slice(plain, at)) + value.slice(at, end);
+		plain = at = end;
+	}
+	return out + urlEncode(value.slice(plain));
+}
+
+/**
+ * The URL with each `:name` segment replaced by its row's value - what the
+ * engine sends (`substitute_path_variables`).
+ *
+ * Only an enabled path row answers, and among several with one key the last
+ * enabled one does. `resolve` turns its value into send-time text (`{{var}}`
+ * resolution; the identity where the snippet stays templated); a value that
+ * resolves to nothing leaves the segment literal (`:id` goes out as written,
+ * as Postman sends it). Otherwise the resolved value is written through
+ * `encodePathSegmentValue` in place of `:name`, and a `.suffix` stays.
+ */
+export function substitutePathVariables(
+	url: string,
+	rows: readonly KeyValueEntry[],
+	resolve: (value: string) => string = (value) => value
+): string {
+	if (rows.length === 0) return url;
+	let out = "";
+	let copied = 0;
+	for (const segment of pathVariableSegments(url)) {
+		const row = answeringRow(rows, segment.name);
+		if (!row) continue;
+		const resolved = resolve(typeof row.value === "string" ? row.value : "");
+		if (!resolved) continue;
+		out += url.slice(copied, segment.offset) + encodePathSegmentValue(resolved);
+		copied = segment.offset + segment.length;
+	}
+	return out + url.slice(copied);
+}
+
+/**
+ * The `params` member an inline `POST /compose` request carries: the path rows
+ * alone, in the stored shape (no editor `id`; every other member, `type` and
+ * `description` included, kept), so the engine fills the `:name` segments of
+ * the editor's URL, which may be ahead of the saved row. The query rows are
+ * not sent - the URL already holds them.
+ *
+ * Always sent, `[]` included: the engine falls back to the *stored* rows when
+ * the key is absent, and a row the editor removed must not answer from there.
+ */
+export function composePathParams(rows: readonly KeyValueEntry[]): KeyValueEntry[] {
+	return pathRowsOf(rows).map((row) => {
+		const {
+			id: _id,
+			system: _system,
+			...entry
+		} = row as KeyValueEntry & {
+			id?: unknown;
+			system?: unknown;
+		};
+		return entry;
+	});
 }

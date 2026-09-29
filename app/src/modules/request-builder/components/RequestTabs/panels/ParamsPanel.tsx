@@ -28,7 +28,7 @@ import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { Eyebrow } from "@/components/ui";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
-import type { KeyValueItem } from "@/types";
+import type { KeyValueEntry, KeyValueItem } from "@/types";
 import {
 	formatParamsToText,
 	parseParamsFromText,
@@ -36,6 +36,7 @@ import {
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
 import {
+	composePathParams,
 	isPathRow,
 	pathRowsOf,
 	queryRowsOf,
@@ -55,6 +56,25 @@ import { EmptyTableHint } from "./EmptyTableHint";
  * keyed by request id rather than by the URL text.
  */
 const stableResolvedUrl = createStableResolve();
+
+/*
+ * The cache's resolver for the "Sends" line: its input is the URL and the path
+ * rows as one JSON text, and it substitutes each value resolved then encoded,
+ * as compose does (#1764), before resolving the URL itself. One wrapper per
+ * `resolveString`, so the cache's identity check still means what it says.
+ */
+const sendsResolvers = new WeakMap<(input: string) => string, (input: string) => string>();
+function sendsResolver(resolve: (input: string) => string): (input: string) => string {
+	let wrapped = sendsResolvers.get(resolve);
+	if (!wrapped) {
+		wrapped = (input) => {
+			const { url, rows } = JSON.parse(input) as { url: string; rows: KeyValueEntry[] };
+			return resolve(substitutePathVariables(url, rows, resolve));
+		};
+		sendsResolvers.set(resolve, wrapped);
+	}
+	return wrapped;
+}
 
 // Module constants for the path table's gates: `KeyValueEditor` keeps its
 // callbacks stable only while these are (issue #1716).
@@ -102,12 +122,12 @@ export default function ParamsPanel() {
 	// URL. A request with no id yet shares one entry: an unsaved draft has
 	// nothing else stable to key on, and the only cost is two blank new tabs
 	// previewing the same generated value.
-	// Path values go in first, as the engine composes them: before `{{}}`
-	// resolution, so a `{{var}}` held in a value still resolves.
+	// Path values go in first, as the engine composes them: before the URL's
+	// own `{{}}` pass, so a `{{baseUrl}}` holding a `:` is never read for one.
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		substitutePathVariables(request.url, pathParams),
-		resolveString
+		JSON.stringify({ url: request.url, rows: composePathParams(pathParams) }),
+		sendsResolver(resolveString)
 	);
 	const displayParams = queryRowsOf(request.params).filter((param) => !param.system);
 

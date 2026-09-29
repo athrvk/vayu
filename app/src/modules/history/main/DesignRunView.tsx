@@ -254,7 +254,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					request: {
 						method: request.method,
 						url: request.url,
-						...composePathParams(request.params),
+						params: composePathParams(request.params),
 						headers: headersRecord,
 						body: execBody,
 						auth: { ...request.auth },

@@ -9,17 +9,26 @@
  * Which URL segments are path variables, how rows follow them, and what the
  * substitution sends (issue #1764). The segment rule is the one the engine
  * applies, so every case here is a claim about what a send does.
+ *
+ * The first three blocks mirror `engine/tests/path_variables_test.cpp` one
+ * case for one, under the same suite and test names, so the two sides provably
+ * read a URL alike: change a case there, change it here.
  */
 
 import { describe, it, expect } from "vitest";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import {
 	composePathParams,
+	encodePathSegmentValue,
 	pathRowsFromUrl,
 	pathVariableNames,
+	pathVariableSegments,
 	substitutePathVariables,
 	syncPathRows,
 } from "./path-variables";
+
+/** Every `:name` in the URL, repeats included - the engine test's `names_in`. */
+const namesIn = (url: string) => pathVariableSegments(url).map((segment) => segment.name);
 
 const path = (key: string, value: string, enabled = true): KeyValueEntry => ({
 	key,
@@ -30,6 +39,87 @@ const path = (key: string, value: string, enabled = true): KeyValueEntry => ({
 
 const row = (id: string, key: string, value: string, extra: Partial<KeyValueItem> = {}) =>
 	({ id, key, value, enabled: true, in: "path", ...extra }) as KeyValueItem;
+
+// ---- Mirrors engine/tests/path_variables_test.cpp ----
+
+describe("PathVariableSegments", () => {
+	it("FindsEveryWholeSegmentThatStartsWithAColon", () => {
+		expect(namesIn("https://api.test/users/:id/posts/:postId")).toEqual(["id", "postId"]);
+		expect(namesIn("{{baseUrl}}/users/:id/copies/:id")).toEqual(["id", "id"]);
+		expect(namesIn("/relative/:id")).toEqual(["id"]);
+		expect(namesIn("api.test/:user-id/:a_b")).toEqual(["user-id", "a_b"]);
+		// A backslash is a `/` to Postman's parser.
+		expect(namesIn("https://api.test\\users\\:id")).toEqual(["id"]);
+		// Extra slashes after the scheme are the authority's, not an empty path.
+		expect(namesIn("http:////host/:id")).toEqual(["id"]);
+	});
+
+	it("NeverReadsTheAuthorityQueryOrFragment", () => {
+		expect(namesIn("http://localhost:8080")).toEqual([]);
+		expect(namesIn("localhost:3000")).toEqual([]);
+		expect(namesIn("localhost:3000/:id")).toEqual(["id"]);
+		expect(namesIn("http://user:pw@host:1/:id")).toEqual(["id"]);
+		expect(namesIn("https://api.test/search?tag=/:id&t=12:30")).toEqual([]);
+		expect(namesIn("https://api.test/a#/:id")).toEqual([]);
+		// A mid-segment colon (`{name}:cancel` in a Google API) is not one.
+		expect(namesIn("https://api.test/v1/ops/x:cancel")).toEqual([]);
+	});
+
+	it("KeepsAVariableHoldingASeparatorWhole", () => {
+		// `{{a/:b}}` is one opaque token, so its `/:b` is no segment of this URL.
+		expect(namesIn("https://api.test/{{a/:b}}")).toEqual([]);
+		expect(namesIn("{{scheme://host}}/:id")).toEqual(["id"]);
+		// The query separator inside a token does not end the path.
+		expect(namesIn("https://api.test/{{a?b}}/:id")).toEqual(["id"]);
+	});
+
+	it("NamesRunToTheFirstDotAndAnEmptyNameIsNone", () => {
+		const segments = pathVariableSegments("https://h/:id.json/:/:.x/::y");
+		expect(segments).toHaveLength(2);
+		expect(segments[0].name).toBe("id");
+		// Offset and length cover `:id`, leaving `.json` in place.
+		expect(segments[0].offset).toBe("https://h/".length);
+		expect(segments[0].length).toBe(3);
+		expect(segments[1].name).toBe(":y");
+	});
+
+	it("KeepsOneSlashOfAFileUrl", () => {
+		expect(namesIn("file:///:dir/x")).toEqual(["dir"]);
+	});
+});
+
+describe("EncodePathSegmentValue", () => {
+	it("EncodesEverythingButTheUnreservedSetAndKeepsTokens", () => {
+		expect(encodePathSegmentValue("a-b_c.d~e")).toBe("a-b_c.d~e");
+		expect(encodePathSegmentValue("a b/c?d#e%f")).toBe("a%20b%2Fc%3Fd%23e%25f");
+		expect(encodePathSegmentValue("\u00E9")).toBe("%C3%A9");
+		expect(encodePathSegmentValue("x {{data.id}}/y")).toBe("x%20{{data.id}}%2Fy");
+		// A lone `{{` is no token and is encoded.
+		expect(encodePathSegmentValue("{{x")).toBe("%7B%7Bx");
+	});
+});
+
+describe("SubstitutePathVariables", () => {
+	it("AnswersOnlyEnabledPathRowsAndLeavesTheRestLiteral", () => {
+		const rows = [
+			{ key: "id", value: "1", enabled: true, in: "path" },
+			{ key: "q", value: "2", enabled: true },
+			{ key: "q", value: "3", enabled: true, in: "query" },
+			{ key: "off", value: "4", enabled: false, in: "path" },
+			{ key: "dup", value: "first", enabled: true, in: "path" },
+			{ key: "dup", value: "last", enabled: true, in: "path" },
+			{ key: "dup", value: "disabled", enabled: false, in: "path" },
+			// No `enabled` member at all is enabled, as in the engine.
+			{ key: "implicit", value: "on", in: "path" },
+		] as KeyValueEntry[];
+		expect(substitutePathVariables("https://h:1/:id/:q/:off/:dup/:implicit?:id", rows)).toBe(
+			"https://h:1/1/:q/:off/last/on?:id"
+		);
+		expect(substitutePathVariables("https://h/:id", [])).toBe("https://h/:id");
+	});
+});
+
+// ---- App-side cases ----
 
 describe("pathVariableNames", () => {
 	it("finds whole `:name` segments in order", () => {
@@ -57,15 +147,21 @@ describe("pathVariableNames", () => {
 		expect(pathVariableNames("{{baseUrl}}:8080/:id")).toEqual(["id"]);
 	});
 
-	it("treats a segment that is not all name characters as literal", () => {
+	it("takes the name to the first dot and allows any other character", () => {
 		expect(pathVariableNames("https://x/:")).toEqual([]);
 		expect(pathVariableNames("https://x/a:b/:c-d/:e.f/:g_h/:x%20y/:{{v}}")).toEqual([
 			"c-d",
-			"e.f",
+			"e",
 			"g_h",
+			"x%20y",
+			"{{v}}",
 		]);
 		// Not a whole segment: the colon is not its first character.
 		expect(pathVariableNames("https://x/v1:id")).toEqual([]);
+	});
+
+	it("skips leading whitespace before the URL", () => {
+		expect(pathVariableNames("  https://x/:id")).toEqual(["id"]);
 	});
 
 	it("ignores a trailing slash and an empty segment", () => {
@@ -134,6 +230,30 @@ describe("syncPathRows", () => {
 		expect(syncPathRows(existing, "https://x/:id")).toEqual(existing);
 	});
 
+	it("collapses rows sharing a key to the one that answers it", () => {
+		const existing = [
+			row("1", "id", "first"),
+			row("2", "id", "answers"),
+			row("3", "id", "off", { enabled: false }),
+		];
+		expect(syncPathRows(existing, "https://x/:id")).toEqual([existing[1]]);
+		const allOff = [
+			row("1", "id", "a", { enabled: false }),
+			row("2", "id", "b", { enabled: false }),
+		];
+		expect(syncPathRows(allOff, "https://x/:id")).toEqual([allOff[1]]);
+	});
+
+	it("keeps members it does not know on a kept or renamed row", () => {
+		const existing = [{ ...row("1", "id", "42"), type: "any" } as unknown as KeyValueItem];
+		expect(syncPathRows(existing, "https://x/:id")[0]).toBe(existing[0]);
+		expect(syncPathRows(existing, "https://x/:userId")[0]).toMatchObject({
+			key: "userId",
+			value: "42",
+			type: "any",
+		});
+	});
+
 	it("keeps one row for a repeated name", () => {
 		const synced = syncPathRows([], "https://x/:id/copy/:id");
 		expect(synced.map((r) => r.key)).toEqual(["id"]);
@@ -184,6 +304,43 @@ describe("substitutePathVariables", () => {
 		);
 	});
 
+	it("keeps the suffix after the name", () => {
+		expect(substitutePathVariables("https://x/:id.json", [path("id", "7")])).toBe(
+			"https://x/7.json"
+		);
+	});
+
+	it("lets the last enabled row answer, even when its value is empty", () => {
+		expect(
+			substitutePathVariables("https://x/:id", [
+				path("id", "1"),
+				path("id", ""),
+				path("id", "3", false),
+			])
+		).toBe("https://x/:id");
+	});
+
+	it("resolves a value before encoding it, and leaves an empty result literal", () => {
+		const vars: Record<string, string> = { "{{user}}": "a b", "{{none}}": "" };
+		const resolve = (value: string) => vars[value] ?? value;
+		expect(substitutePathVariables("https://x/:id", [path("id", "{{user}}")], resolve)).toBe(
+			"https://x/a%20b"
+		);
+		expect(substitutePathVariables("https://x/:id", [path("id", "{{none}}")], resolve)).toBe(
+			"https://x/:id"
+		);
+		// A token still unresolved is kept verbatim.
+		expect(substitutePathVariables("https://x/:id", [path("id", "{{later}}/x")], resolve)).toBe(
+			"https://x/{{later}}%2Fx"
+		);
+	});
+
+	it("reads a backslash as a separator", () => {
+		expect(substitutePathVariables("https://x\\a\\:id", [path("id", "1")])).toBe(
+			"https://x\\a\\1"
+		);
+	});
+
 	it("never touches a port", () => {
 		expect(
 			substitutePathVariables("http://h:8080/:id", [path("8080", "x"), path("id", "1")])
@@ -192,17 +349,26 @@ describe("substitutePathVariables", () => {
 });
 
 describe("composePathParams", () => {
-	it("sends the path rows alone, without editor ids", () => {
-		const rows: KeyValueItem[] = [
+	it("sends the path rows alone, without editor ids, keeping every other member", () => {
+		const rows = [
 			{ id: "q", key: "page", value: "1", enabled: true },
-			row("p", "id", "42", { description: "user" }),
-		];
-		expect(composePathParams(rows)).toEqual({
-			params: [{ key: "id", value: "42", enabled: true, description: "user", in: "path" }],
-		});
+			{ ...row("p", "id", "42", { description: "user" }), type: "any", extra: 1 },
+		] as KeyValueItem[];
+		expect(composePathParams(rows)).toEqual([
+			{
+				key: "id",
+				value: "42",
+				enabled: true,
+				description: "user",
+				in: "path",
+				type: "any",
+				extra: 1,
+			},
+		]);
 	});
 
-	it("adds nothing for a request with no path rows", () => {
-		expect(composePathParams([{ key: "page", value: "1", enabled: true }])).toEqual({});
+	it("sends an empty list for a request with no path rows", () => {
+		// Absent would let the engine answer from the stored rows instead.
+		expect(composePathParams([{ key: "page", value: "1", enabled: true }])).toEqual([]);
 	});
 });

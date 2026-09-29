@@ -61,10 +61,13 @@ longer carries (`mergeParamsFromUrl`, issue #1482).
 **Path variables are the one kind of row the engine reads** (issue #1764). A
 row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`
 without the colon), and never reaches the query: the query builders skip it,
-and at compose time the engine puts each enabled row's value into its segment,
-percent-encoded; an empty or disabled row leaves `:name` literal. An inline
-`POST /compose` carries the editor's path rows as `request.params`, since the
-editor may be ahead of the saved row. The URL bar keeps the rows in step with
+and at compose time the engine puts the value of the last enabled row with
+that key into its segment, `{{variable}}`-resolved and then percent-encoded; an
+empty value or no enabled row leaves `:name` literal. An inline
+`POST /compose` always carries the editor's path rows as `request.params`
+(`[]` when there are none), since the editor may be ahead of the saved row and
+an absent key falls back to the stored rows. A row keeps every member it
+arrived with (`type`, `description` from a Postman import) through edits. The URL bar keeps the rows in step with
 the segments, a renamed segment keeping its row's value (`syncPathRows` in
 `modules/request-builder/utils/path-variables.ts`).
 

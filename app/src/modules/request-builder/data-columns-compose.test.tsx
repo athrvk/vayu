@@ -274,12 +274,12 @@ describe("path rows reach both compose sites", () => {
 		expect(composedRequest().params).toEqual(PATH_ENTRIES);
 	});
 
-	it("a Send without any carries no params at all", async () => {
+	it("a Send without any carries an empty list, so no stored row answers", async () => {
 		renderBuilder();
 		await act(async () => {
 			await (providerProps.onExecute as (request: RequestState) => Promise<unknown>)(REQUEST);
 		});
-		expect(composedRequest()).not.toHaveProperty("params");
+		expect(composedRequest().params).toEqual([]);
 	});
 
 	it("a load run carries them", async () => {

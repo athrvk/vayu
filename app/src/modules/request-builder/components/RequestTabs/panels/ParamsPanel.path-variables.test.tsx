@@ -31,12 +31,16 @@ afterEach(cleanup);
 const QUERY: KeyValueItem = { id: "q", key: "page", value: "1", enabled: true };
 const PATH: KeyValueItem = { id: "p", key: "id", value: "42", enabled: true, in: "path" };
 
-function renderPanel(url: string, params: KeyValueItem[]) {
+function renderPanel(
+	url: string,
+	params: KeyValueItem[],
+	resolveString: (s: string) => string = (s) => s
+) {
 	const updateField = vi.fn();
 	const value = {
 		request: { ...createDefaultRequestState(), id: `req_${url}`, url, params },
 		updateField,
-		resolveString: (s: string) => s,
+		resolveString,
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		updateVariable: () => {},
@@ -122,6 +126,38 @@ describe("the Path variables table", () => {
 		const params = lastWrite("params") as KeyValueItem[];
 		expect(params.filter((p) => p.in === "path")).toEqual([PATH]);
 		expect(lastWrite("url")).toBe("https://x/users/:id?page=2");
+	});
+
+	it("keeps members it does not know when a value or the enable box is edited", () => {
+		// What a Postman import carries on a path row, for the export round trip.
+		const imported = {
+			...PATH,
+			type: "any",
+			description: "user id",
+			note: 1,
+		} as unknown as KeyValueItem;
+		const { lastWrite } = renderPanel("https://x/users/:id", [imported]);
+		fireEvent.change(fields(pathSection()!)[1], { target: { value: "7" } });
+		expect((lastWrite("params") as KeyValueItem[]).filter((p) => p.in === "path")).toEqual([
+			{ ...imported, value: "7" },
+		]);
+
+		cleanup();
+		const again = renderPanel("https://x/users/:id", [imported]);
+		fireEvent.click(within(pathSection()!).getByRole("checkbox", { name: "Enable id" }));
+		expect(
+			(again.lastWrite("params") as KeyValueItem[]).filter((p) => p.in === "path")
+		).toEqual([{ ...imported, enabled: false }]);
+	});
+
+	it("resolves a value before encoding it on the Sends line, as compose does", () => {
+		const resolve = (s: string) => s.replace(/{{user}}/g, "a b");
+		const { container } = renderPanel(
+			"https://x/users/:id.json",
+			[{ ...PATH, value: "{{user}}" }],
+			resolve
+		);
+		expect(sendsLine(container)).toBe("https://x/users/a%20b.json");
 	});
 
 	it("shows the substituted URL on the Sends line", () => {

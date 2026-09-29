@@ -422,8 +422,8 @@ export default function RequestBuilder() {
 				request: {
 					method: request.method,
 					url: request.url,
-					// The `:name` segments' values (#1764) - see composePathParams.
-					...composePathParams(request.params),
+					// Always sent, `[]` included (#1764) - see composePathParams.
+					params: composePathParams(request.params),
 					headers: headersRecord,
 					body: execBody,
 					auth: { ...request.auth },
@@ -730,7 +730,7 @@ export default function RequestBuilder() {
 					request: {
 						method: pendingLoadTestRequest.method,
 						url: pendingLoadTestRequest.url,
-						...composePathParams(pendingLoadTestRequest.params),
+						params: composePathParams(pendingLoadTestRequest.params),
 						headers: toFlatHeaders(pendingLoadTestRequest.headers),
 						body: bodyPayload,
 						auth: { ...pendingLoadTestRequest.auth },

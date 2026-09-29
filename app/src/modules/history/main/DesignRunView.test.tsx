@@ -384,6 +384,24 @@ describe("DesignRunView - sending it again", () => {
 		const payload = executeRequest.mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
 	});
+
+	it("composes with the replay's own path rows, an empty list included (#1764)", async () => {
+		// Absent, the engine would fill `:name` segments from the live request's
+		// stored rows - not the state this replay is showing.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([]);
+	});
 });
 
 describe("DesignRunView - pinning a design run (#1509)", () => {

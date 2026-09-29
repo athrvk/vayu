@@ -99,8 +99,9 @@ export interface IntrospectionTarget {
 	/** Endpoint URL as typed, `{{variables}}` intact. */
 	url: string;
 	/**
-	 * The request's params rows; only the path rows are sent (#1764), so compose
-	 * can fill the URL's `:name` segments.
+	 * The request's params rows; only the path rows are sent (#1764), always,
+	 * `[]` when there are none, so compose fills the URL's `:name` segments
+	 * from these rather than from the stored request's.
 	 */
 	params?: readonly KeyValueEntry[];
 	/** Header rows as typed (enabled-only, flattened), `{{variables}}` intact. */
@@ -164,7 +165,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 			request: {
 				method: "POST",
 				url: target.url,
-				...composePathParams(target.params ?? []),
+				params: composePathParams(target.params ?? []),
 				headers: target.headers,
 				...(target.auth ? { auth: target.auth } : {}),
 			},
