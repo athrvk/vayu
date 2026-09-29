@@ -75,6 +75,7 @@ import type { BodyMode } from "../../../types";
 import type { KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
 import { toFlatHeaders } from "../../../utils/key-value";
+import { substitutePathVariables } from "../../../utils/path-variables";
 import { containsVariableToken } from "@/constants/variables";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
@@ -166,12 +167,17 @@ export default function BodyPanel() {
 	 * thing that unmounts it is the builder going away, which takes
 	 * `resolveString` with it and so would miss that cache anyway.
 	 */
+	// Path values substituted first (#1764), so a changed `:name` value is a new
+	// schema target, the way a changed variable value is. Memoized on the
+	// substituted text, not on `params`, so a query-row edit re-resolves nothing.
+	const pathSubstitutedUrl = substitutePathVariables(request.url || "", request.params);
 	const resolvedGqlUrl = useMemo(
-		() => resolveString(request.url || "").trim(),
-		[request.url, resolveString]
+		() => resolveString(pathSubstitutedUrl).trim(),
+		[pathSubstitutedUrl, resolveString]
 	);
 	const gqlSchemaTarget: SchemaTarget = {
 		url: (request.url || "").trim(),
+		params: request.params,
 		resolvedUrl: resolvedGqlUrl,
 		headers: toFlatHeaders(request.headers),
 		auth: { ...request.auth },

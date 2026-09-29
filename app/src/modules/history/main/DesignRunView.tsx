@@ -63,6 +63,7 @@ import { responseFromRunResult } from "@/modules/request-builder/utils/restore-r
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { ApiError } from "@/services";
 import { seedFromRun, scriptPartToElement } from "./design-run-seed";
+import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import type { Run, ScriptPart, ResolvedElement } from "@/types";
 
@@ -253,6 +254,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					request: {
 						method: request.method,
 						url: request.url,
+						...composePathParams(request.params),
 						headers: headersRecord,
 						body: execBody,
 						auth: { ...request.auth },

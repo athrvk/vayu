@@ -57,6 +57,7 @@ import type {
 import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
+import { composePathParams } from "./utils/path-variables";
 import { toFlatHeaders } from "./utils/key-value";
 import { elementsParts, scriptTextFor } from "./utils/elements-parts";
 import {
@@ -420,6 +421,8 @@ export default function RequestBuilder() {
 				request: {
 					method: request.method,
 					url: request.url,
+					// The `:name` segments' values (#1764) - see composePathParams.
+					...composePathParams(request.params),
 					headers: headersRecord,
 					body: execBody,
 					auth: { ...request.auth },
@@ -726,6 +729,7 @@ export default function RequestBuilder() {
 					request: {
 						method: pendingLoadTestRequest.method,
 						url: pendingLoadTestRequest.url,
+						...composePathParams(pendingLoadTestRequest.params),
 						headers: toFlatHeaders(pendingLoadTestRequest.headers),
 						body: bodyPayload,
 						auth: { ...pendingLoadTestRequest.auth },

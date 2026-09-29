@@ -244,3 +244,52 @@ describe("a load run started with a data file", () => {
 		expect(composedBody().deferDynamicVariables).toBe(true);
 	});
 });
+
+/*
+ * Not `dataColumns`, but the same two compose sites and the same harness: an
+ * inline compose carries the editor's path rows (#1764), because the engine
+ * fills `:name` segments from them and the editor may be ahead of the saved
+ * row. Only the path rows - the query is already in the URL.
+ */
+describe("path rows reach both compose sites", () => {
+	const WITH_PATH: RequestState = {
+		...REQUEST,
+		url: "https://api.test/u/:id?page=1",
+		params: [
+			{ id: "q", key: "page", value: "1", enabled: true },
+			{ id: "p", key: "id", value: "42", enabled: true, in: "path" },
+		],
+	};
+	const PATH_ENTRIES = [{ key: "id", value: "42", enabled: true, in: "path" }];
+
+	const composedRequest = () => composedBody().request as Record<string, unknown>;
+
+	it("a Send carries them", async () => {
+		renderBuilder();
+		await act(async () => {
+			await (providerProps.onExecute as (request: RequestState) => Promise<unknown>)(
+				WITH_PATH
+			);
+		});
+		expect(composedRequest().params).toEqual(PATH_ENTRIES);
+	});
+
+	it("a Send without any carries no params at all", async () => {
+		renderBuilder();
+		await act(async () => {
+			await (providerProps.onExecute as (request: RequestState) => Promise<unknown>)(REQUEST);
+		});
+		expect(composedRequest()).not.toHaveProperty("params");
+	});
+
+	it("a load run carries them", async () => {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)(WITH_PATH);
+		});
+		await act(async () => {
+			await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(LOAD_CONFIG);
+		});
+		expect(composedRequest().params).toEqual(PATH_ENTRIES);
+	});
+});
