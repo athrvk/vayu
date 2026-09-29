@@ -208,6 +208,15 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `script.*` element before #1514's pipeline existed; now that it does, the
   two columns are dead data and this is the real cut-over the #1513 comment
   above once deferred.
+- **Any change to `make_vayu_storage`'s mapping bumps `SCHEMA_VERSION`**
+  (`vayu/db/database.hpp`, #1492), an added nullable column included:
+  `sync_schema ()` runs without `preserve`, so an older engine would rebuild
+  a table without the column it does not map. The bump is one-way - an older
+  engine refuses the stamped workspace - so it gets a row in
+  `docs/engine/db-schema.md#schema-versions` and a line in the next release's
+  notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
+  literal; a step with nothing to move (version 2's
+  `request_examples.postman_response`) only stamps.
 - **A log call takes a category, never text alone** (#1557, full account in
   `docs/engine/logging.md`). `LogRecord{level, cat, msg, fields}` is the whole
   API - `log_debug`/`log_info`/`log_warning`/`log_error` (`utils/logger.hpp`)

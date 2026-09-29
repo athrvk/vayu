@@ -11,6 +11,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -2087,7 +2088,7 @@ TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
 
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
-    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
     << "no pre-migration backup was written";
     EXPECT_TRUE (table_has_column (std::string (TEST_DB_PATH) + ".pre-migration.bak",
@@ -2167,15 +2168,145 @@ TEST_F (DatabaseTest, MigrationDoesNothingOnASecondOpen) {
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    ASSERT_EQ (read_user_version (TEST_DB_PATH), 1);
+    ASSERT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     std::filesystem::remove (std::string (TEST_DB_PATH) + ".pre-migration.bak");
 
-    // A second open at `user_version` 1 must be a fast no-op: no backup
+    // A second open at the current `user_version` must be a fast no-op: no backup
     // rewritten (there is nothing left to migrate).
     Database again (TEST_DB_PATH);
     again.init ();
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
     << "an already-migrated database must not be re-migrated";
+}
+
+// Schema version 2 added `request_examples.postman_response`. A version-1
+// database has nothing to fold: `sync_schema ()` adds the nullable column
+// and the migration only stamps it. Mutation check: write a literal `1` back
+// into either `user_version` write in `migrate_before_sync` and the version
+// assertion reds.
+TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+        RequestExample x;
+        x.id         = "exa_1";
+        x.request_id = "req_1";
+        x.name       = "Created";
+        x.status     = 201;
+        x.created_at = 1;
+        x.updated_at = 1;
+        db.save_request_example (x);
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE request_examples DROP COLUMN postman_response",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"))
+    << "test setup did not remove the column";
+    set_user_version (TEST_DB_PATH, 1);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 2);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "a version-1 database has no script to fold and needs no fold backup";
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto after = reopened.get_request_example ("exa_1");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "Created");
+    EXPECT_EQ (after->status, 201);
+    EXPECT_FALSE (after->postman_response.has_value ());
+}
+
+// A database stamped by the next schema is refused before anything writes to
+// it: the file is byte-identical afterwards.
+TEST_F (DatabaseTest, ADatabaseStampedWithTheNextSchemaIsRefusedUntouched) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    set_user_version (TEST_DB_PATH, vayu::db::SCHEMA_VERSION + 1);
+    const auto read_bytes = [] {
+        std::ifstream in (TEST_DB_PATH, std::ios::binary);
+        return std::string ((std::istreambuf_iterator<char> (in)),
+        std::istreambuf_iterator<char> ());
+    };
+    const std::string before = read_bytes ();
+    ASSERT_FALSE (before.empty ());
+
+    EXPECT_THROW ({ Database db (TEST_DB_PATH); }, std::runtime_error);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION + 1);
+    EXPECT_TRUE (read_bytes () == before)
+    << "a refused database must not be written";
+}
+
+// The column round-trips, and a tombstone clears it with the body it
+// describes (issue #722's rule: nothing serves a suppressed row).
+TEST_F (DatabaseTest, StoresAndTombstonesAnExamplesPostmanResponse) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    Collection col;
+    col.id    = "col_1";
+    col.name  = "C";
+    col.order = 0;
+    db.create_collection (col);
+    Request r;
+    r.id            = "req_1";
+    r.collection_id = "col_1";
+    r.name          = "R";
+    r.method        = vayu::HttpMethod::GET;
+    r.url           = "https://example.test";
+    r.order         = 0;
+    r.created_at    = 1;
+    r.updated_at    = 1;
+    db.save_request (r);
+    RequestExample x;
+    x.id               = "exa_1";
+    x.request_id       = "req_1";
+    x.name             = "OK";
+    x.postman_response = R"({"name":null,"status":"OK","cookie":[]})";
+    x.created_at       = 1;
+    x.updated_at       = 1;
+    db.save_request_example (x);
+
+    auto stored = db.get_request_example ("exa_1");
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    EXPECT_EQ (*stored->postman_response, R"({"name":null,"status":"OK","cookie":[]})");
+
+    db.suppress_request_example ("exa_1", 2);
+    const auto tombstones = db.get_suppressed_request_examples ("req_1");
+    ASSERT_EQ (tombstones.size (), 1u);
+    EXPECT_FALSE (tombstones[0].postman_response.has_value ());
 }
 
 TEST_F (DatabaseTest, ADatabaseFromANewerEngineIsRefused) {
@@ -2234,7 +2365,7 @@ TEST_F (DatabaseTest, MigratesADatabaseThatPredatesTheElementsColumn) {
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "elements"));
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
-    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
     << "no pre-migration backup was written";
 

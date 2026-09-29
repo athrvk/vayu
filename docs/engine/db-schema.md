@@ -221,12 +221,12 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `1`) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `2`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path rather than being read
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
    is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
-   proceeds to fold.
+   proceeds to fold. `1` has no script column left, so it skips the fold and is only stamped.
 2. **Fold, if either table still has a script column.** For each of `requests` and `collections`
    that does (either `pre_request_script` or `post_request_script` alone is enough - a table needs
    folding for): `<db>.pre-migration.bak` is written once, immediately before the first row is
@@ -244,13 +244,30 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    for (a fresh install, or one some other path already brought to this shape) skips the backup and
    the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
    that caused it.
-3. **Set `user_version = 1`.** Only after this returns does `sync_schema ()` see a mapping with no
+3. **Stamp `user_version = SCHEMA_VERSION`.** Both writes (the no-fold path and the fold's
+   commit) go through one helper, `stamp_schema_version`, so a bump of the constant is a bump of
+   every stamp. Only after this returns does `sync_schema ()` see a mapping with no
    `pre_request_script` / `post_request_script` columns and `ALTER TABLE ... DROP COLUMN` them -
    the ordering this migration exists to guarantee, per `engine/CLAUDE.md`'s "Removing a column"
    rule.
 
 `GET /elements/kinds`'s `script.pre` / `script.post` entries gained `apply` in the same issue, so a
 row this migration folds is not just storage-compatible but immediately runnable.
+
+### Schema versions
+
+`SCHEMA_VERSION` lives in `engine/include/vayu/db/database.hpp`. It is bumped by the commit that
+changes `make_vayu_storage`'s mapping - an added column included - and never otherwise, because
+`sync_schema ()` runs without `preserve`: an older engine opening a database with a column it does
+not map would rebuild that table without it. **A bump is one-way.** Once a newer engine has opened a
+workspace, every engine built before the bump refuses it at startup (the refusal above), so the
+release that carries a bump says so in its notes.
+
+| Version | Change | Migration step |
+|---------|--------|----------------|
+| `0` | Every database before #1514 (never stamped) | - |
+| `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
+| `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from) | none: `sync_schema ()` adds the nullable column, the migration only stamps |
 
 ---
 
@@ -585,6 +602,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
 | `suppressed`   | INTEGER | A tombstone: an imported example the user deleted; NOT NULL, default `0` |
 | `spec_example_key` | TEXT | The `examples` map key this was imported from; NULL when there is none |
+| `postman_response` | TEXT | The Postman saved response this was imported from, as JSON text; NULL when it came from anywhere else (schema version 2) |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -636,8 +654,8 @@ recorded nothing, while the sync refresh above rewrites every imported row of a
 request it applies *any* change to, so the next rename-only sync re-created what
 the user had removed. The row is kept so the refresh can skip that response
 **status** (the identity a document's example keeps across a reworded
-description, which its `name` does not), and `body`, `headers` and
-`content_type` are cleared when the flag goes on, since nothing serves a
+description, which its `name` does not), and `body`, `headers`,
+`content_type` and `postman_response` are cleared when the flag goes on, since nothing serves a
 tombstone. `get_request_example`, `get_request_examples` and
 `count_request_examples` all filter suppressed rows out - so the list route, a
 mock server and an export behave exactly as though the delete had removed it -
@@ -657,6 +675,26 @@ equals the entry it came from, so exporting it back would add it beside that
 entry rather than replace it. The bound export reads the key to find its way
 back to the same entry when the document still declares it, and falls back to
 adding a new one when it does not. Not a display field: no app surface reads it.
+
+**postman_response** (schema version 2) is the Postman saved response
+(`item.response[]` entry) the import took this example from, as compact JSON
+text in the source's own member order. Every member is kept verbatim except
+`name` and `body`, which are `null` placeholders holding only their position -
+the columns are the values, so there is one copy of each. It exists because
+the rest of a saved response has no Vayu column: the request it was recorded
+against (`originalRequest`, which differs per example and from the request's
+current state), the status text the server sent, the editor's preview
+language and type, cookies, the response time, and the header rows as written
+(`name` fields, numeric values). The Postman export is the one reader
+(`core/postman_export.cpp`): it writes `originalRequest`, `cookie`,
+`responseTime` and unknown members back as stored, and the status text,
+`header[]` and preview members only while `status` and `headers` still say
+what was imported, regenerating them otherwise - so an edit made in Vayu is
+never contradicted by a stale copy. Only an import writes it: `POST
+/import/apply` and `POST /requests/:id/examples` accept a string that parses
+as a JSON object (capped at `request_example::MAX_POSTMAN_RESPONSE_BYTES`),
+and `PUT` accepts only `null`, which clears it. The list route does not return
+it.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each

@@ -31,7 +31,12 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    (`engine/src/db/database_impl.hpp`). A bump is one-way: an older engine
    refuses to open a database a newer one already stamped (issue #1492), so
    check whether this release's changes touched the schema before tagging - not
-   every version bump carries one.
+   every version bump carries one. When one did
+   (`git diff <last tag> -- engine/include/vayu/db/database.hpp` shows the
+   constant moving; the history is `docs/engine/db-schema.md#schema-versions`),
+   the release notes say so under **Changed**: once this version opens a
+   workspace, earlier versions refuse it, so downgrading means restoring a
+   backup.
 3. Check the vcpkg baseline for staleness - `cd engine && vcpkg
    x-update-baseline --dry-run`. **The release window is the cadence**: nothing
    else owns baseline freshness, and #679 found cpp-httplib five minors behind

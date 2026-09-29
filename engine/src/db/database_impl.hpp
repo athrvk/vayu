@@ -307,6 +307,12 @@ inline auto make_vayu_storage (const std::string& path) {
     // backfill a pre-existing row from, and NULL is the only spelling of "no
     // key".
     make_column ("spec_example_key", &RequestExample::spec_example_key),
+    // The Postman saved response an import took this example from (schema
+    // version 2). Nullable on the `spec_example_key` precedent above: NULL is
+    // every example that did not come from Postman, and every pre-existing
+    // row is one. A mapping change, so `SCHEMA_VERSION` (`database.hpp`) was
+    // bumped with it.
+    make_column ("postman_response", &RequestExample::postman_response),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 
