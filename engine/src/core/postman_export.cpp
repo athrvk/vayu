@@ -21,16 +21,19 @@
 
 #include "js_json.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -1246,6 +1249,74 @@ Walk& walk) {
     return out;
 }
 
+/// The largest millisecond count written as an integer (2^53, where a double
+/// stops holding every integer).
+constexpr double MAX_EXACT_MS = 9007199254740992.0;
+
+/// The `name=value` attribute @p attr names @p name (case-insensitively), or
+/// nothing.
+std::optional<std::string> cookie_attribute (const std::string& attr, std::string_view name) {
+    const std::size_t equals = attr.find ('=');
+    if (equals == std::string::npos ||
+    !vayu::utils::ascii_lower_equal (std::string_view (attr).substr (0, equals), name)) {
+        return std::nullopt;
+    }
+    return std::make_optional (attr.substr (equals + 1));
+}
+
+/// One cookie as Postman's saved response lists it. `hostOnly` is what a
+/// cookie without a `Domain` attribute is.
+json postman_cookie (const vayu::http::SetCookie& cookie) {
+    std::optional<std::string> domain;
+    std::optional<std::string> path;
+    std::optional<std::string> expires;
+    bool http_only = false;
+    bool secure    = false;
+    for (const std::string& attr : cookie.attrs) {
+        if (auto value = cookie_attribute (attr, "domain")) {
+            domain = std::move (value);
+        } else if (auto value = cookie_attribute (attr, "path")) {
+            path = std::move (value);
+        } else if (auto value = cookie_attribute (attr, "expires")) {
+            expires = std::move (value);
+        } else if (vayu::utils::ascii_lower_equal (attr, "httponly")) {
+            http_only = true;
+        } else if (vayu::utils::ascii_lower_equal (attr, "secure")) {
+            secure = true;
+        }
+    }
+    json out;
+    out["key"]      = cookie.name;
+    out["value"]    = cookie.value;
+    out["domain"]   = domain.value_or ("");
+    out["path"]     = path.value_or ("/");
+    out["httpOnly"] = http_only;
+    out["secure"]   = secure;
+    out["hostOnly"] = !domain.has_value ();
+    if (expires) {
+        out["expires"] = *expires;
+    }
+    return out;
+}
+
+/// Every cookie the `Set-Cookie` rows of @p headers set, in row order.
+json postman_cookies (const json& headers) {
+    json out = json::array ();
+    if (!headers.is_array ()) {
+        return out;
+    }
+    for (const json& header : headers) {
+        if (!vayu::utils::ascii_lower_equal (text_of (header, "key"), "set-cookie")) {
+            continue;
+        }
+        for (const vayu::http::SetCookie& cookie :
+        vayu::http::parse_set_cookie (text_of (header, "value"))) {
+            out.push_back (postman_cookie (cookie));
+        }
+    }
+    return out;
+}
+
 /// The request-level behaviours Postman keeps beside the request.
 /// Whether @p body would put bytes on the wire.
 bool body_has_content (const std::optional<json>& body) {
@@ -1433,6 +1504,40 @@ std::uint64_t fnv1a (std::string_view text, std::uint64_t basis) {
 }
 
 } // namespace
+
+std::optional<std::string> postman_saved_response_text (const PostmanExportRequest& sent,
+const PostmanExportExample& example,
+const std::string& status_text,
+std::optional<double> response_time_ms) {
+    // What the mapping cannot carry is the request's own export to report,
+    // not this save's.
+    Walk scratch;
+    const std::optional<json> body = postman_body (sent.body, scratch);
+    const std::optional<std::string> declared = declared_content_type (example.headers);
+    json out;
+    out["name"]            = nullptr;
+    out["originalRequest"] = request_core (sent, body, scratch);
+    out["status"] =
+    status_text.empty () ? vayu::http::status_text (example.status) : status_text;
+    out["code"]                     = example.status;
+    out["_postman_previewlanguage"] = preview_language (declared.value_or (""));
+    out["header"] = postman_rows (example.headers, RowShape::Plain, scratch);
+    out["cookie"] = postman_cookies (example.headers);
+    out["responseTime"] = nullptr;
+    if (response_time_ms) {
+        // Whole milliseconds, as Postman records it; a value past what an
+        // integer holds exactly stays a double rather than overflowing.
+        const double whole = std::round (*response_time_ms);
+        out["responseTime"] =
+        whole < MAX_EXACT_MS ? json (static_cast<std::int64_t> (whole)) : json (whole);
+    }
+    out["body"] = nullptr;
+    std::string text = out.dump (-1, ' ', false, json::error_handler_t::replace);
+    if (text.size () > vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES) {
+        return std::nullopt;
+    }
+    return std::make_optional (std::move (text));
+}
 
 std::string postman_collection_uuid (const std::string& collection_id) {
     if (is_uuid (collection_id)) {

@@ -13,11 +13,14 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/core/postman_export.hpp"
 
 namespace {
@@ -955,6 +958,51 @@ TEST (PostmanExport, ExampleFactsPostmanCannotHoldAreNotes) {
     root.requests.push_back (entry);
     EXPECT_EQ (losses (run (root)),
     (json{ { "truncated_examples", 1 }, { "example_content_types", 1 } }));
+}
+
+// A saved response built from a save in the app (#1763): its `header[]`,
+// read back through the importer's row mapping (what `compare_recorded`
+// reads it through), says the same rows as the example's column - a turned-off
+// row and a description included - so the export keeps the recorded members
+// until an edit. Mutation check: write `header` as `[]` in
+// `postman_saved_response_text` and the row comparison reds.
+TEST (PostmanExport, ASavedResponsesHeaderReadsBackAsTheExamplesRows) {
+    PostmanExportExample example;
+    example.name         = "Saved";
+    example.status       = 418;
+    ordered noted        = row ("X-Note", "n");
+    noted["description"] = "why";
+    example.headers      = ordered::array (
+    { row ("Content-Type", "text/html"), row ("X-Off", "0", false), noted });
+    PostmanExportRequest sent = request ("r", "{{baseUrl}}/a");
+
+    const auto text =
+    vayu::core::postman_saved_response_text (sent, example, "Short And Stout", 7.0);
+    ASSERT_HAS_VALUE (text);
+    const ordered recorded = ordered::parse (*text);
+    const ordered rows =
+    vayu::core::postman_header_rows (recorded.at ("header"));
+    ASSERT_EQ (rows.size (), example.headers.size ()) << recorded.dump ();
+    for (std::size_t at = 0; at < rows.size (); ++at) {
+        const ordered& read = rows.at (at);
+        const ordered& kept = example.headers.at (at);
+        EXPECT_EQ (read.value ("key", ""), kept.value ("key", "")) << at;
+        EXPECT_EQ (read.value ("value", ""), kept.value ("value", "")) << at;
+        EXPECT_EQ (read.value ("enabled", true), kept.value ("enabled", true)) << at;
+        EXPECT_EQ (read.value ("description", ""), kept.value ("description", "")) << at;
+    }
+
+    // Through the export: every recorded member is kept while nothing was
+    // edited - the server's reason phrase included.
+    example.postman_response   = recorded;
+    PostmanExportRequest entry = request ("r", "{{baseUrl}}/b");
+    entry.examples.push_back (example);
+    const ordered response = only_item (entry)["response"][0];
+    EXPECT_EQ (response["status"], "Short And Stout");
+    EXPECT_EQ (response["header"], recorded["header"]);
+    EXPECT_EQ (response["_postman_previewlanguage"], "html");
+    EXPECT_EQ (response["originalRequest"]["url"]["raw"], "{{baseUrl}}/a");
+    EXPECT_EQ (response["responseTime"], 7);
 }
 
 // ---------------------------------------------------------------------------
