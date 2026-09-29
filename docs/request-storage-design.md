@@ -40,11 +40,17 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 editor, disabled entries included.**
 
 `url` is the wire truth: every execution path - design Send, collection scenario
-run, load run - sends it verbatim, and no engine path reads `params[]` at all
-(it is builder display state, see
+run, load run - sends it verbatim, and no engine path reads a query row of
+`params[]` (it is builder display state, see
 [engine/api-reference.md](engine/api-reference.md)). The Params table maintains
 the invariant on the app's side by rewriting `url` on every edit, keeping
 disabled rows in `params[]` only.
+
+A **path row** (`"in": "path"`, issue #1764) is the one row the engine reads:
+`url` keeps the `:name` segment verbatim and composition writes the row's value
+into it at send time (see
+[engine/api-reference.md](engine/api-reference.md#path-variables)). A path row
+never joins the query.
 
 The URL bar keeps the same invariant the other way: typing into it **merges**
 the parsed query into `params[]` rather than replacing the list, so a disabled

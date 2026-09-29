@@ -291,102 +291,54 @@ TEST (ImportParse, StepsOverACycleInAnInsomniaFolderTree) {
     EXPECT_EQ (parsed.result.at ("meta").at ("folderCount"), 2);
 }
 
-TEST (InsomniaImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {
-    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
-        {"_id":"wrk","_type":"workspace","name":"W"},
-        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
-            "url":"https://api.example.com/users/:userId",
-            "pathParameters":[{"name":"userId","value":"42"}]}]})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const json& collection = parsed.result.at ("collections")[0];
-    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
-    "https://api.example.com/users/{{userId}}");
-    ASSERT_TRUE (collection.at ("variables").contains ("userId"));
-    EXPECT_EQ (collection.at ("variables").at ("userId").at ("value"), "42");
-    EXPECT_EQ (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("path_variables"), 1);
-}
-
-TEST (InsomniaImport, KeepsAnExplicitEnvironmentVariableOverAPathVariableOfTheSameName) {
-    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
-        {"_id":"wrk","_type":"workspace","name":"W","environment":{"userId":"explicit"}},
-        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
-            "url":"https://api.example.com/users/:userId",
-            "pathParameters":[{"name":"userId","value":"42"}]}]})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    EXPECT_EQ (
-    parsed.result.at ("collections")[0].at ("variables").at ("userId").at ("value"), "explicit");
-}
-
-TEST (InsomniaImport, FoldsAFolderRequestsPathVariableIntoTheFoldersOwnVariablesNotTheWorkspaces) {
+/**
+ * Insomnia keeps `pathParameters` per request and writes each into its
+ * `/:name` segment at send time (`applyPathParametersToUrl`), so they import
+ * as that request's own path rows (issue #1764): the URL keeps `:userId`, the
+ * value rides on an `in: "path"` row, and nothing is promoted to a
+ * workspace or folder variable. A `:name` with no declared parameter gets an
+ * empty row, as Insomnia's own editor shows one.
+ */
+TEST (InsomniaImport, KeepsAPathParameterAsTheRequestsOwnPathRow) {
     const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
         {"_id":"wrk","_type":"workspace","name":"W"},
         {"_id":"grp","_type":"request_group","parentId":"wrk","name":"G"},
         {"_id":"req","_type":"request","parentId":"grp","name":"R","method":"get",
-            "url":"https://api.example.com/users/:userId",
+            "url":"https://api.example.com/users/:userId/:extra",
+            "parameters":[{"name":"q","value":"1"}],
             "pathParameters":[{"name":"userId","value":"42"}]}]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& collection = parsed.result.at ("collections")[0];
-    EXPECT_FALSE (collection.at ("variables").contains ("userId"));
+    EXPECT_TRUE (collection.at ("variables").empty ());
     const json& folder = collection.at ("children")[0];
-    EXPECT_EQ (folder.at ("variables").at ("userId").at ("value"), "42");
-}
-
-/**
- * A `:` inside a query value (a timestamp, a scoped tag, a port in a redirect
- * URL) is ordinary text, not a path-variable token (issue #1661). Insomnia
- * hands the whole URL, query string included, to the path-variable rewrite,
- * so `?tag=color:id` next to a declared `id` path parameter must survive
- * untouched rather than becoming `?tag=color{{id}}`.
- */
-TEST (InsomniaImport, LeavesAColonInAQueryValueUntouched) {
-    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
-        {"_id":"wrk","_type":"workspace","name":"W"},
-        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
-            "url":"https://api.example.com/search?tag=color:id",
-            "pathParameters":[{"name":"id","value":"5"}]}]})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const json& collection = parsed.result.at ("collections")[0];
-    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
-    "https://api.example.com/search?tag=color:id");
+    EXPECT_TRUE (folder.at ("variables").empty ());
+    const json& request = folder.at ("requests")[0];
+    // The query row is joined into the URL; the path rows are not.
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/users/:userId/:extra?q=1");
+    EXPECT_EQ (request.at ("params"), json::parse (R"([
+        {"key":"q","value":"1","enabled":true},
+        {"key":"userId","value":"42","enabled":true,"in":"path"},
+        {"key":"extra","value":"","enabled":true,"in":"path"}])"));
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
 }
 
 /**
- * `find` used to run once per declared key, so a hit inside an
- * already-rewritten earlier token (or any token containing the real one)
- * could leave a later `:key` untouched (issue #1661). Walking `/`-delimited
- * segments finds every occurrence of every declared key regardless of order.
+ * A `:` inside a query value (a timestamp, a scoped tag, a port in a redirect
+ * URL) is ordinary text, not a path-variable token (issue #1661): the URL
+ * comes back as written and no row is invented for `color:id`.
  */
-TEST (InsomniaImport, RewritesEveryDeclaredSegmentNotJustTheFirstHit) {
+TEST (InsomniaImport, LeavesAColonInAQueryValueUntouched) {
     const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
         {"_id":"wrk","_type":"workspace","name":"W"},
         {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
-            "url":"https://api.example.com/users/:idx/:id",
-            "pathParameters":[{"name":"idx","value":"1"},{"name":"id","value":"2"}]}]})",
+            "url":"https://api.example.com/search?tag=color:id"}]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    EXPECT_EQ (
-    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
-    "https://api.example.com/users/{{idx}}/{{id}}");
-}
-
-TEST (InsomniaImport, RewritesTheSameDeclaredKeyAtEveryOccurrence) {
-    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
-        {"_id":"wrk","_type":"workspace","name":"W"},
-        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
-            "url":"https://api.example.com/:id/copies/:id",
-            "pathParameters":[{"name":"id","value":"7"}]}]})",
-    {}, {});
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    EXPECT_EQ (
-    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
-    "https://api.example.com/{{id}}/copies/{{id}}");
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?tag=color:id");
+    EXPECT_TRUE (request.at ("params").empty ());
 }
 
 /**
@@ -1348,54 +1300,87 @@ TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
 }
 
-TEST (PostmanImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {
+/**
+ * A Postman `:name` segment stays in the URL and its `url.variable[]` entry
+ * becomes the request's own path row (issue #1764): value, description,
+ * `type` and the disabled state kept, nothing promoted to a collection
+ * variable, and no `path_variables` notice - nothing was lost.
+ */
+TEST (PostmanImport, KeepsAPathVariableAsTheRequestsOwnPathRow) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"R","request":{"method":"GET","url":{
-            "raw":"https://api.example.com/users/:userId?x=1",
+            "raw":"https://api.example.com/users/:userId/:postId?x=1",
             "query":[{"key":"x","value":"1"}],
-            "variable":[{"key":"userId","value":"42"}]}}}
+            "variable":[{"key":"userId","value":"{{ who }}","type":"string",
+                         "description":"the user"},
+                        {"key":"unused","value":"u","disabled":true}]}}}
     ]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& collection = parsed.result.at ("collections")[0];
+    const json& request    = collection.at ("requests")[0];
     // `join_params_into_urls` rejoins the enabled query param after `pm_url`
-    // splits it off - see "The url/params invariant" in the Postman doc.
-    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
-    "https://api.example.com/users/{{userId}}?x=1");
-    ASSERT_TRUE (collection.at ("variables").contains ("userId"));
-    EXPECT_EQ (collection.at ("variables").at ("userId").at ("value"), "42");
-    EXPECT_EQ (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("path_variables"), 1);
+    // splits it off - see "The url/params invariant" in the Postman doc - and
+    // leaves the path rows out of it.
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/users/:userId/:postId?x=1");
+    EXPECT_EQ (request.at ("params"), json::parse (R"([
+        {"key":"x","value":"1","enabled":true},
+        {"key":"userId","value":"{{who}}","enabled":true,"in":"path",
+         "type":"string","description":"the user"},
+        {"key":"unused","value":"u","enabled":false,"in":"path"},
+        {"key":"postId","value":"","enabled":true,"in":"path"}])"));
+    EXPECT_TRUE (collection.at ("variables").empty ());
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
 }
 
-/// Mirrors `InsomniaImport.RewritesEveryDeclaredSegmentNotJustTheFirstHit`:
-/// both callers share `substitute_path_variables` (issue #1661).
-TEST (PostmanImport, RewritesEveryDeclaredSegmentNotJustTheFirstHit) {
+/**
+ * The acceptance case of issue #1764: two requests on `:id` with different
+ * values each keep their own, where the old import promoted the first value
+ * to one collection variable both requests then sent.
+ */
+TEST (PostmanImport, TwoRequestsOnOnePathVariableKeepTheirOwnValues) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
-        {"name":"R","request":{"method":"GET","url":{
-            "raw":"https://api.example.com/users/:idx/:id",
-            "variable":[{"key":"idx","value":"1"},{"key":"id","value":"2"}]}}}
+        {"name":"A","request":{"method":"GET","url":{
+            "raw":"https://api.example.com/users/:id","variable":[{"key":"id","value":"1"}]}}},
+        {"name":"B","request":{"method":"GET","url":{
+            "raw":"https://api.example.com/users/:id","variable":[{"key":"id","value":"2"}]}}}
     ]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    EXPECT_EQ (
-    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
-    "https://api.example.com/users/{{idx}}/{{id}}");
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_FALSE (collection.at ("variables").contains ("id"));
+    const json& requests = collection.at ("requests");
+    ASSERT_EQ (requests.size (), 2u);
+    for (size_t i = 0; i < 2; ++i) {
+        EXPECT_EQ (requests[i].at ("url"), "https://api.example.com/users/:id");
+        ASSERT_EQ (requests[i].at ("params").size (), 1u);
+        EXPECT_EQ (requests[i].at ("params")[0].at ("value"), std::to_string (i + 1));
+        EXPECT_EQ (requests[i].at ("params")[0].at ("in"), "path");
+    }
 }
 
-TEST (PostmanImport, KeepsAnExplicitCollectionVariableOverAPathVariableOfTheSameName) {
-    const ImportParse parsed =
-    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
-        "variable":[{"key":"userId","value":"explicit"}],
-        "item":[{"name":"R","request":{"method":"GET",
-            "url":{"raw":"https://api.example.com/users/:userId",
-                "variable":[{"key":"userId","value":"42"}]}}}]})",
+/// A v2.0 string URL carries no `url.variable[]`, so each `:name` gets an
+/// empty row, as Postman's `Url.parse` declares one per name; a v2.0 entry
+/// naming itself by `id` alone is read by that name.
+TEST (PostmanImport, DeclaresAnEmptyRowForAnUndeclaredPathVariable) {
+    const ImportParse parsed = parse_import (R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},"item":[
+        {"name":"S","request":{"method":"GET","url":"https://api.example.com/:a/:a/:b?t=1:2"}},
+        {"name":"V","request":{"method":"GET","url":{"raw":"https://api.example.com/:c",
+            "variable":[{"id":"c","value":"3"}]}}}
+    ]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    EXPECT_EQ (
-    parsed.result.at ("collections")[0].at ("variables").at ("userId").at ("value"), "explicit");
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("url"), "https://api.example.com/:a/:a/:b?t=1%3A2");
+    EXPECT_EQ (requests[0].at ("params"), json::parse (R"([
+        {"key":"t","value":"1:2","enabled":true},
+        {"key":"a","value":"","enabled":true,"in":"path"},
+        {"key":"b","value":"","enabled":true,"in":"path"}])"));
+    EXPECT_EQ (requests[1].at ("params"), json::parse (R"([
+        {"key":"c","value":"3","enabled":true,"in":"path"}])"));
 }
 
 TEST (PostmanImport, AssemblesAUrlFromHostAndPathWhenRawIsAbsent) {

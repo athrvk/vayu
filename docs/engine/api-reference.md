@@ -3040,10 +3040,10 @@ here. Every other format sends no such key. See
 per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
-`unmapped_body`, `unresolved_base_url`, `unsupported_auth`, `path_variables`,
+`unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
-loss: `default_response`, `path_variables` and `url_without_raw` count a mapping
+loss: `default_response` and `url_without_raw` count a mapping
 the import made rather than something it dropped (see
 `docs/app/import-collections/postman.md`). An import that loses something and
 says nothing is the defect this list exists to prevent, so a format with
