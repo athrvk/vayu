@@ -214,6 +214,25 @@ export function syncPathRows(
 	});
 }
 
+/**
+ * The rows the Path variables table shows: every stored path row as it is,
+ * then an empty row for each `:name` of the URL that has none.
+ *
+ * Derived on every render and never written by rendering, so opening a
+ * request whose URL names a variable its rows do not (one stored before
+ * #1764, or imported with no `url.variable` entry) shows the row without
+ * marking the request edited; the first edit in the table writes it back. The
+ * derived row's id is its name, so it keeps its identity across renders.
+ */
+export function displayPathRows(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
+	const held = new Set(existing.map((row) => row.key));
+	const missing = pathVariableNames(url).filter((name) => !held.has(name));
+	return [
+		...existing,
+		...missing.map((name) => ({ ...newPathRow(name), id: `path-variable:${name}` })),
+	];
+}
+
 const encoder = new TextEncoder();
 
 /** RFC 3986's unreserved set, the only bytes a path segment value keeps. */

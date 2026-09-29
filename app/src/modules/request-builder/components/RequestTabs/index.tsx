@@ -26,6 +26,7 @@ import ElementsPanel from "./panels/ElementsPanel";
 import ExamplesPanel from "./panels/ExamplesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRequestSettingsNonDefault } from "../../utils/request-state";
+import { displayPathRows, pathRowsOf, queryRowsOf } from "../../utils/path-variables";
 
 /**
  * The tabs whose panel carries a Monaco editor rather than a form: Body's code
@@ -85,9 +86,13 @@ export default function RequestTabs() {
 			id: "params",
 			label: "Params",
 			// Both tables' enabled rows: the query's and the path variables'
-			// (#1764). A path row with no value yet counts too - it is a row the
-			// tab shows, and the one most likely to need the user's attention.
-			badge: request.params.filter((p) => p.enabled && p.key.trim()).length || undefined,
+			// (#1764), as the tab shows them - so a `:name` no stored row answers
+			// yet counts too; it is the row most likely to need the user.
+			badge:
+				[
+					...queryRowsOf(request.params),
+					...displayPathRows(pathRowsOf(request.params), request.url),
+				].filter((p) => p.enabled && p.key.trim()).length || undefined,
 		},
 		{
 			id: "headers",

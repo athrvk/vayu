@@ -9,7 +9,8 @@
  * ParamsPanel Component
  *
  * Query parameters, kept in step with the URL in the bar above, and under them
- * the path variables (issue #1764): one row per `:name` segment of the URL.
+ * the path variables (issue #1764): one row per `:name` segment of the URL,
+ * plus any declared path row the URL does not use.
  *
  * The two tables edit one `params` array, split by `in`, so each writes its
  * own half back beside the other's untouched. Path rows take their keys from
@@ -37,6 +38,7 @@ import {
 import { buildUrlWithParams } from "../../../utils/url";
 import {
 	composePathParams,
+	displayPathRows,
 	isPathRow,
 	pathRowsOf,
 	queryRowsOf,
@@ -85,7 +87,10 @@ export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
 	const variables = useVariableSupport();
 
-	const pathParams = pathRowsOf(request.params);
+	// Derived, never written by rendering: a `:name` no stored row answers
+	// still gets a row here, and the first edit in the table stores it, so
+	// opening a request does not mark it edited.
+	const pathParams = displayPathRows(pathRowsOf(request.params), request.url);
 
 	// The query table's rows, written back beside the path rows it never shows,
 	// and the URL's query rebuilt from them. `buildUrlWithParams` skips path

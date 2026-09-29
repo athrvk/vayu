@@ -150,6 +150,25 @@ describe("the Path variables table", () => {
 		).toEqual([{ ...imported, enabled: false }]);
 	});
 
+	it("shows a row for a segment the stored rows do not answer, and stores it on the first edit", () => {
+		// A request stored before #1764, or imported with no `url.variable`
+		// entry: its URL names `:id`, its params hold no row for it.
+		const { updateField, lastWrite } = renderPanel("https://x/users/:id?page=1", [QUERY]);
+		const section = pathSection();
+		expect(section).not.toBeNull();
+		expect(fields(section!).map((el) => el.value)).toEqual(["id", ""]);
+		// Opening it writes nothing, so the request is not marked edited.
+		expect(updateField).not.toHaveBeenCalled();
+
+		fireEvent.change(fields(section!)[1], { target: { value: "7" } });
+		const params = lastWrite("params") as KeyValueItem[];
+		expect(params.map(({ key, value, in: at }) => ({ key, value, in: at }))).toEqual([
+			{ key: "page", value: "1", in: undefined },
+			{ key: "id", value: "7", in: "path" },
+		]);
+		expect(lastWrite("url")).toBeUndefined();
+	});
+
 	it("resolves a value before encoding it on the Sends line, as compose does", () => {
 		const resolve = (s: string) => s.replace(/{{user}}/g, "a b");
 		const { container } = renderPanel(

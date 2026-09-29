@@ -23,6 +23,7 @@ import {
 	pathRowsFromUrl,
 	pathVariableNames,
 	pathVariableSegments,
+	displayPathRows,
 	substitutePathVariables,
 	syncPathRows,
 } from "./path-variables";
@@ -293,6 +294,30 @@ describe("syncPathRows", () => {
 	it("keeps one row for a repeated name", () => {
 		const synced = syncPathRows([], "https://x/:id/copy/:id", "https://x/");
 		expect(synced.map((r) => r.key)).toEqual(["id"]);
+	});
+});
+
+describe("displayPathRows", () => {
+	it("shows a row for a segment no stored row answers, with an id that does not change", () => {
+		const shown = displayPathRows([], "https://x/users/:id");
+		expect(shown).toEqual([
+			{ id: "path-variable:id", key: "id", value: "", enabled: true, in: "path" },
+		]);
+		expect(displayPathRows([], "https://x/users/:id")[0].id).toBe(shown[0].id);
+	});
+
+	it("keeps every stored row as it is, a declared-but-unused one included", () => {
+		const existing = [row("1", "unused", "SECRET"), row("2", "id", "7", { enabled: false })];
+		expect(displayPathRows(existing, "https://x/:id/:postId")).toEqual([
+			...existing,
+			{
+				id: "path-variable:postId",
+				key: "postId",
+				value: "",
+				enabled: true,
+				in: "path",
+			},
+		]);
 	});
 });
 
