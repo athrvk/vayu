@@ -861,11 +861,15 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
         const std::string type = text_of (variable, "type");
         if (flag_of (variable, "secret", false)) {
             row["type"] = "secret";
-        } else if (type == "number" || type == "boolean") {
+        } else if (type == "string" || type == "number" || type == "boolean") {
             row["type"] = type;
         }
         if (type == "json") {
             walk.lose (Loss::VariableTypes);
+        }
+        if (const std::string description = text_of (variable, "description");
+        !description.empty ()) {
+            row["description"] = description;
         }
         if (!row_enabled (variable)) {
             row["disabled"] = true;

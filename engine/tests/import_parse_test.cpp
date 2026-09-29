@@ -1404,28 +1404,44 @@ TEST (PostmanImport, MapsStrictSSLFalseToVerifySSLThroughToTheApplyPayload) {
     EXPECT_EQ (payload.at ("requests")[0].at ("verifySSL"), false);
 }
 
-TEST (PostmanImport, CountsVariableMetadataDroppedFromCollectionAndEnvironmentVariables) {
+TEST (PostmanImport, KeepsCollectionVariableMetadataAndCountsWhatHasNoHome) {
     const ImportParse collection =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[],
         "variable":[{"key":"host","value":"x","description":"the host"},
-                    {"key":"token","value":"y","type":"secret"}]})",
+                    {"key":"token","value":"y","type":"secret"},
+                    {"key":"limit","value":"5","type":"number"},
+                    {"key":"plain","value":"p","type":"default"},
+                    {"key":"blob","value":"b","type":"any"}]})",
     {}, {});
     ASSERT_TRUE (collection.ok ()) << collection.error;
     const json& variables =
     collection.result.at ("collections")[0].at ("variables");
     EXPECT_FALSE (variables.at ("host").contains ("secret"));
+    // A collection's variables go back out through the Postman exporter, so
+    // the description is kept for it.
+    EXPECT_EQ (variables.at ("host").at ("description"), "the host");
     EXPECT_TRUE (variables.at ("token").at ("secret").get<bool> ());
-    // Only `host` carried metadata Vayu has nowhere to put; `token`'s `type`
-    // is the one it stores.
+    // Vayu's own type of the same name, cast the same way for a script.
+    EXPECT_EQ (variables.at ("limit").at ("type"), "number");
+    // `default` is Postman's unset marker: nothing stored, nothing counted.
+    EXPECT_FALSE (variables.at ("plain").contains ("type"));
+    // `any` has no Vayu counterpart - the one row still counted.
+    EXPECT_FALSE (variables.at ("blob").contains ("type"));
     EXPECT_EQ (
     skip_counts (collection.result.at ("meta").at ("skipped")).at ("variable_metadata"), 1);
 
     const ImportParse environment = parse_import (
     R"({"_postman_variable_scope":"environment","name":"Prod",
         "values":[{"key":"host","value":"x","description":"the host"},
-                  {"key":"user","value":"y"}]})",
+                  {"key":"user","value":"y","type":"boolean"}]})",
     {}, {});
     ASSERT_TRUE (environment.ok ()) << environment.error;
+    // No exporter reads an environment's description, so it is not kept - and
+    // is counted; the type is Vayu's own and is.
+    const json& values =
+    environment.result.at ("environments")[0].at ("variables");
+    EXPECT_FALSE (values.at ("host").contains ("description"));
+    EXPECT_EQ (values.at ("user").at ("type"), "boolean");
     EXPECT_EQ (skip_counts (environment.result.at ("meta").at ("skipped")).at ("variable_metadata"),
     1);
 }

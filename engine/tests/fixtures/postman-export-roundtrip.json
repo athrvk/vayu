@@ -599,7 +599,20 @@
 					"response": []
 				}
 			],
-			"description": "What an export gives back as Postman wrote it."
+			"description": "What an export gives back as Postman wrote it.",
+			"variable": [
+				{
+					"key": "pageSize",
+					"value": "20",
+					"type": "number"
+				},
+				{
+					"key": "region",
+					"value": "eu",
+					"type": "string",
+					"description": "Which region serves the tenant"
+				}
+			]
 		},
 		{
 			"name": "Soap call",

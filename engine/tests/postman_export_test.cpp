@@ -700,10 +700,11 @@ TEST (PostmanExport, VariablesKeepTheirStateAndPostmanTypes) {
     root.variables = ordered{ { "a", { { "value", "1" }, { "enabled", false } } },
         { "n", { { "value", "5" }, { "enabled", true }, { "type", "number" } } },
         { "j", { { "value", "{}" }, { "enabled", true }, { "type", "json" } } },
-        { "s", { { "value", "x" }, { "enabled", true }, { "type", "string" } } } };
+        { "s", { { "value", "x" }, { "enabled", true }, { "type", "string" } } },
+        { "d", { { "value", "y" }, { "enabled", true }, { "description", "Why" } } } };
     const auto outcome = run (root);
     EXPECT_EQ (ordered::parse (outcome.text)["variable"].dump (),
-    R"([{"key":"a","value":"1","disabled":true},{"key":"n","value":"5","type":"number"},{"key":"j","value":"{}"},{"key":"s","value":"x"}])");
+    R"([{"key":"a","value":"1","disabled":true},{"key":"n","value":"5","type":"number"},{"key":"j","value":"{}"},{"key":"s","value":"x","type":"string"},{"key":"d","value":"y","description":"Why"}])");
     EXPECT_EQ (losses (outcome), (json{ { "variable_types", 1 } }));
 }
 

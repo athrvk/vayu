@@ -658,6 +658,9 @@ vayu::Variable read_variable (const Json& value) {
     if (auto it = value.find ("createdAt"); it != value.end () && it->is_number ()) {
         var.created_at = it->get<int64_t> ();
     }
+    if (auto it = value.find ("description"); it != value.end () && it->is_string ()) {
+        var.description = it->get<std::string> ();
+    }
     return var;
 }
 
@@ -698,6 +701,9 @@ std::string serialize_variables (const vayu::Environment& env) {
         obj[key]["type"] = var.type.empty () ? std::string{ "string" } : var.type;
         if (var.created_at.has_value ()) {
             obj[key]["createdAt"] = *var.created_at;
+        }
+        if (!var.description.empty ()) {
+            obj[key]["description"] = var.description;
         }
     }
     return obj.dump ();

@@ -870,6 +870,11 @@ struct Variable {
     // fails the macOS and Windows legs on every one of those sites).
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> created_at{};
+    // A Postman import's variable `description`, kept for the Postman export
+    // to write back; nothing else reads it, and "" writes no key. `{}` for the
+    // same trailing-field reason as `created_at`.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string description{};
 
     bool operator== (const Variable&) const = default;
 };

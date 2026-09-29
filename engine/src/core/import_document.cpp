@@ -215,17 +215,30 @@ json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
     return out;
 }
 
-/// `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
-/// `type: "secret"` is the one Postman per-variable kind Vayu stores - the rest
-/// describe a value type it does not have, since every value is a string.
-/// @p skipped_variable_metadata counts a row whose `description` or a
-/// meaningfully declared `type` was read and discarded, once per row
-/// regardless of how many of the two it carried. `"default"` is Postman's own
-/// unset marker - every environment and globals export the app can produce
-/// stamps it on every ordinary variable - so it counts no more than an absent
-/// `type` does; only a value naming an actual kind (`"boolean"`, `"number"`,
-/// a custom string) is a declaration Vayu had something to lose.
-json to_var_record (const json* vars, int& skipped_variable_metadata) {
+/// A Postman variable `type` that is one of Vayu's own variable types, cast
+/// the same way at read time (`castByType`).
+bool is_vayu_variable_type (const std::string& type) {
+    return type == "string" || type == "number" || type == "boolean";
+}
+
+/**
+ * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
+ *
+ * `type: "secret"` is `secret: true`; `string`, `number` and `boolean` are
+ * Vayu's own variable types of the same name and stored as `type`, which
+ * casts the value for a script exactly as Postman's typed variable does.
+ * `"default"` is Postman's own unset marker - every environment and globals
+ * export the app can produce stamps it on every ordinary variable - so it
+ * stores nothing and counts no more than an absent `type` does.
+ *
+ * @p keep_description is set for a collection's or folder's variables, which
+ * the Postman exporter writes back with their `description`; an environment
+ * or globals file has no exporter to read one, so there it is dropped.
+ * @p skipped_variable_metadata counts a row whose `description` (when not
+ * kept) or a declared `type` Vayu has no counterpart for (`"any"`, a custom
+ * string) was read and discarded, once per row however many it carried.
+ */
+json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_description) {
     json out = json::object ();
     if (vars == nullptr || !vars->is_array ()) {
         return out;
@@ -236,8 +249,10 @@ json to_var_record (const json* vars, int& skipped_variable_metadata) {
             continue;
         }
         const std::string* declared_type = as_str (prop (record, "type"));
-        if (truthy (prop (record, "description")) ||
-        (declared_type != nullptr && *declared_type != "secret" && *declared_type != "default")) {
+        const json* description          = prop (record, "description");
+        if ((truthy (description) && !keep_description) ||
+        (declared_type != nullptr && *declared_type != "secret" &&
+        *declared_type != "default" && !is_vayu_variable_type (*declared_type))) {
             skipped_variable_metadata += 1;
         }
         // `disabled != null ? !disabled : enabled != null ? !!enabled : true` -
@@ -255,6 +270,11 @@ json to_var_record (const json* vars, int& skipped_variable_metadata) {
         value["enabled"] = enabled;
         if (declared_type != nullptr && *declared_type == "secret") {
             value["secret"] = true;
+        } else if (declared_type != nullptr && is_vayu_variable_type (*declared_type)) {
+            value["type"] = *declared_type;
+        }
+        if (keep_description && truthy (description)) {
+            value["description"] = as_string (description);
         }
         out[as_string (prop (record, "key"))] = std::move (value);
     }
@@ -1614,7 +1634,7 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
     collection["description"] = pm_description_text (text, nested);
     collection["variables"] =
-    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata);
+    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
     collection["auth"] = collection_auth (prop (node, "auth"),
     counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
     if (counts.options.import_scripts) {
@@ -1705,7 +1725,7 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // reads "Import environments & variables", and globals are variables.
     int skipped_variable_metadata = 0;
     const json variables          = options.import_environments ?
-             to_var_record (prop (&parsed, "values"), skipped_variable_metadata) :
+             to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false) :
              json::object ();
 
     json environments = json::array ();

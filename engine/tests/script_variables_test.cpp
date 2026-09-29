@@ -71,6 +71,16 @@ TEST (ScriptVariables, RoundTripKeepsEveryField) {
     EXPECT_EQ (parse_variables (stored.dump ()), parse_variables (APP_BLOB));
 }
 
+// A Postman import's variable description (the Postman exporter writes it
+// back) survives a script's variable write; an absent one stays absent.
+TEST (ScriptVariables, RoundTripKeepsAnImportedDescription) {
+    auto stored = json::parse (serialize_variables (parse_variables (
+    R"({"a":{"value":"1","enabled":true,"description":"Why"},"b":{"value":"2"}})")));
+
+    EXPECT_EQ (stored["a"]["description"], "Why");
+    EXPECT_FALSE (stored["b"].contains ("description"));
+}
+
 // An unknown creation time stays unknown. Stamping it here is what made a
 // pre-existing row leapfrog the row the user had just added.
 TEST (ScriptVariables, AbsentCreatedAtIsNotInvented) {

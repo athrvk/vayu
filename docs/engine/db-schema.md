@@ -1729,7 +1729,10 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
 
 `secret` is a UI masking hint only - values are not encrypted at rest. `type` is a UI/script
 conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` - it controls
-how scripts read the variable via `pm.*.get(...)`.
+how scripts read the variable via `pm.*.get(...)`. A Postman import stores a variable's declared
+`string` / `number` / `boolean` type here, and on a collection or folder also an optional
+`description` - read by nothing but the Postman exporter, which writes it back; the app's
+variables editor does not show it.
 
 `createdAt` (ms epoch) is the app's row-ordering key: the variables editor lists a scope
 oldest-first. It is **optional** - a row written before the field existed, or stripped by an
