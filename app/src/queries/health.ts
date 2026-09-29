@@ -18,6 +18,7 @@ import { useEngineStore, useSaveStore } from "@/stores";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { useEffect, useRef } from "react";
 import { TIMING } from "@/config/timing";
+import { engineStarting, engineStatusAfterFailedPoll } from "@/lib/engine-start-window";
 
 /**
  * How hard to poll `/health`, given how the last poll went.
@@ -36,48 +37,6 @@ export function healthPollIntervalMs(
 	return starting
 		? TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS
 		: TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS;
-}
-
-/**
- * What a failed poll means, given the start it failed on.
- *
- * A refused connection is the same transport error either way, so the failure
- * itself cannot tell an engine coming up from one that is not coming - only
- * whether a start is in flight can. `windowOpenedAt` is `null` when none is, and
- * an engine that answered with nothing starting is unreachable immediately, with
- * no grace: it proved it could serve, so its silence is news.
- *
- * Judged against the window rather than against the session's own age, because
- * the app itself restarts the engine (`useEngineRestart`) and the process that
- * comes back does the same cold-start work as the first one. Reading the session
- * instead called every restart a failure, since an engine had answered - the one
- * this one replaced (#1227).
- *
- * Derived here rather than pushed from the main process. `sidecar.ts` knows more
- * precisely - it holds the child handle and raises `EngineNotReadyError` on the
- * same budget - but `preload.ts` exposes no engine-status channel, and adding
- * one to say something the renderer's own poll already knows would be a second
- * source of truth for one label.
- */
-export function engineStatusAfterFailedPoll(
-	windowOpenedAt: number | null,
-	now: number
-): "starting" | "unreachable" {
-	if (windowOpenedAt === null) return "unreachable";
-	return now - windowOpenedAt < TIMING.ENGINE_STARTUP_GRACE_MS ? "starting" : "unreachable";
-}
-
-/**
- * Whether a failed poll right now would still be a start rather than a lost
- * engine. Read from the store when the query asks, never subscribed: the query
- * options are evaluated per attempt, and a subscription would re-render the
- * hook for a value only those two callbacks consult.
- */
-function engineStarting(): boolean {
-	return (
-		engineStatusAfterFailedPoll(useEngineStore.getState().engineStartWindow, Date.now()) ===
-		"starting"
-	);
 }
 
 /**
