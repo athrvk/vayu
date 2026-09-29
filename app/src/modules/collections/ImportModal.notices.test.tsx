@@ -138,7 +138,7 @@ describe("the import preview's notices", () => {
 				meta: {
 					format: "Postman Collection v2.1",
 					skipped: [
-						{ kind: "path_variables", count: 1 },
+						{ kind: "url_without_raw", count: 1 },
 						{ kind: "unsupported_auth", count: 2, requests: ["Get user", "Put user"] },
 						{ kind: "proxy_config", count: 1 },
 					],

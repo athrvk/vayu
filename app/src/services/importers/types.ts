@@ -186,17 +186,9 @@ export interface SkippedItem {
 		 */
 		| "servers_dropped"
 		/**
-		 * A Postman request whose URL carried `url.variable[]` (issue #1443).
-		 * Every `:key` segment the variable named is turned into a `{{key}}`
-		 * template and the value is recorded as a collection variable, so this is
-		 * a mapping rather than a loss - counted so the preview says how many
-		 * requests changed shape, not that anything is missing.
-		 */
-		| "path_variables"
-		/**
 		 * A Postman URL with no `raw` - the schema-legal `host[]`/`path[]`-only
 		 * shape (issue #1443). The URL is assembled from those parts rather than
-		 * dropped, so like `path_variables` this counts a mapping, not a loss.
+		 * dropped, so this counts a mapping, not a loss.
 		 */
 		| "url_without_raw"
 		/**

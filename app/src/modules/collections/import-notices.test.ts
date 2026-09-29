@@ -82,7 +82,7 @@ describe("importNotices", () => {
 				skipped: [
 					{ kind: "default_response", count: 19 },
 					{ kind: "deprecated_operation", count: 1 },
-					{ kind: "path_variables", count: 2 },
+					{ kind: "url_without_raw", count: 2 },
 					{ kind: "Timer_disabled", count: 3 },
 				],
 				folderStrategy: "mixed",
