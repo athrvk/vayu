@@ -3411,9 +3411,11 @@ recorded, not the request's current state), `cookie`, `responseTime`,
 and number values included) while `headers` still reads the same, and the
 preview language and type while the declared Content-Type is unchanged; an
 edit to any of those regenerates the part it made stale. A member the source
-left out (`code`, `status`) stays out until an edit gives it a value. With
-`includeSecrets: false` the recorded request's `auth` is blanked like any other
-credential and counted in `secretsOmitted`. An example with no stored response
+left out (`code`, `status`) stays out until an edit gives it a value. The
+recorded request's `auth` is written in v2.1's attribute-array shape (a v2.0
+file states it as an object, which the v2.1 schema refuses), and with
+`includeSecrets: false` it is blanked like any other credential and counted in
+`secretsOmitted`. An example with no stored response
 (saved in Vayu, or imported from OpenAPI) gets `originalRequest` from the
 request's current state, the status text from the engine's reason-phrase table
 and `_postman_previewlanguage` from its Content-Type (`Text` when it states

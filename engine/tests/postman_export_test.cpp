@@ -903,6 +903,22 @@ TEST (PostmanExport, ARecordedRequestsCredentialsAreBlankedUnlessAskedFor) {
     EXPECT_NE (kept.text.find ("tok-live"), std::string::npos);
 }
 
+// A v2.0 file's recorded request states its auth as an object, which the
+// v2.1 schema the export declares refuses. Mutation check: write the stored
+// auth unconverted and this reds.
+TEST (PostmanExport, ARecordedV20AuthIsWrittenInV21Shape) {
+    ordered recorded                    = recorded_response ();
+    recorded["originalRequest"]["auth"] = ordered::parse (
+    R"({"type": "basic", "basic": {"username": "u", "password": "p", "showPassword": false}})");
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back (recorded_example (recorded));
+    ordered response = only_item (entry)["response"][0];
+    EXPECT_EQ (response["originalRequest"]["auth"].dump (),
+    R"({"type":"basic","basic":[{"key":"username","value":"u","type":"string"},)"
+    R"({"key":"password","value":"p","type":"string"},)"
+    R"({"key":"showPassword","value":false,"type":"boolean"}]})");
+}
+
 TEST (PostmanExport, ExampleFactsPostmanCannotHoldAreNotes) {
     PostmanExportRequest entry = request ("r", "u");
     entry.examples.push_back ({ "cut", 200, ordered::array (), "par", "", true });

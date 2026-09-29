@@ -1047,6 +1047,30 @@ std::optional<json> write (json value) {
     return std::optional<json> (std::in_place, std::move (value));
 }
 
+/**
+ * A recorded request's `auth` in v2.1's shape. A v2.0 file states each type's
+ * settings as an object (`"basic": {"username": ...}`), which the v2.1 schema
+ * this document declares refuses; it becomes the attribute array Postman's own
+ * v2.0 -> v2.1 conversion writes, typed the way `attribute` types one.
+ */
+json v21_auth (const json& auth) {
+    if (!auth.is_object ()) {
+        return auth;
+    }
+    json out = auth;
+    for (auto member = out.begin (); member != out.end (); ++member) {
+        if (member.key () == "type" || !member->is_object ()) {
+            continue;
+        }
+        json attributes = json::array ();
+        for (auto field = member->begin (); field != member->end (); ++field) {
+            attributes.push_back (attribute (field.key (), field.value ()));
+        }
+        member.value () = std::move (attributes);
+    }
+    return out;
+}
+
 /// One stored member as written back, or nothing to write.
 std::optional<json> stored_member (const std::string& key,
 const json& value,
@@ -1079,10 +1103,12 @@ Walk& walk) {
     if (key == "_postman_previewtype") {
         return recorded.type_same ? write (value) : std::nullopt;
     }
-    if (key == "originalRequest" && value.is_object () &&
-    value.contains ("auth") && !walk.include_secrets) {
-        json request = value;
-        vayu_ext::redact_postman_auth (request.at ("auth"), walk.secrets_omitted);
+    if (key == "originalRequest" && value.is_object () && value.contains ("auth")) {
+        json request    = value;
+        request["auth"] = v21_auth (value.at ("auth"));
+        if (!walk.include_secrets) {
+            vayu_ext::redact_postman_auth (request["auth"], walk.secrets_omitted);
+        }
         return write (std::move (request));
     }
     return write (value);
@@ -1104,8 +1130,8 @@ Walk& walk) {
  * is Postman's own guess. `originalRequest` is kept verbatim: it records the
  * request as it was sent when the response was saved, which differing from
  * the request's current state does not make wrong, and nothing in Vayu edits
- * it. Its auth is blanked like any other credential unless secrets were asked
- * for. A member the source left out stays out while the column still holds
+ * it. Its auth is written in v2.1's shape and blanked like any other
+ * credential unless secrets were asked for. A member the source left out stays out while the column still holds
  * the importer's default for it.
  */
 json stored_response (const PostmanExportExample& example,
