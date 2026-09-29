@@ -3396,10 +3396,28 @@ variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
 skips it, as Vayu does); saved examples are
-`response` entries with an `originalRequest`; `followRedirects: false`,
+`response` entries with an `originalRequest` (see below); `followRedirects: false`,
 `maxRedirects` other than 10 and `verifySSL: false` are
 `protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD
 that sends a body carries `disableBodyPruning: true`.
+
+**Saved examples.** An example imported from Postman carries the saved
+response it came from (`request_examples.postman_response`) and is written back
+from it in the source's member order: `originalRequest` (the request as it was
+recorded, not the request's current state), `cookie`, `responseTime`,
+`_postman_previewtype` and any other member as stored; `name`, `code` and
+`body` from the example's own fields. The status text is the stored one while
+`status` is still the code it was recorded with, `header[]` (its `name` fields
+and number values included) while `headers` still reads the same, and the
+preview language and type while the declared Content-Type is unchanged; an
+edit to any of those regenerates the part it made stale. A member the source
+left out (`code`, `status`) stays out until an edit gives it a value. With
+`includeSecrets: false` the recorded request's `auth` is blanked like any other
+credential and counted in `secretsOmitted`. An example with no stored response
+(saved in Vayu, or imported from OpenAPI) gets `originalRequest` from the
+request's current state, the status text from the engine's reason-phrase table
+and `_postman_previewlanguage` from its Content-Type (`Text` when it states
+none), with `cookie: []`.
 
 **Errors:**
 - `400` `Invalid body: must be an object`.

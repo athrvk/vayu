@@ -997,6 +997,152 @@ std::optional<std::string> declared_content_type (const json& headers) {
     return std::nullopt;
 }
 
+/// Whether two row arrays say the same thing: the same named rows, in order,
+/// with the same value, state and description. Keys the rows do not state
+/// (a stored row's `source`) are not part of what they say.
+bool same_rows (const json& left, const json& right) {
+    if (!left.is_array () || !right.is_array () || left.size () != right.size ()) {
+        return false;
+    }
+    for (std::size_t at = 0; at < left.size (); ++at) {
+        const json& a = left.at (at);
+        const json& b = right.at (at);
+        if (text_of (a, "key") != text_of (b, "key") ||
+        text_of (a, "value") != text_of (b, "value") ||
+        text_of (a, "description") != text_of (b, "description") ||
+        row_enabled (a) != row_enabled (b)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// What a stored saved response still says about the example it came from.
+struct Recorded {
+    /// `status` is the code the response was recorded with.
+    bool status_same = false;
+    /// `headers` reads as the recorded `header[]` does.
+    bool rows_same = false;
+    /// The declared Content-Type is the recorded one.
+    bool type_same = false;
+};
+
+Recorded compare_recorded (const PostmanExportExample& example,
+const std::optional<std::string>& declared) {
+    const json& stored = example.postman_response;
+    const auto header  = stored.find ("header");
+    const json rows =
+    postman_header_rows (header != stored.end () ? *header : json::array ());
+    const auto code  = stored.find ("code");
+    const bool coded = code != stored.end () && code->is_number_integer ();
+    // An absent code is the 200 the importer stored for it.
+    return { (coded ? code->get<int> () : 200) == example.status,
+        same_rows (rows, example.headers), declared_content_type (rows) == declared };
+}
+
+/// @p value as a member to write. `std::optional<json>`'s converting
+/// constructor and `json`'s conversion operator both claim a plain `return
+/// value;`, so the one unambiguous spelling is this.
+std::optional<json> write (json value) {
+    return std::optional<json> (std::in_place, std::move (value));
+}
+
+/// One stored member as written back, or nothing to write.
+std::optional<json> stored_member (const std::string& key,
+const json& value,
+const PostmanExportExample& example,
+const Recorded& recorded,
+Walk& walk) {
+    const std::optional<std::string> declared = declared_content_type (example.headers);
+    if (key == "name") {
+        return write (example.name);
+    }
+    if (key == "body") {
+        return write (example.body);
+    }
+    if (key == "code") {
+        return write (example.status);
+    }
+    if (key == "status") {
+        return write (
+        recorded.status_same ? value : json (vayu::http::status_text (example.status)));
+    }
+    if (key == "header") {
+        return write (recorded.rows_same ?
+        value :
+        postman_rows (example.headers, RowShape::Plain, walk));
+    }
+    if (key == "_postman_previewlanguage") {
+        return write (
+        recorded.type_same ? value : json (preview_language (declared.value_or (""))));
+    }
+    if (key == "_postman_previewtype") {
+        return recorded.type_same ? write (value) : std::nullopt;
+    }
+    if (key == "originalRequest" && value.is_object () &&
+    value.contains ("auth") && !walk.include_secrets) {
+        json request = value;
+        vayu_ext::redact_postman_auth (request.at ("auth"), walk.secrets_omitted);
+        return write (std::move (request));
+    }
+    return write (value);
+}
+
+/**
+ * An example the import kept Postman's saved response for
+ * (`request_examples.postman_response`), written back in the source's member
+ * order.
+ *
+ * The rule that keeps an edit made in Vayu from being contradicted: a member
+ * describing a column is written as stored only while that column still says
+ * what was imported. `name`, `code` and `body` are always the columns. The
+ * status text is kept while `status` is the code it was recorded with,
+ * `header[]` (its `name` fields and number values included) while `headers`
+ * reads the same through the importer's own row mapping, and the preview
+ * language and type while the declared Content-Type is unchanged; otherwise
+ * each is regenerated, and a regenerated preview type is left out, since it
+ * is Postman's own guess. `originalRequest` is kept verbatim: it records the
+ * request as it was sent when the response was saved, which differing from
+ * the request's current state does not make wrong, and nothing in Vayu edits
+ * it. Its auth is blanked like any other credential unless secrets were asked
+ * for. A member the source left out stays out while the column still holds
+ * the importer's default for it.
+ */
+json stored_response (const PostmanExportExample& example,
+const std::optional<std::string>& declared,
+Walk& walk) {
+    const Recorded recorded = compare_recorded (example, declared);
+    json out;
+    const json& stored = example.postman_response;
+    for (auto member = stored.begin (); member != stored.end (); ++member) {
+        if (std::optional<json> written =
+            stored_member (member.key (), member.value (), example, recorded, walk)) {
+            out[member.key ()] = std::move (*written);
+        }
+    }
+    // What the source left out, once an edit gives it a value.
+    const auto absent = [&out] (const char* key) { return !out.contains (key); };
+    if (absent ("name") && example.name != "Example") {
+        out["name"] = example.name;
+    }
+    if (absent ("status") && !recorded.status_same) {
+        out["status"] = vayu::http::status_text (example.status);
+    }
+    if (absent ("code") && example.status != 200) {
+        out["code"] = example.status;
+    }
+    if (absent ("_postman_previewlanguage") && !recorded.type_same) {
+        out["_postman_previewlanguage"] = preview_language (declared.value_or (""));
+    }
+    if (absent ("header") && !example.headers.empty ()) {
+        out["header"] = postman_rows (example.headers, RowShape::Plain, walk);
+    }
+    if (absent ("body") && !example.body.empty ()) {
+        out["body"] = example.body;
+    }
+    return out;
+}
+
 json postman_response (const PostmanExportExample& example,
 const json& original_request,
 Walk& walk) {
@@ -1007,6 +1153,12 @@ Walk& walk) {
     if (!example.content_type.empty () && (!declared || *declared != example.content_type)) {
         walk.lose (Loss::ExampleContentTypes);
     }
+    if (example.postman_response.is_object ()) {
+        return stored_response (example, declared, walk);
+    }
+    // Saved in Vayu (or from an OpenAPI document): no recorded request, so the
+    // request's current state stands in for it, as it would in Postman for a
+    // response saved just now.
     json out;
     out["name"]                     = example.name;
     out["originalRequest"]          = original_request;

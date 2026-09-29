@@ -42,6 +42,13 @@ struct PostmanExportExample {
     std::string body;
     std::string content_type;
     bool body_truncated = false;
+    /**
+     * `request_examples.postman_response`, parsed in stored member order: the
+     * Postman saved response this example was imported from, `null` when it
+     * has none. Written back member by member - see `postman_response` in the
+     * source for which members are kept and which an edit regenerates.
+     */
+    nlohmann::ordered_json postman_response = nullptr;
 };
 
 /// One stored request, its JSON columns parsed in stored key order.

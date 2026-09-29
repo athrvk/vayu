@@ -24,6 +24,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,6 +45,17 @@ ordered column (const std::string& blob, const ordered& fallback) {
         return fallback;
     }
     return parsed;
+}
+
+/// `request_examples.postman_response` as the exporter reads it: the object in
+/// stored member order, or `null` for an example with none (or a value that
+/// is not an object, which the write route never stores).
+ordered stored_postman_response (const std::optional<std::string>& blob) {
+    if (!blob) {
+        return nullptr;
+    }
+    ordered parsed = column (*blob, ordered::object ());
+    return parsed.empty () ? ordered () : parsed;
 }
 
 vayu::core::PostmanExportRequest
@@ -67,8 +79,8 @@ read_request (vayu::db::Database& db, const vayu::db::Request& row) {
     request.mock_response_mode = row.mock_response_mode;
     for (const auto& example : db.get_request_examples (row.id)) {
         request.examples.push_back ({ example.name, example.status,
-        column (example.headers, ordered::array ()), example.body,
-        example.content_type, example.body_truncated });
+        column (example.headers, ordered::array ()), example.body, example.content_type,
+        example.body_truncated, stored_postman_response (example.postman_response) });
     }
     return request;
 }

@@ -316,6 +316,13 @@ secrets and variables marked secret are written empty, and the dialog says how
 many. Turn it on to write them as stored, which is what Postman's own export
 does - only for a file that stays with you.
 
+**Saved responses come back as they were recorded.** An example imported from
+Postman keeps the request it was recorded against, its status text, preview
+settings, cookies and response time, and exports with them. Change its status or
+headers (through the API or an MCP agent) and the export writes that change, regenerating the status text,
+header rows and preview settings that described the old value; the recorded
+request stays as recorded.
+
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.

@@ -37,6 +37,11 @@ std::pair<int, nlohmann::json>
 export_postman_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 import_response (vayu::db::Database& db, const nlohmann::json& body);
+// Defined in examples.cpp.
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -129,7 +134,7 @@ TEST_F (PostmanExportRouteTest, TheRoundTripFixtureComesBackByteForByte) {
     json body            = export_ok (id);
     EXPECT_EQ (without_postman_id (body["text"].get<std::string> ()), fixture);
     EXPECT_EQ (body["fileName"], "Round Trip.postman_collection.json");
-    EXPECT_EQ (body["notes"]["requestsExported"], 19);
+    EXPECT_EQ (body["notes"]["requestsExported"], 21);
     EXPECT_EQ (body["notes"]["foldersExported"], 4);
     EXPECT_EQ (body["notes"]["notCarried"], json::array ());
     EXPECT_EQ (body["notes"]["secretsOmitted"], 0);
@@ -140,16 +145,88 @@ TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted
     import_text (read_text (fixture_path ("postman-export-roundtrip.json")));
     json body = export_ok (id, /*secrets=*/false);
     // The secret variable, the Admin folder's basic password, and the digest,
-    // API-key, OAuth 2.0 client secret, AWS key pair and NTLM credentials;
-    // the two `{{variable}}` references (bearer, the GraphQL API key) stay.
-    EXPECT_EQ (body["notes"]["secretsOmitted"], 8);
+    // API-key, OAuth 2.0 client secret, AWS key pair and NTLM credentials,
+    // and the bearer token a saved response's recorded request carries; the
+    // two `{{variable}}` references (bearer, the GraphQL API key) stay.
+    EXPECT_EQ (body["notes"]["secretsOmitted"], 9);
     const std::string text = body["text"].get<std::string> ();
-    for (const char* secret :
-    { "s3cr3t", "hunter2", "\"pw\"", "k-123", "\"shh\"", "SECRET", "AKIA" }) {
+    for (const char* secret : { "s3cr3t", "hunter2", "\"pw\"", "k-123",
+         "\"shh\"", "SECRET", "AKIA", "\"tok-live\"" }) {
         EXPECT_EQ (text.find (secret), std::string::npos) << secret;
     }
     EXPECT_NE (text.find ("{{token}}"), std::string::npos);
     EXPECT_NE (text.find ("{{apiKey}}"), std::string::npos);
+}
+
+/// The stored examples of the fixture's request named @p name.
+std::vector<vayu::db::RequestExample>
+examples_named (vayu::db::Database& db, const std::string& root, const std::string& name) {
+    for (const auto& row : db.get_requests_in_collection (root)) {
+        if (row.name == name) {
+            return db.get_request_examples (row.id);
+        }
+    }
+    ADD_FAILURE () << "no request " << name;
+    return {};
+}
+
+/// The exported `response[]` of the root request named @p name.
+ordered exported_responses (const std::string& text, const std::string& name) {
+    const ordered doc = ordered::parse (text);
+    for (const ordered& item : doc.at ("item")) {
+        if (item.value ("name", "") == name) {
+            return item.at ("response");
+        }
+    }
+    ADD_FAILURE () << "no exported item " << name;
+    return ordered::array ();
+}
+
+// The edit rule, end to end: an example edited through the route keeps its
+// recorded request verbatim, and every member describing the edited column
+// is regenerated rather than contradicting it. Mutation check: make
+// `stored_response` keep the stored `status` / `header` unconditionally and
+// the two regeneration assertions red.
+TEST_F (PostmanExportRouteTest, AnEditedImportedExampleExportsItsEditNotTheStaleCopy) {
+    const std::string fixture =
+    read_text (fixture_path ("postman-export-roundtrip.json"));
+    const std::string id = import_text (fixture);
+    const auto examples  = examples_named (*db_, id, "Look up tweets");
+    ASSERT_EQ (examples.size (), 2u);
+    const ordered before = exported_responses (export_text (id), "Look up tweets");
+
+    auto [status, edited] = vayu::http::routes::update_request_example_response (*db_,
+    examples[0].request_id, examples[0].id,
+    json{ { "status", 201 },
+    { "headers",
+    json::array ({ json{ { "key", "Content-Type" },
+    { "value", "application/json" }, { "enabled", true } } }) } });
+    ASSERT_EQ (status, 200) << edited.dump ();
+
+    const ordered after = exported_responses (export_text (id), "Look up tweets");
+    ordered response = after.at (0);
+    EXPECT_EQ (response["originalRequest"], before[0]["originalRequest"])
+    << "the recorded request is not the edited part and stays as recorded";
+    EXPECT_EQ (response["code"], 201);
+    EXPECT_EQ (response["status"], "Created");
+    EXPECT_EQ (response["header"].dump (),
+    R"([{"key":"Content-Type","value":"application/json"}])");
+    EXPECT_EQ (response["_postman_previewlanguage"], "json");
+    EXPECT_FALSE (response.contains ("_postman_previewtype"));
+    EXPECT_EQ (response["cookie"], before[0]["cookie"]);
+    EXPECT_EQ (response["responseTime"], "493");
+    EXPECT_EQ (after.at (1), before.at (1))
+    << "the untouched example is unchanged";
+
+    // Clearing the stored response falls back to regeneration entirely.
+    auto [cleared_status, cleared] =
+    vayu::http::routes::update_request_example_response (*db_,
+    examples[1].request_id, examples[1].id, json{ { "postmanResponse", nullptr } });
+    ASSERT_EQ (cleared_status, 200) << cleared.dump ();
+    const ordered regenerated =
+    exported_responses (export_text (id), "Look up tweets").at (1);
+    EXPECT_EQ (regenerated["status"], "Unprocessable Content");
+    EXPECT_EQ (regenerated["originalRequest"]["url"]["raw"], "{{baseUrl}}/tweets?ids=1");
 }
 
 TEST_F (PostmanExportRouteTest, WritesNothing) {

@@ -510,7 +510,16 @@ logged as a warning: it means a client skipped composition.
   request's imported rows on any applied change; every read filters tombstones
   out (`get_request_examples`, `get_request_example`) and
   `get_suppressed_request_examples` is the single read that sees them, matching
-  on response **status**, which survives a reworded description.
+  on response **status**, which survives a reworded description. An example
+  imported from Postman keeps the saved response it came from in
+  **`postman_response`** (schema version 2): the entry as JSON text in source
+  member order, `name`/`body` as `null` placeholders. Only an import writes it
+  (a string on create, `null` - clear - the only value `PUT` takes), no read
+  route returns it, and `POST /export/postman` is its one reader: members
+  describing `status` or `headers` are written back only while those columns
+  still say what was imported, so an edit is never contradicted by the stored
+  copy; `originalRequest` is always kept (its `auth` blanked without
+  `includeSecrets`).
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start. A `404`
   means the request was genuinely deleted; anything else is a transport failure,

@@ -82,7 +82,8 @@ bool is_variable_reference (std::string_view text) {
     inner.find_first_not_of (' ') != std::string_view::npos;
 }
 
-/// Blanks @p value when it is a credential worth blanking, counting it.
+/// Blanks @p value when it is a non-empty string that is not one
+/// `{{variable}}` reference, counting it in @p omitted.
 void blank_secret (Json& value, int& omitted) {
     if (!value.is_string ()) {
         return;
@@ -93,6 +94,33 @@ void blank_secret (Json& value, int& omitted) {
     }
     value = "";
     omitted += 1;
+}
+
+/// One Postman auth type's detail: v2.1's `[{key, value, type}]` attribute
+/// array, or v2.0's `{name: value}` object.
+void redact_postman_detail (Json& detail, int& omitted) {
+    if (detail.is_object ()) {
+        for (auto field = detail.begin (); field != detail.end (); ++field) {
+            if (one_of (SECRET_AUTH_KEYS, field.key ())) {
+                blank_secret (field.value (), omitted);
+            }
+        }
+        return;
+    }
+    if (!detail.is_array ()) {
+        return;
+    }
+    for (Json& attribute : detail) {
+        if (!attribute.is_object ()) {
+            continue;
+        }
+        const auto key   = attribute.find ("key");
+        const auto value = attribute.find ("value");
+        if (key != attribute.end () && key->is_string () && value != attribute.end () &&
+        one_of (SECRET_AUTH_KEYS, key->get<std::string> ())) {
+            blank_secret (*value, omitted);
+        }
+    }
 }
 
 /// Blanks every secret member of one auth level, and recurses into `config`
@@ -179,17 +207,8 @@ void redact_postman_auth (Json& source, int& omitted) {
         return;
     }
     for (auto member = source.begin (); member != source.end (); ++member) {
-        if (!member->is_array ()) {
-            continue;
-        }
-        for (Json& attribute : *member) {
-            if (!attribute.is_object () || !is_string_member (attribute, "key") ||
-            !one_of (SECRET_AUTH_KEYS, attribute.at ("key").get<std::string> ())) {
-                continue;
-            }
-            if (const auto value = attribute.find ("value"); value != attribute.end ()) {
-                blank_secret (*value, omitted);
-            }
+        if (member.key () != "type") {
+            redact_postman_detail (member.value (), omitted);
         }
     }
 }

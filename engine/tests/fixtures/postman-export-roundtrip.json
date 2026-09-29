@@ -1097,6 +1097,195 @@
 				}
 			},
 			"response": []
+		},
+		{
+			"name": "Look up tweets",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/tweets?ids=1",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"tweets"
+					],
+					"query": [
+						{
+							"key": "ids",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Two tweets",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer tok-live",
+								"name": "Authorization",
+								"description": "Added as a part of security scheme: bearer"
+							}
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "tok-live",
+									"type": "string"
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api.example.com/2/tweets/:id?ids=20,21&tweet.fields=created_at",
+							"protocol": "https",
+							"host": [
+								"api",
+								"example",
+								"com"
+							],
+							"path": [
+								"2",
+								"tweets",
+								":id"
+							],
+							"query": [
+								{
+									"key": "ids",
+									"value": "20,21"
+								},
+								{
+									"key": "tweet.fields",
+									"value": "created_at",
+									"description": "Fields to return"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Recorded against production."
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "plain",
+					"_postman_previewtype": "text",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "text/plain;charset=utf-8",
+							"name": "Content-Type",
+							"description": ""
+						},
+						{
+							"key": "X-Rate-Limit-Remaining",
+							"value": 450,
+							"name": "X-Rate-Limit-Remaining",
+							"description": ""
+						}
+					],
+					"cookie": [
+						{
+							"expires": "Fri Apr 15 2016 06:54:28 GMT-0400 (EDT)",
+							"hostOnly": false,
+							"httpOnly": true,
+							"domain": "api.example.com",
+							"path": "/",
+							"secure": true,
+							"session": false,
+							"value": "abc",
+							"key": "sid"
+						}
+					],
+					"responseTime": "493",
+					"body": "20: first\n21: second"
+				},
+				{
+					"name": "Invalid ids",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/tweets?ids=x",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"tweets"
+							],
+							"query": [
+								{
+									"key": "ids",
+									"value": "x"
+								}
+							]
+						}
+					},
+					"status": "Unprocessable Entity",
+					"code": 422,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json; charset=utf-8"
+						}
+					],
+					"cookie": [],
+					"body": "{\"errors\": [\"ids\"]}"
+				}
+			]
+		},
+		{
+			"name": "Legacy saved response",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/legacy",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"legacy"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Recorded without a status",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/legacy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"legacy"
+							]
+						}
+					},
+					"_postman_previewlanguage": "javascript",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{}"
+				}
+			]
 		}
 	],
 	"auth": {

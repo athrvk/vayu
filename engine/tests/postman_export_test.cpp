@@ -777,6 +777,132 @@ TEST (PostmanExport, ExamplesAreResponsesWithTheirOriginalRequest) {
     EXPECT_EQ (item["response"][1]["_postman_previewlanguage"], "Text");
 }
 
+/// A saved response as `request_examples.postman_response` holds it.
+ordered recorded_response () {
+    return ordered::parse (R"({
+        "name": null,
+        "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "tok-live", "type": "string"}]},
+            "url": {"raw": "https://api.example.com/tweets?ids=20", "host": ["api", "example", "com"]}
+        },
+        "status": "Unprocessable Entity",
+        "code": 422,
+        "_postman_previewlanguage": "plain",
+        "_postman_previewtype": "text",
+        "header": [
+            {"key": "Content-Type", "value": "text/plain", "name": "Content-Type"},
+            {"key": "X-Left", "value": 450, "name": "X-Left", "description": ""}
+        ],
+        "cookie": [{"key": "sid", "value": "abc"}],
+        "responseTime": "493",
+        "body": null
+    })");
+}
+
+/// The example the importer stores from @p recorded.
+PostmanExportExample recorded_example (const ordered& recorded) {
+    return { "Invalid", 422,
+        ordered::array ({ row ("Content-Type", "text/plain"), row ("X-Left", "450") }),
+        "nope", "text/plain", false, recorded };
+}
+
+// Every member of a stored saved response comes back in its own order, with
+// the columns' values in the `name` / `body` / `code` positions. Mutation
+// check: return the regenerated response even when `postman_response` is
+// set, and every verbatim assertion reds.
+TEST (PostmanExport, AStoredSavedResponseIsWrittenBackAsRecorded) {
+    PostmanExportRequest entry = request ("r", "{{baseUrl}}/tweets?ids=1");
+    entry.params               = ordered::array ({ row ("ids", "1") });
+    entry.examples.push_back (recorded_example (recorded_response ()));
+    ordered response = only_item (entry)["response"][0];
+    EXPECT_EQ (keys_of (response),
+    (Keys{ "name", "originalRequest", "status", "code", "_postman_previewlanguage",
+    "_postman_previewtype", "header", "cookie", "responseTime", "body" }));
+    EXPECT_EQ (response["name"], "Invalid");
+    EXPECT_EQ (response["originalRequest"], recorded_response ()["originalRequest"]);
+    EXPECT_EQ (response["status"], "Unprocessable Entity");
+    EXPECT_EQ (response["code"], 422);
+    EXPECT_EQ (response["_postman_previewlanguage"], "plain");
+    EXPECT_EQ (response["_postman_previewtype"], "text");
+    EXPECT_EQ (response["header"], recorded_response ()["header"]);
+    EXPECT_EQ (response["header"][1]["value"], 450);
+    EXPECT_EQ (response["cookie"], recorded_response ()["cookie"]);
+    EXPECT_EQ (response["responseTime"], "493");
+    EXPECT_EQ (response["body"], "nope");
+}
+
+// The status text belongs to the code it was recorded with. Mutation check:
+// drop the `status_same` condition and this reds.
+TEST (PostmanExport, AnEditedStatusRegeneratesTheStatusText) {
+    PostmanExportRequest entry   = request ("r", "u");
+    PostmanExportExample example = recorded_example (recorded_response ());
+    example.status               = 201;
+    entry.examples.push_back (example);
+    ordered response = only_item (entry)["response"][0];
+    EXPECT_EQ (response["status"], "Created");
+    EXPECT_EQ (response["code"], 201);
+}
+
+// Edited header rows are written from the column; the preview members follow
+// the declared Content-Type. Mutation check: drop the `rows_same` or
+// `type_same` condition and the matching assertion reds.
+TEST (PostmanExport, EditedHeadersRegenerateTheHeaderRowsAndPreview) {
+    PostmanExportRequest entry   = request ("r", "u");
+    PostmanExportExample example = recorded_example (recorded_response ());
+    example.headers = ordered::array ({ row ("Content-Type", "application/json") });
+    entry.examples.push_back (example);
+    ordered response = only_item (entry)["response"][0];
+    EXPECT_EQ (response["header"].dump (),
+    R"([{"key":"Content-Type","value":"application/json"}])");
+    EXPECT_EQ (response["_postman_previewlanguage"], "json");
+    EXPECT_FALSE (response.contains ("_postman_previewtype"));
+    EXPECT_EQ (response["status"], "Unprocessable Entity")
+    << "the status was not edited";
+
+    // A header edit that keeps the Content-Type keeps the preview members.
+    PostmanExportRequest same_type = request ("r", "u");
+    PostmanExportExample renamed   = recorded_example (recorded_response ());
+    renamed.headers = ordered::array ({ row ("Content-Type", "text/plain") });
+    same_type.examples.push_back (renamed);
+    ordered kept = only_item (same_type)["response"][0];
+    EXPECT_EQ (kept["header"].dump (), R"([{"key":"Content-Type","value":"text/plain"}])");
+    EXPECT_EQ (kept["_postman_previewlanguage"], "plain");
+    EXPECT_EQ (kept["_postman_previewtype"], "text");
+}
+
+// A member the source never wrote stays out while the column holds the
+// importer's default for it, and is written once an edit gives it a value.
+TEST (PostmanExport, AMemberTheSourceLeftOutStaysOutUntilEdited) {
+    ordered recorded = ordered::parse (R"({"name": null, "originalRequest": {"method": "GET"},
+        "_postman_previewlanguage": "json", "header": [], "cookie": [], "body": null})");
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back ({ "Old", 200, ordered::array (), "{}", "", false, recorded });
+    ordered untouched = only_item (entry)["response"][0];
+    EXPECT_EQ (keys_of (untouched),
+    (Keys{ "name", "originalRequest", "_postman_previewlanguage", "header", "cookie", "body" }));
+
+    entry.examples.at (0).status = 404;
+    const ordered edited         = only_item (entry)["response"][0];
+    EXPECT_EQ (edited["status"], "Not Found");
+    EXPECT_EQ (edited["code"], 404);
+}
+
+// The recorded request's credentials are blanked like every other one.
+// Mutation check: skip `redact_postman_auth` and the token survives.
+TEST (PostmanExport, ARecordedRequestsCredentialsAreBlankedUnlessAskedFor) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back (recorded_example (recorded_response ()));
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 1);
+    EXPECT_EQ (blanked.text.find ("tok-live"), std::string::npos);
+    const auto kept = run (root, /*secrets=*/true);
+    EXPECT_NE (kept.text.find ("tok-live"), std::string::npos);
+}
+
 TEST (PostmanExport, ExampleFactsPostmanCannotHoldAreNotes) {
     PostmanExportRequest entry = request ("r", "u");
     entry.examples.push_back ({ "cut", 200, ordered::array (), "par", "", true });
