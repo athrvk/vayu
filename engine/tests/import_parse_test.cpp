@@ -1524,6 +1524,37 @@ TEST (PostmanImport, CountsAnInvalidPercentEscapeThatChangesOnRejoin) {
     1);
 }
 
+/**
+ * What an export back to Postman needs the import to have kept (the Postman
+ * exporter's round trip): each case pins one piece of a Postman document
+ * that used to be rewritten or dropped on the way in, and is a mutation
+ * check on it.
+ */
+TEST (PostmanImport, KeepsEveryEventInDocumentOrderAndADisabledOneTurnedOff) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"j("},"item":[
+        {"name":"R","event":[
+            {"listen":"test","script":{"exec":["t()"]}},
+            {"listen":"prerequest","script":{"exec":["p()"]},"disabled":true},
+            {"listen":"test","script":{"exec":["u()"]}}
+        ],"request":{"method":"GET","url":"https://x.com"}}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& elements =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("elements");
+    ASSERT_EQ (elements.size (), 3U);
+    EXPECT_EQ (elements[0].at ("kind"), "script.post");
+    EXPECT_EQ (elements[0].at ("config").at ("script"), "t()");
+    EXPECT_FALSE (elements[0].contains ("enabled"));
+    // Postman's runtime skips a disabled event; importing it active would run
+    // a script the collection had switched off.
+    EXPECT_EQ (elements[1].at ("kind"), "script.pre");
+    EXPECT_EQ (elements[1].at ("enabled"), false);
+    // A second event of one listen used to be dropped without a count.
+    EXPECT_EQ (elements[2].at ("config").at ("script"), "u()");
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

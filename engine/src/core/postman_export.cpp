@@ -48,8 +48,6 @@ using json = nlohmann::ordered_json;
 /// Every `notCarried` code, in the order the notes list them.
 enum class Loss : std::uint8_t {
     VayuElements,
-    DisabledScripts,
-    MergedScripts,
     ScriptSettings,
     JsonRpcBodies,
     UnsupportedBodies,
@@ -78,8 +76,6 @@ struct LossText {
 /// "message (count)", keyed on the code.
 constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "vayu_elements", "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" },
-{ "disabled_scripts", "Turned-off scripts were left out" },
-{ "merged_scripts", "Several scripts on one level were joined into one" },
 { "script_settings", "Script names and the run-inline setting have no Postman equivalent" },
 { "jsonrpc_bodies", "JSON-RPC bodies were written as raw JSON" },
 { "unsupported_bodies", "Bodies in a mode Postman lacks were left out" },
@@ -737,7 +733,7 @@ json script_exec (const std::string& script) {
     return split_on (script, '\n');
 }
 
-json postman_event (const char* listen, const std::string& script, EventOwner owner) {
+json postman_event (const char* listen, const std::string& script, EventOwner owner, bool enabled) {
     json body;
     if (owner == EventOwner::Request) {
         body["exec"]     = script_exec (script);
@@ -750,17 +746,18 @@ json postman_event (const char* listen, const std::string& script, EventOwner ow
         body["requests"] = json::object ();
         body["exec"]     = script_exec (script);
     }
-    return json{ { "listen", listen }, { "script", std::move (body) } };
+    json event{ { "listen", listen }, { "script", std::move (body) } };
+    if (!enabled) {
+        // Postman's runtime skips a disabled event, as Vayu skips a turned-off
+        // element; the importer reads it back the same way.
+        event["disabled"] = true;
+    }
+    return event;
 }
 
-/// The one script a level's elements give an event, or "" for none.
-struct Scripts {
-    std::vector<std::string> pre;
-    std::vector<std::string> post;
-};
-
-/// Sorts one element into @p scripts, or counts why it is not written.
-void read_element (const json& element, Scripts& scripts, Walk& walk) {
+/// One element as its event, or nothing when it is not a step script (counted)
+/// or holds no text.
+std::optional<json> element_event (const json& element, EventOwner owner, Walk& walk) {
     const std::string kind = text_of (element, "kind");
     const json empty       = json::object ();
     const auto found       = element.find ("config");
@@ -772,48 +769,37 @@ void read_element (const json& element, Scripts& scripts, Walk& walk) {
         if (!kind.starts_with ("script.") || !is_blank_script_text (script)) {
             walk.lose (Loss::VayuElements);
         }
-        return;
+        return std::nullopt;
     }
     if (is_blank_script_text (script)) {
-        return;
-    }
-    if (!flag_of (element, "enabled", true)) {
-        walk.lose (Loss::DisabledScripts);
-        return;
+        return std::nullopt;
     }
     if (!text_of (element, "name").empty () || flag_of (config, "inline", false)) {
         walk.lose (Loss::ScriptSettings);
     }
-    (kind == "script.pre" ? scripts.pre : scripts.post).push_back (script);
+    return std::make_optional (
+    postman_event (kind == "script.pre" ? "prerequest" : "test", script, owner,
+    flag_of (element, "enabled", true)));
 }
 
-std::string joined (const std::vector<std::string>& scripts, Walk& walk) {
-    if (scripts.size () > 1) {
-        walk.lose (Loss::MergedScripts);
-    }
-    std::string out;
-    for (const std::string& script : scripts) {
-        out += out.empty () ? script : "\n" + script;
-    }
-    return out;
-}
-
-/// A level's `event` array, or nothing when it has no script.
+/**
+ * A level's `event` array, or nothing when it has no script: one event per
+ * script element, in element order. Postman runs every event of a listen in
+ * the order listed, which is how Vayu runs several script elements of one
+ * phase, so nothing is joined; the importer reads each back as its own
+ * element.
+ */
 std::optional<json> postman_events (const json& elements, EventOwner owner, Walk& walk) {
-    Scripts scripts;
+    json events = json::array ();
     if (elements.is_array ()) {
         for (const json& element : elements) {
-            if (element.is_object ()) {
-                read_element (element, scripts, walk);
+            if (!element.is_object ()) {
+                continue;
+            }
+            if (std::optional<json> event = element_event (element, owner, walk)) {
+                events.push_back (std::move (*event));
             }
         }
-    }
-    json events = json::array ();
-    if (!scripts.pre.empty ()) {
-        events.push_back (postman_event ("prerequest", joined (scripts.pre, walk), owner));
-    }
-    if (!scripts.post.empty ()) {
-        events.push_back (postman_event ("test", joined (scripts.post, walk), owner));
     }
     return events.empty () ? std::nullopt : std::make_optional (std::move (events));
 }

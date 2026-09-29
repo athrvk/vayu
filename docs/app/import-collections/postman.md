@@ -78,8 +78,7 @@ The root is produced by `pmFolder(parsed, ctx)`; `parsed` is the whole collectio
 | `info.description` (fallback `description`) | `description` | string used directly; if object, `.content` is used; else `""` |
 | `variable[]` | `variables` | via `to_var_record` |
 | `auth` | `auth` | via `collectionAuth` (see [Auth](#auth-mapping)) |
-| `event[]` (`prerequest`) | `preRequestScript` | via `join_exec`; `""` when `importScripts` is false |
-| `event[]` (`test`) | `postRequestScript` | via `join_exec`; `""` when `importScripts` is false |
+| `event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
 | nested `item[]` (folders) | `children` | recursion |
 | `item[]` (requests) | `requests` | |
 
@@ -98,14 +97,26 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | `request.header[]` | `headers` | via `map_key_values` |
 | `request.body` | `body` | via `pmBody` (see [Body mapping](#body-mapping)) |
 | `request.auth` | `auth` | via `map_postman_auth`; `inherit` allowed for requests |
-| `item.event[]` (`prerequest`) | `preRequestScript` | via `join_exec`; `""` when `importScripts` is false |
-| `item.event[]` (`test`) | `postRequestScript` | via `join_exec`; `""` when `importScripts` is false |
+| `item.event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
 | `item.protocolProfileBehavior.followRedirects` | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
 | `item.protocolProfileBehavior.strictSSL` | `verifySSL` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.response[]` | `examples` | via `pmExamples` (see [Saved responses](#saved-responses)); **absent** when the item saved none |
 | `request.certificate` | `clientCertificates[]` (top-level, not a request field) | resolved into a `client_certificates` registry entry keyed on the request's own host, applied best-effort by `POST /import/apply` after the rest of the tree commits (issue #1656) - Vayu's client certificates belong to a host, not a request. A candidate is resolved only when it would pass the same check `POST /client-certificates` runs: a readable PEM pair or PKCS#12 file, a literal (not `{{var}}`) host, and no earlier request in this import already claiming a different certificate for that (host, port). Anything else counts as `certificate` instead |
 | `request.proxy` | - | not imported - Vayu has no per-request proxy override, and none is planned: `TransportPolicy` is workspace/run-scoped (`engine/CLAUDE.md`), so this stays a permanent tally rather than a mapping (issue #1656's own recorded decision); counted as `proxy_config` |
+
+### Scripts
+
+`set_event_elements` turns every `event[]` entry into one element, in the
+order the document lists them: `prerequest` becomes `script.pre`, `test`
+becomes `script.post`, and the script is `join_exec` of its `exec`. Postman
+runs every event of a listen in order, and Vayu runs every script element of
+a phase in order, so a second `test` event is a second element (it used to be
+dropped without a count) and a level that lists `test` before `prerequest`
+exports back that way. An event marked `disabled: true` is one Postman's
+runtime skips, so it imports as an element with `enabled: false` rather than
+a script that runs. A blank script contributes nothing, and a `listen` other
+than those two has no phase in Vayu.
 
 ### Saved responses
 
@@ -233,7 +244,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 ## Options & lossy behavior
 
-**`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` emit `""` for both `preRequestScript` and `postRequestScript` (the `join_exec` call is gated behind the flag). When true, `join_exec` joins the event's `script.exec` array with `\n` (or returns the string form, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
+**`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
 **`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (`hawk`/`oauth1`/`edgegrid`/a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `path_variables` and `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `invalid_percent_encoding` (a query key or value whose invalid `%` escape changes when rejoined into the URL, see [URL handling](#url-handling)), `variable_metadata` (a collection, folder, environment or globals variable's `description` or non-`secret` `type`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 

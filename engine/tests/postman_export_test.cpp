@@ -616,9 +616,10 @@ TEST (PostmanExport, ScriptsAreEventsInPostmansShapePerLevel) {
     ordered doc = document (root);
     EXPECT_EQ (doc["event"].dump (),
     R"j([{"listen":"prerequest","script":{"type":"text/javascript","packages":{},"requests":{},"exec":["one()","two()"]}}])j");
-    // A request's script lists `exec` first; prerequest before test.
+    // A request's script lists `exec` first; events keep element order, so a
+    // test listed before its prerequest stays there.
     EXPECT_EQ (doc["item"][0]["event"].dump (),
-    R"j([{"listen":"prerequest","script":{"exec":["p()"],"type":"text/javascript","packages":{},"requests":{}}},{"listen":"test","script":{"exec":["a()","","b()"],"type":"text/javascript","packages":{},"requests":{}}}])j");
+    R"j([{"listen":"test","script":{"exec":["a()","","b()"],"type":"text/javascript","packages":{},"requests":{}}},{"listen":"prerequest","script":{"exec":["p()"],"type":"text/javascript","packages":{},"requests":{}}}])j");
 }
 
 TEST (PostmanExport, ElementsPostmanCannotHoldAreNotes) {
@@ -639,13 +640,19 @@ TEST (PostmanExport, ElementsPostmanCannotHoldAreNotes) {
     root.requests.push_back (entry);
     const auto outcome = run (root);
     EXPECT_EQ (losses (outcome),
-    (json{ { "vayu_elements", 3 }, { "disabled_scripts", 1 },
-    { "merged_scripts", 2 }, { "script_settings", 2 } }));
+    (json{ { "vayu_elements", 3 }, { "script_settings", 2 } }));
+    // One event per script element, none joined; a turned-off one is written
+    // disabled, which Postman's runtime skips as Vayu does.
     ordered events = ordered::parse (outcome.text)["item"][0]["event"];
-    EXPECT_EQ (events[0]["script"]["exec"].dump (), R"j(["a()","b()"])j");
-    EXPECT_EQ (events[1]["script"]["exec"].dump (), R"j(["n()","i()"])j");
+    ASSERT_EQ (events.size (), 5U);
+    EXPECT_EQ (events[0]["script"]["exec"].dump (), R"j(["a()"])j");
+    EXPECT_EQ (events[1]["script"]["exec"].dump (), R"j(["b()"])j");
+    EXPECT_EQ (events[2]["listen"], "prerequest");
+    EXPECT_EQ (events[2]["disabled"], true);
+    EXPECT_FALSE (events[3].contains ("disabled"));
+    EXPECT_EQ (events[4]["script"]["exec"].dump (), R"j(["i()"])j");
     // Codes arrive in their fixed order, each with its sentence.
-    ASSERT_EQ (outcome.notes.not_carried.size (), 4U);
+    ASSERT_EQ (outcome.notes.not_carried.size (), 2U);
     EXPECT_EQ (outcome.notes.not_carried[0].code, "vayu_elements");
     EXPECT_FALSE (outcome.notes.not_carried[0].message.empty ());
 }

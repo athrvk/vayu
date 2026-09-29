@@ -3351,8 +3351,6 @@ Postman's own export does.
 | Code | Written when the collection holds |
 |------|-----------------------------------|
 | `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
-| `disabled_scripts` | A turned-off script; Postman would run it, so it is left out |
-| `merged_scripts` | More than one pre-request (or post-response) script on one level, joined into its single Postman script |
 | `script_settings` | A script with a name or the load-test `inline` setting |
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
@@ -3377,7 +3375,9 @@ stored order); a request's `inherit` auth is an absent `auth` and its `none` is
 are `raw` with that `options.raw.language`, `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `form-data` is `formdata` with a file part's `src`; `script.pre` /
-`script.post` are the `prerequest` / `test` events; saved examples are
+`script.post` are the `prerequest` / `test` events, one event per element in
+element order, a turned-off one written `disabled: true` (Postman's runtime
+skips it, as Vayu does); saved examples are
 `response` entries with an `originalRequest`; `followRedirects: false`,
 `maxRedirects` other than 10 and `verifySSL: false` are
 `protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD

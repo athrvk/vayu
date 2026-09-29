@@ -1230,15 +1230,45 @@ std::vector<const json*> pm_events (const json* node) {
     return events;
 }
 
-/// The first event listening on @p listen, or nothing.
-const json* pm_event (const std::vector<const json*>& events, const char* listen) {
-    for (const json* event : events) {
-        const json* declared = prop (event, "listen");
-        if (declared != nullptr && *declared == listen) {
-            return event;
-        }
+/// The element kind a Postman `listen` runs as, or nothing for a listen Vayu
+/// has no phase for.
+const char* script_kind_of (const std::string* listen) {
+    if (listen != nullptr && *listen == "prerequest") {
+        return "script.pre";
+    }
+    if (listen != nullptr && *listen == "test") {
+        return "script.post";
     }
     return nullptr;
+}
+
+/**
+ * @p events as `script.pre` / `script.post` elements on @p item, one element
+ * per event and in the order the document lists them - Postman runs every
+ * event of a listen, and a level whose `test` precedes its `prerequest`
+ * exports back in that order. An event Postman marks `disabled: true` is one
+ * its runtime skips, so it imports turned off rather than running; a blank
+ * script contributes nothing, and a `listen` other than the two Vayu runs
+ * is not a script Vayu has a phase for.
+ */
+void set_event_elements (json& item, const std::vector<const json*>& events) {
+    json elements = json::array ();
+    for (const json* event : events) {
+        const char* kind = script_kind_of (as_str (prop (event, "listen")));
+        const std::string script = join_exec (event);
+        if (kind == nullptr || script.find_first_not_of (" \t\r\n") == std::string::npos) {
+            continue;
+        }
+        json element = { { "kind", kind }, { "config", { { "script", script } } } };
+        if (const json* disabled = prop (event, "disabled");
+        disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
+            element["enabled"] = false;
+        }
+        elements.push_back (std::move (element));
+    }
+    if (!elements.empty ()) {
+        item["elements"] = std::move (elements);
+    }
 }
 
 /**
@@ -1497,8 +1527,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {
-        set_script_elements (request, join_exec (pm_event (events, "prerequest")),
-        join_exec (pm_event (events, "test")));
+        set_event_elements (request, events);
     }
     pm_redirects (item, request);
     if (!examples.empty ()) {
@@ -1567,8 +1596,7 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     collection["auth"] = collection_auth (prop (node, "auth"),
     counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
     if (counts.options.import_scripts) {
-        set_script_elements (collection, join_exec (pm_event (events, "prerequest")),
-        join_exec (pm_event (events, "test")));
+        set_event_elements (collection, events);
     }
     collection["children"] = std::move (children);
     collection["requests"] = std::move (requests);

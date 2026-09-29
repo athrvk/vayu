@@ -465,6 +465,54 @@
 			]
 		},
 		{
+			"name": "Fidelity",
+			"item": [
+				{
+					"name": "Checks first",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"created\", () => pm.response.to.have.status(201));"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"console.log(\"off\");"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							},
+							"disabled": true
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/checks",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"checks"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "What an export gives back as Postman wrote it."
+		},
+		{
 			"name": "Soap call",
 			"protocolProfileBehavior": {
 				"strictSSL": false,
