@@ -11,6 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,6 +142,37 @@ TEST (PendingPathVariablesOf, KeepsTheAnsweringPathRowOfEachKey) {
     ASSERT_EQ (pending.size (), 1u);
     EXPECT_EQ (pending[0].key, "id");
     EXPECT_EQ (pending[0].value, "last");
+}
+
+/**
+ * `tests/fixtures/path-variable-conformance.json` is the contract between this
+ * scanner and substitution and the app's copy of both
+ * (`path-variables.conformance.test.ts` reads the same file): a case added
+ * there fails whichever side answers it differently.
+ */
+TEST (PathVariableConformance, EveryFixtureCaseMatches) {
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "path-variable-conformance.json";
+    std::ifstream in (path);
+    ASSERT_TRUE (in.good ()) << "fixture missing: " << path;
+    const json fixture = json::parse (in);
+    const json& cases  = fixture.at ("cases");
+    // Guards the scan itself: an empty table would pass every case.
+    ASSERT_GT (cases.size (), 20u);
+    const auto identity = [] (const std::string& value) { return value; };
+    for (const json& c : cases) {
+        const std::string name = c.at ("name").get<std::string> ();
+        const std::string url  = c.at ("url").get<std::string> ();
+        json segments          = json::array ();
+        for (const auto& segment : path_variable_segments (url)) {
+            segments.push_back ({ { "name", segment.name },
+            { "offset", segment.offset }, { "length", segment.length } });
+        }
+        EXPECT_EQ (segments, c.at ("segments")) << name;
+        EXPECT_EQ (vayu::core::substitute_path_variables (url, c.at ("rows"), identity),
+        c.at ("composed").get<std::string> ())
+        << name;
+    }
 }
 
 } // namespace

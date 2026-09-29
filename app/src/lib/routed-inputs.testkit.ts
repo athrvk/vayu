@@ -273,6 +273,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts",
 		paths: ["engine/tests/fixtures/set-cookie-conformance.json"],
 	},
+	pathVariables: {
+		reader: "app/src/modules/request-builder/utils/path-variables.conformance.test.ts",
+		paths: ["engine/tests/fixtures/path-variable-conformance.json"],
+	},
 	importPayloads: {
 		reader: "app/src/services/importers/orchestrator.payload-conformance.test.ts",
 		paths: ["engine/tests/fixtures/import-conformance.json"],

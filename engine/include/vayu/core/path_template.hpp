@@ -26,7 +26,10 @@
  *
  * It also holds the one engine-side reading of Postman's `:name` path
  * variables (issue #1764): which segments of a URL are one, and what a
- * request's `in: "path"` Params rows put in their place at send time.
+ * request's `in: "path"` Params rows put in their place at send time. The
+ * app's copy of that reading (`request-builder/utils/path-variables.ts`) is
+ * pinned to this one by `tests/fixtures/path-variable-conformance.json`, read
+ * by `path_variables_test.cpp` and `path-variables.conformance.test.ts`.
  */
 
 #include <cstddef>
@@ -113,10 +116,9 @@ struct PathVariableSegment {
  * data in one segment rather than structure. A `%XX` triplet already in the
  * value is copied as written, as `postman-url-encoder` does: a value imported
  * pre-encoded (`a%40b.com`) goes out as Postman sends it, not encoded twice.
- * A token is kept whole because something
- * after composition still has to answer it - a data column bound per
- * iteration, a deferred `{{$guid}}`, the residual pass after a pre-request
- * script - and an encoded `%7B%7B` would be a name nothing can find.
+ * A token is kept whole: composition never writes a value that still holds
+ * one (it waits, see @ref settle_path_variables), so a token here is one
+ * nothing answered, and it goes out as the name it is rather than `%7B%7B`.
  */
 [[nodiscard]] std::string encode_path_segment_value (std::string_view value);
 

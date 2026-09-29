@@ -12,7 +12,8 @@
  * The URL keeps `:name` verbatim; the engine substitutes the enabled rows at
  * compose time. This file is the app's one statement of which segments count,
  * and of the substitution the snippets (`services/codegen`) and the Params
- * tab's "Sends" line need to agree with the engine on.
+ * tab's "Sends" line need to agree with the engine on, pinned to it by
+ * `engine/tests/fixtures/path-variable-conformance.json`.
  */
 
 import type { KeyValueEntry, KeyValueItem } from "@/types";
@@ -273,10 +274,8 @@ function urlEncode(text: string): string {
  * `value` percent-encoded as one path segment, with every `{{variable}}` token
  * in it kept verbatim - the engine's `encode_path_segment_value`. A `/`, `?`,
  * `#` or a bare `%` in a value is data in one segment rather than structure, a
- * `%XX` already in it is sent as written; a token
- * is kept whole because something after composition still has to answer it
- * (a data column, a deferred `{{$guid}}`), and `%7B%7B` would be a name
- * nothing can find.
+ * `%XX` already in it is sent as written; a token is kept whole, so a
+ * snippet shows the name a run answers rather than `%7B%7B`.
  */
 export function encodePathSegmentValue(value: string): string {
 	let out = "";

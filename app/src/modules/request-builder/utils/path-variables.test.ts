@@ -8,28 +8,21 @@
 /**
  * Which URL segments are path variables, how rows follow them, and what the
  * substitution sends (issue #1764). The segment rule is the one the engine
- * applies, so every case here is a claim about what a send does.
- *
- * The first three blocks mirror `engine/tests/path_variables_test.cpp` one
- * case for one, under the same suite and test names, so the two sides provably
- * read a URL alike: change a case there, change it here.
+ * applies, so every case here is a claim about what a send does. That the two
+ * sides read a URL alike is `path-variables.conformance.test.ts`'s job, over
+ * the fixture both suites read.
  */
 
 import { describe, it, expect } from "vitest";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import {
 	composePathParams,
-	encodePathSegmentValue,
 	pathRowsFromUrl,
 	pathVariableNames,
-	pathVariableSegments,
 	displayPathRows,
 	substitutePathVariables,
 	syncPathRows,
 } from "./path-variables";
-
-/** Every `:name` in the URL, repeats included - the engine test's `names_in`. */
-const namesIn = (url: string) => pathVariableSegments(url).map((segment) => segment.name);
 
 const path = (key: string, value: string, enabled = true): KeyValueEntry => ({
 	key,
@@ -40,90 +33,6 @@ const path = (key: string, value: string, enabled = true): KeyValueEntry => ({
 
 const row = (id: string, key: string, value: string, extra: Partial<KeyValueItem> = {}) =>
 	({ id, key, value, enabled: true, in: "path", ...extra }) as KeyValueItem;
-
-// ---- Mirrors engine/tests/path_variables_test.cpp ----
-
-describe("PathVariableSegments", () => {
-	it("FindsEveryWholeSegmentThatStartsWithAColon", () => {
-		expect(namesIn("https://api.test/users/:id/posts/:postId")).toEqual(["id", "postId"]);
-		expect(namesIn("{{baseUrl}}/users/:id/copies/:id")).toEqual(["id", "id"]);
-		expect(namesIn("/relative/:id")).toEqual(["id"]);
-		expect(namesIn("api.test/:user-id/:a_b")).toEqual(["user-id", "a_b"]);
-		// A backslash is a `/` to Postman's parser.
-		expect(namesIn("https://api.test\\users\\:id")).toEqual(["id"]);
-		// Extra slashes after the scheme are the authority's, not an empty path.
-		expect(namesIn("http:////host/:id")).toEqual(["id"]);
-	});
-
-	it("NeverReadsTheAuthorityQueryOrFragment", () => {
-		expect(namesIn("http://localhost:8080")).toEqual([]);
-		expect(namesIn("localhost:3000")).toEqual([]);
-		expect(namesIn("localhost:3000/:id")).toEqual(["id"]);
-		expect(namesIn("http://user:pw@host:1/:id")).toEqual(["id"]);
-		expect(namesIn("https://api.test/search?tag=/:id&t=12:30")).toEqual([]);
-		expect(namesIn("https://api.test/a#/:id")).toEqual([]);
-		// A mid-segment colon (`{name}:cancel` in a Google API) is not one.
-		expect(namesIn("https://api.test/v1/ops/x:cancel")).toEqual([]);
-	});
-
-	it("KeepsAVariableHoldingASeparatorWhole", () => {
-		// `{{a/:b}}` is one opaque token, so its `/:b` is no segment of this URL.
-		expect(namesIn("https://api.test/{{a/:b}}")).toEqual([]);
-		expect(namesIn("{{scheme://host}}/:id")).toEqual(["id"]);
-		// The query separator inside a token does not end the path.
-		expect(namesIn("https://api.test/{{a?b}}/:id")).toEqual(["id"]);
-	});
-
-	it("NamesRunToTheFirstDotAndAnEmptyNameIsNone", () => {
-		const segments = pathVariableSegments("https://h/:id.json/:/:.x/::y");
-		expect(segments).toHaveLength(2);
-		expect(segments[0].name).toBe("id");
-		// Offset and length cover `:id`, leaving `.json` in place.
-		expect(segments[0].offset).toBe("https://h/".length);
-		expect(segments[0].length).toBe(3);
-		expect(segments[1].name).toBe(":y");
-	});
-
-	it("KeepsOneSlashOfAFileUrl", () => {
-		expect(namesIn("file:///:dir/x")).toEqual(["dir"]);
-	});
-});
-
-describe("EncodePathSegmentValue", () => {
-	it("EncodesEverythingButTheUnreservedSetAndKeepsTokens", () => {
-		expect(encodePathSegmentValue("a-b_c.d~e")).toBe("a-b_c.d~e");
-		expect(encodePathSegmentValue("a b/c?d#e%f")).toBe("a%20b%2Fc%3Fd%23e%25f");
-		// A `%XX` triplet is already encoded and is sent as written; a `%` that
-		// starts none (`%g1`, `%4`, a trailing `%`) is data.
-		expect(encodePathSegmentValue("a%40b.com")).toBe("a%40b.com");
-		expect(encodePathSegmentValue("%2f%2F/%")).toBe("%2f%2F%2F%25");
-		expect(encodePathSegmentValue("%g1 %4")).toBe("%25g1%20%254");
-		expect(encodePathSegmentValue("\u00E9")).toBe("%C3%A9");
-		expect(encodePathSegmentValue("x {{data.id}}/y")).toBe("x%20{{data.id}}%2Fy");
-		// A lone `{{` is no token and is encoded.
-		expect(encodePathSegmentValue("{{x")).toBe("%7B%7Bx");
-	});
-});
-
-describe("SubstitutePathVariables", () => {
-	it("AnswersOnlyEnabledPathRowsAndLeavesTheRestLiteral", () => {
-		const rows = [
-			{ key: "id", value: "1", enabled: true, in: "path" },
-			{ key: "q", value: "2", enabled: true },
-			{ key: "q", value: "3", enabled: true, in: "query" },
-			{ key: "off", value: "4", enabled: false, in: "path" },
-			{ key: "dup", value: "first", enabled: true, in: "path" },
-			{ key: "dup", value: "last", enabled: true, in: "path" },
-			{ key: "dup", value: "disabled", enabled: false, in: "path" },
-			// No `enabled` member at all is enabled, as in the engine.
-			{ key: "implicit", value: "on", in: "path" },
-		] as KeyValueEntry[];
-		expect(substitutePathVariables("https://h:1/:id/:q/:off/:dup/:implicit?:id", rows)).toBe(
-			"https://h:1/1/:q/:off/last/on?:id"
-		);
-		expect(substitutePathVariables("https://h/:id", [])).toBe("https://h/:id");
-	});
-});
 
 // ---- App-side cases ----
 

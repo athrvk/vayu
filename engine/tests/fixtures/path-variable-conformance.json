@@ -1,0 +1,836 @@
+{
+  "$comment": "Cross-language conformance fixture for Postman `:name` path variables (issue #1764). Read by BOTH the engine gtest suite (path_variables_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/path-variables.conformance.test.ts). The engine composes the request (`core::path_variable_segments`, `core::substitute_path_variables`); the app draws the Params tab's Sends line and the code snippets from its own copy (`pathVariableSegments`, `substitutePathVariables`), so a case answered two ways is a request that shows one URL and sends another. Each case: `url`; `rows`, a request's Params rows; `segments`, every `:name` segment of `url` with the offset of its colon and the length of `:name` (a `.suffix` excluded); `composed`, `url` with the rows substituted under the identity resolver. URLs are ASCII so an offset is the same number in both languages.",
+  "cases": [
+    {
+      "name": "an IPv6 host and its port are the authority",
+      "url": "http://[::1]:8080/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 18,
+          "length": 3
+        }
+      ],
+      "composed": "http://[::1]:8080/7"
+    },
+    {
+      "name": "userinfo and a port are the authority, and a :id in the query or the fragment is not a segment",
+      "url": "http://user:pw@host:8080/a/:id?x=:id&t=12:30#/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 27,
+          "length": 3
+        }
+      ],
+      "composed": "http://user:pw@host:8080/a/7?x=:id&t=12:30#/:id"
+    },
+    {
+      "name": "a {{variable}} host is opaque",
+      "url": "{{baseUrl}}/users/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 18,
+          "length": 3
+        }
+      ],
+      "composed": "{{baseUrl}}/users/7"
+    },
+    {
+      "name": "a relative URL's path starts at its first slash",
+      "url": "/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 1,
+          "length": 3
+        }
+      ],
+      "composed": "/7"
+    },
+    {
+      "name": "a mailto: URL has no path",
+      "url": "mailto:someone@example.com",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "mailto:someone@example.com"
+    },
+    {
+      "name": "a urn: has no path",
+      "url": "urn:isbn:0451450523",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "urn:isbn:0451450523"
+    },
+    {
+      "name": "a ws:// URL is read like http",
+      "url": "ws://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 7,
+          "length": 3
+        }
+      ],
+      "composed": "ws://h/7"
+    },
+    {
+      "name": "a bare host's port is never a variable",
+      "url": "localhost:8080",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "localhost:8080"
+    },
+    {
+      "name": "a bare host with a port and a path",
+      "url": "localhost:8080/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 15,
+          "length": 3
+        }
+      ],
+      "composed": "localhost:8080/7"
+    },
+    {
+      "name": "a .suffix after the name stays on the wire",
+      "url": "https://h/:id.json",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/7.json"
+    },
+    {
+      "name": "a colon inside the name is part of it",
+      "url": "https://h/:id:a",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        },
+        {
+          "key": "id:a",
+          "value": "9",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id:a",
+          "offset": 10,
+          "length": 5
+        }
+      ],
+      "composed": "https://h/9"
+    },
+    {
+      "name": "a :// inside the path is not a second scheme",
+      "url": "https://h/a://b/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 16,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/a://b/7"
+    },
+    {
+      "name": "a backslash is a slash",
+      "url": "https://h\\users\\:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 16,
+          "length": 3
+        }
+      ],
+      "composed": "https://h\\users\\7"
+    },
+    {
+      "name": "http:/ with one slash has no scheme separator",
+      "url": "http:/h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 8,
+          "length": 3
+        }
+      ],
+      "composed": "http:/h/7"
+    },
+    {
+      "name": "leading whitespace is skipped, and kept",
+      "url": "  https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 12,
+          "length": 3
+        }
+      ],
+      "composed": "  https://h/7"
+    },
+    {
+      "name": "an empty segment before a variable",
+      "url": "https://h//:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 11,
+          "length": 3
+        }
+      ],
+      "composed": "https://h//7"
+    },
+    {
+      "name": "file:/// keeps one slash as the path's start",
+      "url": "file:///:dir/x",
+      "rows": [
+        {
+          "key": "dir",
+          "value": "D",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "dir",
+          "offset": 8,
+          "length": 4
+        }
+      ],
+      "composed": "file:///D/x"
+    },
+    {
+      "name": "a bare : and a :.x name nothing",
+      "url": "https://h/:/:.x/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 16,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/:/:.x/7"
+    },
+    {
+      "name": "a colon after a token mid-segment is not a variable",
+      "url": "https://h/{{a}}:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "https://h/{{a}}:id"
+    },
+    {
+      "name": "a name runs to the first dot, inside a token too",
+      "url": "https://h/:{{a.b}}",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "{{a",
+          "offset": 10,
+          "length": 4
+        }
+      ],
+      "composed": "https://h/:{{a.b}}"
+    },
+    {
+      "name": "a pre-encoded %XX in a value is sent as written",
+      "url": "https://h/users/:email",
+      "rows": [
+        {
+          "key": "email",
+          "value": "a%40b.com",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "email",
+          "offset": 16,
+          "length": 6
+        }
+      ],
+      "composed": "https://h/users/a%40b.com"
+    },
+    {
+      "name": "a bare % in a value is encoded, a malformed triplet too",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "100% %zz %4",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/100%25%20%25zz%20%254"
+    },
+    {
+      "name": "a / ? # and space in a value are data in one segment",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "a b/c?d#e",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/a%20b%2Fc%3Fd%23e"
+    },
+    {
+      "name": "a non-ASCII value is UTF-8 percent-encoded",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "é",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/%C3%A9"
+    },
+    {
+      "name": "a token in a value is kept verbatim",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "u {{data.x}}",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/u%20{{data.x}}"
+    },
+    {
+      "name": "a disabled row leaves the segment literal",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path",
+          "enabled": false
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/:id"
+    },
+    {
+      "name": "an empty value leaves the segment literal",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/:id"
+    },
+    {
+      "name": "a query row of the same name does not answer",
+      "url": "https://h/:id?id=1",
+      "rows": [
+        {
+          "key": "id",
+          "value": "q"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/:id?id=1"
+    },
+    {
+      "name": "among duplicate keys the last enabled row answers, every occurrence",
+      "url": "https://h/:id/copy/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "first",
+          "in": "path"
+        },
+        {
+          "key": "id",
+          "value": "last",
+          "in": "path"
+        },
+        {
+          "key": "id",
+          "value": "off",
+          "in": "path",
+          "enabled": false
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        },
+        {
+          "name": "id",
+          "offset": 19,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/last/copy/last"
+    },
+    {
+      "name": "every whole segment that starts with a colon",
+      "url": "https://api.test/users/:id/posts/:postId",
+      "rows": [
+        {
+          "key": "id",
+          "value": "1",
+          "in": "path"
+        },
+        {
+          "key": "postId",
+          "value": "2",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 23,
+          "length": 3
+        },
+        {
+          "name": "postId",
+          "offset": 33,
+          "length": 7
+        }
+      ],
+      "composed": "https://api.test/users/1/posts/2"
+    },
+    {
+      "name": "a name holds any character but a dot",
+      "url": "api.test/:user-id/:a_b",
+      "rows": [
+        {
+          "key": "user-id",
+          "value": "u",
+          "in": "path"
+        },
+        {
+          "key": "a_b",
+          "value": "v",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "user-id",
+          "offset": 9,
+          "length": 8
+        },
+        {
+          "name": "a_b",
+          "offset": 18,
+          "length": 4
+        }
+      ],
+      "composed": "api.test/u/v"
+    },
+    {
+      "name": "extra slashes after the scheme belong to the authority",
+      "url": "http:////host/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 14,
+          "length": 3
+        }
+      ],
+      "composed": "http:////host/7"
+    },
+    {
+      "name": "a scheme and port with no path have no variable",
+      "url": "http://localhost:8080",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "http://localhost:8080"
+    },
+    {
+      "name": "a colon-slash in the query is not a segment",
+      "url": "https://api.test/search?tag=/:id&t=12:30",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "https://api.test/search?tag=/:id&t=12:30"
+    },
+    {
+      "name": "a mid-segment colon is not a variable",
+      "url": "https://api.test/v1/ops/x:cancel",
+      "rows": [
+        {
+          "key": "cancel",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "https://api.test/v1/ops/x:cancel"
+    },
+    {
+      "name": "a token holding a slash is opaque",
+      "url": "https://api.test/{{a/:b}}",
+      "rows": [
+        {
+          "key": "b",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [],
+      "composed": "https://api.test/{{a/:b}}"
+    },
+    {
+      "name": "a token holding a scheme is opaque",
+      "url": "{{scheme://host}}/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 18,
+          "length": 3
+        }
+      ],
+      "composed": "{{scheme://host}}/7"
+    },
+    {
+      "name": "a query separator inside a token does not end the path",
+      "url": "https://api.test/{{a?b}}/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "7",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 25,
+          "length": 3
+        }
+      ],
+      "composed": "https://api.test/{{a?b}}/7"
+    },
+    {
+      "name": "a doubled colon names a variable starting with a colon",
+      "url": "https://h/:id.json/:/:.x/::y",
+      "rows": [
+        {
+          "key": "id",
+          "value": "1",
+          "in": "path"
+        },
+        {
+          "key": ":y",
+          "value": "2",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        },
+        {
+          "name": ":y",
+          "offset": 25,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/1.json/:/:.x/2"
+    },
+    {
+      "name": "an absent enabled member is enabled, and an in: query row never answers",
+      "url": "https://h/:a/:q",
+      "rows": [
+        {
+          "key": "a",
+          "value": "on",
+          "in": "path"
+        },
+        {
+          "key": "q",
+          "value": "3",
+          "enabled": true,
+          "in": "query"
+        }
+      ],
+      "segments": [
+        {
+          "name": "a",
+          "offset": 10,
+          "length": 2
+        },
+        {
+          "name": "q",
+          "offset": 13,
+          "length": 2
+        }
+      ],
+      "composed": "https://h/on/:q"
+    },
+    {
+      "name": "the unreserved set passes through",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "a-b_c.d~e",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/a-b_c.d~e"
+    },
+    {
+      "name": "pre-encoded triplets of either case are kept, a trailing % is encoded",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "%2f%2F/%",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/%2f%2F%2F%25"
+    },
+    {
+      "name": "a lone {{ is no token and is encoded",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "{{x",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/%7B%7Bx"
+    }
+  ]
+}

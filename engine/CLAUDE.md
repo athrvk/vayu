@@ -820,7 +820,9 @@ unchanged. It also writes a request's `:name` path variables from its
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
 a value still holding a token after resolution is not joined into the URL but
 waits in the payload's `params` / `vayu::Request::path_variables` until the bind
-or the residual pass answers it, `core::settle_path_variables`),
+or the residual pass answers it, `core::settle_path_variables`; the app's copy
+of the segment rule and substitution is pinned by
+`tests/fixtures/path-variable-conformance.json`),
 which is the only place a Params row reaches the wire. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
