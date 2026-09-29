@@ -95,3 +95,56 @@ describe("useElectronTheme - matching the OS accent at launch", () => {
 		expect(result.current.colorScheme).toBe("ocean");
 	});
 });
+
+describe("useElectronTheme - restoring the saved theme mode at launch", () => {
+	// Electron's nativeTheme.themeSource is process state and starts at "system"
+	// on every launch, so the bridge reports "system" no matter what was saved.
+	// The stored choice has to be pushed back into the main process.
+	function stubFreshLaunch() {
+		const setTheme = vi.fn(async (source: string) => ({
+			shouldUseDarkColors: source === "dark",
+			themeSource: source,
+		}));
+		vi.stubGlobal("electronAPI", {
+			getTheme: vi
+				.fn()
+				.mockResolvedValue({ shouldUseDarkColors: false, themeSource: "system" }),
+			setTheme,
+			onThemeChanged: vi.fn().mockReturnValue(() => {}),
+			getAccentScheme: vi.fn().mockResolvedValue({ accentScheme: null }),
+			onAccentSchemeChanged: vi.fn().mockReturnValue(() => {}),
+		});
+		return setTheme;
+	}
+
+	beforeEach(() => {
+		document.documentElement.classList.remove("dark");
+	});
+
+	it.each(["dark", "light"] as const)(
+		"restores a saved %s mode into the main process",
+		async (saved) => {
+			localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, saved);
+			const setTheme = stubFreshLaunch();
+
+			const { result } = renderHook(() => useElectronTheme());
+
+			await waitFor(() => expect(result.current.isLoading).toBe(false));
+			expect(setTheme).toHaveBeenCalledWith(saved);
+			expect(result.current.themeSource).toBe(saved);
+			expect(result.current.isDark).toBe(saved === "dark");
+			expect(document.documentElement.classList.contains("dark")).toBe(saved === "dark");
+		}
+	);
+
+	it("leaves the main process alone when nothing or an unknown value is saved", async () => {
+		localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, "sepia");
+		const setTheme = stubFreshLaunch();
+
+		const { result } = renderHook(() => useElectronTheme());
+
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		expect(setTheme).not.toHaveBeenCalled();
+		expect(result.current.themeSource).toBe("system");
+	});
+});

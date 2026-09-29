@@ -26,6 +26,10 @@ interface UseElectronThemeOptions {
 	onThemeChange?: (isDark: boolean) => void;
 }
 
+function isThemeSource(value: string | null): value is ThemeSource {
+	return value === "system" || value === "light" || value === "dark";
+}
+
 export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	const { onThemeChange } = options;
 	const [themeSource, setThemeSource] = useState<ThemeSource>("system");
@@ -81,10 +85,17 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				// `accent:get` on every platform, but only resolves a scheme on
 				// Windows/macOS - Linux has no OS accent color, so accentScheme
 				// comes back null there and the toggle must not appear at all.
-				const [theme, accentInfo] = await Promise.all([
+				let [theme, accentInfo] = await Promise.all([
 					window.electronAPI.getTheme(),
 					window.electronAPI.getAccentScheme(),
 				]);
+				// `nativeTheme.themeSource` is process state that starts at "system"
+				// on every launch, so `theme` above is the default, not the user's
+				// choice. Push the stored one back into the main process; it
+				// answers with the resolved colors.
+				if (isThemeSource(savedSource) && savedSource !== theme.themeSource) {
+					theme = await window.electronAPI.setTheme(savedSource);
+				}
 				source = theme.themeSource as ThemeSource;
 				accentSupported = accentInfo.accentScheme !== null;
 
