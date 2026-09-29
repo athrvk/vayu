@@ -153,6 +153,7 @@ add_executable(vayu_tests
     spec_describe_route_test.cpp
     spec_bind_route_test.cpp
     operation_match_test.cpp
+    path_variables_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
     jmeter_import_test.cpp

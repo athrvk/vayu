@@ -1,0 +1,112 @@
+/**
+ * @file tests/path_variables_test.cpp
+ * @brief Which URL segments are Postman `:name` path variables, and how a
+ *        value is written into one (issue #1764).
+ *
+ * The rule is Postman's own (`postman-url-encoder/parser` plus
+ * `postman-collection`'s `parsePathVariable`), so the cases here are the
+ * places a hand-written scanner can disagree with it: a port, a `:` in the
+ * query or the fragment, a `{{variable}}` holding a separator, a `.suffix`.
+ */
+
+#include <gtest/gtest.h>
+
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "vayu/core/path_template.hpp"
+
+namespace {
+
+using nlohmann::json;
+using vayu::core::path_variable_segments;
+
+std::vector<std::string> names_in (const std::string& url) {
+    std::vector<std::string> out;
+    for (const auto& segment : path_variable_segments (url)) {
+        out.push_back (segment.name);
+    }
+    return out;
+}
+
+using Names = std::vector<std::string>;
+
+TEST (PathVariableSegments, FindsEveryWholeSegmentThatStartsWithAColon) {
+    EXPECT_EQ (names_in ("https://api.test/users/:id/posts/:postId"),
+    (Names{ "id", "postId" }));
+    EXPECT_EQ (names_in ("{{baseUrl}}/users/:id/copies/:id"), (Names{ "id", "id" }));
+    EXPECT_EQ (names_in ("/relative/:id"), (Names{ "id" }));
+    EXPECT_EQ (names_in ("api.test/:user-id/:a_b"), (Names{ "user-id", "a_b" }));
+    // A backslash is a `/` to Postman's parser.
+    EXPECT_EQ (names_in ("https://api.test\\users\\:id"), (Names{ "id" }));
+    // Extra slashes after the scheme are the authority's, not an empty path.
+    EXPECT_EQ (names_in ("http:////host/:id"), (Names{ "id" }));
+}
+
+TEST (PathVariableSegments, NeverReadsTheAuthorityQueryOrFragment) {
+    EXPECT_TRUE (names_in ("http://localhost:8080").empty ());
+    EXPECT_TRUE (names_in ("localhost:3000").empty ());
+    EXPECT_EQ (names_in ("localhost:3000/:id"), (Names{ "id" }));
+    EXPECT_EQ (names_in ("http://user:pw@host:1/:id"), (Names{ "id" }));
+    EXPECT_TRUE (names_in ("https://api.test/search?tag=/:id&t=12:30").empty ());
+    EXPECT_TRUE (names_in ("https://api.test/a#/:id").empty ());
+    // A mid-segment colon (`{name}:cancel` in a Google API) is not one.
+    EXPECT_TRUE (names_in ("https://api.test/v1/ops/x:cancel").empty ());
+}
+
+TEST (PathVariableSegments, KeepsAVariableHoldingASeparatorWhole) {
+    // `{{a/:b}}` is one opaque token, so its `/:b` is no segment of this URL.
+    EXPECT_TRUE (names_in ("https://api.test/{{a/:b}}").empty ());
+    EXPECT_EQ (names_in ("{{scheme://host}}/:id"), (Names{ "id" }));
+    // The query separator inside a token does not end the path.
+    EXPECT_EQ (names_in ("https://api.test/{{a?b}}/:id"), (Names{ "id" }));
+}
+
+TEST (PathVariableSegments, NamesRunToTheFirstDotAndAnEmptyNameIsNone) {
+    const auto segments =
+    path_variable_segments ("https://h/:id.json/:/:.x/::y");
+    ASSERT_EQ (segments.size (), 2u);
+    EXPECT_EQ (segments[0].name, "id");
+    // Offset and length cover `:id`, leaving `.json` in place.
+    EXPECT_EQ (segments[0].offset, std::string ("https://h/").size ());
+    EXPECT_EQ (segments[0].length, 3u);
+    EXPECT_EQ (segments[1].name, ":y");
+}
+
+TEST (PathVariableSegments, KeepsOneSlashOfAFileUrl) {
+    EXPECT_EQ (names_in ("file:///:dir/x"), (Names{ "dir" }));
+}
+
+TEST (EncodePathSegmentValue, EncodesEverythingButTheUnreservedSetAndKeepsTokens) {
+    using vayu::core::encode_path_segment_value;
+    EXPECT_EQ (encode_path_segment_value ("a-b_c.d~e"), "a-b_c.d~e");
+    EXPECT_EQ (encode_path_segment_value ("a b/c?d#e%f"), "a%20b%2Fc%3Fd%23e%25f");
+    EXPECT_EQ (encode_path_segment_value ("\xC3\xA9"), "%C3%A9");
+    EXPECT_EQ (encode_path_segment_value ("x {{data.id}}/y"), "x%20{{data.id}}%2Fy");
+    // A lone `{{` is no token and is encoded.
+    EXPECT_EQ (encode_path_segment_value ("{{x"), "%7B%7Bx");
+}
+
+TEST (SubstitutePathVariables, AnswersOnlyEnabledPathRowsAndLeavesTheRestLiteral) {
+    const json rows     = json::parse (R"([
+        {"key":"id","value":"1","enabled":true,"in":"path"},
+        {"key":"q","value":"2","enabled":true},
+        {"key":"q","value":"3","enabled":true,"in":"query"},
+        {"key":"off","value":"4","enabled":false,"in":"path"},
+        {"key":"dup","value":"first","enabled":true,"in":"path"},
+        {"key":"dup","value":"last","enabled":true,"in":"path"},
+        {"key":"dup","value":"disabled","enabled":false,"in":"path"},
+        {"key":"implicit","value":"on","in":"path"}
+    ])");
+    const auto identity = [] (const std::string& value) { return value; };
+    EXPECT_EQ (vayu::core::substitute_path_variables (
+               "https://h:1/:id/:q/:off/:dup/:implicit?:id", rows, identity),
+    "https://h:1/1/:q/:off/last/on?:id");
+    EXPECT_EQ (vayu::core::substitute_path_variables ("https://h/:id", json::array (), identity),
+    "https://h/:id");
+}
+
+} // namespace

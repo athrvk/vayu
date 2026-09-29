@@ -18,6 +18,7 @@
 #include <unordered_set>
 
 #include "vayu/core/elements.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
@@ -1246,6 +1247,39 @@ nlohmann::json& field) {
     }
 }
 
+/**
+ * The URL's `:name` path variables, answered by the request's `in: "path"`
+ * Params rows (issue #1764) - before the URL's own `{{var}}` pass, so a
+ * `{{baseUrl}}` holding `host:8080` or a path of its own is never read for a
+ * `:name`, which is what Postman's parse of the unresolved `raw` does too.
+ *
+ * The rows are the inline request's `params` when it carries any (editor
+ * state, which may be ahead of the saved row), otherwise the stored
+ * request's. Each value is `{{var}}`-resolved through the same call the URL
+ * uses and written as one percent-encoded segment; the encoded text holds no
+ * `{{`, so the URL pass that follows cannot read a value as a template.
+ */
+void substitute_compose_path_variables (const VariableValues& vars,
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
+const std::optional<vayu::db::Request>& stored,
+nlohmann::json& payload) {
+    const auto url = payload.find ("url");
+    if (url == payload.end () || !url->is_string ()) {
+        return;
+    }
+    nlohmann::json rows;
+    if (const auto own = payload.find ("params"); own != payload.end ()) {
+        rows = *own;
+    } else if (stored && !stored->params.empty ()) {
+        rows = nlohmann::json::parse (stored->params, nullptr, /*allow_exceptions=*/false);
+    }
+    *url = vayu::core::substitute_path_variables (
+    url->get<std::string> (), rows, [&] (const std::string& value) {
+        return resolve_template (value, vars, bound_columns, dynamic);
+    });
+}
+
 /** The body: its content, and every string its form fields carry. */
 void resolve_compose_body (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
@@ -1423,6 +1457,7 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
 
+    substitute_compose_path_variables (vars, bound_columns, dynamic, stored, payload);
     if (auto refusal = resolve_compose_head (vars, bound_columns, dynamic, payload)) {
         return *refusal;
     }

@@ -814,7 +814,10 @@ The engine owns request composition (#226): `POST /compose`
 (`engine/src/http/request_composer.cpp`) resolves `{{variables}}` and `inherit`
 auth (collection-chain walk; `noauth` terminates, `none` steps over) and
 returns the execute-ready payload `POST /execute` / `POST /runs` accept
-unchanged. Compose is pure (sends nothing, no run row) and is the one place a
+unchanged. It also writes a request's `:name` path variables from its
+`in: "path"` Params rows (#1764, `core::substitute_path_variables` in
+`core/path_template.hpp`, Postman's segment rule; empty value stays literal),
+which is the only place a Params row reaches the wire. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
 and an inline `request` plus `collectionId` scope (the renderer, because Send

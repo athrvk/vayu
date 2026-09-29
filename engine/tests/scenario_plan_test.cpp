@@ -660,6 +660,49 @@ TEST_F (ScenarioPlanTest, ARunsColumnsDeferTheirBareTokensAndSplitThem) {
     EXPECT_EQ (bound.url, "https://api.test/u/grace?r=eu");
 }
 
+/**
+ * A collection run's steps - sequential and load alike, both read this plan -
+ * take their `:name` path variables from each request's own path rows through
+ * the same composition a Send uses (issue #1764): two requests on `:id` send
+ * their own values, and a data column in a value is bound per iteration.
+ *
+ * Mutation-check: drop `substitute_compose_path_variables` from
+ * `compose_request_core` and every URL here keeps its `:id`.
+ */
+TEST_F (ScenarioPlanTest, AStepSendsItsOwnPathVariablesAndBindsAColumnInOne) {
+    seed_collection ("col", "");
+    const auto with_path_row = [&] (const std::string& id, int order,
+                               const std::string& value) {
+        seed_request (id, "col", order, "https://api.test/users/:id?r=eu");
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row);
+        row->params = json::array (
+        { { { "key", "id" }, { "value", value }, { "enabled", true },
+        { "in",
+        "path" } } }).dump ();
+        db_->save_request (*row);
+    };
+    with_path_row ("one", 0, "1");
+    with_path_row ("two", 1, "2");
+    with_path_row ("bound", 2, "{{username}}");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "username", "ada" } } });
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 3u);
+    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://api.test/users/1?r=eu");
+    EXPECT_EQ (resolved.plan.steps[1].request.url, "https://api.test/users/2?r=eu");
+    EXPECT_EQ (resolved.plan.steps[2].request.url, "https://api.test/users/{{username}}?r=eu");
+
+    vayu::Request bound = resolved.plan.steps[2].request;
+    ASSERT_TRUE (vayu::core::apply_iteration_template (bound,
+    resolved.plan.steps[2].data_template,
+    vayu::core::IterationBinding{ resolved.data_rows.data (), 0, {} })
+    .ok);
+    EXPECT_EQ (bound.url, "https://api.test/users/ada?r=eu");
+}
+
 TEST_F (ScenarioPlanTest, ARunWithoutRowsResolvesABareNameFromTheScopesAsItAlwaysDid) {
     // The both-ways half of the rule at the plan level: with no data block, the
     // same collection composes exactly as it did before #1007.

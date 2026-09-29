@@ -7,6 +7,9 @@
 
 #include "vayu/core/path_template.hpp"
 
+#include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/encoding.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
@@ -129,6 +132,154 @@ std::string normalize_template_vars (const std::string& text) {
 
 std::string normalize_path_templates (const std::string& path) {
     return normalize (path, /*path_templates=*/true);
+}
+
+namespace {
+
+/**
+ * The end of the `{{...}}` token starting at @p at in @p text, or `npos` when
+ * none starts there - `postman-url-encoder`'s `/{{[^{}]*}}/`, which is what
+ * keeps a separator inside a variable name from splitting the URL.
+ */
+std::size_t token_end (std::string_view text, std::size_t at) {
+    if (text.compare (at, 2, "{{") != 0) {
+        return std::string_view::npos;
+    }
+    for (std::size_t scan = at + 2; scan < text.size (); ++scan) {
+        if (text[scan] == '{') {
+            return std::string_view::npos;
+        }
+        if (text[scan] == '}') {
+            return text.compare (scan, 2, "}}") == 0 ? scan + 2 : std::string_view::npos;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// @p text with every `{{...}}` token's characters replaced by `_`, the same
+/// length - so offsets into it are offsets into @p text, and a separator
+/// inside a token is no longer one.
+std::string mask_tokens (std::string_view text) {
+    std::string out (text);
+    for (std::size_t at = 0; at < out.size ();) {
+        const std::size_t end = token_end (text, at);
+        if (end == std::string_view::npos) {
+            ++at;
+            continue;
+        }
+        std::fill (out.begin () + static_cast<std::ptrdiff_t> (at),
+        out.begin () + static_cast<std::ptrdiff_t> (end), '_');
+        at = end;
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<PathVariableSegment> path_variable_segments (std::string_view url) {
+    std::vector<PathVariableSegment> out;
+    const std::string masked = mask_tokens (url);
+    const std::string_view view (masked);
+
+    // Leading whitespace is not part of the URL (`trimLeft`).
+    std::size_t begin = view.find_first_not_of (" \t\r\n\f\v");
+    if (begin == std::string_view::npos) {
+        return out;
+    }
+    // Fragment first, then query, each from its first occurrence.
+    std::size_t end = std::min (view.find ('#', begin), view.size ());
+    end             = std::min (view.find ('?', begin), end);
+
+    const auto is_slash = [&] (std::size_t at) {
+        return view[at] == '/' || view[at] == '\\';
+    };
+    if (const std::size_t scheme = view.find ("://", begin);
+    scheme != std::string_view::npos && scheme + 3 <= end) {
+        std::size_t after = scheme + 3;
+        while (after < end && is_slash (after)) {
+            ++after;
+        }
+        // `file:///path` keeps one slash: the path starts at it.
+        const std::string_view protocol = view.substr (begin, scheme - begin);
+        if (after > scheme + 3 && vayu::utils::ascii_lower_equal (protocol, "file")) {
+            --after;
+        }
+        begin = after;
+    }
+    std::size_t cursor = begin;
+    while (cursor < end && !is_slash (cursor)) {
+        ++cursor;
+    }
+    // Everything before the first slash is the authority; no slash, no path.
+    while (cursor < end) {
+        const std::size_t start = cursor + 1;
+        std::size_t stop        = start;
+        while (stop < end && !is_slash (stop)) {
+            ++stop;
+        }
+        if (start < stop && url[start] == ':') {
+            const std::string_view segment = url.substr (start, stop - start);
+            const std::size_t dot          = segment.find ('.', 1);
+            const std::size_t name_end =
+            dot == std::string_view::npos ? segment.size () : dot;
+            if (name_end > 1) {
+                out.push_back (
+                { start, name_end, std::string (segment.substr (1, name_end - 1)) });
+            }
+        }
+        cursor = stop;
+    }
+    return out;
+}
+
+bool is_path_variable_row (const nlohmann::json& row) {
+    if (!row.is_object ()) {
+        return false;
+    }
+    const auto in = row.find ("in");
+    return in != row.end () && in->is_string () &&
+    in->get_ref<const std::string&> () == "path";
+}
+
+const nlohmann::json*
+find_path_variable_row (const nlohmann::json& rows, std::string_view name) {
+    if (!rows.is_array ()) {
+        return nullptr;
+    }
+    for (auto row = rows.rbegin (); row != rows.rend (); ++row) {
+        if (!is_path_variable_row (*row)) {
+            continue;
+        }
+        const auto key = row->find ("key");
+        if (key == row->end () || !key->is_string () ||
+        key->get_ref<const std::string&> () != name) {
+            continue;
+        }
+        // Absent or non-boolean `enabled` is enabled (D17).
+        const auto enabled = row->find ("enabled");
+        if (enabled != row->end () && enabled->is_boolean () && !enabled->get<bool> ()) {
+            continue;
+        }
+        return &*row;
+    }
+    return nullptr;
+}
+
+std::string encode_path_segment_value (std::string_view value) {
+    std::string out;
+    std::size_t plain = 0;
+    for (std::size_t at = 0; at < value.size ();) {
+        const std::size_t end = token_end (value, at);
+        if (end == std::string_view::npos) {
+            ++at;
+            continue;
+        }
+        out += vayu::utils::url_encode (value.substr (plain, at - plain));
+        out += value.substr (at, end - at);
+        plain = at = end;
+    }
+    out += vayu::utils::url_encode (value.substr (plain));
+    return out;
 }
 
 } // namespace vayu::core
