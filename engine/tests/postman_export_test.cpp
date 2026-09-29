@@ -235,6 +235,22 @@ TEST (PostmanExport, HeaderRowsAreTypedTextAndDisabledOnlyWhenOff) {
     R"({"key":"X-Tenant","value":"acme","description":"Which tenant","type":"text"})");
 }
 
+TEST (PostmanExport, RowMetadataAnImportKeptIsWrittenBack) {
+    PostmanExportRequest entry = request ("r", "u?expand=");
+    ordered typed              = row ("Accept", "a/b");
+    typed["type"]              = "default";
+    entry.headers              = ordered::array ({ typed });
+    ordered equals             = row ("expand", "", false);
+    equals["equals"]           = true;
+    entry.params               = ordered::array ({ equals });
+    ordered item               = only_item (entry);
+    EXPECT_EQ (item["request"]["header"][0].dump (),
+    R"({"key":"Accept","value":"a/b","type":"default"})");
+    // `equals` after `value`, where Postman writes it.
+    EXPECT_EQ (item["request"]["url"]["query"][0].dump (),
+    R"({"key":"expand","value":"","equals":true,"disabled":true})");
+}
+
 TEST (PostmanExport, RowsWithoutANameAreDroppedAndCountedWhenTheyHeldAValue) {
     PostmanExportRequest entry = request ("r", "u");
     entry.headers =

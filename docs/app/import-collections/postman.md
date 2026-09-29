@@ -94,7 +94,7 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | `request.description` | `description` | string used directly; if object, `.content`; else `""` |
 | `request.method` | `method` | `toMethod`: upper-cased; if not one of GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS → `GET`, counted as `unsupported_method` (a custom verb such as `PROPFIND` or `PURGE`) |
 | `request.url` | `url`, `params` | via `pmUrl` (see [URL handling](#url-handling)) |
-| `request.header[]` | `headers` | via `map_key_values` |
+| `request.header[]` | `headers` | via `map_key_values`; a row's `type` other than `"text"` (recent Postman writes `"default"`) is kept on the row for the export to write back |
 | `request.body` | `body` | via `pmBody` (see [Body mapping](#body-mapping)) |
 | `request.auth` | `auth` | via `map_postman_auth`; `inherit` allowed for requests |
 | `item.event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
@@ -151,7 +151,7 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 `pmUrl(url)` handles both shapes:
 
 - **String url** (v2.0, sometimes v2.1): if there is no `?`, the whole string is the base URL (`normalize_template_vars` applied), `params = []`. If there is a `?`, the substring before `?` is the base and the query string goes through `queryEntries`: split on `&`, each `key=value` pair URL-decoded, with `value` run through `normalize_template_vars`; missing `=` yields an empty value. All extracted params are `enabled: true`.
-- **Object url** (v2.1): `url.raw` is split at the first `?` to get the base (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
+- **Object url** (v2.1): `url.raw` is split at the first `?` to get the base (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved, and a row's boolean `equals` rides on the row for the export - it does not change how the row joins into the URL). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
 - **Object url with no `raw`** (schema-legal, rare - most exports always write `raw`): `host_path_url` assembles a base from `protocol` (default `https`), `host[]` (or a bare string) joined with `.`, an optional `port`, and `path[]` (string or `{value}` variable entries) joined with `/`. Counted as `url_without_raw`, informational rather than lossy - the URL is built, not dropped.
 
 **Decoding never aborts the import.** `queryEntries` decodes through `safeDecode`, which returns the still-encoded text when `decodeURIComponent` throws. Postman does not percent-validate a typed URL, so a literal `%` in a value (`?discount=50%`, a LIKE pattern) is realistic - and a bare `decodeURIComponent` used to raise `URIError: URI malformed` out of `parseImport`, failing an entire file with no pointer to the offending request.
@@ -169,7 +169,7 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 | Postman `body.mode` | Vayu `RequestBody` | Notes |
 |---------------------|--------------------|-------|
 | `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
-| `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)` |
+| `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)`, a row's non-`"text"` `type` kept as on a header |
 | `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. Only a file entry naming no path adds to `ctx.skippedFileBody`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
 | `file` | `{ mode: "none" }` | adds 1 to `ctx.skippedFileBody` - a whole-body file is a shape Vayu has no mode for (unlike a multipart file *part*, which imports) |

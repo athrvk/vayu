@@ -40,6 +40,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
@@ -171,9 +172,18 @@ std::string normalize_vars (const std::string& text) {
     return normalize_template_vars (text);
 }
 
+/**
+ * What a Postman row carries beyond `key`/`value`/`description`/`disabled`
+ * that Vayu keeps for the export to write back - nothing reads either at send
+ * time. `Typed` is a header or urlencoded row's `type` other than `"text"`
+ * (Postman's default, and what the exporter writes for a row with none);
+ * `Query` is a query row's boolean `equals`.
+ */
+enum class RowExtras : std::uint8_t { None, Typed, Query };
+
 /// `mapKeyValues(rows)`: a Postman/Insomnia row array as table rows, disabled
 /// rows and duplicates intact. A row with no truthy `key` names nothing.
-json map_key_values (const json* rows) {
+json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
     json out = json::array ();
     if (rows == nullptr || !rows->is_array ()) {
         return out;
@@ -191,6 +201,14 @@ json map_key_values (const json* rows) {
         !disabled->get<bool> ();
         if (const json* description = prop (record, "description"); truthy (description)) {
             entry["description"] = as_string (description);
+        }
+        if (const std::string* type = as_str (prop (record, "type"));
+        extras == RowExtras::Typed && type != nullptr && !type->empty () && *type != "text") {
+            entry["type"] = *type;
+        }
+        if (const json* equals = prop (record, "equals");
+        extras == RowExtras::Query && equals != nullptr && equals->is_boolean ()) {
+            entry["equals"] = *equals;
         }
         out.push_back (std::move (entry));
     }
@@ -921,7 +939,7 @@ json pm_body (const json* body, PostmanCounts& counts) {
     }
     if (named == "urlencoded") {
         return json{ { "mode", "x-www-form-urlencoded" },
-            { "fields", map_key_values (prop (node, "urlencoded")) } };
+            { "fields", map_key_values (prop (node, "urlencoded"), RowExtras::Typed) } };
     }
     if (named == "formdata") {
         return json{ { "mode", "form-data" },
@@ -1208,7 +1226,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     question == std::string::npos ? raw : raw.substr (0, question);
     const std::string base = substitute_path_variables (base_raw,
     prop (url, "variable"), counts.path_variables, counts.skipped_path_variables);
-    json structured        = map_key_values (prop (url, "query"));
+    json structured = map_key_values (prop (url, "query"), RowExtras::Query);
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
     // hand-written or script-generated collections that populate only `raw`.
@@ -1524,10 +1542,10 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (unsupported_method) {
         counts.skipped_unsupported_method += 1;
     }
-    request["url"]    = url;
-    request["params"] = params;
-    request["headers"] =
-    with_required_content_type (map_key_values (prop (rq, "header")), body);
+    request["url"]     = url;
+    request["params"]  = params;
+    request["headers"] = with_required_content_type (
+    map_key_values (prop (rq, "header"), RowExtras::Typed), body);
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {

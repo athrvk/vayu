@@ -561,6 +561,42 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Search products",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "default"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/products?where=sku%3D1",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"products"
+							],
+							"query": [
+								{
+									"key": "where",
+									"value": "sku=1",
+									"equals": true
+								},
+								{
+									"key": "expand",
+									"value": "",
+									"equals": true,
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
 				}
 			],
 			"description": "What an export gives back as Postman wrote it."

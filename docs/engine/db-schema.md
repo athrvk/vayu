@@ -435,6 +435,9 @@ an app setting or that repair pass wrote rather than the user - the auto `Conten
 a body-mode change adds, the `Accept` the Event stream toggle adds, or a row the
 header-strip pass disabled - so it can tell its own row apart from a hand-typed one
 across a reload; retyping the row's key or value clears it (issues #1481, #1491).
+A Postman import also keeps two keys nothing sends, for the Postman export to
+write back: a header row's `type` other than `"text"` (`"default"`) and a
+query row's boolean `equals`.
 
 **elements** - same shape, and the same script-to-elements cut-over, as
 [`collections.elements`](#collections) above; see that entry.

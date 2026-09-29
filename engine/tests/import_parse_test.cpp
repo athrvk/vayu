@@ -1577,6 +1577,27 @@ TEST (PostmanImport, KeepsARawBodysUndeclaredLanguageWithoutChangingItsMode) {
     EXPECT_FALSE (requests[2].at ("body").contains ("rawLanguage"));
 }
 
+TEST (PostmanImport, KeepsAHeaderRowsTypeAndAQueryRowsEquals) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST",
+            "header":[{"key":"A","value":"1","type":"default"},{"key":"B","value":"2","type":"text"}],
+            "body":{"mode":"urlencoded","urlencoded":[{"key":"f","value":"v","type":"default"}]},
+            "url":{"raw":"https://x.com/a?expand=","query":[{"key":"expand","value":"","equals":true}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("headers")[0].at ("type"), "default");
+    // `text` is the default the exporter writes for a row with none.
+    EXPECT_FALSE (request.at ("headers")[1].contains ("type"));
+    EXPECT_EQ (request.at ("body").at ("fields")[0].at ("type"), "default");
+    EXPECT_EQ (request.at ("params")[0].at ("equals"), true);
+    // Carried beside the row, never onto the wire: the URL is joined exactly
+    // as before (an empty value still joins as a bare key).
+    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand");
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

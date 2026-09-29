@@ -168,12 +168,20 @@ json postman_row (const json& row, RowShape shape) {
     json out;
     out["key"]   = text_of (row, "key");
     out["value"] = text_of (row, "value");
+    if (const auto equals = row.find ("equals");
+    shape == RowShape::Plain && equals != row.end () && equals->is_boolean ()) {
+        // A query row's `equals`, as an import kept it.
+        out["equals"] = *equals;
+    }
     if (const std::string description = text_of (row, "description");
     !description.empty ()) {
         out["description"] = description;
     }
     if (shape == RowShape::Typed) {
-        out["type"] = "text";
+        // `text` unless an import kept another (`default`, which recent
+        // Postman writes on a header row).
+        const std::string type = text_of (row, "type");
+        out["type"]            = type.empty () ? std::string ("text") : type;
     }
     if (!row_enabled (row)) {
         out["disabled"] = true;
