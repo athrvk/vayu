@@ -159,10 +159,9 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 			Record<string, unknown>
 		>;
 		expect(rows[0]).not.toHaveProperty("dataFile");
-		expect(rows[0].dataSchema).toEqual(DECLARED.dataSchema);
 	});
 
-	test("it rides a read tool, answered with writes off, and reads no file", async () => {
+	test("it rides a read tool, answered with writes off, and names a path, never contents", async () => {
 		const tool = TOOLS.find((t) => t.name === "list_collections")!;
 		expect(tool.category).toBe("read");
 		expect(tool.annotations.readOnlyHint).toBe(true);

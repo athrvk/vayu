@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveUserDataDirectory } from "./user-data-dir.js";
-import { APP_NAME, LEGACY_USER_DATA_DIR_NAME, USER_DATA_DIR_NAME } from "./constants.js";
+import { LEGACY_USER_DATA_DIR_NAME, USER_DATA_DIR_NAME } from "./constants.js";
 
 let appData = "";
 beforeEach(() => {
@@ -40,11 +40,15 @@ function seedInstall(dir: string, marker: string): void {
 }
 
 describe("the data directory", () => {
-	it("is named for the product, and was named for the npm package before", () => {
-		expect(USER_DATA_DIR_NAME).toBe(APP_NAME);
-		expect(USER_DATA_DIR_NAME).toBe("Vayu");
-		// What every release up to 0.36 wrote - changing it would strand them.
-		expect(LEGACY_USER_DATA_DIR_NAME).toBe("vayu-client");
+	it("moves the directory every release up to 0.36 wrote into one named for the product", () => {
+		// Spelled out rather than read from the constants: these are the names on
+		// users' disks, and a constant renamed would strand them.
+		seedInstall(join(appData, "vayu-client"), "user-workspace");
+
+		expect(resolveUserDataDirectory(appData)).toEqual({
+			path: join(appData, "Vayu"),
+			outcome: "migrated",
+		});
 	});
 
 	it("moves an existing install's directory whole on the first launch", () => {
