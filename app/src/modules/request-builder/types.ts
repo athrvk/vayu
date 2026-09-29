@@ -24,6 +24,7 @@ import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
+	ExampleSentRequest,
 	DataContractScope,
 	ElementDef,
 	ElementOutcome,
@@ -311,6 +312,19 @@ export interface ResponseState {
 	 * request beside it may have been edited since. Gone after the next send.
 	 */
 	restoredFrom?: RestoredFrom;
+	/**
+	 * The request as the user wrote it when this response's Send was pressed
+	 * (issue #1763) - `{{vars}}` unresolved, captured at Send so edits made
+	 * while reading the response do not leak in. Read by
+	 * `ResponseViewer/save-as-example.ts`, which sends it as the example's
+	 * `savedFrom` so a Postman export describes the request that produced it.
+	 *
+	 * Set on a live send only, by `RequestBuilderProvider` rather than by
+	 * either response funnel: neither `/execute` nor a stored trace carries
+	 * the unresolved request, so a restored response has no snapshot and its
+	 * example regenerates on export, as one saved before this field did.
+	 */
+	sentRequest?: ExampleSentRequest;
 	errorCode?: string;
 	errorMessage?: string;
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */

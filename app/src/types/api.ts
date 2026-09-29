@@ -24,6 +24,7 @@ import type {
 	EngineHealth,
 	VariableValue,
 	KeyValueEntry,
+	FormFieldEntry,
 	RequestBody,
 	RequestAuth,
 	OAuth2Config,
@@ -293,6 +294,38 @@ export interface CreateRequestExampleRequest {
 	 * save is complete.
 	 */
 	bodyTruncated: boolean;
+	/**
+	 * The exchange this response came from, as the builder held it at Send
+	 * (issue #1763). Create-only: the engine builds the Postman saved-response
+	 * shape from it once and stores it in `request_examples.postman_response`,
+	 * so a later export writes the request that was sent rather than the one
+	 * the request has become. Absent when the response was restored from a
+	 * stored run - there is no snapshot to report, and the export regenerates.
+	 */
+	savedFrom?: ExampleSavedFrom;
+}
+
+/**
+ * The request as the user wrote it at Send (issue #1763): `{{vars}}`
+ * unresolved, the request's own URL before any redirect, path rows included.
+ * The stored request-column shapes, so the engine reads it with the same
+ * appliers as a request save. Auth is deliberately not part of it.
+ */
+export interface ExampleSentRequest {
+	method: string;
+	url: string;
+	params: FormFieldEntry[];
+	headers: FormFieldEntry[];
+	body: RequestBody;
+}
+
+/** See {@link CreateRequestExampleRequest.savedFrom}. */
+export interface ExampleSavedFrom {
+	request: ExampleSentRequest;
+	/** The server's own reason phrase; `""` lets the engine use the table's. */
+	statusText: string;
+	/** Absent writes `responseTime: null`. */
+	responseTimeMs?: number;
 }
 
 /** The rows as written - one drop is one transaction, so this is all of them. */

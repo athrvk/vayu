@@ -66,37 +66,16 @@ import {
 	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
+	toBodyPayload,
 } from "./utils/execute-mapping";
 import type {
 	HttpMethod,
 	LoadTestConfig,
 	StartLoadTestRequest,
-	RequestBody,
 	RequestAuth,
 	OAuth2Config,
 	UpdateRequestRequest,
 } from "@/types";
-
-/**
- * The flattened editor body as the wire's discriminated `RequestBody` - shared
- * between a real save and the "gone" pane's cURL snippet (issue #1436), which
- * has no fetched request to save against but still needs the same mapping.
- */
-function toBodyPayload(request: RequestState): RequestBody {
-	if (request.bodyMode === "form-data") {
-		return { mode: "form-data", fields: toKeyValueEntries(request.formData) };
-	}
-	if (request.bodyMode === "x-www-form-urlencoded") {
-		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
-	}
-	if (request.bodyMode !== "none") {
-		return {
-			mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
-			content: request.body ?? "",
-		};
-	}
-	return { mode: "none" };
-}
 
 /**
  * The PUT payload for exactly the fields the user changed (issue #1436) - an
