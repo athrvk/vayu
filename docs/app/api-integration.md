@@ -199,6 +199,18 @@ and an imported one are served identically. No `order` is ever sent: the engine
 appends, which is what keeps a restarted mock answering with the same first
 example.
 
+A response from a live send also carries **`sentRequest`**, the request as the
+builder held it at Send (`{{vars}}` unresolved, the stored request-column
+shapes from `sentRequestOf` in `utils/execute-mapping.ts`; issue #1763).
+`RequestBuilderProvider` attaches it - to the `/execute` result on the buffered
+path, and on a stream to the stored run's response at stream end, only when
+that run is the one the snapshot was taken for. The save sends it as the
+create-only **`savedFrom`**: `{ request, statusText, responseTimeMs }`, the
+server's own reason phrase and the response time beside it. The engine builds
+the Postman saved-response shape from it once and stores it for the export. A
+response restored from a stored run has no snapshot, so its save omits
+`savedFrom` and the export regenerates that example.
+
 No transformer, unlike a request row: an example carries no timestamp the app
 renders and no column that predates a schema change, so the wire shape *is* the
 domain shape - minus the `order` and timestamps the `RequestExample` type

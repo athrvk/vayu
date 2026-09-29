@@ -28,6 +28,11 @@
  *   and `bodyTruncated: true` rides the payload (issue #659) - the name used to
  *   carry the disclosure, and a name is editable, so renaming at save time
  *   erased it.
+ * - **The request that produced it rides along, when there is one** (issue
+ *   #1763). A live send's snapshot goes out as `savedFrom` with the server's own
+ *   reason phrase, so the export can write the request as it was sent; a
+ *   response restored from a stored run has no snapshot and sends no
+ *   `savedFrom`, so the export regenerates as it always did.
  *
  * Rendered, not source-scanned: every one of those is decided at runtime from
  * the response and the request beside it.
@@ -38,6 +43,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useExecutionEventsStore } from "@/stores";
+import type { ExampleSentRequest } from "@/types";
 import type { ResponseState } from "../../types";
 
 // Monaco does not run under jsdom, and the body panel is not what this asserts.
@@ -223,6 +229,47 @@ describe("save response as example", () => {
 		expect(await screen.findByText(/Example body is 2000000 bytes/)).toBeTruthy();
 		// Still open, with the name the attempt used, so it can be retried.
 		expect(screen.getByLabelText(/^name/i)).toBeTruthy();
+	});
+
+	it("sends the request as it was at Send, with the server's own reason phrase", async () => {
+		const sentRequest: ExampleSentRequest = {
+			method: "POST",
+			url: "{{baseUrl}}/users/:id",
+			params: [{ key: "id", value: "7", enabled: true, in: "path" }],
+			headers: [{ key: "X-Trace", value: "1", enabled: true }],
+			body: { mode: "json", content: '{"name":"{{user}}"}' },
+		};
+		// Not the table's phrase for 200: the point is that the server's own
+		// reaches the engine rather than being re-derived from the code.
+		state.response = okResponse({ statusText: "Totally Fine", time: 123, sentRequest });
+		renderViewer();
+
+		openDialog();
+		expect(screen.getByText(/and the request that produced it/)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].savedFrom).toEqual({
+			request: sentRequest,
+			statusText: "Totally Fine",
+			responseTimeMs: 123,
+		});
+	});
+
+	it("sends no savedFrom for a restored response, which has no Send snapshot", async () => {
+		state.response = okResponse({
+			restoredFrom: { runId: "run_1", at: "2026-01-01T00:00:00Z" },
+		});
+		renderViewer();
+
+		openDialog();
+		expect(screen.queryByText(/and the request that produced it/)).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		// Absent, not null: an absent key is what keeps the engine's
+		// regenerate-on-export behaviour.
+		expect("savedFrom" in createRequestExample.mock.calls[0][1]).toBe(false);
 	});
 
 	it("refuses to save an example with no name", () => {
