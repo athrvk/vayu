@@ -96,6 +96,20 @@
       "origin": "{{baseUrl}}",
       "path": "/pets/{petId",
       "shape": "/pets/{petId"
+    },
+    {
+      "name": "a Postman :name path variable is a placeholder like {{name}} (issue #1764)",
+      "url": "{{baseUrl}}/pets/:petId/toys/:toyId.json",
+      "origin": "{{baseUrl}}",
+      "path": "/pets/:petId/toys/:toyId.json",
+      "shape": "/pets/{}/toys/{}.json"
+    },
+    {
+      "name": "a port colon is the origin's and a mid-segment colon is text",
+      "url": "http://localhost:8080/v1/ops/x:cancel",
+      "origin": "http://localhost:8080",
+      "path": "/v1/ops/x:cancel",
+      "shape": "/v1/ops/x:cancel"
     }
   ],
   "specPaths": [

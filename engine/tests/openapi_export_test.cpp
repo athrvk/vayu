@@ -704,6 +704,23 @@ TEST (SkeletonExport, RecoversThePathTemplateAndTheServerFromTheRequestUrls) {
     EXPECT_EQ (exported.notes.requests_exported, 2);
 }
 
+/**
+ * A Postman `:name` segment (issue #1764) is an OpenAPI `{name}` path
+ * parameter, and the request's path row for it is that parameter's example;
+ * a segment with a suffix is left as written, as a `{{name}}.json` one is.
+ */
+TEST (SkeletonExport, WritesAColonPathVariableAsAPathParameterWithItsRowsValue) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets/:petId/files/:name.json");
+    entry.path_params = { row ("petId", "42") };
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (keys_of (exported.document["paths"]),
+    (std::vector<std::string>{ "/pets/{petId}/files/:name.json" }));
+    EXPECT_EQ (operation_of (exported.document,
+               "/pets/{petId}/files/:name.json", "get")["parameters"],
+    json::parse (R"([{"name":"petId","in":"path","required":true,"schema":{"type":"string"},"example":"42"}])"));
+}
+
 TEST (SkeletonExport, DeclaresTheRowsTheRequestHoldsWithoutClaimingAnyAreRequired) {
     ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
     entry.params        = { row ("status", "available"), row ("verbose", "") };

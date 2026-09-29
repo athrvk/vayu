@@ -7,6 +7,8 @@
 
 #include "vayu/core/operation_match.hpp"
 
+#include "vayu/core/path_template.hpp"
+
 #include <cctype>
 #include <unordered_map>
 
@@ -113,6 +115,22 @@ std::string flatten_placeholders (std::string_view path) {
         out += path[cursor];
         ++cursor;
     }
+    return out;
+}
+
+/// @p path with each Postman `:name` path variable (issue #1764) already
+/// flattened to `{}` - a request stored as `/pets/:petId` is the operation
+/// `/pets/{petId}` exactly as `/pets/{{petId}}` is. A `.suffix` after the name
+/// stays, as it does after a `{{name}}`.
+std::string flatten_colon_variables (std::string_view path) {
+    std::string out;
+    size_t copied = 0;
+    for (const auto& segment : vayu::core::path_variable_segments (path)) {
+        out.append (path.substr (copied, segment.offset - copied));
+        out += "{}";
+        copied = segment.offset + segment.length;
+    }
+    out.append (path.substr (copied));
     return out;
 }
 
@@ -225,7 +243,9 @@ std::optional<std::string> request_path_shape (std::string_view url) {
     if (!parts.path) {
         return std::nullopt;
     }
-    return normalize_path_shape (*parts.path);
+    // A request's own spelling only: an OpenAPI path has no `:name`
+    // variables, and the spec side's shape is pinned to the renderer's.
+    return normalize_path_shape (flatten_colon_variables (*parts.path));
 }
 
 std::string spec_path_shape (std::string_view path) {

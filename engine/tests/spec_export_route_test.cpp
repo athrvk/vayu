@@ -520,6 +520,10 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
             "headers":[{"key":"Content-Type","value":"text/xml","enabled":true}],
             "body":{"mode":"xml","content":"<x/>"},"auth":{"mode":"none"}})json"),
     json::parse (R"json({"name":"Home","method":"GET","url":"{{baseUrl}}"})json"),
+    // A path row (issue #1764) comes back a path row: `x-vayu-request` keeps
+    // its `in` and `type`, and it is the `{postId}` parameter, not a query one.
+    json::parse (R"json({"name":"Get post","method":"GET","url":"{{baseUrl}}/posts/:postId",
+            "params":[{"key":"postId","value":"9","enabled":true,"in":"path","type":"string"}]})json"),
     json::parse (R"json({"name":"Upload again","method":"POST","url":"{{baseUrl}}/files"})json") }) {
         json body              = request;
         body["collectionId"]   = request["name"] == "Soap" ? admin : root_;

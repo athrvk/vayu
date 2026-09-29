@@ -202,6 +202,17 @@ TEST (MatchOperations, PairsARequestWithItsOperationAndReportsBothLeftovers) {
     (std::vector<std::string>{ "createPet" }));
 }
 
+/// A request stored with Postman's `:petId` (issue #1764) is the operation
+/// `/pets/{petId}`, exactly as one stored with `{{petId}}` is.
+TEST (MatchOperations, MatchesAColonPathVariableToItsTemplatedOperation) {
+    const std::vector<MatchableRequest> requests{ request (
+    "r1", "GET", "{{baseUrl}}/pets/:petId") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets/{petId}", "getPet") };
+    const auto result = match_operations (requests, operations);
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "getPet" }));
+}
+
 TEST (MatchOperations, DoesNotMatchAcrossMethods) {
     const std::vector<MatchableRequest> requests{ request (
     "r1", "DELETE", "{{baseUrl}}/pets/{{petId}}") };

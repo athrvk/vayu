@@ -581,7 +581,8 @@ logged as a warning: it means a client skipped composition.
   - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped
-    and every placeholder (`{{petId}}`, `{petId}`) flattened to `{}`. Ambiguity
+    and every placeholder (`{{petId}}`, a request's `:petId`, `{petId}`)
+    flattened to `{}`. Ambiguity
     is refused in both directions, because the sync applies changes *by*
     identity. It parses no OpenAPI: the caller hands it the identities, which
     since #869 come from **`POST /specs/describe`** (dialect, `info.title`,

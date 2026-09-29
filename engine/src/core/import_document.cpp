@@ -3193,7 +3193,7 @@ void apply_vayu_request (const json& object, json& request, ImportTally& tally) 
     apply_piece (object, "description", tally, string_piece, set ("description"));
     apply_piece (object, "method", tally, method_piece, set ("method"));
     apply_piece (object, "url", tally, string_piece, set ("url"));
-    apply_piece (object, "params", tally, ext::rows_of, set ("params"));
+    apply_piece (object, "params", tally, ext::param_rows_of, set ("params"));
     apply_piece (object, "headers", tally, ext::rows_of, set ("headers"));
     apply_piece (object, "body", tally, ext::body_of, [&request] (json body) {
         request["body"] = with_unattached_files (std::move (body));

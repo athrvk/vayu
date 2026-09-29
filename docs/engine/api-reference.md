@@ -2093,8 +2093,9 @@ the same way a stored `spec_operation` omits it.
 
 **How it matches.** Both sides are reduced to a path shape: the origin dropped
 (`{{baseUrl}}`, `https://api.example.com` and a schemeless host alike), the query
-and fragment dropped, and every placeholder - Vayu's `{{petId}}` and the
-document's `{petId}` - flattened to `{}`. Flattening the name too is deliberate:
+and fragment dropped, and every placeholder - Vayu's `{{petId}}`, a request's
+Postman-style `:petId` path variable (issue #1764) and the document's `{petId}` -
+flattened to `{}`. Flattening the name too is deliberate:
 a document that renames its path parameter describes the same endpoint, and a
 match that turned on the parameter's spelling would report a rename as removed
 and added. A second pass then offers each remaining request to the templates it
@@ -2461,10 +2462,19 @@ request nobody edited writes nothing new into the standard members - an
 unedited export in `full` differs from the stored document only by its
 `x-vayu-*` keys. A skeleton ignores `mode`. Anything else is a `400`.
 
+**A request's `:name` path variable is an OpenAPI path parameter** (issue
+#1764): wherever a URL becomes a path, a whole `:name` segment is written
+`{name}`, as a whole `{{name}}` segment is, and its path row's value is the
+parameter's `example`. A path row is never declared `in: query`, and
+`x-vayu-request.params` keeps each row's `in` (and a Postman `type`), so a
+re-import gives the path row back. A segment with a suffix (`:name.json`) is left
+as written, as `{{name}}.json` is.
+
 **A bound export patches the stored bytes, never rebuilds them.** Operations no
 request claims are removed (and a path left with no operations goes with them),
-a declared parameter whose request row carries a value gets it as `example`, and
-stored examples become response examples - one as `example`, several as a named
+a declared parameter whose request row carries a value gets it as `example` (a
+declared `in: path` parameter reads the request's path row of that name, issue
+#1764), and stored examples become response examples - one as `example`, several as a named
 `examples` map. Everything else - `info`, `tags`, vendor extensions, `security`,
 components nothing references - is carried through by simply not being visited,
 and the dialect is left as it was.

@@ -39,12 +39,14 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_export.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -56,6 +58,10 @@ namespace vayu::http::routes {
 
 namespace {
 
+/// Which rows of a Params table @ref read_rows reads: the query rows, or the
+/// `in: "path"` rows (issue #1764). A Headers table has only the first kind.
+enum class RowSide : std::uint8_t { Query, Path };
+
 /**
  * The Params / Headers rows of a stored request.
  *
@@ -64,7 +70,8 @@ namespace {
  * keeps it because the endpoint accepts the parameter either way. A toggle says
  * what this request does, not what the API takes.
  */
-std::vector<vayu::core::ExportKeyValue> read_rows (const std::string& blob) {
+std::vector<vayu::core::ExportKeyValue>
+read_rows (const std::string& blob, RowSide side = RowSide::Query) {
     std::vector<vayu::core::ExportKeyValue> out;
     if (blob.empty ()) {
         return out;
@@ -80,7 +87,8 @@ std::vector<vayu::core::ExportKeyValue> read_rows (const std::string& blob) {
         std::string ();
     };
     for (const auto& row : rows) {
-        if (!row.is_object ()) {
+        if (!row.is_object () ||
+        vayu::core::is_path_variable_row (row) != (side == RowSide::Path)) {
             continue;
         }
         // Absent or non-boolean `enabled` means enabled (D17, the same rule
@@ -330,6 +338,7 @@ const std::vector<vayu::db::Collection>& chain) {
     entry.method         = vayu::to_string (row.method);
     entry.url            = row.url;
     entry.params         = read_rows (row.params);
+    entry.path_params    = read_rows (row.params, RowSide::Path);
     entry.headers        = read_rows (row.headers);
     entry.body           = read_body (row.body);
     entry.stored_params  = stored_json (row.params, nlohmann::json::array ());
