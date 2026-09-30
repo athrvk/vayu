@@ -127,4 +127,16 @@ describe("importNotices", () => {
 			"3 ResultCollector not imported",
 		]);
 	});
+
+	it("says a Postman protocol setting is kept, not dropped, now that cookies, headers and encoding apply (#1765)", () => {
+		// The engine counts only what it stores without applying (TLS options,
+		// a Host / Content-Length opt-out), so the line must not name cookies or
+		// URL encoding as missing: those three are honoured on Send.
+		const texts = importNotices(
+			meta({ skipped: [{ kind: "protocol_behavior", count: 2 }] })
+		).map((n) => n.text);
+		expect(texts).toEqual([
+			"2 requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
+		]);
+	});
 });
