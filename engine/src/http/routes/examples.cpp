@@ -248,14 +248,23 @@ nlohmann::ordered_json& out) {
 
 /// The Vayu verb @p text names, in any case, as the request column spells it.
 std::optional<std::string> canonical_method (const std::string& text) {
-    for (const vayu::HttpMethod method : { vayu::HttpMethod::GET,
-         vayu::HttpMethod::POST, vayu::HttpMethod::PUT, vayu::HttpMethod::DELETE,
-         vayu::HttpMethod::PATCH, vayu::HttpMethod::HEAD, vayu::HttpMethod::OPTIONS }) {
-        if (vayu::utils::ascii_lower_equal (text, vayu::to_string (method))) {
-            return std::make_optional<std::string> (vayu::to_string (method));
+    const std::optional<vayu::HttpMethod> method =
+    vayu::parse_method (vayu::utils::ascii_upper (text));
+    return method ? std::make_optional<std::string> (vayu::to_string (*method)) :
+                    std::nullopt;
+}
+
+/// Every verb `parse_method` takes, as a refusal lists them: the enum's
+/// values in order, up to the first one `to_string` has no name for.
+std::string method_names () {
+    std::string out;
+    for (unsigned at = 0;; ++at) {
+        const char* name = vayu::to_string (static_cast<vayu::HttpMethod> (at));
+        if (!vayu::parse_method (name)) {
+            return out;
         }
+        out += (out.empty () ? "" : ", ") + std::string (name);
     }
-    return std::nullopt;
 }
 
 /// `savedFrom.request`: the stored request columns' shapes, as sent.
@@ -271,9 +280,8 @@ vayu::core::PostmanExportRequest& out) {
     }
     if (!verb) {
         return route_error (400,
-        "Invalid 'savedFrom.request.method': must be an HTTP method (GET, "
-        "POST, "
-        "PUT, DELETE, PATCH, HEAD or OPTIONS)");
+        "Invalid 'savedFrom.request.method': must be an HTTP method (" +
+        method_names () + ")");
     }
     out.method     = std::move (*verb);
     const auto url = request.find ("url");

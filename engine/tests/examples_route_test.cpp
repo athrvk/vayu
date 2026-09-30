@@ -557,6 +557,15 @@ TEST_F (ExamplesRouteTest, CreateRejectsAMalformedSavedFrom) {
         << "expected the refusal to name " << field << ": " << body.dump ();
     }
 
+    // The verbs a refusal lists are the ones `parse_method` takes.
+    auto [verb_status, verb] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "X" },
+    { "savedFrom", with ([] (json& s) { s["request"]["method"] = "FETCH"; }) } });
+    EXPECT_EQ (verb_status, 400);
+    EXPECT_NE (
+    verb.dump ().find ("(GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)"), std::string::npos)
+    << verb.dump ();
+
     // Two writers of one column.
     auto [both_status, both] = routes::create_request_example_response (*db_, "req_1",
     json{ { "name", "X" }, { "postmanResponse", R"({"status":"OK"})" },
