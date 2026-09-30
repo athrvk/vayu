@@ -392,6 +392,7 @@ set(vayu_scratch_database_suites
     ScriptRequestNameTest
     ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
+    SendTimeQueryValues
     ServerBindTest
     SpecBindRouteTest
     SpecExportRouteTest
