@@ -63,6 +63,7 @@ import { elementsParts, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
 	disabledDefaults,
+	protocolSettings,
 	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
@@ -142,6 +143,14 @@ function buildUpdatePayload(
 	if (changedFields.has("maxRedirects")) payload.maxRedirects = request.maxRedirects;
 	if (changedFields.has("httpVersion")) payload.httpVersion = request.httpVersion;
 	if (changedFields.has("verifySSL")) payload.verifySSL = request.verifySSL;
+	if (changedFields.has("disableCookies")) payload.disableCookies = request.disableCookies;
+	// The *stored* automatic-header list (issue #1765), edited in the Settings
+	// tab - unlike the per-send `disabledDefaultHeaders` above, which never is.
+	// Sent whole, `[]` included, for the `elements` reason.
+	if (changedFields.has("disabledSystemHeaders"))
+		payload.disabledSystemHeaders = request.disabledSystemHeaders;
+	if (changedFields.has("disableUrlEncoding"))
+		payload.disableUrlEncoding = request.disableUrlEncoding;
 	if (changedFields.has("stream")) payload.stream = request.stream;
 
 	return payload;
@@ -176,6 +185,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				stream: request.stream,
 				verifySSL: request.verifySSL,
 				followRedirects: request.followRedirects,
+				disableUrlEncoding: request.disableUrlEncoding,
 			});
 			// A text button, so the acknowledgement is the toast rather than a
 			// check swap (design-system.md, Component Patterns) - and `useCopy`
@@ -347,6 +357,9 @@ export default function RequestBuilder() {
 			maxRedirects: fetchedRequest.maxRedirects,
 			httpVersion: fetchedRequest.httpVersion,
 			verifySSL: fetchedRequest.verifySSL,
+			disableCookies: fetchedRequest.disableCookies,
+			disabledSystemHeaders: fetchedRequest.disabledSystemHeaders,
+			disableUrlEncoding: fetchedRequest.disableUrlEncoding,
 			stream: fetchedRequest.stream,
 			collectionId: fetchedRequest.collectionId,
 		};
@@ -421,6 +434,9 @@ export default function RequestBuilder() {
 					// omitted `false` verifies the certificate the user turned
 					// verification off for (issue #706).
 					verifySSL: request.verifySSL,
+					// Postman's protocol switches (issue #1765), always sent for
+					// the same reason: the editor's value, not the saved row's.
+					...protocolSettings(request),
 					// Identity for the script sandbox (pm.info), not an HTTP
 					// field - it rides through composition to /execute.
 					...execIdentity(request),
@@ -727,6 +743,10 @@ export default function RequestBuilder() {
 						// test that verified where Send did not would fail on
 						// every request against the host the user opted out for.
 						verifySSL: pendingLoadTestRequest.verifySSL,
+						// And its stored protocol switches (issue #1765): a load
+						// run must skip the jar, the headers and the encoding Send
+						// skips, or it measures a different request.
+						...protocolSettings(pendingLoadTestRequest),
 						// The name in the editor right now - Send's
 						// own compose call already carries this (see
 						// `composeForSend`); the load dialog composes separately

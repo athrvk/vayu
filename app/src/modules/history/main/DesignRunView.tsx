@@ -55,6 +55,7 @@ import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
 	disabledDefaults,
+	protocolSettings,
 	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
@@ -272,6 +273,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// a resend that verified where the run did not would
 						// fail against the host the run was aimed at.
 						verifySSL: request.verifySSL,
+						// And the protocol switches it ran with (issue #1765):
+						// the jar, the stored header opt-outs, the encoding.
+						...protocolSettings(request),
 						// Identity for the script sandbox (pm.info), not an HTTP
 						// field. A replay copy is detached, so its name is the
 						// only one the engine can be told about.

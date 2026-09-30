@@ -797,6 +797,35 @@ export interface Request {
 	 */
 	verifySSL: boolean;
 	/**
+	 * Skip the cookie jar for this request (issue #1765, Postman's
+	 * `protocolProfileBehavior.disableCookies`): no jar cookie is attached and
+	 * no `Set-Cookie` is stored. A `Cookie` header typed in the Headers tab is
+	 * still sent.
+	 */
+	disableCookies: boolean;
+	/**
+	 * The engine's automatic headers this request never sends, as lowercased
+	 * names (issue #1765, Postman's `disabledSystemHeaders`). **Stored**, unlike
+	 * the per-send `disabledDefaultHeaders` (#1229), which lives only on the
+	 * editor state for one Send; the engine unions the two at send time. Names
+	 * Vayu cannot omit (`host`, `content-length`) or never sends
+	 * (`postman-token`, `connection`, `cache-control`) are kept for the Postman
+	 * export and do nothing on the wire.
+	 */
+	disabledSystemHeaders: string[];
+	/**
+	 * Send the path and query as written, skipping Vayu's own percent-encoding
+	 * of path-variable values, query rows and an API-key query param
+	 * (issue #1765, Postman's `disableUrlEncoding`).
+	 */
+	disableUrlEncoding: boolean;
+	/**
+	 * The imported Postman item's `protocolProfileBehavior`, verbatim. Read by
+	 * the engine's Postman exporter only; nothing sends it and the app never
+	 * edits it. Absent or `null` for a request that did not come from Postman.
+	 */
+	postmanProtocolBehavior?: Record<string, unknown> | null;
+	/**
 	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
 	 * Stored on the request because it describes the *endpoint* rather than one
 	 * send, so the builder's Event stream toggle survives a tab switch and a

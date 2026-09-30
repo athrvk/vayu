@@ -47,6 +47,16 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		...(r.verifySSL !== undefined ? { verifySSL: r.verifySSL } : {}),
 		...(r.httpVersion !== undefined ? { httpVersion: r.httpVersion } : {}),
 		...(r.stream !== undefined ? { stream: r.stream } : {}),
+		...(r.disableCookies !== undefined ? { disableCookies: r.disableCookies } : {}),
+		...(r.disabledSystemHeaders !== undefined
+			? { disabledSystemHeaders: r.disabledSystemHeaders }
+			: {}),
+		...(r.disableUrlEncoding !== undefined ? { disableUrlEncoding: r.disableUrlEncoding } : {}),
+		// The export carrier (issue #1765): a `null` is a statement too, so only
+		// an absent key is left out.
+		...(r.postmanProtocolBehavior !== undefined
+			? { postmanProtocolBehavior: r.postmanProtocolBehavior }
+			: {}),
 		// Saved example responses ride nested on their request rather than as a
 		// section of their own: nothing references them, so they need no temp id,
 		// and the engine writes them in the same transaction. Spread for the same

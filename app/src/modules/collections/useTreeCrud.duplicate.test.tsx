@@ -70,6 +70,15 @@ const source: Request = {
 	maxRedirects: 3,
 	httpVersion: "http1.1",
 	verifySSL: false,
+	// Postman's protocol switches and their export carrier (#1765), at
+	// non-default values, so a copy that reset them fails the whole-record check.
+	disableCookies: true,
+	disabledSystemHeaders: ["user-agent"],
+	disableUrlEncoding: true,
+	postmanProtocolBehavior: {
+		disableCookies: true,
+		disabledSystemHeaders: { "user-agent": true },
+	},
 	stream: true,
 	mockResponseMode: "first",
 	specOperation: { operationId: "getPet", method: "GET", path: "/pets/{id}" },

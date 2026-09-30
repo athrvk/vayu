@@ -30,6 +30,15 @@ export const DEFAULT_MAX_REDIRECTS = 10;
  */
 export const DEFAULT_VERIFY_SSL = true;
 
+/**
+ * Postman's per-request protocol switches (issue #1765). Both mirror the
+ * `requests.disable_cookies` / `requests.disable_url_encoding` column defaults,
+ * so a request stored before the columns existed reads back using the jar and
+ * encoding its URL, which is what it did.
+ */
+export const DEFAULT_DISABLE_COOKIES = false;
+export const DEFAULT_DISABLE_URL_ENCODING = false;
+
 /** Bounds offered by the Settings tab; the engine clamps to the same range. */
 export const MIN_MAX_REDIRECTS = 0;
 export const MAX_MAX_REDIRECTS = 100;

@@ -507,3 +507,7 @@ describe("buildChangeset", () => {
 		expect(set.map((i) => i.field)).toEqual(["Auth"]);
 	});
 });
+			// Same for Postman's protocol switches (#1765).
+			disableCookies: false,
+			disabledSystemHeaders: [],
+			disableUrlEncoding: false,

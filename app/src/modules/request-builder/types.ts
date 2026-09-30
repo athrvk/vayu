@@ -145,15 +145,18 @@ export interface RequestState {
 	params: KeyValueItem[];
 	headers: KeyValueItem[];
 	/**
-	 * Names of the engine's own default headers this send refuses (issue #1229),
-	 * ticked off in the Headers tab's "Added by Vayu" group and sent as
+	 * Names of the engine's own default headers **this send** refuses (issue
+	 * #1229), ticked off in the Headers tab's "Added by Vayu" group and sent as
 	 * `disabledDefaultHeaders`.
 	 *
-	 * **None of it is persisted.** It is a property of this send, not of the
-	 * request: the defaults are resolved from engine config at send time, so a
-	 * saved opt-out would be a stored answer to a question config re-answers on
-	 * every send - which is the whole defect #1229 removes. `handleSave` writes
-	 * no such field, and there is none on `Request` to write it to.
+	 * **This per-send opt-out is never persisted.** The defaults are resolved
+	 * from engine config at send time, so saving a Headers-tab untick would be a
+	 * stored answer to a question config re-answers on every send - the defect
+	 * #1229 removes. `handleSave` writes no such field.
+	 *
+	 * Not to be confused with {@link disabledSystemHeaders}: that one is the
+	 * *stored* per-request list (Postman's `disabledSystemHeaders`, issue #1765)
+	 * edited in the Settings tab. The engine unions the two at send time.
 	 */
 	disabledDefaultHeaders: string[];
 
@@ -180,6 +183,16 @@ export interface RequestState {
 	httpVersion: HttpVersion;
 	/** Verify the TLS certificate. See `Request.verifySSL` for the rationale. */
 	verifySSL: boolean;
+	/** Skip the cookie jar. See `Request.disableCookies` (issue #1765). */
+	disableCookies: boolean;
+	/**
+	 * The automatic headers this request never sends, **stored** on the request
+	 * (issue #1765) and edited in the Settings tab. See `Request.disabledSystemHeaders`,
+	 * and {@link disabledDefaultHeaders} for the per-send list it is kept apart from.
+	 */
+	disabledSystemHeaders: string[];
+	/** Send the URL as written. See `Request.disableUrlEncoding` (issue #1765). */
+	disableUrlEncoding: boolean;
 	/**
 	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
 	 *

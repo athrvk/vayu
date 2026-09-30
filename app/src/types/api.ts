@@ -178,6 +178,14 @@ export interface CreateRequestRequest {
 	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/** Skip the cookie jar - see {@link Request.disableCookies}. */
+	disableCookies?: boolean;
+	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
+	disabledSystemHeaders?: string[];
+	/** Send the URL unencoded - see {@link Request.disableUrlEncoding}. */
+	disableUrlEncoding?: boolean;
+	/** Postman's `protocolProfileBehavior`, verbatim - see {@link Request.postmanProtocolBehavior}. */
+	postmanProtocolBehavior?: Record<string, unknown> | null;
 	/** Which spec operation this request is - see {@link Request.specOperation}. */
 	specOperation?: SpecOperation;
 	/** Which app setting wrote `method` - see {@link Request.methodSource}. */
@@ -210,6 +218,12 @@ export interface UpdateRequestRequest {
 	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/** Skip the cookie jar - see {@link Request.disableCookies}. */
+	disableCookies?: boolean;
+	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
+	disabledSystemHeaders?: string[];
+	/** Send the URL unencoded - see {@link Request.disableUrlEncoding}. */
+	disableUrlEncoding?: boolean;
 	/** See {@link import("./domain").Request.mockResponseMode}. */
 	mockResponseMode?: import("./domain").MockResponseMode;
 	/**
@@ -420,6 +434,15 @@ export interface ExecuteRequestRequest {
 	 * a client reading the declared set and sending.
 	 */
 	disabledDefaultHeaders?: string[];
+	/**
+	 * The request's stored protocol settings (issue #1765). Sent on **every**
+	 * execute, never elided at the default, for the `verifySSL` reason above.
+	 * `disabledSystemHeaders` is the *stored* opt-out list and is distinct from
+	 * the per-send `disabledDefaultHeaders`: the engine unions the two.
+	 */
+	disableCookies?: boolean;
+	disabledSystemHeaders?: string[];
+	disableUrlEncoding?: boolean;
 	requestId?: string;
 	/**
 	 * The request's name, for the script sandbox to read as `pm.info.requestName`
@@ -610,6 +633,14 @@ export interface StartLoadTestRequest {
 	 * send the header set a Send sends, or it measures a different request.
 	 */
 	disabledDefaultHeaders?: string[];
+
+	/**
+	 * The request's stored protocol settings (issue #1765), always sent, same
+	 * rationale as {@link ExecuteRequestRequest.disableCookies}.
+	 */
+	disableCookies?: boolean;
+	disabledSystemHeaders?: string[];
+	disableUrlEncoding?: boolean;
 
 	// Load test strategy
 	mode: LoadTestMode;
@@ -1548,6 +1579,12 @@ export interface ImportApplyRequestItem {
 	verifySSL?: boolean;
 	httpVersion?: HttpVersion;
 	stream?: boolean;
+	/** Omitted unless the imported file states them (Postman's `protocolProfileBehavior`). */
+	disableCookies?: boolean;
+	disabledSystemHeaders?: string[];
+	disableUrlEncoding?: boolean;
+	/** Postman's `protocolProfileBehavior`, verbatim - see {@link Request.postmanProtocolBehavior}. */
+	postmanProtocolBehavior?: Record<string, unknown> | null;
 	order?: number;
 	/** Omitted unless the source file carried saved responses for this request. */
 	examples?: ImportApplyExample[];

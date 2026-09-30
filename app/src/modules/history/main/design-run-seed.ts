@@ -26,6 +26,8 @@ import { paramsFromUrl } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
@@ -56,6 +58,9 @@ interface DesignSnapshot {
 	maxRedirects?: number;
 	httpVersion?: string;
 	verifySSL?: boolean;
+	disableCookies?: boolean;
+	disabledSystemHeaders?: unknown;
+	disableUrlEncoding?: boolean;
 }
 
 export interface DesignRunSeed {
@@ -211,6 +216,16 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			// verifying - the same direction every other default here takes,
 			// and the only safe one for this field.
 			verifySSL: snapshot.verifySSL ?? DEFAULT_VERIFY_SSL,
+			// Postman's protocol switches (issue #1765), same direction: a run
+			// recorded before they existed used the jar, encoded its URL and
+			// suppressed no automatic header.
+			disableCookies: snapshot.disableCookies ?? DEFAULT_DISABLE_COOKIES,
+			disabledSystemHeaders: Array.isArray(snapshot.disabledSystemHeaders)
+				? (snapshot.disabledSystemHeaders as unknown[]).filter(
+						(name): name is string => typeof name === "string"
+					)
+				: [],
+			disableUrlEncoding: snapshot.disableUrlEncoding ?? DEFAULT_DISABLE_URL_ENCODING,
 		},
 		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
 		collectionPostScripts: collectionParts(snapshot.postRequestScripts),
