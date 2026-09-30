@@ -4784,18 +4784,24 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   empty value as `key=` and a `valueless: true` row (Postman's
   `"value": null`) as a bare `key`. A
   request with `disableUrlEncoding` writes the pair as typed.
-- A value known only at send time is written by the same rule, as Postman
-  resolves variables and then encodes the query: a `{{variable}}` substituted
-  into the URL's query (by composition, a data row's bind, or the residual
-  pass after the pre-request script), encoded as a key or as a value by where
-  the token sits, and a pair a script adds with `pm.request.url.query.add` or
-  `upsert` ([scripting](scripting.md#writing)). `GET {{base}}/?q={{term}}`
-  with `term = "a b#c"` sends `/?q=a%20b%23c`. Where the token sits is read
-  left to right from the URL written so far: the first `?` opens the query at
-  a key, `=` moves to the value, `&` starts the next key, `#` opens the
-  fragment. A layered value is resolved whole and encoded once. A value
-  substituted into the host, the path or the fragment is not touched by this
-  rule, and `disableUrlEncoding` writes every value as typed.
+- A value known only at send time is URL text, not a row: a `{{variable}}`
+  substituted into the URL (by composition, a data row's bind, or the residual
+  pass after the pre-request script). Postman substitutes into the URL string,
+  parses it again and then encodes it, so a value's `&` and `=` split pairs as
+  they would typed, a `?` it brings into the head opens the query, and a `#`
+  opens the fragment. In the query only `QUERY_ENCODE_SET` above is encoded,
+  alike in a key and a value; the `&`/`=` step of a row never applies.
+  `GET {{base}}/?q={{term}}` with `term = "a b#c"` sends `/?q=a%20b`, with
+  `#c` as the fragment (which is not sent), and `?{{qs}}` with
+  `qs = "a=1&b=2 c"` sends `?a=1&b=2%20c`. Where a value lands is read left
+  to right from the URL written so far, substituted values included: the
+  first `?` in the head opens the query, `#` opens the fragment. A layered
+  value is resolved whole and encoded once. The head and the fragment take a
+  value as it stands, so a `{{base}}` holding `https://x/p?k=a b` has only its
+  query part encoded, and `disableUrlEncoding` writes every value as typed.
+- A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
+  and is written by the row rule above
+  ([scripting](scripting.md#writing)).
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.

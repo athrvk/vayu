@@ -60,14 +60,23 @@ export function encodeQueryComponent(text: string, part: QueryPart): string {
 
 /**
  * Which part of a URL a point in its text sits in (issue #1773), the engine's
- * `core::UrlComponent`: `head` is the scheme, host and path.
+ * `core::UrlComponent`: `head` is the scheme, host and path. A query key and
+ * value are one component: substituted text encodes both alike.
  */
-export type UrlComponent = "head" | QueryPart | "fragment";
+export type UrlComponent = "head" | "query" | "fragment";
+
+/** `QUERY_ENCODE_SET`'s ASCII beyond the controls; its `#` is structure here. */
+const SUBSTITUTED_ENCODE_ASCII = new Set([...` "'<>`].map((char) => char.charCodeAt(0)));
+
+function afterUrlChar(char: string, where: UrlComponent): UrlComponent {
+	if (char === "#") return "fragment";
+	return char === "?" && where === "head" ? "query" : where;
+}
 
 /**
- * The component in force after `text`, read from `from`: the first `?` opens
- * the query at a key, `=` moves a key to its value, `&` starts the next key,
- * `#` opens the fragment. A whole `{{...}}` token moves nothing.
+ * The component in force after `text`, read from `from`: the first `?` in the
+ * head opens the query, `#` opens the fragment. A whole `{{...}}` token moves
+ * nothing.
  */
 export function advanceUrlComponent(text: string, from: UrlComponent): UrlComponent {
 	let where = from;
@@ -77,21 +86,48 @@ export function advanceUrlComponent(text: string, from: UrlComponent): UrlCompon
 			at = end;
 			continue;
 		}
-		const char = text[at++];
-		if (char === "#") where = "fragment";
-		else if (where === "head") where = char === "?" ? "key" : where;
-		else if (char === "&") where = "key";
-		else if (char === "=" && where === "key") where = "value";
+		where = afterUrlChar(text[at++], where);
 	}
 	return where;
 }
 
 /**
- * `url` with each `{{...}}` token resolved through `resolve` and written by the
- * rule of the component it lands in, the engine's `substitute_url_tokens`: a
- * query key or value by `encodeQueryComponent`, the head and the fragment as
- * resolved. `resolve` gets the token alone, so a layered value is resolved
- * whole and encoded once. `encode: false` is `disableUrlEncoding`.
+ * `value` written into a URL at `from`, and the component it leaves the URL
+ * in: the engine's `encode_at_url_component`. Postman substitutes into the URL
+ * string and parses it again, so a value is URL text: its `?` opens the query
+ * from the head, its `#` the fragment, its `&` and `=` split pairs, and only
+ * `QUERY_ENCODE_SET` is encoded in the query. The head and the fragment are
+ * written as they stand; a whole `{{...}}` token is kept and moves nothing.
+ */
+export function encodeAtUrlComponent(
+	value: string,
+	from: UrlComponent
+): { written: string; where: UrlComponent } {
+	let where = from;
+	let out = "";
+	for (let at = 0; at < value.length;) {
+		const end = tokenEnd(value, at);
+		if (end !== -1) {
+			out += value.slice(at, end);
+			at = end;
+			continue;
+		}
+		// A whole code point, so a character outside the BMP encodes as its
+		// UTF-8 bytes rather than as two lone surrogates.
+		const char = String.fromCodePoint(value.codePointAt(at) ?? 0);
+		at += char.length;
+		where = afterUrlChar(char, where);
+		out += where === "query" ? percentEncodeQuery(char, SUBSTITUTED_ENCODE_ASCII) : char;
+	}
+	return { written: out, where };
+}
+
+/**
+ * `url` with each `{{...}}` token resolved through `resolve` and written as
+ * URL text at the component the text before it has reached, substituted
+ * values included: the engine's `substitute_url_tokens`. `resolve` gets the
+ * token alone, so a layered value is resolved whole and encoded once.
+ * `encode: false` is `disableUrlEncoding`.
  */
 export function resolveUrlTemplate(
 	url: string,
@@ -110,11 +146,9 @@ export function resolveUrlTemplate(
 		}
 		const literal = url.slice(plain, at);
 		where = advanceUrlComponent(literal, where);
-		const resolved = resolve(url.slice(at, end));
-		const written =
-			where === "key" || where === "value" ? encodeQueryComponent(resolved, where) : resolved;
-		where = advanceUrlComponent(written, where);
-		out += literal + written;
+		const encoded = encodeAtUrlComponent(resolve(url.slice(at, end)), where);
+		where = encoded.where;
+		out += literal + encoded.written;
 		plain = at = end;
 	}
 	return out + url.slice(plain);

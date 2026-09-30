@@ -49,29 +49,39 @@ enum class QueryEncoding : std::uint8_t { UriComponent, Postman, AsTyped };
 
 /// Which part of a URL a point in its text sits in, for the rule a value
 /// substituted there is written by (issue #1773). `Head` is everything before
-/// the query: scheme, host and path, which keep their own rules.
-enum class UrlComponent : std::uint8_t { Head, QueryKey, QueryValue, Fragment };
+/// the query: scheme, host and path, which keep their own rules. A query key
+/// and a query value are one component here: substituted text is written by
+/// the whole-query rule, which encodes both alike.
+enum class UrlComponent : std::uint8_t { Head, Query, Fragment };
 
 /**
  * @brief The component in force after @p text, read from @p from.
  *
- * The first `?` opens the query at a key, `=` moves a key to its value, `&`
- * starts the next key, and `#` opens the fragment, which nothing closes.
- * Every whole `{{...}}` token is skipped, so a separator inside a variable
- * name moves nothing - the same token rule `encode_query_component` keeps.
+ * The first `?` in the head opens the query and `#` opens the fragment, which
+ * nothing closes. Every whole `{{...}}` token is skipped, so a separator
+ * inside a variable name moves nothing - the same token rule
+ * `encode_query_component` keeps.
  */
 [[nodiscard]] UrlComponent advance_url_component (std::string_view text, UrlComponent from);
 
 /**
- * @brief @p value as it is written into a URL at @p where: by
- *        `encode_query_component` in a query key or value, as it stands in
- *        the head and the fragment.
+ * @brief @p value as it is written into a URL at @p where, which is advanced
+ *        past it.
  *
- * Postman resolves a request's variables and then encodes its query with
- * `toNodeUrl`, so a value a `{{var}}` brings into the query is encoded by the
- * query rule; the path has its own rule (`encode_path_variable_value`), and
- * a host or fragment value is not encoded.
+ * Postman (postman-runtime 7.56.1 `resolveUrl`) substitutes a request's
+ * variables into the URL *string*, parses that string again and encodes the
+ * result with `toNodeUrl`. So a substituted value is URL text, not a row: its
+ * `?` opens the query when it sits in the head, its `#` opens the fragment,
+ * and its `&` and `=` split pairs as they would typed. Inside the query only
+ * `QUERY_ENCODE_SET` is encoded (the C0 controls, DEL, every byte above `~`,
+ * space, `"`, `'`, `<`, `>`; the set's `#` is structure here); the head and
+ * the fragment are written as they stand, so a `{{base}}` holding
+ * `https://x/?k=a b` has its query part encoded and its path not. The
+ * per-row `normalizeParam` step (`&` in a value, `=` in a key) belongs to
+ * `encode_query_component` and never applies here. `%` passes and every whole
+ * `{{...}}` token is kept verbatim without moving @p where.
  */
-[[nodiscard]] std::string encode_at_url_component (std::string_view value, UrlComponent where);
+[[nodiscard]] std::string
+encode_at_url_component (std::string_view value, UrlComponent& where);
 
 } // namespace vayu::core

@@ -447,17 +447,18 @@ TEST_F (LoadDataTest, AnAbsentColumnErrorsTheSubmissionInsteadOfSendingIt) {
     << "a bind failure left the run believing a request was still in flight";
 }
 
-// Issue #1773: a column bound into the query is written by Postman's query
-// rule, per submission, as a value or as a key by where its token sits; under
-// `disableUrlEncoding` it goes out as the cell wrote it.
+// Issue #1773: a column bound into the query is written as Postman writes a
+// substituted value, per submission: URL text whose `=` and `&` split pairs and
+// whose QUERY_ENCODE_SET bytes are encoded; under `disableUrlEncoding` it goes
+// out as the cell wrote it.
 TEST_F (LoadDataTest, AColumnBoundIntoTheQueryIsEncodedByItsPosition) {
     vayu::tests::EchoServer echo;
     json payload = iterations_payload (echo.url () + "?q={{data.term}}&{{data.k}}=1", 1);
-    payload["data"] = json::array ({ json{ { "term", "a b#c" }, { "k", "x=y" } } });
+    payload["data"] = json::array ({ json{ { "term", "a b\"c" }, { "k", "x=y" } } });
 
     run (payload);
 
-    EXPECT_EQ (echo.target (), "/echo?q=a%20b%23c&x%3Dy=1");
+    EXPECT_EQ (echo.target (), "/echo?q=a%20b%22c&x=y=1");
 }
 
 TEST_F (LoadDataTest, AColumnBoundIntoTheQueryIsSentAsTypedWhenUrlEncodingIsOff) {

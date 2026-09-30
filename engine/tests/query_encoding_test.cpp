@@ -319,14 +319,18 @@ class SendTimeQueryValues : public PostmanQueryOnTheWire {
     std::unique_ptr<vayu::db::Database> db_;
 };
 
-// The issue's acceptance: `GET {{base}}?q={{term}}` with `term = "a b#c"`.
-// Raw, libcurl refuses the space; with the space gone, the `#` would start a
-// fragment and cut the query short.
+// `GET {{base}}?q={{term}}&{{k}}=1`: raw, libcurl refuses the space. Postman
+// substitutes into the URL string and parses it again, so a value's `=` and
+// `&` split pairs and its `#` opens the fragment (which is not sent).
 TEST_F (SendTimeQueryValues, AComposedQueryValueReachesTheWireEncoded) {
     const json variables = { { "base", variable (server_->url ()) },
-        { "term", variable ("a b#c") }, { "k", variable ("x=y") } };
+        { "term", variable ("a b\"c") }, { "k", variable ("x=y&z") } };
     EXPECT_EQ (compose_and_send ("{{base}}?q={{term}}&{{k}}=1", variables, true),
-    "/echo?q=a%20b%23c&x%3Dy=1");
+    "/echo?q=a%20b%22c&x=y&z=1");
+    EXPECT_EQ (
+    compose_and_send ("{{base}}?q={{term}}",
+    { { "base", variable (server_->url ()) }, { "term", variable ("a b#c") } }, true),
+    "/echo?q=a%20b");
 }
 
 TEST_F (SendTimeQueryValues, DisableUrlEncodingComposesTheValueAsItStands) {
@@ -342,8 +346,8 @@ TEST_F (SendTimeQueryValues, TheResidualPassEncodesAValueTheScriptSet) {
     request.url = server_->url () + "?{{k}}={{term}}";
     EXPECT_FALSE (vayu::http::routes::resolve_residual_tokens (request,
     vayu::http::VariableValues{ { "k", "a=b" }, { "term", "c d%41" } }));
-    EXPECT_EQ (request.url, server_->url () + "?a%3Db=c%20d%41");
-    EXPECT_EQ (send (request.url), "/echo?a%3Db=c%20d%41");
+    EXPECT_EQ (request.url, server_->url () + "?a=b=c%20d%41");
+    EXPECT_EQ (send (request.url), "/echo?a=b=c%20d%41");
 
     vayu::Request as_typed;
     as_typed.url                  = server_->url () + "?q={{term}}";

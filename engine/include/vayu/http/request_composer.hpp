@@ -211,16 +211,19 @@ std::string substitute_tokens (const std::string& input,
 const std::function<std::optional<std::string> (const std::string& name)>& resolve);
 
 /**
- * @ref substitute_tokens over a URL, writing each replacement by the rule of
- * the component it lands in (issue #1773): a query key or value is encoded by
- * Postman's query rule (`core::encode_query_component`), the head and the
- * fragment take the value as it stands. A layered value is resolved whole
- * first and encoded once, so a `%` a value carries is never encoded twice.
+ * @ref substitute_tokens over a URL, writing each replacement as Postman does
+ * (issue #1773): it substitutes into the URL string and parses the result
+ * again, so a value is URL text (`core::encode_at_url_component`). In the
+ * query its `QUERY_ENCODE_SET` bytes are encoded and its `&`, `=`, `?` and
+ * `#` stay structure; the head and the fragment take it as it stands. A
+ * layered value is resolved whole first and encoded once, so a `%` a value
+ * carries is never encoded twice.
  *
  * The component is read left to right from the text written so far, the
  * literal around the tokens and the values already written, so a `?` that a
- * `{{baseUrl}}` brings in opens the query for the tokens after it - as it
- * does for a later pass that meets the same text as a literal.
+ * `{{baseUrl}}` brings in opens the query for the rest of the value and the
+ * tokens after it - as it does for a later pass that meets the same text as a
+ * literal.
  *
  * @p encode_query false is `disableUrlEncoding`: every value as it stands.
  */

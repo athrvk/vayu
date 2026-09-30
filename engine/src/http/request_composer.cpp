@@ -552,9 +552,11 @@ bool encode_query) {
         last = static_cast<size_t> (match.position () + match.length ());
         // One token through the ordinary scanner, so nesting and the cycle
         // rule are its own; a token nothing answers comes back as written,
-        // and the encoder keeps a whole token verbatim.
-        write (vayu::core::encode_at_url_component (
-        substitute_tokens_nested (match.str (), resolve, expanding), where));
+        // and the encoder keeps a whole token verbatim. The value is URL text
+        // (Postman re-parses the substituted string), so its own `?` and `#`
+        // move `where` for the text after it.
+        out += vayu::core::encode_at_url_component (
+        substitute_tokens_nested (match.str (), resolve, expanding), where);
     }
     write (std::string_view (input).substr (last));
     return out;

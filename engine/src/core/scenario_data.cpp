@@ -561,17 +561,6 @@ bool keeps_deferrable_credential_namespace (const std::string& name) {
     vayu::http::is_identity_variable_name (name);
 }
 
-/// How a token at @p where in an encoded URL is written.
-DataValueEncoding url_encoding_at (UrlComponent where) {
-    switch (where) {
-    case UrlComponent::QueryKey: return DataValueEncoding::QueryKey;
-    case UrlComponent::QueryValue: return DataValueEncoding::QueryValue;
-    case UrlComponent::Head:
-    case UrlComponent::Fragment: break;
-    }
-    return DataValueEncoding::Verbatim;
-}
-
 /**
  * Split each visited field around the reserved tokens of one namespace, keeping
  * only the fields that carry one.
@@ -615,15 +604,13 @@ class FieldSplitter {
         entry.encodings.reserve (split.names.size ());
         bool in_string = false;
         XmlScanState xml_state;
-        auto url_component = UrlComponent::Head;
         for (size_t i = 0; i < split.names.size (); ++i) {
             entry.tokens.push_back (split.names[i]);
             DataValueEncoding encoding = DataValueEncoding::Verbatim;
             if (context == FieldContext::Url) {
-                // Read from the literals alone: a bound value in the query is
-                // encoded, so it cannot move the component itself.
-                url_component = advance_url_component (entry.literals[i], url_component);
-                encoding = url_encoding_at (url_component);
+                // Where in the URL is read at join time: a bound value can
+                // open the query for the tokens after it.
+                encoding = DataValueEncoding::Url;
             } else if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
                 encoding = in_string ? DataValueEncoding::JsonString :
@@ -748,10 +735,8 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
     case DataValueEncoding::XmlAttributeSingle:
         return escape_xml_content (rendered, '\'');
     case DataValueEncoding::XmlCdata: return escape_xml_cdata (rendered);
-    case DataValueEncoding::QueryKey:
-        return encode_query_component (rendered, QueryPart::Key);
-    case DataValueEncoding::QueryValue:
-        return encode_query_component (rendered, QueryPart::Value);
+    // Written by the join, which carries the URL component across the field.
+    case DataValueEncoding::Url:
     // The two unwritable placements never reach this: the join refuses the row
     // before it renders a value for them.
     case DataValueEncoding::XmlInComment:
@@ -823,6 +808,14 @@ class TemplateJoiner {
         ++cursor_;
 
         std::string out = entry.literals[0];
+        // Only a URL field reads it: the component the text written so far
+        // (bound values included) has reached, which is the rule composition
+        // and the residual pass follow over the same text.
+        const bool in_url = context == FieldContext::Url;
+        if (in_url) {
+            url_component_ =
+            advance_url_component (entry.literals[0], UrlComponent::Head);
+        }
         for (size_t i = 0; i < entry.tokens.size (); ++i) {
             const auto encoded = encode_token (entry, i, context);
             if (!encoded) {
@@ -830,6 +823,10 @@ class TemplateJoiner {
             }
             out += *encoded;
             out += entry.literals[i + 1];
+            if (in_url) {
+                url_component_ =
+                advance_url_component (entry.literals[i + 1], url_component_);
+            }
         }
         field = std::move (out);
     }
@@ -860,7 +857,9 @@ class TemplateJoiner {
         if (!value) {
             return std::nullopt; // `value_of` recorded why
         }
-        std::string encoded = encode_data_value (*value, entry.encodings[index]);
+        std::string encoded = entry.encodings[index] == DataValueEncoding::Url ?
+        encode_at_url_component (vayu::http::render_data_value (*value), url_component_) :
+        encode_data_value (*value, entry.encodings[index]);
         // Checked on the encoded text rather than the value, because that is
         // what the field ends up holding - and only in a header, where a line
         // break is a line terminator. Everywhere else the same bytes are
@@ -952,6 +951,8 @@ class TemplateJoiner {
     size_t next_field_ = 0;
     size_t cursor_     = 0;
     DataBindResult result_{ true, {} };
+    /// The URL component the field being joined has reached; see operator().
+    UrlComponent url_component_ = UrlComponent::Head;
 };
 
 } // namespace

@@ -380,39 +380,39 @@
     }
   ],
   "substitutions": {
-    "$comment": "Issue #1773: a `{{var}}` in a request's URL substituted at send time. Postman resolves the variables and then encodes the query with `toNodeUrl`, so a value landing in the query is written by the rule above - as a key when the token sits in a key, as a value when it sits in a value - and a value landing in the host, the path or the fragment is not touched by this rule. Which part a token sits in is read left to right from the text written so far: the first `?` opens the query at a key, `=` moves a key to its value, `&` starts the next key, `#` opens the fragment, and a whole `{{...}}` token is skipped. A layered value is resolved whole and then encoded once. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
+    "$comment": "Issue #1773: a `{{var}}` in a request's URL substituted at send time. Postman (postman-runtime 7.56.1 runner/util.js `resolveUrl`) substitutes the variables into the URL string, parses that string again (`new sdk.Url`) and encodes it with `toNodeUrl`, so a substituted value is URL text, not a row: a `?` it carries in the head opens the query, a `#` opens the fragment, and its `&` and `=` split pairs. Inside the query only QUERY_ENCODE_SET is encoded (the C0 controls, DEL, every byte above `~`, space, `\"`, `'`, `<`, `>`; its `#` is structure here), the same set for a key and a value; `normalizeParam` (`&`/`#` in a value, `=` in a key) applies only to rows and never to substituted text. The head and the fragment take a value as it stands. Which part a value lands in is read left to right from the text written so far, substituted values included: the first `?` in the head opens the query, `#` opens the fragment, and a whole `{{...}}` token is skipped and kept. A layered value is resolved whole and then encoded once. The expected outputs are the ones postman-runtime produces. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
     "cases": [
       {
-        "name": "a value in the query is encoded (the issue's case)",
+        "name": "a value in the query is encoded, and its # opens the fragment (the issue's case)",
         "url": "https://x/?q={{term}}",
         "variables": {
           "term": "a b#c"
         },
-        "sent": "https://x/?q=a%20b%23c"
+        "sent": "https://x/?q=a%20b#c"
       },
       {
-        "name": "a key token is encoded by the key rule",
+        "name": "a key token's = and & split pairs",
         "url": "https://x/?{{k}}=1",
         "variables": {
           "k": "a=b&c d"
         },
-        "sent": "https://x/?a%3Db%26c%20d=1"
+        "sent": "https://x/?a=b&c%20d=1"
       },
       {
-        "name": "a value keeps = and encodes &",
+        "name": "a value's = and & are written as structure",
         "url": "https://x/?q={{v}}",
         "variables": {
           "v": "a=b&c"
         },
-        "sent": "https://x/?q=a=b%26c"
+        "sent": "https://x/?q=a=b&c"
       },
       {
-        "name": "a token beside literal text in a key is still in the key",
+        "name": "a = a key token brings in splits the pair",
         "url": "https://x/?a{{k}}b=1",
         "variables": {
           "k": "="
         },
-        "sent": "https://x/?a%3Db=1"
+        "sent": "https://x/?a=b=1"
       },
       {
         "name": "an escape in a value passes, so nothing is encoded twice",
@@ -446,7 +446,7 @@
           "outer": "{{inner}} x",
           "inner": "a&b"
         },
-        "sent": "https://x/?q=a%26b%20x"
+        "sent": "https://x/?q=a&b%20x"
       },
       {
         "name": "a token nothing answers is kept",
@@ -464,13 +464,37 @@
         "sent": "https://x/?a=1&q=b%20c"
       },
       {
-        "name": "a token after a bare key sits in the next key or value",
+        "name": "a ? in a path value opens the query, and the rest of the value is encoded",
+        "url": "http://x/p{{p}}?q=1",
+        "variables": {
+          "p": "/y?z=a b"
+        },
+        "sent": "http://x/p/y?z=a%20b?q=1"
+      },
+      {
+        "name": "a whole query string in one token is split and encoded as a query",
+        "url": "https://x/?{{qs}}",
+        "variables": {
+          "qs": "a=1&b=2 c"
+        },
+        "sent": "https://x/?a=1&b=2%20c"
+      },
+      {
+        "name": "a base URL holding a query has its query part encoded",
+        "url": "{{base}}&r=1",
+        "variables": {
+          "base": "https://x/p?k=a b"
+        },
+        "sent": "https://x/p?k=a%20b&r=1"
+      },
+      {
+        "name": "a token after a bare key is written by the same rule",
         "url": "https://x/?flag&q={{v}}&{{k}}",
         "variables": {
           "v": "a b",
           "k": "c=d"
         },
-        "sent": "https://x/?flag&q=a%20b&c%3Dd"
+        "sent": "https://x/?flag&q=a%20b&c=d"
       },
       {
         "name": "a separator inside a kept token's name moves nothing",
@@ -478,7 +502,7 @@
         "variables": {
           "k": "a=b"
         },
-        "sent": "https://x/?{{un=known}}a%3Db=1"
+        "sent": "https://x/?{{un=known}}a=b=1"
       },
       {
         "name": "disableUrlEncoding writes every value as it stands",

@@ -9,8 +9,8 @@
  */
 
 /**
- * The "Sends" line writes a `{{var}}` that lands in the query by Postman's
- * query rule (issue #1773), as the engine's compose does, through the
+ * The "Sends" line writes a `{{var}}` that lands in the query as Postman
+ * writes substituted URL text (issue #1773), as the engine's compose does, through the
  * component rather than the helper: the helper is pinned to the engine by the
  * conformance fixture, and this pins that the line actually goes through it.
  */
@@ -56,8 +56,8 @@ function sendsLine(url: string, disableUrlEncoding: boolean): string {
 }
 
 describe("the Sends line's query", () => {
-	it("encodes a value a variable brings into the query", () => {
-		expect(sendsLine("{{base}}/s?q={{term}}", false)).toBe("https://x/s?q=a%20b%23c");
+	it("encodes a value a variable brings into the query, its # opening the fragment", () => {
+		expect(sendsLine("{{base}}/s?q={{term}}", false)).toBe("https://x/s?q=a%20b#c");
 	});
 
 	it("shows the value as it stands under disableUrlEncoding", () => {

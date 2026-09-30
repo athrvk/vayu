@@ -575,6 +575,24 @@ TEST (ScenarioDataJsonBodyTest, TheUrlAndHeadersAreNeverEscapedForAJsonBody) {
     EXPECT_EQ (request.body.content, "{\"q\":\"a\\\"b\"}");
 }
 
+// Issue #1773: which part of the URL a bound token lands in is read from the
+// text written before it, bound values included - the rule composition and
+// the residual pass follow - so a `?` a bound base brings in opens the query
+// for the token after it.
+TEST (ScenarioDataUrlTest, ABoundValueThatOpensTheQueryMovesTheTokensAfterIt) {
+    auto request = request_with_url ("{{data.base}}&q={{data.v}}");
+
+    const auto result = bind_data_row (
+    request, json{ { "base", "https://api.test/p?a=b c" }, { "v", "d e" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/p?a=b%20c&q=d%20e");
+    EXPECT_EQ (request.url,
+    vayu::http::resolve_url_template ("{{base}}&q={{v}}",
+    vayu::http::VariableValues{ { "base", "https://api.test/p?a=b c" }, { "v", "d e" } }, true))
+    << "the bind and composition answer the same URL differently";
+}
+
 TEST (ScenarioDataJsonBodyTest, AGraphqlEnvelopeIsAJsonDocumentAndABareOneIsNot) {
     // `graphql` content is either shape. The envelope has string literals a
     // token can sit inside; a bare document is escaped wholesale when
@@ -857,7 +875,8 @@ TEST (ScenarioDataXmlBodyTest, AnOrdinaryValueIsByteIdenticalToBeforeTheRule) {
 
 TEST (ScenarioDataXmlBodyTest, TheUrlAndHeadersAreNeverEscapedForAnXmlBody) {
     // Per field, not per request - the same rule the JSON context follows. The
-    // URL's query is written by the query rule (issue #1773), not XML's.
+    // URL's query has a rule of its own (issue #1773), not XML's, and under it
+    // a bound `&` splits the pair as Postman's re-parsed URL does.
     auto request = request_with_url ("https://api.test/?q={{data.q}}");
     request.headers["X-Note"] = "{{data.q}}";
     request.body.mode         = vayu::BodyMode::Xml;
@@ -866,7 +885,7 @@ TEST (ScenarioDataXmlBodyTest, TheUrlAndHeadersAreNeverEscapedForAnXmlBody) {
     const auto result = bind_data_row (request, json{ { "q", "a&b" } }, 0);
 
     ASSERT_TRUE (result.ok) << result.error;
-    EXPECT_EQ (request.url, "https://api.test/?q=a%26b");
+    EXPECT_EQ (request.url, "https://api.test/?q=a&b");
     EXPECT_EQ (request.headers.at ("X-Note"), "a&b");
     EXPECT_EQ (request.body.content, "<o>a&amp;b</o>");
 }

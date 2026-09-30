@@ -161,7 +161,9 @@ struct DataBindResult {
  *
  * Decided at split time, per token, because the surrounding literals are what
  * answer it and they do not change per row - the join must not re-derive this
- * for every iteration of every virtual user.
+ * for every iteration of every virtual user. @ref Url is the one exception: a
+ * bound value can move a URL into its query, so the join reads the component
+ * off the text it is already copying.
  */
 enum class DataValueEncoding : std::uint8_t {
     /// The rendered text, byte for byte. Every field that is not a document
@@ -189,12 +191,11 @@ enum class DataValueEncoding : std::uint8_t {
     XmlInComment,
     /// Not writable: the token sits inside an XML processing instruction.
     XmlInProcessingInstruction,
-    /// Encoded by Postman's query rule as a key (`=` included), for a token
-    /// in a query key of a URL sent encoded (issue #1773).
-    QueryKey,
-    /// Encoded by Postman's query rule as a value, for a token in a query value
-    /// of a URL sent encoded.
-    QueryValue,
+    /// Written by `core::encode_at_url_component`, for every token of a URL
+    /// sent encoded (issue #1773). The one encoding not settled at split time:
+    /// which component a token lands in is read from the text written before
+    /// it, bound values included, so the join carries it across the field.
+    Url,
 };
 
 /**
