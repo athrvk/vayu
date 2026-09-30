@@ -896,6 +896,88 @@ TEST (PostmanExport, ASavedResponsesCookiesAreWrittenAsPostmanWritesThem) {
     EXPECT_EQ (cookies[2]["httpOnly"], true);
 }
 
+/// The `cookie[]` a save records for the Set-Cookie header @p value, as
+/// received at @p received_at.
+ordered saved_cookies (const std::string& value, std::time_t received_at) {
+    PostmanExportExample example;
+    example.headers = ordered::array ({ row ("Set-Cookie", value) });
+    const auto text = vayu::core::postman_saved_response_text (
+    request ("r", "u"), example, "", std::nullopt, received_at);
+    return text ? ordered::parse (*text).at ("cookie") : ordered ();
+}
+
+// 2026-01-01T00:00:00Z.
+constexpr std::time_t NEW_YEAR_2026 = 1767225600;
+
+// An expiry reads the same on every platform: ASP.NET's "never"
+// (year 9999) and a date before 1970, which Windows' `_gmtime64_s` refuses,
+// are JavaScript's date text, not "Invalid Date". Mutation check: have
+// `js_date_utc` refuse a time past 32535215999 or below 0 (what
+// `_gmtime64_s` refuses) and the matching assertion reds.
+TEST (PostmanExport, ACookieExpiryReadsTheSameOnEveryPlatform) {
+    const ordered never =
+    saved_cookies ("a=1; Expires=Fri, 31 Dec 9999 23:59:59 GMT", NEW_YEAR_2026);
+    ASSERT_EQ (never.size (), 1u) << never.dump ();
+    EXPECT_EQ (never[0]["expires"],
+    "Fri Dec 31 9999 23:59:59 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (never[0]["session"], false);
+
+    const ordered past =
+    saved_cookies ("b=1; Expires=Wed, 01 Jan 1969 00:00:00 GMT", NEW_YEAR_2026);
+    ASSERT_EQ (past.size (), 1u) << past.dump ();
+    EXPECT_EQ (past[0]["expires"],
+    "Wed Jan 01 1969 00:00:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (past[0]["session"], false);
+}
+
+// A Max-Age past what the clock holds is held to its end (past the calendar,
+// so JavaScript's unprintable date, but not a session cookie); a negative one
+// has already expired, at the moment the response came in; and an unknown
+// receive time (`std::time`'s -1) leaves the Max-Age unread rather than
+// overflowing the room left on the clock. Mutation checks: drop the clamp's
+// lower bound and the negative age reds; drop the `received_at >= 0` guard
+// and the unknown-time cookie stops being a session cookie.
+TEST (PostmanExport, AnOutOfRangeMaxAgeIsClamped) {
+    const ordered huge = saved_cookies ("a=1; Max-Age=9223372036854775807", NEW_YEAR_2026);
+    ASSERT_EQ (huge.size (), 1u) << huge.dump ();
+    EXPECT_EQ (huge[0]["expires"], "Invalid Date");
+    EXPECT_EQ (huge[0]["session"], false);
+
+    const ordered negative = saved_cookies ("b=1; Max-Age=-5", NEW_YEAR_2026);
+    ASSERT_EQ (negative.size (), 1u) << negative.dump ();
+    EXPECT_EQ (negative[0]["expires"],
+    "Thu Jan 01 2026 00:00:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (negative[0]["session"], false);
+
+    const ordered unknown = saved_cookies ("c=1; Max-Age=60", -1);
+    ASSERT_EQ (unknown.size (), 1u) << unknown.dump ();
+    EXPECT_EQ (unknown[0]["expires"], "Invalid Date");
+    EXPECT_EQ (unknown[0]["session"], true);
+}
+
+// The attributes read as RFC 6265 5.2 and tough-cookie (Postman's cookie
+// store) read them: an empty Domain is ignored (host-only), a leading `.` is
+// dropped, a Path not starting with `/` is the default path, and the space
+// around `=` is not part of a name or value. Mutation checks: skip the empty
+// test, the `.` strip, the `/` test or the trim, and the matching assertion
+// reds.
+TEST (PostmanExport, CookieAttributesReadAsACookieStoreReadsThem) {
+    const ordered empty = saved_cookies ("e=1; Domain=; Path=relative", NEW_YEAR_2026);
+    ASSERT_EQ (empty.size (), 1u) << empty.dump ();
+    EXPECT_EQ (empty[0]["hostOnly"], true);
+    EXPECT_EQ (empty[0]["domain"], "");
+    EXPECT_EQ (empty[0]["path"], "/");
+
+    const ordered spaced = saved_cookies (
+    "f=2; Domain = .Example.TEST ; Path = /x ; Max-Age = 60", NEW_YEAR_2026);
+    ASSERT_EQ (spaced.size (), 1u) << spaced.dump ();
+    EXPECT_EQ (spaced[0]["hostOnly"], false);
+    EXPECT_EQ (spaced[0]["domain"], "example.test");
+    EXPECT_EQ (spaced[0]["path"], "/x");
+    EXPECT_EQ (spaced[0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+}
+
 // A stored `cookie[]` is written as recorded only while the header rows are;
 // an edit rebuilds it from the Set-Cookie rows, so a removed row's value does
 // not outlive it. Mutation check: write the stored `cookie` unconditionally
