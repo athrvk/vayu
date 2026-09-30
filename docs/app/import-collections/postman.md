@@ -189,8 +189,8 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 
 `pmUrl(url)` handles both shapes:
 
-- **String url** (v2.0, sometimes v2.1): if there is no `?`, the whole string is the base URL (`normalize_template_vars` applied), `params = []`. If there is a `?`, the substring before `?` is the base and the query string goes through `queryEntries`: split on `&` and each pair on its first `=`, **never decoded** (Postman's `QueryParam.parse` does not decode either), with `value` run through `normalize_template_vars`; missing `=` yields an empty value. All extracted params are `enabled: true`.
-- **Object url** (v2.1): `url.raw` is split at the first `?` to get the base (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved, and a row's boolean `equals` rides on the row for the export - it does not change how the row joins into the URL). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
+- **String url** (v2.0, sometimes v2.1): if there is no `?`, the whole string is the base URL (`normalize_template_vars` applied), `params = []`. If there is a `?`, the substring before `?` is the base and the query string goes through `queryEntries`: split on `&` and each pair on its first `=`, **never decoded** (Postman's `QueryParam.parse` does not decode either), with `value` run through `normalize_template_vars`; a missing `=` yields an empty value marked `valueless: true`, which rejoins as a bare `key` where `key=` rejoins as `key=`. All extracted params are `enabled: true`.
+- **Object url** (v2.1): `url.raw` is split at the first `?` to get the base (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved, and a row's boolean `equals` rides on the row for the export - it does not change how the row joins into the URL; a `"value": null` or absent value is what does, stored as `valueless: true` and joined as a bare `key`). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
 - **Object url with no `raw`** (schema-legal, rare - most exports always write `raw`): `host_path_url` assembles a base from `protocol` (default `https`), `host[]` (or a bare string) joined with `.`, an optional `port`, and `path[]` (string or `{value}` variable entries) joined with `/`. Counted as `url_without_raw`, informational rather than lossy - the URL is built, not dropped.
 
 **A query row holds raw query text** (issue #1771), as a Postman row does: `?q=a%2Bb` is the row `a%2Bb`, not `a+b`. Decoding first and re-encoding on the join is not lossless - `%2B` would become a `+` a server reads as a space, and `%2541` would become `%41` - so nothing is decoded and a literal `%` (`?discount=50%`, `%ZZ`) is kept byte for byte. The join (below) writes each enabled row with Postman's own query rule, `core::encode_query_component`: Postman's `QUERY_ENCODE_SET` (the C0 controls, DEL, every byte above `~` as UTF-8, space, `"`, `#`, `'`, `<`, `>`), plus `&` in a key or a value and `=` in a key. Everything else goes out as written - `+`, `|`, `/`, `?`, `:`, `[`, `]` and `%` - so an escape already in a row is never encoded twice, and a whole `{{token}}` is kept verbatim. `?q=a|b&r=c d` is stored as `?q=a|b&r=c%20d`, which is what Postman sends. An item with `disableUrlEncoding` joins its rows as written. The rule is pinned to the app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`.
@@ -403,13 +403,12 @@ export writes the edit.
 - **`url.raw` is rebuilt** from the stored URL: the query rows Postman sends
   (a stale `raw` a generator left without an enabled row gains it), encoded
   by Postman's own query rule, so a reserved character (`filter[type]`, `a|b`)
-  comes back as written. Two differences remain. A space or non-ASCII
+  comes back as written. One difference remains. A space or non-ASCII
   character typed into `raw` comes back percent-encoded (`c%20d`), because
   Postman's `raw` holds the typed text and Vayu stores the wire form. An
-  enabled row with an empty value comes back as a bare `key` where Postman
-  writes `key=`, because Vayu's rows hold a string and cannot tell an empty
-  one from Postman's null (issue #1772). The `query[]` rows themselves come
-  back as written.
+  empty value comes back as `key=` and a `"value": null` row as a bare `key`,
+  as Postman writes them: the row keeps the null as `valueless: true`. The
+  `query[]` rows themselves come back as written, a null value as `null`.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
 - **`protocolProfileBehavior`** is written back as imported, member order and

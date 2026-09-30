@@ -55,23 +55,28 @@ json load_fixture () {
     return json::parse (in);
 }
 
-/// A Postman v2.1 collection holding one GET item at @p raw with @p rows as
-/// its `query[]`, written as Postman writes them (`disabled`, not `enabled`).
-std::string postman_item (const std::string& raw, const json& rows, bool encode) {
-    json query = json::array ();
-    for (const json& row : rows) {
-        query.push_back ({ { "key", row.at ("key") }, { "value", row.at ("value") },
-        { "disabled", !row.at ("enabled").get<bool> () } });
-    }
-    json item = { { "name", "R" },
-        { "request",
-        { { "method", "GET" }, { "url", { { "raw", raw }, { "query", query } } } } } };
+/// A Postman v2.1 GET item at @p url, as a collection holding only it.
+std::string postman_collection (const json& url, bool encode) {
+    json item = { { "name", "R" }, { "request", { { "method", "GET" }, { "url", url } } } };
     if (!encode) {
         item["protocolProfileBehavior"] = { { "disableUrlEncoding", true } };
     }
     return json{ { "info", { { "schema", POSTMAN_SCHEMA } } },
         { "item", json::array ({ item }) } }
     .dump ();
+}
+
+/// A Postman v2.1 collection holding one GET item at @p raw with @p rows as
+/// its `query[]`, written as Postman writes them (`disabled`, not `enabled`,
+/// and a `valueless` row's value as `null`).
+std::string postman_item (const std::string& raw, const json& rows, bool encode) {
+    json query = json::array ();
+    for (const json& row : rows) {
+        query.push_back ({ { "key", row.at ("key") },
+        { "value", row.value ("valueless", false) ? json (nullptr) : row.at ("value") },
+        { "disabled", !row.at ("enabled").get<bool> () } });
+    }
+    return postman_collection (json{ { "raw", raw }, { "query", query } }, encode);
 }
 
 std::string imported_url (const std::string& document) {
@@ -134,6 +139,50 @@ TEST (QueryEncodingConformance, EveryQueryJoinsIntoAPostmanImportsStoredUrl) {
         const std::string expected = query.empty () ? "https://x/" : "https://x/?" + query;
         EXPECT_EQ (imported_url (postman_item ("https://x/", q.at ("rows"), encode)), expected)
         << q.at ("name");
+    }
+}
+
+/// The first stored request of an imported @p document.
+json imported_request (const std::string& document) {
+    const ImportParse parsed = parse_import (document, {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return json::object ();
+    }
+    return parsed.result.at ("collections")[0].at ("requests")[0];
+}
+
+// Issue #1772's acceptance: `{flag, ""}` stores `flag=`, and a null value a
+// bare `flag` on a row that says so.
+TEST (PostmanQueryImport, AnEmptyValueKeepsItsEqualsSignAndANullOneDoesNot) {
+    const json empty = imported_request (postman_item ("https://x/?flag=&x=1",
+    json::parse (R"([{"key":"flag","value":"","enabled":true},{"key":"x","value":"1","enabled":true}])"),
+    true));
+    EXPECT_EQ (empty.at ("url"), "https://x/?flag=&x=1");
+    EXPECT_FALSE (empty.at ("params")[0].contains ("valueless"));
+
+    const json null = imported_request (postman_collection (json::parse (R"({
+        "raw": "https://x/?flag&x=1",
+        "query": [{"key": "flag", "value": null}, {"key": "x", "value": "1"}]})"),
+    true));
+    EXPECT_EQ (null.at ("url"), "https://x/?flag&x=1");
+    EXPECT_EQ (null.at ("params")[0],
+    json::parse (R"({"key":"flag","value":"","enabled":true,"valueless":true})"));
+}
+
+// `QueryParam.parse` reads no value from a row that omits it, and from a
+// pair with no `=` in a URL written as a string or a `raw` with no `query[]`.
+TEST (PostmanQueryImport, AMissingValueAndABarePairAreValueless) {
+    const json absent =
+    json::parse (R"({"raw": "https://x/?flag", "query": [{"key": "flag"}]})");
+    EXPECT_EQ (imported_request (postman_collection (absent, true)).at ("url"), "https://x/?flag");
+    for (const json& url :
+    { json ("https://x/?flag&e=&x=1"), json{ { "raw", "https://x/?flag&e=&x=1" } } }) {
+        const json request = imported_request (postman_collection (url, true));
+        EXPECT_EQ (request.at ("url"), "https://x/?flag&e=&x=1") << url.dump ();
+        EXPECT_EQ (request.at ("params")[0].value ("valueless", false), true)
+        << url.dump ();
+        EXPECT_FALSE (request.at ("params")[1].contains ("valueless")) << url.dump ();
     }
 }
 

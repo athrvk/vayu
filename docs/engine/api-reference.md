@@ -4781,7 +4781,8 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   `?k=a|b+c=d`; `key=` is written even for an empty value), and the join of a
   Postman import's query rows into the stored URL
   ([POST /import/parse](#post-importparse)), which writes a row with an
-  empty value as a bare `key` where Postman writes `key=` (issue #1772). A
+  empty value as `key=` and a `valueless: true` row (Postman's
+  `"value": null`) as a bare `key`. A
   request with `disableUrlEncoding` writes the pair as typed.
 - A value known only at send time is written by the same rule, as Postman
   resolves variables and then encodes the query: a `{{variable}}` substituted

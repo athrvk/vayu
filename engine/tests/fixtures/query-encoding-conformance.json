@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for how a query row is written into a URL (issue #1771). Read by BOTH the engine gtest suite (engine/tests/query_encoding_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/query-encoding.conformance.test.ts). The rule is Postman's own, checked against postman-url-encoder 3.0.8 `toNodeUrl` (index.js:204-215) over postman-collection 5.3.1's `Url`: the query string is `QueryParam.unparse` (query-param.js:268-287), whose `normalizeParam` (:57-96) encodes `&` and `#` in a value and `&`, `#` and `=` in a key, skipping every whole `{{...}}` token (/{{[^{}]*}}/); then `encodeQueryParam` (encoder/index.js:203-210) applies QUERY_ENCODE_SET (encoder/encode-set.js:30, 111-115, 183-191): the C0 controls, DEL, every byte above `~` (each UTF-8 byte, `%XX` uppercase), space, `\"`, `#`, `'`, `<`, `>`. Nothing else is encoded: `%` passes as written, so an escape is never encoded twice, and `+`, `|`, `/`, `?`, `[`, `]`, `{`, `}` and the rest go out as typed. `components`: `text` encoded as a key (`key`) and as a value (`value`). `queries`: a request's query rows (`rows`), joined into `https://x/` with the rule above, or as typed when `encode` is false (Postman's `disableUrlEncoding`); `query` is what follows the `?`, empty meaning no `?` at all. Two Vayu rules differ from Postman and are pinned here as they stand: an empty value writes a bare `key` where Postman writes `key=` for an empty string (Vayu's rows cannot tell an empty string from null; issue #1772 tracks matching Postman), and a row whose key is empty or whitespace is skipped (Postman writes `=value`).",
+  "$comment": "Cross-language conformance fixture for how a query row is written into a URL (issue #1771). Read by BOTH the engine gtest suite (engine/tests/query_encoding_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/query-encoding.conformance.test.ts). The rule is Postman's own, checked against postman-url-encoder 3.0.8 `toNodeUrl` (index.js:204-215) over postman-collection 5.3.1's `Url`: the query string is `QueryParam.unparse` (query-param.js:268-287), whose `normalizeParam` (:57-96) encodes `&` and `#` in a value and `&`, `#` and `=` in a key, skipping every whole `{{...}}` token (/{{[^{}]*}}/); then `encodeQueryParam` (encoder/index.js:203-210) applies QUERY_ENCODE_SET (encoder/encode-set.js:30, 111-115, 183-191): the C0 controls, DEL, every byte above `~` (each UTF-8 byte, `%XX` uppercase), space, `\"`, `#`, `'`, `<`, `>`. Nothing else is encoded: `%` passes as written, so an escape is never encoded twice, and `+`, `|`, `/`, `?`, `[`, `]`, `{`, `}` and the rest go out as typed. `components`: `text` encoded as a key (`key`) and as a value (`value`). `queries`: a request's query rows (`rows`), joined into `https://x/` with the rule above, or as typed when `encode` is false (Postman's `disableUrlEncoding`); `query` is what follows the `?`, empty meaning no `?` at all. An empty value writes `key=` and a row with `valueless: true` (Postman's `\"value\": null`, `?flag` in a URL) a bare `key`, as `unparseSingle` writes a string and a null. One Vayu rule differs from Postman and is pinned here as it stands: a row whose key is empty or whitespace is skipped (Postman writes `=value`).",
   "components": [
     {
       "name": "unreserved characters pass",
@@ -207,7 +207,7 @@
       "query": ""
     },
     {
-      "name": "an empty value writes a bare key, not Postman's key= (issue #1772)",
+      "name": "an empty value writes key=",
       "rows": [
         {
           "key": "flag",
@@ -220,7 +220,42 @@
           "enabled": true
         }
       ],
+      "query": "flag=&x=1"
+    },
+    {
+      "name": "a valueless row writes a bare key",
+      "rows": [
+        {
+          "key": "flag",
+          "value": "",
+          "valueless": true,
+          "enabled": true
+        },
+        {
+          "key": "x",
+          "value": "1",
+          "enabled": true
+        }
+      ],
       "query": "flag&x=1"
+    },
+    {
+      "name": "a valueless row writes a bare key as typed too",
+      "rows": [
+        {
+          "key": "a b",
+          "value": "",
+          "valueless": true,
+          "enabled": true
+        },
+        {
+          "key": "c d",
+          "value": "",
+          "enabled": true
+        }
+      ],
+      "encode": false,
+      "query": "a b&c d="
     },
     {
       "name": "an empty or whitespace-only key is skipped",

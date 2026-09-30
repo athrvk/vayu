@@ -103,6 +103,18 @@ TEST (VayuExtensions, GivesEveryRowTheFieldsTheWriteRoutesRequire) {
     EXPECT_FALSE (ext::rows_of (Json::parse (R"([{"key":"A","enabled":"yes"}])")));
 }
 
+// A Params row keeps `valueless: true`, which writes it as a bare `key` on
+// the next table edit, and nothing that is not that boolean.
+TEST (VayuExtensions, KeepsAValuelessQueryRow) {
+    const auto rows = ext::param_rows_of (Json::parse (
+    R"([{"key":"flag","valueless":true},{"key":"a","valueless":"yes"},{"key":"b","valueless":false}])"));
+    ASSERT_HAS_VALUE (rows);
+    EXPECT_EQ ((*rows)[0],
+    Json::parse (R"({"key":"flag","value":"","enabled":true,"valueless":true})"));
+    EXPECT_FALSE ((*rows)[1].contains ("valueless"));
+    EXPECT_FALSE ((*rows)[2].contains ("valueless"));
+}
+
 TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     EXPECT_FALSE (ext::body_of (Json::parse (R"({"mode":"telepathy"})")));
     EXPECT_FALSE (ext::body_of (Json::parse (R"({"mode":"json","content":7})")));

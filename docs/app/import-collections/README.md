@@ -197,8 +197,10 @@ declared, and only the enabled rows reach `url`.
 Two consequences worth expecting:
 
 - A row disabled in the source stays in the table and out of the URL.
-- A row with a key and no value joins as a **bare key** (`?verbose`), which is
-  what the Params table writes for the same row. The OpenAPI parsers import an
+- An Insomnia, JMeter or OpenAPI row with a key and an empty value joins as a
+  **bare key** (`?verbose`), as Insomnia's own join writes it; a Postman row
+  joins as `verbose=`, and only a `"value": null` row as `verbose` (see
+  [URL handling](./postman.md#url-handling)). The OpenAPI parsers import an
   optional value-less parameter **disabled** so this does not happen for a
   parameter the spec merely documents - only a `required` one, or one carrying a
   declared value, reaches the URL. Declared **header** parameters follow the same

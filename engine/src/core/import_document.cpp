@@ -181,7 +181,9 @@ std::string normalize_vars (const std::string& text) {
  * that Vayu keeps for the export to write back - nothing reads either at send
  * time. `Typed` is a header or urlencoded row's `type` other than `"text"`
  * (Postman's default, and what the exporter writes for a row with none);
- * `Query` is a query row's boolean `equals`; `Path` is a `url.variable[]`
+ * `Query` is a query row's boolean `equals`, and `valueless: true` for a row
+ * whose `value` is null or absent (Postman writes that row as a bare `key`,
+ * and an empty string as `key=`); `Path` is a `url.variable[]`
  * entry's `type` whatever it says (Postman writes `"string"` or `"any"` there
  * and has no default to leave out).
  */
@@ -216,6 +218,10 @@ json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
         if (const json* equals = prop (record, "equals");
         extras == RowExtras::Query && equals != nullptr && equals->is_boolean ()) {
             entry["equals"] = *equals;
+        }
+        if (const json* value = prop (record, "value");
+        extras == RowExtras::Query && (value == nullptr || value->is_null ())) {
+            entry["valueless"] = true;
         }
         out.push_back (std::move (entry));
     }
@@ -1054,9 +1060,10 @@ json pm_body (const json* body, PostmanCounts& counts) {
 
 /// `queryEntries(query)`: a `k=v&k2=v2` string as rows, split on `&` and the
 /// first `=` and never decoded, as Postman's `QueryParam.parse` reads it
-/// (issue #1771). A row holds raw query text, so the join writes it back byte
-/// for byte; decoding first would turn `%2B` into a `+` a server reads as a
-/// space, and `%2541` into `%41`.
+/// (issue #1771): a pair with no `=` is `valueless`, one ending in `=` holds
+/// an empty value. A row holds raw query text, so the join writes it back
+/// byte for byte; decoding first would turn `%2B` into a `+` a server reads
+/// as a space, and `%2541` into `%41`.
 json query_entries (const std::string& query) {
     json out     = json::array ();
     size_t start = 0;
@@ -1073,8 +1080,12 @@ json query_entries (const std::string& query) {
         equals == std::string::npos ? pair : pair.substr (0, equals);
         const std::string value =
         equals == std::string::npos ? std::string () : pair.substr (equals + 1);
-        out.push_back (
-        { { "key", key }, { "value", normalize_vars (value) }, { "enabled", true } });
+        json row = { { "key", key }, { "value", normalize_vars (value) },
+            { "enabled", true } };
+        if (equals == std::string::npos) {
+            row["valueless"] = true;
+        }
+        out.push_back (std::move (row));
     }
     return out;
 }
@@ -3692,6 +3703,14 @@ bool is_insomnia_v4 (const json& parsed) {
     format->is_number () && format->get<double> () == 4.0;
 }
 
+/// One params row as `js::query_string` joins it.
+struct JoinedRow {
+    std::string key;
+    std::string value;
+    bool enabled   = true;
+    bool valueless = false;
+};
+
 /**
  * `joinParamsIntoUrls(result)`: restore the app's url/params invariant on every
  * request a parser produced.
@@ -3714,17 +3733,17 @@ bool is_insomnia_v4 (const json& parsed) {
 void join_params_into_urls (json& collections, QueryEncoding encoding) {
     for (json& collection : collections) {
         for (json& request : collection.at ("requests")) {
-            std::vector<DraftField> rows;
+            std::vector<JoinedRow> rows;
             for (const json& row : request.at ("params")) {
                 // A path row is sent in its `:name` segment, never the query.
                 if (vayu::core::is_path_variable_row (row)) {
                     continue;
                 }
-                DraftField field;
-                field.key     = row.at ("key").get<std::string> ();
-                field.value   = row.at ("value").get<std::string> ();
-                field.enabled = row.at ("enabled").get<bool> ();
-                rows.push_back (std::move (field));
+                const json* valueless = prop (&row, "valueless");
+                rows.push_back ({ row.at ("key").get<std::string> (),
+                row.at ("value").get<std::string> (), row.at ("enabled").get<bool> (),
+                valueless != nullptr && valueless->is_boolean () &&
+                valueless->get<bool> () });
             }
             // A request whose item says `disableUrlEncoding` joins its rows as
             // written (issue #1765), as the app's Params table does for it.

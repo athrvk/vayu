@@ -345,17 +345,20 @@ TEST (InsomniaImport, LeavesAColonInAQueryValueUntouched) {
  * Insomnia's rows keep `encodeURIComponent` on the join (issue #1771): Postman's
  * set would send a literal `+` raw, which a server reads as a space. Mutation
  * check: pass `QueryEncoding::Postman` for Insomnia and the `|` goes out raw.
+ * An empty value joins as a bare `name`, as Insomnia's own strict join writes
+ * it; mutation check: drop the `UriComponent` term from `query_string`'s
+ * `bare` and `e` goes out as `e=`.
  */
 TEST (InsomniaImport, JoinsItsParametersWithEncodeUriComponent) {
     const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
         {"_id":"wrk","_type":"workspace","name":"W"},
         {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
             "url":"https://api.example.com/search",
-            "parameters":[{"name":"q","value":"a|b"},{"name":"p","value":"1+2"}]}]})",
+            "parameters":[{"name":"q","value":"a|b"},{"name":"p","value":"1+2"},{"name":"e","value":""}]}]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
-    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=a%7Cb&p=1%2B2");
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=a%7Cb&p=1%2B2&e");
 }
 
 /**
@@ -1678,9 +1681,9 @@ TEST (PostmanImport, KeepsAHeaderRowsTypeAndAQueryRowsEquals) {
     EXPECT_FALSE (request.at ("headers")[1].contains ("type"));
     EXPECT_EQ (request.at ("body").at ("fields")[0].at ("type"), "default");
     EXPECT_EQ (request.at ("params")[0].at ("equals"), true);
-    // Carried beside the row, never onto the wire: the URL is joined exactly
-    // as before (an empty value still joins as a bare key).
-    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand");
+    // Carried beside the row, never onto the wire: the empty string is what
+    // joins it as `expand=`.
+    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand=");
 }
 
 TEST (PostmanImport, ReadsAnItemLevelDescriptionWhenTheRequestHasNone) {

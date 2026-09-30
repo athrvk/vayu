@@ -73,10 +73,11 @@ both key and value, and `=` only in a key. Everything else, `+`, `|`, `%` and
 `encodeQueryComponent` (`modules/request-builder/utils/query-encoding.ts`) and
 the engine's `encode_query_component` are pinned to one another by
 `engine/tests/fixtures/query-encoding-conformance.json`. A row with an empty
-value is written as a bare `key` where Postman writes `key=` (issue #1772), and
-the value a stored `{{variable}}` token resolves to at send time, and a pair a
-script's `query.add` writes, are encoded by the same rule when they land in the
-query (issue #1773).
+value is written as `key=`, and one with `valueless: true` (Postman's
+`"value": null`, a URL's `?flag`) as a bare `key` (issue #1772). The value a
+stored `{{variable}}` token resolves to at send time, and a pair a script's
+`query.add` writes, are encoded by the same rule when they land in the query
+(issue #1773).
 
 **A Params table edit rewrites only the pairs it touches.** Each enabled row
 takes the first unused pair of the current `url` with the same key and value

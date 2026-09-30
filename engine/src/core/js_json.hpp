@@ -339,8 +339,16 @@ inline std::string query_part (const std::string& text, QueryPart part, QueryEnc
     return contains_variable_token (text) ? text : encode_uri_component (text);
 }
 
-/// The query the enabled, keyed rows write under @p encoding, and a bare key
-/// for a row with no value (Postman writes `key=`; issue #1772).
+/**
+ * The query the enabled, keyed rows write under @p encoding.
+ *
+ * An empty value writes `key=` and a `valueless` row a bare `key`, as
+ * Postman's `QueryParam.unparseSingle` writes a string value and a null one.
+ * `UriComponent` writes a bare `key` for any empty value: its sources hold no
+ * null (Insomnia's own strict join writes `name` for an empty value), and an
+ * OpenAPI draft's URL is what the sync diff compares stored URLs against.
+ * A row type with no `valueless` member (`DraftField`) states none.
+ */
 template <typename Row>
 std::string query_string (const std::vector<Row>& params, QueryEncoding encoding) {
     std::string out;
@@ -352,7 +360,13 @@ std::string query_string (const std::vector<Row>& params, QueryEncoding encoding
             out += '&';
         }
         out += query_part (row.key, QueryPart::Key, encoding);
-        if (!row.value.empty ()) {
+        bool valueless = false;
+        if constexpr (requires { row.valueless; }) {
+            valueless = row.valueless;
+        }
+        const bool bare = row.value.empty () &&
+        (valueless || encoding == QueryEncoding::UriComponent);
+        if (!bare) {
             out += '=';
             out += query_part (row.value, QueryPart::Value, encoding);
         }

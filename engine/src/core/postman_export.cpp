@@ -181,6 +181,11 @@ json postman_row (const json& row, RowShape shape) {
     json out;
     out["key"]   = text_of (row, "key");
     out["value"] = text_of (row, "value");
+    if (shape == RowShape::Plain && flag_of (row, "valueless", false) &&
+    text_of (row, "value").empty ()) {
+        // A query row with no value at all, which Postman writes as a bare key.
+        out["value"] = nullptr;
+    }
     if (const auto equals = row.find ("equals");
     shape == RowShape::Plain && equals != row.end () && equals->is_boolean ()) {
         // A query row's `equals`, as an import kept it.
