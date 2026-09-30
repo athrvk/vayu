@@ -40,9 +40,10 @@ export interface PathVariableSegment {
 
 /**
  * The end of the `{{...}}` token starting at `at`, or -1 when none starts
- * there: `postman-url-encoder`'s `/{{[^{}]*}}/`.
+ * there: `postman-url-encoder`'s `/{{[^{}]*}}/`. Shared with the query
+ * encoder (`query-encoding.ts`), which keeps a token verbatim by the same rule.
  */
-function tokenEnd(text: string, at: number): number {
+export function tokenEnd(text: string, at: number): number {
 	if (!text.startsWith("{{", at)) return -1;
 	for (let scan = at + 2; scan < text.length; scan++) {
 		if (text[scan] === "{") return -1;
