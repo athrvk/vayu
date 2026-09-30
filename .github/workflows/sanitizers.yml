@@ -168,10 +168,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
