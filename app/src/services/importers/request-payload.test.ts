@@ -66,4 +66,12 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			postmanProtocolBehavior: carrier,
 		});
 	});
+
+	it("forwards the engine parse's text carrier unchanged, member order and all", () => {
+		// The engine writes the carrier as JSON text so its member order
+		// survives to the export; an object would be reordered by its reader.
+		const carrier = '{"strictSSL":true,"disabledSystemHeaders":{},"followRedirects":true}';
+		const fields = requestFieldsFromDraft({ ...draft, postmanProtocolBehavior: carrier });
+		expect(fields.postmanProtocolBehavior).toBe(carrier);
+	});
 });

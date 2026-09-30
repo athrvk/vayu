@@ -436,11 +436,16 @@ export interface RequestDraft {
 	 * Postman's per-request protocol switches (issue #1765), when the item's
 	 * `protocolProfileBehavior` states them, and that object verbatim as the
 	 * export carrier. Absent means "engine default" for the reason above.
+	 *
+	 * The engine's parse writes the carrier as JSON text in the source's member
+	 * order (the `postmanResponse` precedent: an object would lose that order
+	 * crossing the engine's JSON reader), and the payload forwards it
+	 * untouched. The object form is what `GET /requests` answers with.
 	 */
 	disableCookies?: boolean;
 	disabledSystemHeaders?: string[];
 	disableUrlEncoding?: boolean;
-	postmanProtocolBehavior?: Record<string, unknown> | null;
+	postmanProtocolBehavior?: string | Record<string, unknown> | null;
 	/**
 	 * Saved example responses, in the order the source listed them - which the
 	 * engine stores as their `order`, because "the first example" is what a mock

@@ -1590,8 +1590,12 @@ export interface ImportApplyRequestItem {
 	disableCookies?: boolean;
 	disabledSystemHeaders?: string[];
 	disableUrlEncoding?: boolean;
-	/** Postman's `protocolProfileBehavior`, verbatim - see {@link Request.postmanProtocolBehavior}. */
-	postmanProtocolBehavior?: Record<string, unknown> | null;
+	/**
+	 * Postman's `protocolProfileBehavior`, verbatim - see
+	 * {@link Request.postmanProtocolBehavior}. A string is the engine parse's
+	 * form (JSON text in source member order), forwarded as it came.
+	 */
+	postmanProtocolBehavior?: string | Record<string, unknown> | null;
 	order?: number;
 	/** Omitted unless the source file carried saved responses for this request. */
 	examples?: ImportApplyExample[];
