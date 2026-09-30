@@ -31,7 +31,8 @@ python build.py --test-only
 - **CMake**: 3.25 or higher
 - **C++ Compiler**: C++23 capable, which since #901 means the library, not just
   the dialect flag
-  - GCC 13+ (13.3 is what CI builds on)
+  - GCC 13+ (CI builds on 13.3, Ubuntu 24.04's own, and on the toolchain PPA's
+    GCC 13 on 22.04 for the release - see [Linux](#the-release-is-built-on-the-oldest-supported-ubuntu-lts))
   - Clang 19+ against libstdc++ - clang 18 compiles C++23 but cannot see
     libstdc++'s `<expected>`, which is gated behind a concepts macro it does not
     advertise; against libc++ it is fine from 18
@@ -484,6 +485,58 @@ All platforms script with the same vendored engine: QuickJS-NG
 
 - Requires development headers: `libcurl-dev`, `sqlite3-dev`
 - Recommended: Use Ninja for faster builds
+
+#### The release is built on the oldest supported Ubuntu LTS
+
+A Linux binary asks the loader for the glibc symbol versions it was linked
+against, so it runs on the glibc it was built with and every later one, never
+an earlier one. 0.37.0 was built on `ubuntu-latest` (24.04, glibc 2.39), linked
+`fmod@GLIBC_2.38` and the C23 `__isoc23_strtol` family, and did not start on
+Ubuntu 22.04 or Debian 12: the engine died before `main` with
+``version `GLIBC_2.38' not found``, and the AppImage catalog's test caught it.
+
+So the release's Linux leg builds on **Ubuntu 22.04**, the oldest LTS still in
+standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
+21, Debian 12, Fedora 36 or later. Four pieces hold it there:
+
+- **`.github/actions/linux-release-toolchain`** installs GCC 13 from the Ubuntu
+  toolchain PPA (22.04 ships GCC 12, which cannot build C++23 here) and exports
+  it as `CC`/`CXX`, so vcpkg's ports and the engine are built by the same
+  compiler. `release.yml` uses it, `cache-warm.yml` warms the caches with it,
+  and `pr-tests.yml` runs it as the `ubuntu-22.04` engine leg on every engine
+  pull request, so a break surfaces there rather than on a tag. It refuses to
+  run on any other Ubuntu release.
+- **The C++ runtime is linked in** (`vayu_runtime` in `engine/CMakeLists.txt`,
+  `-static-libstdc++ -static-libgcc` on every Linux build except the
+  sanitizer ones). libstdc++ versions its symbols by compiler, and 22.04's copy
+  is GCC 12's, so an engine linked against it dynamically would stop at
+  ``GLIBCXX_3.4.32 not found`` instead. glibc itself cannot be bundled the same
+  way, which is why the build machine sets its floor.
+- **`scripts/check-linux-glibc.sh`** reads the built binary back: no
+  `libstdc++`/`libgcc_s` among its `NEEDED` libraries, and no glibc symbol
+  version above `VAYU_LINUX_GLIBC_FLOOR` (default 2.35). It runs in
+  `release.yml` and on the `ubuntu-22.04` leg of `pr-tests.yml`. The
+  `ubuntu-latest` leg is not checked: it links against 24.04's glibc by design.
+- **The vcpkg cache key carries the runner image** (`matrix.os`). vcpkg's
+  archives only fit the compiler that built them and `actions/cache` never
+  overwrites a key, so with one `Linux` key for both images whichever saved
+  first owned it and the other rebuilt every dependency from source.
+
+To check a local build the same way:
+
+```bash
+./scripts/check-linux-glibc.sh engine/build-release/vayu-engine
+```
+
+A build on a newer distribution fails the glibc half of that by design; only
+the release baseline has a floor to hold.
+
+Raising the floor is a user-visible support change. When 22.04 leaves standard
+support (April 2027), move the three workflows' runner, the version check in
+the toolchain action and the script's default floor together, and update the
+supported-platform lines in `README.md` and `docs/index.md`;
+`cache-warm.yml`'s guard fails if the warmed images and `release.yml`'s drift
+apart.
 
 ### macOS
 

@@ -89,6 +89,10 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     your applications menu. Nothing it writes leaves your home directory, so it
     never asks for root. Re-run it to update. x86_64 only.
 
+    **glibc 2.35 or later**: Ubuntu 22.04, Linux Mint 21, Debian 12, Fedora 36
+    or newer. The release is built on the oldest supported Ubuntu LTS so it runs
+    there and on everything after it.
+
     Or take the AppImage from the
     [latest release](https://github.com/athrvk/vayu/releases/latest) and run it
     yourself - it is self-contained either way.
@@ -389,7 +393,8 @@ persists.
 ??? question "Which platforms are supported?"
 
     Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon and Intel,
-    universal), and Linux (x86_64 AppImage).
+    universal), and Linux (x86_64 AppImage, glibc 2.35 or later: Ubuntu 22.04,
+    Debian 12 or newer).
 
 ## Contribute
 

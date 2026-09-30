@@ -290,6 +290,28 @@ if(VAYU_USE_TSAN)
 endif()
 
 # ============================================================================
+# C++ runtime (Linux)
+# ============================================================================
+
+# On Linux every binary carries its own copy of the GCC C++ runtime, so the
+# only shared libraries it asks the system for are glibc's. libstdc++ versions
+# its symbols by compiler release (GLIBCXX_3.4.32 is GCC 13's), and the engine
+# needs a newer GCC than the oldest supported distribution ships, so a
+# dynamically linked engine fails to start there with "GLIBCXX_3.4.32 not
+# found". glibc cannot be bundled the same way; its floor comes from building
+# the release on the oldest supported Ubuntu LTS instead, and
+# scripts/check-linux-glibc.sh asserts both halves on the built binary. See
+# docs/engine/building.md.
+#
+# Not under the sanitizers: ASan and TSan replace operator new and delete by
+# interposing the shared runtime's symbols, and definitions linked into the
+# executable itself would win over them.
+add_library(vayu_runtime INTERFACE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT VAYU_USE_ASAN AND NOT VAYU_USE_TSAN)
+    target_link_options(vayu_runtime INTERFACE -static-libstdc++ -static-libgcc)
+endif()
+
+# ============================================================================
 # Dependencies (via vcpkg)
 # ============================================================================
 
@@ -597,6 +619,7 @@ target_link_libraries(vayu_core PUBLIC
     hdrhistogram
     vayu_warnings
     vayu_sanitizers
+    vayu_runtime
 )
 
 # sqlite_orm hides its json_extract/json_valid wrappers behind this macro, which

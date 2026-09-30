@@ -1,0 +1,52 @@
+name: Linux release toolchain
+description: >
+  Stand up the compiler the Linux release is built with - GCC 13 on Ubuntu
+  22.04 - and make it the one CMake and vcpkg pick up.
+
+# The Linux release is built on the oldest supported Ubuntu LTS, because a
+# binary asks the loader for the glibc it was linked against and runs on that
+# release and every later one, never an earlier one. 0.37.0 was built on 24.04
+# and failed to start on 22.04 with "version `GLIBC_2.38' not found".
+#
+# 22.04 ships GCC 12, which cannot build the engine (C++23; CLAUDE.md asks for
+# GCC 13+), so GCC 13 comes from the Ubuntu toolchain PPA. Its libstdc++ is
+# newer than 22.04's, which is why engine/CMakeLists.txt links the C++ runtime
+# statically on Linux; scripts/check-linux-glibc.sh asserts both halves on the
+# built binary.
+#
+# An action rather than a step because three workflows need the identical
+# compiler: release.yml builds the artifact, cache-warm.yml fills the vcpkg and
+# sccache entries the release reads (a different compiler misses both caches),
+# and pr-tests.yml builds the same configuration on every engine pull request
+# so a break surfaces there rather than on a tag.
+#
+# Raising the baseline to the next LTS means changing the runner in those three
+# workflows, the version check below, and VAYU_LINUX_GLIBC_FLOOR's default in
+# scripts/check-linux-glibc.sh, together. See docs/engine/building.md.
+
+runs:
+  using: composite
+  steps:
+    - name: Install GCC 13 and select it
+      shell: bash
+      run: |
+        set -euo pipefail
+        . /etc/os-release
+        # The floor this toolchain exists to hold is the glibc of *this*
+        # release. On a newer runner the build would succeed and quietly raise
+        # the floor again, which is the failure being fixed.
+        if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "22.04" ]; then
+          echo "::error::The Linux release toolchain is pinned to Ubuntu 22.04, and this runner is ${PRETTY_NAME:-unknown}. Run it on ubuntu-22.04, or raise the baseline everywhere at once (see docs/engine/building.md)." >&2
+          exit 1
+        fi
+        if ! command -v g++-13 >/dev/null 2>&1; then
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-13 g++-13
+        fi
+        g++-13 --version | head -1
+        # CMake reads CC/CXX on a fresh configure, and vcpkg builds its ports
+        # through the same toolchain, so both the dependencies and the engine
+        # are compiled by GCC 13.
+        echo "CC=gcc-13" >> "$GITHUB_ENV"
+        echo "CXX=g++-13" >> "$GITHUB_ENV"

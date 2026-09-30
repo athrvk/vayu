@@ -324,6 +324,8 @@ jobs:
               - 'VERSION'
               - '.clang-format'
               - '.github/check-windows-deps.py'
+              - 'scripts/check-linux-glibc.sh'
+              - '.github/actions/linux-release-toolchain/**'
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
               - '!**/*.md'
@@ -641,7 +643,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-22.04, windows-latest, macos-latest]
         include:
           # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
           # both legs that use it (issue #884) - a warning that only one
@@ -649,6 +651,16 @@ jobs:
           # gating Linux alone would leave Clang-only diagnostics unwatched.
           # Windows needs no flag: MSVC builds /WX unconditionally.
           - os: ubuntu-latest
+            preset: linux-prod
+            configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
+          # The Linux release's own configuration: the oldest supported Ubuntu
+          # LTS and the GCC it builds with (.github/actions/linux-release-
+          # toolchain). release.yml runs only on a tag, so without this leg a
+          # change that breaks that compiler, or pulls a newer glibc symbol into
+          # the engine, would first fail with the release half-published.
+          # ubuntu-latest stays alongside it: it is the current distribution,
+          # and the clang-tidy gate runs there.
+          - os: ubuntu-22.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           - os: windows-latest
@@ -694,6 +706,10 @@ jobs:
             automake \
             libtool
 
+      - name: Set up the Linux release toolchain
+        if: matrix.os == 'ubuntu-22.04'
+        uses: ./.github/actions/linux-release-toolchain
+
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         # autoconf-archive and friends are for vcpkg's libsodium, which builds
@@ -710,10 +726,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -779,6 +795,14 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: ./scripts/check-macos-min-version.sh engine/build-release/vayu-engine
+
+      # The Linux counterpart, on the leg built the way the release is. The
+      # ubuntu-latest leg links against a newer glibc by design and would fail
+      # it, which is the point: only the release baseline has a floor to hold.
+      - name: Verify engine glibc floor
+        if: matrix.os == 'ubuntu-22.04'
+        shell: bash
+        run: ./scripts/check-linux-glibc.sh engine/build-release/vayu-engine
 
       # `< /dev/null` is what a shell step already gives ctest here, written
       # down so it stays true: release.yml pins the same redirect on its own
@@ -877,6 +901,7 @@ jobs:
       - name: Lint changed engine sources
         if: >-
           runner.os != 'macOS'
+          && matrix.os != 'ubuntu-22.04'
           && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
         run: |
@@ -1054,6 +1079,7 @@ jobs:
       - name: Note the lint skip
         if: >-
           runner.os != 'macOS'
+          && matrix.os != 'ubuntu-22.04'
           && contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
         run: |

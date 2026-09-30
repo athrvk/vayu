@@ -19,9 +19,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux builds on the oldest supported Ubuntu LTS, not ubuntu-latest: a
+        # binary runs on the glibc it was linked against and every later one,
+        # never an earlier one. 0.37.0 was built on 24.04 and did not start on
+        # 22.04 ("version `GLIBC_2.38' not found"). The toolchain step and the
+        # glibc check below hold it there; cache-warm.yml warms the same image.
+        os: [ubuntu-22.04, windows-latest, macos-latest]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -68,6 +73,12 @@ jobs:
             automake \
             libtool
 
+      # GCC 13 on 22.04, exported as CC/CXX before vcpkg or CMake runs. See the
+      # action for why this is not the runner's own compiler.
+      - name: Set up the Linux release toolchain
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-release-toolchain
+
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         # autoconf-archive and friends are for vcpkg's libsodium, which builds
@@ -96,10 +107,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -220,6 +231,15 @@ jobs:
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure < /dev/null
+
+      # The Linux counterpart of the macOS deployment-target check above, and
+      # the same class of bug: a binary linked on a newer distribution than the
+      # oldest one supported asks for glibc symbols that distribution does not
+      # have, and every other step here still passes. 0.37.0 shipped that way.
+      - name: Verify engine glibc floor (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./scripts/check-linux-glibc.sh engine/build-release/vayu-engine
 
       # `if: always()` on purpose: a build that *failed* is the one whose
       # sccache errors are worth reading, and without it this step would be

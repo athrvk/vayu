@@ -130,6 +130,14 @@ jobs:
           # `runner.os`; it only ever runs on ubuntu, so those are the same
           # string. Normalise that one difference, require exact equality for
           # everything else.
+          #
+          # The key also carries the runner image (`matrix.os`, with
+          # `ubuntu-latest` for the one job that has no matrix, codeql.yml's).
+          # vcpkg's archives are only valid for the compiler that built them,
+          # and actions/cache never overwrites a key, so while the Linux release
+          # built on ubuntu-22.04 and every other Linux job on ubuntu-latest
+          # shared one key, whichever saved first owned it and the other always
+          # rebuilt its dependencies from source.
           # sanitizers.yml and engine-tidy-scan.yml carry the same pin and were
           # outside this list until the 0.24.0 baseline bump found them: a bump
           # that updated only the guarded four would have left them checking out
@@ -266,6 +274,29 @@ jobs:
           fi
           echo "Production presets agree: $(echo "$rel_presets" | tr '\n' ' ')"
 
+          # 1b. Same runner images. The vcpkg key carries the image, so warming
+          #     a different one fills keys the release never reads - which is
+          #     what would happen the day release.yml moves its Linux leg to a
+          #     newer LTS and this file is left behind. Only the first `os:`
+          #     list in each file is read: the build matrix, not warm-node's.
+          extract_images() {
+            grep -m1 -oE '^[[:space:]]*os: \[[^]]*\]' "$1" \
+              | sed -E 's/^[[:space:]]*os: \[//; s/\]$//' | tr ',' '\n' | tr -d ' ' | sort
+          }
+          rel_images=$(extract_images "$rel")
+          warm_images=$(extract_images "$warm")
+          if [ -z "$rel_images" ] || [ -z "$warm_images" ]; then
+            echo "::error::Found no runner-image matrix in $rel or $warm - this guard just stopped guarding it." >&2
+            exit 1
+          fi
+          if [ "$rel_images" != "$warm_images" ]; then
+            echo "::error::$warm warms different runner images than $rel builds on, so the warmed caches are unreachable from the release build." >&2
+            echo "release.yml images:"    >&2; echo "$rel_images"  >&2
+            echo "cache-warm.yml images:" >&2; echo "$warm_images" >&2
+            exit 1
+          fi
+          echo "Runner images agree: $(echo "$rel_images" | tr '\n' ' ')"
+
           # 2. Same sccache backend and compiler launcher in both workflows.
           #    Each pattern is anchored to the real YAML/`run:` line it matches;
           #    the pattern strings in this array start with a quote, not with the
@@ -294,9 +325,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The runner images release.yml builds on, not the pull-request matrix's:
+        # the vcpkg key carries the image (see the guard), so warming
+        # ubuntu-latest would fill a key the Linux release never asks for. The
+        # guard asserts this list and release.yml's stay equal.
+        os: [ubuntu-22.04, windows-latest, macos-latest]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -334,6 +369,12 @@ jobs:
             automake \
             libtool
 
+      # The release's compiler, or neither the vcpkg archives nor the sccache
+      # entries this job writes are the ones the release looks up.
+      - name: Set up the Linux release toolchain
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-release-toolchain
+
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         # Same set release.yml installs: vcpkg builds libsodium from source
@@ -348,10 +389,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
