@@ -103,6 +103,18 @@ struct PathVariableSegment {
 /// path value keeps verbatim, and the reason its segment waits.
 [[nodiscard]] bool holds_template_token (std::string_view text);
 
+/// The end of the `{{...}}` token starting at @p at in @p text, or `npos` when
+/// none starts there - `postman-url-encoder`'s `/{{[^{}]*}}/`, which is what
+/// keeps a separator inside a variable name from splitting the URL.
+[[nodiscard]] std::size_t template_token_end (std::string_view text, std::size_t at);
+
+/// @p text with every byte @p in_set answers true for written as `%XX`
+/// (uppercase hex) and every whole `{{...}}` token kept verbatim. The one
+/// encoder behind Postman's path-variable and query rules, which differ only
+/// in the set.
+[[nodiscard]] std::string
+encode_outside_tokens (std::string_view text, bool (*in_set) (unsigned char));
+
 /// Whether a Params row is a path variable (`"in": "path"`) rather than a
 /// query row (`in` absent, `"query"`, or anything else).
 [[nodiscard]] bool is_path_variable_row (const nlohmann::json& row);

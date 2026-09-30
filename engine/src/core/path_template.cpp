@@ -133,14 +133,7 @@ std::string normalize_path_templates (const std::string& path) {
     return normalize (path, /*path_templates=*/true);
 }
 
-namespace {
-
-/**
- * The end of the `{{...}}` token starting at @p at in @p text, or `npos` when
- * none starts there - `postman-url-encoder`'s `/{{[^{}]*}}/`, which is what
- * keeps a separator inside a variable name from splitting the URL.
- */
-std::size_t token_end (std::string_view text, std::size_t at) {
+std::size_t template_token_end (std::string_view text, std::size_t at) {
     if (text.compare (at, 2, "{{") != 0) {
         return std::string_view::npos;
     }
@@ -155,13 +148,15 @@ std::size_t token_end (std::string_view text, std::size_t at) {
     return std::string_view::npos;
 }
 
+namespace {
+
 /// @p text with every `{{...}}` token's characters replaced by `_`, the same
 /// length - so offsets into it are offsets into @p text, and a separator
 /// inside a token is no longer one.
 std::string mask_tokens (std::string_view text) {
     std::string out (text);
     for (std::size_t at = 0; at < out.size ();) {
-        const std::size_t end = token_end (text, at);
+        const std::size_t end = template_token_end (text, at);
         if (end == std::string_view::npos) {
             ++at;
             continue;
@@ -234,7 +229,7 @@ std::vector<PathVariableSegment> path_variable_segments (std::string_view url) {
 bool holds_template_token (std::string_view text) {
     for (std::size_t at = text.find ("{{"); at != std::string_view::npos;
     at                  = text.find ("{{", at + 1)) {
-        if (token_end (text, at) != std::string_view::npos) {
+        if (template_token_end (text, at) != std::string_view::npos) {
             return true;
         }
     }
@@ -301,37 +296,40 @@ bool in_postman_path_encode_set (unsigned char byte) {
     }
 }
 
-void append_encoded (std::string& out, std::string_view text) {
-    static constexpr std::string_view hex = "0123456789ABCDEF";
-    for (const char ch : text) {
-        const auto byte = static_cast<unsigned char> (ch);
-        if (!in_postman_path_encode_set (byte)) {
-            out += ch;
-            continue;
-        }
-        out += '%';
-        out += hex[byte >> 4U];
-        out += hex[byte & 0x0FU];
-    }
-}
-
 } // namespace
 
-std::string encode_path_variable_value (std::string_view value) {
+std::string encode_outside_tokens (std::string_view text, bool (*in_set) (unsigned char)) {
+    static constexpr std::string_view hex = "0123456789ABCDEF";
+    const auto append_encoded = [in_set] (std::string& out, std::string_view plain) {
+        for (const char ch : plain) {
+            const auto byte = static_cast<unsigned char> (ch);
+            if (!in_set (byte)) {
+                out += ch;
+                continue;
+            }
+            out += '%';
+            out += hex[byte >> 4U];
+            out += hex[byte & 0x0FU];
+        }
+    };
     std::string out;
     std::size_t plain = 0;
-    for (std::size_t at = 0; at < value.size ();) {
-        const std::size_t end = token_end (value, at);
+    for (std::size_t at = 0; at < text.size ();) {
+        const std::size_t end = template_token_end (text, at);
         if (end == std::string_view::npos) {
             ++at;
             continue;
         }
-        append_encoded (out, value.substr (plain, at - plain));
-        out += value.substr (at, end - at);
+        append_encoded (out, text.substr (plain, at - plain));
+        out += text.substr (at, end - at);
         plain = at = end;
     }
-    append_encoded (out, value.substr (plain));
+    append_encoded (out, text.substr (plain));
     return out;
+}
+
+std::string encode_path_variable_value (std::string_view value) {
+    return encode_outside_tokens (value, in_postman_path_encode_set);
 }
 
 std::vector<vayu::PendingPathVariable> pending_path_variables_of (const nlohmann::json& rows) {
