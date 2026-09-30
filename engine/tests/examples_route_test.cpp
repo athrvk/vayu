@@ -367,9 +367,16 @@ TEST_F (ExamplesRouteTest, CreateRejectsAPostmanResponseThatIsNotAJsonObject) {
         *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", bad } });
         EXPECT_EQ (status, 400) << bad.dump () << " -> " << body.dump ();
     }
-    const std::string oversized = "{\"x\":\"" +
-    std::string (vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a') +
-    "\"}";
+    // Appended, not `"..." + std::string (n, 'a') + "..."`: the Ubuntu 22.04
+    // toolchain's GCC 13 at -O3 reports that temporary's move as an
+    // out-of-bounds memcpy, and the release preset's -Werror fails the build.
+    std::string oversized;
+    oversized.reserve (
+    vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES + 8);
+    oversized += "{\"x\":\"";
+    oversized.append (
+    vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a');
+    oversized += "\"}";
     auto [status, body] = routes::create_request_example_response (
     *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", oversized } });
     EXPECT_EQ (status, 400) << body.dump ();

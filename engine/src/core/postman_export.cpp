@@ -1246,21 +1246,21 @@ json postman_cookie (const vayu::http::SetCookie& cookie, std::time_t received_a
     bool http_only = false;
     bool secure    = false;
     for (const std::string& attr : cookie.attrs) {
-        if (auto value = cookie_attribute (attr, "domain")) {
-            if (!value->empty () && value->front () == '.') {
-                value->erase (0, 1);
+        if (auto domain_value = cookie_attribute (attr, "domain")) {
+            if (!domain_value->empty () && domain_value->front () == '.') {
+                domain_value->erase (0, 1);
             }
-            if (!value->empty ()) {
-                domain = vayu::utils::ascii_lower (*value);
+            if (!domain_value->empty ()) {
+                domain = vayu::utils::ascii_lower (*domain_value);
             }
-        } else if (auto value = cookie_attribute (attr, "path")) {
-            path = !value->empty () && value->front () == '/' ?
-            std::move (value) :
+        } else if (auto path_value = cookie_attribute (attr, "path")) {
+            path = !path_value->empty () && path_value->front () == '/' ?
+            std::move (path_value) :
             std::optional<std::string> ();
-        } else if (auto value = cookie_attribute (attr, "expires")) {
-            expires = std::move (value);
-        } else if (auto value = cookie_attribute (attr, "max-age")) {
-            max_age = std::move (value);
+        } else if (auto expires_value = cookie_attribute (attr, "expires")) {
+            expires = std::move (expires_value);
+        } else if (auto max_age_value = cookie_attribute (attr, "max-age")) {
+            max_age = std::move (max_age_value);
         } else if (vayu::utils::ascii_lower_equal (attr, "httponly")) {
             http_only = true;
         } else if (vayu::utils::ascii_lower_equal (attr, "secure")) {
