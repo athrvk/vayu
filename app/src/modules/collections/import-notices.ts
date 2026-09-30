@@ -179,12 +179,6 @@ const COPY: Partial<Record<string, Copy>> = {
 	// A stale `state` is regenerated and a stashed token is fetched again by the grant.
 	oauth2_dropped_field: HIDDEN,
 	url_without_raw: HIDDEN,
-	invalid_percent_encoding: {
-		tier: "note",
-		named: "query value with a bad % escape was re-encoded",
-		one: "1 query value with a bad % escape was re-encoded",
-		many: "{n} query values with bad % escapes were re-encoded",
-	},
 	variable_metadata: HIDDEN,
 	disabled_body: {
 		tier: "note",
