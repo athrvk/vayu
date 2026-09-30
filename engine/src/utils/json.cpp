@@ -931,7 +931,10 @@ std::optional<Error> read_default_header_opt_outs (const Json& json, Request& re
                 "'disabledDefaultHeaders' must hold header names as strings" };
         }
         const auto text = name.get<std::string> ();
-        if (auto rejection = vayu::http::unusable_header_name (text)) {
+        // The token rule alone (issue #1765): `unusable_header_name` is the
+        // correlation-id validator and refuses `User-Agent`, the one name this
+        // list most exists to carry.
+        if (auto rejection = vayu::http::invalid_header_token (text)) {
             return Error{ ErrorCode::InternalError, "'disabledDefaultHeaders': " + *rejection };
         }
         request.suppressed_default_headers.insert (text);

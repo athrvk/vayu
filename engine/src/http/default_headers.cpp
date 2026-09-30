@@ -190,7 +190,7 @@ const std::string& supported_accept_encodings () {
     return built_accept_encodings ();
 }
 
-std::optional<std::string> unusable_header_name (std::string_view name) {
+std::optional<std::string> invalid_header_token (std::string_view name) {
     if (name.empty ()) {
         return "a header name cannot be empty";
     }
@@ -198,6 +198,13 @@ std::optional<std::string> unusable_header_name (std::string_view name) {
     if (offending != name.end ()) {
         return std::format (
         "'{}' is not a header name: '{}' cannot appear in one", name, *offending);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> unusable_header_name (std::string_view name) {
+    if (auto rejection = invalid_header_token (name)) {
+        return rejection;
     }
     // A name the engine already derives would be added twice, by two rules that
     // each check only the request's own headers - see the header for what each

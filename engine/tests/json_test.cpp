@@ -424,6 +424,30 @@ TEST (CapTraceBodies, LeavesUnderCapBodiesVerbatimWithoutMetadata) {
     EXPECT_FALSE (trace["request"].contains ("bodyBytes"));
 }
 
+// Issue #1765: a per-send opt-out of the engine's own `User-Agent` is the
+// whole point of the list, and it used to be a 400 because the reader
+// validated names with the correlation-id rule (`unusable_header_name`), which
+// refuses the headers the engine derives. Mutation check: put
+// `unusable_header_name` back in `read_default_header_opt_outs` and the first
+// assertion reds.
+TEST (JsonTest, ADefaultHeaderOptOutMayNameTheHeadersTheEngineDerives) {
+    auto result = deserialize_request (std::string (R"({
+        "method": "POST",
+        "url": "https://example.com/",
+        "disabledDefaultHeaders": ["User-Agent", "Accept-Encoding", "Content-Type"]
+    })"));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& suppressed = result.value ().suppressed_default_headers;
+    EXPECT_TRUE (suppressed.contains ("user-agent"));
+    EXPECT_TRUE (suppressed.contains ("accept-encoding"));
+    EXPECT_TRUE (suppressed.contains ("content-type"));
+
+    // The token rule still holds.
+    EXPECT_TRUE (deserialize_request (
+    std::string (R"({"method":"GET","url":"https://e/","disabledDefaultHeaders":["User Agent"]})"))
+    .is_error ());
+}
+
 TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
     // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
     // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.
