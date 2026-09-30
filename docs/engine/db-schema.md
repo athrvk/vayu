@@ -607,7 +607,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
 | `suppressed`   | INTEGER | A tombstone: an imported example the user deleted; NOT NULL, default `0` |
 | `spec_example_key` | TEXT | The `examples` map key this was imported from; NULL when there is none |
-| `postman_response` | TEXT | The Postman saved response this was imported from, as JSON text; NULL when it came from anywhere else (schema version 2) |
+| `postman_response` | TEXT | The Postman saved response this example has - from an import or from a save in the app - as JSON text; NULL when it has none (schema version 2) |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -681,9 +681,13 @@ entry rather than replace it. The bound export reads the key to find its way
 back to the same entry when the document still declares it, and falls back to
 adding a new one when it does not. Not a display field: no app surface reads it.
 
-**postman_response** (schema version 2) is the Postman saved response
-(`item.response[]` entry) the import took this example from, as compact JSON
-text in the source's own member order. Every member is kept verbatim except
+**postman_response** (schema version 2) is the Postman saved response this
+example has - from an import or from a save in the app - as compact JSON
+text in Postman's member order: an imported one is the `item.response[]` entry
+the import took it from, in the source's own order, and one saved from a live
+response in the app (#1763) is built by the engine
+(`core::postman_saved_response_text`) from the request as written when it was
+sent and the server's reason phrase. Every member is kept verbatim except
 `name` and `body`, which are `null` placeholders holding only their position -
 the columns are the values, so there is one copy of each. It exists because
 the rest of a saved response has no Vayu column: the request it was recorded
@@ -691,14 +695,17 @@ against (`originalRequest`, which differs per example and from the request's
 current state), the status text the server sent, the editor's preview
 language and type, cookies, the response time, and the header rows as written
 (`name` fields, numeric values). The Postman export is the one reader
-(`core/postman_export.cpp`): it writes `originalRequest`, `cookie`,
+(`core/postman_export.cpp`): it writes `originalRequest`,
 `responseTime` and unknown members back as stored, and the status text,
 `header[]` and preview members only while `status` and `headers` still say
-what was imported, regenerating them otherwise - so an edit made in Vayu is
-never contradicted by a stale copy. Only an import writes it: `POST
-/import/apply` and `POST /requests/:id/examples` accept a string that parses
-as a JSON object (capped at `request_example::MAX_POSTMAN_RESPONSE_BYTES`),
-and `PUT` accepts only `null`, which clears it. The list route does not return
+what was imported, and `cookie` while the enabled `Set-Cookie` rows do,
+regenerating them otherwise - so an edit made in Vayu is
+never contradicted by a stale copy. An import or a save in the app writes
+it: `POST /import/apply` and `POST /requests/:id/examples` accept a string that
+parses as a JSON object (capped at
+`request_example::MAX_POSTMAN_RESPONSE_BYTES`), `POST /requests/:id/examples`
+builds it from a `savedFrom` instead (left NULL, with a warning, when the
+result would be over that cap), and `PUT` accepts only `null`, which clears it. The list route does not return
 it.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes

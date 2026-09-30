@@ -44,7 +44,7 @@ import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/revea
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries";
-import type { ResolvedElement } from "@/types";
+import type { ExampleSentRequest, ResolvedElement } from "@/types";
 import type {
 	RequestState,
 	ResponseState,
@@ -58,6 +58,7 @@ import type {
 import { resolveAuthForSend } from "../utils/auth-resolution";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
+import { sentRequestOf } from "../utils/execute-mapping";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { useSendWithRow } from "../hooks/useSendWithRow";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
@@ -1012,6 +1013,15 @@ export default function RequestBuilderProvider({
 	useExecutionEvents();
 
 	/*
+	 * The Send snapshot of the stream this builder started (issue #1763),
+	 * keyed by its run. The stream's response only exists once the run is
+	 * stored, so the snapshot waits here for the stream-end swap below, which
+	 * attaches it only to the report of that same run - never to a response
+	 * some other send produced.
+	 */
+	const streamSentRef = useRef<{ runId: string; sent: ExampleSentRequest } | null>(null);
+
+	/*
 	 * When the stream ends, replace the live rows with what the run stored.
 	 *
 	 * The two-sources-one-list handoff `ScenarioRunView` makes, at the moment
@@ -1034,8 +1044,13 @@ export default function RequestBuilderProvider({
 		void (async () => {
 			try {
 				const report = await apiService.getRunReport(streamRunId);
-				const restored = responseFromRunResult(report?.results?.[0], streamRunId);
-				if (cancelled || !restored) return;
+				const stored = responseFromRunResult(report?.results?.[0], streamRunId);
+				if (cancelled || !stored) return;
+				const snapshot = streamSentRef.current;
+				const restored =
+					snapshot && snapshot.runId === streamRunId
+						? { ...stored, sentRequest: snapshot.sent }
+						: stored;
 				// Keyed by the request that streamed, exactly like the execute
 				// path: `storeSetResponse` is safe even if the builder has since
 				// moved on, and the live pane is only touched when it has not.
@@ -1096,6 +1111,11 @@ export default function RequestBuilderProvider({
 			// actually ran - not on whatever is on screen when it finishes.
 			const executingRequest = request;
 			const executingId = executingRequest.id;
+			// What save-as-example records as the request that produced this
+			// response (issue #1763). Taken here, not at Save, so edits made
+			// while reading the response stay out of it; only a saved request
+			// can hold an example, so an unsaved one takes none.
+			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
 
 			/*
 			 * A stream-flagged request takes the other endpoint answer (issue #574):
@@ -1120,6 +1140,7 @@ export default function RequestBuilderProvider({
 						}
 						return;
 					}
+					streamSentRef.current = sent ? { runId: started.runId, sent } : null;
 					useExecutionEventsStore.getState().startStream({
 						requestId: executingId,
 						runId: started.runId,
@@ -1168,7 +1189,8 @@ export default function RequestBuilderProvider({
 			setIsExecuting(true);
 
 			try {
-				const result = await onExecute(executingRequest, dataRow);
+				const executed = await onExecute(executingRequest, dataRow);
+				const result = executed && sent ? { ...executed, sentRequest: sent } : executed;
 				if (result) {
 					// Persist under the request that ran, so returning to it shows its
 					// own response. `storeSetResponse` is keyed by id and is safe even

@@ -21,19 +21,28 @@
 
 #include "js_json.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/parse.hpp"
+
+#include <curl/curl.h>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -105,6 +114,9 @@ struct Walk {
     int folders          = 0;
     int secrets_omitted  = 0;
     std::array<int, static_cast<std::size_t> (Loss::Count_)> losses{};
+    /// When the export runs: a cookie regenerated from edited rows has no
+    /// other time to count its `Max-Age` from.
+    std::time_t now = 0;
 
     void lose (Loss loss, int count = 1) {
         losses.at (static_cast<std::size_t> (loss)) += count;
@@ -1056,6 +1068,22 @@ bool same_rows (const json& left, const json& right) {
     return true;
 }
 
+/// The values of the enabled `Set-Cookie` rows of @p rows, in order: what a
+/// saved response's `cookie[]` is built from.
+std::vector<std::string> set_cookie_values (const json& rows) {
+    std::vector<std::string> out;
+    if (!rows.is_array ()) {
+        return out;
+    }
+    for (const json& row : rows) {
+        if (row_enabled (row) &&
+        vayu::utils::ascii_lower_equal (text_of (row, "key"), "set-cookie")) {
+            out.push_back (text_of (row, "value"));
+        }
+    }
+    return out;
+}
+
 /// What a stored saved response still says about the example it came from.
 struct Recorded {
     /// `status` is the code the response was recorded with.
@@ -1064,6 +1092,11 @@ struct Recorded {
     bool rows_same = false;
     /// The declared Content-Type is the recorded one.
     bool type_same = false;
+    /// `headers` holds the enabled `Set-Cookie` rows the recorded `header[]`
+    /// holds. Finer than `rows_same`: an unrelated header edit keeps a
+    /// `cookie[]` whose `Max-Age` expiry was counted from when the response
+    /// came in, which a rebuild at export time could only re-count from now.
+    bool cookies_same = false;
 };
 
 Recorded compare_recorded (const PostmanExportExample& example,
@@ -1076,7 +1109,8 @@ const std::optional<std::string>& declared) {
     const bool coded = code != stored.end () && code->is_number_integer ();
     // An absent code is the 200 the importer stored for it.
     return { (coded ? code->get<int> () : 200) == example.status,
-        same_rows (rows, example.headers), declared_content_type (rows) == declared };
+        same_rows (rows, example.headers), declared_content_type (rows) == declared,
+        set_cookie_values (rows) == set_cookie_values (example.headers) };
 }
 
 /// @p value as a member to write. `std::optional<json>`'s converting
@@ -1110,6 +1144,167 @@ json v21_auth (const json& auth) {
     return out;
 }
 
+/// @p text without the spaces and tabs (RFC 6265's WSP) around it.
+std::string_view trim_wsp (std::string_view text) {
+    const std::size_t first = text.find_first_not_of (" \t");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr (first, text.find_last_not_of (" \t") - first + 1);
+}
+
+/// The value of the `name=value` attribute @p attr, when it names @p name
+/// (case-insensitively). The name and value are trimmed as RFC 6265 5.2
+/// trims them, so `Max-Age = 60` is a `Max-Age` of `60`.
+std::optional<std::string> cookie_attribute (const std::string& attr, std::string_view name) {
+    const std::size_t equals = attr.find ('=');
+    if (equals == std::string::npos ||
+    !vayu::utils::ascii_lower_equal (
+    trim_wsp (std::string_view (attr).substr (0, equals)), name)) {
+        return std::nullopt;
+    }
+    return std::make_optional<std::string> (
+    trim_wsp (std::string_view (attr).substr (equals + 1)));
+}
+
+/// When a cookie set at @p received_at expires, from its `Max-Age` (which
+/// wins, RFC 6265 5.3) or its `Expires`; nothing for a session cookie. An
+/// attribute that does not parse is ignored, as a cookie store ignores it,
+/// and so is a `Max-Age` when @p received_at is unknown (negative: what
+/// `std::time` answers when the clock cannot be read).
+std::optional<std::time_t> cookie_expiry (const std::optional<std::string>& max_age,
+const std::optional<std::string>& expires,
+std::time_t received_at) {
+    if (max_age && received_at >= 0) {
+        if (const auto seconds = vayu::utils::parse_number<long long> (*max_age)) {
+            // A zero or negative age has already expired; an age past what
+            // the clock holds is held to its end. `received_at` is not
+            // negative, so the room left cannot overflow.
+            const long long room = std::numeric_limits<std::time_t>::max () - received_at;
+            return received_at + std::clamp (*seconds, 0LL, room);
+        }
+    }
+    if (expires) {
+        if (const std::time_t at = curl_getdate (expires->c_str (), nullptr); at != -1) {
+            return at;
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * JavaScript's `Date.prototype.toString` of @p at in UTC
+ * (`Fri Dec 31 9999 23:59:59 GMT+0000 (Coordinated Universal Time)`), or
+ * nothing past the years `std::chrono::year_month_day` holds (+-32767).
+ *
+ * Calendar arithmetic rather than `gmtime`: Windows' `_gmtime64_s` refuses a
+ * time before 1970 or after the year 3000, so ASP.NET's "never expires"
+ * (`Expires=Fri, 31 Dec 9999 23:59:59 GMT`) would read differently per
+ * platform. The names are spelled here, not through a locale.
+ */
+std::optional<std::string> js_date_utc (std::time_t at) {
+    using namespace std::chrono;
+    static constexpr std::array<std::string_view, 7> WEEKDAYS = { "Sun", "Mon",
+        "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static constexpr std::array<std::string_view, 12> MONTHS  = { "Jan", "Feb",
+         "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    constexpr sys_days FIRST = year::min () / January / 1;
+    constexpr sys_days LAST  = year::max () / December / 31;
+    const sys_seconds time{ seconds{ static_cast<seconds::rep> (at) } };
+    const sys_days day = floor<days> (time);
+    if (day < FIRST || day > LAST) {
+        return std::nullopt;
+    }
+    const year_month_day date{ day };
+    const hh_mm_ss clock{ time - day };
+    const int y = static_cast<int> (date.year ());
+    // JavaScript pads the year to four digits and signs a negative one.
+    return std::make_optional (
+    std::format ("{} {} {:02} {}{:04} {:02}:{:02}:{:02} "
+                 "GMT+0000 (Coordinated Universal Time)",
+    WEEKDAYS.at (weekday{ day }.c_encoding ()),
+    MONTHS.at (static_cast<unsigned> (date.month ()) - 1),
+    static_cast<unsigned> (date.day ()), y < 0 ? "-" : "", y < 0 ? -y : y,
+    clock.hours ().count (), clock.minutes ().count (), clock.seconds ().count ()));
+}
+
+/**
+ * One cookie as Postman's saved response lists it, in its member order.
+ * `expires` is JavaScript's `Date.prototype.toString` of the expiry, which is
+ * what Postman writes (in its own zone; UTC here), and `"Invalid Date"` with
+ * `session: true` for a cookie with no expiry. The attributes read as RFC
+ * 6265 5.2 and tough-cookie (Postman's cookie store) read them: an empty
+ * `Domain` is ignored and a leading `.` dropped, the domain lowercased; a
+ * `Path` that does not start with `/` is the default path. `hostOnly` is
+ * what a cookie without a `Domain` is.
+ */
+json postman_cookie (const vayu::http::SetCookie& cookie, std::time_t received_at) {
+    std::optional<std::string> domain;
+    std::optional<std::string> path;
+    std::optional<std::string> expires;
+    std::optional<std::string> max_age;
+    bool http_only = false;
+    bool secure    = false;
+    for (const std::string& attr : cookie.attrs) {
+        if (auto domain_value = cookie_attribute (attr, "domain")) {
+            if (!domain_value->empty () && domain_value->front () == '.') {
+                domain_value->erase (0, 1);
+            }
+            if (!domain_value->empty ()) {
+                domain = vayu::utils::ascii_lower (*domain_value);
+            }
+        } else if (auto path_value = cookie_attribute (attr, "path")) {
+            path = !path_value->empty () && path_value->front () == '/' ?
+            std::move (path_value) :
+            std::optional<std::string> ();
+        } else if (auto expires_value = cookie_attribute (attr, "expires")) {
+            expires = std::move (expires_value);
+        } else if (auto max_age_value = cookie_attribute (attr, "max-age")) {
+            max_age = std::move (max_age_value);
+        } else if (vayu::utils::ascii_lower_equal (attr, "httponly")) {
+            http_only = true;
+        } else if (vayu::utils::ascii_lower_equal (attr, "secure")) {
+            secure = true;
+        }
+    }
+    const std::optional<std::time_t> expiry = cookie_expiry (max_age, expires, received_at);
+    const std::optional<std::string> written =
+    expiry ? js_date_utc (*expiry) : std::optional<std::string> ();
+    json out;
+    // A year past what the calendar holds prints as JavaScript's own
+    // unprintable date does.
+    out["expires"]  = written.value_or ("Invalid Date");
+    out["hostOnly"] = !domain.has_value ();
+    out["httpOnly"] = http_only;
+    out["domain"]   = domain.value_or ("");
+    out["path"]     = path.value_or ("/");
+    out["secure"]   = secure;
+    out["session"]  = !expiry.has_value ();
+    out["value"]    = cookie.value;
+    out["key"]      = cookie.name;
+    return out;
+}
+
+/// Every cookie the enabled `Set-Cookie` rows of @p headers set, in row
+/// order, as received at @p received_at.
+json postman_cookies (const json& headers, std::time_t received_at) {
+    json out = json::array ();
+    if (!headers.is_array ()) {
+        return out;
+    }
+    for (const json& header : headers) {
+        if (!row_enabled (header) ||
+        !vayu::utils::ascii_lower_equal (text_of (header, "key"), "set-cookie")) {
+            continue;
+        }
+        for (const vayu::http::SetCookie& cookie :
+        vayu::http::parse_set_cookie (text_of (header, "value"))) {
+            out.push_back (postman_cookie (cookie, received_at));
+        }
+    }
+    return out;
+}
+
 /// One stored member as written back, or nothing to write.
 std::optional<json> stored_member (const std::string& key,
 const json& value,
@@ -1134,6 +1329,12 @@ Walk& walk) {
         return write (recorded.rows_same ?
         value :
         postman_rows (example.headers, RowShape::Plain, walk));
+    }
+    if (key == "cookie") {
+        // Built from the Set-Cookie rows, so an edit that removes one must
+        // not leave its value behind here.
+        return write (
+        recorded.cookies_same ? value : postman_cookies (example.headers, walk.now));
     }
     if (key == "_postman_previewlanguage") {
         return write (
@@ -1163,7 +1364,8 @@ Walk& walk) {
  * what was imported. `name`, `code` and `body` are always the columns. The
  * status text is kept while `status` is the code it was recorded with,
  * `header[]` (its `name` fields and number values included) while `headers`
- * reads the same through the importer's own row mapping, and the preview
+ * reads the same through the importer's own row mapping, `cookie[]` while its
+ * enabled `Set-Cookie` rows do, and the preview
  * language and type while the declared Content-Type is unchanged; otherwise
  * each is regenerated, and a regenerated preview type is left out, since it
  * is Postman's own guess. `originalRequest` is kept verbatim: it records the
@@ -1235,6 +1437,10 @@ Walk& walk) {
     out["body"]   = example.body;
     return out;
 }
+
+/// The largest millisecond count written as an integer (2^53, where a double
+/// stops holding every integer).
+constexpr double MAX_EXACT_MS = 9007199254740992.0;
 
 /// The request-level behaviours Postman keeps beside the request.
 /// Whether @p body would put bytes on the wire.
@@ -1424,6 +1630,41 @@ std::uint64_t fnv1a (std::string_view text, std::uint64_t basis) {
 
 } // namespace
 
+std::optional<std::string> postman_saved_response_text (const PostmanExportRequest& sent,
+const PostmanExportExample& example,
+const std::string& status_text,
+std::optional<double> response_time_ms,
+std::time_t received_at) {
+    // What the mapping cannot carry is the request's own export to report,
+    // not this save's.
+    Walk scratch;
+    const std::optional<json> body = postman_body (sent.body, scratch);
+    const std::optional<std::string> declared = declared_content_type (example.headers);
+    json out;
+    out["name"]            = nullptr;
+    out["originalRequest"] = request_core (sent, body, scratch);
+    out["status"] =
+    status_text.empty () ? vayu::http::status_text (example.status) : status_text;
+    out["code"]                     = example.status;
+    out["_postman_previewlanguage"] = preview_language (declared.value_or (""));
+    out["header"] = postman_rows (example.headers, RowShape::Plain, scratch);
+    out["cookie"] = postman_cookies (example.headers, received_at);
+    out["responseTime"] = nullptr;
+    if (response_time_ms) {
+        // Whole milliseconds, as Postman records it; a value past what an
+        // integer holds exactly stays a double rather than overflowing.
+        const double whole = std::round (*response_time_ms);
+        out["responseTime"] =
+        whole < MAX_EXACT_MS ? json (static_cast<std::int64_t> (whole)) : json (whole);
+    }
+    out["body"] = nullptr;
+    std::string text = out.dump (-1, ' ', false, json::error_handler_t::replace);
+    if (text.size () > vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES) {
+        return std::nullopt;
+    }
+    return std::make_optional (std::move (text));
+}
+
 std::string postman_collection_uuid (const std::string& collection_id) {
     if (is_uuid (collection_id)) {
         return vayu::utils::ascii_lower (collection_id);
@@ -1455,6 +1696,7 @@ PostmanExportOutcome export_postman (const PostmanExportFolder& root,
 const PostmanExportOptions& options) {
     Walk walk;
     walk.include_secrets = options.include_secrets;
+    walk.now             = std::time (nullptr);
     note_container_losses (root, walk);
 
     json info;

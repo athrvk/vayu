@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -366,9 +367,16 @@ TEST_F (ExamplesRouteTest, CreateRejectsAPostmanResponseThatIsNotAJsonObject) {
         *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", bad } });
         EXPECT_EQ (status, 400) << bad.dump () << " -> " << body.dump ();
     }
-    const std::string oversized = "{\"x\":\"" +
-    std::string (vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a') +
-    "\"}";
+    // Appended, not `"..." + std::string (n, 'a') + "..."`: the Ubuntu 22.04
+    // toolchain's GCC 13 at -O3 reports that temporary's move as an
+    // out-of-bounds memcpy, and the release preset's -Werror fails the build.
+    std::string oversized;
+    oversized.reserve (
+    vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES + 8);
+    oversized += "{\"x\":\"";
+    oversized.append (
+    vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a');
+    oversized += "\"}";
     auto [status, body] = routes::create_request_example_response (
     *db_, "req_1", json{ { "name", "X" }, { "postmanResponse", oversized } });
     EXPECT_EQ (status, 400) << body.dump ();
@@ -402,6 +410,232 @@ TEST_F (ExamplesRouteTest, UpdateCanOnlyClearAPostmanResponse) {
     auto after_clear = db_->get_request_example (id);
     ASSERT_HAS_VALUE (after_clear);
     EXPECT_FALSE (after_clear->postman_response.has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// savedFrom (#1763): a save in the app records the request it was sent with
+// ---------------------------------------------------------------------------
+
+/// A `savedFrom` as the app sends it: the request as written at Send.
+json saved_from (const json& request_overrides = json::object ()) {
+    json request = { { "method", "post" }, { "url", "{{baseUrl}}/users/:id?verbose=1" },
+        { "params",
+        json::array ({ json{ { "key", "id" }, { "value", "7" }, { "enabled", true }, { "in", "path" } },
+        json{ { "key", "verbose" }, { "value", "1" }, { "enabled", true } } }) },
+        { "headers",
+        json::array ({ json{ { "key", "X-Trace" }, { "value", "{{trace}}" },
+        { "enabled", true } } }) },
+        { "body", json{ { "mode", "json" }, { "content", R"({"a":1})" } } } };
+    request.update (request_overrides);
+    return json{ { "request", request }, { "statusText", "Totally Fine" },
+        { "responseTimeMs", 123.4 } };
+}
+
+std::vector<std::string> member_names (const nlohmann::ordered_json& node) {
+    std::vector<std::string> names;
+    for (auto member = node.begin (); member != node.end (); ++member) {
+        names.push_back (member.key ());
+    }
+    return names;
+}
+
+// The engine builds the saved response itself, in Postman's member order,
+// from the request as written (`{{baseUrl}}` kept, the `:id` row a
+// `url.variable`) and the server's own reason phrase. Mutation check: skip
+// `record_saved_response` in the create core and the blob is absent.
+TEST_F (ExamplesRouteTest, CreateWithSavedFromRecordsTheSavedResponse) {
+    const std::string id = create_example ("req_1",
+    json{ { "name", "Fine" }, { "status", 200 }, { "origin", "user" },
+    { "headers",
+    json::array ({ json{ { "key", "Content-Type" }, { "value", "application/json" }, { "enabled", true } },
+    json{ { "key", "Set-Cookie" }, { "value", "s=1; Path=/app; HttpOnly" }, { "enabled", true } },
+    json{ { "key", "set-cookie" }, { "value", "t=2; Domain=example.test; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure" },
+    { "enabled", true } } }) },
+    { "body", "{}" }, { "savedFrom", saved_from () } });
+    const auto stored    = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    const auto blob = nlohmann::ordered_json::parse (*stored->postman_response);
+
+    EXPECT_EQ (member_names (blob),
+    (std::vector<std::string>{ "name", "originalRequest", "status", "code",
+    "_postman_previewlanguage", "header", "cookie", "responseTime", "body" }));
+    EXPECT_TRUE (blob["name"].is_null ());
+    EXPECT_TRUE (blob["body"].is_null ());
+    EXPECT_EQ (blob["status"], "Totally Fine");
+    EXPECT_EQ (blob["code"], 200);
+    EXPECT_EQ (blob["_postman_previewlanguage"], "json");
+    EXPECT_EQ (blob["responseTime"], 123);
+
+    const auto& original = blob["originalRequest"];
+    EXPECT_EQ (original["method"], "POST")
+    << "the verb is the column's spelling";
+    EXPECT_FALSE (original.contains ("auth"));
+    EXPECT_EQ (original["url"]["raw"], "{{baseUrl}}/users/:id?verbose=1");
+    ASSERT_EQ (original["url"]["variable"].size (), 1u);
+    EXPECT_EQ (original["url"]["variable"][0]["key"], "id");
+    EXPECT_EQ (original["url"]["variable"][0]["value"], "7");
+    EXPECT_EQ (original["header"][0]["value"], "{{trace}}");
+    EXPECT_EQ (original["body"]["raw"], R"({"a":1})");
+
+    ASSERT_EQ (blob["header"].size (), 3u);
+    EXPECT_EQ (blob["header"][1]["key"], "Set-Cookie");
+
+    const auto& cookies = blob["cookie"];
+    ASSERT_EQ (cookies.size (), 2u) << cookies.dump ();
+    EXPECT_EQ (member_names (cookies[0]),
+    (std::vector<std::string>{ "expires", "hostOnly", "httpOnly", "domain",
+    "path", "secure", "session", "value", "key" }))
+    << "Postman's own member order";
+    EXPECT_EQ (cookies[0]["expires"], "Invalid Date");
+    EXPECT_EQ (cookies[0]["session"], true);
+    EXPECT_EQ (cookies[0]["key"], "s");
+    EXPECT_EQ (cookies[0]["value"], "1");
+    EXPECT_EQ (cookies[0]["domain"], "");
+    EXPECT_EQ (cookies[0]["path"], "/app");
+    EXPECT_EQ (cookies[0]["httpOnly"], true);
+    EXPECT_EQ (cookies[0]["secure"], false);
+    EXPECT_EQ (cookies[0]["hostOnly"], true);
+    EXPECT_EQ (cookies[1]["key"], "t");
+    EXPECT_EQ (cookies[1]["domain"], "example.test");
+    EXPECT_EQ (cookies[1]["path"], "/");
+    EXPECT_EQ (cookies[1]["secure"], true);
+    EXPECT_EQ (cookies[1]["hostOnly"], false);
+    EXPECT_EQ (cookies[1]["expires"], "Wed Oct 21 2037 07:28:00 GMT+0000 (Coordinated Universal Time)")
+    << "the comma inside Expires is not a cookie boundary";
+    EXPECT_EQ (cookies[1]["session"], false);
+
+    // Still never a display field.
+    auto [list_status, list] = routes::list_request_examples_response (*db_, "req_1");
+    ASSERT_EQ (list_status, 200);
+    EXPECT_FALSE (list[0].contains ("postmanResponse"));
+    EXPECT_FALSE (list[0].contains ("savedFrom"));
+}
+
+// An empty statusText (HTTP/2 carries no reason phrase) falls back to the
+// table, and an absent responseTimeMs records null.
+TEST_F (ExamplesRouteTest, SavedFromWithoutAReasonPhraseOrTimeUsesTheTable) {
+    json saved          = saved_from ();
+    saved["statusText"] = "";
+    saved.erase ("responseTimeMs");
+    const std::string id = create_example ("req_1",
+    json{ { "name", "Made" }, { "status", 201 }, { "savedFrom", saved } });
+    const auto stored    = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    const auto blob = nlohmann::ordered_json::parse (*stored->postman_response);
+    EXPECT_EQ (blob["status"], "Created");
+    EXPECT_TRUE (blob["responseTime"].is_null ());
+    EXPECT_TRUE (blob["cookie"].empty ());
+}
+
+// Every malformed `savedFrom` is a 400 naming the field, and nothing is written.
+TEST_F (ExamplesRouteTest, CreateRejectsAMalformedSavedFrom) {
+    const auto with = [] (const std::function<void (json&)>& edit) {
+        json saved = saved_from ();
+        edit (saved);
+        return saved;
+    };
+    const std::vector<std::pair<json, std::string>> cases = {
+        { json ("nope"), "savedFrom" },
+        { json::array (), "savedFrom" },
+        { with ([] (json& s) { s.erase ("request"); }), "savedFrom.request" },
+        { with ([] (json& s) { s["request"]               = "GET /"; }), "savedFrom.request" },
+        { with ([] (json& s) { s["request"].erase ("method"); }), "savedFrom.request.method" },
+        { with ([] (json& s) { s["request"]["method"]     = "FETCH"; }), "savedFrom.request.method" },
+        { with ([] (json& s) { s["request"]["method"]     = 1; }), "savedFrom.request.method" },
+        { with ([] (json& s) { s["request"].erase ("url"); }), "savedFrom.request.url" },
+        { with ([] (json& s) { s["request"]["url"]        = 5; }), "savedFrom.request.url" },
+        { with ([] (json& s) { s["request"]["params"]     = json::object (); }), "savedFrom.request.params" },
+        { with ([] (json& s) { s["request"]["headers"]    = "X: 1"; }), "savedFrom.request.headers" },
+        { with ([] (json& s) { s["request"]["body"]       = "raw"; }), "savedFrom.request.body" },
+        { with ([] (json& s) { s.erase ("statusText"); }), "savedFrom.statusText" },
+        { with ([] (json& s) { s["statusText"]            = 200; }), "savedFrom.statusText" },
+        { with ([] (json& s) { s["responseTimeMs"]        = -1; }), "savedFrom.responseTimeMs" },
+        { with ([] (json& s) { s["responseTimeMs"]        = "12"; }), "savedFrom.responseTimeMs" },
+        { with ([] (json& s) { s["receivedAt"]            = -1; }), "savedFrom.receivedAt" },
+        { with ([] (json& s) { s["receivedAt"]            = "1767225600000"; }), "savedFrom.receivedAt" },
+    };
+    for (const auto& [saved, field] : cases) {
+        auto [status, body] = routes::create_request_example_response (
+        *db_, "req_1", json{ { "name", "X" }, { "savedFrom", saved } });
+        EXPECT_EQ (status, 400) << saved.dump ();
+        EXPECT_NE (body.dump ().find ("'" + field + "'"), std::string::npos)
+        << "expected the refusal to name " << field << ": " << body.dump ();
+    }
+
+    // The verbs a refusal lists are the ones `parse_method` takes.
+    auto [verb_status, verb] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "X" },
+    { "savedFrom", with ([] (json& s) { s["request"]["method"] = "FETCH"; }) } });
+    EXPECT_EQ (verb_status, 400);
+    EXPECT_NE (
+    verb.dump ().find ("(GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)"), std::string::npos)
+    << verb.dump ();
+
+    // Two writers of one column.
+    auto [both_status, both] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "X" }, { "postmanResponse", R"({"status":"OK"})" },
+    { "savedFrom", saved_from () } });
+    EXPECT_EQ (both_status, 400) << both.dump ();
+    EXPECT_NE (both.dump ().find ("'savedFrom'"), std::string::npos) << both.dump ();
+
+    EXPECT_TRUE (db_->get_request_examples ("req_1").empty ());
+}
+
+// A cookie's Max-Age counts from `receivedAt`, when the response came in,
+// not from the save; any case of a verb is the column's spelling. Mutation
+// check: ignore `receivedAt` (count from `std::time`) and the expiry reds.
+TEST_F (ExamplesRouteTest, SavedFromReceivedAtIsWhenAMaxAgeCountsFrom) {
+    json saved                 = saved_from ();
+    saved["receivedAt"]        = 1767225600500.0; // 2026-01-01T00:00:00.5Z
+    saved["request"]["method"] = "pAtCh";
+    const std::string id       = create_example ("req_1",
+          json{ { "name", "Timed" }, { "status", 200 },
+          { "headers",
+          json::array ({ json{ { "key", "Set-Cookie" },
+          { "value", "a=1; Max-Age=60" }, { "enabled", true } } }) },
+          { "savedFrom", saved } });
+    const auto stored          = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    const auto blob = nlohmann::ordered_json::parse (*stored->postman_response);
+    EXPECT_EQ (blob["cookie"][0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (blob["originalRequest"]["method"], "PATCH");
+}
+
+// Null is "no record", like absent; a PUT ignores the key (it is create-only,
+// and an update cannot author the column).
+TEST_F (ExamplesRouteTest, SavedFromIsCreateOnlyAndNullRecordsNothing) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "Plain" }, { "savedFrom", nullptr } });
+    const auto plain = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (plain);
+    EXPECT_FALSE (plain->postman_response.has_value ());
+
+    auto [status, body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "savedFrom", saved_from () } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto after = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (after);
+    EXPECT_FALSE (after->postman_response.has_value ());
+}
+
+// A request body too large to record still saves the example - without the
+// blob, so the export regenerates those members - rather than refusing the
+// save the user asked for.
+TEST_F (ExamplesRouteTest, ASavedFromOverTheCapStillCreatesTheExampleWithoutIt) {
+    json saved               = saved_from ();
+    saved["request"]["body"] = json{ { "mode", "text" },
+        { "content",
+        std::string (vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES, 'a') } };
+    auto [status, body]      = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Big" }, { "savedFrom", saved } });
+    ASSERT_EQ (status, 200) << body.dump ().substr (0, 200);
+    const auto stored = db_->get_request_example (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_FALSE (stored->postman_response.has_value ());
 }
 
 // ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@
  * are in scope.
  */
 
-import type { ResolvedElement, SanityResult } from "@/types";
+import type { ExampleSentRequest, RequestBody, ResolvedElement, SanityResult } from "@/types";
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
@@ -52,6 +52,46 @@ export interface ExecField {
 	src?: string;
 	fileName?: string;
 	contentType?: string;
+}
+
+/**
+ * The flattened editor body as the wire's discriminated `RequestBody`, with
+ * `{{vars}}` left as written - the stored shape, not the sent one (that is
+ * `buildExecBody` below). Shared by the builder's save, the "gone" pane's cURL
+ * snippet (issue #1436) and the Send snapshot `sentRequestOf` takes.
+ */
+export function toBodyPayload(request: RequestState): RequestBody {
+	if (request.bodyMode === "form-data") {
+		return { mode: "form-data", fields: toKeyValueEntries(request.formData) };
+	}
+	if (request.bodyMode === "x-www-form-urlencoded") {
+		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
+	}
+	if (request.bodyMode !== "none") {
+		return {
+			mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
+			content: request.body ?? "",
+		};
+	}
+	return { mode: "none" };
+}
+
+/**
+ * The request as the user wrote it, in the stored request-column shapes
+ * (issue #1763) - the same row mapping the builder's save sends, path rows
+ * included. The engine reads it with its own `savedFrom` reader, which checks
+ * only the outer shapes (an HTTP method, a string url, arrays of rows, an
+ * object body), not with a request save's appliers. Taken at Send and
+ * carried on the response as `sentRequest`.
+ */
+export function sentRequestOf(request: RequestState): ExampleSentRequest {
+	return {
+		method: request.method,
+		url: request.url,
+		params: toKeyValueEntries(request.params),
+		headers: toKeyValueEntries(request.headers),
+		body: toBodyPayload(request),
+	};
 }
 
 /**

@@ -77,9 +77,10 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 				<DialogHeader>
 					<DialogTitle>Save response as example</DialogTitle>
 					<DialogDescription>
-						Kept against this request with its status, headers and body - the same shape
-						an import stores, and what a mock server for this collection can answer
-						with.
+						Kept against this request with its status, headers and body
+						{response.sentRequest && ", and the request that produced it"} - the same
+						shape an import stores, and what a mock server for this collection can
+						answer with.
 					</DialogDescription>
 				</DialogHeader>
 

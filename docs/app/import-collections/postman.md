@@ -321,8 +321,27 @@ does - only for a file that stays with you.
 Postman keeps the request it was recorded against, its status text, preview
 settings, cookies and response time, and exports with them. Change its status or
 headers (through the API or an MCP agent) and the export writes that change, regenerating the status text,
-header rows and preview settings that described the old value; the recorded
-request stays as recorded.
+header rows and preview settings that described the old value. The cookies are
+rebuilt only when a `Set-Cookie` header changes, so a cookie whose `Set-Cookie`
+header you removed is not exported, while fixing an unrelated header keeps the
+cookies as recorded; the recorded request stays as recorded.
+
+**A response you save as an example keeps the request that produced it**
+(issue #1763). *Save as example* on a response you just sent records the
+request as it was when you pressed Send - method, URL, params, headers and
+body, with `{{variables}}` left unresolved and auth left out - together with
+the server's own status text, the response's cookies (a `Max-Age` counted from
+when the response arrived) and its response time.
+The export writes those back, so editing the request afterwards does not change
+what the example says it was sent with. A value typed literally into a header
+or the URL at Send stays in that example after you remove it from the request,
+and exports even with **Include credentials** off, the same as a header on the
+request itself. A streamed response keeps the record too: the copy the
+app reloads when the stream ends is matched to the Send that started it. An
+example saved before this, or from a response the app fetched without a Send
+of its own to match it to (the last run shown again after a restart, or a
+response opened from History), has no such record and exports regenerated from
+the request as it is at export time.
 
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each

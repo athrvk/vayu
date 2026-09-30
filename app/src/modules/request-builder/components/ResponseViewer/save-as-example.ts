@@ -14,6 +14,14 @@
  * where its route table came from. The two rules that could drift are both
  * here - the Content-Type lookup is the Postman importer's, header for header
  * (`importers/postman.ts`), and `order` is never sent so the engine appends.
+ *
+ * A response from a live send also carries the request as it was at Send
+ * (`sentRequest`), and the save forwards it as `savedFrom` with the server's
+ * own reason phrase and the response time (issue #1763): the engine turns that
+ * into the Postman saved response once, so an export describes the request
+ * that produced this response rather than whatever the request has become. A
+ * response fetched with no Send to match it to (the last run after a restart,
+ * one opened from History) has no snapshot and sends no `savedFrom`.
  */
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
@@ -54,6 +62,11 @@ function headerEntries(headers: Record<string, string>): KeyValueEntry[] {
  * denormalizes this column for the mock server, and a value that disagrees with
  * the header beside it is the kind of difference that only shows up when
  * something is served.
+ *
+ * `savedFrom` rides only when the response has a Send snapshot: without one
+ * there is no request to report, and the engine regenerates on export. Its
+ * `receivedAt` is when the response came in, the time a cookie's `Max-Age`
+ * counts from - not the Save, which may be minutes later.
  */
 export function exampleFromResponse(
 	response: ResponseState,
@@ -73,5 +86,24 @@ export function exampleFromResponse(
 		// flag optional for responses that never went through a trace, and an
 		// absent one there means "not truncated", not "unknown".
 		bodyTruncated: response.bodyTruncated ?? false,
+		...(response.sentRequest && {
+			savedFrom: {
+				request: response.sentRequest,
+				statusText: response.statusText,
+				responseTimeMs: response.time,
+				...receivedAtOf(response),
+			},
+		}),
 	};
+}
+
+/**
+ * When @p response came in, as `savedFrom.receivedAt` (epoch ms): the live
+ * funnel's `receivedAt`, else the stored run's time a stream's reloaded copy
+ * carries in `restoredFrom.at`. Nothing when neither parses, and the engine
+ * uses its own clock.
+ */
+function receivedAtOf(response: ResponseState): { receivedAt?: number } {
+	const at = Date.parse(response.receivedAt ?? response.restoredFrom?.at ?? "");
+	return Number.isFinite(at) && at >= 0 ? { receivedAt: at } : {};
 }

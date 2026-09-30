@@ -27,6 +27,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <ctime>
 #include <optional>
 #include <string>
 #include <vector>
@@ -141,6 +142,34 @@ const PostmanExportOptions& options);
  */
 [[nodiscard]] std::optional<nlohmann::ordered_json> postman_auth_written (
 const nlohmann::ordered_json& auth);
+
+/**
+ * The Postman saved response a save in the app records (#1763), as the
+ * `request_examples.postman_response` text the export reads back: `name`,
+ * `originalRequest`, `status`, `code`, `_postman_previewlanguage`, `header`,
+ * `cookie`, `responseTime`, `body`, in Postman's own member order, with
+ * `name` and `body` as `null` placeholders like an imported one.
+ *
+ * @p sent is the request as written when it was sent (only `method`, `url`,
+ * `params`, `headers` and `body` are read), and becomes `originalRequest`
+ * through the same mapping the exported request itself goes through, with no
+ * `auth`. `header` is @p example's rows through the export's own row mapping,
+ * so the export's check that the column still says what was recorded reads it
+ * as unchanged until an edit. @p status_text is the server's reason phrase;
+ * empty falls back to the status table. `cookie` lists what the enabled
+ * `Set-Cookie` rows set, a `Max-Age` counted from @p received_at: when the
+ * response came in (`savedFrom.receivedAt`), or the save's own clock when the
+ * app did not say; a negative @p received_at is unknown, and a `Max-Age` is
+ * then ignored. Nothing when the text would be over
+ * `MAX_POSTMAN_RESPONSE_BYTES`: the example is then kept without it and the
+ * export regenerates these members, as it does for an import.
+ */
+[[nodiscard]] std::optional<std::string> postman_saved_response_text (
+const PostmanExportRequest& sent,
+const PostmanExportExample& example,
+const std::string& status_text,
+std::optional<double> response_time_ms,
+std::time_t received_at);
 
 /// `PostmanExportNotes` as the route answers with it.
 [[nodiscard]] nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes);

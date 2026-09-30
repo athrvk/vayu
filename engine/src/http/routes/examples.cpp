@@ -18,12 +18,18 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/postman_export.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/types.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <ctime>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -204,6 +210,195 @@ bool is_create) {
     return {};
 }
 
+/// What a save in the app says produced the response (#1763): the request as
+/// written when it was sent, and the server's own reason phrase.
+struct SavedFrom {
+    vayu::core::PostmanExportRequest request;
+    std::string status_text;
+    std::optional<double> response_time_ms;
+    /// When the response came in, the clock a cookie's `Max-Age` counts
+    /// from; nothing counts it from the save.
+    std::optional<std::time_t> received_at;
+};
+
+/// @p json as the exporter's key-ordered JSON. A request body arrives parsed
+/// into sorted `nlohmann::json`, which is also the order the request route
+/// stores its own columns in, so nothing is lost the stored request keeps.
+nlohmann::ordered_json as_ordered (const nlohmann::json& json) {
+    return nlohmann::ordered_json::parse (json.dump ());
+}
+
+/// @p key of @p object as an array, `[]` when absent or null, or the 400
+/// naming @p field.
+RouteResult read_rows (const nlohmann::json& object,
+const char* key,
+const char* field,
+nlohmann::ordered_json& out) {
+    const auto found = object.find (key);
+    if (found == object.end () || found->is_null ()) {
+        out = nlohmann::ordered_json::array ();
+        return {};
+    }
+    if (!found->is_array ()) {
+        return route_error (400, std::string ("Invalid '") + field + "': must be an array");
+    }
+    out = as_ordered (*found);
+    return {};
+}
+
+/// The Vayu verb @p text names, in any case, as the request column spells it.
+std::optional<std::string> canonical_method (const std::string& text) {
+    const std::optional<vayu::HttpMethod> method =
+    vayu::parse_method (vayu::utils::ascii_upper (text));
+    return method ? std::make_optional<std::string> (vayu::to_string (*method)) :
+                    std::nullopt;
+}
+
+/// Every verb `parse_method` takes, as a refusal lists them: the enum's
+/// values in order, up to the first one `to_string` has no name for.
+std::string method_names () {
+    std::string out;
+    for (unsigned at = 0;; ++at) {
+        const char* name = vayu::to_string (static_cast<vayu::HttpMethod> (at));
+        if (!vayu::parse_method (name)) {
+            return out;
+        }
+        out += (out.empty () ? "" : ", ") + std::string (name);
+    }
+}
+
+/// `savedFrom.request`: the stored request columns' shapes, as sent.
+RouteResult read_sent_request (const nlohmann::json& request,
+vayu::core::PostmanExportRequest& out) {
+    if (!request.is_object ()) {
+        return route_error (400, "Invalid 'savedFrom.request': must be an object");
+    }
+    const auto method = request.find ("method");
+    std::optional<std::string> verb;
+    if (method != request.end () && method->is_string ()) {
+        verb = canonical_method (method->get<std::string> ());
+    }
+    if (!verb) {
+        return route_error (400,
+        "Invalid 'savedFrom.request.method': must be an HTTP method (" +
+        method_names () + ")");
+    }
+    out.method     = std::move (*verb);
+    const auto url = request.find ("url");
+    if (url == request.end () || !url->is_string ()) {
+        return route_error (400, "Invalid 'savedFrom.request.url': must be a string");
+    }
+    out.url = url->get<std::string> ();
+    if (auto outcome =
+        read_rows (request, "params", "savedFrom.request.params", out.params);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome =
+        read_rows (request, "headers", "savedFrom.request.headers", out.headers);
+    !outcome) {
+        return outcome;
+    }
+    const auto body = request.find ("body");
+    if (body == request.end () || body->is_null ()) {
+        out.body = nlohmann::ordered_json{ { "mode", "none" } };
+    } else if (body->is_object ()) {
+        out.body = as_ordered (*body);
+    } else {
+        return route_error (400, "Invalid 'savedFrom.request.body': must be an object");
+    }
+    return {};
+}
+
+/**
+ * `savedFrom` (#1763), create-only: the executed request and reason phrase a
+ * save in the app hands over, from which the engine builds the example's
+ * `postman_response` itself. Absent or null is no record. Read after
+ * `apply_request_example_fields`, never inside it: it describes a live send,
+ * which an import has none of, so `POST /import/apply` does not take it.
+ * `postmanResponse` beside it would be two writers of one column, a 400.
+ */
+RouteResult read_saved_from (const nlohmann::json& json, std::optional<SavedFrom>& out) {
+    const auto found = json.find ("savedFrom");
+    if (found == json.end () || found->is_null ()) {
+        return {};
+    }
+    if (const auto stored = json.find ("postmanResponse");
+    stored != json.end () && !stored->is_null ()) {
+        return route_error (400,
+        "Invalid 'savedFrom': 'postmanResponse' is given too - the saved "
+        "response is built from 'savedFrom', so send one or the other");
+    }
+    if (!found->is_object ()) {
+        return route_error (400, "Invalid 'savedFrom': must be an object");
+    }
+    SavedFrom saved;
+    const auto request = found->find ("request");
+    if (request == found->end ()) {
+        return route_error (400, "Invalid 'savedFrom.request': must be an object");
+    }
+    if (auto outcome = read_sent_request (*request, saved.request); !outcome) {
+        return outcome;
+    }
+    const auto status_text = found->find ("statusText");
+    if (status_text == found->end () || !status_text->is_string ()) {
+        return route_error (400, "Invalid 'savedFrom.statusText': must be a string");
+    }
+    saved.status_text = status_text->get<std::string> ();
+    if (const auto time = found->find ("responseTimeMs");
+    time != found->end () && !time->is_null ()) {
+        if (!time->is_number () || time->get<double> () < 0) {
+            return route_error (400,
+            "Invalid 'savedFrom.responseTimeMs': must be a number of "
+            "milliseconds, "
+            "0 or more");
+        }
+        saved.response_time_ms = time->get<double> ();
+    }
+    if (const auto received = found->find ("receivedAt");
+    received != found->end () && !received->is_null ()) {
+        if (!received->is_number () || received->get<double> () < 0) {
+            return route_error (400,
+            "Invalid 'savedFrom.receivedAt': must be a time in milliseconds "
+            "since the epoch, 0 or more");
+        }
+        // Whole seconds, held to what `time_t` holds (2^63 itself does not
+        // convert, hence `>=`).
+        const double seconds = std::floor (received->get<double> () / 1000.0);
+        constexpr auto LAST  = std::numeric_limits<std::time_t>::max ();
+        saved.received_at    = seconds >= static_cast<double> (LAST) ?
+           LAST :
+           static_cast<std::time_t> (seconds);
+    }
+    out = std::move (saved);
+    return {};
+}
+
+/**
+ * The saved response @p saved records for the example just applied into
+ * @p x, stored as its `postman_response`. Over the size cap the example is
+ * kept without it (the export regenerates those members) and the loss logged.
+ */
+void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved) {
+    vayu::core::PostmanExportExample example;
+    example.name   = x.name;
+    example.status = x.status;
+    example.headers =
+    nlohmann::ordered_json::parse (x.headers, nullptr, /*allow_exceptions=*/false);
+    if (!example.headers.is_array ()) {
+        example.headers = nlohmann::ordered_json::array ();
+    }
+    x.postman_response = vayu::core::postman_saved_response_text (saved.request,
+    example, saved.status_text, saved.response_time_ms,
+    saved.received_at.value_or (std::time (nullptr)));
+    if (!x.postman_response) {
+        vayu::utils::log_warning ("http",
+        "Saved example kept without its recorded request: over the size limit",
+        { { "request", x.request_id },
+        { "limit", vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES } });
+    }
+}
+
 } // namespace
 
 /**
@@ -327,6 +522,13 @@ const nlohmann::json& json) {
 
     if (auto outcome = apply_request_example_fields (x, json, /*is_create=*/true); !outcome) {
         return as_response (outcome.error ());
+    }
+    std::optional<SavedFrom> saved;
+    if (auto outcome = read_saved_from (json, saved); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (saved) {
+        record_saved_response (x, *saved);
     }
     if (order_is_defaulted (json)) {
         x.order = next_example_order (db, request_id);
@@ -472,7 +674,13 @@ void register_request_example_routes (RouteContext& ctx) {
      * null appends after the request's current examples), origin ("import" |
      * "user", default "import" - the app's save-as-example sends "user"),
      * bodyTruncated (default false - true when `body` is only the first slice
-     * of the response it was captured from).
+     * of the response it was captured from), savedFrom (optional, #1763:
+     * `{request: {method, url, params?, headers?, body?}, statusText,
+     * responseTimeMs?, receivedAt?}` - the request as written when it was
+     * sent, the server's reason phrase and when the response came in (epoch
+     * ms; a cookie's Max-Age counts from it), which the engine records as the
+     * example's Postman saved response; a 400 beside a non-null
+     * postmanResponse).
      * Returns: the created example, 404 if the request does not exist, 400 on a
      * rejected field, or 409 at the cap.
      */

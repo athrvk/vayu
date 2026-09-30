@@ -383,7 +383,10 @@ logged as a warning: it means a client skipped composition.
   request's `collectionId` / `name` / `method` / `url`) rejects `null` with a
   `400`. The rule lives in one place per side, `apply_*_field` in
   `engine/include/vayu/http/routes.hpp` and `apiService.updateX` in
-  `app/src/services/api.ts`; add fields there, never per handler. **The engine
+  `app/src/services/api.ts`; add fields there, never per handler. The one
+  deliberate exception is an example's `savedFrom`, read by the create handler
+  after `apply_request_example_fields`: it describes a live send, so it is
+  create-only and `POST /import/apply` must not take it. **The engine
   owns every id** (#97): a create carrying an `id` is a `400` (presence alone,
   `null` included), and a `PUT` whose body `id` disagrees with the path is a
   `400`; `reject_client_supplied_id` / `reject_mismatched_body_id` in
@@ -513,8 +516,10 @@ logged as a warning: it means a client skipped composition.
   on response **status**, which survives a reworded description. An example
   imported from Postman keeps the saved response it came from in
   **`postman_response`** (schema version 2): the entry as JSON text in source
-  member order, `name`/`body` as `null` placeholders. Only an import writes it
-  (a string on create, `null` - clear - the only value `PUT` takes), no read
+  member order, `name`/`body` as `null` placeholders. An import writes it, and
+  so does an app save that sends `savedFrom` (the request as written at Send,
+  built into the same shape by `postman_saved_response_text`); a string on
+  create, `null` - clear - the only value `PUT` takes; no read
   route returns it, and `POST /export/postman` is its one reader: members
   describing `status` or `headers` are written back only while those columns
   still say what was imported, so an edit is never contradicted by the stored
