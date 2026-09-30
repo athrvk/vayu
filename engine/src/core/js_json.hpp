@@ -324,7 +324,7 @@ inline bool contains_variable_token (const std::string& text) {
     return false;
 }
 // ---------------------------------------------------------------------------
-// The URL (`normalizeVars` + `appendParamsToUrl`)
+// The URL's query join (`query_string`, `append_params`)
 // ---------------------------------------------------------------------------
 
 /// One query key or value under @p encoding. `UriComponent` leaves a part
@@ -339,8 +339,8 @@ inline std::string query_part (const std::string& text, QueryPart part, QueryEnc
     return contains_variable_token (text) ? text : encode_uri_component (text);
 }
 
-/// `toQueryString(params)`: the enabled rows under @p encoding, and a bare key
-/// for a row with no value.
+/// The query the enabled, keyed rows write under @p encoding, and a bare key
+/// for a row with no value (Postman writes `key=`; issue #1772).
 template <typename Row>
 std::string query_string (const std::vector<Row>& params, QueryEncoding encoding) {
     std::string out;
@@ -361,7 +361,7 @@ std::string query_string (const std::vector<Row>& params, QueryEncoding encoding
 }
 
 /**
- * `appendParamsToUrl(url, params)`, which the import factory applies to every
+ * @p url with @p params' query appended, which the import applies to every
  * draft it produced.
  *
  * The rows are appended rather than replacing the query, because `url` and

@@ -91,8 +91,9 @@ function queryRowsToWrite(params: readonly KeyValueEntry[]): KeyValueEntry[] {
  * One row as `key=value`, encoded with Postman's query rule
  * (`encodeQueryComponent`, issue #1771), or as typed under `encode: false`.
  *
- * A row with no value writes as a bare key (`?page`, not `?page=`) - legal, and
- * the same shape `formatParamsToText` shows the user for that row.
+ * A row with no value writes as a bare key (`?page`, not Postman's `?page=`;
+ * issue #1772) - legal, and the same shape `formatParamsToText` shows the user
+ * for that row.
  *
  * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the row
  * is written as typed, so `q=a|b` stays `a|b` in the URL the engine sends.

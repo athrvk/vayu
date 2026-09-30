@@ -1243,11 +1243,12 @@ puts all three on the inline compose request through one helper,
 `protocolSettings()` in `request-builder/utils/execute-mapping.ts`, so the
 editor's value wins over the saved row's and composition carries them on to
 `/execute` and `/runs`. `disableUrlEncoding` also changes what the renderer
-writes: the Params table reads the URL's query into rows without decoding it
-(`parseQueryParams` / `mergeParamsFromUrl` with `decode: false`) and joins them
-back as typed, so editing one row rebuilds exactly the query the others held;
-turning the flag on or off leaves the URL alone and re-derives the rows from it
-in the new mode. The Sends line and the code snippets substitute path values
+writes: the Params table always reads the URL's query into rows without
+decoding it (`parseQueryParams`, issue #1771), and with the flag on joins a row
+the URL does not already carry back as typed rather than with Postman's query
+rule, so editing one row rebuilds exactly the query the others held. Turning
+the flag on or off writes only the flag: the URL and the rows stay as they
+are. The Sends line and the code snippets substitute path values
 raw, and a query-located API key is appended raw, all matching what the engine
 sends. The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by

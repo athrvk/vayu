@@ -126,9 +126,10 @@ namespace {
 
 using json = nlohmann::ordered_json;
 
-// The JavaScript the renderer's parsers are written in - `prop`, truthiness,
-// `JSON.stringify`, `encodeURIComponent`, `appendParamsToUrl`. Shared with the
-// draft builder (`openapi_drafts.cpp`) rather than copied.
+// The JavaScript semantics the format readers are written in - `prop`,
+// truthiness, `JSON.stringify`, `encodeURIComponent` - and the query join
+// `append_params`. Shared with the draft builder (`openapi_drafts.cpp`) rather
+// than copied.
 using namespace js;
 
 /**

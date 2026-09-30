@@ -62,9 +62,9 @@ namespace {
 using json = nlohmann::ordered_json;
 
 // The JavaScript semantics these rules are written in - `prop`, truthiness,
-// `JSON.stringify`'s number and string forms, `encodeURIComponent`,
-// `appendParamsToUrl`. Shared with the import (issue #877) rather than kept
-// here, so the two readers of a foreign document cannot drift apart.
+// `JSON.stringify`'s number and string forms, `encodeURIComponent` - and the
+// query join `append_params`. Shared with the import (issue #877) rather than
+// kept here, so the two readers of a foreign document cannot drift apart.
 using namespace js;
 
 /// `tally.add(kind)` for a caller that may not be keeping one - the sync diff

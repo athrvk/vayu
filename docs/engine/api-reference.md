@@ -4780,8 +4780,12 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   with `tokenPlacement: "query"` (a value `a|b+c=d` goes out as
   `?k=a|b+c=d`; `key=` is written even for an empty value), and the join of a
   Postman import's query rows into the stored URL
-  ([POST /import/parse](#post-importparse)). A request with
-  `disableUrlEncoding` writes the pair as typed.
+  ([POST /import/parse](#post-importparse)), which writes a row with an
+  empty value as a bare `key` where Postman writes `key=` (issue #1772). A
+  request with `disableUrlEncoding` writes the pair as typed.
+- Not yet covered (issue #1773): a value substituted into a `{{variable}}`
+  token at send time, and a pair a script adds with `pm.request.url.query.add`
+  or `upsert`, go out unencoded, where Postman encodes both.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.

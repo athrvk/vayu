@@ -408,8 +408,8 @@ export writes the edit.
   Postman's `raw` holds the typed text and Vayu stores the wire form. An
   enabled row with an empty value comes back as a bare `key` where Postman
   writes `key=`, because Vayu's rows hold a string and cannot tell an empty
-  one from Postman's null. The `query[]` rows themselves come back as
-  written.
+  one from Postman's null (issue #1772). The `query[]` rows themselves come
+  back as written.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
 - **`protocolProfileBehavior`** is written back as imported, member order and
