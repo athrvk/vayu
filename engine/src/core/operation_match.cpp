@@ -243,13 +243,15 @@ std::optional<std::string> request_path_shape (std::string_view url) {
     if (!parts.path) {
         return std::nullopt;
     }
-    // A request's own spelling only: an OpenAPI path has no `:name`
-    // variables, and the spec side's shape is pinned to the renderer's.
     return normalize_path_shape (flatten_colon_variables (*parts.path));
 }
 
 std::string spec_path_shape (std::string_view path) {
-    return normalize_path_shape (path);
+    // OpenAPI has no `:name` spelling, but an Express-style `/users/:id` is a
+    // common invalid path the importer keeps verbatim (`openapi_drafts.cpp`),
+    // and a request drafted from it keeps `:id`: flattened on one side only,
+    // that request would no longer match the operation it was drafted from.
+    return normalize_path_shape (flatten_colon_variables (path));
 }
 
 std::string operation_shape_key (std::string_view method, std::string_view path_shape) {
