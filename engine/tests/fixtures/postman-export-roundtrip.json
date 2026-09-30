@@ -574,7 +574,7 @@
 							}
 						],
 						"url": {
-							"raw": "{{baseUrl}}/products?where=sku%3D1",
+							"raw": "{{baseUrl}}/products?where=sku=1",
 							"host": [
 								"{{baseUrl}}"
 							],

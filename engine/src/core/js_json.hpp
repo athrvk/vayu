@@ -23,11 +23,12 @@
  *
  * They lived inside `openapi_drafts.cpp` while the drafts were their only
  * reader (#865). The import moved engine-side in #877 and reads Postman and
- * Insomnia documents by the same rules - a variable-carrying row is not
- * percent-encoded in either format, and both write their numbers the way
+ * Insomnia documents by the same rules - both write their numbers the way
  * `JSON.stringify` does - so a second copy here is the repo\'s
  * hand-rolled-copy defect waiting to drift.
  */
+
+#include "vayu/core/query_encoding.hpp"
 
 #include <algorithm>
 #include <array>
@@ -305,8 +306,7 @@ inline std::string encode_uri_component (const std::string& value) {
     return out;
 }
 
-/// `containsVariableToken(text)`: a `{{name}}` anywhere in the string. Such a
-/// value is left unencoded, so the variable syntax survives into the URL.
+/// `containsVariableToken(text)`: a `{{name}}` anywhere in the string.
 inline bool contains_variable_token (const std::string& text) {
     for (size_t at = text.find ("{{"); at != std::string::npos;
     at             = text.find ("{{", at + 1)) {
@@ -327,11 +327,22 @@ inline bool contains_variable_token (const std::string& text) {
 // The URL (`normalizeVars` + `appendParamsToUrl`)
 // ---------------------------------------------------------------------------
 
-/// `toQueryString(params)`: the enabled rows, percent-encoded unless they carry
-/// a `{{var}}` or @p encode is false (issue #1765, a request whose Postman
-/// item says `disableUrlEncoding`), and a bare key for a row with no value.
+/// One query key or value under @p encoding. `UriComponent` leaves a part
+/// holding a `{{var}}` whole and unencoded, so the variable syntax survives;
+/// `Postman` keeps only the token itself verbatim and encodes around it.
+inline std::string query_part (const std::string& text, QueryPart part, QueryEncoding encoding) {
+    switch (encoding) {
+    case QueryEncoding::Postman: return encode_query_component (text, part);
+    case QueryEncoding::AsTyped: return text;
+    case QueryEncoding::UriComponent: break;
+    }
+    return contains_variable_token (text) ? text : encode_uri_component (text);
+}
+
+/// `toQueryString(params)`: the enabled rows under @p encoding, and a bare key
+/// for a row with no value.
 template <typename Row>
-std::string query_string (const std::vector<Row>& params, bool encode = true) {
+std::string query_string (const std::vector<Row>& params, QueryEncoding encoding) {
     std::string out;
     for (const Row& row : params) {
         if (!row.enabled || row.key.find_first_not_of (" \t\n\r\f\v") == std::string::npos) {
@@ -340,14 +351,10 @@ std::string query_string (const std::vector<Row>& params, bool encode = true) {
         if (!out.empty ()) {
             out += '&';
         }
-        out += !encode || contains_variable_token (row.key) ?
-        row.key :
-        encode_uri_component (row.key);
+        out += query_part (row.key, QueryPart::Key, encoding);
         if (!row.value.empty ()) {
             out += '=';
-            out += !encode || contains_variable_token (row.value) ?
-            row.value :
-            encode_uri_component (row.value);
+            out += query_part (row.value, QueryPart::Value, encoding);
         }
     }
     return out;
@@ -365,8 +372,8 @@ std::string query_string (const std::vector<Row>& params, bool encode = true) {
  */
 template <typename Row>
 std::string
-append_params (const std::string& url, const std::vector<Row>& params, bool encode = true) {
-    const std::string query = query_string (params, encode);
+append_params (const std::string& url, const std::vector<Row>& params, QueryEncoding encoding) {
+    const std::string query = query_string (params, encoding);
     if (query.empty ()) {
         return url;
     }

@@ -1289,8 +1289,11 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         examples_v3 (sampler, prop (operation, "responses"), tally) :
         examples_v2 (document, sampler, operation, tally);
 
-        draft.url =
-        append_params ("{{baseUrl}}" + normalize_path_templates (path), draft.params);
+        // Not Postman's set (issue #1771): the sync diff compares stored URLs
+        // with this one, so a changed encoding would mark every bound request
+        // changed.
+        draft.url = append_params ("{{baseUrl}}" + normalize_path_templates (path),
+        draft.params, QueryEncoding::UriComponent);
 
         entry.identified = walked.identified;
         entry.operation  = std::move (walked.identity);
@@ -1368,8 +1371,8 @@ nlohmann::ordered_json ImportTally::items () const {
     "unmapped_body", "unresolved_base_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
     "security_unmapped_mutualtls", "security_unmapped_openidconnect",
-    "security_unmapped_type", "security_unmapped_apikey_cookie", "oauth2_dropped_field",
-    "url_without_raw", "invalid_percent_encoding", "variable_metadata",
+    "security_unmapped_type", "security_unmapped_apikey_cookie",
+    "oauth2_dropped_field", "url_without_raw", "variable_metadata",
     "disabled_body", "certificate", "proxy_config", "protocol_behavior" });
 
     const auto item_of = [] (const Entry& entry) {

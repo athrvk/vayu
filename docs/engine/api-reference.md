@@ -1444,8 +1444,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   nothing on the wire.
 - `disableUrlEncoding` writes a path variable's value and an api-key (or
   OAuth 2.0 query-placed) credential into the URL as typed rather than
-  percent-encoded: a path value skips Postman's path encode set entirely
-  (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
+  percent-encoded: a path value skips Postman's path encode set and a
+  credential skips its query rule ([Query encoding](#query-encoding))
+  entirely (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
   `toNodeUrl (url, disableEncoding)` sends it.
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
@@ -4758,6 +4759,33 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
   erroring - composition works with no collection or environment at all.
 
+#### Query encoding
+
+A stored URL's query is sent exactly as stored: nothing re-encodes it, and the
+send hands `url` to libcurl untouched. Where the engine itself writes a query
+pair into a URL, it uses Postman's rule (issue #1771,
+`core::encode_query_component` in `core/query_encoding.hpp`, pinned to the
+app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`),
+read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
+`QueryParam.unparse`:
+
+- Encoded as `%XX` (uppercase hex): Postman's `QUERY_ENCODE_SET` - the C0
+  controls, DEL, every byte above `~` (each UTF-8 byte), space, `"`, `#`, `'`,
+  `<` and `>` - plus `&` in a key or a value and `=` in a key only (a value
+  cannot split a pair, because a parser splits on the first `=`).
+- Everything else goes out as typed: `+`, `|`, `/`, `?`, `:`, `@`, `[`, `]`,
+  `{`, `}` and `%`, so an escape already in the text is never encoded twice. A
+  whole `{{token}}` is kept verbatim, with the text around it encoded.
+- The writers are an `apikey` auth with `in: "query"` and an OAuth 2.0 token
+  with `tokenPlacement: "query"` (a value `a|b+c=d` goes out as
+  `?k=a|b+c=d`; `key=` is written even for an empty value), and the join of a
+  Postman import's query rows into the stored URL
+  ([POST /import/parse](#post-importparse)). A request with
+  `disableUrlEncoding` writes the pair as typed.
+- OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
+  the OpenAPI sync diff compares stored URLs against that form, and neither
+  other source uses Postman's set.
+
 #### Path variables
 
 A `:name` segment of the URL is answered by the request's own `in: "path"`
@@ -5146,8 +5174,8 @@ Refused with a **400**, before any run row exists and with nothing sent:
 **Credentials bind here too** (issue #642). A `{{data.user}}` in a basic-auth
 username, a bearer token or an api key is substituted from the row like any
 other field, and it is bound **before** the credentials are encoded - so basic
-auth base64s the row's values, and an api key in the query is percent-encoded
-after the substitution rather than before. This is the same deferral a
+auth base64s the row's values, and an api key in the query is encoded by the
+[query rule](#query-encoding) after the substitution rather than before. This is the same deferral a
 collection run performs per iteration (issue #591): the credentials are parsed
 and kept typed, the request is built without resolving them, and the auth is
 applied once the row has reached it.
