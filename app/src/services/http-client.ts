@@ -229,18 +229,30 @@ class HttpClient {
 				fetchOptions.body = JSON.stringify(body);
 			}
 
-			const response = await fetch(url, fetchOptions);
+			// Only a rejected `fetch` is an engine that could not be reached. A
+			// body that fails to parse came from an engine that answered, and
+			// wrapping it would send it down the start window's retry path.
+			let response: Response;
+			try {
+				response = await fetch(url, fetchOptions);
+			} catch (error) {
+				throw asTransportError(error);
+			}
 
 			if (!response.ok) {
 				throw await readApiError(response);
 			}
 
-			return await response.json();
-		} catch (error) {
-			if (error instanceof ApiError) {
+			try {
+				return (await response.json()) as T;
+			} catch (error) {
+				// The timeout firing mid-body is still an engine that did not
+				// answer in time.
+				if (error instanceof Error && error.name === "AbortError") {
+					throw asTransportError(error);
+				}
 				throw error;
 			}
-			throw asTransportError(error);
 		} finally {
 			clearTimeout(timeoutId);
 		}
