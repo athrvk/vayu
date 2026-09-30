@@ -298,7 +298,9 @@ export default function SettingsPanel() {
 								// beside a label, as in the Headers tab's rows.
 								className="size-target"
 							/>
-							<span className="font-mono">{option.name}</span>
+							<span className="font-mono shrink-0 whitespace-nowrap">
+								{option.name}
+							</span>
 							<span className="text-muted-foreground">{option.detail}</span>
 						</label>
 					))}

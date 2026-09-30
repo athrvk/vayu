@@ -90,7 +90,8 @@ function DefaultHeaderRow({
 				{header.name}
 			</span>
 			{storedOff ? (
-				<span className="text-xs italic text-subtle-foreground truncate">
+				// Wraps rather than truncates: the tab it names is the point.
+				<span className="text-xs italic text-subtle-foreground">
 					off for this request in Settings
 				</span>
 			) : header.generated ? (
