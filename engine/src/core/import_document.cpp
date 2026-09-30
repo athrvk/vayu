@@ -67,20 +67,6 @@ std::string file_base_name (const std::string& path) {
     return cut == std::string::npos ? trimmed : trimmed.substr (cut + 1);
 }
 
-/**
- * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
- * file.
- *
- * The path is kept exactly as the source wrote it and a row that has one is
- * marked **unresolved**, because it names a file on the exporting machine.
- * A part declared *without* a path - an OpenAPI document names the upload,
- * never the file (#425) - is not unresolved: the flag warns that something
- * which looks filled in cannot be sent, and a row showing "Choose file" makes
- * no such claim.
- *
- * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
- * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
- */
 nlohmann::ordered_json
 postman_raw_body (const std::string& content, const std::string* language) {
     if (language != nullptr) {
@@ -103,6 +89,20 @@ postman_raw_body (const std::string& content, const std::string* language) {
         { "rawLanguage", language == nullptr ? std::string () : *language } };
 }
 
+/**
+ * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
+ * file.
+ *
+ * The path is kept exactly as the source wrote it and a row that has one is
+ * marked **unresolved**, because it names a file on the exporting machine.
+ * A part declared *without* a path - an OpenAPI document names the upload,
+ * never the file (#425) - is not unresolved: the flag warns that something
+ * which looks filled in cannot be sent, and a row showing "Choose file" makes
+ * no such claim.
+ *
+ * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
+ * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
+ */
 nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
 const std::string& src,
 const std::string* content_type) {
