@@ -402,6 +402,34 @@ describe("DesignRunView - sending it again", () => {
 
 		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([]);
 	});
+
+	it("replays with the protocol switches the run recorded (#1765)", async () => {
+		// Composed inline, so an omitted switch would let the live request's
+		// stored value win - a replay that used the jar the run skipped.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const recorded = designRun();
+		Object.assign(recorded.configSnapshot as Record<string, unknown>, {
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+
+		renderView(recorded);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request).toMatchObject({
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+	});
 });
 
 describe("DesignRunView - pinning a design run (#1509)", () => {

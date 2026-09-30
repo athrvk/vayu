@@ -77,3 +77,21 @@ describe("ExternalChangeNotice", () => {
 		expect(takeExternalField).toHaveBeenCalledTimes(2);
 	});
 });
+
+describe("ExternalChangeNotice - Postman's protocol switches (#1765)", () => {
+	it("files them under settings, and takes the whole group at once", () => {
+		const { takeExternalField } = renderWith({
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+
+		expect(screen.getAllByText(/changed elsewhere:/i)).toHaveLength(1);
+		expect(screen.getByText(/changed elsewhere: settings/i)).toBeTruthy();
+
+		screen.getByRole("button", { name: /take theirs/i }).click();
+		for (const field of ["disableCookies", "disabledSystemHeaders", "disableUrlEncoding"]) {
+			expect(takeExternalField).toHaveBeenCalledWith(field);
+		}
+	});
+});

@@ -189,4 +189,38 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(body).toContain("httpVersion: pendingLoadTestRequest.httpVersion");
 		expect(body).not.toContain("updateRequestMutation");
 	});
+
+	/**
+	 * Postman's protocol switches (issue #1765) have the same load and save
+	 * hops, and one shared execute hop: `protocolSettings`, which the Send
+	 * compose and the load compose both spread so the three can never travel
+	 * apart. Its own always-send rule is `execute-mapping.test.ts`'s.
+	 */
+	const PROTOCOL_FIELDS = [
+		"disableCookies",
+		"disabledSystemHeaders",
+		"disableUrlEncoding",
+	] as const;
+
+	for (const field of PROTOCOL_FIELDS) {
+		it(`loads ${field} from the saved request into the editor state`, () => {
+			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
+		});
+	}
+
+	it("persists each protocol switch on save, and the encoding flag in the cURL copy", () => {
+		// One save hop each; `disableUrlEncoding` also rides the deleted-request
+		// cURL recovery snippet, because it changes the URL the snippet prints.
+		expect(hops(source ?? "", "request", "disableCookies")).toBe(1);
+		expect(hops(source ?? "", "request", "disabledSystemHeaders")).toBe(1);
+		expect(hops(source ?? "", "request", "disableUrlEncoding")).toBe(2);
+	});
+
+	it("sends the protocol switches with Send and with the load test", () => {
+		const src = source ?? "";
+		expect(src.match(/\.\.\.protocolSettings\(request\)/g) ?? []).toHaveLength(1);
+		expect(src.match(/\.\.\.protocolSettings\(pendingLoadTestRequest\)/g) ?? []).toHaveLength(
+			1
+		);
+	});
 });

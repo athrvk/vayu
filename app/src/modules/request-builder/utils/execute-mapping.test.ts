@@ -16,7 +16,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildExecBody, execIdentity, responseFromExecuteResult } from "./execute-mapping";
+import {
+	buildExecBody,
+	disabledDefaults,
+	execIdentity,
+	protocolSettings,
+	responseFromExecuteResult,
+} from "./execute-mapping";
 // The threshold itself, not a second spelling of it: the mapping and the pane
 // share one number and a test that pinned its own would keep passing after a
 // change made the gate unreachable.
@@ -278,5 +284,45 @@ describe("buildExecBody form modes", () => {
 		);
 
 		expect(body?.fields).toEqual([{ key: "key", value: "val", enabled: true }]);
+	});
+});
+
+describe("protocolSettings (#1765)", () => {
+	it("sends all three at their defaults, never elided", () => {
+		// The editor may be ahead of the saved row: an omitted `false` or `[]`
+		// would let the stored value win on the compose overlay.
+		expect(protocolSettings(createDefaultRequestState())).toEqual({
+			disableCookies: false,
+			disabledSystemHeaders: [],
+			disableUrlEncoding: false,
+		});
+	});
+
+	it("carries the editor's values", () => {
+		expect(
+			protocolSettings({
+				...createDefaultRequestState(),
+				disableCookies: true,
+				disabledSystemHeaders: ["user-agent", "accept"],
+				disableUrlEncoding: true,
+			})
+		).toEqual({
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent", "accept"],
+			disableUrlEncoding: true,
+		});
+	});
+
+	it("keeps the stored list apart from the per-send opt-out", () => {
+		// Two fields, two helpers: the stored `disabledSystemHeaders` is not
+		// folded into `disabledDefaultHeaders` (the engine unions them), and the
+		// per-send list does not leak into the stored one.
+		const request = {
+			...createDefaultRequestState(),
+			disabledSystemHeaders: ["accept"],
+			disabledDefaultHeaders: ["User-Agent"],
+		};
+		expect(protocolSettings(request).disabledSystemHeaders).toEqual(["accept"]);
+		expect(disabledDefaults(request)).toEqual({ disabledDefaultHeaders: ["User-Agent"] });
 	});
 });

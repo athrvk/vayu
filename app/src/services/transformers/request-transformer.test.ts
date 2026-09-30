@@ -17,6 +17,8 @@
 import { describe, expect, it } from "vitest";
 import { RequestTransformer } from "./request-transformer";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
@@ -251,5 +253,48 @@ describe("RequestTransformer mock response mode", () => {
 		});
 		expect(req.mockResponseMode).toBe("first");
 		expect("mockExampleId" in req).toBe(false);
+	});
+});
+
+describe("RequestTransformer Postman protocol switches (#1765)", () => {
+	it("reads a row that predates the columns as jar on, encoded, nothing left out", () => {
+		const request = RequestTransformer.toFrontend({ ...base });
+		expect(request.disableCookies).toBe(DEFAULT_DISABLE_COOKIES);
+		expect(request.disabledSystemHeaders).toEqual([]);
+		expect(request.disableUrlEncoding).toBe(DEFAULT_DISABLE_URL_ENCODING);
+		expect("postmanProtocolBehavior" in request).toBe(false);
+	});
+
+	it("preserves stored values, and the export carrier verbatim", () => {
+		const carrier = { disableCookies: true, tlsDisabledProtocols: ["TLSv1"] };
+		const request = RequestTransformer.toFrontend({
+			...base,
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent", "accept"],
+			disableUrlEncoding: true,
+			postmanProtocolBehavior: carrier,
+		});
+		expect(request.disableCookies).toBe(true);
+		expect(request.disabledSystemHeaders).toEqual(["user-agent", "accept"]);
+		expect(request.disableUrlEncoding).toBe(true);
+		expect(request.postmanProtocolBehavior).toEqual(carrier);
+	});
+
+	it("lowercases, dedupes and drops non-strings in a header list from an older engine", () => {
+		const request = RequestTransformer.toFrontend({
+			...base,
+			disabledSystemHeaders: ["User-Agent", "user-agent", 3, " Accept "],
+		});
+		expect(request.disabledSystemHeaders).toEqual(["user-agent", "accept"]);
+	});
+
+	it("ignores non-boolean switches rather than coercing them", () => {
+		const request = RequestTransformer.toFrontend({
+			...base,
+			disableCookies: "true",
+			disableUrlEncoding: 1,
+		});
+		expect(request.disableCookies).toBe(false);
+		expect(request.disableUrlEncoding).toBe(false);
 	});
 });
