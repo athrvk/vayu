@@ -1471,6 +1471,35 @@ TEST_F (RequestComposerTest, ReadsPathRowsFromTheInlineRequestBeforeTheStoredOne
     EXPECT_EQ (inline_only["url"], "https://api.test/last/last");
 }
 
+/// An inline `params` that is not an array carries no rows, so it does not
+/// shadow the stored ones: they still answer, and the malformed member is not
+/// echoed. `[]` is an array and does shadow them (the editor removed the row).
+/// Mutation check: take the inline member whatever its type and the first
+/// expectation reads `/users/:id`.
+TEST_F (RequestComposerTest, ANonArrayInlineParamsFallsBackToTheStoredPathRows) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/users/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "stored" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    for (const json& malformed :
+    { json ("x"), json::object (), json (nullptr), json (3) }) {
+        auto [status, payload] = vayu::http::compose_request_core (*db_,
+        json{ { "requestId", "req_1" }, { "request", { { "params", malformed } } } });
+        ASSERT_EQ (status, 200) << payload.dump ();
+        EXPECT_EQ (payload["url"], "https://api.test/users/stored") << malformed.dump ();
+        EXPECT_FALSE (payload.contains ("params")) << malformed.dump ();
+    }
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" }, { "request", { { "params", json::array () } } } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/users/:id");
+}
+
 /// A request with no path rows composes byte-identically to before #1764: a
 /// literal `:x` segment is sent as written.
 TEST_F (RequestComposerTest, ARequestWithoutPathRowsKeepsItsColonSegmentLiteral) {
