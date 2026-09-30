@@ -1249,8 +1249,10 @@ the URL does not already carry back as typed rather than with Postman's query
 rule, so editing one row rebuilds exactly the query the others held. Turning
 the flag on or off writes only the flag: the URL and the rows stay as they
 are. The Sends line and the code snippets substitute path values
-raw, and a query-located API key is appended raw, all matching what the engine
-sends. The imported
+raw, the Sends line writes a value a `{{variable}}` brings into the query raw
+(with the query rule otherwise, issue #1773, `resolveUrlTemplate` in
+`request-builder/utils/query-encoding.ts`), and a query-located API key is
+appended raw, all matching what the engine sends. The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
 the Postman exporter only: `GET /requests` returns it as the stored JSON text,
 which the app keeps as a string and never parses, so an import and a Duplicate

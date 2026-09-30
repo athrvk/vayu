@@ -57,3 +57,65 @@ export function encodeQueryComponent(text: string, part: QueryPart): string {
 	}
 	return out + percentEncodeQuery(text.slice(plain), ascii);
 }
+
+/**
+ * Which part of a URL a point in its text sits in (issue #1773), the engine's
+ * `core::UrlComponent`: `head` is the scheme, host and path.
+ */
+export type UrlComponent = "head" | QueryPart | "fragment";
+
+/**
+ * The component in force after `text`, read from `from`: the first `?` opens
+ * the query at a key, `=` moves a key to its value, `&` starts the next key,
+ * `#` opens the fragment. A whole `{{...}}` token moves nothing.
+ */
+export function advanceUrlComponent(text: string, from: UrlComponent): UrlComponent {
+	let where = from;
+	for (let at = 0; at < text.length && where !== "fragment";) {
+		const end = tokenEnd(text, at);
+		if (end !== -1) {
+			at = end;
+			continue;
+		}
+		const char = text[at++];
+		if (char === "#") where = "fragment";
+		else if (where === "head") where = char === "?" ? "key" : where;
+		else if (char === "&") where = "key";
+		else if (char === "=" && where === "key") where = "value";
+	}
+	return where;
+}
+
+/**
+ * `url` with each `{{...}}` token resolved through `resolve` and written by the
+ * rule of the component it lands in, the engine's `substitute_url_tokens`: a
+ * query key or value by `encodeQueryComponent`, the head and the fragment as
+ * resolved. `resolve` gets the token alone, so a layered value is resolved
+ * whole and encoded once. `encode: false` is `disableUrlEncoding`.
+ */
+export function resolveUrlTemplate(
+	url: string,
+	resolve: (text: string) => string,
+	{ encode }: { encode: boolean }
+): string {
+	if (!encode) return resolve(url);
+	let out = "";
+	let where: UrlComponent = "head";
+	let plain = 0;
+	for (let at = 0; at < url.length;) {
+		const end = tokenEnd(url, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		const literal = url.slice(plain, at);
+		where = advanceUrlComponent(literal, where);
+		const resolved = resolve(url.slice(at, end));
+		const written =
+			where === "key" || where === "value" ? encodeQueryComponent(resolved, where) : resolved;
+		where = advanceUrlComponent(written, where);
+		out += literal + written;
+		plain = at = end;
+	}
+	return out + url.slice(plain);
+}

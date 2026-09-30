@@ -44,6 +44,7 @@ import {
 	queryRowsOf,
 	substitutePathVariables,
 } from "../../../utils/path-variables";
+import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { EmptyTableHint } from "./EmptyTableHint";
 
 /*
@@ -63,7 +64,8 @@ const stableResolvedUrl = createStableResolve();
  * The cache's resolver for the "Sends" line: its input is the URL and the path
  * rows as one JSON text, and it substitutes each value resolved then encoded,
  * as compose does (#1764) - or raw under `disableUrlEncoding` (#1765) - before
- * resolving the URL itself. One wrapper per
+ * resolving the URL itself, a value landing in the query encoded by the query
+ * rule (#1773). One wrapper per
  * `resolveString`, so the cache's identity check still means what it says.
  */
 const sendsResolvers = new WeakMap<(input: string) => string, (input: string) => string>();
@@ -76,7 +78,13 @@ function sendsResolver(resolve: (input: string) => string): (input: string) => s
 				rows: KeyValueEntry[];
 				encode: boolean;
 			};
-			return resolve(substitutePathVariables(url, rows, resolve, { encode }));
+			return resolveUrlTemplate(
+				substitutePathVariables(url, rows, resolve, { encode }),
+				resolve,
+				{
+					encode,
+				}
+			);
 		};
 		sendsResolvers.set(resolve, wrapped);
 	}

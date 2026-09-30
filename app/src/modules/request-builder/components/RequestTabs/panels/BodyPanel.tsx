@@ -76,6 +76,7 @@ import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
 import { toFlatHeaders } from "../../../utils/key-value";
 import { composePathParams, substitutePathVariables } from "../../../utils/path-variables";
+import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { containsVariableToken } from "@/constants/variables";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
@@ -168,14 +169,21 @@ export default function BodyPanel() {
 	 * `resolveString` with it and so would miss that cache anyway.
 	 */
 	// Path values substituted first, each resolved then encoded as compose does
-	// (#1764), so a changed `:name` value is a new schema target, the way a
+	// (#1764), then the URL's own tokens by the rule of the part they land in
+	// (#1773), so a changed `:name` value is a new schema target, the way a
 	// changed variable value is. Memoized on the URL and the path rows' text,
 	// not on `params`, so a query-row edit re-resolves nothing.
 	const gqlUrl = request.url || "";
 	const pathRowsText = JSON.stringify(composePathParams(request.params));
 	const resolvedGqlUrl = useMemo(() => {
 		const rows = JSON.parse(pathRowsText) as KeyValueEntry[];
-		return resolveString(substitutePathVariables(gqlUrl, rows, resolveString)).trim();
+		return resolveUrlTemplate(
+			substitutePathVariables(gqlUrl, rows, resolveString),
+			resolveString,
+			{
+				encode: true,
+			}
+		).trim();
 	}, [gqlUrl, pathRowsText, resolveString]);
 	const gqlSchemaTarget: SchemaTarget = {
 		url: (request.url || "").trim(),

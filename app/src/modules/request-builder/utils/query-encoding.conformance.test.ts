@@ -21,7 +21,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { KeyValueEntry } from "@/types";
-import { encodeQueryComponent } from "./query-encoding";
+import { resolveTemplate } from "@/lib/variable-resolution";
+import { encodeQueryComponent, resolveUrlTemplate } from "./query-encoding";
 import { buildUrlWithParams } from "./url";
 
 /** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
@@ -41,15 +42,25 @@ interface QueryCase {
 	query: string;
 }
 
+interface SubstitutionCase {
+	name: string;
+	url: string;
+	variables: Record<string, string>;
+	encode?: false;
+	sent: string;
+}
+
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 	components: ComponentCase[];
 	queries: QueryCase[];
+	substitutions: { cases: SubstitutionCase[] };
 };
 
 describe("query encoding conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
 		expect(fixture.components.length).toBeGreaterThan(20);
 		expect(fixture.queries.length).toBeGreaterThan(10);
+		expect(fixture.substitutions.cases.length).toBeGreaterThan(10);
 	});
 
 	it.each(fixture.components.map((c) => [c.name, c] as const))("component: %s", (_name, c) => {
@@ -62,4 +73,13 @@ describe("query encoding conformance fixture", () => {
 			c.query ? `https://x/?${c.query}` : "https://x/"
 		);
 	});
+
+	// Issue #1773: the Sends line resolves the URL as compose does.
+	it.each(fixture.substitutions.cases.map((c) => [c.name, c] as const))(
+		"substitution: %s",
+		(_name, c) => {
+			const resolve = (text: string) => resolveTemplate(text, (name) => c.variables[name]);
+			expect(resolveUrlTemplate(c.url, resolve, { encode: c.encode !== false })).toBe(c.sent);
+		}
+	);
 });
