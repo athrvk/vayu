@@ -15,6 +15,7 @@ import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import { splitKeyValueLine, stripDisabledMarker, PARAM_SEPARATORS } from "./kv-line";
 import { queryRowsOf } from "./path-variables";
+import { writesBareKey } from "./url";
 
 /**
  * Format params array to text format for bulk edit
@@ -32,10 +33,12 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
 				const hasContent = p.key.trim() || p.value.trim();
 				return hasContent && !p.system;
 			})
-			// A valueless param writes as a bare key, matching how it is sent:
-			// `buildUrlWithParams` emits `?page`, not `?page=`. Writing `page=` here
-			// round-tripped, but told the user something the request does not do.
-			.map((p) => `${p.enabled ? "" : "// "}${p.value ? `${p.key}=${p.value}` : p.key}`)
+			// Each line is spelled the way `buildUrlWithParams` sends it: a
+			// valueless row as a bare `page`, an empty value as `page=`.
+			.map(
+				(p) =>
+					`${p.enabled ? "" : "// "}${writesBareKey(p) ? p.key : `${p.key}=${p.value}`}`
+			)
 			.join("\n")
 	);
 };
@@ -49,10 +52,10 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
  * Two kinds of line used to be dropped in silence. `Authorization: Bearer abc`
  * has no `=`, so pasting a header block returned an empty array - which the
  * panel then wrote over the user's params. And `page`, a legal valueless
- * parameter that `buildUrlWithParams` already emits as `?page`, matched nothing
- * either, so bulk-editing lost it.
+ * parameter, matched nothing either, so bulk-editing lost it. It is now a
+ * `valueless` row (`?page`), where `page=` is an empty value (`?page=`).
  *
- * A line that restates a row of `previous` (same key and value) keeps that
+ * A line that restates a row of `previous` (same key, value and `=`) keeps that
  * row's id, each row once. `buildUrlWithParams` reads the id to tell a row
  * carried over from one the user edited (issue #1771), and a bulk commit edits
  * only the lines that changed.
@@ -69,9 +72,10 @@ export const parseParamsFromText = (
 	const params: KeyValueItem[] = [];
 	const carried = queryRowsOf(previous).filter((p) => !p.system);
 	const consumed = new Array<boolean>(carried.length).fill(false);
-	const idFor = (key: string, value: string): string => {
+	const idFor = (key: string, value: string, valueless: boolean): string => {
 		const match = carried.findIndex(
-			(p, i) => !consumed[i] && p.key === key && p.value === value
+			(p, i) =>
+				!consumed[i] && p.key === key && p.value === value && writesBareKey(p) === valueless
 		);
 		if (match === -1) return generateId();
 		consumed[match] = true;
@@ -84,10 +88,11 @@ export const parseParamsFromText = (
 		if (!parsed) return;
 
 		params.push({
-			id: idFor(parsed.key, parsed.value),
+			id: idFor(parsed.key, parsed.value, parsed.valueless === true),
 			key: parsed.key,
 			value: parsed.value,
 			enabled,
+			...(parsed.valueless && { valueless: parsed.valueless }),
 		});
 	});
 
@@ -103,7 +108,12 @@ export const isNoOpParamsEdit = (text: string, params: KeyValueItem[]): boolean 
 	const normalize = (list: KeyValueItem[]) =>
 		queryRowsOf(list)
 			.filter((p) => (p.key.trim() || p.value.trim()) && !p.system)
-			.map(({ key, value, enabled }) => ({ key, value, enabled }));
+			.map((p) => ({
+				key: p.key,
+				value: p.value,
+				enabled: p.enabled,
+				bare: writesBareKey(p),
+			}));
 	return (
 		JSON.stringify(normalize(parseParamsFromText(text))) === JSON.stringify(normalize(params))
 	);

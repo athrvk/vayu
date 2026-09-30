@@ -95,6 +95,13 @@ export interface KeyValueEntry {
 	 * compose time. Meaningless on any other kind of row.
 	 */
 	in?: ParamLocation;
+	/**
+	 * A query row that states no value at all, written as a bare `key` where
+	 * an empty `value` writes `key=` (Postman's `"value": null` against `""`,
+	 * issue #1772). Only meaningful while `value` is empty; editing the value
+	 * clears it. Meaningless on any other kind of row.
+	 */
+	valueless?: true;
 }
 
 /** See {@link KeyValueEntry.in}. */

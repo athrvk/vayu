@@ -30,6 +30,8 @@ export interface UrlEncodeOptions {
 interface RawQueryPair {
 	key: string;
 	value: string;
+	/** The pair has no `=` at all (`?flag`, not `?flag=`). */
+	valueless: boolean;
 	/** The pair exactly as the URL spells it. */
 	text: string;
 }
@@ -73,8 +75,13 @@ function rawQueryPairs(url: string): RawQueryPair[] {
 		.map((text) => {
 			const separator = text.indexOf("=");
 			return separator === -1
-				? { key: text, value: "", text }
-				: { key: text.slice(0, separator), value: text.slice(separator + 1), text };
+				? { key: text, value: "", valueless: true, text }
+				: {
+						key: text.slice(0, separator),
+						value: text.slice(separator + 1),
+						valueless: false,
+						text,
+					};
 		});
 }
 
@@ -87,20 +94,24 @@ function queryRowsToWrite(params: readonly KeyValueEntry[]): KeyValueEntry[] {
 	return params.filter((p) => p.enabled && p.key.trim() && !isPathRow(p));
 }
 
+/** Whether @p row writes as a bare `key`: it is `valueless` and still has no value. */
+export function writesBareKey(row: KeyValueEntry): boolean {
+	return row.valueless === true && !row.value;
+}
+
 /**
  * One row as `key=value`, encoded with Postman's query rule
  * (`encodeQueryComponent`, issue #1771), or as typed under `encode: false`.
  *
- * A row with no value writes as a bare key (`?page`, not Postman's `?page=`;
- * issue #1772) - legal, and the same shape `formatParamsToText` shows the user
- * for that row.
+ * An empty value writes `key=` and a `valueless` row a bare `key`, as
+ * Postman's `QueryParam.unparseSingle` writes `""` and `null` (issue #1772).
  *
  * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the row
  * is written as typed, so `q=a|b` stays `a|b` in the URL the engine sends.
  */
 function writeQueryRow(row: KeyValueEntry, encode: boolean): string {
 	const key = encode ? encodeQueryComponent(row.key, "key") : row.key;
-	if (!row.value) return key;
+	if (writesBareKey(row)) return key;
 	return `${key}=${encode ? encodeQueryComponent(row.value, "value") : row.value}`;
 }
 
@@ -122,6 +133,11 @@ function writeQueryRow(row: KeyValueEntry, encode: boolean): string {
  * (same id, key and value). A row the user just edited or added means what it
  * says: `+` typed over `%2B` is a `+`. With no `previous`, every row counts as
  * carried over. A row with no pair is encoded.
+ *
+ * The exact match also asks the pair to agree on `=`, so a row made valueless
+ * (or given its `=` back) is rewritten. The decoded match does not: a row
+ * stored before rows could be valueless holds `""` for a URL's bare `?flag`,
+ * and a carried-over one keeps it.
  */
 export function buildUrlWithParams(
 	baseUrl: string,
@@ -142,10 +158,21 @@ export function buildUrlWithParams(
 	const carriedOver = (row: KeyValueEntry): boolean =>
 		previous === undefined ||
 		("id" in row &&
-			previous.some((p) => p.id === row.id && p.key === row.key && p.value === row.value));
+			previous.some(
+				(p) =>
+					p.id === row.id &&
+					p.key === row.key &&
+					p.value === row.value &&
+					writesBareKey(p) === writesBareKey(row)
+			));
 
 	const written = rows.map((row) =>
-		claim((pair) => pair.key === row.key && pair.value === row.value)
+		claim(
+			(pair) =>
+				pair.key === row.key &&
+				pair.value === row.value &&
+				pair.valueless === writesBareKey(row)
+		)
 	);
 	rows.forEach((row, i) => {
 		if (written[i] !== undefined || !carriedOver(row)) return;
@@ -165,14 +192,16 @@ export function buildUrlWithParams(
  * Nothing is lost that way (issue #1771). Decoding is not reversible: `%2B`
  * decodes to a `+` a server then reads as a space, `%2541` to `%41`, and `%26`
  * inside a value to a new `&` pair. And since the query encoding never encodes
- * `%`, a raw row written back is the pair it came from.
+ * `%`, a raw row written back is the pair it came from. A pair with no `=`
+ * (`?flag`) is a `valueless` row, so it is written back without one.
  */
 export function parseQueryParams(url: string): KeyValueItem[] {
-	return rawQueryPairs(url).map(({ key, value }) => ({
+	return rawQueryPairs(url).map(({ key, value, valueless }) => ({
 		id: generateId(),
 		key,
 		value,
 		enabled: true,
+		...(valueless && { valueless: true as const }),
 	}));
 }
 
@@ -217,7 +246,9 @@ export function mergeParamsFromUrl(
 		const matchIndex = fromUrl.findIndex((p, i) => !consumed[i] && p.key === row.key);
 		if (matchIndex === -1) continue; // the URL no longer carries this key
 		consumed[matchIndex] = true;
-		merged.push({ ...row, value: fromUrl[matchIndex].value });
+		const { valueless: _was, ...rest } = row;
+		const { value, valueless } = fromUrl[matchIndex];
+		merged.push({ ...rest, value, ...(valueless && { valueless }) });
 	}
 
 	fromUrl.forEach((p, i) => {

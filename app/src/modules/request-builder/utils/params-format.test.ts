@@ -96,8 +96,24 @@ describe("a valueless parameter", () => {
 		expect(pairs("page")).toEqual([{ key: "page", value: "" }]);
 	});
 
-	it("writes back as a bare key, not `page=`", () => {
-		expect(formatParamsToText(items(["page", ""]))).toBe("page");
+	it("is read from a line with no `=`, and an empty value from `page=` (#1772)", () => {
+		const [bare, empty] = parseParamsFromText("page\nsort=");
+		expect(bare).toMatchObject({ key: "page", value: "", valueless: true });
+		expect(empty).toMatchObject({ key: "sort", value: "" });
+		expect(empty.valueless).toBeUndefined();
+	});
+
+	it("writes back as a bare key, and an empty value as `page=` (#1772)", () => {
+		// Each line is what `buildUrlWithParams` sends for the row.
+		const [valueless, empty] = items(["page", ""], ["sort", ""]);
+		expect(formatParamsToText([{ ...valueless, valueless: true }, empty])).toBe("page\nsort=");
+	});
+
+	it("counts gaining or losing the `=` as an edit (#1772)", () => {
+		const [row] = items(["page", ""]);
+		expect(isNoOpParamsEdit("page=", [row])).toBe(true);
+		expect(isNoOpParamsEdit("page", [row])).toBe(false);
+		expect(isNoOpParamsEdit("page=", [{ ...row, valueless: true }])).toBe(false);
 	});
 
 	it("does not turn a valued param into a bare one", () => {

@@ -48,10 +48,19 @@ describe("buildUrlWithParams", () => {
 		expect(buildUrlWithParams("https://x/y?page=1", [])).toBe("https://x/y");
 	});
 
-	it("drops rows with no key, and writes a valueless row as a bare key", () => {
+	it("drops rows with no key, and writes an empty value as key=", () => {
 		expect(buildUrlWithParams("https://x/y", [kv("  ", "1"), kv("page", "")])).toBe(
-			"https://x/y?page"
+			"https://x/y?page="
 		);
+	});
+
+	it("writes a valueless row as a bare key, unless it has a value (#1772)", () => {
+		expect(
+			buildUrlWithParams("https://x/y", [
+				{ ...kv("flag", ""), valueless: true },
+				{ ...kv("n", "1"), valueless: true },
+			])
+		).toBe("https://x/y?flag&n=1");
 	});
 
 	it("encodes keys and values with Postman's query rule, and leaves {{variables}} alone", () => {
@@ -113,6 +122,15 @@ describe("mergeParamsFromUrl", () => {
 		expect(merged[1].id).not.toBe("1");
 	});
 
+	it("takes the URL's = with its value (#1772)", () => {
+		const existing = [item("1", "flag", ""), item("2", "e", "", true, { valueless: true })];
+		const merged = mergeParamsFromUrl(existing, "https://x/?flag&e=", "https://x/?flag=&e");
+		expect(merged.map(({ id, valueless }) => [id, valueless])).toEqual([
+			["1", true],
+			["2", undefined],
+		]);
+	});
+
 	it("never lists an enabled row the URL does not carry", () => {
 		const existing = [item("1", "a", "1", true), item("2", "gone", "x", true)];
 		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1", "https://x/y");
@@ -171,6 +189,41 @@ describe("the query as written", () => {
 			"https://x/?a=1&a=1"
 		);
 		expect(buildUrlWithParams(url, [item("1", "a", "c d")])).toBe("https://x/?a=c%20d");
+	});
+
+	it("reads ?flag as valueless and ?flag= as an empty value, and writes each back (#1772)", () => {
+		// Mutation check: dropping `valueless` from `parseQueryParams` rewrites
+		// the bare pair as `flag=` once another row's edit rebuilds the query.
+		const url = "https://x/?flag&e=&n=1";
+		const rows = parseQueryParams(url);
+		expect(rows.map(({ key, value, valueless }) => [key, value, valueless])).toEqual([
+			["flag", "", true],
+			["e", "", undefined],
+			["n", "1", undefined],
+		]);
+		const edited = rows.map((r) => (r.key === "n" ? { ...r, value: "2" } : r));
+		expect(buildUrlWithParams(url, edited, {}, rows)).toBe("https://x/?flag&e=&n=2");
+		// Without the URL's pairs to keep, the rows alone write the same query.
+		expect(buildUrlWithParams("https://x/", edited)).toBe("https://x/?flag&e=&n=2");
+	});
+
+	it("rewrites a pair whose row gained or lost its = (#1772)", () => {
+		// Mutation check: an exact match on key and value alone keeps `flag`
+		// and `e=` here, so the edit never reaches the URL.
+		const url = "https://x/?flag&e=";
+		const previous = parseQueryParams(url);
+		const [flag, e] = previous;
+		const { valueless: _dropped, ...flagWithEquals } = flag;
+		const edited = [flagWithEquals, { ...e, valueless: true as const }];
+		expect(buildUrlWithParams(url, edited, {}, previous)).toBe("https://x/?flag=&e");
+	});
+
+	it("keeps a bare pair for a row stored before rows could be valueless", () => {
+		// That row holds `""` for `?flag`, and the URL is what was sent.
+		const url = "https://x/?flag&n=1";
+		const rows = [item("1", "flag", ""), item("2", "n", "1")];
+		const edited = [rows[0], { ...rows[1], value: "2" }];
+		expect(buildUrlWithParams(url, edited, {}, rows)).toBe("https://x/?flag&n=2");
 	});
 
 	it("merges the URL's query as written", () => {

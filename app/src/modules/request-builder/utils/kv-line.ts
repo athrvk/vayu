@@ -51,10 +51,10 @@ export const PARAM_SEPARATORS: SeparatorTiers = [["="], [":"]];
 
 export interface SplitOptions {
 	/**
-	 * Treat a line with no separator as a key with an empty value.
+	 * Treat a line with no separator as a key with no value (`valueless`).
 	 *
 	 * True for params, where `?page` is a legal valueless parameter and
-	 * `buildUrlWithParams` already emits one. False for headers, where a bare
+	 * `buildUrlWithParams` emits one for a valueless row. False for headers, where a bare
 	 * word names no header - `justsometext` is not a header line, and inventing
 	 * an empty one from it would put a row in the table the user did not write.
 	 */
@@ -108,7 +108,7 @@ export function splitKeyValueLine(
 	line: string,
 	tiers: SeparatorTiers,
 	{ allowBareKey = false }: SplitOptions = {}
-): { key: string; value: string } | null {
+): { key: string; value: string; valueless?: true } | null {
 	for (const tier of tiers) {
 		const positions = tier.map((sep) => line.indexOf(sep)).filter((i) => i !== -1);
 		if (positions.length === 0) continue;
@@ -123,5 +123,5 @@ export function splitKeyValueLine(
 
 	if (!allowBareKey) return null;
 	const key = line.trim();
-	return key ? { key, value: "" } : null;
+	return key ? { key, value: "", valueless: true } : null;
 }
