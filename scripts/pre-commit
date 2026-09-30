@@ -244,8 +244,9 @@ done
 # which is where it is finally read.
 #
 # Run in parallel (below) rather than one process per file in sequence, since
-# whole-file clang-tidy is slow (~10-30s/file) and a large commit can stage
-# dozens. `xargs -P`'s own exit status (123 if anything failed) is what feeds
+# whole-file clang-tidy is slow (20-80 s a file on clang-tidy 19; a test file
+# stays in that range only because of the analyzer mode engine/tests/.clang-tidy
+# sets) and a large commit can stage dozens. `xargs -P`'s own exit status (123 if anything failed) is what feeds
 # STATUS, so the per-file guarantee above still holds.
 lint_one_file() {
     local FILE="$1"
