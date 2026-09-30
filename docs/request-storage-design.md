@@ -40,17 +40,43 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 editor, disabled entries included.**
 
 `url` is the wire truth: every execution path - design Send, collection scenario
-run, load run - sends it verbatim, and no engine path reads `params[]` at all
-(it is builder display state, see
+run, load run - sends its query verbatim, and no engine path reads the query
+rows of `params[]` (they are builder display state, see
 [engine/api-reference.md](engine/api-reference.md)). The Params table maintains
 the invariant on the app's side by rewriting `url` on every edit, keeping
 disabled rows in `params[]` only.
+
+A **path row** (`"in": "path"`, issue #1764) is the one row the engine reads:
+`url` keeps the `:name` segment verbatim and composition writes the row's value
+into it at send time (see
+[engine/api-reference.md](engine/api-reference.md#path-variables)). A path row
+never joins the query.
 
 The URL bar keeps the same invariant the other way: typing into it **merges**
 the parsed query into `params[]` rather than replacing the list, so a disabled
 row (invisible in the query by design) survives, and a key removed from the URL
 is removed from `params[]` too, rather than left behind as a row the URL no
 longer carries (`mergeParamsFromUrl`, issue #1482).
+
+**Path variables are the one kind of row the engine reads** (issue #1764). A
+row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`
+without the colon), and never reaches the query: the query builders skip it,
+and at compose time the engine puts the value of the last enabled row with
+that key into its segment, `{{variable}}`-resolved and then percent-encoded
+with Postman's path encode set (space, `"`, `<`, `>`, `` ` ``, `#`, `?`, `{`,
+`}`, controls and non-ASCII; a `/` in a value makes more segments, as it does
+in Postman); an empty value or no enabled row leaves `:name` literal. An inline
+`POST /compose` always carries the editor's path rows as `request.params`
+(`[]` when there are none), since the editor may be ahead of the saved row and
+an absent key falls back to the stored rows. A row keeps every member it
+arrived with (`type`, `description` from a Postman import) through edits. The URL bar keeps the rows in step with
+the segments, but only on an edit that changes them: a query-only edit leaves
+every path row alone (a declared row no segment uses included), and a segment
+renamed on its own keeps its row's value (`syncPathRows` in
+`modules/request-builder/utils/path-variables.ts`). A `:name` with no stored
+row is not given one until its value is edited: the Params tab shows an empty
+row for it (`displayPathRows`), so opening a request does not change it, and
+an import stores only the rows the source declares.
 
 A writer that stores the query *only* in `params[]` therefore stores a request
 that sends nothing of it. That was issue #590: every importer split the query

@@ -1286,6 +1286,74 @@
 					"body": "{}"
 				}
 			]
+		},
+		{
+			"name": "Get a user's post",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/users/:id/posts/:postId.json?page=2",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"users",
+						":id",
+						"posts",
+						":postId.json"
+					],
+					"query": [
+						{
+							"key": "page",
+							"value": "2"
+						}
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "1",
+							"type": "string",
+							"description": "The user"
+						},
+						{
+							"key": "postId",
+							"value": "{{latestPost}}"
+						},
+						{
+							"key": "draft",
+							"value": "yes",
+							"disabled": true
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get another user",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/users/:id/:section",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"users",
+						":id",
+						":section"
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "2"
+						}
+					]
+				}
+			},
+			"response": []
 		}
 	],
 	"auth": {

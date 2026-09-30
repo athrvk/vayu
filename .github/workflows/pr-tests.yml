@@ -284,6 +284,7 @@ jobs:
               - 'engine/tests/fixtures/recursive-run-order-conformance.json'
               - 'engine/tests/fixtures/variable-resolution-conformance.json'
               - 'engine/tests/fixtures/set-cookie-conformance.json'
+              - 'engine/tests/fixtures/path-variable-conformance.json'
               - 'engine/tests/fixtures/import-conformance.json'
               - 'engine/tests/fixtures/element-kinds.json'
             # The files at the repository root that a suite in `app/` reads.

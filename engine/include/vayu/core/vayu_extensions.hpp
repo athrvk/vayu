@@ -99,6 +99,13 @@ void redact_postman_auth (Json& source, int& omitted);
  */
 [[nodiscard]] std::optional<Json> rows_of (const Json& value);
 
+/**
+ * Params rows: @ref rows_of plus a row's `in` (`"path"` marks a `:name` path
+ * variable, issue #1764) and the `type` a Postman path variable carries, so
+ * an `x-vayu-request` re-import keeps a path row a path row.
+ */
+[[nodiscard]] std::optional<Json> param_rows_of (const Json& value);
+
 /// A request body in one of Vayu's own modes, or nothing.
 [[nodiscard]] std::optional<Json> body_of (const Json& value);
 

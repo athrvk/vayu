@@ -1041,3 +1041,44 @@ describe("the Content-Type a body mode implies", () => {
 		expect(code).not.toContain("application/xml");
 	});
 });
+
+/**
+ * A `:name` segment is filled from the request's path rows (issue #1764), the
+ * way `POST /compose` fills it, so the templated snippet sends what Vayu does.
+ * The substitution is `prepare.ts`'s, so a target that read `request.url`
+ * rather than the prepared one would still print `:id` here.
+ */
+describe("path variables", () => {
+	const request: SnippetRequest = {
+		...GET,
+		url: "https://api.example.com/v1/users/:id/posts/:postId",
+		params: [
+			{ key: "id", value: "a b", enabled: true, in: "path" },
+			{ key: "postId", value: "", enabled: true, in: "path" },
+			{ key: "id", value: "query", enabled: true },
+		],
+	};
+
+	for (const target of CODE_TARGETS) {
+		it(`${target.label} substitutes an enabled, valued path row, encoded`, () => {
+			const { code } = target.generate(request);
+			expect(code).toContain("/v1/users/a%20b/posts/:postId");
+			expect(code).not.toContain("/users/:id");
+			// The query row is already in the URL, and only there.
+			expect(code).not.toContain("query");
+		});
+	}
+
+	it("substitutes before a query-located API key is appended", () => {
+		const { code } = generateCurl({
+			...request,
+			auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+		});
+		expect(code).toContain("'https://api.example.com/v1/users/a%20b/posts/:postId?k=v'");
+	});
+
+	it("leaves the URL alone with no params at all", () => {
+		const { code } = generateCurl({ ...GET, url: "https://x/:id" });
+		expect(code).toContain("'https://x/:id'");
+	});
+});

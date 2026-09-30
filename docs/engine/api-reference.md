@@ -1319,7 +1319,7 @@ the null-vs-absent rule.
   "name": "Get Users",               // Required, no default (null is a 400)
   "method": "GET",                   // Required: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
   "url": "{{baseUrl}}/users",        // Required, no default (null is a 400)
-  "params": [],                      // Optional, array of {key, value, enabled}
+  "params": [],                      // Optional, array of {key, value, enabled, in?} - see below
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
@@ -1344,13 +1344,24 @@ the null-vs-absent rule.
 }
 ```
 
-**`params` is builder display state, not the query the engine sends.** The
-engine stores it and hands it back verbatim; nothing in the request-composition
-path ever reads it. `url` is the wire truth, so a query parameter that must
-reach the wire belongs **in `url`** - the app's Params table keeps the two in
-step by rewriting `url` on every edit, and stores disabled rows in `params` only.
-A raw API, MCP or import caller that puts the query only in `params` stores a
-request that sends none of it (issue #590).
+**A query row in `params` is builder display state, not the query the engine
+sends.** The engine stores it and hands it back verbatim; nothing in the
+request-composition path reads a query row. `url` is the wire truth, so a query
+parameter that must reach the wire belongs **in `url`** - the app's Params table
+keeps the two in step by rewriting `url` on every edit, and stores disabled rows
+in `params` only. A raw API, MCP or import caller that puts the query only in
+`params` stores a request that sends none of it (issue #590).
+
+**A path row is the one row composition reads** (issue #1764). A row carrying
+`"in": "path"` is a Postman-style path variable: `key` is the name without its
+colon, and the URL keeps the `:name` segment verbatim
+(`{{baseUrl}}/users/:id`). [`POST /compose`](#post-compose) writes the row's
+value in place of the segment at send time - see
+[Path variables](#path-variables) there. A row with `in` absent, `"query"` or
+anything else is a query row, and everything that joins or splits the query
+(the importers' URL join, the Postman and OpenAPI exports) skips path rows.
+The field needs no schema change: rows are stored verbatim, extra keys
+included.
 
 **`stream` is the saved half of [`POST /execute`'s `stream`](#post-execute)**
 (issue #574). It records that *this endpoint* is a `text/event-stream`, which is
@@ -2090,8 +2101,9 @@ the same way a stored `spec_operation` omits it.
 
 **How it matches.** Both sides are reduced to a path shape: the origin dropped
 (`{{baseUrl}}`, `https://api.example.com` and a schemeless host alike), the query
-and fragment dropped, and every placeholder - Vayu's `{{petId}}` and the
-document's `{petId}` - flattened to `{}`. Flattening the name too is deliberate:
+and fragment dropped, and every placeholder - Vayu's `{{petId}}`, a request's
+Postman-style `:petId` path variable (issue #1764) and the document's `{petId}` -
+flattened to `{}`. Flattening the name too is deliberate:
 a document that renames its path parameter describes the same endpoint, and a
 match that turned on the parameter's spelling would report a rename as removed
 and added. A second pass then offers each remaining request to the templates it
@@ -2458,10 +2470,19 @@ request nobody edited writes nothing new into the standard members - an
 unedited export in `full` differs from the stored document only by its
 `x-vayu-*` keys. A skeleton ignores `mode`. Anything else is a `400`.
 
+**A request's `:name` path variable is an OpenAPI path parameter** (issue
+#1764): wherever a URL becomes a path, a whole `:name` segment is written
+`{name}`, as a whole `{{name}}` segment is, and its path row's value is the
+parameter's `example`. A path row is never declared `in: query`, and
+`x-vayu-request.params` keeps each row's `in` (and a Postman `type`), so a
+re-import gives the path row back. A segment with a suffix (`:name.json`) is left
+as written, as `{{name}}.json` is.
+
 **A bound export patches the stored bytes, never rebuilds them.** Operations no
 request claims are removed (and a path left with no operations goes with them),
-a declared parameter whose request row carries a value gets it as `example`, and
-stored examples become response examples - one as `example`, several as a named
+a declared parameter whose request row carries a value gets it as `example` (a
+declared `in: path` parameter reads the request's path row of that name, issue
+#1764), and stored examples become response examples - one as `example`, several as a named
 `examples` map. Everything else - `info`, `tags`, vendor extensions, `security`,
 components nothing references - is carried through by simply not being visited,
 and the dialect is left as it was.
@@ -3037,10 +3058,10 @@ here. Every other format sends no such key. See
 per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
-`unmapped_body`, `unresolved_base_url`, `unsupported_auth`, `path_variables`,
+`unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
-loss: `default_response`, `path_variables` and `url_without_raw` count a mapping
+loss: `default_response` and `url_without_raw` count a mapping
 the import made rather than something it dropped (see
 `docs/app/import-collections/postman.md`). An import that loses something and
 says nothing is the defect this list exists to prevent, so a format with
@@ -4612,6 +4633,64 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
   erroring - composition works with no collection or environment at all.
 
+#### Path variables
+
+A `:name` segment of the URL is answered by the request's own `in: "path"`
+Params row of that key (issue #1764) - the inline `request.params` when the
+inline request carries a `params` array, the stored row's otherwise (so an
+inline `url` override still reads the stored rows). This runs before the URL's
+own `{{var}}` pass, on the URL as written, and follows Postman's parse
+(`postman-url-encoder/parser`, `postman-collection`'s `Url.parse` /
+`Url.getPath`):
+
+- A segment is a path variable when it is a whole path segment - after the
+  authority, between `/` and the next `/`, `?`, `#` or the end - that starts
+  with `:`. The name runs to the first `.`, and a suffix after it stays
+  (`:id.json` sends `7.json`); `:` alone or `:.x` names nothing. A
+  `{{variable}}` token is opaque, a backslash is a `/`, and a port
+  (`host:8080`), the query and the fragment are never read.
+- Only an **enabled** row answers; among several rows of one key the **last**
+  enabled one does. Postman's `VariableList` answers with the last row whatever
+  its `disabled` flag, but Postman's editor has no toggle for a path variable;
+  Vayu's does, and a disabled row answers nothing. A segment with no such row
+  stays literal, which is also how every request stored before #1764 composes:
+  a `:x` segment with no path row is sent as written.
+- The value is `{{var}}`-resolved exactly as the URL is, then written in place
+  of `:name` percent-encoded as Postman encodes it: Postman joins the raw value
+  into the path (`Url.getPath`) and encodes the path with
+  `postman-url-encoder`'s `PATH_ENCODE_SET`, which is the C0 controls, DEL and
+  every byte above it (UTF-8, `%XX` with uppercase hex), space, `"`, `<`, `>`,
+  `` ` ``, `#`, `?`, `{` and `}` - and nothing else. So a `/` in a value makes
+  more segments (`a b/c` sends `/users/a%20b/c`), `@ : , ; = & + ! $ ' ( ) *`
+  and `%` go out as typed (`user@x.com`, `12:30`, `100%`, and an imported
+  `a%40b.com` is not encoded twice), and a `?` or `#` is `%3F` / `%23`, so a
+  value never ends the path. A whole `{{token}}` in the value is kept verbatim
+  rather than encoded (see the next point).
+- A value that still holds a `{{token}}` after that resolution - a bound data
+  column, a deferred `{{$guid}}`, a name a pre-request script sets - is **not
+  written yet**: its segment stays `:name` in the composed `url`, and the row
+  goes out in the composed payload's `params` as
+  `{"key": "id", "value": "{{username}}", "in": "path"}`, its value resolved as
+  far as composition could. Whatever answers the token later - the
+  per-iteration bind, or the residual pass after the pre-request script -
+  writes the answer into the segment through the same encoding, so a data cell
+  `a b?c` goes out as `/users/a%20b%3Fc`, never with a raw space and a query. A token
+  nothing answers is written verbatim, as composition keeps one. Until then a
+  pre-request script reads `pm.request.url` with the `:name` still in it.
+- A value that resolves to the **empty string leaves the segment literal**
+  (`:id` goes out as written), as Postman's `Url.getPath` (it writes only a
+  non-empty string) and Insomnia's `applyPathParametersToUrl` both do.
+
+The composed payload's `url` is the substituted URL, and its `params` holds
+exactly the path rows still waiting (absent when none is; an inline request's
+own `params` is consumed, never echoed). `/execute`, `/runs` and a scenario
+plan step (which is composed through this same path) read that `params` back
+and write each waiting value into its `:name` segment once it is answered, at
+the latest just before the send: a run with no residual pass writes it after
+the bind, or once at the start for a load run that binds nothing. A caller
+posting its own `params` path rows to `/execute` or `/runs` gets the same
+writing.
+
 **What gets resolved:** the URL, header keys and values, body `content` and
 `fields`, and every string inside the winning auth block - after `inherit` is
 walked (leaf→root; an explicit `noauth` terminates the walk, `none` is stepped
@@ -4725,7 +4804,9 @@ canonical imported auth pattern work: a pre-request script does
 {{token}}` carries the fresh value, rather than the previous run's token or
 `""` on the first run. It resolves the same fields composition does - the URL,
 header names and values, body content, and the five strings a form field
-carries - by the same resolver and the same rules (scope precedence, nested
+carries, plus the value of a `:name` path variable composition left waiting
+(written into its segment, encoded, as the pass ends; see
+[Path variables](#path-variables)) - by the same resolver and the same rules (scope precedence, nested
 resolution, cycles, the 8-level bound); a value composition already
 substituted is finished text and is not touched again. `{{data.column}}` is
 left alone here too - the data namespace is bound per iteration by whoever owns

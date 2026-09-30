@@ -93,6 +93,31 @@ describe("seedFromRun", () => {
 		expect(request.params?.some((p) => p.key === "page" && p.value === "2")).toBe(true);
 	});
 
+	it("seeds a pending path row from the snapshot's params, not an empty one (#1764)", () => {
+		const snapshot = {
+			...run().configSnapshot,
+			url: "https://api.example.test/users/:id/posts/:postId?page=2",
+			params: [
+				{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" },
+				// Not a path row: the URL holds the query.
+				{ key: "page", value: "9", enabled: true },
+			],
+		};
+		const { request } = seedFromRun(
+			run({ configSnapshot: snapshot } as Partial<Run>),
+			liveRequest
+		);
+
+		expect(
+			request.params?.map(({ key, value, in: where }) => ({ key, value, in: where }))
+		).toEqual([
+			{ key: "page", value: "2", in: undefined },
+			{ key: "id", value: "{{fromScript}}", in: "path" },
+			// A `:name` the snapshot has no row for still gets one.
+			{ key: "postId", value: "", in: "path" },
+		]);
+	});
+
 	it("has no id, which is what stops anything being saved", () => {
 		// useSaveManager stops early on a null entityId, and the response store
 		// is keyed by id so nothing is written to it either.

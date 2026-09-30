@@ -95,4 +95,37 @@ describe("UrlInput param sync", () => {
 			{ key: "b", enabled: false },
 		]);
 	});
+
+	it("adds, renames and removes path rows as `:name` segments are typed (#1764)", () => {
+		const query: KeyValueItem = { id: "q", key: "page", value: "1", enabled: true };
+		const idRow: KeyValueItem = { id: "p", key: "id", value: "42", enabled: true, in: "path" };
+		const paramsAfter = (url: string, params: KeyValueItem[]) => {
+			// A start unlike every target, so each change below is a real edit.
+			const { updateField } = renderUrlInput("https://x/users/:id?page=1&before", params);
+			fireEvent.change(screen.getByLabelText("Request URL"), { target: { value: url } });
+			cleanup();
+			const call = updateField.mock.calls.find(([field]) => field === "params");
+			return (call![1] as KeyValueItem[]).map(({ key, value, in: at }) => ({
+				key,
+				value,
+				in: at,
+			}));
+		};
+
+		// Added, in segment order, with no value yet.
+		expect(paramsAfter("https://x/users/:id/posts/:postId?page=1", [query])).toEqual([
+			{ key: "page", value: "1", in: undefined },
+			{ key: "id", value: "", in: "path" },
+			{ key: "postId", value: "", in: "path" },
+		]);
+		// Renamed, keeping its value.
+		expect(paramsAfter("https://x/users/:userId?page=1", [query, idRow])).toEqual([
+			{ key: "page", value: "1", in: undefined },
+			{ key: "userId", value: "42", in: "path" },
+		]);
+		// Removed with its segment; the query row is untouched.
+		expect(paramsAfter("https://x/users?page=1", [query, idRow])).toEqual([
+			{ key: "page", value: "1", in: undefined },
+		]);
+	});
 });

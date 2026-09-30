@@ -242,6 +242,13 @@ struct ExportRequest {
     /// The request's position among its folder's requests, so a re-import
     /// lists them as the sidebar did rather than in document path order.
     int order = 0;
+    /**
+     * The Params rows marked `in: "path"` (issue #1764): the values of the
+     * URL's `:name` segments, which export as `{name}` path parameters. Kept
+     * apart from @ref params, which are the query rows only, so a path row is
+     * never declared `in: query`.
+     */
+    std::vector<ExportKeyValue> path_params;
 };
 
 /**

@@ -30,7 +30,8 @@
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import type { ComposedRequest, ExecuteRequestRequest } from "@/types";
+import type { ComposedRequest, ExecuteRequestRequest, KeyValueEntry } from "@/types";
+import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 
 /**
  * Why introspection failed, in the terms the user can act on.
@@ -97,6 +98,12 @@ function hostOf(url: string): string {
 export interface IntrospectionTarget {
 	/** Endpoint URL as typed, `{{variables}}` intact. */
 	url: string;
+	/**
+	 * The request's params rows; only the path rows are sent (#1764), always,
+	 * `[]` when there are none, so compose fills the URL's `:name` segments
+	 * from these rather than from the stored request's.
+	 */
+	params?: readonly KeyValueEntry[];
 	/** Header rows as typed (enabled-only, flattened), `{{variables}}` intact. */
 	headers: Record<string, string>;
 	/** The request's auth block, `inherit` included. Absent means no auth. */
@@ -158,6 +165,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 			request: {
 				method: "POST",
 				url: target.url,
+				params: composePathParams(target.params ?? []),
 				headers: target.headers,
 				...(target.auth ? { auth: target.auth } : {}),
 			},

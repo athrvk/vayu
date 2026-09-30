@@ -190,3 +190,18 @@ describe("isNoOpParamsEdit", () => {
 		expect(isNoOpParamsEdit(reEnabled, rows)).toBe(false);
 	});
 });
+
+describe("path rows stay out of bulk edit (issue #1764)", () => {
+	const rows: KeyValueItem[] = [
+		{ id: "q", key: "page", value: "1", enabled: true },
+		{ id: "p", key: "id", value: "42", enabled: true, in: "path" },
+	];
+
+	it("are not written as lines", () => {
+		expect(formatParamsToText(rows)).toBe("page=1");
+	});
+
+	it("do not make an unchanged commit look like an edit", () => {
+		expect(isNoOpParamsEdit("page=1", rows)).toBe(true);
+	});
+});

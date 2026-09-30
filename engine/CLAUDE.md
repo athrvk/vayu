@@ -581,7 +581,8 @@ logged as a warning: it means a client skipped composition.
   - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped
-    and every placeholder (`{{petId}}`, `{petId}`) flattened to `{}`. Ambiguity
+    and every placeholder (`{{petId}}`, a request's `:petId`, `{petId}`)
+    flattened to `{}`. Ambiguity
     is refused in both directions, because the sync applies changes *by*
     identity. It parses no OpenAPI: the caller hands it the identities, which
     since #869 come from **`POST /specs/describe`** (dialect, `info.title`,
@@ -814,7 +815,15 @@ The engine owns request composition (#226): `POST /compose`
 (`engine/src/http/request_composer.cpp`) resolves `{{variables}}` and `inherit`
 auth (collection-chain walk; `noauth` terminates, `none` steps over) and
 returns the execute-ready payload `POST /execute` / `POST /runs` accept
-unchanged. Compose is pure (sends nothing, no run row) and is the one place a
+unchanged. It also writes a request's `:name` path variables from its
+`in: "path"` Params rows (#1764, `core::substitute_path_variables` in
+`core/path_template.hpp`, Postman's segment rule; empty value stays literal;
+a value still holding a token after resolution is not joined into the URL but
+waits in the payload's `params` / `vayu::Request::path_variables` until the bind
+or the residual pass answers it, `core::settle_path_variables`; the app's copy
+of the segment rule and substitution is pinned by
+`tests/fixtures/path-variable-conformance.json`),
+which is the only place a Params row reaches the wire. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
 and an inline `request` plus `collectionId` scope (the renderer, because Send

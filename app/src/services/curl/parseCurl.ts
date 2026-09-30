@@ -28,7 +28,7 @@ import type { BodyMode, KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
-import { parseQueryParams, safeDecode } from "@/modules/request-builder/utils/url";
+import { paramsFromUrl, safeDecode } from "@/modules/request-builder/utils/url";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
 import { ACCEPT_HEADER, DEFAULT_MAX_REDIRECTS, SSE_ACCEPT } from "@/constants/request";
 import { tokenize } from "./tokenize";
@@ -455,7 +455,9 @@ function resolve(b: Builder): CommandImport {
 	if (b.forceGet && dataJoined) {
 		url += (url.includes("?") ? "&" : "?") + dataJoined;
 	}
-	const params = parseQueryParams(url);
+	// The query, then a path row per `:name` segment (issue #1764) - a URL with
+	// none gets none.
+	const params = paramsFromUrl(url);
 
 	// --- method -------------------------------------------------------------
 	const hasBody = b.dataParts.length > 0 || b.urlEncodeParts.length > 0 || b.jsonShortcut;

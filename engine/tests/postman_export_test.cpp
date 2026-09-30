@@ -275,6 +275,33 @@ TEST (PostmanExport, QueryRowsComeFromParamsAndKeepTurnedOffRows) {
     R"([{"key":"limit","value":"10","description":"Page size"},{"key":"trace","value":"on","disabled":true}])");
 }
 
+/**
+ * Path rows (issue #1764) are `url.variable[]`, written after `query` and
+ * never into it; a row made in Vayu carries no `type`. Mutation check: drop
+ * `split_params` from `postman_url` (hand it every row as the query) and the
+ * path rows land in `query[]` while `variable` goes missing.
+ */
+TEST (PostmanExport, PathRowsAreUrlVariablesAfterTheQueryRows) {
+    PostmanExportRequest entry = request ("r", "{{baseUrl}}/users/:id?page=2");
+    ordered path_row           = row ("id", "7");
+    path_row["in"]             = "path";
+    path_row["description"]    = "The user";
+    ordered off                = row ("draft", "x", false);
+    off["in"]                  = "path";
+    entry.params = ordered::array ({ path_row, row ("page", "2"), off });
+    ordered url  = only_item (entry)["request"]["url"];
+    EXPECT_EQ (keys_of (url), (Keys{ "raw", "host", "path", "query", "variable" }));
+    EXPECT_EQ (url["path"].dump (), R"(["users",":id"])");
+    EXPECT_EQ (url["query"].dump (), R"([{"key":"page","value":"2"}])");
+    EXPECT_EQ (url["variable"].dump (),
+    R"([{"key":"id","value":"7","description":"The user"},{"key":"draft","value":"x","disabled":true}])");
+
+    // No query rows at all: `variable` still comes last.
+    entry.params = ordered::array ({ path_row });
+    url          = only_item (entry)["request"]["url"];
+    EXPECT_EQ (keys_of (url), (Keys{ "raw", "host", "path", "variable" }));
+}
+
 struct UrlCase {
     const char* raw;
     const char* expected;

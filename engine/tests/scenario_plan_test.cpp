@@ -44,6 +44,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/utils/encoding.hpp"
 
@@ -658,6 +659,89 @@ TEST_F (ScenarioPlanTest, ARunsColumnsDeferTheirBareTokensAndSplitThem) {
     vayu::core::IterationBinding{ &resolved.data_rows[1], 1, {} })
     .ok);
     EXPECT_EQ (bound.url, "https://api.test/u/grace?r=eu");
+}
+
+/**
+ * A collection run's steps - sequential and load alike, both read this plan -
+ * take their `:name` path variables from each request's own path rows through
+ * the same composition a Send uses (issue #1764): two requests on `:id` send
+ * their own values, and a data column in a value is bound per iteration.
+ *
+ * Mutation-check: drop `substitute_compose_path_variables` from
+ * `compose_request_core` and every URL here keeps its `:id`.
+ */
+TEST_F (ScenarioPlanTest, AStepSendsItsOwnPathVariablesAndBindsAColumnInOne) {
+    seed_collection ("col", "");
+    const auto with_path_row = [&] (const std::string& id, int order,
+                               const std::string& value) {
+        seed_request (id, "col", order, "https://api.test/users/:id?r=eu");
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row);
+        row->params = json::array (
+        { { { "key", "id" }, { "value", value }, { "enabled", true },
+        { "in",
+        "path" } } }).dump ();
+        db_->save_request (*row);
+    };
+    with_path_row ("one", 0, "1");
+    with_path_row ("two", 1, "2");
+    with_path_row ("bound", 2, "{{username}}");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "username", "a b?c" } } });
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 3u);
+    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://api.test/users/1?r=eu");
+    EXPECT_EQ (resolved.plan.steps[1].request.url, "https://api.test/users/2?r=eu");
+    // The bound value waits for its row: its segment stays `:id`.
+    EXPECT_EQ (resolved.plan.steps[2].request.url, "https://api.test/users/:id?r=eu");
+
+    // The cell is encoded as composition encodes a value it could answer
+    // itself. Mutation check: join the token into the URL at composition (the
+    // pre-fix behaviour) and this reads `/users/a b?c`, a query.
+    vayu::Request bound = resolved.plan.steps[2].request;
+    ASSERT_TRUE (vayu::core::apply_iteration_template (bound,
+    resolved.plan.steps[2].data_template,
+    vayu::core::IterationBinding{ resolved.data_rows.data (), 0, {} })
+    .ok);
+    EXPECT_EQ (bound.url, "https://api.test/users/a%20b%3Fc?r=eu");
+    EXPECT_TRUE (bound.path_variables.empty ());
+}
+
+/**
+ * A path value holding a token a row does not answer waits past the bind for
+ * the residual pass, which writes the value a pre-request script set, encoded as
+ * Postman encodes it (issue #1764); a column in the same value is bound first.
+ */
+TEST_F (ScenarioPlanTest, APathValueTheScriptAnswersIsEncodedByTheResidualPass) {
+    seed_collection ("col", "");
+    seed_request ("one", "col", 0, "https://api.test/users/:id");
+    auto row = db_->get_request ("one");
+    ASSERT_HAS_VALUE (row);
+    row->params = json::array (
+    { { { "key", "id" }, { "value", "{{username}}-{{fromScript}}" }, { "enabled", true },
+    { "in",
+    "path" } } }).dump ();
+    db_->save_request (*row);
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "username", "a b" } } });
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    vayu::Request request = resolved.plan.steps[0].request;
+    ASSERT_TRUE (vayu::core::apply_iteration_template (request,
+    resolved.plan.steps[0].data_template,
+    vayu::core::IterationBinding{ resolved.data_rows.data (), 0, {} })
+    .ok);
+    EXPECT_EQ (request.url, "https://api.test/users/:id");
+    ASSERT_EQ (request.path_variables.size (), 1u);
+    EXPECT_EQ (request.path_variables[0].value, "a b-{{fromScript}}");
+
+    vayu::http::VariableValues vars{ { "fromScript", "c?d" } };
+    ASSERT_FALSE (vayu::http::routes::resolve_residual_tokens (request, vars));
+    EXPECT_EQ (request.url, "https://api.test/users/a%20b-c%3Fd");
+    EXPECT_TRUE (request.path_variables.empty ());
 }
 
 TEST_F (ScenarioPlanTest, ARunWithoutRowsResolvesABareNameFromTheScopesAsItAlwaysDid) {

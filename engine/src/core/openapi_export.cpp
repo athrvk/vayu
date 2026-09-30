@@ -885,6 +885,8 @@ std::string_view example_key = "example") {
         const std::vector<ExportKeyValue>* rows = nullptr;
         if (location == "query") {
             rows = &entry.params;
+        } else if (location == "path") {
+            rows = &entry.path_params;
         } else if (location == "header") {
             rows = &entry.headers;
         } else {
@@ -1035,8 +1037,21 @@ namespace ext = vayu::core::vayu_ext;
 enum class Vocabulary : std::uint8_t { V3, V2 };
 
 /**
+ * The name of a Postman path variable that is a whole segment (`:petId`,
+ * issue #1764), or nothing - `:id.json` carries a suffix OpenAPI cannot
+ * template, exactly as a `{{name}}.json` segment cannot.
+ */
+std::optional<std::string_view> colon_variable_name (std::string_view segment) {
+    if (segment.size () < 2 || segment.front () != ':' ||
+    segment.find_first_of (".{}") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    return segment.substr (1);
+}
+
+/**
  * A request path with Vayu's tokens written the way OpenAPI writes them:
- * `/pets/{{petId}}` becomes `/pets/{petId}`.
+ * `/pets/{{petId}}` and `/pets/:petId` both become `/pets/{petId}`.
  *
  * Only a segment that is *entirely* one token converts. A token inside a longer
  * segment (`/files/{{name}}.json`) is not a path parameter - OpenAPI has no
@@ -1053,6 +1068,8 @@ std::string path_template (std::string_view path) {
         const auto name                = variable_token_name (segment);
         if (name) {
             out += "{" + std::string (trim (*name)) + "}";
+        } else if (const auto colon = colon_variable_name (segment)) {
+            out += "{" + std::string (*colon) + "}";
         } else {
             out += segment;
         }
@@ -1084,7 +1101,10 @@ void write_string_type (Json& parameter, Vocabulary vocabulary) {
  * object must carry one, and a URL segment is text until something says
  * otherwise.
  */
-void append_path_parameters (const std::string& templated, Json& parameters, Vocabulary vocabulary) {
+void append_path_parameters (const std::string& templated,
+const std::vector<ExportKeyValue>& path_rows,
+Json& parameters,
+Vocabulary vocabulary) {
     // The renderer's `/\{([^{}]+)\}/g`, read left to right: a `{` starts a name
     // over, so `{a{b}` declares `b` rather than nothing.
     size_t open = std::string::npos;
@@ -1097,9 +1117,19 @@ void append_path_parameters (const std::string& templated, Json& parameters, Voc
             continue;
         }
         if (open != std::string::npos && index > open + 1) {
-            Json parameter{ { "name", templated.substr (open + 1, index - open - 1) },
-                { "in", "path" }, { "required", true } };
+            const std::string name = templated.substr (open + 1, index - open - 1);
+            Json parameter{ { "name", name }, { "in", "path" }, { "required", true } };
             write_string_type (parameter, vocabulary);
+            // The value a `:name` path row holds (issue #1764) is this
+            // request's example of the parameter, as a query row's is.
+            const auto row = std::find_if (path_rows.rbegin (),
+            path_rows.rend (), [&] (const ExportKeyValue& candidate) {
+                return candidate.enabled && candidate.key == name;
+            });
+            if (row != path_rows.rend () && !row->value.empty ()) {
+                parameter[vocabulary == Vocabulary::V3 ? "example" : "x-example"] =
+                row->value;
+            }
             parameters.push_back (std::move (parameter));
         }
         open = std::string::npos;
@@ -1879,7 +1909,7 @@ SchemeNamer& schemes) {
     }
 
     Json parameters = Json::array ();
-    append_path_parameters (templated, parameters, context.vocabulary);
+    append_path_parameters (templated, entry.path_params, parameters, context.vocabulary);
     DeclaredParameters declared;
     append_row_parameters (entry, declared, parameters, context.vocabulary);
     if (context.vocabulary == Vocabulary::V2) {

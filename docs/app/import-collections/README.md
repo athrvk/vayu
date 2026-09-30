@@ -170,7 +170,9 @@ on every build.
 A stored request carries its **enabled** query inside `url`; `params[]` mirrors
 it for the editor, disabled rows included (see
 [request-storage-design.md](../../request-storage-design.md)). `url` is what
-every execution path sends verbatim, and no engine path reads `params[]` at all.
+every execution path sends, and no engine path reads a query row of `params[]`.
+A path row (`"in": "path"`, issue #1764) is the exception and never joins the
+query: composition writes its value into the URL's `:name` segment instead.
 
 Every parser states the query some other way - Postman splits it out of the URL
 into `params[]`, Insomnia keeps a `parameters[]` beside a verbatim URL, the
@@ -362,7 +364,7 @@ than tallying while building them, so the number and the rows cannot disagree.
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
-"unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "path_variables" |
+"unmapped_body" | "unresolved_base_url" | "unsupported_auth" |
 "url_without_raw" | "variable_metadata", count, requests? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
@@ -408,15 +410,15 @@ could reach - a `{variable}` the document declares no default for, or a relative
 document that arrived with no URL to resolve it against (see
 [OpenAPI 3.0](./openapi-v3.md#the-base-url)).
 
-The last four are Postman kinds added by issue #1443, closing gaps in the same "dropped is
+The last three are Postman kinds added by issue #1443, closing gaps in the same "dropped is
 counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu has no mode
 for (`hawk`, `oauth1`, `edgegrid`, or a non-string `type`), unlike `awsv4`/`digest`/`ntlm`,
-which import as data and count under `nonExecutableAuth` instead. `path_variables` and
-`url_without_raw` are not losses: the first counts a request whose `url.variable[]` path
-segment was turned into a `{{key}}` template plus a collection variable, the second a URL
-assembled from `host[]`/`path[]` because it carried no `raw` - both are mappings the Preview
-changes nothing the user sends, so like `default_response` the Preview does not show them;
-they stay counted in `meta.skipped`. `variable_metadata` is a collection,
+which import as data and count under `nonExecutableAuth` instead. `url_without_raw` is not a
+loss: it counts a URL assembled from `host[]`/`path[]` because it carried no `raw` - a mapping
+that changes nothing the user sends, so like `default_response` the Preview does not show it;
+it stays counted in `meta.skipped`. (A fourth, `path_variables`, counted a `:key` segment
+rewritten to `{{key}}` plus a collection variable; issue #1764 retired it along with that
+rewrite - a path variable now imports as the request's own path row, which loses nothing.) `variable_metadata` is a collection,
 folder, environment or globals variable whose `description` or a meaningfully declared `type`
 (anything but `secret` or Postman's own `default` marker) was read and discarded, because
 Vayu's variable record has a field for the value and the secret flag only (see

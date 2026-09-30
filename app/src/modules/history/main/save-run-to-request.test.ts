@@ -282,6 +282,42 @@ describe("buildChangeset", () => {
 		expect(f).toContain("Protocol");
 	});
 
+	it("keys a path row as `:name`, apart from a same-named query row (#1764)", () => {
+		// The run sent `?id=7` against a request whose `:id` path row held 42.
+		const live = liveRequest({
+			url: "https://api.example.test/users/:id",
+			params: [{ key: "id", value: "42", enabled: true, in: "path" }],
+		});
+		const snapshot = { ...run().configSnapshot, url: "https://api.example.test/users?id=7" };
+		const params = buildChangeset(
+			seedFromRun(run({ configSnapshot: snapshot } as Partial<Run>), live),
+			live
+		).find((i) => i.field === "Params");
+
+		expect(params!.entries).toEqual([
+			{ key: "id", kind: "added", value: "7" },
+			{ key: ":id", kind: "removed", value: "42" },
+		]);
+	});
+
+	it("keeps a path value the run left pending rather than blanking the row (#1764)", () => {
+		const live = liveRequest({
+			url: "https://api.example.test/users/:id",
+			params: [{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" }],
+		});
+		const snapshot = {
+			...run().configSnapshot,
+			url: "https://api.example.test/users/:id",
+			params: [{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" }],
+		};
+		const seed = seedFromRun(run({ configSnapshot: snapshot } as Partial<Run>), live);
+
+		expect(applyRunToRequest(seed, live).params).toEqual([
+			{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" },
+		]);
+		expect(buildChangeset(seed, live).find((i) => i.field === "Params")).toBeUndefined();
+	});
+
 	it("shows a Protocol diff row when the run's requested protocol differs from the request's", () => {
 		// live: "auto" (fixture default); run recorded "http2".
 		const live = liveRequest();

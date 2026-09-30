@@ -179,9 +179,11 @@ std::string normalize_vars (const std::string& text) {
  * that Vayu keeps for the export to write back - nothing reads either at send
  * time. `Typed` is a header or urlencoded row's `type` other than `"text"`
  * (Postman's default, and what the exporter writes for a row with none);
- * `Query` is a query row's boolean `equals`.
+ * `Query` is a query row's boolean `equals`; `Path` is a `url.variable[]`
+ * entry's `type` whatever it says (Postman writes `"string"` or `"any"` there
+ * and has no default to leave out).
  */
-enum class RowExtras : std::uint8_t { None, Typed, Query };
+enum class RowExtras : std::uint8_t { None, Typed, Query, Path };
 
 /// `mapKeyValues(rows)`: a Postman/Insomnia row array as table rows, disabled
 /// rows and duplicates intact. A row with no truthy `key` names nothing.
@@ -205,7 +207,8 @@ json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
             entry["description"] = as_string (description);
         }
         if (const std::string* type = as_str (prop (record, "type"));
-        extras == RowExtras::Typed && type != nullptr && !type->empty () && *type != "text") {
+        type != nullptr && !type->empty () &&
+        ((extras == RowExtras::Typed && *type != "text") || extras == RowExtras::Path)) {
             entry["type"] = *type;
         }
         if (const json* equals = prop (record, "equals");
@@ -888,7 +891,6 @@ struct PostmanCounts {
     int skipped_malformed          = 0;
     int skipped_unsupported_method = 0;
     int skipped_unsupported_auth   = 0;
-    int skipped_path_variables     = 0;
     int skipped_url_without_raw    = 0;
     int skipped_variable_metadata  = 0;
     int disabled_body              = 0;
@@ -906,10 +908,6 @@ struct PostmanCounts {
     // rejoin (`joinParamsIntoUrls`) percent-encodes the literal `%` too,
     // changing the stored URL from what the source wrote (issue #1460).
     int invalid_percent_encoding = 0;
-    // `{key: {value, enabled}}` collected from every request's `url.variable[]`,
-    // merged into the root collection's variables once the walk finishes - see
-    // `substitutePathVariables`.
-    json path_variables = json::object ();
     // `client_certificates` registry candidates built from a request's own
     // `certificate` (issue #1656), one per distinct (host, port) this import
     // resolved a usable candidate for - see `pm_certificate`. Deduped by
@@ -1218,85 +1216,43 @@ std::string host_path_url (const json* url) {
     return host.empty () && !has_path ? std::string () : out;
 }
 
-/// The declared `{key, value}` row (Postman's `url.variable[]` shape) whose
-/// `key` is @p key, or `nullptr` when @p declared has none - pulled out of
-/// `substitute_path_variables` so that function's own branching stays
-/// readable.
-const json* find_declared_path_variable (const json& declared, const std::string& key) {
-    for (const json& row : declared) {
-        const json* record = as_record (&row);
-        const std::string* declared_key =
-        record == nullptr ? nullptr : as_str (prop (record, "key"));
-        if (declared_key != nullptr && *declared_key == key) {
-            return record;
-        }
+/**
+ * A request's path variables as Params rows (issue #1764): @p declared -
+ * already table rows, in the order the source lists them - each marked
+ * `in: "path"`. Only what the source declares: a `:name` the URL spells with
+ * no declared entry gets no row here, because the Params tab shows one for it
+ * without a stored row (`displayPathRows`), and a synthesised row would be
+ * exported back as a `url.variable` entry the source never had. The URL keeps
+ * its `:name` segments verbatim; composition writes each row's value into its
+ * segment at send time, so two requests on the same name keep their own
+ * values rather than sharing one variable.
+ */
+json path_variable_rows (json declared) {
+    for (json& row : declared) {
+        row["in"] = "path";
     }
-    return nullptr;
+    return declared;
 }
 
-/// `substitutePathVariables(base, variable[])`: a `:key` path segment as
-/// Vayu's `{{key}}` template - Postman's `url.variable[]`, and (via
-/// `insomnia_path_variable_rows`) Insomnia's `pathParameters[]`, both read
-/// into the same `{key, value}` row shape first. The first value seen for a
-/// key is recorded into @p path_variables so the caller can give the template
-/// something to resolve against; @p skipped_count is incremented once per URL
-/// that carried at least one substitution, which is a mapping (the value
-/// survives as a variable), not a loss - the "path_variables" tally kind
-/// reads accordingly in both formats.
-///
-/// The query string and fragment are split off first - a `:` inside a query
-/// value (a timestamp `t=12:30`, a scoped tag, a port in a redirect URL) is
-/// ordinary text, never a path-variable token - and the path is then walked
-/// one `/`-delimited segment at a time; a segment is a candidate only when it
-/// is exactly `:key` for a declared key, which gives the left boundary a
-/// substring search cannot and finds every occurrence, not just the first
-/// (`/:id/copies/:id` rewrites both). @p base carries the query string
-/// verbatim on both callers now, so a caller no longer has to split it first.
-std::string substitute_path_variables (const std::string& base,
-const json* declared,
-json& path_variables,
-int& skipped_count) {
-    if (declared == nullptr || !declared->is_array () || declared->empty ()) {
-        return base;
+/// Postman's `url.variable[]`, with a v2.0 entry that names itself by `id`
+/// alone read by that name - `Url`'s own `v.key = v.key || v.id`.
+json postman_path_variables (const json* declared) {
+    json rows = json::array ();
+    if (declared == nullptr || !declared->is_array ()) {
+        return rows;
     }
-    const size_t split = base.find_first_of ("?#");
-    const std::string path = split == std::string::npos ? base : base.substr (0, split);
-    const std::string rest =
-    split == std::string::npos ? std::string () : base.substr (split);
-
-    std::string out;
-    out.reserve (path.size ());
-    bool substituted = false;
-    size_t pos       = 0;
-    while (true) {
-        const size_t next = path.find ('/', pos);
-        const std::string segment =
-        path.substr (pos, next == std::string::npos ? std::string::npos : next - pos);
-        const json* record = segment.size () > 1 && segment.front () == ':' ?
-        find_declared_path_variable (*declared, segment.substr (1)) :
-        nullptr;
-        if (record == nullptr) {
-            out += segment;
+    for (const json& row : *declared) {
+        const json* record = as_record (&row);
+        if (record != nullptr && !truthy (prop (record, "key")) &&
+        truthy (prop (record, "id"))) {
+            json named   = *record;
+            named["key"] = *prop (record, "id");
+            rows.push_back (std::move (named));
         } else {
-            const std::string key = segment.substr (1);
-            out += "{{" + key + "}}";
-            substituted = true;
-            if (!path_variables.contains (key)) {
-                path_variables[key] =
-                json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
-                    { "enabled", true } };
-            }
+            rows.push_back (row);
         }
-        if (next == std::string::npos) {
-            break;
-        }
-        out += '/';
-        pos = next + 1;
     }
-    if (substituted) {
-        skipped_count += 1;
-    }
-    return out + rest;
+    return map_key_values (&rows, RowExtras::Path);
 }
 
 /// A Postman `url`, which is a string in v2.0 and either shape in v2.1.
@@ -1304,11 +1260,13 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     if (url != nullptr && url->is_string ()) {
         const std::string text = url->get<std::string> ();
         const size_t question  = text.find ('?');
-        if (question == std::string::npos) {
-            return { normalize_vars (text), json::array () };
-        }
-        return { normalize_vars (text.substr (0, question)),
-            query_entries (text.substr (question + 1), counts) };
+        const std::string base = normalize_vars (
+        question == std::string::npos ? text : text.substr (0, question));
+        json params = question == std::string::npos ?
+        json::array () :
+        query_entries (text.substr (question + 1), counts);
+        // A string URL has no `url.variable[]`, so it declares no path row.
+        return { base, std::move (params) };
     }
     const std::string* declared = as_str (prop (url, "raw"));
     std::string raw;
@@ -1321,8 +1279,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     const size_t question = raw.find ('?');
     const std::string base_raw =
     question == std::string::npos ? raw : raw.substr (0, question);
-    const std::string base = substitute_path_variables (base_raw,
-    prop (url, "variable"), counts.path_variables, counts.skipped_path_variables);
+    const std::string base = normalize_vars (base_raw);
     json structured = map_key_values (prop (url, "query"), RowExtras::Query);
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
@@ -1330,7 +1287,10 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     json params = (!structured.empty () || question == std::string::npos) ?
     std::move (structured) :
     query_entries (raw.substr (question + 1), counts);
-    return { normalize_vars (base), std::move (params) };
+    for (json& row : path_variable_rows (postman_path_variables (prop (url, "variable")))) {
+        params.push_back (std::move (row));
+    }
+    return { base, std::move (params) };
 }
 
 /// `pmEvents(node)`: the `event[]` entries that are objects. A `null` in that
@@ -1611,7 +1571,6 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "unsupported_method", &PostmanCounts::skipped_unsupported_method },
 { "unsupported_auth", &PostmanCounts::skipped_unsupported_auth },
 { "oauth2_dropped_field", &PostmanCounts::oauth2_dropped_field },
-{ "path_variables", &PostmanCounts::skipped_path_variables },
 { "url_without_raw", &PostmanCounts::skipped_url_without_raw },
 { "invalid_percent_encoding", &PostmanCounts::invalid_percent_encoding },
 { "disabled_body", &PostmanCounts::disabled_body },
@@ -1794,23 +1753,12 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     collections.push_back (
     pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
 
-    // Path variables are collected while walking every request, then merged
-    // once so an explicit collection variable of the same name is never
-    // overwritten by one only a request's URL implied.
-    json& root_variables = collections.front ().at ("variables");
-    for (auto& [key, value] : counts.path_variables.items ()) {
-        if (!root_variables.contains (key)) {
-            root_variables[key] = value;
-        }
-    }
-
     ImportTally tally;
     tally.add ("file_body", counts.skipped_file_body);
     tally.add ("malformed_item", counts.skipped_malformed);
     tally.add ("unsupported_method", counts.skipped_unsupported_method);
     tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
     tally.add ("oauth2_dropped_field", counts.oauth2_dropped_field);
-    tally.add ("path_variables", counts.skipped_path_variables);
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
     tally.add ("invalid_percent_encoding", counts.invalid_percent_encoding);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
@@ -1912,11 +1860,10 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
 /// things Vayu genuinely cannot store.
 struct InsomniaCounts {
     ImportOptions options;
-    int non_executable         = 0;
-    int file_body              = 0;
-    int requests               = 0;
-    int folders                = 0;
-    int skipped_path_variables = 0;
+    int non_executable = 0;
+    int file_body      = 0;
+    int requests       = 0;
+    int folders        = 0;
 };
 
 /// A row array that may be absent but must not be another type.
@@ -1961,11 +1908,13 @@ json kv_rows (const json* rows) {
     return mapped;
 }
 
-/// Insomnia's `pathParameters[]` (`{name, value}`) as the `{key, value}` rows
-/// `substitute_path_variables` reads - the same `name` -> `key` conversion
-/// `kv_row` already does for query/header rows.
-json insomnia_path_variable_rows (const json* rows) {
-    return kv_rows (rows);
+/// Insomnia's `pathParameters[]` (`{name, value}`) as table rows - the same
+/// `name` -> `key` conversion `kv_row` already does for query/header rows.
+/// Insomnia keeps them per request and writes each into its `/:name` segment
+/// at send time (`applyPathParametersToUrl`), the model a path row is.
+json insomnia_path_variables (const json* rows) {
+    const json named = kv_rows (rows);
+    return map_key_values (&named);
 }
 
 /**
@@ -2310,7 +2259,7 @@ class InsomniaTree {
         return found == by_parent_.end () ? NONE : found->second;
     }
 
-    json build_request (const json* resource, json& path_variables) {
+    json build_request (const json* resource) {
         counts_.requests += 1;
         json body = insomnia_body (prop (resource, "body"), counts_);
         const json params =
@@ -2318,7 +2267,7 @@ class InsomniaTree {
         const json headers =
         kv_rows (rows_or_throw (prop (resource, "headers"), "`headers`"));
         const json* description       = prop (resource, "description");
-        const json path_variable_rows = insomnia_path_variable_rows (
+        const json declared_path_rows = insomnia_path_variables (
         rows_or_throw (prop (resource, "pathParameters"), "`pathParameters`"));
 
         json request;
@@ -2326,10 +2275,12 @@ class InsomniaTree {
         request["description"] =
         description == nullptr || description->is_null () ? json ("") : *description;
         request["method"] = to_method (prop (resource, "method"));
-        request["url"]    = substitute_path_variables (
-        normalize_vars (as_string (prop (resource, "url"))),
-        &path_variable_rows, path_variables, counts_.skipped_path_variables);
+        const std::string url = normalize_vars (as_string (prop (resource, "url")));
+        request["url"]    = url;
         request["params"] = map_key_values (&params);
+        for (json& row : path_variable_rows (declared_path_rows)) {
+            request["params"].push_back (std::move (row));
+        }
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
         request["auth"] = insomnia_auth (prop (resource, "authentication"), counts_);
@@ -2342,21 +2293,17 @@ class InsomniaTree {
     }
 
     /** One child of a folder, by the resource type it declares. */
-    void add_child (const json* child, json& children, json& requests, json& path_variables) {
+    void add_child (const json* child, json& children, json& requests) {
         if (type_is (child, "request_group")) {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
         } else if (type_is (child, "request")) {
             const int file_bodies           = counts_.file_body;
-            const int path_variables_before = counts_.skipped_path_variables;
             const int non_executable_before = counts_.non_executable;
-            json request           = build_request (child, path_variables);
-            const std::string name = as_string (&request.at ("name"));
+            json request                    = build_request (child);
+            const std::string name          = as_string (&request.at ("name"));
             if (counts_.file_body > file_bodies) {
                 named_["file_body"].push_back (name);
-            }
-            if (counts_.skipped_path_variables > path_variables_before) {
-                named_["path_variables"].push_back (name);
             }
             if (counts_.non_executable > non_executable_before) {
                 named_["non_executable_auth"].push_back (name);
@@ -2388,11 +2335,10 @@ class InsomniaTree {
         if (!visited_.insert (id).second) {
             throw MalformedImport ("resource \"" + id + "\" appears twice in the folder tree");
         }
-        json children       = json::array ();
-        json requests       = json::array ();
-        json path_variables = json::object ();
+        json children = json::array ();
+        json requests = json::array ();
         for (const json* child : children_of (node)) {
-            add_child (child, children, requests, path_variables);
+            add_child (child, children, requests);
         }
         json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
@@ -2404,15 +2350,6 @@ class InsomniaTree {
         collection["variables"] = workspace ?
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
-        // Path variables are collected while walking this node's own requests,
-        // then merged once so an explicit environment/folder variable of the
-        // same name is never overwritten by one only a request's URL implied -
-        // the same rule `parse_postman` applies at its single root collection.
-        for (auto& [key, value] : path_variables.items ()) {
-            if (!collection["variables"].contains (key)) {
-                collection["variables"][key] = value;
-            }
-        }
         // Collections never inherit.
         collection["auth"] =
         auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
@@ -2498,7 +2435,6 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     json environments = tree.environments ();
 
     tree.tally ().add ("file_body", tree.counts ().file_body);
-    tree.tally ().add ("path_variables", tree.counts ().skipped_path_variables);
     tree.name_counted ();
 
     json meta;
@@ -3259,7 +3195,7 @@ void apply_vayu_request (const json& object, json& request, ImportTally& tally) 
     apply_piece (object, "description", tally, string_piece, set ("description"));
     apply_piece (object, "method", tally, method_piece, set ("method"));
     apply_piece (object, "url", tally, string_piece, set ("url"));
-    apply_piece (object, "params", tally, ext::rows_of, set ("params"));
+    apply_piece (object, "params", tally, ext::param_rows_of, set ("params"));
     apply_piece (object, "headers", tally, ext::rows_of, set ("headers"));
     apply_piece (object, "body", tally, ext::body_of, [&request] (json body) {
         request["body"] = with_unattached_files (std::move (body));
@@ -3779,6 +3715,10 @@ void join_params_into_urls (json& collections) {
         for (json& request : collection.at ("requests")) {
             std::vector<DraftField> rows;
             for (const json& row : request.at ("params")) {
+                // A path row is sent in its `:name` segment, never the query.
+                if (vayu::core::is_path_variable_row (row)) {
+                    continue;
+                }
                 DraftField field;
                 field.key     = row.at ("key").get<std::string> ();
                 field.value   = row.at ("value").get<std::string> ();

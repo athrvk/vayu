@@ -384,6 +384,52 @@ describe("DesignRunView - sending it again", () => {
 		const payload = executeRequest.mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
 	});
+
+	it("composes with the replay's own path rows, an empty list included (#1764)", async () => {
+		// Absent, the engine would fill `:name` segments from the live request's
+		// stored rows - not the state this replay is showing.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([]);
+	});
+
+	it("replays a path value composition left pending, not the literal `:name` (#1764)", async () => {
+		// Recorded when `:id` held a token only the pre-request script answers:
+		// the URL kept `:id` and the value rode the payload's own `params`.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const run = designRun();
+		renderView(
+			designRun({
+				configSnapshot: {
+					...run.configSnapshot,
+					url: "https://api.example.test/users/:id?page=2",
+					params: [{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" }],
+				},
+			} as Partial<Run>)
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([
+			{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" },
+		]);
+	});
 });
 
 describe("DesignRunView - pinning a design run (#1509)", () => {

@@ -41,9 +41,9 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// Merge, never replace: a disabled row is invisible in the URL by
 			// design and must survive a URL edit, and clearing the query must
 			// clear the enabled rows it used to carry (issue #1482).
-			updateField("params", mergeParamsFromUrl(request.params, trimmedUrl));
+			updateField("params", mergeParamsFromUrl(request.params, trimmedUrl, request.url));
 		},
-		[request.params, updateField]
+		[request.params, request.url, updateField]
 	);
 
 	/** Replace the request with what a curl/wget command describes. */

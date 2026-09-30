@@ -23,6 +23,7 @@
 
 #include "vayu/core/elements.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/status.hpp"
@@ -352,12 +353,57 @@ json postman_url_parts (const std::string& raw) {
 
 namespace {
 
+/**
+ * One path row as a `url.variable[]` entry (issue #1764), in the member order
+ * Postman's own export writes: `key`, `value`, then a `type` an import kept,
+ * `description`, and `disabled` for a row turned off.
+ */
+json postman_path_variable (const json& row) {
+    json out;
+    out["key"]   = text_of (row, "key");
+    out["value"] = text_of (row, "value");
+    if (const std::string type = text_of (row, "type"); !type.empty ()) {
+        out["type"] = type;
+    }
+    if (const std::string description = text_of (row, "description");
+    !description.empty ()) {
+        out["description"] = description;
+    }
+    if (!row_enabled (row)) {
+        out["disabled"] = true;
+    }
+    return out;
+}
+
+/// @p params split into the query rows and the path rows, each in order.
+std::pair<json, json> split_params (const json& params) {
+    json query = json::array ();
+    json path  = json::array ();
+    if (params.is_array ()) {
+        for (const json& row : params) {
+            (vayu::core::is_path_variable_row (row) ? path : query).push_back (row);
+        }
+    }
+    return { std::move (query), std::move (path) };
+}
+
 /// The url object with the query rows, which come from Params rather than
-/// from `raw` so a turned-off row survives.
+/// from `raw` so a turned-off row survives, and the path rows as
+/// `url.variable[]` - after everything else, where Postman writes it.
 json postman_url (const std::string& raw, const json& params, Walk& walk) {
-    json url         = postman_url_parts (raw);
-    const json query = postman_rows (params, RowShape::Plain, walk);
+    const auto [query_rows, path_rows] = split_params (params);
+    json url                           = postman_url_parts (raw);
+    const json query = postman_rows (query_rows, RowShape::Plain, walk);
+    json variable    = json::array ();
+    for (const json& row : path_rows) {
+        if (row.is_object () && !skip_unnamed (row, walk)) {
+            variable.push_back (postman_path_variable (row));
+        }
+    }
     if (query.empty ()) {
+        if (!variable.empty ()) {
+            url["variable"] = std::move (variable);
+        }
         return url;
     }
     // `query` sits after `path` and before `hash`, where Postman writes it.
@@ -370,6 +416,9 @@ json postman_url (const std::string& raw, const json& params, Walk& walk) {
     }
     if (!ordered.contains ("query")) {
         ordered["query"] = query;
+    }
+    if (!variable.empty ()) {
+        ordered["variable"] = std::move (variable);
     }
     return ordered;
 }

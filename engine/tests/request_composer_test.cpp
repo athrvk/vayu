@@ -32,6 +32,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -1344,3 +1345,218 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
 }
 
 } // namespace
+
+// --- Path variables (issue #1764) --------------------------------------------
+
+/**
+ * A Params row `in: "path"` answers the URL's `:name` segment at composition:
+ * its `{{var}}` resolved, the result percent-encoded as Postman encodes it
+ * (`/` kept, space encoded). Mutation check: drop the
+ * `substitute_compose_path_variables` call in `compose_request_core` and every
+ * expectation here that names a value fails.
+ */
+TEST_F (RequestComposerTest, SubstitutesAPathVariableFromTheStoredPathRows) {
+    seed_collection ("col", "",
+    R"({"host":{"value":"api.test","enabled":true},"who":{"value":"a b/c","enabled":true}})");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://{{host}}/users/:id/posts/:postId?x=1";
+    r.params = json::array (
+    { { { "key", "x" }, { "value", "1" }, { "enabled", true } },
+    { { "key", "id" }, { "value", "{{who}}" }, { "enabled", true }, { "in", "path" } },
+    { { "key", "postId" }, { "value", "7" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/users/a%20b/c/posts/7?x=1");
+}
+
+TEST_F (RequestComposerTest, TwoRequestsWithTheSameNameSendTheirOwnValues) {
+    seed_collection ("col", "");
+    for (const auto& [id, value] : std::vector<std::pair<std::string, std::string>>{
+         { "req_1", "1" }, { "req_2", "2" } }) {
+        auto r   = make_request (id, "col");
+        r.url    = "https://api.test/users/:id";
+        r.params = json::array (
+        { { { "key", "id" }, { "value", value }, { "enabled", true }, { "in", "path" } } })
+                   .dump ();
+        db_->save_request (r);
+    }
+    for (const char* id : { "req_1", "req_2" }) {
+        auto [status, payload] =
+        vayu::http::compose_request_core (*db_, json{ { "requestId", id } });
+        ASSERT_EQ (status, 200) << payload.dump ();
+        EXPECT_EQ (payload["url"],
+        std::string ("https://api.test/users/") + (std::string (id) == "req_1" ? "1" : "2"));
+    }
+}
+
+/// A disabled row, a missing row, an empty value and a value that resolves to
+/// nothing all leave the segment literal - Postman's `Url.getPath` writes a
+/// value only when it is a non-empty string.
+TEST_F (RequestComposerTest, LeavesAPathVariableLiteralWithoutAnEnabledNonEmptyRow) {
+    seed_collection ("col", "", R"({"blank":{"value":"","enabled":true}})");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/:off/:missing/:empty/:blank";
+    r.params = json::array (
+    { { { "key", "off" }, { "value", "x" }, { "enabled", false }, { "in", "path" } },
+    { { "key", "empty" }, { "value", "" }, { "enabled", true }, { "in", "path" } },
+    { { "key", "blank" }, { "value", "{{blank}}" }, { "enabled", true }, { "in", "path" } },
+    // A query row of the same name is not a path row.
+    { { "key", "missing" }, { "value", "q" }, { "enabled", true } } })
+               .dump ();
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/:off/:missing/:empty/:blank");
+}
+
+TEST_F (RequestComposerTest, NeverReadsAPortAQueryOrAFragmentAsAPathVariable) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "http://localhost:8080/a/:id.json?t=12:id&u=/:id#/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "9" }, { "enabled", true }, { "in", "path" } },
+    { { "key", "8080" }, { "value", "no" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    // The `.json` suffix stays, as Postman's `parsePathVariable` keeps it.
+    EXPECT_EQ (payload["url"], "http://localhost:8080/a/9.json?t=12:id&u=/:id#/:id");
+}
+
+/// The inline request's own `params` win over the stored row's (editor state
+/// may be ahead of the save); with none inline, the stored rows answer an
+/// inline URL override (MCP's `start_load_run { requestId, url }` shape).
+TEST_F (RequestComposerTest, ReadsPathRowsFromTheInlineRequestBeforeTheStoredOne) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/users/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "stored" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request",
+    { { "params",
+    json::array ({ { { "key", "id" }, { "value", "edited" },
+    { "enabled", true }, { "in", "path" } } }) } } } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/users/edited");
+
+    auto [override_status, overridden] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request", { { "url", "https://other.test/v2/users/:id" } } } });
+    ASSERT_EQ (override_status, 200) << overridden.dump ();
+    EXPECT_EQ (overridden["url"], "https://other.test/v2/users/stored");
+
+    auto [inline_status, inline_only] = vayu::http::compose_request_core (*db_,
+    json{ { "collectionId", "col" },
+    { "request",
+    { { "method", "GET" }, { "url", "https://api.test/:a/:a" },
+    { "params",
+    json::array ({ { { "key", "a" }, { "value", "first" }, { "enabled", true }, { "in", "path" } },
+    { { "key", "a" }, { "value", "last" }, { "enabled", true }, { "in", "path" } } }) } } } });
+    ASSERT_EQ (inline_status, 200) << inline_only.dump ();
+    // Every occurrence, and the last enabled duplicate answers.
+    EXPECT_EQ (inline_only["url"], "https://api.test/last/last");
+}
+
+/// An inline `params` that is not an array carries no rows, so it does not
+/// shadow the stored ones: they still answer, and the malformed member is not
+/// echoed. `[]` is an array and does shadow them (the editor removed the row).
+/// Mutation check: take the inline member whatever its type and the first
+/// expectation reads `/users/:id`.
+TEST_F (RequestComposerTest, ANonArrayInlineParamsFallsBackToTheStoredPathRows) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/users/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "stored" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    for (const json& malformed :
+    { json ("x"), json::object (), json (nullptr), json (3) }) {
+        auto [status, payload] = vayu::http::compose_request_core (*db_,
+        json{ { "requestId", "req_1" }, { "request", { { "params", malformed } } } });
+        ASSERT_EQ (status, 200) << payload.dump ();
+        EXPECT_EQ (payload["url"], "https://api.test/users/stored") << malformed.dump ();
+        EXPECT_FALSE (payload.contains ("params")) << malformed.dump ();
+    }
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" }, { "request", { { "params", json::array () } } } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/users/:id");
+}
+
+/// A request with no path rows composes byte-identically to before #1764: a
+/// literal `:x` segment is sent as written.
+TEST_F (RequestComposerTest, ARequestWithoutPathRowsKeepsItsColonSegmentLiteral) {
+    seed_collection ("col", "", R"({"x":{"value":"var","enabled":true}})");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/v1/:x/{{x}}";
+    r.params = R"([{"key":"x","value":"q","enabled":true}])";
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/v1/:x/var");
+}
+
+/// A value holding a token the composition cannot answer (a data column
+/// bound per iteration) is not written: its segment stays `:id` and the row
+/// goes out as the payload's `params`, the value resolved as far as it can
+/// be, for the pass that answers the token to encode the answer. Mutation
+/// check: write every resolved value into the URL and this reads
+/// `/users/u%20{{username}}`.
+TEST_F (RequestComposerTest, LeavesAPathValueHoldingATokenForThePassThatAnswersIt) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/users/:id";
+    r.params = json::array ({ { { "key", "id" }, { "value", "u {{username}}" },
+                            { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    db_->save_request (r);
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" }, { "dataColumns", json::array ({ "username" }) } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/users/:id");
+    EXPECT_EQ (payload["params"],
+    json::parse (R"([{"key":"id","value":"u {{username}}","in":"path"}])"));
+
+    // `/execute` and `/runs` read it back onto the request they send.
+    const auto request = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (request.is_ok ());
+    ASSERT_EQ (request.value ().path_variables.size (), 1u);
+    EXPECT_EQ (request.value ().path_variables[0].key, "id");
+    EXPECT_EQ (request.value ().path_variables[0].value, "u {{username}}");
+}
+
+/// A composition that finished every path value carries no `params`: the
+/// inline request's own rows are consumed, not echoed.
+TEST_F (RequestComposerTest, ACompositionThatFinishedItsPathCarriesNoParams) {
+    seed_collection ("col", "");
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "collectionId", "col" },
+    { "request",
+    { { "method", "GET" }, { "url", "https://api.test/:a" },
+    { "params",
+    json::array ({ { { "key", "a" }, { "value", "1" }, { "enabled", true },
+    { "in", "path" } } }) } } } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/1");
+    EXPECT_FALSE (payload.contains ("params"));
+}

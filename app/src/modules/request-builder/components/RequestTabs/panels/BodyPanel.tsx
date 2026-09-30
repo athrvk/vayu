@@ -72,9 +72,10 @@ import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { BodyMode } from "../../../types";
-import type { KeyValueItem } from "@/types";
+import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
 import { toFlatHeaders } from "../../../utils/key-value";
+import { composePathParams, substitutePathVariables } from "../../../utils/path-variables";
 import { containsVariableToken } from "@/constants/variables";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
@@ -166,12 +167,19 @@ export default function BodyPanel() {
 	 * thing that unmounts it is the builder going away, which takes
 	 * `resolveString` with it and so would miss that cache anyway.
 	 */
-	const resolvedGqlUrl = useMemo(
-		() => resolveString(request.url || "").trim(),
-		[request.url, resolveString]
-	);
+	// Path values substituted first, each resolved then encoded as compose does
+	// (#1764), so a changed `:name` value is a new schema target, the way a
+	// changed variable value is. Memoized on the URL and the path rows' text,
+	// not on `params`, so a query-row edit re-resolves nothing.
+	const gqlUrl = request.url || "";
+	const pathRowsText = JSON.stringify(composePathParams(request.params));
+	const resolvedGqlUrl = useMemo(() => {
+		const rows = JSON.parse(pathRowsText) as KeyValueEntry[];
+		return resolveString(substitutePathVariables(gqlUrl, rows, resolveString)).trim();
+	}, [gqlUrl, pathRowsText, resolveString]);
 	const gqlSchemaTarget: SchemaTarget = {
 		url: (request.url || "").trim(),
+		params: request.params,
 		resolvedUrl: resolvedGqlUrl,
 		headers: toFlatHeaders(request.headers),
 		auth: { ...request.auth },

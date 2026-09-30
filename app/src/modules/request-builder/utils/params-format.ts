@@ -14,15 +14,19 @@
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import { splitKeyValueLine, stripDisabledMarker, PARAM_SEPARATORS } from "./kv-line";
+import { queryRowsOf } from "./path-variables";
 
 /**
  * Format params array to text format for bulk edit
  * Format: "key=value" (one per line); a disabled row is prefixed `// `
  * (issue #1480), the same marker the Headers tab uses.
+ *
+ * Query rows only: the bulk editor edits the query table, and a path row
+ * (issue #1764) belongs to the URL's `:name` segments, not to a `key=value` line.
  */
 export const formatParamsToText = (params: KeyValueItem[]): string => {
 	return (
-		params
+		queryRowsOf(params)
 			.filter((p) => {
 				// Filter out empty params and system params
 				const hasContent = p.key.trim() || p.value.trim();
@@ -73,11 +77,12 @@ export const parseParamsFromText = (text: string): KeyValueItem[] => {
 
 /**
  * Whether committing `text` would change nothing about the enabled, non-system
- * `params` (issue #1480) - see `isNoOpHeadersEdit`, same rule.
+ * query `params` (issue #1480) - see `isNoOpHeadersEdit`, same rule. Path rows
+ * are not what the text describes, so they never make an edit look like one.
  */
 export const isNoOpParamsEdit = (text: string, params: KeyValueItem[]): boolean => {
 	const normalize = (list: KeyValueItem[]) =>
-		list
+		queryRowsOf(list)
 			.filter((p) => (p.key.trim() || p.value.trim()) && !p.system)
 			.map(({ key, value, enabled }) => ({ key, value, enabled }));
 	return (

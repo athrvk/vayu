@@ -69,6 +69,9 @@ std::to_array<std::string_view> ({ "auto", "http1.1", "http2" });
 constexpr auto FORM_PART_KEYS =
 std::to_array<std::string_view> ({ "type", "fileName", "contentType" });
 
+/// A Params row's optional members besides the row's own.
+constexpr auto PARAM_ROW_KEYS = std::to_array<std::string_view> ({ "in", "type" });
+
 template <size_t N>
 bool one_of (const std::array<std::string_view, N>& set, std::string_view value) {
     return std::find (set.begin (), set.end (), value) != set.end ();
@@ -302,6 +305,10 @@ Json portable_body (const Json& body) {
 
 std::optional<Json> rows_of (const Json& value) {
     return rows_with (value, std::array<std::string_view, 0>{});
+}
+
+std::optional<Json> param_rows_of (const Json& value) {
+    return rows_with (value, PARAM_ROW_KEYS);
 }
 
 std::optional<Json> body_of (const Json& value) {

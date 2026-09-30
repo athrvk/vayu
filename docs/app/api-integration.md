@@ -1126,7 +1126,15 @@ script-issued request one way and refused it the other.
 The renderer sends the **inline** compose shape (`{ request, collectionId,
 environmentId }`) rather than compose-by-id, because Send executes the *editor
 state* - possibly unsaved, or a detached History replay copy that has no saved
-row at all. `requestId` is attached to the execute payload afterwards purely to
+row at all. For the same reason the inline `request` carries the editor's
+**path rows** as `params` (issue #1764, `composePathParams` in
+`modules/request-builder/utils/path-variables.ts`): the engine fills the URL's
+`:name` segments from them. Only the path rows - the query is already in `url` -
+and always the key, `[]` for a request without any: the engine answers an
+absent `params` from the *stored* rows, which would let a row the editor
+removed fill a segment. Every member of a row is kept (a Postman import's
+`type`, `description`), only the editor `id` is dropped. All four inline sites
+send them: Send, a load test, a History replay and GraphQL introspection. `requestId` is attached to the execute payload afterwards purely to
 link the run to the saved request in History; `environmentId` scopes both
 composition and the engine's script context / variable persistence.
 `useVariableResolver()` still exists but is **preview-only** (tab titles,

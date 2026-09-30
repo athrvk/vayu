@@ -16,6 +16,7 @@
 #include <utility>
 #include <variant>
 
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/graphql_body.hpp"
 // `describe_empty_header_name` - the wording every layer that can leave a
 // header nameless shares, this one included (issue #1095).
@@ -174,6 +175,12 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
 
     visit (request.url, FieldContext::Plain);
+    // A path variable's value is joined raw and encoded (Postman's path set)
+    // when it is written into the URL (`settle_path_variables`), which is why it is a
+    // field of its own rather than text already in the URL (issue #1764).
+    for (auto& variable : request.path_variables) {
+        visit (variable.value, FieldContext::Plain);
+    }
 
     if (!request.headers.empty ()) {
         vayu::Headers rebound;
@@ -1081,6 +1088,9 @@ const IterationBinding& binding) {
         return DataBindResult{ false,
             describe_header_collision (*faults.collision, binding) };
     }
+    // A path value the row answered completely is written into its segment
+    // now; one still holding a token waits for the residual pass.
+    settle_path_variables (request, PathSettle::Answered);
     return result;
 }
 

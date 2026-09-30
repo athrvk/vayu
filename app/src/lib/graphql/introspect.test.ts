@@ -126,6 +126,8 @@ describe("introspectSchema", () => {
 			request: {
 				method: "POST",
 				url: "{{base}}/gql",
+				// Always sent (#1764): absent, the stored rows would answer.
+				params: [],
 				headers: { "X-Team": "{{team}}" },
 				auth: { mode: "inherit" },
 			},
@@ -151,6 +153,22 @@ describe("introspectSchema", () => {
 		await introspectSchema({ url: "https://api.test/gql", headers: {} });
 		const composeBody = vi.mocked(apiService.composeRequest).mock.calls[0][0];
 		expect("auth" in (composeBody.request ?? {})).toBe(false);
+	});
+
+	it("sends the target's path rows alone, for compose to fill `:name` segments", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
+		await introspectSchema({
+			url: "https://api.test/:tenant/gql",
+			params: [
+				{ key: "page", value: "1", enabled: true },
+				{ key: "tenant", value: "acme", enabled: true, in: "path" },
+			],
+			headers: {},
+		});
+		const composeBody = vi.mocked(apiService.composeRequest).mock.calls[0][0];
+		expect(composeBody.request?.params).toEqual([
+			{ key: "tenant", value: "acme", enabled: true, in: "path" },
+		]);
 	});
 
 	it("builds a GraphQLSchema from a successful introspection response", async () => {

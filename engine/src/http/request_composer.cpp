@@ -18,6 +18,7 @@
 #include <unordered_set>
 
 #include "vayu/core/elements.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
@@ -1246,6 +1247,74 @@ nlohmann::json& field) {
     }
 }
 
+/**
+ * The URL's `:name` path variables, answered by the request's `in: "path"`
+ * Params rows (issue #1764) - before the URL's own `{{var}}` pass, so a
+ * `{{baseUrl}}` holding `host:8080` or a path of its own is never read for a
+ * `:name`, which is what Postman's parse of the unresolved `raw` does too.
+ *
+ * The rows are the inline request's `params` when it carries an array (editor
+ * state, which may be ahead of the saved row; `[]` included), otherwise the
+ * stored request's. Each value is `{{var}}`-resolved once, through the same
+ * call the URL uses. A value that comes out token-free is written into its
+ * segments, encoded as Postman encodes it. A value still holding a token - a
+ * bound data column, a deferred `{{$guid}}`, a name the pre-request script may
+ * set - is not written: its segment stays `:name` and the row goes out as the
+ * payload's `params`, so the bind or the residual pass that answers the token
+ * encodes the answer (`core::settle_path_variables`). Joined into the URL
+ * now, that answer would be raw text in the path, a space or `?` and all. The
+ * payload's own `params` is replaced either way: it carries exactly the rows
+ * still waiting, and is absent when none is.
+ */
+void substitute_compose_path_variables (const VariableValues& vars,
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
+const std::optional<vayu::db::Request>& stored,
+nlohmann::json& payload) {
+    nlohmann::json rows;
+    if (const auto own = payload.find ("params"); own != payload.end ()) {
+        if (own->is_array ()) {
+            rows = std::move (*own);
+        }
+        payload.erase ("params");
+    }
+    if (!rows.is_array () && stored && !stored->params.empty ()) {
+        rows = nlohmann::json::parse (stored->params, nullptr, /*allow_exceptions=*/false);
+    }
+    const auto url = payload.find ("url");
+    if (url == payload.end () || !url->is_string () || !rows.is_array ()) {
+        return;
+    }
+    nlohmann::json written = nlohmann::json::array ();
+    nlohmann::json waiting = nlohmann::json::array ();
+    std::unordered_set<std::string> seen;
+    for (const auto& segment :
+    vayu::core::path_variable_segments (url->get<std::string> ())) {
+        if (!seen.insert (segment.name).second) {
+            continue;
+        }
+        const nlohmann::json* row =
+        vayu::core::find_path_variable_row (rows, segment.name);
+        if (row == nullptr) {
+            continue;
+        }
+        const auto value      = row->find ("value");
+        const std::string raw = value != row->end () && value->is_string () ?
+        value->get<std::string> () :
+        std::string ();
+        std::string resolved = resolve_template (raw, vars, bound_columns, dynamic);
+        const bool waits = vayu::core::holds_template_token (resolved);
+        (waits ? waiting : written)
+        .push_back ({ { "key", segment.name },
+        { "value", std::move (resolved) }, { "in", "path" } });
+    }
+    *url = vayu::core::substitute_path_variables (url->get<std::string> (),
+    written, [] (const std::string& value) { return value; });
+    if (!waiting.empty ()) {
+        payload["params"] = std::move (waiting);
+    }
+}
+
 /** The body: its content, and every string its form fields carry. */
 void resolve_compose_body (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
@@ -1423,6 +1492,7 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
 
+    substitute_compose_path_variables (vars, bound_columns, dynamic, stored, payload);
     if (auto refusal = resolve_compose_head (vars, bound_columns, dynamic, payload)) {
         return *refusal;
     }
