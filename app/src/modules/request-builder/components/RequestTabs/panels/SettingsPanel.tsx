@@ -282,8 +282,11 @@ export default function SettingsPanel() {
 					description={
 						<>
 							Path variable values, query rows and an API key in the query go out as
-							typed instead of percent-encoded, so a <code>/</code> in a value becomes
-							a path separator. A URL with a space in it is still refused.
+							typed. Without it, a path value has its space, <code>&quot;</code>,{" "}
+							<code>&lt;</code>, <code>&gt;</code>, <code>`</code>, <code>#</code>,{" "}
+							<code>?</code>, <code>{"{"}</code>, <code>{"}"}</code> and non-ASCII
+							characters percent-encoded, and a query row or API key is encoded in
+							full. A URL with a space in it is still refused.
 						</>
 					}
 				/>
