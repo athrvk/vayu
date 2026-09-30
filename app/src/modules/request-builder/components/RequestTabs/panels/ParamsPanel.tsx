@@ -109,10 +109,17 @@ export default function ParamsPanel() {
 			updateField("params", params);
 			// A request sent unencoded (issue #1765) keeps its rows as typed in
 			// the URL too, or the table would encode what the engine then sends
-			// raw.
+			// raw. The rows before this change tell an edited row from one
+			// carried over (issue #1771): only the latter may keep a pair it
+			// matches decoded.
 			updateField(
 				"url",
-				buildUrlWithParams(request.url, params, { encode: !request.disableUrlEncoding })
+				buildUrlWithParams(
+					request.url,
+					params,
+					{ encode: !request.disableUrlEncoding },
+					request.params
+				)
 			);
 		},
 		[request.url, request.params, request.disableUrlEncoding, updateField]
@@ -161,7 +168,7 @@ export default function ParamsPanel() {
 			// switching straight back cannot re-enable a disabled row (issue #1480).
 			onCommit={(text) => {
 				if (isNoOpParamsEdit(text, request.params)) return;
-				handleParamsChange(parseParamsFromText(text));
+				handleParamsChange(parseParamsFromText(text, request.params));
 			}}
 			placeholder={"page=1\nlimit=10\nsort=name"}
 			hint={

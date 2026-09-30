@@ -75,9 +75,13 @@ the engine's `encode_query_component` are pinned to one another by
 `engine/tests/fixtures/query-encoding-conformance.json`.
 
 **A Params table edit rewrites only the pairs it touches.** Each enabled row
-takes the first unused pair of the current `url` with the same key and value,
-compared as written or percent-decoded, and keeps that pair's bytes; only a row
-with no such pair is encoded. So a pair written by another rule - a row an
+takes the first unused pair of the current `url` with the same key and value
+as written, and keeps that pair's bytes; then a row carried over unchanged from
+before the edit (same id, key and value) may take a pair that percent-decodes
+to it, which is the case an older version's decoded row needs. An edited or new
+row is never matched decoded - `+` typed over `%2B` is written `+` - and a row
+with no pair is encoded. The query ends at the fragment, which is put back
+after the rebuilt query. So a pair written by another rule - a row an
 older version stored decoded (`+05:00` for `%2B05%3A00`), an Insomnia, JMeter
 or OpenAPI import's `encodeURIComponent` join, a Postman `key=` - survives an
 edit of another row. Nothing re-encodes a stored `url`: it is sent verbatim,

@@ -205,3 +205,24 @@ describe("path rows stay out of bulk edit (issue #1764)", () => {
 		expect(isNoOpParamsEdit("page=1", rows)).toBe(true);
 	});
 });
+
+/**
+ * A bulk commit keeps the id of each row a line restates, so
+ * `buildUrlWithParams` still sees it as carried over (issue #1771): an older
+ * version's decoded `+05:00` for `%2B05%3A00` keeps its bytes through an edit
+ * of another line.
+ */
+describe("a bulk commit keeps the ids of unchanged rows", () => {
+	it("reuses each previous row's id once, and gives a changed line a new one", () => {
+		// Mutation check: always calling `generateId` gives every line a new id.
+		const previous: KeyValueItem[] = [
+			{ id: "1", key: "tz", value: "+05:00", enabled: true },
+			{ id: "2", key: "a", value: "1", enabled: true },
+			{ id: "3", key: "a", value: "1", enabled: true },
+		];
+		const parsed = parseParamsFromText("tz=+05:00\na=1\na=1\na=1\nx=2", previous);
+		expect(parsed.map((p) => p.id).slice(0, 3)).toEqual(["1", "2", "3"]);
+		expect(["1", "2", "3"]).not.toContain(parsed[3].id);
+		expect(["1", "2", "3"]).not.toContain(parsed[4].id);
+	});
+});

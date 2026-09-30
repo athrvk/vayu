@@ -13,6 +13,7 @@ import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import {
 	isPathRow,
+	maskTokens,
 	pathRowsFromUrl,
 	pathRowsOf,
 	queryRowsOf,
@@ -33,15 +34,40 @@ interface RawQueryPair {
 	text: string;
 }
 
+/** A URL cut at its query: `base` before the `?`, `query` up to the `#`, `fragment` from it. */
+interface UrlQuerySplit {
+	base: string;
+	/** The query text, without its `?`; null when the URL has no `?`. */
+	query: string | null;
+	/** From the `#` on, or "" when there is none. */
+	fragment: string;
+}
+
+/**
+ * The URL cut at its fragment (the first `#`) and then its query (the first
+ * `?` before that), with a `{{variable}}` token opaque - so `{{a#b}}` is not a
+ * fragment, the same cut `pathVariableSegments` and the engine's
+ * `path_variable_segments` make. The fragment is never sent, so a pair left
+ * glued to it would never reach the server.
+ */
+function splitQuery(url: string): UrlQuerySplit {
+	const view = maskTokens(url);
+	const hash = view.indexOf("#");
+	const end = hash === -1 ? url.length : hash;
+	const fragment = url.slice(end);
+	const queryStart = view.slice(0, end).indexOf("?");
+	if (queryStart === -1) return { base: url.slice(0, end), query: null, fragment };
+	return { base: url.slice(0, queryStart), query: url.slice(queryStart + 1, end), fragment };
+}
+
 /**
  * The URL's query pairs, never decoded: split on `&`, then on the first `=`.
  * Empty pairs (`a=1&&b=2`) are dropped.
  */
 function rawQueryPairs(url: string): RawQueryPair[] {
-	const queryStart = url.indexOf("?");
-	if (queryStart === -1) return [];
-	return url
-		.slice(queryStart + 1)
+	const { query } = splitQuery(url);
+	if (query === null) return [];
+	return query
 		.split("&")
 		.filter(Boolean)
 		.map((text) => {
@@ -79,42 +105,55 @@ function writeQueryRow(row: KeyValueEntry, encode: boolean): string {
 
 /**
  * The URL that expresses exactly these params: the rows *replace* whatever
- * query the URL carried.
+ * query the URL carried. The fragment, if any, stays after the new query.
  *
  * This is the Params table's rule, and only the table's - there the rows are
  * the whole truth of the query, so deleting the last one has to clear it.
  *
- * A row the URL already carries keeps the URL's own bytes (issue #1771): each
- * enabled row takes the first unused pair with the same key and value, compared
- * as written or through `safeDecode`, and only a row with no such pair is
- * encoded. So an edit rewrites only the pairs it touches, and a pair written by
- * another rule survives it: `%2B05%3A00` held as the decoded row `+05:00` by an
- * older version (re-encoding would send a `+` a server reads as a space), an
- * Insomnia or OpenAPI import's `encodeURIComponent` join, or a Postman `key=`.
+ * A row the URL already carries keeps the URL's own bytes (issue #1771), so an
+ * edit rewrites only the pairs it touches and a pair written by another rule
+ * survives it: an Insomnia or OpenAPI import's `encodeURIComponent` join, or a
+ * Postman `key=`. Each enabled row takes the first unused pair spelled exactly
+ * as the row, and only then may a row take a pair that `safeDecode`s to it.
+ * That second match is for a row an older version stored decoded (`+05:00`
+ * held for `%2B05%3A00`; re-encoding it would send a `+` a server reads as a
+ * space), so it is open only to a row carried over unchanged from `previous`
+ * (same id, key and value). A row the user just edited or added means what it
+ * says: `+` typed over `%2B` is a `+`. With no `previous`, every row counts as
+ * carried over. A row with no pair is encoded.
  */
 export function buildUrlWithParams(
 	baseUrl: string,
 	params: readonly KeyValueEntry[],
-	{ encode = true }: UrlEncodeOptions = {}
+	{ encode = true }: UrlEncodeOptions = {},
+	previous?: readonly KeyValueItem[]
 ): string {
-	const queryStart = baseUrl.indexOf("?");
-	const base = queryStart === -1 ? baseUrl : baseUrl.slice(0, queryStart);
+	const { base, fragment } = splitQuery(baseUrl);
 	const pairs = rawQueryPairs(baseUrl);
 	const used = new Array<boolean>(pairs.length).fill(false);
-	const query = queryRowsToWrite(params)
-		.map((row) => {
-			const match = pairs.findIndex(
-				(pair, i) =>
-					!used[i] &&
-					((pair.key === row.key && pair.value === row.value) ||
-						(safeDecode(pair.key) === row.key && safeDecode(pair.value) === row.value))
-			);
-			if (match === -1) return writeQueryRow(row, encode);
-			used[match] = true;
-			return pairs[match].text;
-		})
-		.join("&");
-	return query ? `${base}?${query}` : base;
+	const rows = queryRowsToWrite(params);
+	const claim = (matches: (pair: RawQueryPair) => boolean): string | undefined => {
+		const match = pairs.findIndex((pair, i) => !used[i] && matches(pair));
+		if (match === -1) return undefined;
+		used[match] = true;
+		return pairs[match].text;
+	};
+	const carriedOver = (row: KeyValueEntry): boolean =>
+		previous === undefined ||
+		("id" in row &&
+			previous.some((p) => p.id === row.id && p.key === row.key && p.value === row.value));
+
+	const written = rows.map((row) =>
+		claim((pair) => pair.key === row.key && pair.value === row.value)
+	);
+	rows.forEach((row, i) => {
+		if (written[i] !== undefined || !carriedOver(row)) return;
+		written[i] = claim(
+			(pair) => safeDecode(pair.key) === row.key && safeDecode(pair.value) === row.value
+		);
+	});
+	const query = rows.map((row, i) => written[i] ?? writeQueryRow(row, encode)).join("&");
+	return `${query ? `${base}?${query}` : base}${fragment}`;
 }
 
 /**

@@ -55,9 +55,9 @@ export function tokenEnd(text: string, at: number): number {
 /**
  * `text` with every `{{...}}` token's characters replaced by `_`, the same
  * length, so offsets into it are offsets into `text` and a separator inside a
- * token is no longer one.
+ * token is no longer one. Shared with the query split in `url.ts`.
  */
-function maskTokens(text: string): string {
+export function maskTokens(text: string): string {
 	let out = "";
 	let copied = 0;
 	for (let at = 0; at < text.length;) {

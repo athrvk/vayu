@@ -52,12 +52,31 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
  * parameter that `buildUrlWithParams` already emits as `?page`, matched nothing
  * either, so bulk-editing lost it.
  *
+ * A line that restates a row of `previous` (same key and value) keeps that
+ * row's id, each row once. `buildUrlWithParams` reads the id to tell a row
+ * carried over from one the user edited (issue #1771), and a bulk commit edits
+ * only the lines that changed.
+ *
  * @param text - Params in text format
+ * @param previous - The rows the text was formatted from, if any
  * @returns Array of KeyValueItem
  */
-export const parseParamsFromText = (text: string): KeyValueItem[] => {
+export const parseParamsFromText = (
+	text: string,
+	previous: readonly KeyValueItem[] = []
+): KeyValueItem[] => {
 	const lines = text.split("\n").filter((line) => line.trim());
 	const params: KeyValueItem[] = [];
+	const carried = queryRowsOf(previous).filter((p) => !p.system);
+	const consumed = new Array<boolean>(carried.length).fill(false);
+	const idFor = (key: string, value: string): string => {
+		const match = carried.findIndex(
+			(p, i) => !consumed[i] && p.key === key && p.value === value
+		);
+		if (match === -1) return generateId();
+		consumed[match] = true;
+		return carried[match].id;
+	};
 
 	lines.forEach((line) => {
 		const { enabled, rest } = stripDisabledMarker(line);
@@ -65,7 +84,7 @@ export const parseParamsFromText = (text: string): KeyValueItem[] => {
 		if (!parsed) return;
 
 		params.push({
-			id: generateId(),
+			id: idFor(parsed.key, parsed.value),
 			key: parsed.key,
 			value: parsed.value,
 			enabled,

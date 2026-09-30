@@ -74,4 +74,15 @@ describe("the Params table's query encoding", () => {
 		fireEvent.change(fieldWithValue("c"), { target: { value: "c d" } });
 		expect(lastWrite("url")).toBe("https://x/?q=a%7Cb&r=c%20d");
 	});
+
+	it("writes a row edited to the decoded spelling as typed", () => {
+		// Mutation check: not passing the previous rows to `buildUrlWithParams`
+		// lets the edited `+` claim `%2B` by its decoded spelling, and the URL
+		// stays `?t=%2B`.
+		const lastWrite = renderPanel("https://x/?t=%2B", [
+			{ id: "1", key: "t", value: "%2B", enabled: true },
+		]);
+		fireEvent.change(fieldWithValue("%2B"), { target: { value: "+" } });
+		expect(lastWrite("url")).toBe("https://x/?t=+");
+	});
 });

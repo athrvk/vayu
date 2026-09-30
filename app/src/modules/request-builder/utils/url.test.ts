@@ -184,6 +184,97 @@ describe("the query as written", () => {
 });
 
 /**
+ * The fragment is never sent, so the query ends at the first `#` both ways:
+ * reading pairs and rebuilding them, with the fragment put back last.
+ */
+describe("the fragment", () => {
+	const URL = "https://x/p?a=1&b=2#frag";
+
+	it("is not part of the last pair", () => {
+		// Mutation check: reading the query to the end of the URL makes the
+		// last row `b` = `2#frag`.
+		expect(parseQueryParams(URL).map(({ key, value }) => [key, value])).toEqual([
+			["a", "1"],
+			["b", "2"],
+		]);
+	});
+
+	it("stays after the query when a row is added or rows are reordered", () => {
+		// Mutation check: keeping the fragment inside the query writes
+		// `?a=1&b=2#frag&c=3`, where `c` is never sent.
+		const rows = parseQueryParams(URL);
+		expect(buildUrlWithParams(URL, [...rows, item("c", "c", "3")])).toBe(
+			"https://x/p?a=1&b=2&c=3#frag"
+		);
+		expect(buildUrlWithParams(URL, [...rows].reverse())).toBe("https://x/p?b=2&a=1#frag");
+		expect(buildUrlWithParams(URL, [])).toBe("https://x/p#frag");
+		expect(buildUrlWithParams("https://x/p#frag", [kv("c", "3")])).toBe("https://x/p?c=3#frag");
+	});
+
+	it("is not cut inside a {{variable}} token", () => {
+		const url = "https://x/p?a={{x#y}}&b=2#frag";
+		expect(parseQueryParams(url).map(({ key, value }) => [key, value])).toEqual([
+			["a", "{{x#y}}"],
+			["b", "2"],
+		]);
+		expect(buildUrlWithParams("https://{{h?#}}/p", [kv("c", "3")])).toBe(
+			"https://{{h?#}}/p?c=3"
+		);
+	});
+});
+
+/**
+ * A pair is matched by its decoded spelling only for a row carried over
+ * unchanged, which is the row an older version stored decoded; an edited or
+ * new row is matched as written, or encoded.
+ */
+describe("matching a row to the URL's pair", () => {
+	it("writes a row edited to the decoded spelling as typed", () => {
+		// Mutation check: letting every row match decoded keeps `%2B` and `%2541`.
+		expect(
+			buildUrlWithParams("https://x/?t=%2B", [item("1", "t", "+")], {}, [
+				item("1", "t", "%2B"),
+			])
+		).toBe("https://x/?t=+");
+		expect(
+			buildUrlWithParams("https://x/?t=%2541", [item("1", "t", "%41")], {}, [
+				item("1", "t", "%2541"),
+			])
+		).toBe("https://x/?t=%41");
+	});
+
+	it("matches every row as written before any row decoded", () => {
+		// Mutation check: a single pass lets `+` claim `%2B` by decoding, and the
+		// reordered rows write `t=%2B&t=%2B`.
+		const url = "https://x/?t=%2B&t=+";
+		const before = [item("1", "t", "%2B"), item("2", "t", "+")];
+		expect(buildUrlWithParams(url, [before[1], before[0]], {}, before)).toBe(
+			"https://x/?t=+&t=%2B"
+		);
+	});
+
+	it("keeps the decoded match for a row carried over unchanged", () => {
+		const url = "https://x/?tz=%2B05%3A00&x=1";
+		const before = [item("1", "tz", "+05:00"), item("2", "x", "1")];
+		const after = [before[0], item("2", "x", "2")];
+		expect(buildUrlWithParams(url, after, {}, before)).toBe("https://x/?tz=%2B05%3A00&x=2");
+		// A new row that decodes to the same text is not carried over.
+		expect(buildUrlWithParams("https://x/?t=%2B", [item("9", "t", "+")], {}, [])).toBe(
+			"https://x/?t=+"
+		);
+	});
+
+	it("gives each pair to one row", () => {
+		// Mutation check: dropping the `used` check lets both rows claim the
+		// raw `a=1`, which writes `a=1&a=1` and loses `%31`.
+		const url = "https://x/?a=%31&a=1";
+		expect(buildUrlWithParams(url, [item("1", "a", "1"), item("2", "a", "1")])).toBe(
+			"https://x/?a=1&a=%31"
+		);
+	});
+});
+
+/**
  * Path rows (issue #1764) live in the same `params` array as the query rows,
  * and the join must never write one into the query string.
  */
