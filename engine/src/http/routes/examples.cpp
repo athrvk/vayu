@@ -27,7 +27,9 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -214,6 +216,9 @@ struct SavedFrom {
     vayu::core::PostmanExportRequest request;
     std::string status_text;
     std::optional<double> response_time_ms;
+    /// When the response came in, the clock a cookie's `Max-Age` counts
+    /// from; nothing counts it from the save.
+    std::optional<std::time_t> received_at;
 };
 
 /// @p json as the exporter's key-ordered JSON. A request body arrives parsed
@@ -342,6 +347,21 @@ RouteResult read_saved_from (const nlohmann::json& json, std::optional<SavedFrom
         }
         saved.response_time_ms = time->get<double> ();
     }
+    if (const auto received = found->find ("receivedAt");
+    received != found->end () && !received->is_null ()) {
+        if (!received->is_number () || received->get<double> () < 0) {
+            return route_error (400,
+            "Invalid 'savedFrom.receivedAt': must be a time in milliseconds "
+            "since the epoch, 0 or more");
+        }
+        // Whole seconds, held to what `time_t` holds (2^63 itself does not
+        // convert, hence `>=`).
+        const double seconds = std::floor (received->get<double> () / 1000.0);
+        constexpr auto LAST  = std::numeric_limits<std::time_t>::max ();
+        saved.received_at    = seconds >= static_cast<double> (LAST) ?
+           LAST :
+           static_cast<std::time_t> (seconds);
+    }
     out = std::move (saved);
     return {};
 }
@@ -361,7 +381,8 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
         example.headers = nlohmann::ordered_json::array ();
     }
     x.postman_response = vayu::core::postman_saved_response_text (saved.request,
-    example, saved.status_text, saved.response_time_ms, std::time (nullptr));
+    example, saved.status_text, saved.response_time_ms,
+    saved.received_at.value_or (std::time (nullptr)));
     if (!x.postman_response) {
         vayu::utils::log_warning ("http",
         "Saved example kept without its recorded request: over the size limit",
@@ -647,9 +668,11 @@ void register_request_example_routes (RouteContext& ctx) {
      * bodyTruncated (default false - true when `body` is only the first slice
      * of the response it was captured from), savedFrom (optional, #1763:
      * `{request: {method, url, params?, headers?, body?}, statusText,
-     * responseTimeMs?}` - the request as written when it was sent and the
-     * server's reason phrase, which the engine records as the example's
-     * Postman saved response; a 400 beside a non-null postmanResponse).
+     * responseTimeMs?, receivedAt?}` - the request as written when it was
+     * sent, the server's reason phrase and when the response came in (epoch
+     * ms; a cookie's Max-Age counts from it), which the engine records as the
+     * example's Postman saved response; a 400 beside a non-null
+     * postmanResponse).
      * Returns: the created example, 404 if the request does not exist, 400 on a
      * rejected field, or 409 at the cap.
      */

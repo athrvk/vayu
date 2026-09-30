@@ -546,6 +546,8 @@ TEST_F (ExamplesRouteTest, CreateRejectsAMalformedSavedFrom) {
         { with ([] (json& s) { s["statusText"]            = 200; }), "savedFrom.statusText" },
         { with ([] (json& s) { s["responseTimeMs"]        = -1; }), "savedFrom.responseTimeMs" },
         { with ([] (json& s) { s["responseTimeMs"]        = "12"; }), "savedFrom.responseTimeMs" },
+        { with ([] (json& s) { s["receivedAt"]            = -1; }), "savedFrom.receivedAt" },
+        { with ([] (json& s) { s["receivedAt"]            = "1767225600000"; }), "savedFrom.receivedAt" },
     };
     for (const auto& [saved, field] : cases) {
         auto [status, body] = routes::create_request_example_response (
@@ -563,6 +565,28 @@ TEST_F (ExamplesRouteTest, CreateRejectsAMalformedSavedFrom) {
     EXPECT_NE (both.dump ().find ("'savedFrom'"), std::string::npos) << both.dump ();
 
     EXPECT_TRUE (db_->get_request_examples ("req_1").empty ());
+}
+
+// A cookie's Max-Age counts from `receivedAt`, when the response came in,
+// not from the save; any case of a verb is the column's spelling. Mutation
+// check: ignore `receivedAt` (count from `std::time`) and the expiry reds.
+TEST_F (ExamplesRouteTest, SavedFromReceivedAtIsWhenAMaxAgeCountsFrom) {
+    json saved                 = saved_from ();
+    saved["receivedAt"]        = 1767225600500.0; // 2026-01-01T00:00:00.5Z
+    saved["request"]["method"] = "pAtCh";
+    const std::string id       = create_example ("req_1",
+          json{ { "name", "Timed" }, { "status", 200 },
+          { "headers",
+          json::array ({ json{ { "key", "Set-Cookie" },
+          { "value", "a=1; Max-Age=60" }, { "enabled", true } } }) },
+          { "savedFrom", saved } });
+    const auto stored          = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_response);
+    const auto blob = nlohmann::ordered_json::parse (*stored->postman_response);
+    EXPECT_EQ (blob["cookie"][0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (blob["originalRequest"]["method"], "PATCH");
 }
 
 // Null is "no record", like absent; a PUT ignores the key (it is create-only,

@@ -157,7 +157,10 @@ const nlohmann::ordered_json& auth);
  * so the export's check that the column still says what was recorded reads it
  * as unchanged until an edit. @p status_text is the server's reason phrase;
  * empty falls back to the status table. `cookie` lists what the enabled
- * `Set-Cookie` rows set, a `Max-Age` counted from @p received_at. Nothing when the text would be over
+ * `Set-Cookie` rows set, a `Max-Age` counted from @p received_at: when the
+ * response came in (`savedFrom.receivedAt`), or the save's own clock when the
+ * app did not say; a negative @p received_at is unknown, and a `Max-Age` is
+ * then ignored. Nothing when the text would be over
  * `MAX_POSTMAN_RESPONSE_BYTES`: the example is then kept without it and the
  * export regenerates these members, as it does for an import.
  */

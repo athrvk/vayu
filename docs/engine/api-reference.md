@@ -1766,7 +1766,9 @@ request is edited.
     "body": {"mode": "none"}            // Optional object, default {"mode":"none"}
   },
   "statusText": "Totally Fine",         // Required string; "" = the status table's
-  "responseTimeMs": 123                 // Optional number, 0 or more; absent = null
+  "responseTimeMs": 123,                // Optional number, 0 or more; absent = null
+  "receivedAt": 1767225600000           // Optional epoch ms, 0 or more: when the
+                                        // response came in; absent = the save's clock
 }
 ```
 
@@ -1776,8 +1778,12 @@ body and url as the export writes a request's, with no `auth`), `status`
 own rows), `cookie` (one entry per cookie the enabled `Set-Cookie` rows set,
 in Postman's member order: `expires`, `hostOnly`, `httpOnly`, `domain`, `path`,
 `secure`, `session`, `value`, `key`; `expires` is JavaScript's date text in
-UTC, from `Max-Age` counted from the save when there is one, else `Expires`,
-and `"Invalid Date"` with `session: true` for a cookie with neither),
+UTC, from `Max-Age` counted from `receivedAt` (the engine's clock at the save
+when absent) when there is one, else `Expires`, and `"Invalid Date"` with
+`session: true` for a cookie with neither; the attributes are read as RFC 6265
+and Postman's cookie store read them: an empty `Domain` is ignored, a leading
+`.` dropped, a `Path` not starting with `/` is `/`, and the space around `=` is
+not part of a name or value),
 `responseTime` (whole milliseconds) and `body` (`null`). When it
 would be over the 1 MiB cap (a large request body) the example is still
 created, without it, and a warning is logged; the export then regenerates
@@ -1806,8 +1812,8 @@ is not a string holding a JSON object or is over its cap. `400` naming the field
 on a `savedFrom` that is not an object, whose `request` is not an object, whose
 `method` is missing or not an HTTP method, whose `url` is not a string, whose
 `params` or `headers` is not an array, whose `body` is not an object, whose
-`statusText` is not a string or whose `responseTimeMs` is negative or not a
-number, and on a `savedFrom` beside a non-null `postmanResponse` (two writers of
+`statusText` is not a string, whose `responseTimeMs` or `receivedAt` is
+negative or not a number, and on a `savedFrom` beside a non-null `postmanResponse` (two writers of
 one column). `409` when the request
 already holds the maximum number of examples.
 
