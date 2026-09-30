@@ -17,6 +17,7 @@
 #include <ctime>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -476,6 +477,56 @@ TEST (PostmanExport, AGetThatSendsABodyTellsPostmanNotToPruneIt) {
     entry.method = "POST";
     entry.body   = ordered{ { "mode", "json" }, { "content", "{}" } };
     EXPECT_FALSE (only_item (entry).contains ("protocolProfileBehavior"));
+}
+
+// Issue #1765. With no imported object the settings are generated in one
+// fixed order that agrees with every order Postman's own exports show.
+// Mutation check: move `disableBodyPruning` back to the front and this reds.
+TEST (PostmanExport, AGeneratedProtocolProfileBehaviorIsInOneFixedOrder) {
+    PostmanExportRequest entry    = request ("r", "u");
+    entry.verify_ssl              = false;
+    entry.follow_redirects        = false;
+    entry.max_redirects           = 3;
+    entry.disable_url_encoding    = true;
+    entry.disable_cookies         = true;
+    entry.disabled_system_headers = ordered::array ({ "user-agent", "accept" });
+    entry.body = ordered{ { "mode", "json" }, { "content", "{}" } };
+    EXPECT_EQ (only_item (entry)["protocolProfileBehavior"].dump (),
+    R"({"strictSSL":false,"followRedirects":false,"maxRedirects":3,"disableUrlEncoding":true,"disableCookies":true,"disabledSystemHeaders":{"user-agent":true,"accept":true},"disableBodyPruning":true})");
+}
+
+// An imported object still agreeing with the typed settings is written back
+// as it came: explicit defaults, `{}`, a `false` entry, a key Vayu does not
+// apply, a name in another case, and the member order.
+TEST (PostmanExport, AnImportedProtocolProfileBehaviorIsWrittenBackWhileItStillAgrees) {
+    for (const char* carried :
+    { R"({"followRedirects":true,"disableUrlEncoding":false,"disableCookies":false})",
+    R"({"strictSSL":true,"disabledSystemHeaders":{}})",
+    R"({"disabledSystemHeaders":{"User-Agent":true,"connection":false},"disableBodyPruning":true})",
+    R"({"insecureHTTPParser":true,"maxRedirects":10})", R"({})" }) {
+        PostmanExportRequest entry      = request ("r", "u");
+        entry.postman_protocol_behavior = ordered::parse (carried);
+        if (std::string_view (carried).find ("User-Agent") != std::string_view::npos) {
+            entry.disabled_system_headers = ordered::array ({ "user-agent" });
+        }
+        EXPECT_EQ (only_item (entry)["protocolProfileBehavior"].dump (), carried);
+    }
+}
+
+// An edit since the import wins: a disagreeing key is overwritten in place, a
+// missing one appended, and the headers written from the stored list.
+// Mutation check: make `reconcile_flag` keep whatever the carrier holds and
+// this reds.
+TEST (PostmanExport, AnEditSinceTheImportIsWrittenOverTheImportedObject) {
+    PostmanExportRequest entry      = request ("r", "u");
+    entry.postman_protocol_behavior = ordered::parse (
+    R"({"disableCookies":true,"disabledSystemHeaders":{"accept":true},"strictSSL":"yes","tls":1})");
+    entry.disable_cookies         = false;
+    entry.disabled_system_headers = ordered::array ({ "accept", "user-agent" });
+    entry.disable_url_encoding    = true;
+    entry.verify_ssl              = false;
+    EXPECT_EQ (only_item (entry)["protocolProfileBehavior"].dump (),
+    R"({"disableCookies":false,"disabledSystemHeaders":{"accept":true,"user-agent":true},"strictSSL":false,"tls":1,"disableUrlEncoding":true})");
 }
 
 // ---------------------------------------------------------------------------

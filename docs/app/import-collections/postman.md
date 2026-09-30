@@ -100,6 +100,10 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | `item.protocolProfileBehavior.followRedirects` | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
 | `item.protocolProfileBehavior.strictSSL` | `verifySSL` | only when it is a boolean; otherwise **absent** (engine default `true`) |
+| `item.protocolProfileBehavior.disableCookies` | `disableCookies` | only when it is a boolean; otherwise **absent** (engine default `false`) - issue #1765 |
+| `item.protocolProfileBehavior.disableUrlEncoding` | `disableUrlEncoding` | only when it is a boolean; otherwise **absent** (engine default `false`) |
+| `item.protocolProfileBehavior.disabledSystemHeaders` | `disabledSystemHeaders` | the names set to `true`, lowercased, in source order, when it is an object |
+| `item.protocolProfileBehavior` | `postmanProtocolBehavior` | the whole object as JSON text in source member order, `{}` included, for the export to write back |
 | `item.response[]` | `examples` | via `pmExamples` (see [Saved responses](#saved-responses)); **absent** when the item saved none |
 | `request.certificate` | `clientCertificates[]` (top-level, not a request field) | resolved into a `client_certificates` registry entry keyed on the request's own host, applied best-effort by `POST /import/apply` after the rest of the tree commits (issue #1656) - Vayu's client certificates belong to a host, not a request. A candidate is resolved only when it would pass the same check `POST /client-certificates` runs: a readable PEM pair or PKCS#12 file, a literal (not `{{var}}`) host, and no earlier request in this import already claiming a different certificate for that (host, port). Anything else counts as `certificate` instead |
 | `request.proxy` | - | not imported - Vayu has no per-request proxy override, and none is planned: `TransportPolicy` is workspace/run-scoped (`engine/CLAUDE.md`), so this stays a permanent tally rather than a mapping (issue #1656's own recorded decision); counted as `proxy_config` |
@@ -142,18 +146,32 @@ An entry that is not an object counts toward `malformed_item`, the same treatmen
 
 ### Redirect settings
 
-Postman writes item-level `protocolProfileBehavior` exactly when the user overrides redirect or TLS handling for that request, so it is present precisely where it matters. `pmRedirects(item)` reads the three fields Vayu stores per request and the orchestrator forwards them on `POST /import/apply`.
+Postman writes item-level `protocolProfileBehavior` exactly when the user overrides redirect, TLS, cookie, header or encoding handling for that request, so it is present precisely where it matters. `pmRedirects(item)` reads the fields Vayu stores per request and the orchestrator forwards them on `POST /import/apply`.
 
-All three fields are **optional on the draft and omitted from the payload when the source did not state them** - the engine then applies its own defaults (`followRedirects: true`, `maxRedirects: 10`, `verifySSL: true`). An absent field must not look like a stated `true`: the engine follows redirects and verifies certificates by default, so dropping a source `false` silently follows the 3xx the request exists to inspect, or trusts a host the export deliberately did not.
+The three redirect and TLS fields are **optional on the draft and omitted from the payload when the source did not state them** - the engine then applies its own defaults (`followRedirects: true`, `maxRedirects: 10`, `verifySSL: true`). An absent field must not look like a stated `true`: the engine follows redirects and verifies certificates by default, so dropping a source `false` silently follows the 3xx the request exists to inspect, or trusts a host the export deliberately did not.
 
 Values of the wrong type are ignored rather than coerced (a `"false"` string would read as the user's setting while being its opposite). Collection- and folder-level `protocolProfileBehavior` is **not** read: Vayu stores these settings per request only, so there is nowhere to put it.
 
-Three other item-level settings change what Postman sends and have no
-per-request place in Vayu: `disabledSystemHeaders` (Postman's own default
-headers turned off), `disableCookies` and `disableUrlEncoding`. A request
-stating any of them is counted once as `protocol_behavior`. `disableBodyPruning`
-is not counted: Vayu always sends a body, and the export writes it for a GET or
-HEAD that has one.
+Since issue #1765 the three settings that change what Postman sends are
+stored and applied per request, the same optional-on-the-draft way:
+`disableCookies` (the cookie jar neither sends nor stores for the request),
+`disableUrlEncoding` (path values and an api-key query sent as typed; the
+query rows of such a request are joined into its URL unencoded too) and
+`disabledSystemHeaders` (Postman's names set to `true`: `user-agent`,
+`accept`, `accept-encoding` and `content-type` are refused on the wire,
+`connection`, `cache-control` and `postman-token` are headers Vayu never sends
+anyway). The whole object also rides along as `postmanProtocolBehavior`, JSON
+text rather than an object so its member order survives the apply, and the
+export writes it back.
+
+A request is counted once as `protocol_behavior` only when its object names
+something Vayu keeps for the export but does not apply: a key outside
+`followRedirects`, `maxRedirects`, `strictSSL`, `disableBodyPruning`,
+`disableCookies`, `disableUrlEncoding` and `disabledSystemHeaders` whose value
+is not Postman's default (`false`, or an empty object or array) - a TLS option,
+`insecureHTTPParser` - or `host` / `content-length` set in
+`disabledSystemHeaders`, which Vayu cannot omit without breaking the request's
+framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 
 ## URL handling
 
@@ -279,7 +297,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `invalid_percent_encoding` (a query key or value whose invalid `%` escape changes when rejoined into the URL, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `disabledSystemHeaders`, `disableCookies` or `disableUrlEncoding` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `invalid_percent_encoding` (a query key or value whose invalid `%` escape changes when rejoined into the URL, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request** whose mapped auth mode is one of `CONFIG_AUTH_TYPES` (`aws`, `digest`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`). These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is now mapped to an executable config and does **not** count.
 
@@ -374,10 +392,14 @@ export writes the edit.
   `query[]` rows themselves come back as written.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
-- **`protocolProfileBehavior`** keys other than the redirect and TLS settings
-  are not stored (the unhonoured ones are counted as `protocol_behavior`), so a
-  `disableBodyPruning` Postman wrote on a request with no GET-or-HEAD body is
-  not written back.
+- **`protocolProfileBehavior`** is written back as imported, member order and
+  every key included, while it agrees with the request's settings; a setting
+  edited in Vayu since is written over its key in place (or appended), and a
+  changed `disabledSystemHeaders` is rewritten as `{name: true}` in stored
+  order. A request with no imported object gets one generated in the order
+  `strictSSL, followRedirects, maxRedirects, disableUrlEncoding, disableCookies,
+  disabledSystemHeaders, disableBodyPruning`. `disableBodyPruning` stays as
+  imported even if the request later gains or loses a body.
 - **Empty-name rows** (a disabled header with no key, an editor's trailing
   blank row) are not imported.
 

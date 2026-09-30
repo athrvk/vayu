@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp.",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765).",
   "cases": [
     {
       "name": "postman-v21",
@@ -891,7 +891,8 @@
                       "script": "pm.test()"
                     }
                   }
-                ]
+                ],
+                "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}"
               }
             ]
           }
@@ -1058,7 +1059,8 @@
                   "script": "pm.test()"
                 }
               }
-            ]
+            ],
+            "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}"
           },
           {
             "tempId": "r3",
@@ -1117,6 +1119,194 @@
         "environments": [],
         "specs": [],
         "clientCertificates": []
+      }
+    },
+    {
+      "name": "postman-protocol-settings",
+      "document": "{\n\t\"info\": {\n\t\t\"name\": \"Protocol settings\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n\t},\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Raw and cookieless\",\n\t\t\t\"protocolProfileBehavior\": {\n\t\t\t\t\"disableUrlEncoding\": true,\n\t\t\t\t\"disableCookies\": true,\n\t\t\t\t\"disabledSystemHeaders\": {\n\t\t\t\t\t\"User-Agent\": true,\n\t\t\t\t\t\"connection\": false,\n\t\t\t\t\t\"accept\": true\n\t\t\t\t},\n\t\t\t\t\"tlsDisabledProtocols\": [\n\t\t\t\t\t\"TLSv1\"\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\"header\": [],\n\t\t\t\t\"url\": {\n\t\t\t\t\t\"raw\": \"https://api.example.com/users/:id?q=a|b\",\n\t\t\t\t\t\"protocol\": \"https\",\n\t\t\t\t\t\"host\": [\n\t\t\t\t\t\t\"api\",\n\t\t\t\t\t\t\"example\",\n\t\t\t\t\t\t\"com\"\n\t\t\t\t\t],\n\t\t\t\t\t\"path\": [\n\t\t\t\t\t\t\"users\",\n\t\t\t\t\t\t\":id\"\n\t\t\t\t\t],\n\t\t\t\t\t\"query\": [\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"key\": \"q\",\n\t\t\t\t\t\t\t\"value\": \"a|b\"\n\t\t\t\t\t\t}\n\t\t\t\t\t],\n\t\t\t\t\t\"variable\": [\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"key\": \"id\",\n\t\t\t\t\t\t\t\"value\": \"x/y\"\n\t\t\t\t\t\t}\n\t\t\t\t\t]\n\t\t\t\t}\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Explicit defaults\",\n\t\t\t\"protocolProfileBehavior\": {\n\t\t\t\t\"followRedirects\": true,\n\t\t\t\t\"disableUrlEncoding\": false,\n\t\t\t\t\"disableCookies\": false,\n\t\t\t\t\"disabledSystemHeaders\": {}\n\t\t\t},\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\"url\": \"https://api.example.com/plain?q=a|b\"\n\t\t\t}\n\t\t}\n\t]\n}",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [],
+            "description": "",
+            "name": "Protocol settings",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "disableCookies": true,
+                "disableUrlEncoding": true,
+                "disabledSystemHeaders": [
+                  "user-agent",
+                  "accept"
+                ],
+                "headers": [],
+                "method": "GET",
+                "name": "Raw and cookieless",
+                "params": [
+                  {
+                    "enabled": true,
+                    "key": "q",
+                    "value": "a|b"
+                  },
+                  {
+                    "enabled": true,
+                    "in": "path",
+                    "key": "id",
+                    "value": "x/y"
+                  }
+                ],
+                "postmanProtocolBehavior": "{\"disableUrlEncoding\":true,\"disableCookies\":true,\"disabledSystemHeaders\":{\"User-Agent\":true,\"connection\":false,\"accept\":true},\"tlsDisabledProtocols\":[\"TLSv1\"]}",
+                "url": "https://api.example.com/users/:id?q=a|b"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "disableCookies": false,
+                "disableUrlEncoding": false,
+                "disabledSystemHeaders": [],
+                "followRedirects": true,
+                "headers": [],
+                "method": "GET",
+                "name": "Explicit defaults",
+                "params": [
+                  {
+                    "enabled": true,
+                    "key": "q",
+                    "value": "a|b"
+                  }
+                ],
+                "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
+                "url": "https://api.example.com/plain?q=a%7Cb"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 0,
+          "format": "Postman Collection v2.1",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 2,
+          "skipped": [
+            {
+              "count": 1,
+              "kind": "protocol_behavior",
+              "requests": [
+                "Raw and cookieless"
+              ]
+            }
+          ],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Protocol settings",
+            "parentTempId": null,
+            "tempId": "c1",
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "requests": [
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "disableCookies": true,
+            "disableUrlEncoding": true,
+            "disabledSystemHeaders": [
+              "user-agent",
+              "accept"
+            ],
+            "headers": [],
+            "method": "GET",
+            "name": "Raw and cookieless",
+            "order": 0,
+            "params": [
+              {
+                "enabled": true,
+                "key": "q",
+                "value": "a|b"
+              },
+              {
+                "enabled": true,
+                "in": "path",
+                "key": "id",
+                "value": "x/y"
+              }
+            ],
+            "postmanProtocolBehavior": "{\"disableUrlEncoding\":true,\"disableCookies\":true,\"disabledSystemHeaders\":{\"User-Agent\":true,\"connection\":false,\"accept\":true},\"tlsDisabledProtocols\":[\"TLSv1\"]}",
+            "tempId": "r1",
+            "url": "https://api.example.com/users/:id?q=a|b"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "disableCookies": false,
+            "disableUrlEncoding": false,
+            "disabledSystemHeaders": [],
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "Explicit defaults",
+            "order": 1,
+            "params": [
+              {
+                "enabled": true,
+                "key": "q",
+                "value": "a|b"
+              }
+            ],
+            "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
+            "tempId": "r2",
+            "url": "https://api.example.com/plain?q=a%7Cb"
+          }
+        ],
+        "specs": []
       }
     },
     {

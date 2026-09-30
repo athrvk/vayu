@@ -1700,7 +1700,10 @@ TEST (PostmanImport, KeepsAnAuthBlockOnlyWhenTheExportWouldNotGiveItBack) {
     EXPECT_FALSE (grant.at ("config").contains ("accessToken"));
 }
 
-TEST (PostmanImport, CountsAProtocolBehaviourVayuDoesNotHonour) {
+// Issue #1765: the three settings Vayu now applies are stored, so only a key
+// Vayu keeps but does not apply is counted - once per request. Mutation check:
+// put `disableCookies` back into the counted set and the count reads 3.
+TEST (PostmanImport, CountsOnlyAProtocolBehaviourVayuStoresButDoesNotApply) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"Headers","protocolProfileBehavior":{"disabledSystemHeaders":{"accept":true}},
@@ -1708,13 +1711,56 @@ TEST (PostmanImport, CountsAProtocolBehaviourVayuDoesNotHonour) {
         {"name":"Pruning","protocolProfileBehavior":{"disableBodyPruning":true},
             "request":{"method":"GET","url":"https://x.com"}},
         {"name":"Cookies","protocolProfileBehavior":{"disableCookies":true,"disableUrlEncoding":true},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Host","protocolProfileBehavior":{"disabledSystemHeaders":{"host":true,"accept":true}},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Tls","protocolProfileBehavior":{"tlsDisabledProtocols":["TLSv1"],"insecureHTTPParser":true},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Defaults","protocolProfileBehavior":{"insecureHTTPParser":false,"tlsDisabledProtocols":[]},
             "request":{"method":"GET","url":"https://x.com"}}
     ]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    // Once per request; body pruning is not one - Vayu always sends the body.
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("protocol_behavior"), 2);
+}
+
+// The typed fields and the carrier, read off the draft and off the payload
+// `POST /import/apply` is sent. The carrier is JSON text in the source's
+// member order. Mutation check: drop `disableCookies` from `apply_request`'s
+// carry list and the payload assertion reds.
+TEST (PostmanImport, StoresTheProtocolSettingsAndKeepsTheWholeObject) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"All","protocolProfileBehavior":{"followRedirects":true,"disableCookies":true,
+            "disabledSystemHeaders":{"User-Agent":true,"connection":false,"accept":true},
+            "disableUrlEncoding":true},
+            "request":{"method":"GET","url":{"raw":"https://x.com/u/:id?q=a|b",
+                "protocol":"https","host":["x","com"],"path":["u",":id"],
+                "query":[{"key":"q","value":"a|b"}],
+                "variable":[{"key":"id","value":"x/y"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const auto& draft = first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (draft.at ("disableCookies"), true);
+    EXPECT_EQ (draft.at ("disableUrlEncoding"), true);
+    EXPECT_EQ (draft.at ("disabledSystemHeaders"),
+    nlohmann::ordered_json::array ({ "user-agent", "accept" }));
+    EXPECT_EQ (draft.at ("postmanProtocolBehavior"),
+    R"({"followRedirects":true,"disableCookies":true,"disabledSystemHeaders":{"User-Agent":true,"connection":false,"accept":true},"disableUrlEncoding":true})");
+    // The query row joined as typed, as the request will send it.
+    EXPECT_EQ (draft.at ("url"), "https://x.com/u/:id?q=a|b");
+
+    const nlohmann::json payload =
+    nlohmann::json::parse (vayu::core::import_apply_payload (parsed.result).dump ());
+    const auto& item = payload.at ("requests")[0];
+    EXPECT_EQ (item.at ("disableCookies"), true);
+    EXPECT_EQ (item.at ("disableUrlEncoding"), true);
+    EXPECT_EQ (item.at ("disabledSystemHeaders"),
+    nlohmann::json::array ({ "user-agent", "accept" }));
+    EXPECT_TRUE (item.at ("postmanProtocolBehavior").is_string ());
+    EXPECT_EQ (item.at ("followRedirects"), true);
 }
 
 class ImportParseRoute : public ::testing::Test {

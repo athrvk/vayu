@@ -1389,13 +1389,112 @@ bool body_has_content (const std::optional<json>& body) {
     return rows != body->end () && rows->is_array () && !rows->empty ();
 }
 
-std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
-    json out = json::object ();
-    // Postman strips a GET's body unless told not to, and sets this itself
-    // when one is given a body. Vayu sends it, so the export says so.
-    if (has_body && (request.method == "GET" || request.method == "HEAD")) {
-        out["disableBodyPruning"] = true;
+/// The stored `disabledSystemHeaders` names, in stored order.
+std::vector<std::string> stored_disabled_headers (const PostmanExportRequest& request) {
+    std::vector<std::string> names;
+    if (!request.disabled_system_headers.is_array ()) {
+        return names;
     }
+    for (const json& name : request.disabled_system_headers) {
+        if (name.is_string ()) {
+            names.push_back (vayu::utils::ascii_lower (name.get<std::string> ()));
+        }
+    }
+    return names;
+}
+
+/// Postman's `disabledSystemHeaders` object for @p names: each one `true`, in order.
+json disabled_headers_object (const std::vector<std::string>& names) {
+    json out = json::object ();
+    for (const std::string& name : names) {
+        out[name] = true;
+    }
+    return out;
+}
+
+/**
+ * Write @p state under @p key of @p out unless what is there already reads as
+ * it. "Reads as" is the importer's reading: a boolean is itself, anything else
+ * (absent included) is @p fallback - so a carried spelling the typed column
+ * still agrees with, explicit default and all, is kept byte for byte, and an
+ * edit since the import overwrites it in place (or appends it when absent).
+ */
+void reconcile_flag (json& out, const char* key, bool state, bool fallback) {
+    const auto found = out.find (key);
+    const bool read =
+    found != out.end () && found->is_boolean () ? found->get<bool> () : fallback;
+    if (read != state) {
+        out[key] = state;
+    }
+}
+
+/// The names @p headers (a `disabledSystemHeaders` object) sets to `true`,
+/// lowercased, sorted and deduplicated - the set the importer stored.
+std::vector<std::string> truthy_header_set (const json& headers) {
+    std::vector<std::string> names;
+    if (!headers.is_object ()) {
+        return names;
+    }
+    for (auto header = headers.begin (); header != headers.end (); ++header) {
+        if (header.value ().is_boolean () && header.value ().get<bool> ()) {
+            names.push_back (vayu::utils::ascii_lower (header.key ()));
+        }
+    }
+    std::ranges::sort (names);
+    names.erase (std::ranges::unique (names).begin (), names.end ());
+    return names;
+}
+
+/// The carried object with every key Vayu owns brought back in line with the
+/// typed columns - see `protocol_profile`.
+json reconciled_profile (const PostmanExportRequest& request,
+const std::vector<std::string>& disabled) {
+    json out = request.postman_protocol_behavior;
+    reconcile_flag (out, "strictSSL", request.verify_ssl, true);
+    reconcile_flag (out, "followRedirects", request.follow_redirects, true);
+    // `apply_int_field`'s reading, then its clamp: an integer, else 10.
+    const auto limit     = out.find ("maxRedirects");
+    const int read_limit = limit != out.end () && limit->is_number_integer () ?
+    static_cast<int> (std::clamp<std::int64_t> (limit->get<std::int64_t> (), 0, 100)) :
+    10;
+    if (read_limit != request.max_redirects) {
+        out["maxRedirects"] = request.max_redirects;
+    }
+    reconcile_flag (out, "disableUrlEncoding", request.disable_url_encoding, false);
+    reconcile_flag (out, "disableCookies", request.disable_cookies, false);
+    std::vector<std::string> stored_set = disabled;
+    std::ranges::sort (stored_set);
+    stored_set.erase (std::ranges::unique (stored_set).begin (), stored_set.end ());
+    const auto carried = out.find ("disabledSystemHeaders");
+    if (truthy_header_set (carried != out.end () ? *carried : json ()) != stored_set) {
+        out["disabledSystemHeaders"] = disabled_headers_object (disabled);
+    }
+    return out;
+}
+
+/**
+ * The item's `protocolProfileBehavior`, or nothing when it would say nothing.
+ *
+ * With a carried object (`requests.postman_protocol_behavior`, issue #1765)
+ * the export starts from it, so keys Vayu does not apply, explicit defaults
+ * and the source's member order all survive; each key Vayu owns is then
+ * checked against its typed column (`reconcile_flag`). `disabledSystemHeaders`
+ * compares as a set of the names set to `true`: equal keeps the object
+ * verbatim (`{}` and `false` entries included), different writes the stored
+ * list. `disableBodyPruning` and unknown keys are the carrier's.
+ *
+ * Without one the object is generated in the order
+ * `strictSSL, followRedirects, maxRedirects, disableUrlEncoding,
+ * disableCookies, disabledSystemHeaders, disableBodyPruning`, which agrees with
+ * every relative order Postman's own exports in the corpus show.
+ */
+std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
+    const std::vector<std::string> disabled = stored_disabled_headers (request);
+    if (request.postman_protocol_behavior.is_object ()) {
+        return std::make_optional (reconciled_profile (request, disabled));
+    }
+
+    json out = json::object ();
     if (!request.verify_ssl) {
         out["strictSSL"] = false;
     }
@@ -1404,6 +1503,20 @@ std::optional<json> protocol_profile (const PostmanExportRequest& request, bool 
     }
     if (request.max_redirects != 10) {
         out["maxRedirects"] = request.max_redirects;
+    }
+    if (request.disable_url_encoding) {
+        out["disableUrlEncoding"] = true;
+    }
+    if (request.disable_cookies) {
+        out["disableCookies"] = true;
+    }
+    if (!disabled.empty ()) {
+        out["disabledSystemHeaders"] = disabled_headers_object (disabled);
+    }
+    // Postman strips a GET's body unless told not to, and sets this itself
+    // when one is given a body. Vayu sends it, so the export says so.
+    if (has_body && (request.method == "GET" || request.method == "HEAD")) {
+        out["disableBodyPruning"] = true;
     }
     return out.empty () ? std::nullopt : std::make_optional (std::move (out));
 }

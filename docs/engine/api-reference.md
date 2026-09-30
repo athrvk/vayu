@@ -3507,10 +3507,24 @@ variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
 skips it, as Vayu does); saved examples are
-`response` entries with an `originalRequest` (see below); `followRedirects: false`,
-`maxRedirects` other than 10 and `verifySSL: false` are
-`protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD
-that sends a body carries `disableBodyPruning: true`.
+`response` entries with an `originalRequest` (see below).
+
+**`protocolProfileBehavior`.** A request imported with one (its
+`postmanProtocolBehavior`) is written as that object, member order, explicit
+defaults and keys Vayu does not apply included, with each key Vayu owns checked
+against the stored setting (issue #1765): `strictSSL` (`verifySSL`),
+`followRedirects`, `maxRedirects`, `disableUrlEncoding` and `disableCookies`
+keep the imported spelling while it reads as the stored value (absent or
+not the right type reading as the default) and are otherwise overwritten in
+place, or appended when absent; `disabledSystemHeaders` is kept while its
+names set to `true` are the stored set, and otherwise written as
+`{name: true}` in stored order; `disableBodyPruning` and every other key are
+the imported object's. Without one, the object is generated in the order
+`strictSSL, followRedirects, maxRedirects, disableUrlEncoding, disableCookies,
+disabledSystemHeaders, disableBodyPruning`, each only where it differs from
+Postman's default: `strictSSL: false`, `followRedirects: false`, a
+`maxRedirects` other than 10, `true` for either flag, the non-empty header
+list, and `disableBodyPruning: true` on a GET or HEAD that sends a body.
 
 **Saved examples.** An example imported from Postman carries the saved
 response it came from (`request_examples.postman_response`), and so does one

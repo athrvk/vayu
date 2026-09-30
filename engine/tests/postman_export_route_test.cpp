@@ -145,10 +145,48 @@ TEST_F (PostmanExportRouteTest, TheRoundTripFixtureComesBackByteForByte) {
     json body            = export_ok (id);
     EXPECT_EQ (without_postman_id (body["text"].get<std::string> ()), fixture);
     EXPECT_EQ (body["fileName"], "Round Trip.postman_collection.json");
-    EXPECT_EQ (body["notes"]["requestsExported"], 23);
+    EXPECT_EQ (body["notes"]["requestsExported"], 27);
     EXPECT_EQ (body["notes"]["foldersExported"], 4);
     EXPECT_EQ (body["notes"]["notCarried"], json::array ());
     EXPECT_EQ (body["notes"]["secretsOmitted"], 0);
+}
+
+/// The exported `protocolProfileBehavior` of the root item named @p name, as
+/// the text it was written as (member order is the point).
+std::string exported_protocol_behavior (const std::string& text, const std::string& name) {
+    const ordered doc = ordered::parse (text);
+    for (const ordered& item : doc.at ("item")) {
+        if (item.value ("name", "") == name) {
+            return item.contains ("protocolProfileBehavior") ?
+            item.at ("protocolProfileBehavior").dump () :
+            std::string ();
+        }
+    }
+    ADD_FAILURE () << "no exported item " << name;
+    return {};
+}
+
+// Issue #1765: an edit since the import is written over the carried
+// `protocolProfileBehavior` in place, a key the carrier did not have is
+// appended, and what Vayu does not apply stays. Mutation check: make
+// `protocol_profile` return the carrier unconditionally and this reds.
+TEST_F (PostmanExportRouteTest, AnEditedProtocolSettingIsWrittenOverTheImportedObject) {
+    const std::string id =
+    import_text (read_text (fixture_path ("postman-export-roundtrip.json")));
+    std::string request_id;
+    for (const auto& row : db_->get_requests_in_collection (id)) {
+        if (row.name == "Raw and cookieless") {
+            request_id = row.id;
+        }
+    }
+    ASSERT_FALSE (request_id.empty ());
+    auto [status, updated] = vayu::http::routes::update_request_response (*db_, request_id,
+    json{ { "disableCookies", false }, { "followRedirects", false },
+    { "disabledSystemHeaders", json::array ({ "user-agent", "postman-token", "accept" }) } });
+    ASSERT_EQ (status, 200) << updated.dump ();
+
+    EXPECT_EQ (exported_protocol_behavior (export_text (id), "Raw and cookieless"),
+    R"({"disableUrlEncoding":true,"disableCookies":false,"disabledSystemHeaders":{"user-agent":true,"postman-token":true,"accept":true},"tlsDisabledProtocols":["TLSv1"],"followRedirects":false})");
 }
 
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
@@ -598,6 +636,10 @@ json snapshot (vayu::db::Database& db, const std::string& id) {
         { "body", stored (row.body) }, { "auth", stored (row.auth) },
         { "elements", stored (row.elements) }, { "followRedirects", row.follow_redirects },
         { "maxRedirects", row.max_redirects }, { "verifySSL", row.verify_ssl },
+        { "disableCookies", row.disable_cookies },
+        { "disabledSystemHeaders", stored (row.disabled_system_headers) },
+        { "disableUrlEncoding", row.disable_url_encoding },
+        { "postmanProtocolBehavior", row.postman_protocol_behavior.value_or ("") },
         { "order", row.order }, { "examples", examples } });
     }
     out["requests"] = requests;

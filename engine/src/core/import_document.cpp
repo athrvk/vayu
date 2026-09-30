@@ -896,8 +896,8 @@ struct PostmanCounts {
     int disabled_body              = 0;
     int skipped_certificate        = 0;
     int skipped_proxy              = 0;
-    // An item-level `protocolProfileBehavior` setting Vayu neither stores nor
-    // honours - see `pm_redirects`.
+    // An item-level `protocolProfileBehavior` setting Vayu stores for the
+    // export but does not apply - see `names_unapplied_protocol_behavior`.
     int skipped_protocol_behavior = 0;
     // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
@@ -1351,6 +1351,47 @@ void set_event_elements (json& item, const std::vector<const json*>& events) {
 }
 
 /**
+ * Whether a `protocolProfileBehavior` names something Vayu stores but does not
+ * apply (issue #1765): a key outside the set the engine honours, with a value
+ * that is not Postman's default, or a `disabledSystemHeaders` entry for a
+ * header whose removal would break HTTP/1.1 framing (`host`,
+ * `content-length`). Counted once per request as `protocol_behavior`.
+ */
+bool names_unapplied_protocol_behavior (const json& behavior) {
+    for (auto member = behavior.begin (); member != behavior.end (); ++member) {
+        const std::string& key = member.key ();
+        const json& value      = member.value ();
+        if (key == "disabledSystemHeaders") {
+            if (!value.is_object ()) {
+                continue;
+            }
+            for (auto header = value.begin (); header != value.end (); ++header) {
+                const std::string name = vayu::utils::ascii_lower (header.key ());
+                if ((name == "host" || name == "content-length") &&
+                header.value ().is_boolean () && header.value ().get<bool> ()) {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if (key == "followRedirects" || key == "maxRedirects" ||
+        key == "strictSSL" || key == "disableBodyPruning" ||
+        key == "disableCookies" || key == "disableUrlEncoding") {
+            continue;
+        }
+        // Postman's default for every boolean it defines is `false`, and an
+        // empty object or array states nothing.
+        const bool is_default = value.is_null () ||
+        (value.is_boolean () && !value.get<bool> ()) ||
+        ((value.is_object () || value.is_array ()) && value.empty ());
+        if (!is_default) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * `pmRedirects(item)`: the item-level `protocolProfileBehavior`.
  *
  * Postman writes it exactly when the user overrides redirect handling, and the
@@ -1359,24 +1400,20 @@ void set_event_elements (json& item, const std::vector<const json*>& events) {
  * values are read: a coerced `"false"` would read as the user's setting while
  * being the opposite of it. `strictSSL` follows the same rule onto
  * `verifySSL`, which likewise defaults to `true`.
+ *
+ * Issue #1765 adds the three settings Vayu now applies per request -
+ * `disableCookies`, `disableUrlEncoding` and `disabledSystemHeaders` (the
+ * names set to `true`, lowercased, in source order) - and keeps the whole
+ * object as `postmanProtocolBehavior`, JSON text in source member order, for
+ * the export to write back.
  */
 void pm_redirects (const json* item, json& request, int& skipped_protocol_behavior) {
     const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
     if (behavior == nullptr) {
         return;
     }
-    // Settings that change what Postman sends and that Vayu has no per-request
-    // place for: its own default headers turned off, the cookie jar ignored,
-    // the URL sent unencoded. Counted once per request that states any
-    // (`disableBodyPruning` is not among them: Vayu always sends a body).
-    for (const char* unhonoured :
-    { "disabledSystemHeaders", "disableCookies", "disableUrlEncoding" }) {
-        if (const json* value = prop (behavior, unhonoured); value != nullptr &&
-        ((value->is_boolean () && value->get<bool> ()) ||
-        (value->is_object () && !value->empty ()))) {
-            skipped_protocol_behavior += 1;
-            break;
-        }
+    if (names_unapplied_protocol_behavior (*behavior)) {
+        skipped_protocol_behavior += 1;
     }
     if (const json* follow = prop (behavior, "followRedirects");
     follow != nullptr && follow->is_boolean ()) {
@@ -1389,6 +1426,35 @@ void pm_redirects (const json* item, json& request, int& skipped_protocol_behavi
     if (const json* strict = prop (behavior, "strictSSL");
     strict != nullptr && strict->is_boolean ()) {
         request["verifySSL"] = strict->get<bool> ();
+    }
+    for (const char* flag : { "disableCookies", "disableUrlEncoding" }) {
+        if (const json* value = prop (behavior, flag);
+        value != nullptr && value->is_boolean ()) {
+            request[flag] = value->get<bool> ();
+        }
+    }
+    if (const json* headers = prop (behavior, "disabledSystemHeaders");
+    headers != nullptr && headers->is_object ()) {
+        json names = json::array ();
+        for (auto header = headers->begin (); header != headers->end (); ++header) {
+            if (!header.value ().is_boolean () || !header.value ().get<bool> ()) {
+                continue;
+            }
+            std::string name = vayu::utils::ascii_lower (header.key ());
+            if (std::find (names.begin (), names.end (), name) == names.end ()) {
+                names.push_back (std::move (name));
+            }
+        }
+        request["disabledSystemHeaders"] = std::move (names);
+    }
+    // Text, not an object, on the `postmanResponse` precedent: an object would
+    // lose its member order the moment it crossed the engine's JSON reader
+    // between the parse and the apply.
+    // Over the field cap it is dropped rather than failing the whole apply;
+    // the export then regenerates what the typed columns say.
+    std::string carrier = behavior->dump (-1, ' ', false, json::error_handler_t::replace);
+    if (carrier.size () <= vayu::core::constants::json::MAX_FIELD_SIZE) {
+        request["postmanProtocolBehavior"] = std::move (carrier);
     }
 }
 
@@ -3714,7 +3780,13 @@ void join_params_into_urls (json& collections) {
                 field.enabled = row.at ("enabled").get<bool> ();
                 rows.push_back (std::move (field));
             }
-            request["url"] = append_params (request.at ("url").get<std::string> (), rows);
+            // A request whose item says `disableUrlEncoding` joins its rows as
+            // written (issue #1765), as the app's Params table does for it.
+            const json* raw = prop (&request, "disableUrlEncoding");
+            const bool as_typed =
+            raw != nullptr && raw->is_boolean () && raw->get<bool> ();
+            request["url"] =
+            append_params (request.at ("url").get<std::string> (), rows, !as_typed);
         }
         join_params_into_urls (collection.at ("children"));
     }
@@ -3762,9 +3834,10 @@ int order) {
     item["body"]             = draft.at ("body");
     item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
     item["auth"] = draft.at ("auth");
-    for (const char* optional : { "followRedirects", "maxRedirects",
-         "verifySSL", "httpVersion", "stream", "examples", "specOperation",
-         "elements", "mockResponseMode", "mockExampleIndex" }) {
+    for (const char* optional : { "followRedirects", "maxRedirects", "verifySSL",
+         "httpVersion", "stream", "disableCookies", "disabledSystemHeaders",
+         "disableUrlEncoding", "postmanProtocolBehavior", "examples",
+         "specOperation", "elements", "mockResponseMode", "mockExampleIndex" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;

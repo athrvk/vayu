@@ -61,20 +61,30 @@ ordered stored_postman_response (const std::optional<std::string>& blob) {
 vayu::core::PostmanExportRequest
 read_request (vayu::db::Database& db, const vayu::db::Request& row) {
     vayu::core::PostmanExportRequest request;
-    request.name               = row.name;
-    request.description        = row.description;
-    request.method             = vayu::to_string (row.method);
-    request.url                = row.url;
-    request.params             = column (row.params, ordered::array ());
-    request.headers            = column (row.headers, ordered::array ());
-    request.body               = column (row.body, ordered::object ());
-    request.auth               = column (row.auth, ordered::object ());
-    request.elements           = column (row.elements, ordered::array ());
-    request.follow_redirects   = row.follow_redirects;
-    request.max_redirects      = row.max_redirects;
-    request.http_version       = row.http_version;
-    request.verify_ssl         = row.verify_ssl;
-    request.stream             = row.stream;
+    request.name             = row.name;
+    request.description      = row.description;
+    request.method           = vayu::to_string (row.method);
+    request.url              = row.url;
+    request.params           = column (row.params, ordered::array ());
+    request.headers          = column (row.headers, ordered::array ());
+    request.body             = column (row.body, ordered::object ());
+    request.auth             = column (row.auth, ordered::object ());
+    request.elements         = column (row.elements, ordered::array ());
+    request.follow_redirects = row.follow_redirects;
+    request.max_redirects    = row.max_redirects;
+    request.http_version     = row.http_version;
+    request.verify_ssl       = row.verify_ssl;
+    request.stream           = row.stream;
+    request.disable_cookies  = row.disable_cookies;
+    request.disabled_system_headers =
+    column (row.disabled_system_headers, ordered::array ());
+    request.disable_url_encoding = row.disable_url_encoding;
+    // `{}` is kept, unlike a saved response's: an item that said
+    // `protocolProfileBehavior: {}` is written back saying it.
+    if (row.postman_protocol_behavior) {
+        request.postman_protocol_behavior =
+        column (*row.postman_protocol_behavior, ordered::object ());
+    }
     request.has_spec_operation = row.spec_operation.has_value ();
     request.mock_response_mode = row.mock_response_mode;
     for (const auto& example : db.get_request_examples (row.id)) {
