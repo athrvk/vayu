@@ -1606,9 +1606,9 @@ TEST_F (RequestComposerTest, EmitsTheStoredProtocolSettingsAndLetsAnInlineValueW
 }
 
 /**
- * `disableUrlEncoding` writes a path value as typed, so `a|b/c` is two
- * segments exactly as Postman sends it; the inline flag decides, stored or
- * not. Mutation check: pass `true` for `encode` in
+ * `disableUrlEncoding` writes a path value as typed, skipping Postman's
+ * path encode set (`a"b/c` keeps its `"`, where the default writes `%22`);
+ * the inline flag decides, stored or not. Mutation check: pass `true` for `encode` in
  * `substitute_compose_path_variables` and the raw expectations red.
  */
 TEST_F (RequestComposerTest, APathValueIsWrittenAsTypedWhenUrlEncodingIsOff) {
@@ -1616,7 +1616,7 @@ TEST_F (RequestComposerTest, APathValueIsWrittenAsTypedWhenUrlEncodingIsOff) {
     auto r   = make_request ("req_1", "col");
     r.url    = "https://api.test/u/:id";
     r.params = json::array (
-    { { { "key", "id" }, { "value", "a|b/c" }, { "enabled", true }, { "in", "path" } } })
+    { { { "key", "id" }, { "value", "a\"b/c" }, { "enabled", true }, { "in", "path" } } })
                .dump ();
     r.disable_url_encoding = true;
     db_->save_request (r);
@@ -1624,10 +1624,10 @@ TEST_F (RequestComposerTest, APathValueIsWrittenAsTypedWhenUrlEncodingIsOff) {
     auto [status, payload] =
     vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["url"], "https://api.test/u/a|b/c");
+    EXPECT_EQ (payload["url"], "https://api.test/u/a\"b/c");
 
     auto [inline_status, encoded] = vayu::http::compose_request_core (*db_,
     json{ { "requestId", "req_1" }, { "request", { { "disableUrlEncoding", false } } } });
     ASSERT_EQ (inline_status, 200) << encoded.dump ();
-    EXPECT_EQ (encoded["url"], "https://api.test/u/a%7Cb%2Fc");
+    EXPECT_EQ (encoded["url"], "https://api.test/u/a%22b/c");
 }

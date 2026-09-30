@@ -1440,7 +1440,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   nothing on the wire.
 - `disableUrlEncoding` writes a path variable's value and an api-key (or
   OAuth 2.0 query-placed) credential into the URL as typed rather than
-  percent-encoded; `a/b` as a path value is two segments, as Postman sends it.
+  percent-encoded: a path value skips Postman's path encode set entirely
+  (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
+  `toNodeUrl (url, disableEncoding)` sends it.
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the

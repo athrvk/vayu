@@ -149,16 +149,17 @@ TEST (SettlePathVariables, WritesAnAnsweredValueAsOneSegmentAndLeavesATokenWaiti
 }
 
 // Issue #1765: a request with `disableUrlEncoding` settles its waiting values
-// as typed - the bind and residual passes on every driver go through here.
-// Mutation check: pass `true` for `encode` in `settle_path_variables` and this
-// reds.
+// as typed, with none of Postman's path encode set (`"` stays, where the
+// default writes `%22`) - the bind and residual passes on every driver go
+// through here. Mutation check: pass `true` for `encode` in
+// `settle_path_variables` and this reds.
 TEST (SettlePathVariables, WritesAValueAsTypedWhenUrlEncodingIsOff) {
     vayu::Request request;
     request.url                  = "https://h/u/:id";
     request.disable_url_encoding = true;
-    request.path_variables       = { { "id", "a|b/c" } };
+    request.path_variables       = { { "id", "a\"b/c" } };
     vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
-    EXPECT_EQ (request.url, "https://h/u/a|b/c");
+    EXPECT_EQ (request.url, "https://h/u/a\"b/c");
 }
 
 TEST (PendingPathVariablesOf, KeepsTheAnsweringPathRowOfEachKey) {

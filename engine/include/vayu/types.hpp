@@ -357,9 +357,11 @@ struct Request {
      *        parameter as typed, not percent-encoded (issue #1765, Postman's
      *        `disableUrlEncoding`).
      *
-     * With it set, `a/b` as a path value is two segments, exactly as Postman
-     * sends it. libcurl's own URL handling is untouched: a raw space is still
-     * refused and dot-segments are still normalised.
+     * With it set, a path value skips Postman's path encode set entirely
+     * (`a"b` goes out as `a"b`, not `a%22b`), exactly as Postman's
+     * `toNodeUrl (url, disableEncoding)` sends it. libcurl's own URL handling
+     * is untouched: a raw space is still refused and dot-segments are still
+     * normalised.
      */
     bool disable_url_encoding = false;
 

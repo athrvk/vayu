@@ -271,7 +271,7 @@ TEST_F (LoadStrategyTest, FastPathWithAnUnresolvedTokenCountsAndWarnsWithoutRefu
 // once, and with `disableUrlEncoding` it goes on the wire as typed. Read off
 // the server's own record of the target. Mutation check: make
 // `settle_path_variables` ignore the flag and the target reads
-// `/echo/u/a%7Cb%2Fc`.
+// `/echo/u/a%22b/c`.
 TEST_F (LoadStrategyTest, TheFastPathSendsAPathValueAsTypedWhenUrlEncodingIsOff) {
     vayu::tests::EchoServer echo;
     nlohmann::json config = {
@@ -290,7 +290,7 @@ TEST_F (LoadStrategyTest, TheFastPathSendsAPathValueAsTypedWhenUrlEncodingIsOff)
     request.url                  = echo.url () + "/u/:id";
     request.timeout_ms           = 30000;
     request.disable_url_encoding = true;
-    request.path_variables       = { { "id", "a|b/c" } };
+    request.path_variables       = { { "id", "a\"b/c" } };
 
     vayu::db::Database db (TEST_DB_PATH);
     auto strategy = vayu::core::LoadStrategy::create (config);
@@ -298,7 +298,7 @@ TEST_F (LoadStrategyTest, TheFastPathSendsAPathValueAsTypedWhenUrlEncodingIsOff)
     context->event_loop->stop (false);
 
     ASSERT_EQ (context->requests_sent.load (), 1u);
-    EXPECT_EQ (echo.target (), "/echo/u/a|b/c");
+    EXPECT_EQ (echo.target (), "/echo/u/a\"b/c");
 }
 
 // The companion shapes: `load_unresolved_tokens` left empty (a request
