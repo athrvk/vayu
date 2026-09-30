@@ -51,5 +51,6 @@ export function templatedRequest(
 		stream: request.stream,
 		verifySSL: request.verifySSL,
 		followRedirects: request.followRedirects,
+		disableUrlEncoding: request.disableUrlEncoding,
 	};
 }

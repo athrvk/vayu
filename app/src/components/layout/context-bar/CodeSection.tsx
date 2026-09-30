@@ -230,11 +230,13 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 					 * The jar is applied by libcurl at transfer time, so it is not in
 					 * the composed payload and cannot be in the snippet. Saying so is
 					 * the difference between a snippet that is incomplete and one that
-					 * is wrong.
+					 * is wrong - and a request that skips the jar (#1765) sends
+					 * exactly what the snippet shows, so it says that instead.
 					 */}
 					<p className="text-label text-muted-foreground m-0">
-						Cookies from the jar are attached when the request is sent and are not part
-						of this snippet.
+						{request.disableCookies
+							? "The cookie jar is off for this request, so Vayu attaches no cookies beyond the headers shown."
+							: "Cookies from the jar are attached when the request is sent and are not part of this snippet."}
 					</p>
 				</>
 			)}

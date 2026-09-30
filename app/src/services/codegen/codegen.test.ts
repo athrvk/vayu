@@ -1081,4 +1081,16 @@ describe("path variables", () => {
 		const { code } = generateCurl({ ...GET, url: "https://x/:id" });
 		expect(code).toContain("'https://x/:id'");
 	});
+	it("substitutes raw, and appends an API key raw, under disableUrlEncoding (#1765)", () => {
+		// The engine's own substitution and `append_query_param` skip encoding
+		// for such a request, so a snippet that encoded would send another URL.
+		const { code } = generateCurl({
+			...GET,
+			url: "https://x/u/:id",
+			params: [{ key: "id", value: "a|b/c", enabled: true, in: "path" }],
+			auth: { mode: "apikey", key: "k", value: "p|q", in: "query" },
+			disableUrlEncoding: true,
+		});
+		expect(code).toContain("'https://x/u/a|b/c?k=p|q'");
+	});
 });

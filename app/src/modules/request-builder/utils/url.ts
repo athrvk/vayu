@@ -20,6 +20,11 @@ import {
 	syncPathRows,
 } from "./path-variables";
 
+/** Whether a query built from rows percent-encodes them - see `toQueryString`. */
+export interface UrlEncodeOptions {
+	encode?: boolean;
+}
+
 /**
  * Render the enabled, keyed rows as a query string, without a leading `?`.
  *
@@ -31,13 +36,21 @@ import {
  *
  * A path row (`in: "path"`, issue #1764) is never part of the query: its value
  * goes into a `:name` segment, which the URL already carries.
+ *
+ * `encode: false` is a request's `disableUrlEncoding` (issue #1765): every row
+ * is written as typed, so `q=a|b` stays `a|b` in the URL the engine sends.
  */
-function toQueryString(params: readonly KeyValueEntry[]): string {
+function toQueryString(
+	params: readonly KeyValueEntry[],
+	{ encode = true }: UrlEncodeOptions = {}
+): string {
+	const enc = (text: string) =>
+		!encode || containsVariableToken(text) ? text : encodeURIComponent(text);
 	return params
 		.filter((p) => p.enabled && p.key.trim() && !isPathRow(p))
 		.map((p) => {
-			const key = containsVariableToken(p.key) ? p.key : encodeURIComponent(p.key);
-			const value = containsVariableToken(p.value) ? p.value : encodeURIComponent(p.value);
+			const key = enc(p.key);
+			const value = enc(p.value);
 			return p.value ? `${key}=${value}` : key;
 		})
 		.join("&");
@@ -52,10 +65,14 @@ function toQueryString(params: readonly KeyValueEntry[]): string {
  * importer must not use this: a source URL can carry a query the source did not
  * also list as a param, and replacing would drop it. See `appendParamsToUrl`.
  */
-export function buildUrlWithParams(baseUrl: string, params: readonly KeyValueEntry[]): string {
+export function buildUrlWithParams(
+	baseUrl: string,
+	params: readonly KeyValueEntry[],
+	options: UrlEncodeOptions = {}
+): string {
 	const queryStart = baseUrl.indexOf("?");
 	const base = queryStart === -1 ? baseUrl : baseUrl.slice(0, queryStart);
-	const query = toQueryString(params);
+	const query = toQueryString(params, options);
 	return query ? `${base}?${query}` : base;
 }
 

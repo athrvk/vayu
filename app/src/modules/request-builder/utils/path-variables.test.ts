@@ -252,6 +252,19 @@ describe("substitutePathVariables", () => {
 		);
 	});
 
+	it("writes the value as typed under disableUrlEncoding, so a / is structure (#1765)", () => {
+		// The engine's raw substitution: `a|b/c` becomes two segments, as
+		// Postman sends it, where the encoded form is one.
+		expect(
+			substitutePathVariables("https://x/u/:id?q=1", [path("id", "a|b/c")], undefined, {
+				encode: false,
+			})
+		).toBe("https://x/u/a|b/c?q=1");
+		expect(substitutePathVariables("https://x/u/:id", [path("id", "a|b/c")])).toBe(
+			"https://x/u/a%7Cb%2Fc"
+		);
+	});
+
 	it("leaves the segment literal for an empty value or a disabled row", () => {
 		expect(substitutePathVariables("https://x/:id", [path("id", "")])).toBe("https://x/:id");
 		expect(substitutePathVariables("https://x/:id", [path("id", "1", false)])).toBe(

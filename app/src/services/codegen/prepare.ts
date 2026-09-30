@@ -102,9 +102,14 @@ function maskerFor(secrets: string[] | undefined, mask: boolean | undefined) {
 	return { apply, wasUsed: () => used };
 }
 
-/** Append a query parameter to a URL that may or may not already have some. */
-function appendQueryParam(url: string, key: string, value: string): string {
-	const encoded = `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+/**
+ * Append a query parameter to a URL that may or may not already have some -
+ * encoded unless the request sends its URL as written (issue #1765), as the
+ * engine's `append_query_param` does.
+ */
+function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
+	const enc = encode ? encodeURIComponent : (text: string) => text;
+	const encoded = `${enc(key)}=${enc(value)}`;
 	// Split the fragment off first: a parameter appended after `#` lands in the
 	// fragment and is never sent.
 	const hash = url.indexOf("#");
@@ -225,7 +230,11 @@ export function prepareRequest(
 
 	// Path variables first, as the engine composes them (issue #1764), so a
 	// query-located API key appended below lands after the substituted path.
-	let url = substitutePathVariables(request.url ?? "", request.params ?? []);
+	// Raw under `disableUrlEncoding` (issue #1765), as the engine substitutes.
+	const encode = request.disableUrlEncoding !== true;
+	let url = substitutePathVariables(request.url ?? "", request.params ?? [], undefined, {
+		encode,
+	});
 	const headers: Array<[string, string]> = Object.entries(request.headers ?? {});
 	let basicAuth: { username: string; password: string } | null = null;
 
@@ -249,7 +258,7 @@ export function prepareRequest(
 			const key = asString(auth!.key);
 			const value = asString(auth!.value);
 			if (key) {
-				if (asString(auth!.in) === "query") url = appendQueryParam(url, key, value);
+				if (asString(auth!.in) === "query") url = appendQueryParam(url, key, value, encode);
 				else headers.push([key, value]);
 			}
 			break;

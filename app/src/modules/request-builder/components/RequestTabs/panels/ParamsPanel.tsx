@@ -62,7 +62,8 @@ const stableResolvedUrl = createStableResolve();
 /*
  * The cache's resolver for the "Sends" line: its input is the URL and the path
  * rows as one JSON text, and it substitutes each value resolved then encoded,
- * as compose does (#1764), before resolving the URL itself. One wrapper per
+ * as compose does (#1764) - or raw under `disableUrlEncoding` (#1765) - before
+ * resolving the URL itself. One wrapper per
  * `resolveString`, so the cache's identity check still means what it says.
  */
 const sendsResolvers = new WeakMap<(input: string) => string, (input: string) => string>();
@@ -70,8 +71,12 @@ function sendsResolver(resolve: (input: string) => string): (input: string) => s
 	let wrapped = sendsResolvers.get(resolve);
 	if (!wrapped) {
 		wrapped = (input) => {
-			const { url, rows } = JSON.parse(input) as { url: string; rows: KeyValueEntry[] };
-			return resolve(substitutePathVariables(url, rows, resolve));
+			const { url, rows, encode } = JSON.parse(input) as {
+				url: string;
+				rows: KeyValueEntry[];
+				encode: boolean;
+			};
+			return resolve(substitutePathVariables(url, rows, resolve, { encode }));
 		};
 		sendsResolvers.set(resolve, wrapped);
 	}
@@ -102,9 +107,15 @@ export default function ParamsPanel() {
 			const params = [...queryParams, ...pathRowsOf(request.params)];
 
 			updateField("params", params);
-			updateField("url", buildUrlWithParams(request.url, params));
+			// A request sent unencoded (issue #1765) keeps its rows as typed in
+			// the URL too, or the table would encode what the engine then sends
+			// raw.
+			updateField(
+				"url",
+				buildUrlWithParams(request.url, params, { encode: !request.disableUrlEncoding })
+			);
 		},
-		[request.url, request.params, updateField]
+		[request.url, request.params, request.disableUrlEncoding, updateField]
 	);
 
 	// Values only: the URL does not change, because a path row's value goes into
@@ -131,7 +142,11 @@ export default function ParamsPanel() {
 	// own `{{}}` pass, so a `{{baseUrl}}` holding a `:` is never read for one.
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		JSON.stringify({ url: request.url, rows: composePathParams(pathParams) }),
+		JSON.stringify({
+			url: request.url,
+			rows: composePathParams(pathParams),
+			encode: !request.disableUrlEncoding,
+		}),
 		sendsResolver(resolveString)
 	);
 	const displayParams = queryRowsOf(request.params).filter((param) => !param.system);

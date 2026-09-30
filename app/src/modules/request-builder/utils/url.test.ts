@@ -70,6 +70,15 @@ describe("buildUrlWithParams", () => {
 			"https://x/y?q=a%20b%26c&id={{userId}}"
 		);
 	});
+
+	it("writes rows as typed for a request sent without encoding (#1765)", () => {
+		// The engine sends the URL's query as written under
+		// `disableUrlEncoding`, so the table must not encode what then goes out
+		// raw - `a|b` stays `a|b`.
+		expect(
+			buildUrlWithParams("https://x/y", [kv("q", "a|b"), kv("k[]", "1")], { encode: false })
+		).toBe("https://x/y?q=a|b&k[]=1");
+	});
 });
 
 describe("appendParamsToUrl", () => {
