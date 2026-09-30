@@ -62,8 +62,10 @@ longer carries (`mergeParamsFromUrl`, issue #1482).
 row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`
 without the colon), and never reaches the query: the query builders skip it,
 and at compose time the engine puts the value of the last enabled row with
-that key into its segment, `{{variable}}`-resolved and then percent-encoded; an
-empty value or no enabled row leaves `:name` literal. An inline
+that key into its segment, `{{variable}}`-resolved and then percent-encoded
+with Postman's path encode set (space, `"`, `<`, `>`, `` ` ``, `#`, `?`, `{`,
+`}`, controls and non-ASCII; a `/` in a value makes more segments, as it does
+in Postman); an empty value or no enabled row leaves `:name` literal. An inline
 `POST /compose` always carries the editor's path rows as `request.params`
 (`[]` when there are none), since the editor may be ahead of the saved row and
 an absent key falls back to the stored rows. A row keeps every member it

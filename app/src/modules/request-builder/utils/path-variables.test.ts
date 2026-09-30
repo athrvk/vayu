@@ -246,9 +246,15 @@ describe("substitutePathVariables", () => {
 		);
 	});
 
-	it("percent-encodes a value as one segment, beyond encodeURIComponent", () => {
+	it("percent-encodes a value with Postman's path encode set, not encodeURIComponent's", () => {
 		expect(substitutePathVariables("https://x/:id", [path("id", "a/b c!'()*~")])).toBe(
-			"https://x/a%2Fb%20c%21%27%28%29%2A~"
+			"https://x/a/b%20c!'()*~"
+		);
+		expect(substitutePathVariables("https://x/:id", [path("id", "user@x.com")])).toBe(
+			"https://x/user@x.com"
+		);
+		expect(substitutePathVariables("https://x/:id", [path("id", "12:30?#100%")])).toBe(
+			"https://x/12:30%3F%23100%"
 		);
 	});
 
@@ -300,8 +306,8 @@ describe("substitutePathVariables", () => {
 			"https://x/:id"
 		);
 		// A token still unresolved is kept verbatim.
-		expect(substitutePathVariables("https://x/:id", [path("id", "{{later}}/x")], resolve)).toBe(
-			"https://x/{{later}}%2Fx"
+		expect(substitutePathVariables("https://x/:id", [path("id", "{{later}} x")], resolve)).toBe(
+			"https://x/{{later}}%20x"
 		);
 	});
 

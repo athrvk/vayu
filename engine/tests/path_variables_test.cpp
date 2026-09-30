@@ -82,19 +82,36 @@ TEST (PathVariableSegments, KeepsOneSlashOfAFileUrl) {
     EXPECT_EQ (names_in ("file:///:dir/x"), (Names{ "dir" }));
 }
 
-TEST (EncodePathSegmentValue, EncodesEverythingButTheUnreservedSetAndKeepsTokens) {
-    using vayu::core::encode_path_segment_value;
-    EXPECT_EQ (encode_path_segment_value ("a-b_c.d~e"), "a-b_c.d~e");
-    EXPECT_EQ (encode_path_segment_value ("a b/c?d#e%f"), "a%20b%2Fc%3Fd%23e%25f");
-    // A `%XX` triplet is already encoded and is sent as written; a `%` that
-    // starts none (`%g1`, `%4`, a trailing `%`) is data.
-    EXPECT_EQ (encode_path_segment_value ("a%40b.com"), "a%40b.com");
-    EXPECT_EQ (encode_path_segment_value ("%2f%2F/%"), "%2f%2F%2F%25");
-    EXPECT_EQ (encode_path_segment_value ("%g1 %4"), "%25g1%20%254");
-    EXPECT_EQ (encode_path_segment_value ("\xC3\xA9"), "%C3%A9");
-    EXPECT_EQ (encode_path_segment_value ("x {{data.id}}/y"), "x%20{{data.id}}%2Fy");
+TEST (EncodePathVariableValue, EncodesPostmansPathSetAndKeepsTokens) {
+    using vayu::core::encode_path_variable_value;
+    // `postman-url-encoder` 3.0.8's PATH_ENCODE_SET, byte by byte: the C0
+    // controls, DEL, space " # < > ? ` { } - and nothing else in ASCII.
+    std::string encoded_ascii;
+    for (int byte = 0x00; byte <= 0x7F; ++byte) {
+        const std::string one (1, static_cast<char> (byte));
+        if (encode_path_variable_value (one) != one) {
+            encoded_ascii += one;
+        }
+    }
+    std::string expected;
+    for (int byte = 0x00; byte < 0x20; ++byte) {
+        expected += static_cast<char> (byte);
+    }
+    expected += " \"#<>?`{}\x7F";
+    EXPECT_EQ (encoded_ascii, expected);
+
+    EXPECT_EQ (encode_path_variable_value ("a b/c?d#e"), "a%20b/c%3Fd%23e");
+    // The reserved set a value is typed with goes out as typed.
+    EXPECT_EQ (encode_path_variable_value ("user@x.com"), "user@x.com");
+    EXPECT_EQ (encode_path_variable_value ("12:30;a=b&c+d,e"), "12:30;a=b&c+d,e");
+    // `%` is not in the set: a pre-encoded triplet and a bare `%` both pass.
+    EXPECT_EQ (encode_path_variable_value ("a%40b.com"), "a%40b.com");
+    EXPECT_EQ (encode_path_variable_value ("100% %zz"), "100%%20%zz");
+    EXPECT_EQ (encode_path_variable_value ("\x01\x7F"), "%01%7F");
+    EXPECT_EQ (encode_path_variable_value ("\xC3\xA9"), "%C3%A9");
+    EXPECT_EQ (encode_path_variable_value ("x {{data.id}}/y"), "x%20{{data.id}}/y");
     // A lone `{{` is no token and is encoded.
-    EXPECT_EQ (encode_path_segment_value ("{{x"), "%7B%7Bx");
+    EXPECT_EQ (encode_path_variable_value ("{{x"), "%7B%7Bx");
 }
 
 TEST (SubstitutePathVariables, AnswersOnlyEnabledPathRowsAndLeavesTheRestLiteral) {
@@ -122,12 +139,12 @@ TEST (SettlePathVariables, WritesAnAnsweredValueAsOneSegmentAndLeavesATokenWaiti
     request.path_variables = { { "a", "x y/z" }, { "b", "{{later}}" }, { "c", "" } };
     vayu::core::settle_path_variables (request, vayu::core::PathSettle::Answered);
     // An empty value leaves its segment literal, as composition does.
-    EXPECT_EQ (request.url, "https://h/x%20y%2Fz/:b/:c/x%20y%2Fz");
+    EXPECT_EQ (request.url, "https://h/x%20y/z/:b/:c/x%20y/z");
     ASSERT_EQ (request.path_variables.size (), 1u);
     EXPECT_EQ (request.path_variables[0].key, "b");
 
     vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
-    EXPECT_EQ (request.url, "https://h/x%20y%2Fz/{{later}}/:c/x%20y%2Fz");
+    EXPECT_EQ (request.url, "https://h/x%20y/z/{{later}}/:c/x%20y/z");
     EXPECT_TRUE (request.path_variables.empty ());
 }
 

@@ -1350,9 +1350,10 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
 
 /**
  * A Params row `in: "path"` answers the URL's `:name` segment at composition:
- * its `{{var}}` resolved, the result percent-encoded as one segment. Mutation
- * check: drop the `substitute_compose_path_variables` call in
- * `compose_request_core` and every expectation here that names a value fails.
+ * its `{{var}}` resolved, the result percent-encoded as Postman encodes it
+ * (`/` kept, space encoded). Mutation check: drop the
+ * `substitute_compose_path_variables` call in `compose_request_core` and every
+ * expectation here that names a value fails.
  */
 TEST_F (RequestComposerTest, SubstitutesAPathVariableFromTheStoredPathRows) {
     seed_collection ("col", "",
@@ -1369,7 +1370,7 @@ TEST_F (RequestComposerTest, SubstitutesAPathVariableFromTheStoredPathRows) {
     auto [status, payload] =
     vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["url"], "https://api.test/users/a%20b%2Fc/posts/7?x=1");
+    EXPECT_EQ (payload["url"], "https://api.test/users/a%20b/c/posts/7?x=1");
 }
 
 TEST_F (RequestComposerTest, TwoRequestsWithTheSameNameSendTheirOwnValues) {
@@ -1466,8 +1467,7 @@ TEST_F (RequestComposerTest, ReadsPathRowsFromTheInlineRequestBeforeTheStoredOne
     json::array ({ { { "key", "a" }, { "value", "first" }, { "enabled", true }, { "in", "path" } },
     { { "key", "a" }, { "value", "last" }, { "enabled", true }, { "in", "path" } } }) } } } });
     ASSERT_EQ (inline_status, 200) << inline_only.dump ();
-    // Every occurrence, and the last enabled duplicate answers (Postman's
-    // `VariableList`).
+    // Every occurrence, and the last enabled duplicate answers.
     EXPECT_EQ (inline_only["url"], "https://api.test/last/last");
 }
 
