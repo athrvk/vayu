@@ -4833,11 +4833,39 @@ RequestUrlState* url_state_of_query (JSContext* ctx, JSValue* func_data, const c
     return state;
 }
 
+/// Whether the request a script runs against sends its query encoded, which
+/// is when `add` and `upsert` store a row's key and value as the wire has them.
+bool script_query_is_encoded (JSContext* ctx) {
+    const auto* data = get_context_data (ctx);
+    return data == nullptr || data->request == nullptr || !data->request->disable_url_encoding;
+}
+
+/// A name a script looks a param up by. A row `add` wrote holds its key as
+/// sent (`a%20b`), and Postman's row holds it as typed, so a name matches a
+/// key written either way: `get('a b')` after `add({key: 'a b'})` finds it.
+class QueryParamName {
+    public:
+    QueryParamName (JSContext* ctx, std::string typed)
+    : typed_ (std::move (typed)),
+      encoded_ (script_query_is_encoded (ctx) ?
+      vayu::core::encode_query_component (typed_, vayu::core::QueryPart::Key) :
+      typed_) {
+    }
+
+    [[nodiscard]] bool matches (const std::string& key) const {
+        return key == typed_ || key == encoded_;
+    }
+
+    private:
+    std::string typed_;
+    std::string encoded_;
+};
+
 /// The value of the first param named @p name, or nullptr when there is none.
 const std::optional<std::string>*
-find_query_param (const RequestUrlState& state, const std::string& name) {
+find_query_param (const RequestUrlState& state, const QueryParamName& name) {
     for (const auto& param : state.parts.query_params) {
-        if (param.key == name) {
+        if (name.matches (param.key)) {
             return &param.value;
         }
     }
@@ -4869,8 +4897,8 @@ JSValue* func_data) {
         "pm.request.url.query.%s needs a name string, got %s", magic == 0 ? "get" : "has",
         argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
     }
-    const std::string name = js_to_string (ctx, argv[0]);
-    const auto* found      = find_query_param (*state, name);
+    const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+    const auto* found = find_query_param (*state, name);
     if (magic != 0) {
         return JS_NewBool (ctx, found != nullptr ? 1 : 0);
     }
@@ -5051,9 +5079,10 @@ JSValue* func_data) {
         return JS_EXCEPTION;
     }
     // Encoded here, as the send would write it (issue #1773): the rows hold
-    // wire bytes, so `get`, `all` and `getQueryString()` read what goes out.
-    const auto* data = get_context_data (ctx);
-    if (data == nullptr || data->request == nullptr || !data->request->disable_url_encoding) {
+    // wire bytes, so `all` and `getQueryString()` read what goes out. Postman
+    // adds a row and `normalizeParam` writes it, so the per-row rule applies.
+    const QueryParamName name (ctx, param.key);
+    if (script_query_is_encoded (ctx)) {
         param.key =
         vayu::core::encode_query_component (param.key, vayu::core::QueryPart::Key);
         if (param.value) {
@@ -5064,7 +5093,7 @@ JSValue* func_data) {
     auto& params = state->parts.query_params;
     if (magic == QUERY_UPSERT) {
         for (auto& existing : params) {
-            if (existing.key == param.key) {
+            if (name.matches (existing.key)) {
                 existing.value = std::move (param.value);
                 mark_url_edited (*state);
                 return JS_UNDEFINED;
@@ -5095,11 +5124,11 @@ JSValue* func_data) {
         return JS_ThrowTypeError (ctx, "pm.request.url.query.remove needs a name string, got %s",
         argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
     }
-    const std::string name = js_to_string (ctx, argv[0]);
-    auto& params           = state->parts.query_params;
-    const size_t before    = params.size ();
+    const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+    auto& params        = state->parts.query_params;
+    const size_t before = params.size ();
     std::erase_if (params,
-    [&name] (const vayu::http::UrlQueryParam& p) { return p.key == name; });
+    [&name] (const vayu::http::UrlQueryParam& p) { return name.matches (p.key); });
     // Removing a name that is not there is a no-op rather than an error, the
     // same rule `pm.request.headers.remove` follows.
     if (params.size () != before) {

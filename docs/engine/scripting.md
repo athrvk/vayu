@@ -1117,7 +1117,10 @@ undo:
   `%` is never encoded, so a value already encoded passes as it is; under
   `disableUrlEncoding` the pair is written as typed. Postman keeps the text as
   given and encodes it when it sends, so its `getQueryString()` answers
-  `k=a b` here - Vayu answers what goes out.
+  `k=a b` here - Vayu answers what goes out. A name is still looked up as the
+  script typed it: after `add({ key: 'a b', value: '1' })`, `get('a b')`,
+  `has('a b')`, `remove('a b')` and `upsert({ key: 'a b', ... })` all find
+  the stored `a%20b`, as they do in Postman.
 - **An edit that cannot reach the wire is an error, never a no-op.** A URL the
   parser could not read has no parts to edit, so a write is refused rather than
   composing `://` out of empty pieces, and a path segment that is not a string

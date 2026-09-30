@@ -380,6 +380,35 @@ TEST_F (SendTimeQueryValues, AScriptQueryAddIsEncodedAndGetQueryStringIsTheWire)
     EXPECT_EQ ("/echo?" + env.at ("qs").value, target);
 }
 
+// A row `add` wrote holds its key as sent, and a script still names it as it
+// typed it, as it does in Postman (whose row holds the key as typed).
+TEST (ScriptQueryNames, AnAddedKeyIsFoundByTheNameTheScriptTyped) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::Request request;
+    request.url       = "https://x/";
+    const auto result = engine.execute_prerequest (R"JS(
+        const q = pm.request.url.query;
+        q.add({ key: 'a b', value: '1' });
+        pm.environment.set('got', String(q.get('a b')));
+        pm.environment.set('has', String(q.has('a b')));
+        q.upsert({ key: 'a b', value: '2' });
+        pm.environment.set('count', String(q.count()));
+        pm.environment.set('after', String(q.get('a b')));
+        q.remove('a b');
+        pm.environment.set('left', String(q.count()));
+    )JS",
+    request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("got").value, "1");
+    EXPECT_EQ (env.at ("has").value, "true");
+    EXPECT_EQ (env.at ("count").value, "1")
+    << "upsert duplicated the key add wrote";
+    EXPECT_EQ (env.at ("after").value, "2");
+    EXPECT_EQ (env.at ("left").value, "0");
+    EXPECT_EQ (request.url, "https://x/");
+}
+
 TEST_F (SendTimeQueryValues, AScriptQueryAddIsWrittenAsTypedWhenUrlEncodingIsOff) {
     vayu::runtime::ScriptEngine engine;
     vayu::Environment env;
