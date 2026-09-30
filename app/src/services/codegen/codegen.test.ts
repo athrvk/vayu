@@ -1087,10 +1087,10 @@ describe("path variables", () => {
 		const { code } = generateCurl({
 			...GET,
 			url: "https://x/u/:id",
-			params: [{ key: "id", value: "a|b/c", enabled: true, in: "path" }],
+			params: [{ key: "id", value: 'a"b/c', enabled: true, in: "path" }],
 			auth: { mode: "apikey", key: "k", value: "p|q", in: "query" },
 			disableUrlEncoding: true,
 		});
-		expect(code).toContain("'https://x/u/a|b/c?k=p|q'");
+		expect(code).toContain(`'https://x/u/a"b/c?k=p|q'`);
 	});
 });

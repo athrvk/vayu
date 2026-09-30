@@ -258,16 +258,16 @@ describe("substitutePathVariables", () => {
 		);
 	});
 
-	it("writes the value as typed under disableUrlEncoding, so a / is structure (#1765)", () => {
-		// The engine's raw substitution: `a|b/c` becomes two segments, as
-		// Postman sends it, where the encoded form is one.
+	it("writes the value as typed under disableUrlEncoding, skipping the path encode set (#1765)", () => {
+		// The engine's raw substitution, as Postman's `toNodeUrl` sends it with
+		// `disableEncoding`: the space stays a space where the default is `%20`.
 		expect(
-			substitutePathVariables("https://x/u/:id?q=1", [path("id", "a|b/c")], undefined, {
+			substitutePathVariables("https://x/u/:id?q=1", [path("id", "a b/c")], undefined, {
 				encode: false,
 			})
-		).toBe("https://x/u/a|b/c?q=1");
-		expect(substitutePathVariables("https://x/u/:id", [path("id", "a|b/c")])).toBe(
-			"https://x/u/a%7Cb%2Fc"
+		).toBe("https://x/u/a b/c?q=1");
+		expect(substitutePathVariables("https://x/u/:id", [path("id", "a b/c")])).toBe(
+			"https://x/u/a%20b/c"
 		);
 	});
 

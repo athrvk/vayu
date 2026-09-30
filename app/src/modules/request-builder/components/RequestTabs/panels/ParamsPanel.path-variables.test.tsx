@@ -196,11 +196,11 @@ describe("the Path variables table", () => {
 	it("shows a raw path value on the Sends line under disableUrlEncoding", () => {
 		const { container } = renderPanel(
 			"https://x/users/:id",
-			[{ ...PATH, value: "a|b/c" }],
+			[{ ...PATH, value: "a b/c" }],
 			undefined,
 			true
 		);
-		expect(sendsLine(container)).toBe("https://x/users/a|b/c");
+		expect(sendsLine(container)).toBe("https://x/users/a b/c");
 	});
 
 	it("writes a query-table edit raw into the URL under disableUrlEncoding", () => {
