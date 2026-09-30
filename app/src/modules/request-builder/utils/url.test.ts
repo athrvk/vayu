@@ -6,23 +6,12 @@
  */
 
 /**
- * The two join rules and the parser that reads them back.
- *
- * `buildUrlWithParams` (the Params table: the rows *are* the query) and
- * `appendParamsToUrl` (import: the rows are *additional* to the query the URL
- * already carries) differ in exactly one case - a URL that arrives with a query
- * of its own - and that case is what issue #590 turns on, so it is pinned on
- * both sides rather than assumed.
+ * The Params table's join rule, `buildUrlWithParams` (the rows *are* the
+ * query), and the parser that reads a URL back into rows.
  */
 
 import { describe, it, expect } from "vitest";
-import {
-	appendParamsToUrl,
-	buildUrlWithParams,
-	mergeParamsFromUrl,
-	paramsFromUrl,
-	parseQueryParams,
-} from "./url";
+import { buildUrlWithParams, mergeParamsFromUrl, paramsFromUrl, parseQueryParams } from "./url";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 
 const kv = (key: string, value: string, enabled = true): KeyValueEntry => ({
@@ -65,10 +54,12 @@ describe("buildUrlWithParams", () => {
 		);
 	});
 
-	it("encodes keys and values, but leaves {{variables}} alone", () => {
-		expect(buildUrlWithParams("https://x/y", [kv("q", "a b&c"), kv("id", "{{userId}}")])).toBe(
-			"https://x/y?q=a%20b%26c&id={{userId}}"
-		);
+	it("encodes keys and values with Postman's query rule, and leaves {{variables}} alone", () => {
+		// `|` is raw, space and `&` are encoded (issue #1771); the fixture in
+		// `query-encoding.conformance.test.ts` holds the whole rule.
+		expect(
+			buildUrlWithParams("https://x/y", [kv("q", "a b&c|d"), kv("id", "{{userId}}")])
+		).toBe("https://x/y?q=a%20b%26c|d&id={{userId}}");
 	});
 
 	it("writes rows as typed for a request sent without encoding (#1765)", () => {
@@ -78,38 +69,6 @@ describe("buildUrlWithParams", () => {
 		expect(
 			buildUrlWithParams("https://x/y", [kv("q", "a|b"), kv("k[]", "1")], { encode: false })
 		).toBe("https://x/y?q=a|b&k[]=1");
-	});
-});
-
-describe("appendParamsToUrl", () => {
-	it("keeps the URL's own query and appends the rows after it", () => {
-		expect(appendParamsToUrl("https://x/y?a=1", [kv("b", "2")])).toBe("https://x/y?a=1&b=2");
-	});
-
-	it("starts a query when the URL has none", () => {
-		expect(appendParamsToUrl("{{baseUrl}}/users", [kv("page", "1")])).toBe(
-			"{{baseUrl}}/users?page=1"
-		);
-	});
-
-	it("leaves a URL with nothing to append exactly as it was", () => {
-		// The disabled-row trap: an import must keep the row in the table and out
-		// of the wire, and must not strip a query the source put in the URL.
-		expect(appendParamsToUrl("https://x/y?a=1", [kv("b", "2", false)])).toBe("https://x/y?a=1");
-		expect(appendParamsToUrl("https://x/y", [])).toBe("https://x/y");
-	});
-
-	it("does not double the separator on a URL that already ends in one", () => {
-		expect(appendParamsToUrl("https://x/y?", [kv("a", "1")])).toBe("https://x/y?a=1");
-		expect(appendParamsToUrl("https://x/y?a=1&", [kv("b", "2")])).toBe("https://x/y?a=1&b=2");
-	});
-
-	it("round-trips through parseQueryParams", () => {
-		const joined = appendParamsToUrl("https://x/y", [kv("q", "a b"), kv("id", "{{userId}}")]);
-		expect(parseQueryParams(joined).map(({ key, value }) => ({ key, value }))).toEqual([
-			{ key: "q", value: "a b" },
-			{ key: "id", value: "{{userId}}" },
-		]);
 	});
 });
 
@@ -162,42 +121,71 @@ describe("mergeParamsFromUrl", () => {
 });
 
 /**
- * A request under `disableUrlEncoding` (issue #1765) joins its rows raw, so the
- * rows must hold the query as written: decoded rows joined raw turn a `%26`
- * inside one value into a new `&` pair and a `%20` into a raw space.
+ * Rows hold the query as the URL spells it (issue #1771), in either encoding
+ * mode, and a table edit rewrites only the pairs it touches.
  */
-describe("the query under disableUrlEncoding", () => {
+describe("the query as written", () => {
 	const URL = "https://x/y?redirect=https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2&q=a%20b&b=1";
 
-	it("reads rows as written and rebuilds exactly the query they came from", () => {
-		// Mutation check: dropping `decode: false` (so the rows are decoded)
-		// rebuilds `redirect=https://a.b/?x=1&y=2&q=a b&b=2` here.
-		const rows = parseQueryParams(URL, { decode: false });
+	it("reads rows raw and rebuilds exactly the query they came from", () => {
+		const rows = parseQueryParams(URL);
 		expect(rows.map(({ key, value }) => [key, value])).toEqual([
 			["redirect", "https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2"],
 			["q", "a%20b"],
 			["b", "1"],
 		]);
 		const edited = rows.map((r) => (r.key === "b" ? { ...r, value: "2" } : r));
-		expect(buildUrlWithParams(URL, edited, { encode: false })).toBe(
-			"https://x/y?redirect=https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2&q=a%20b&b=2"
-		);
+		const expected = "https://x/y?redirect=https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2&q=a%20b&b=2";
+		expect(buildUrlWithParams(URL, edited)).toBe(expected);
+		expect(buildUrlWithParams(URL, edited, { encode: false })).toBe(expected);
 	});
 
-	it("merges the URL's query as written, and decoded by default", () => {
+	it("keeps an escaped + through an edit of another row", () => {
+		// Mutation check: decoding in `parseQueryParams` turns the row into
+		// `a+b`, which is written back raw as `a+b` - a server reads a space.
+		const url = "https://x/?q=a%2Bb&n=1";
+		const rows = parseQueryParams(url);
+		expect(rows[0].value).toBe("a%2Bb");
+		const edited = rows.map((r) => (r.key === "n" ? { ...r, value: "2" } : r));
+		expect(buildUrlWithParams(url, edited)).toBe("https://x/?q=a%2Bb&n=2");
+	});
+
+	it("keeps the bytes of a row an older version stored decoded", () => {
+		// A row read decoded before #1771 (`+05:00` from `%2B05%3A00`). Mutation
+		// check: encoding every row, with no byte preservation, writes
+		// `tz=+05:00` here, whose `+` a server reads as a space.
+		const url = "https://x/?tz=%2B05%3A00&x=1";
+		const rows = [item("1", "tz", "+05:00"), item("2", "x", "2")];
+		expect(buildUrlWithParams(url, rows)).toBe("https://x/?tz=%2B05%3A00&x=2");
+	});
+
+	it("keeps an encodeURIComponent join and a Postman key= untouched", () => {
+		const url = "https://x/?a=p%7Cq&flag=&c=1";
+		const rows = [item("1", "a", "p|q"), item("2", "flag", ""), item("3", "c", "1")];
+		expect(buildUrlWithParams(url, rows)).toBe(url);
+	});
+
+	it("encodes a row the URL does not carry, and uses each pair once", () => {
+		const url = "https://x/?a=1";
+		expect(buildUrlWithParams(url, [item("1", "a", "1"), item("2", "a", "1")])).toBe(
+			"https://x/?a=1&a=1"
+		);
+		expect(buildUrlWithParams(url, [item("1", "a", "c d")])).toBe("https://x/?a=c%20d");
+	});
+
+	it("merges the URL's query as written", () => {
 		const existing = [item("1", "q", "old")];
-		expect(mergeParamsFromUrl(existing, URL, URL, { decode: false })[0]).toMatchObject({
+		expect(mergeParamsFromUrl(existing, URL, URL)[0]).toMatchObject({
 			id: "1",
 			key: "q",
 			value: "a%20b",
 		});
-		expect(mergeParamsFromUrl(existing, URL, URL)[0]).toMatchObject({ value: "a b" });
 	});
 });
 
 /**
  * Path rows (issue #1764) live in the same `params` array as the query rows,
- * and neither join rule may write one into the query string.
+ * and the join must never write one into the query string.
  */
 describe("path rows", () => {
 	const pathRow = (key: string, value: string): KeyValueEntry => ({
@@ -207,12 +195,11 @@ describe("path rows", () => {
 		in: "path",
 	});
 
-	it("never reach the query, whichever join rule runs", () => {
+	it("never reach the query", () => {
 		const params = [kv("page", "1"), pathRow("id", "42")];
 		expect(buildUrlWithParams("https://x/users/:id", params)).toBe(
 			"https://x/users/:id?page=1"
 		);
-		expect(appendParamsToUrl("https://x/users/:id", params)).toBe("https://x/users/:id?page=1");
 		expect(buildUrlWithParams("https://x/users/:id?page=1", [pathRow("id", "42")])).toBe(
 			"https://x/users/:id"
 		);
