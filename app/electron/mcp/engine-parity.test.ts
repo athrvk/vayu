@@ -28,6 +28,19 @@ const body = (r: { content: Array<{ text: string }> }) =>
 	JSON.parse(r.content[0].text) as Record<string, unknown>;
 const tool = (name: string) => TOOLS.find((t) => t.name === name)!;
 
+// The previews are read tools because an agent reaches for them to decide
+// whether to ask for writes at all; the diagnosis sends a request to the host,
+// so it is gated as an execute even though it changes nothing Vayu stores.
+test.each([
+	["diagnose_connection", "execute"],
+	["list_client_certificates", "read"],
+	["preview_import", "read"],
+	["preview_spec_bind", "read"],
+] as const)("%s is gated as %s and hints read-only to the client", (name, category) => {
+	expect(tool(name).category).toBe(category);
+	expect(tool(name).annotations.readOnlyHint).toBe(true);
+});
+
 describe("diagnose_connection", () => {
 	test("refuses a host off the allowlist without sending anything", async () => {
 		const diagnoseConnection = vi.fn();
@@ -58,21 +71,16 @@ describe("diagnose_connection", () => {
 		expect(body(result).outcome).toBe("tls_failed");
 		expect(text(result)).toContain("list_client_certificates");
 	});
-
-	test("is an execute tool, since it sends a request to the host", () => {
-		expect(tool("diagnose_connection").category).toBe("execute");
-	});
 });
 
 describe("list_client_certificates", () => {
-	test("is a read tool that answers the registry as the engine does", async () => {
+	test("answers the registry as the engine does", async () => {
 		const rows = [{ id: "cert_1", host: "api.example.com", port: null, hasPassphrase: true }];
 		const result = await dispatchTool(
 			"list_client_certificates",
 			{},
 			ctxWith({ listClientCertificates: vi.fn().mockResolvedValue(rows) })
 		);
-		expect(tool("list_client_certificates").category).toBe("read");
 		expect(JSON.parse(result.content[0].text)).toEqual(rows);
 	});
 });
@@ -187,11 +195,13 @@ describe("preview_spec_bind", () => {
 
 	test("matches the operations the engine read, and names what a bind would clear", async () => {
 		const c = client();
+		// Writes off, as for preview_import: the preview answers before any grant.
 		const result = await dispatchTool(
 			"preview_spec_bind",
 			{ collectionId: "col_root", content: "openapi: 3.0.0" },
 			ctxWith(c)
 		);
+		expect(result.isError).toBeFalsy();
 		expect(c.matchSpec).toHaveBeenCalledWith(
 			{ collectionId: "col_root", operations: OPERATIONS },
 			undefined
@@ -212,11 +222,5 @@ describe("preview_spec_bind", () => {
 		expect(preview.unmatchedOperations).toEqual({ count: 1, operations: [OPERATIONS[1]] });
 		expect(text(result)).toContain("clear identity from 1 request");
 		expect(c.bindSpec).not.toHaveBeenCalled();
-	});
-
-	test("both previews are read tools, answered with writes off", () => {
-		expect(tool("preview_spec_bind").category).toBe("read");
-		expect(tool("preview_import").category).toBe("read");
-		expect(tool("preview_spec_bind").annotations.readOnlyHint).toBe(true);
 	});
 });

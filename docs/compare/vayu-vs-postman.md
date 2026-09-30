@@ -108,6 +108,11 @@ Digest / AWS / NTLM auth imports as data but will not execute. Most `pm.*` test
 scripts run unmodified - [what is covered](../app/pm-api-compatibility.md), and
 [what carries over per format](../app/import-collections/postman.md).
 
+The road runs both ways: any Vayu collection exports as a Postman Collection
+v2.1 file, with credentials left out unless you choose to include them, and the
+export names anything Postman has no place for rather than dropping it
+([Exporting to Postman](../app/import-collections/postman.md#exporting-to-postman)).
+
 ## Try it
 
 Windows:

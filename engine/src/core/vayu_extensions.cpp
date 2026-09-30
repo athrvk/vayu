@@ -34,15 +34,32 @@ namespace {
  */
 constexpr auto SECRET_AUTH_KEYS = std::to_array<std::string_view> (
 { "token", "password", "value", "clientSecret", "secretKey", "accessKey",
-"sessionToken", "accessToken", "refreshToken", "idToken", "secret" });
+"sessionToken", "accessToken", "refreshToken", "idToken", "secret",
+// Postman's names for the credentials of the auth types Vayu keeps as data
+// only: Hawk's key, OAuth 1.0's consumer and token secrets, EdgeGrid's
+// client token, a JWT's private key.
+"authKey", "consumerSecret", "tokenSecret", "clientToken", "privateKey",
+// A Postman OAuth 2.0 block's PKCE verifier.
+"code_verifier" });
+
+/**
+ * The wire names a credential goes by in a Postman OAuth 2.0 block's extra
+ * request parameters (`tokenRequestParams`, `authRequestParams`,
+ * `refreshRequestParams`: arrays of `{key, value, enabled, send_as}` rows),
+ * beside the attribute names above.
+ */
+constexpr auto SECRET_PARAM_KEYS =
+std::to_array<std::string_view> ({ "client_secret", "client_assertion", "code_verifier",
+"refresh_token", "access_token", "id_token", "password", "assertion" });
 
 /// Vayu's body modes (`RequestBody["mode"]` in the app's `domain.ts`).
 constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json",
 "text", "graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded" });
 
 /// Vayu's auth modes (`AuthMode` in `domain.ts`).
-constexpr auto AUTH_MODES = std::to_array<std::string_view> ({ "none", "noauth",
-"inherit", "bearer", "basic", "apikey", "oauth2", "digest", "aws", "ntlm" });
+constexpr auto AUTH_MODES =
+std::to_array<std::string_view> ({ "none", "noauth", "inherit", "bearer", "basic",
+"apikey", "oauth2", "digest", "aws", "ntlm", "hawk", "oauth1", "edgegrid", "jwt" });
 
 /// The `httpVersion` values the request routes accept.
 constexpr auto HTTP_VERSIONS =
@@ -77,7 +94,78 @@ bool is_variable_reference (std::string_view text) {
     inner.find_first_not_of (' ') != std::string_view::npos;
 }
 
-/// Blanks every secret member of one auth level, and recurses into `config`.
+/// Blanks @p value when it is a non-empty string that is not one
+/// `{{variable}}` reference, counting it in @p omitted.
+void blank_secret (Json& value, int& omitted) {
+    if (!value.is_string ()) {
+        return;
+    }
+    const auto& text = value.get_ref<const std::string&> ();
+    if (text.empty () || is_variable_reference (text)) {
+        return;
+    }
+    value = "";
+    omitted += 1;
+}
+
+/// Blanks the value of each `{key, value, ...}` row of @p rows (an OAuth 2.0
+/// block's extra request parameters) whose key names a credential.
+void redact_param_rows (Json& rows, int& omitted) {
+    if (!rows.is_array ()) {
+        return;
+    }
+    for (Json& row : rows) {
+        if (!row.is_object ()) {
+            continue;
+        }
+        const auto key   = row.find ("key");
+        const auto value = row.find ("value");
+        if (key == row.end () || !key->is_string () || value == row.end ()) {
+            continue;
+        }
+        const auto& name = key->get_ref<const std::string&> ();
+        if (one_of (SECRET_AUTH_KEYS, name) || one_of (SECRET_PARAM_KEYS, name)) {
+            blank_secret (*value, omitted);
+        }
+    }
+}
+
+/// One attribute of a Postman auth type: a credential is blanked, and an
+/// array of parameter rows is walked for the credentials it carries.
+void redact_postman_attribute (const std::string& name, Json& value, int& omitted) {
+    if (one_of (SECRET_AUTH_KEYS, name)) {
+        blank_secret (value, omitted);
+    } else {
+        redact_param_rows (value, omitted);
+    }
+}
+
+/// One Postman auth type's detail: v2.1's `[{key, value, type}]` attribute
+/// array, or v2.0's `{name: value}` object.
+void redact_postman_detail (Json& detail, int& omitted) {
+    if (detail.is_object ()) {
+        for (auto field = detail.begin (); field != detail.end (); ++field) {
+            redact_postman_attribute (field.key (), field.value (), omitted);
+        }
+        return;
+    }
+    if (!detail.is_array ()) {
+        return;
+    }
+    for (Json& attribute : detail) {
+        if (!attribute.is_object ()) {
+            continue;
+        }
+        const auto key   = attribute.find ("key");
+        const auto value = attribute.find ("value");
+        if (key != attribute.end () && key->is_string () && value != attribute.end ()) {
+            redact_postman_attribute (key->get<std::string> (), *value, omitted);
+        }
+    }
+}
+
+/// Blanks every secret member of one auth level, and recurses into `config`
+/// and a Postman import's `postman` source.
 void redact_level (Json& node, int& omitted) {
     if (!node.is_object ()) {
         return;
@@ -85,6 +173,10 @@ void redact_level (Json& node, int& omitted) {
     for (auto member = node.begin (); member != node.end (); ++member) {
         if (member.key () == "config") {
             redact_level (member.value (), omitted);
+            continue;
+        }
+        if (member.key () == "postman") {
+            redact_postman_auth (member.value (), omitted);
             continue;
         }
         if (!one_of (SECRET_AUTH_KEYS, member.key ()) || !member->is_string ()) {
@@ -150,6 +242,17 @@ rows_with (const Json& value, const std::array<std::string_view, N>& extra) {
 }
 
 } // namespace
+
+void redact_postman_auth (Json& source, int& omitted) {
+    if (!source.is_object ()) {
+        return;
+    }
+    for (auto member = source.begin (); member != source.end (); ++member) {
+        if (member.key () != "type") {
+            redact_postman_detail (member.value (), omitted);
+        }
+    }
+}
 
 Json redact_auth (const Json& auth, int& omitted) {
     Json out = auth;

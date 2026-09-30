@@ -160,6 +160,8 @@ add_executable(vayu_tests
     spec_diff_test.cpp
     openapi_export_test.cpp
     spec_export_route_test.cpp
+    postman_export_test.cpp
+    postman_export_route_test.cpp
     vayu_extensions_test.cpp
     workspace_backup_test.cpp
     trash_test.cpp
@@ -190,6 +192,7 @@ add_executable(vayu_tests
     ../src/http/routes/spec_describe.cpp
     ../src/http/routes/spec_bind.cpp
     ../src/http/routes/spec_export.cpp
+    ../src/http/routes/postman_export.cpp
     ../src/http/routes/reorder.cpp
     ../src/http/routes/runs.cpp
     ../src/http/routes/collections.cpp
@@ -367,6 +370,7 @@ set(vayu_scratch_database_suites
     OAuthRouteTest
     PersistScriptVariablesTest
     PlanAuthRefreshTest
+    PostmanExportRouteTest
     RecordDesignResultTest
     RelayTest
     ReorderRouteTest

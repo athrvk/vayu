@@ -33,6 +33,19 @@ export class ApiError extends Error {
 }
 
 /**
+ * The engine did not answer at all: the connection was refused or dropped, or
+ * the call ran out of time before any response arrived.
+ *
+ * Its own class, not a bare `Error`, because what it means depends on when it
+ * happens: while an engine is starting it is the ordinary state of the port,
+ * not a failure (`lib/query-client.ts` retries it through the start window
+ * instead of spending the default budget). An `ApiError` is the opposite case,
+ * an engine that answered. `name` is left as `Error` so a message rendered with
+ * `String(error)` reads exactly as it did before this class existed.
+ */
+export class EngineUnreachableError extends Error {}
+
+/**
  * One message from a streamed engine call (issue #882).
  *
  * `event` is an SSE frame, in the order the engine wrote it. `buffered` is the
@@ -108,14 +121,20 @@ function abortError(): Error {
  * recoverable from what was thrown, which is what `preserve-caught-error` is
  * about.
  */
-function asTransportError(error: unknown): Error {
+function asTransportError(error: unknown): EngineUnreachableError {
 	if (error instanceof Error) {
 		if (error.name === "AbortError") {
-			return new Error("Couldn't reach Vayu's engine in time.", { cause: error });
+			return new EngineUnreachableError("Couldn't reach Vayu's engine in time.", {
+				cause: error,
+			});
 		}
-		return new Error(`Couldn't reach Vayu's engine (${error.message}).`, { cause: error });
+		return new EngineUnreachableError(`Couldn't reach Vayu's engine (${error.message}).`, {
+			cause: error,
+		});
 	}
-	return new Error("Couldn't reach Vayu's engine (unknown error).", { cause: error });
+	return new EngineUnreachableError("Couldn't reach Vayu's engine (unknown error).", {
+		cause: error,
+	});
 }
 
 /**
@@ -210,18 +229,30 @@ class HttpClient {
 				fetchOptions.body = JSON.stringify(body);
 			}
 
-			const response = await fetch(url, fetchOptions);
+			// Only a rejected `fetch` is an engine that could not be reached. A
+			// body that fails to parse came from an engine that answered, and
+			// wrapping it would send it down the start window's retry path.
+			let response: Response;
+			try {
+				response = await fetch(url, fetchOptions);
+			} catch (error) {
+				throw asTransportError(error);
+			}
 
 			if (!response.ok) {
 				throw await readApiError(response);
 			}
 
-			return await response.json();
-		} catch (error) {
-			if (error instanceof ApiError) {
+			try {
+				return (await response.json()) as T;
+			} catch (error) {
+				// The timeout firing mid-body is still an engine that did not
+				// answer in time.
+				if (error instanceof Error && error.name === "AbortError") {
+					throw asTransportError(error);
+				}
 				throw error;
 			}
-			throw asTransportError(error);
 		} finally {
 			clearTimeout(timeoutId);
 		}

@@ -207,6 +207,16 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			fileName: "api.openapi.json",
 			notes: { direction: "document", dialect: "OpenAPI 3.1.0", requestsExported: 2 },
 		}),
+		exportPostman: vi.fn().mockResolvedValue({
+			text: '{\n  "info": { "name": "API" }\n}\n',
+			fileName: "API.postman_collection.json",
+			notes: {
+				requestsExported: 2,
+				foldersExported: 1,
+				secretsOmitted: 1,
+				notCarried: [{ code: "load-test", count: 1, message: "Load-test settings" }],
+			},
+		}),
 		syncSpec: vi.fn().mockResolvedValue({
 			idMap: {},
 			specId: "spec_2",
@@ -8347,6 +8357,70 @@ describe("OpenAPI spec binding tools", () => {
 		expect(allText(res)).toContain("spec_1");
 	});
 
+	test("export_postman asks the engine for the document with secrets omitted", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"export_postman",
+			// An argument the schema does not declare is not a way in: the
+			// secrets stay out whatever the caller sends.
+			{ collectionId: "col_1", includeSecrets: true },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.exportPostman).toHaveBeenCalledWith("col_1", undefined);
+		expect(client.listRequests).not.toHaveBeenCalled();
+		const value = JSON.parse(firstText(res));
+		expect(value).toMatchObject({
+			collectionId: "col_1",
+			fileName: "API.postman_collection.json",
+			documentTruncated: false,
+		});
+		expect(value.notes.secretsOmitted).toBe(1);
+		expect(value.notes.notCarried).toEqual([
+			{ code: "load-test", count: 1, message: "Load-test settings" },
+		]);
+		expect(value.document).toContain("info");
+	});
+
+	test("export_postman caps a document too large to hand back whole", async () => {
+		const document = `{"info":{},"x":"${"a".repeat(MAX_INLINE_BODY_BYTES)}"}`;
+		const client = fakeClient({
+			exportPostman: vi.fn().mockResolvedValue({
+				text: document,
+				fileName: "API.postman_collection.json",
+				notes: {},
+			}),
+		});
+		const res = await dispatchTool(
+			"export_postman",
+			{ collectionId: "col_1" },
+			ctxWith(client)
+		);
+		const value = JSON.parse(firstText(res));
+		expect(Buffer.byteLength(value.document, "utf8")).toBeLessThanOrEqual(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(value.documentTruncated).toBe(true);
+		expect(value.contentBytes).toBe(document.length);
+	});
+
+	test("export_postman passes the engine's refusal through", async () => {
+		const client = fakeClient({
+			exportPostman: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 404",
+						404,
+						"Collection 'nope' not found"
+					)
+				),
+		});
+		const res = await dispatchTool("export_postman", { collectionId: "nope" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(allText(res)).toContain("nope");
+	});
+
 	test("diff_spec sends the candidate document and nothing it could compare wrongly", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -8681,6 +8755,9 @@ describe("OpenAPI spec binding tools", () => {
 		expect(tools.get("export_spec")?.category).toBe("read");
 		expect(tools.get("export_spec")?.invalidates).toEqual([]);
 		expect(tools.get("export_spec")?.annotations.readOnlyHint).toBe(true);
+		expect(tools.get("export_postman")?.category).toBe("read");
+		expect(tools.get("export_postman")?.invalidates).toEqual([]);
+		expect(tools.get("export_postman")?.annotations.readOnlyHint).toBe(true);
 		expect(tools.get("unbind_spec")?.category).toBe("write");
 		// The Spec tab reads the binding off the collection row, so the family that
 		// refetches collections is the one that refreshes it - no `spec` entity.

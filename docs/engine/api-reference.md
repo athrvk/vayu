@@ -1460,6 +1460,14 @@ the write is a `400` naming the index, the kind and the field. The only script
 source - `GET /requests/:id` and every list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
+**`auth.postman`**, the Postman block an import kept beside the mapped auth
+(see [`db-schema.md`](db-schema.md)), is kept on a write only while mapping it
+through the Postman importer still gives the auth being written; otherwise it
+is dropped. So a changed credential never leaves the old one behind in the
+stored block, whichever client wrote it, and a save that changed nothing keeps
+it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
+`POST /import/apply` apply the same rule.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
@@ -1721,10 +1729,19 @@ Create one example. **Create only**, and the engine owns the id - see
   "contentType": "",         // Optional. Default ""
   "order": 0,                // Optional, appended after the request's examples if omitted
   "origin": "import",        // Optional, "import" | "user". Default "import"
-  "bodyTruncated": false     // Optional. Default false - true when `body` is
+  "bodyTruncated": false,    // Optional. Default false - true when `body` is
                              // only the first slice of the captured response
+  "postmanResponse": null    // Optional. The Postman saved response an import
+                             // took this from, as JSON text; null = none
 }
 ```
+
+`postmanResponse` is what the Postman importer sends (schema version 2): the
+`item.response[]` entry as JSON **text** in the source's member order, `name`
+and `body` replaced by `null` placeholders. A string rather than an object so the
+order survives a parse into sorted JSON on the way here; it must parse as a JSON
+object, and it is capped at 1 MiB. `POST /export/postman` is its reader, and no
+read route returns it.
 
 `headers` is an array of `KeyValueEntry`, the same shape a request's headers
 use - not a JSON object. A stored example is re-served rather than only
@@ -1737,7 +1754,8 @@ to survive.
 `id`, if `name` is missing or `null`, on a `status` outside `100`-`599` (rejected
 rather than clamped - a stored `700` would be re-served as a status line nobody
 can send), on a malformed `headers` entry, on an `origin` that is neither
-`"import"` nor `"user"`, or on a `body` over the cap. `409` when the request
+`"import"` nor `"user"`, on a `body` over the cap, or on a `postmanResponse` that
+is not a string holding a JSON object or is over its cap. `409` when the request
 already holds the maximum number of examples.
 
 ### PUT /requests/:id/examples/:exampleId
@@ -1745,7 +1763,9 @@ already holds the maximum number of examples.
 Update one example. **Update only** - a `404` when the example does not exist,
 and the same `404` when it exists under a different request. Merge-patch body:
 absent keeps, `null` resets to the field's default (`name` has none, so `null`
-is a `400`).
+is a `400`). `postmanResponse` accepts only `null`, which clears it; any other
+value is a `400` - it records what a file said, and the export already
+regenerates each part of it an edit to `status` or `headers` makes stale.
 
 **Response:** the updated example object.
 
@@ -3285,6 +3305,135 @@ Messages, by case:
 - `400` `Import too large: 10001 items exceeds the limit of 10000 per call`.
 - `500` `<detail>` - the transaction itself failed; nothing was
   written.
+
+## Export
+
+### POST /export/postman
+
+A collection and everything beneath it as a Postman Collection v2.1.0
+document, written the way Postman's own "Export > Collection v2.1" writes one
+(`core/postman_export.hpp`). It is the inverse of the Postman importer: a
+collection imported from a Postman export and exported again gives back the
+same document, `_postman_id` aside, and exporting, importing and exporting
+again is byte-identical.
+
+**Reads only.** Nothing is stored. The whole subtree is exported, with no stop
+at a collection bound to another OpenAPI document.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",   // Required, non-empty
+  "includeSecrets": false          // Optional - default false
+}
+```
+
+`includeSecrets: false` writes every credential as `""`: a bearer token, a
+basic or digest or NTLM password, an API-key value, an OAuth 2.0 client secret
+or password-grant password, an AWS key pair or session token, and the value of
+a variable marked secret. A value that is exactly one `{{variable}}`
+reference names a secret without being one and is kept. Each blanked value is
+counted in `secretsOmitted`. `true` writes them as stored, which is what
+Postman's own export does.
+
+**Response:**
+```json
+{
+  "text": "{\n\t\"info\": {\n\t\t\"_postman_id\": \"9a1f...\",\n ...",
+  "fileName": "Pet Store.postman_collection.json",
+  "notes": {
+    "requestsExported": 12,
+    "foldersExported": 3,
+    "secretsOmitted": 2,
+    "notCarried": [
+      { "code": "vayu_elements", "count": 4,
+        "message": "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" }
+    ]
+  }
+}
+```
+
+- `text` is `JSON.stringify(document, null, "\t")`: tab-indented, no trailing
+  newline, keys in the order Postman writes them. `info.schema` is
+  `https://schema.getpostman.com/json/collection/v2.1.0/collection.json`;
+  `info._postman_id` is the collection id when that is a UUID, the UUID an
+  engine id ends in (`col_<uuid>`), or else a version-8 UUID derived from the
+  id. No `_exporter_id` or `_collection_link` is written.
+- `fileName` is `<collection name>.postman_collection.json`, with every
+  character a filesystem refuses (`<>:"/\|?*` and control characters)
+  replaced by `_`.
+- `foldersExported` counts the folders beneath the collection, not the
+  collection itself.
+- `notCarried` has one entry per kind of stored thing the format cannot carry,
+  in a fixed code order, each with its count and a short phrase; an empty
+  array means everything was carried.
+
+| Code | Written when the collection holds |
+|------|-----------------------------------|
+| `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
+| `script_settings` | A script with a name or the load-test `inline` setting |
+| `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
+| `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
+| `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
+| `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
+| `form_file_names` | A form-data file part whose file name differs from its path's own |
+| `http_version` | A request's HTTP version other than `auto` |
+| `event_stream` | A request consumed as an event stream |
+| `mock_response_mode` | A mock response mode other than `first` |
+| `truncated_examples` | An example saved from a cut-off response, written with the partial body |
+| `example_content_types` | An example content type no Content-Type header row states |
+| `variable_types` | A variable typed `json` (`number` and `boolean` are written as Postman's own types) |
+| `data_contracts` | A collection or folder data-file contract |
+| `spec_bindings` | A collection or folder bound to an OpenAPI document |
+| `spec_operations` | A request stamped as an OpenAPI operation |
+| `rows_without_key` | A header, param or form row with a value but no name, left out |
+
+An auth a Postman import kept its original block for (`auth.postman`, see
+`docs/engine/db-schema.md`) is written as that block, while it still maps to
+the stored auth; everything below describes the rest.
+
+What maps where: folders are item groups (folders before requests, each in
+stored order); a request's `inherit` auth is an absent `auth` and its `none` is
+`noauth`, while a collection's or folder's `none` is an absent `auth` and its
+`noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
+are `raw` with that `options.raw.language` (or the language a Postman import
+kept as `rawLanguage`, none at all for `""`, while the body still sniffs to its
+mode), `graphql` is `graphql` with the
+variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
+`form-data` is `formdata` with a file part's `src`; `script.pre` /
+`script.post` are the `prerequest` / `test` events, one event per element in
+element order, a turned-off one written `disabled: true` (Postman's runtime
+skips it, as Vayu does); saved examples are
+`response` entries with an `originalRequest` (see below); `followRedirects: false`,
+`maxRedirects` other than 10 and `verifySSL: false` are
+`protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD
+that sends a body carries `disableBodyPruning: true`.
+
+**Saved examples.** An example imported from Postman carries the saved
+response it came from (`request_examples.postman_response`) and is written back
+from it in the source's member order: `originalRequest` (the request as it was
+recorded, not the request's current state), `cookie`, `responseTime`,
+`_postman_previewtype` and any other member as stored; `name`, `code` and
+`body` from the example's own fields. The status text is the stored one while
+`status` is still the code it was recorded with, `header[]` (its `name` fields
+and number values included) while `headers` still reads the same, and the
+preview language and type while the declared Content-Type is unchanged; an
+edit to any of those regenerates the part it made stale. A member the source
+left out (`code`, `status`) stays out until an edit gives it a value. The
+recorded request's `auth` is written in v2.1's attribute-array shape (a v2.0
+file states it as an object, which the v2.1 schema refuses), and with
+`includeSecrets: false` it is blanked like any other credential and counted in
+`secretsOmitted`. An example with no stored response
+(saved in Vayu, or imported from OpenAPI) gets `originalRequest` from the
+request's current state, the status text from the engine's reason-phrase table
+and `_postman_previewlanguage` from its Content-Type (`Text` when it states
+none), with `cookie: []`.
+
+**Errors:**
+- `400` `Invalid body: must be an object`.
+- `400` `Invalid 'collectionId': must be a non-empty string`.
+- `400` `Invalid 'includeSecrets': must be true or false`.
+- `404` `Collection not found`.
 
 ## Environments
 

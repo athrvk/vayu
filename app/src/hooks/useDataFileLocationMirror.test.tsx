@@ -44,9 +44,13 @@ describe("useDataFileLocationMirror", () => {
 		expect(publish).toHaveBeenCalledTimes(2);
 	});
 
-	it("does nothing outside Electron", () => {
+	it("does nothing outside Electron, on mount or on a change", () => {
 		vi.stubGlobal("electronAPI", undefined);
+		// Mutation check: drop the `if (!publish) return` guard and the mount
+		// calls an undefined publisher; subscribe before it and the change does.
 		expect(() => renderHook(() => useDataFileLocationMirror())).not.toThrow();
-		expect(publish).not.toHaveBeenCalled();
+		expect(() =>
+			act(() => useDataFileStore.getState().setDataFile("col_2", USERS))
+		).not.toThrow();
 	});
 });

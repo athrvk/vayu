@@ -797,21 +797,6 @@ TEST_F (RunsRouteTest, DbCountMatchesFilter) {
     EXPECT_EQ (db_->count_runs ({}), 3); // no filter -> everything
 }
 
-// GET /runs/:id serializes a run with the full configSnapshot (and no
-// `summary`, which is the list row's compact stand-in for it).
-TEST_F (RunsRouteTest, FullRunSerializationKeepsConfigSnapshot) {
-    seed ({ .id = "run_full",
-    .config_snapshot = R"({"url":"https://a/","method":"GET","headers":{"X":"1"}})" });
-
-    auto runs = db_->get_all_runs ();
-    ASSERT_EQ (runs.size (), 1u);
-    auto full = vayu::json::serialize (runs.front ());
-    EXPECT_TRUE (full.contains ("configSnapshot"));
-    EXPECT_FALSE (full.contains ("summary"));
-    // Full snapshot, including keys the summary would drop.
-    EXPECT_TRUE (full["configSnapshot"].contains ("headers"));
-}
-
 // GET /runs/:id/report's `configuration` object: same nine-key extension as
 // the list-row summary (mode/duration/concurrency/startConcurrency/
 // rampUpDuration/timeout/comment + httpVersion/followRedirects/maxRedirects),

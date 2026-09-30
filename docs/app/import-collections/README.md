@@ -488,7 +488,7 @@ and **preserves duplicates and disabled rows**.
 Reads the per-type detail via `auth_detail`, which handles both v2.1's array shape
 (`[{key, value}]`) and v2.0's object shape. Maps `bearer`/`basic`/`apikey` to concrete auth,
 maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `map_postman_oauth2` (below),
-stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), maps the real AWS wire type
+stores `digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt` as `{mode, config}` (not executed; the `CONFIG_AUTH_TYPES` table in `postman_format.hpp`), maps the real AWS wire type
 `awsv4` → the internal `{mode:"aws", config}`, `noauth` → `none`, and missing/`inherit` →
 `inherit`. A collection/folder `noauth` is handled by `collection_auth` instead,
 which maps it to the terminal `{mode:"noauth"}`. 
@@ -498,18 +498,21 @@ Turns each source format's OAuth 2.0 block into Vayu's typed `OAuth2Config`, so 
 OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
 - `map_postman_oauth2(detail)` - Postman v2.1 `oauth2` params, incl. grant normalization
   (`authorization_code_with_pkce` → auth-code + PKCE; `implicit` → auth-code + PKCE; a minimal
-  export with only a pre-fetched `accessToken` → a bearer token).
+  export with only a pre-fetched `accessToken` → a bearer token, or an API key when Postman
+  would place or prefix it otherwise).
 - `map_insomnia_oauth2(auth)` - Insomnia's camelCase `oauth2` object.
 - `map_openapi_v3_oauth2(scheme)` / `map_swagger_oauth2(scheme)` - pick the first usable flow from an
   OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
 
-Grant/field normalization is shared here so the parsers agree. Only `digest`/`aws`/`ntlm`
+Grant/field normalization is shared here so the parsers agree. Only the data-only modes (`digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt`)
 remain non-executable and are counted in `meta.nonExecutableAuth`.
 
-### raw_body
-`raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
+### postman_raw_body
+`postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
 directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
-`text`) and never guesses `xml`.
+`text`) and never guesses `xml`, keeping the declared language (or `""` for none) as
+`rawLanguage`. Public in `import_document.hpp`: the Postman exporter calls it to decide
+whether a kept `rawLanguage` still describes the stored body.
 
 ### join_exec
 `join_exec(event)` - a Postman event entry → a single script string. Joins

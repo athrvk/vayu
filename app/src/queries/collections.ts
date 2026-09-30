@@ -18,6 +18,7 @@ import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { isEngineStartFailure } from "@/lib/query-client";
 import { useResponseStore } from "@/stores/response-store";
 import { useSaveStore } from "@/stores/save-store";
 import { useDataFileStore } from "@/stores/data-file-store";
@@ -273,9 +274,11 @@ export function requestDetailOptions(requestId: string | null) {
 		},
 		enabled: !!requestId,
 		// Never retry a real deletion - a 404 is final. Only a transport failure
-		// is worth a retry, and only a bounded number of times.
+		// is worth a retry, and only a bounded number of times - except the
+		// engine a restored tab's lookup races at launch, which has not failed.
 		retry: (count: number, error: unknown) =>
-			!isRequestNotFound(error) && count < QUERY_CACHE.REQUEST_LOOKUP_RETRY,
+			!isRequestNotFound(error) &&
+			(isEngineStartFailure(error) || count < QUERY_CACHE.REQUEST_LOOKUP_RETRY),
 		retryDelay: QUERY_CACHE.REQUEST_LOOKUP_RETRY_DELAY_MS,
 		staleTime: Infinity,
 	};

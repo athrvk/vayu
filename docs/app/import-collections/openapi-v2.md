@@ -359,7 +359,7 @@ Shared between both: the folder routing (`OperationFolders` - first tag, else pa
 | `declared_param_row`, `param_value_text` | `openapi_drafts.cpp` | one `in: "query"` or `in: "header"` parameter as a table row - the value/enabled rule both OpenAPI parsers apply |
 | `count_examples` | `import_document.cpp` | total the examples across the finished drafts, for `meta.exampleCount` |
 
-Beyond `count_examples`, this parser does **not** use the Postman/Insomnia helpers in `import_document.cpp` (`as_string`, `to_var_record`, `map_key_values`, `map_postman_auth`, `raw_body`, `join_exec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
+Beyond `count_examples`, this parser does **not** use the Postman/Insomnia helpers in `import_document.cpp` (`as_string`, `to_var_record`, `map_key_values`, `map_postman_auth`, `postman_raw_body`, `join_exec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 
 ## Related
 

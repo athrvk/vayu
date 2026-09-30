@@ -783,10 +783,10 @@ TEST (ImportParse, NamesTheRequestsACountIsAbout) {
     const ImportParse postman = parse_import (R"({"info":{"name":"P",
         "schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
         "item":[{"name":"Signed","request":{"method":"GET","url":"https://x.test",
-                 "auth":{"type":"hawk"}}},
+                 "auth":{"type":"kerberos"}}},
                 {"name":"Plain","request":{"method":"GET","url":"https://x.test"}},
                 {"name":"Also signed","request":{"method":"GET","url":"https://x.test",
-                 "auth":{"type":"oauth1"}}},
+                 "auth":{"type":"negotiate"}}},
                 {"name":"Digest","request":{"method":"GET","url":"https://x.test",
                  "auth":{"type":"digest"}}}]})",
     {}, {});
@@ -1305,7 +1305,7 @@ TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"A","request":{"method":"GET","url":"https://x.com/a",
-            "auth":{"type":"hawk","hawk":[]}}},
+            "auth":{"type":"custom","custom":[]}}},
         {"name":"B","request":{"method":"GET","url":"https://x.com/b",
             "auth":{"type":"noauth"}}}
     ]})",
@@ -1318,6 +1318,58 @@ TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
     // "send nothing", which is exactly what it mapped to.
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_auth"), 1);
+}
+
+/// Every auth type Postman's schema defines that Vayu cannot sign is kept as
+/// data, like AWS, Digest and NTLM always were: stored, not sent, counted.
+TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"H","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"hawk","hawk":[{"key":"authId","value":"id"},
+                {"key":"includePayloadHash","value":true,"type":"boolean"}]}}},
+        {"name":"O","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"oauth1","oauth1":[{"key":"consumerKey","value":"ck"}]}}},
+        {"name":"E","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"edgegrid","edgegrid":[{"key":"clientToken","value":"ct"}]}}},
+        {"name":"J","request":{"method":"GET","url":"https://x.com",
+            "auth":{"type":"jwt","jwt":[{"key":"algorithm","value":"HS256"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("auth").at ("mode"), "hawk");
+    EXPECT_EQ (requests[0].at ("auth").at ("config").at ("authId"), "id");
+    EXPECT_EQ (requests[1].at ("auth").at ("mode"), "oauth1");
+    EXPECT_EQ (requests[2].at ("auth").at ("mode"), "edgegrid");
+    EXPECT_EQ (requests[3].at ("auth").at ("mode"), "jwt");
+    EXPECT_EQ (parsed.result.at ("meta").at ("nonExecutableAuth"), 4);
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
+}
+
+/// A collection's or folder's data-only auth reaches every request inheriting
+/// it, so it is counted where it is declared - once, named - rather than
+/// nowhere. Mutation check: drop the count in `pm_folder` and this goes red.
+TEST (PostmanImport, CountsADataOnlyAuthOnACollectionOrFolder) {
+    const ImportParse parsed = parse_import (
+    R"({"info":{"name":"Signed API","schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
+        "auth":{"type":"hawk","hawk":[{"key":"authId","value":"id"}]},
+        "item":[
+        {"name":"Reports","auth":{"type":"digest","digest":[{"key":"username","value":"u"}]},
+         "item":[{"name":"R","request":{"method":"GET","url":"https://x.com/r"}}]},
+        {"name":"A","request":{"method":"GET","url":"https://x.com/a"}},
+        {"name":"B","request":{"method":"GET","url":"https://x.com/b"}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& root = parsed.result.at ("collections")[0];
+    EXPECT_EQ (root.at ("auth").at ("mode"), "hawk");
+    EXPECT_EQ (root.at ("children")[0].at ("auth").at ("mode"), "digest");
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
+    EXPECT_EQ (meta.at ("nonExecutableAuthRequests").get<Names> (),
+    (Names{ "Reports", "Signed API" }));
 }
 
 TEST (PostmanImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {
@@ -1404,28 +1456,44 @@ TEST (PostmanImport, MapsStrictSSLFalseToVerifySSLThroughToTheApplyPayload) {
     EXPECT_EQ (payload.at ("requests")[0].at ("verifySSL"), false);
 }
 
-TEST (PostmanImport, CountsVariableMetadataDroppedFromCollectionAndEnvironmentVariables) {
+TEST (PostmanImport, KeepsCollectionVariableMetadataAndCountsWhatHasNoHome) {
     const ImportParse collection =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[],
         "variable":[{"key":"host","value":"x","description":"the host"},
-                    {"key":"token","value":"y","type":"secret"}]})",
+                    {"key":"token","value":"y","type":"secret"},
+                    {"key":"limit","value":"5","type":"number"},
+                    {"key":"plain","value":"p","type":"default"},
+                    {"key":"blob","value":"b","type":"any"}]})",
     {}, {});
     ASSERT_TRUE (collection.ok ()) << collection.error;
     const json& variables =
     collection.result.at ("collections")[0].at ("variables");
     EXPECT_FALSE (variables.at ("host").contains ("secret"));
+    // A collection's variables go back out through the Postman exporter, so
+    // the description is kept for it.
+    EXPECT_EQ (variables.at ("host").at ("description"), "the host");
     EXPECT_TRUE (variables.at ("token").at ("secret").get<bool> ());
-    // Only `host` carried metadata Vayu has nowhere to put; `token`'s `type`
-    // is the one it stores.
+    // Vayu's own type of the same name, cast the same way for a script.
+    EXPECT_EQ (variables.at ("limit").at ("type"), "number");
+    // `default` is Postman's unset marker: nothing stored, nothing counted.
+    EXPECT_FALSE (variables.at ("plain").contains ("type"));
+    // `any` has no Vayu counterpart - the one row still counted.
+    EXPECT_FALSE (variables.at ("blob").contains ("type"));
     EXPECT_EQ (
     skip_counts (collection.result.at ("meta").at ("skipped")).at ("variable_metadata"), 1);
 
     const ImportParse environment = parse_import (
     R"({"_postman_variable_scope":"environment","name":"Prod",
         "values":[{"key":"host","value":"x","description":"the host"},
-                  {"key":"user","value":"y"}]})",
+                  {"key":"user","value":"y","type":"boolean"}]})",
     {}, {});
     ASSERT_TRUE (environment.ok ()) << environment.error;
+    // No exporter reads an environment's description, so it is not kept - and
+    // is counted; the type is Vayu's own and is.
+    const json& values =
+    environment.result.at ("environments")[0].at ("variables");
+    EXPECT_FALSE (values.at ("host").contains ("description"));
+    EXPECT_EQ (values.at ("user").at ("type"), "boolean");
     EXPECT_EQ (skip_counts (environment.result.at ("meta").at ("skipped")).at ("variable_metadata"),
     1);
 }
@@ -1522,6 +1590,170 @@ TEST (PostmanImport, CountsAnInvalidPercentEscapeThatChangesOnRejoin) {
     EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=%25ZZ");
     EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("invalid_percent_encoding"),
     1);
+}
+
+/**
+ * What an export back to Postman needs the import to have kept (the Postman
+ * exporter's round trip): each case pins one piece of a Postman document
+ * that used to be rewritten or dropped on the way in, and is a mutation
+ * check on it.
+ */
+TEST (PostmanImport, KeepsEveryEventInDocumentOrderAndADisabledOneTurnedOff) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"j("},"item":[
+        {"name":"R","event":[
+            {"listen":"test","script":{"exec":["t()"]}},
+            {"listen":"prerequest","script":{"exec":["p()"]},"disabled":true},
+            {"listen":"test","script":{"exec":["u()"]}}
+        ],"request":{"method":"GET","url":"https://x.com"}}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& elements =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("elements");
+    ASSERT_EQ (elements.size (), 3U);
+    EXPECT_EQ (elements[0].at ("kind"), "script.post");
+    EXPECT_EQ (elements[0].at ("config").at ("script"), "t()");
+    EXPECT_FALSE (elements[0].contains ("enabled"));
+    // Postman's runtime skips a disabled event; importing it active would run
+    // a script the collection had switched off.
+    EXPECT_EQ (elements[1].at ("kind"), "script.pre");
+    EXPECT_EQ (elements[1].at ("enabled"), false);
+    // A second event of one listen used to be dropped without a count.
+    EXPECT_EQ (elements[2].at ("config").at ("script"), "u()");
+}
+
+TEST (PostmanImport, KeepsARawBodysUndeclaredLanguageWithoutChangingItsMode) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"None","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{\"a\":1}"}}},
+        {"name":"Js","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"let a;","options":{"raw":{"language":"javascript"}}}}},
+        {"name":"Json","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{}","options":{"raw":{"language":"json"}}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    // Still sniffed - what Vayu sends is unchanged - with "declared none" kept.
+    EXPECT_EQ (requests[0].at ("body"),
+    (json{ { "mode", "json" }, { "content", "{\"a\":1}" }, { "rawLanguage", "" } }));
+    EXPECT_EQ (requests[1].at ("body"),
+    (json{ { "mode", "text" }, { "content", "let a;" }, { "rawLanguage", "javascript" } }));
+    // A language that is a Vayu mode needs nothing kept beside it.
+    EXPECT_FALSE (requests[2].at ("body").contains ("rawLanguage"));
+}
+
+TEST (PostmanImport, KeepsAHeaderRowsTypeAndAQueryRowsEquals) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST",
+            "header":[{"key":"A","value":"1","type":"default"},{"key":"B","value":"2","type":"text"}],
+            "body":{"mode":"urlencoded","urlencoded":[{"key":"f","value":"v","type":"default"}]},
+            "url":{"raw":"https://x.com/a?expand=","query":[{"key":"expand","value":"","equals":true}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("headers")[0].at ("type"), "default");
+    // `text` is the default the exporter writes for a row with none.
+    EXPECT_FALSE (request.at ("headers")[1].contains ("type"));
+    EXPECT_EQ (request.at ("body").at ("fields")[0].at ("type"), "default");
+    EXPECT_EQ (request.at ("params")[0].at ("equals"), true);
+    // Carried beside the row, never onto the wire: the URL is joined exactly
+    // as before (an empty value still joins as a bare key).
+    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand");
+}
+
+TEST (PostmanImport, ReadsAnItemLevelDescriptionWhenTheRequestHasNone) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Item","description":"On the item","request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Both","description":"On the item",
+            "request":{"method":"GET","url":"https://x.com","description":{"content":"On the request"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("description"), "On the item");
+    EXPECT_EQ (requests[1].at ("description"), "On the request");
+}
+
+/// The first request's auth of a one-request Postman collection whose request
+/// auth is @p auth.
+json request_auth_of (const std::string& auth) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[{"name":"R","request":{"method":"GET","url":"https://x.com","auth":)" +
+    auth + "}}]}",
+    {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return json ();
+    }
+    return json::parse (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").dump ());
+}
+
+TEST (PostmanImport, ASeededOAuth2TokenIsSentAsPostmanSendsItAndKeepsItsBlock) {
+    // commercetools' shape (a v2.0 detail object): no grant, a seeded token.
+    const json bearer = request_auth_of (
+    R"({"type":"oauth2","oauth2":{"accessToken":"{{t}}","addTokenTo":"header","tokenType":"Bearer"}})");
+    EXPECT_EQ (bearer.at ("mode"), "bearer");
+    EXPECT_EQ (bearer.at ("token"), "{{t}}");
+    // The block rides beside it in v2.1 form, types as Postman converts them.
+    EXPECT_EQ (bearer.at ("postman"), json::parse (R"({"type":"oauth2","oauth2":[
+        {"key":"accessToken","value":"{{t}}","type":"string"},
+        {"key":"addTokenTo","value":"header","type":"string"},
+        {"key":"tokenType","value":"Bearer","type":"string"}]})"));
+
+    // Placed in the query, or under another prefix, Postman sends something a
+    // bearer token cannot: an API key in the right place says it exactly.
+    const json query = request_auth_of (
+    R"({"type":"oauth2","oauth2":[{"key":"accessToken","value":"t"},{"key":"addTokenTo","value":"queryParams"}]})");
+    EXPECT_EQ (query.at ("mode"), "apikey");
+    EXPECT_EQ (query.at ("key"), "access_token");
+    EXPECT_EQ (query.at ("in"), "query");
+    EXPECT_EQ (query.at ("value"), "t");
+    const json prefixed = request_auth_of (
+    R"({"type":"oauth2","oauth2":[{"key":"accessToken","value":"t"},{"key":"headerPrefix","value":"Token"}]})");
+    EXPECT_EQ (prefixed.at ("mode"), "apikey");
+    EXPECT_EQ (prefixed.at ("key"), "Authorization");
+    EXPECT_EQ (prefixed.at ("value"), "Token t");
+}
+
+TEST (PostmanImport, KeepsAnAuthBlockOnlyWhenTheExportWouldNotGiveItBack) {
+    // Exactly what the exporter writes for this bearer token: nothing kept.
+    EXPECT_FALSE (request_auth_of (R"({"type":"bearer","bearer":[{"key":"token","value":"{{t}}","type":"string"}]})")
+    .contains ("postman"));
+    // An oauth2 grant carrying what the config has no field for (`state`,
+    // a seeded token): kept, so the export writes those back.
+    const json grant = request_auth_of (R"({"type":"oauth2","oauth2":[
+        {"key":"state","value":"s","type":"string"},
+        {"key":"grant_type","value":"client_credentials","type":"string"},
+        {"key":"accessTokenUrl","value":"https://a.example.com/t","type":"string"},
+        {"key":"accessToken","value":"seed","type":"string"}]})");
+    EXPECT_EQ (grant.at ("mode"), "oauth2");
+    EXPECT_EQ (grant.at ("postman").at ("oauth2")[0].at ("key"), "state");
+    EXPECT_FALSE (grant.at ("config").contains ("accessToken"));
+}
+
+TEST (PostmanImport, CountsAProtocolBehaviourVayuDoesNotHonour) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Headers","protocolProfileBehavior":{"disabledSystemHeaders":{"accept":true}},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Pruning","protocolProfileBehavior":{"disableBodyPruning":true},
+            "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Cookies","protocolProfileBehavior":{"disableCookies":true,"disableUrlEncoding":true},
+            "request":{"method":"GET","url":"https://x.com"}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    // Once per request; body pruning is not one - Vayu always sends the body.
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("protocol_behavior"), 2);
 }
 
 class ImportParseRoute : public ::testing::Test {

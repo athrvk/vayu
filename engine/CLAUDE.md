@@ -208,6 +208,15 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `script.*` element before #1514's pipeline existed; now that it does, the
   two columns are dead data and this is the real cut-over the #1513 comment
   above once deferred.
+- **Any change to `make_vayu_storage`'s mapping bumps `SCHEMA_VERSION`**
+  (`vayu/db/database.hpp`, #1492), an added nullable column included:
+  `sync_schema ()` runs without `preserve`, so an older engine would rebuild
+  a table without the column it does not map. The bump is one-way - an older
+  engine refuses the stamped workspace - so it gets a row in
+  `docs/engine/db-schema.md#schema-versions` and a line in the next release's
+  notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
+  literal; a step with nothing to move (version 2's
+  `request_examples.postman_response`) only stamps.
 - **A log call takes a category, never text alone** (#1557, full account in
   `docs/engine/logging.md`). `LogRecord{level, cat, msg, fields}` is the whole
   API - `log_debug`/`log_info`/`log_warning`/`log_error` (`utils/logger.hpp`)
@@ -353,6 +362,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (#854); reads only, applying is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (#862): the document, the binding and every stamp, written **and cleared**, in one transaction |
 | POST | `/specs/export` | A collection back out as an OpenAPI document (#855): its bound document patched, or a skeleton when it binds none; reads only |
+| POST | `/export/postman` | A collection's subtree as a Postman Collection v2.1.0 document in the shape Postman's own export writes (`core/postman_export.hpp`, the Postman importer's inverse); credentials blanked unless `includeSecrets`, everything the format cannot carry listed in `notes.notCarried`; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 
@@ -500,7 +510,16 @@ logged as a warning: it means a client skipped composition.
   request's imported rows on any applied change; every read filters tombstones
   out (`get_request_examples`, `get_request_example`) and
   `get_suppressed_request_examples` is the single read that sees them, matching
-  on response **status**, which survives a reworded description.
+  on response **status**, which survives a reworded description. An example
+  imported from Postman keeps the saved response it came from in
+  **`postman_response`** (schema version 2): the entry as JSON text in source
+  member order, `name`/`body` as `null` placeholders. Only an import writes it
+  (a string on create, `null` - clear - the only value `PUT` takes), no read
+  route returns it, and `POST /export/postman` is its one reader: members
+  describing `status` or `headers` are written back only while those columns
+  still say what was imported, so an edit is never contradicted by the stored
+  copy; `originalRequest` is always kept (its `auth` blanked without
+  `includeSecrets`).
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start. A `404`
   means the request was genuinely deleted; anything else is a transport failure,

@@ -21,6 +21,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -124,6 +133,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "elements": [
@@ -228,6 +246,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -323,6 +350,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{token}}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             }
           },
@@ -696,6 +732,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{ token }}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             },
             "children": [
@@ -726,9 +771,18 @@
                       "content": "<x/>"
                     },
                     "auth": {
-                      "mode": "aws",
                       "config": {
                         "region": "eu-1"
+                      },
+                      "mode": "aws",
+                      "postman": {
+                        "awsv4": [
+                          {
+                            "key": "region",
+                            "value": "eu-1"
+                          }
+                        ],
+                        "type": "awsv4"
                       }
                     },
                     "examples": [
@@ -743,7 +797,8 @@
                           }
                         ],
                         "body": "<y/>",
-                        "contentType": "application/xml"
+                        "contentType": "application/xml",
+                        "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
                       }
                     ]
                   }
@@ -885,6 +940,15 @@
             },
             "auth": {
               "mode": "bearer",
+              "postman": {
+                "bearer": [
+                  {
+                    "key": "token",
+                    "value": "{{ token }}"
+                  }
+                ],
+                "type": "bearer"
+              },
               "token": "{{token}}"
             }
           },
@@ -1017,9 +1081,18 @@
             },
             "bodyType": "xml",
             "auth": {
-              "mode": "aws",
               "config": {
                 "region": "eu-1"
+              },
+              "mode": "aws",
+              "postman": {
+                "awsv4": [
+                  {
+                    "key": "region",
+                    "value": "eu-1"
+                  }
+                ],
+                "type": "awsv4"
               }
             },
             "examples": [
@@ -1034,7 +1107,8 @@
                   }
                 ],
                 "body": "<y/>",
-                "contentType": "application/xml"
+                "contentType": "application/xml",
+                "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
               }
             ],
             "order": 0

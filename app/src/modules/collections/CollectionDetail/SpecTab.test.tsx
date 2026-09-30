@@ -152,6 +152,20 @@ vi.mock("@/hooks/useSpecDocumentLimit", () => ({
 	useSpecDocumentLimit: () => ({ maxBytes: 10 * 1024 * 1024 }),
 }));
 
+// Both export dialogs, stubbed to a line naming which one mounted: what each
+// says is asserted in its own file, and this one is about which the Export
+// menu opens.
+vi.mock("@/modules/collections/ExportSpecDialog", () => ({
+	default: ({ collection }: { collection: Collection }) => (
+		<p data-testid="export-dialog">OpenAPI export of {collection.name}</p>
+	),
+}));
+vi.mock("@/modules/collections/ExportPostmanDialog", () => ({
+	default: ({ collection }: { collection: Collection }) => (
+		<p data-testid="export-dialog">Postman export of {collection.name}</p>
+	),
+}));
+
 const { default: SpecTab } = await import("./SpecTab");
 
 const OPENAPI = JSON.stringify({
@@ -638,6 +652,38 @@ describe("a bound collection", () => {
 	it("offers no picker while a spec is bound - re-binding is sync's job", () => {
 		render(<SpecTab collection={bound()} />);
 		expect(screen.queryByRole("button", { name: /choose file/i })).toBeNull();
+	});
+
+	/** Open the Export menu the way a keyboard does - Radix's trigger ignores `click`. */
+	async function openExportMenu() {
+		const trigger = screen.getByRole("button", { name: "Export" });
+		fireEvent.keyDown(trigger, { key: "Enter" });
+		return await screen.findByRole("menu");
+	}
+
+	it("offers both export formats from one Export menu", async () => {
+		render(<SpecTab collection={bound()} />);
+
+		await openExportMenu();
+
+		expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+			"OpenAPI…",
+			"Postman Collection v2.1…",
+		]);
+		// Nothing is mounted until a format is chosen.
+		expect(screen.queryByTestId("export-dialog")).toBeNull();
+	});
+
+	it.each([
+		["OpenAPI…", "OpenAPI export of Pets"],
+		["Postman Collection v2.1…", "Postman export of Pets"],
+	])("opens the matching dialog for %s", async (item, dialog) => {
+		render(<SpecTab collection={bound()} />);
+
+		await openExportMenu();
+		fireEvent.click(screen.getByRole("menuitem", { name: item }));
+
+		expect((await screen.findByTestId("export-dialog")).textContent).toBe(dialog);
 	});
 
 	/*

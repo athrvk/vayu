@@ -198,10 +198,16 @@ inline void append_json_string (const std::string& value, std::string& out) {
     out += '"';
 }
 
-inline void append_json_text (const json& value, size_t indent, size_t step, std::string& out);
-
 inline void
-append_json_container (const json& value, size_t indent, size_t step, std::string& out) {
+append_json_text (const json& value, size_t indent, size_t step, std::string& out, char pad = ' ');
+
+/// @p pad is the character `JSON.stringify`'s `space` argument repeats: a
+/// number of spaces, or `'\t'` with a step of 1 for a `"\t"` argument.
+inline void append_json_container (const json& value,
+size_t indent,
+size_t step,
+std::string& out,
+char pad = ' ') {
     const bool array = value.is_array ();
     if (value.empty ()) {
         out += array ? "[]" : "{}";
@@ -211,7 +217,7 @@ append_json_container (const json& value, size_t indent, size_t step, std::strin
     // all - not even after a colon - which is what @p step of 0 is.
     const bool pretty = step > 0;
     out += array ? "[" : "{";
-    const std::string inner (pretty ? indent + step : 0, ' ');
+    const std::string inner (pretty ? indent + step : 0, pad);
     bool first = true;
     for (auto entry = value.begin (); entry != value.end (); ++entry) {
         if (!first) {
@@ -226,16 +232,17 @@ append_json_container (const json& value, size_t indent, size_t step, std::strin
             append_json_string (entry.key (), out);
             out += pretty ? ": " : ":";
         }
-        append_json_text (entry.value (), indent + step, step, out);
+        append_json_text (entry.value (), indent + step, step, out, pad);
     }
     if (pretty) {
         out += '\n';
-        out.append (indent, ' ');
+        out.append (indent, pad);
     }
     out += array ? ']' : '}';
 }
 
-inline void append_json_text (const json& value, size_t indent, size_t step, std::string& out) {
+inline void
+append_json_text (const json& value, size_t indent, size_t step, std::string& out, char pad) {
     if (value.is_null ()) {
         out += "null";
     } else if (value.is_boolean ()) {
@@ -245,7 +252,7 @@ inline void append_json_text (const json& value, size_t indent, size_t step, std
     } else if (value.is_string ()) {
         append_json_string (value.get_ref<const std::string&> (), out);
     } else {
-        append_json_container (value, indent, step, out);
+        append_json_container (value, indent, step, out, pad);
     }
 }
 
@@ -253,6 +260,13 @@ inline void append_json_text (const json& value, size_t indent, size_t step, std
 inline std::string js_json_text (const json& value) {
     std::string out;
     append_json_text (value, 0, 2, out);
+    return out;
+}
+
+/// `JSON.stringify(value, null, "\t")` - what Postman writes an export as.
+inline std::string js_json_tabbed (const json& value) {
+    std::string out;
+    append_json_text (value, 0, 1, out, '\t');
     return out;
 }
 

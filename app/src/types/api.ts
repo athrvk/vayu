@@ -2067,6 +2067,55 @@ export interface SpecExportResponse {
 	notes: ExportNotes;
 }
 
+/**
+ * What `POST /export/postman` is asked: a collection, and whether its
+ * credentials travel with it.
+ *
+ * Like `SpecExportRequest`, nothing but the id is sent - the engine reads the
+ * subtree, its variables and its auth itself.
+ */
+export interface PostmanExportRequest {
+	collectionId: string;
+	/**
+	 * Write auth secrets and secret variables as stored. Defaults to `false`
+	 * engine-side, where they are written empty and counted in
+	 * `PostmanExportNotes.secretsOmitted`. `true` is what Postman's own export
+	 * does.
+	 */
+	includeSecrets?: boolean;
+}
+
+/** One kind of thing the Postman document has no place for, and how often it came up. */
+export interface PostmanNotCarried {
+	/** Stable identifier for the kind, e.g. a load-test setting or an element type. */
+	code: string;
+	count: number;
+	/** The engine's sentence, shown as written. */
+	message: string;
+}
+
+/**
+ * What a Postman export wrote and what it could not.
+ *
+ * `notCarried` is open-ended on purpose: the engine names each loss in its own
+ * words, so a new kind reaches the dialog without a field added here.
+ */
+export interface PostmanExportNotes {
+	requestsExported: number;
+	foldersExported: number;
+	/** Auth secrets and secret variables written as `""`. Zero when `includeSecrets` was set. */
+	secretsOmitted: number;
+	notCarried: PostmanNotCarried[];
+}
+
+export interface PostmanExportResponse {
+	/** The Postman Collection v2.1 document, as JSON text. */
+	text: string;
+	/** `<name>.postman_collection.json`. */
+	fileName: string;
+	notes: PostmanExportNotes;
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;

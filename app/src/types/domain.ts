@@ -38,7 +38,11 @@ export type AuthMode =
 	| "oauth2"
 	| "digest"
 	| "aws"
-	| "ntlm";
+	| "ntlm"
+	| "hawk"
+	| "oauth1"
+	| "edgegrid"
+	| "jwt";
 
 /**
  * A single key-value entry (headers, params, form fields).
@@ -191,7 +195,10 @@ export type RequestAuth =
 	| { mode: "basic"; username: string; password: string }
 	| { mode: "apikey"; key: string; value: string; in: "header" | "query" }
 	| { mode: "oauth2"; config: OAuth2Config }
-	| { mode: "digest" | "aws" | "ntlm"; config: Record<string, unknown> };
+	| {
+			mode: "digest" | "aws" | "ntlm" | "hawk" | "oauth1" | "edgegrid" | "jwt";
+			config: Record<string, unknown>;
+	  };
 
 /**
  * The data contract a collection declares (issue #599): which columns a run's

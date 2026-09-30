@@ -40,7 +40,8 @@ import { createElement, type ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { useHealthQuery, healthPollIntervalMs, engineStatusAfterFailedPoll } from "./health";
+import { useHealthQuery, healthPollIntervalMs } from "./health";
+import { engineStatusAfterFailedPoll } from "@/lib/engine-start-window";
 import { useEngineStore, useSaveStore } from "@/stores";
 import { NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
@@ -146,7 +147,10 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 			.spyOn(useSaveStore.getState(), "flushAll")
 			.mockResolvedValue({ saved: 0, failed: 0, pending: 0 });
 		// Once: inside a launch's start window the hook does not retry, so the
-		// first rejection is the error state.
+		// first rejection is the error state. A retry there would wait TanStack's
+		// default second before the startup poll or this refetch could run.
+		// Mutation check: restore `retry: 1` and the retry succeeds, so the error
+		// state this waits for never arrives.
 		getHealth.mockRejectedValueOnce(new Error("Network error: fetch failed"));
 		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
 
@@ -208,25 +212,6 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		expect(TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS).toBeLessThan(
 			TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS
 		);
-	});
-
-	it("surfaces a failed poll during a start without retrying it first", async () => {
-		// The retry waited TanStack's default second before the failure could
-		// reach the startup poll or the refetch of the queries that raced the
-		// engine - so this client keeps that default delay. Mutation check:
-		// restore `retry: 1` and the error state arrives after the one-second
-		// retry, past this bound.
-		const client = new QueryClient();
-		getHealth.mockRejectedValue(new Error("Network error: fetch failed"));
-
-		const { result, unmount } = renderHook(() => useHealthQuery(), {
-			wrapper: wrapperFor(client),
-		});
-		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 500 });
-
-		expect(useEngineStore.getState().engineStatus).toBe("starting");
-		unmount();
-		client.clear();
 	});
 
 	it("keeps its one retry for an engine that was already serving", async () => {

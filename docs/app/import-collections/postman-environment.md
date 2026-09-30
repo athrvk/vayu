@@ -80,8 +80,9 @@ A globals export carries a `name` (the workspace's). Vayu's globals scope is a s
 | `value` | `as_string` then `normalize_template_vars`, so `{{ user.name }}` tightens to `{{user.name}}` like every other parser. |
 | `enabled` / `disabled` | `disabled` wins if present, else `enabled`, else `true`. |
 | `type === "secret"` | Sets `secret: true`. Any other `type` omits the flag entirely (not `secret: false`). |
+| `type` of `"string"` / `"number"` / `"boolean"` | Stored as the variable's `type`, Vayu's own type of the same name. |
 
-Postman's other `type` values describe a value kind Vayu does not store - every variable value is a string - so only `"secret"` is read.
+`"default"` is Postman's unset marker and stores nothing. `"any"` or a custom `type`, and a `description` (an environment or globals file has no exporter to write one back), are dropped and counted as `variable_metadata`.
 
 **Empty secret values are imported, not skipped.** Some Postman export paths blank out secret-typed values. The variable is still created (empty, enabled, `secret: true`) so the key stays visible for the user to fill in; dropping it would lose the name too, with nothing on screen to say so.
 

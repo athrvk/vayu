@@ -1367,10 +1367,10 @@ nlohmann::ordered_json ImportTally::items () const {
     "duplicate_operation_id", "webhook_operations", "deprecated_operation", "cookie_param",
     "unmapped_body", "unresolved_base_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
-    "security_unmapped_mutualtls", "security_unmapped_openidconnect",
-    "security_unmapped_type", "security_unmapped_apikey_cookie", "oauth2_dropped_field",
-    "path_variables", "url_without_raw", "invalid_percent_encoding",
-    "variable_metadata", "disabled_body", "certificate", "proxy_config" });
+    "security_unmapped_mutualtls", "security_unmapped_openidconnect", "security_unmapped_type",
+    "security_unmapped_apikey_cookie", "oauth2_dropped_field", "path_variables",
+    "url_without_raw", "invalid_percent_encoding", "variable_metadata",
+    "disabled_body", "certificate", "proxy_config", "protocol_behavior" });
 
     const auto item_of = [] (const Entry& entry) {
         nlohmann::ordered_json item = { { "kind", entry.kind }, { "count", entry.count } };

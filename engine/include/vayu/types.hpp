@@ -870,6 +870,11 @@ struct Variable {
     // fails the macOS and Windows legs on every one of those sites).
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> created_at{};
+    // A Postman import's variable `description`, kept for the Postman export
+    // to write back; nothing else reads it, and "" writes no key. `{}` for the
+    // same trailing-field reason as `created_at`.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string description{};
 
     bool operator== (const Variable&) const = default;
 };
@@ -1198,8 +1203,8 @@ struct RequestExample {
      * and `count_request_examples` filter it out, so every reader - the list
      * route, the mock server, the export - behaves exactly as though the
      * delete had removed it, and only the sync's own accessor
-     * (`get_suppressed_request_examples`) can see it. `body`, `headers` and
-     * `content_type` are cleared when the flag goes on: nothing serves a
+     * (`get_suppressed_request_examples`) can see it. `body`, `headers`,
+     * `content_type` and `postman_response` are cleared when the flag goes on: nothing serves a
      * tombstone, so keeping a response body against a deleted row would retain
      * bytes for a reader that does not exist.
      *
@@ -1220,6 +1225,23 @@ struct RequestExample {
      * came from instead of adding a new one beside it.
      */
     std::optional<std::string> spec_example_key;
+    /**
+     * The Postman saved response this example was imported from, as compact
+     * JSON text in the source's own member order (schema version 2). NULL for
+     * every other example - one saved from a live response, one from an
+     * OpenAPI document, every row that predates the column.
+     *
+     * Every member is kept verbatim except `name` and `body`, which are
+     * `null` placeholders holding only their position: the `name` and `body`
+     * columns are the values. The Postman export is the reader
+     * (`core/postman_export.cpp`): it writes `originalRequest`, `cookie`,
+     * `responseTime` and the `_postman_*` members back as stored, and the
+     * status text, `header[]` and preview members only while the columns they
+     * describe (`status`, `headers`) still say what was imported - an edit to
+     * those regenerates them instead. Only an import writes it; an update may
+     * clear it (`null`) and nothing else.
+     */
+    std::optional<std::string> postman_response;
     int64_t created_at = 0;
     int64_t updated_at = 0;
 };

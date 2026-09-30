@@ -120,10 +120,12 @@ export interface SkippedItem {
 		 */
 		| "unresolved_base_url"
 		/**
-		 * A Postman `auth.type` naming a scheme Vayu has no mode for - `hawk`,
-		 * `oauth1`, `edgegrid`, or a non-string `type` (issue #1443) - unlike
-		 * `awsv4`/`digest`/`ntlm`, which import as data and count under
-		 * `nonExecutableAuth` instead. The request imports with no auth.
+		 * A Postman `auth.type` naming a scheme Vayu has no mode for - a type
+		 * the schema does not define, or a non-string `type` (issue #1443) -
+		 * unlike the schema's own types Vayu cannot sign (`awsv4`, `digest`,
+		 * `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), which import as data and
+		 * count under `nonExecutableAuth` instead. The request imports with no
+		 * auth.
 		 */
 		| "unsupported_auth"
 		/**
@@ -245,6 +247,13 @@ export interface SkippedItem {
 		 */
 		| "proxy_config"
 		/**
+		 * A Postman request whose `protocolProfileBehavior` turns off one of
+		 * Postman's own default headers (`disabledSystemHeaders`), its cookie
+		 * jar (`disableCookies`) or URL encoding (`disableUrlEncoding`) - none
+		 * of which Vayu stores per request.
+		 */
+		| "protocol_behavior"
+		/**
 		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
 		 * failed the element registry - an unknown kind, a config the wrong shape -
 		 * once the document was hand-edited (issue #1518). Dropped and counted
@@ -336,17 +345,19 @@ export interface ImportMeta {
 	 */
 	skipped: SkippedItem[];
 	/**
-	 * Requests whose auth Vayu stores but does not execute - digest, aws and
-	 * ntlm, the three the engine counts (`import_document.cpp`); oauth2 is not
-	 * among them, since `POST /oauth2/token` executes it. Counted rather than
-	 * skipped: the request imports and sends, only its credentials do not
-	 * travel. Shown by `importNotices` beside the skip counts.
+	 * Requests, and for Postman folders and collections, whose own auth Vayu
+	 * stores but does not execute - the `CONFIG_AUTH_TYPES` modes (aws,
+	 * digest, ntlm, hawk, oauth1, edgegrid, jwt) the engine counts
+	 * (`import_document.cpp`); oauth2 is not among them, since
+	 * `POST /oauth2/token` executes it. Counted rather than skipped: the
+	 * request imports and sends, only its credentials do not travel. Shown by
+	 * `importNotices` beside the skip counts.
 	 */
 	nonExecutableAuth: number;
 	/**
-	 * Those requests by name, when the walk had them in hand (Postman and
-	 * Insomnia) - so the preview names the requests whose credentials will not
-	 * travel, rather than only counting them.
+	 * Those requests, folders and collections by name, when the walk had them
+	 * in hand (Postman and Insomnia) - so the preview names where credentials
+	 * will not travel, rather than only counting them.
 	 */
 	nonExecutableAuthRequests?: string[];
 	/**
@@ -382,6 +393,14 @@ export interface ExampleDraft {
 	 * the source says nothing - not a guess.
 	 */
 	contentType: string;
+	/**
+	 * The Postman saved response this came from, as the engine's parse wrote it:
+	 * JSON text in the source's member order, forwarded untouched so
+	 * `POST /export/postman` can write back what no field here models (the
+	 * recorded request, status text, preview settings, cookies). Postman
+	 * imports only; absent otherwise and when over the engine's size cap.
+	 */
+	postmanResponse?: string;
 }
 
 export interface RequestDraft {

@@ -205,7 +205,8 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
     row.headers        = "";
     row.content_type   = "";
     row.body_truncated = false;
-    row.updated_at     = now;
+    row.postman_response.reset ();
+    row.updated_at = now;
     impl_->storage.replace (row);
 }
 

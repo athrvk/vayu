@@ -566,8 +566,10 @@ reports as failed, after which the next failed poll owes the user its reason
 again. A window nobody closes is spent rather than cleared - an engine that
 never arrives leaves its opening time in place, expired - so this is not an "is
 something starting" flag and must not be read as one: only
-`engineStatusAfterFailedPoll` interprets it, and to that an expired timestamp
-and a `null` mean the same thing.
+`engineStatusAfterFailedPoll` (`lib/engine-start-window.ts`) interprets it, and
+to that an expired timestamp and a `null` mean the same thing. Two things ask
+it: `useHealthQuery`, for `engineStatus`, and the shared query retry policy,
+which keeps queries loading rather than failed while it answers `starting`.
 
 **Non-persisted** (cleared on app restart).
 
@@ -1863,13 +1865,20 @@ between two serializations of one answer, and by the moment the dialog mounted
 because a *collection* changes under its id in a way a document never does:
 that is what makes it fresh on every open and cached across a toggle, which
 neither `staleTime` alone can say. A key per format also means a switch is a
-cache miss, so this is the one read that carries `placeholderData:
+cache miss, so this read carries `placeholderData:
 keepPreviousData` (issue #1311): the counts the dialog prints belong to the
 collection rather than to the serialization, and are the same either way, so
 the previous answer is the honest thing to hold while the next one assembles.
 The dialog gates Copy and Download on `isFetching` for that window - the text
 under them is still the previous format's - and shows a placeholder shaped like
 its summary card on the first read, when there is nothing to keep.
+
+`exports.postman(collectionId, includeSecrets, opened)` is the same read for the
+Postman Collection v2.1 export (`usePostmanExportQuery` in `queries/exports.ts`),
+on the same terms: keyed by the dialog's one toggle and by the moment it mounted,
+with `placeholderData: keepPreviousData` so the summary stays while the other
+answer assembles. It is not under `specs` because a Postman document reads no
+binding.
 
 `specs.match(collectionId, fingerprint)` is the third of that family and the one
 that names no document (issue #761): the pairing of a collection's requests
@@ -2001,8 +2010,13 @@ until it names a reader. The emitting side is documented in
 not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
 deleted row answers identically every time, so retrying it only delays the error
 the caller is waiting on. 4xx is never retried; everything else (5xx, timeout,
-unreachable engine - which `http-client.ts` throws as a plain `Error`, not an
-`ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
+unreachable engine - which `http-client.ts` throws as an `EngineUnreachableError`,
+not an `ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget. The one exception is
+an engine that is still starting: while `engineStartWindow` is open, an
+`EngineUnreachableError` is retried without counting against the budget, every
+`ENGINE_START_RETRY_DELAY_MS` (`queryRetryDelay`), so a launch shows loading
+rather than error panes until the engine answers or the window expires
+(`docs/app/api-integration.md`, Health Checking).
 
 **Cache policy lives in `config/cache.ts` (`QUERY_CACHE`), not in the call
 sites.** Name the constant when you need a duration; restating the number here

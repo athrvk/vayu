@@ -106,6 +106,9 @@ export const API_ENDPOINTS = {
 	// engine-side with the rest of #761's phase B, so the renderer asks for the
 	// finished text rather than reading the stored document to build it here.
 	SPEC_EXPORT: `/specs/export`,
+	// The same collection as a Postman Collection v2.1 document. A read like the
+	// one above: the engine assembles it and nothing is stored.
+	POSTMAN_EXPORT: `/export/postman`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

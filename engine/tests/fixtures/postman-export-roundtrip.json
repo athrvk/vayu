@@ -1,0 +1,1345 @@
+{
+	"info": {
+		"_postman_id": "00000000-0000-4000-8000-000000000000",
+		"name": "Round Trip",
+		"description": "Every Postman field Vayu carries.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "List users",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"pm.variables.set(\"page\", 1);"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"ok\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-Debug",
+								"value": "1",
+								"type": "text",
+								"disabled": true
+							},
+							{
+								"key": "X-Tenant",
+								"value": "acme",
+								"description": "Which tenant",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/users?page=1&limit=10",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"users"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Page size"
+								},
+								{
+									"key": "trace",
+									"value": "on",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Lists every user."
+					},
+					"response": [
+						{
+							"name": "A page of users",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json",
+										"type": "text"
+									},
+									{
+										"key": "X-Debug",
+										"value": "1",
+										"type": "text",
+										"disabled": true
+									},
+									{
+										"key": "X-Tenant",
+										"value": "acme",
+										"description": "Which tenant",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/users?page=1&limit=10",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"users"
+									],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "limit",
+											"value": "10",
+											"description": "Page size"
+										},
+										{
+											"key": "trace",
+											"value": "on",
+											"disabled": true
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "X-Rate-Limit",
+									"value": "100"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"users\": []\n}"
+						},
+						{
+							"name": "Missing",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json",
+										"type": "text"
+									},
+									{
+										"key": "X-Debug",
+										"value": "1",
+										"type": "text",
+										"disabled": true
+									},
+									{
+										"key": "X-Tenant",
+										"value": "acme",
+										"description": "Which tenant",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/users?page=1&limit=10",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"users"
+									],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "limit",
+											"value": "10",
+											"description": "Page size"
+										},
+										{
+											"key": "trace",
+											"value": "on",
+											"disabled": true
+										}
+									]
+								}
+							},
+							"status": "Not Found",
+							"code": 404,
+							"_postman_previewlanguage": "Text",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "text/plain"
+								}
+							],
+							"cookie": [],
+							"body": "not here"
+						}
+					]
+				},
+				{
+					"name": "Create user",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Ada\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"users"
+							]
+						},
+						"description": "Creates one."
+					},
+					"response": []
+				}
+			],
+			"description": "Everything about users."
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Deep",
+					"item": [
+						{
+							"name": "Intranet",
+							"request": {
+								"auth": {
+									"type": "ntlm",
+									"ntlm": [
+										{
+											"key": "password",
+											"value": "pw",
+											"type": "string"
+										},
+										{
+											"key": "username",
+											"value": "ada",
+											"type": "string"
+										},
+										{
+											"key": "domain",
+											"value": "CORP",
+											"type": "string"
+										}
+									]
+								},
+								"method": "OPTIONS",
+								"header": [],
+								"url": {
+									"raw": "http://intranet.local/api",
+									"protocol": "http",
+									"host": [
+										"intranet",
+										"local"
+									],
+									"path": [
+										"api"
+									]
+								}
+							},
+							"response": []
+						}
+					],
+					"auth": {
+						"type": "noauth"
+					}
+				},
+				{
+					"name": "Delete me",
+					"request": {
+						"auth": {
+							"type": "oauth2",
+							"oauth2": [
+								{
+									"key": "accessTokenUrl",
+									"value": "https://auth.example.com/token",
+									"type": "string"
+								},
+								{
+									"key": "scope",
+									"value": "read write",
+									"type": "string"
+								},
+								{
+									"key": "grant_type",
+									"value": "authorization_code_with_pkce",
+									"type": "string"
+								},
+								{
+									"key": "authUrl",
+									"value": "https://auth.example.com/authorize",
+									"type": "string"
+								},
+								{
+									"key": "tokenName",
+									"value": "ada",
+									"type": "string"
+								},
+								{
+									"key": "useBrowser",
+									"value": true,
+									"type": "boolean"
+								},
+								{
+									"key": "challengeAlgorithm",
+									"value": "S256",
+									"type": "string"
+								},
+								{
+									"key": "redirect_uri",
+									"value": "https://oauth.pstmn.io/v1/callback",
+									"type": "string"
+								},
+								{
+									"key": "clientSecret",
+									"value": "shh",
+									"type": "string"
+								},
+								{
+									"key": "clientId",
+									"value": "vayu-client",
+									"type": "string"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "client_authentication",
+									"value": "body",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"me"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Bucket head",
+					"request": {
+						"auth": {
+							"type": "awsv4",
+							"awsv4": [
+								{
+									"key": "service",
+									"value": "s3",
+									"type": "string"
+								},
+								{
+									"key": "region",
+									"value": "eu-west-1",
+									"type": "string"
+								},
+								{
+									"key": "secretKey",
+									"value": "SECRET",
+									"type": "string"
+								},
+								{
+									"key": "accessKey",
+									"value": "AKIA",
+									"type": "string"
+								}
+							]
+						},
+						"method": "HEAD",
+						"header": [],
+						"url": {
+							"raw": "https://s3.amazonaws.com/bucket",
+							"protocol": "https",
+							"host": [
+								"s3",
+								"amazonaws",
+								"com"
+							],
+							"path": [
+								"bucket"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Admin-only endpoints.",
+			"auth": {
+				"type": "basic",
+				"basic": [
+					{
+						"key": "username",
+						"value": "admin",
+						"type": "string"
+					},
+					{
+						"key": "password",
+						"value": "hunter2",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {},
+						"exec": [
+							"console.log(\"admin\");"
+						]
+					}
+				}
+			],
+			"variable": [
+				{
+					"key": "role",
+					"value": "admin"
+				}
+			]
+		},
+		{
+			"name": "Fidelity",
+			"item": [
+				{
+					"name": "Checks first",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"created\", () => pm.response.to.have.status(201));"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"console.log(\"off\");"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							},
+							"disabled": true
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/checks",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"checks"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Unlabelled body",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"note\": \"no language chosen\"}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/notes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notes"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Script body",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "console.log(1);",
+							"options": {
+								"raw": {
+									"language": "javascript"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/eval",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"eval"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search products",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "default"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/products?where=sku%3D1",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"products"
+							],
+							"query": [
+								{
+									"key": "where",
+									"value": "sku=1",
+									"equals": true
+								},
+								{
+									"key": "expand",
+									"value": "",
+									"equals": true,
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Seeded token",
+					"request": {
+						"auth": {
+							"type": "oauth2",
+							"oauth2": [
+								{
+									"key": "accessToken",
+									"value": "{{ctp_access_token}}",
+									"type": "string"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "tokenType",
+									"value": "Bearer",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/carts",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"carts"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Consented grant",
+					"request": {
+						"auth": {
+							"type": "oauth2",
+							"oauth2": [
+								{
+									"key": "useBrowser",
+									"value": false,
+									"type": "boolean"
+								},
+								{
+									"key": "state",
+									"value": "",
+									"type": "string"
+								},
+								{
+									"key": "accessTokenUrl",
+									"value": "https://login.example.com/token",
+									"type": "string"
+								},
+								{
+									"key": "authUrl",
+									"value": "https://login.example.com/authorize",
+									"type": "string"
+								},
+								{
+									"key": "grant_type",
+									"value": "authorization_code",
+									"type": "string"
+								},
+								{
+									"key": "clientId",
+									"value": "{{clientId}}",
+									"type": "string"
+								},
+								{
+									"key": "scope",
+									"value": "files.read offline_access",
+									"type": "string"
+								},
+								{
+									"key": "tokenName",
+									"value": "Graph",
+									"type": "string"
+								},
+								{
+									"key": "authRequestParams",
+									"value": [
+										{
+											"key": "prompt",
+											"value": "consent",
+											"enabled": true,
+											"send_as": "request_url"
+										}
+									],
+									"type": "any"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "client_authentication",
+									"value": "body",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/drives",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"drives"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Password first",
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{password}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "ada",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"profile"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Signed with Hawk",
+					"request": {
+						"auth": {
+							"type": "hawk",
+							"hawk": [
+								{
+									"key": "includePayloadHash",
+									"value": true,
+									"type": "boolean"
+								},
+								{
+									"key": "algorithm",
+									"value": "sha256",
+									"type": "string"
+								},
+								{
+									"key": "authKey",
+									"value": "{{hawkKey}}",
+									"type": "string"
+								},
+								{
+									"key": "authId",
+									"value": "dh37fgj492je",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/hawk",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"hawk"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "What an export gives back as Postman wrote it.",
+			"variable": [
+				{
+					"key": "pageSize",
+					"value": "20",
+					"type": "number"
+				},
+				{
+					"key": "region",
+					"value": "eu",
+					"type": "string",
+					"description": "Which region serves the tenant"
+				}
+			]
+		},
+		{
+			"name": "Soap call",
+			"protocolProfileBehavior": {
+				"strictSSL": false,
+				"followRedirects": false,
+				"maxRedirects": 3
+			},
+			"request": {
+				"auth": {
+					"type": "digest",
+					"digest": [
+						{
+							"key": "algorithm",
+							"value": "MD5",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "ada",
+							"type": "string"
+						},
+						{
+							"key": "realm",
+							"value": "ws",
+							"type": "string"
+						},
+						{
+							"key": "password",
+							"value": "pw",
+							"type": "string"
+						},
+						{
+							"key": "disableRetryRequest",
+							"value": false,
+							"type": "boolean"
+						}
+					]
+				},
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<ping/>",
+					"options": {
+						"raw": {
+							"language": "xml"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://soap.example.com:8443/ws/",
+					"protocol": "https",
+					"host": [
+						"soap",
+						"example",
+						"com"
+					],
+					"port": "8443",
+					"path": [
+						"ws",
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Log in",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "user",
+							"value": "ada",
+							"type": "text"
+						},
+						{
+							"key": "remember",
+							"value": "1",
+							"description": "Keep me signed in",
+							"type": "text"
+						},
+						{
+							"key": "otp",
+							"value": "",
+							"type": "text",
+							"disabled": true
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrl}}/login",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Upload",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "title",
+							"value": "Report",
+							"type": "text"
+						},
+						{
+							"key": "file",
+							"description": "The PDF",
+							"type": "file",
+							"src": "/home/ada/report.pdf"
+						},
+						{
+							"key": "thumb",
+							"type": "file",
+							"src": "/home/ada/thumb.png",
+							"contentType": "image/png"
+						},
+						{
+							"key": "draft",
+							"value": "true",
+							"type": "text",
+							"disabled": true
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrl}}/files",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"files"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Who am I",
+			"request": {
+				"auth": {
+					"type": "apikey",
+					"apikey": [
+						{
+							"key": "value",
+							"value": "{{apiKey}}",
+							"type": "string"
+						},
+						{
+							"key": "key",
+							"value": "X-Api-Key",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "graphql",
+					"graphql": {
+						"query": "query Me($id: ID!) { user(id: $id) { name } }",
+						"variables": "{\n    \"id\": 1\n}"
+					}
+				},
+				"url": {
+					"raw": "https://api.example.com/graphql",
+					"protocol": "https",
+					"host": [
+						"api",
+						"example",
+						"com"
+					],
+					"path": [
+						"graphql"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Edit note",
+			"request": {
+				"auth": {
+					"type": "apikey",
+					"apikey": [
+						{
+							"key": "value",
+							"value": "k-123",
+							"type": "string"
+						},
+						{
+							"key": "key",
+							"value": "api_key",
+							"type": "string"
+						},
+						{
+							"key": "in",
+							"value": "query",
+							"type": "string"
+						}
+					]
+				},
+				"method": "PATCH",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "plain words",
+					"options": {
+						"raw": {
+							"language": "text"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/notes/{{noteId}}?format=plain",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"notes",
+						"{{noteId}}"
+					],
+					"query": [
+						{
+							"key": "format",
+							"value": "plain"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Search with a body",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"q\": \"x\"}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/search",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"search"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Look up tweets",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/tweets?ids=1",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"tweets"
+					],
+					"query": [
+						{
+							"key": "ids",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Two tweets",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer tok-live",
+								"name": "Authorization",
+								"description": "Added as a part of security scheme: bearer"
+							}
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "tok-live",
+									"type": "string"
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api.example.com/2/tweets/:id?ids=20,21&tweet.fields=created_at",
+							"protocol": "https",
+							"host": [
+								"api",
+								"example",
+								"com"
+							],
+							"path": [
+								"2",
+								"tweets",
+								":id"
+							],
+							"query": [
+								{
+									"key": "ids",
+									"value": "20,21"
+								},
+								{
+									"key": "tweet.fields",
+									"value": "created_at",
+									"description": "Fields to return"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Recorded against production."
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "plain",
+					"_postman_previewtype": "text",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "text/plain;charset=utf-8",
+							"name": "Content-Type",
+							"description": ""
+						},
+						{
+							"key": "X-Rate-Limit-Remaining",
+							"value": 450,
+							"name": "X-Rate-Limit-Remaining",
+							"description": ""
+						}
+					],
+					"cookie": [
+						{
+							"expires": "Fri Apr 15 2016 06:54:28 GMT-0400 (EDT)",
+							"hostOnly": false,
+							"httpOnly": true,
+							"domain": "api.example.com",
+							"path": "/",
+							"secure": true,
+							"session": false,
+							"value": "abc",
+							"key": "sid"
+						}
+					],
+					"responseTime": "493",
+					"body": "20: first\n21: second"
+				},
+				{
+					"name": "Invalid ids",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/tweets?ids=x",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"tweets"
+							],
+							"query": [
+								{
+									"key": "ids",
+									"value": "x"
+								}
+							]
+						}
+					},
+					"status": "Unprocessable Entity",
+					"code": 422,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json; charset=utf-8"
+						}
+					],
+					"cookie": [],
+					"body": "{\"errors\": [\"ids\"]}"
+				}
+			]
+		},
+		{
+			"name": "Legacy saved response",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/legacy",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"legacy"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Recorded without a status",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/legacy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"legacy"
+							]
+						}
+					},
+					"_postman_previewlanguage": "javascript",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{}"
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					"pm.collectionVariables.set(\"t\", Date.now());"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					"pm.test(\"has body\", () => pm.response.text());"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "apiKey",
+			"value": "s3cr3t",
+			"type": "secret"
+		},
+		{
+			"key": "baseUrl",
+			"value": "https://api.example.com"
+		},
+		{
+			"key": "legacy",
+			"value": "old",
+			"disabled": true
+		},
+		{
+			"key": "noteId",
+			"value": "42"
+		}
+	]
+}

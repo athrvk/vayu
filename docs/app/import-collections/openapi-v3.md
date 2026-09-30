@@ -354,7 +354,7 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 | `response_example`, `find_json_media_type`, `first_named_example`, `example_body_text`, `deref` | `openapi_drafts.cpp` | map one `responses` entry to an example draft; the halves the two OpenAPI parsers share |
 | `count_examples` | `import_document.cpp` | total the examples across the finished drafts, for `meta.exampleCount` |
 
-This parser does **not** use the Postman/Insomnia-shaped helpers in `import_document.cpp` (`as_string`, `to_var_record`, `map_key_values`, `map_postman_auth`, `raw_body`, `join_exec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
+This parser does **not** use the Postman/Insomnia-shaped helpers in `import_document.cpp` (`as_string`, `to_var_record`, `map_key_values`, `map_postman_auth`, `postman_raw_body`, `join_exec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 
 ## Related
 

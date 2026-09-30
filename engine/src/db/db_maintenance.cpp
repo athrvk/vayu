@@ -310,11 +310,14 @@ void log_reclaim_outcome (const ReclaimOutcome& outcome) {
     std::to_string (outcome.after_bytes / 1024) + " KB)");
 }
 
-/// The schema version this engine understands (issue #1514). `PRAGMA
-/// user_version` starts at 0 on every pre-cutover database; this build's
-/// first successful start on one bumps it to 1, after folding any script
-/// this file predates the fold ever adding.
-constexpr int SCHEMA_VERSION = 1;
+/// Stamps @p connection with this build's `SCHEMA_VERSION` (`database.hpp`).
+/// The one spelling of the write, so a bump of the constant is a bump of
+/// every path that marks a database migrated.
+void stamp_schema_version (sqlite3* connection) {
+    const std::string sql =
+    "PRAGMA user_version = " + std::to_string (SCHEMA_VERSION) + ";";
+    sqlite3_exec (connection, sql.c_str (), nullptr, nullptr, nullptr);
+}
 
 /// @p table's current column names, read fresh so a caller never assumes a
 /// shape a genuinely pre-cutover database (older than #1513, no `elements`
@@ -615,7 +618,7 @@ const std::function<bool (const std::string&)>& probe) {
  * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
  *
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
- * unrepresented script into `elements`, then sets it to 1); already at
+ * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 is stamped without a fold; already at
  * `SCHEMA_VERSION` is a fast no-op; newer than `SCHEMA_VERSION` refuses to
  * start rather than silently serving - and possibly writing - settings this
  * build does not understand.
@@ -671,9 +674,11 @@ void migrate_before_sync (const std::string& path) {
     const bool collections_need_fold =
     table_has_script_columns (connection.get (), "collections");
     if (!requests_need_fold && !collections_need_fold) {
-        // Nothing to fold - either a fresh schema with no rows yet, or a
-        // database some other path already brought to this shape.
-        sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
+        // Nothing to fold - a fresh schema with no rows yet, a database some
+        // other path already brought to this shape, or a version-1 database
+        // (the 1 -> 2 step is `request_examples.postman_response`, a nullable
+        // column `sync_schema ()` adds by itself, so it only needs stamping).
+        stamp_schema_version (connection.get ());
         return;
     }
 
@@ -696,7 +701,7 @@ void migrate_before_sync (const std::string& path) {
         fold_table_scripts_into_elements (connection.get (), "collections", fold_error);
     }
     if (ok) {
-        sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
+        stamp_schema_version (connection.get ());
         sqlite3_exec (connection.get (), "COMMIT;", nullptr, nullptr, nullptr);
     } else {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);

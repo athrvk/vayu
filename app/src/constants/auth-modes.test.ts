@@ -44,6 +44,10 @@ const ALL_MODES: AuthMode[] = [
 	"digest",
 	"aws",
 	"ntlm",
+	"hawk",
+	"oauth1",
+	"edgegrid",
+	"jwt",
 ];
 
 describe("auth mode registry", () => {
@@ -59,9 +63,17 @@ describe("auth mode registry", () => {
 	});
 
 	it("never offers a mode the engine cannot resolve", () => {
-		// Offering digest/aws/ntlm would let someone configure something that
+		// Offering a data-only mode would let someone configure something that
 		// silently does nothing - the opposite of the bug #61 fixed.
-		for (const mode of ["digest", "aws", "ntlm"] as const) {
+		for (const mode of [
+			"digest",
+			"aws",
+			"ntlm",
+			"hawk",
+			"oauth1",
+			"edgegrid",
+			"jwt",
+		] as const) {
 			expect(isUneditableAuthMode(mode)).toBe(true);
 			expect(isEditableAuthMode(mode)).toBe(false);
 			expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain(mode);

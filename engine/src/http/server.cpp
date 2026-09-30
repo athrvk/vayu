@@ -199,6 +199,7 @@ void Server::setup_routes () {
     routes::register_spec_describe_routes (*route_ctx_);
     routes::register_spec_bind_routes (*route_ctx_);
     routes::register_spec_export_routes (*route_ctx_);
+    routes::register_postman_export_routes (*route_ctx_);
     routes::register_reorder_routes (*route_ctx_);
     routes::register_environment_routes (*route_ctx_);
     routes::register_client_certificate_routes (*route_ctx_);

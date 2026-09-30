@@ -79,6 +79,8 @@ import type {
 	SpecBindResponse,
 	SpecExportRequest,
 	SpecExportResponse,
+	PostmanExportRequest,
+	PostmanExportResponse,
 	SpecDescribeRequest,
 	SpecDescribeResponse,
 	SpecDiffRequest,
@@ -392,6 +394,17 @@ export const apiService = {
 	 */
 	async exportSpec(payload: SpecExportRequest): Promise<SpecExportResponse> {
 		return await httpClient.post<SpecExportResponse>(API_ENDPOINTS.SPEC_EXPORT, payload);
+	},
+
+	/**
+	 * A collection as a Postman Collection v2.1 document.
+	 *
+	 * Assembled engine-side for the reason `exportSpec` is: an agent over MCP
+	 * gets the same document the dialog downloads. Secrets are written empty
+	 * unless `includeSecrets` is set.
+	 */
+	async exportPostman(payload: PostmanExportRequest): Promise<PostmanExportResponse> {
+		return await httpClient.post<PostmanExportResponse>(API_ENDPOINTS.POSTMAN_EXPORT, payload);
 	},
 
 	/**

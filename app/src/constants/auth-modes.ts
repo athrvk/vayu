@@ -21,8 +21,8 @@
  * hint, and only the request side offers `inherit` (a collection is always a
  * source, never an inheritor).
  *
- * digest/aws/ntlm are stored but never offered: the engine has no resolution for
- * them, so a picker entry would let someone configure something that silently
+ * digest/aws/ntlm/hawk/oauth1/edgegrid/jwt are stored but never offered: the
+ * engine has no resolution for them, so a picker entry would let someone configure something that silently
  * does nothing. They still arrive - the Insomnia importer produces them and the
  * Postman importer preserves them - so both editors must *surface* them (name
  * the stored mode, warn that it is still what runs) rather than narrow them to
@@ -43,6 +43,10 @@ export const AUTH_MODE_LABELS: Record<AuthMode, string> = {
 	digest: "Digest",
 	aws: "AWS Signature",
 	ntlm: "NTLM",
+	hawk: "Hawk",
+	oauth1: "OAuth 1.0",
+	edgegrid: "Akamai EdgeGrid",
+	jwt: "JWT Bearer",
 };
 
 /**
@@ -75,11 +79,21 @@ export type CollectionAuthMode = EditableAuthMode | "noauth";
 export type EditableAuthMode = (typeof EDITABLE_AUTH_MODES)[number];
 
 /** The modes stored-but-not-editable in either auth editor. */
-export type UneditableAuthMode = "digest" | "aws" | "ntlm";
+export type UneditableAuthMode = "digest" | "aws" | "ntlm" | "hawk" | "oauth1" | "edgegrid" | "jwt";
+
+const UNEDITABLE_AUTH_MODES: readonly string[] = [
+	"digest",
+	"aws",
+	"ntlm",
+	"hawk",
+	"oauth1",
+	"edgegrid",
+	"jwt",
+] satisfies readonly UneditableAuthMode[];
 
 /** Narrowing guard: is this mode one an editor stores but cannot edit? */
 export function isUneditableAuthMode(mode: AuthMode | string): mode is UneditableAuthMode {
-	return mode === "digest" || mode === "aws" || mode === "ntlm";
+	return UNEDITABLE_AUTH_MODES.includes(mode);
 }
 
 /** Narrowing guard: is this a mode the shared field editor can render? */

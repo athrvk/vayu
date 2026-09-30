@@ -71,6 +71,47 @@ namespace vayu::core {
 const std::string& src,
 const std::string* content_type);
 
+/**
+ * A Postman raw body as the Vayu body the importer stores: `{mode, content}`,
+ * where a declared `options.raw.language` that is a Vayu mode (`json`, `text`,
+ * `xml`) is that mode and anything else - no language at all included - is
+ * sniffed (JSON that parses is `json`, the rest `text`). A sniffed body also
+ * keeps what was declared as `rawLanguage`, `""` for none, so the exporter
+ * can write the body's `options` back as Postman had them.
+ *
+ * Shared with the exporter (`postman_export.cpp`), which writes a stored
+ * `rawLanguage` back only while this mapping still gives the stored mode, so
+ * a body edited into another mode since is written the way its mode says.
+ */
+[[nodiscard]] nlohmann::ordered_json
+postman_raw_body (const std::string& content, const std::string* language);
+
+/**
+ * A Postman `auth` object (`{type, <type>: attributes}`, either schema
+ * version) as the Vayu auth the importer stores for a request, without the
+ * `postman` source it may add. The Postman exporter calls it to tell whether
+ * a stored auth's `postman` source still describes that auth - mapping it
+ * again gives the auth, so the user has not changed it since.
+ */
+[[nodiscard]] nlohmann::ordered_json postman_auth_mapping (
+const nlohmann::ordered_json& auth);
+
+/**
+ * Whether @p auth (a stored Vayu auth) carries a `postman` source that still
+ * describes it: mapping the source through `postman_auth_mapping` gives
+ * @p auth without the source. The exporter writes such a source verbatim.
+ */
+[[nodiscard]] bool postman_source_stands (const nlohmann::json& auth);
+
+/**
+ * @p stored (an `auth` column's text) without its `postman` source once the
+ * source no longer describes it. Every auth write goes through this
+ * (`routes/requests.cpp`, `routes/collections.cpp`): a source kept past an
+ * edit would hold the credential the edit replaced, and every read of the
+ * row (`GET /requests`, the MCP tools) would return it.
+ */
+[[nodiscard]] std::string without_stale_postman_source (std::string stored);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {
@@ -136,6 +177,15 @@ struct ImportParse {
 [[nodiscard]] ImportParse parse_import (const std::string& text,
 const ImportOptions& options,
 const ImportSource& source);
+
+/**
+ * A Postman row array (`header[]`, `query[]`) as the importer stores it: the
+ * `key`/`value`/`enabled`/`description` rows `map_key_values` builds. The
+ * Postman export compares a stored saved response's `header[]` through this
+ * against the example's `headers` column, so "still what was imported" is
+ * decided by the same reading the import made.
+ */
+[[nodiscard]] nlohmann::ordered_json postman_header_rows (const nlohmann::ordered_json& rows);
 
 /**
  * @brief An `ImportResult` as the `POST /import/apply` payload that persists it.

@@ -150,6 +150,60 @@ bool is_create) {
     std::nullopt;
 }
 
+/**
+ * `postmanResponse` (schema version 2): the Postman saved response an import
+ * took this example from, as JSON text.
+ *
+ * A string rather than an object on purpose: the export writes the members
+ * back in the order the source wrote them, and a body parsed into
+ * `nlohmann::json` on its way here has already sorted them. Only an import
+ * writes it - on create a string must parse as a JSON object within
+ * `MAX_POSTMAN_RESPONSE_BYTES` - and an update may only clear it: the value
+ * records what a file said, which no edit made in Vayu can author, and the
+ * export already regenerates whatever an edit to `status` or `headers` makes
+ * stale.
+ */
+RouteResult apply_postman_response_field (const nlohmann::json& json,
+std::optional<std::string>& out,
+bool is_create) {
+    namespace example_bounds = vayu::core::constants::request_example;
+    if (!json.contains ("postmanResponse")) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return {};
+    }
+    const nlohmann::json& value = json["postmanResponse"];
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    if (!is_create) {
+        return route_error (400,
+        "Invalid 'postmanResponse': an update can only clear it (null) - it "
+        "records the "
+        "Postman saved response the example was imported from");
+    }
+    if (!value.is_string ()) {
+        return route_error (
+        400, "Invalid 'postmanResponse': must be a string holding a JSON object, or null");
+    }
+    const auto& text = value.get_ref<const std::string&> ();
+    if (text.size () > example_bounds::MAX_POSTMAN_RESPONSE_BYTES) {
+        return route_error (400,
+        "'postmanResponse' is " + std::to_string (text.size ()) + " bytes, over the " +
+        std::to_string (example_bounds::MAX_POSTMAN_RESPONSE_BYTES) + "-byte limit");
+    }
+    const nlohmann::json parsed =
+    nlohmann::json::parse (text, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_object ()) {
+        return route_error (
+        400, "Invalid 'postmanResponse': must be a string holding a JSON object, or null");
+    }
+    out = text;
+    return {};
+}
+
 } // namespace
 
 /**
@@ -167,6 +221,8 @@ bool is_create) {
  * `bodyTruncated` takes the plain boolean rule: nothing can validate it, since
  * only the client that captured the response knows whether it was cut, and the
  * stored body is a legitimate length either way.
+ * `postmanResponse` is create-only and cleared by `null` on update - see
+ * `apply_postman_response_field`.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields
  * to every example nested in a bulk payload.
@@ -203,6 +259,10 @@ bool is_create) {
     // was cut, and no later read of the row can tell (issue #659).
     apply_bool_field (json, "bodyTruncated", x.body_truncated, false, is_create);
     apply_spec_example_key_field (json, x.spec_example_key, is_create);
+    if (auto outcome = apply_postman_response_field (json, x.postman_response, is_create);
+    !outcome) {
+        return outcome;
+    }
     return apply_origin_field (json, x.origin, is_create);
 }
 

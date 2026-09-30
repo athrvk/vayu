@@ -23,10 +23,13 @@
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_export.hpp"
+#include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -39,6 +42,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
@@ -61,6 +65,28 @@ std::string file_base_name (const std::string& path) {
     path.substr (begin, path.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     const size_t cut = trimmed.find_last_of ("/\\");
     return cut == std::string::npos ? trimmed : trimmed.substr (cut + 1);
+}
+
+nlohmann::ordered_json
+postman_raw_body (const std::string& content, const std::string* language) {
+    if (language != nullptr) {
+        // `xml` is what gets an imported SOAP request its `application/xml`:
+        // `text` requires no Content-Type, so before this the envelope went out
+        // as libcurl's `x-www-form-urlencoded`.
+        for (const std::string_view mode : postman::RAW_LANGUAGES) {
+            if (*language == mode) {
+                return nlohmann::ordered_json{ { "mode", std::string (mode) },
+                    { "content", content } };
+            }
+        }
+    }
+    // No language Vayu has a mode for: sniff JSON, and keep what was declared
+    // so the export can say it again rather than the mode's own name.
+    const nlohmann::ordered_json parsed =
+    nlohmann::ordered_json::parse (content, nullptr, false);
+    return nlohmann::ordered_json{ { "mode", parsed.is_discarded () ? "text" : "json" },
+        { "content", content },
+        { "rawLanguage", language == nullptr ? std::string () : *language } };
 }
 
 /**
@@ -148,9 +174,18 @@ std::string normalize_vars (const std::string& text) {
     return normalize_template_vars (text);
 }
 
+/**
+ * What a Postman row carries beyond `key`/`value`/`description`/`disabled`
+ * that Vayu keeps for the export to write back - nothing reads either at send
+ * time. `Typed` is a header or urlencoded row's `type` other than `"text"`
+ * (Postman's default, and what the exporter writes for a row with none);
+ * `Query` is a query row's boolean `equals`.
+ */
+enum class RowExtras : std::uint8_t { None, Typed, Query };
+
 /// `mapKeyValues(rows)`: a Postman/Insomnia row array as table rows, disabled
 /// rows and duplicates intact. A row with no truthy `key` names nothing.
-json map_key_values (const json* rows) {
+json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
     json out = json::array ();
     if (rows == nullptr || !rows->is_array ()) {
         return out;
@@ -169,22 +204,43 @@ json map_key_values (const json* rows) {
         if (const json* description = prop (record, "description"); truthy (description)) {
             entry["description"] = as_string (description);
         }
+        if (const std::string* type = as_str (prop (record, "type"));
+        extras == RowExtras::Typed && type != nullptr && !type->empty () && *type != "text") {
+            entry["type"] = *type;
+        }
+        if (const json* equals = prop (record, "equals");
+        extras == RowExtras::Query && equals != nullptr && equals->is_boolean ()) {
+            entry["equals"] = *equals;
+        }
         out.push_back (std::move (entry));
     }
     return out;
 }
 
-/// `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
-/// `type: "secret"` is the one Postman per-variable kind Vayu stores - the rest
-/// describe a value type it does not have, since every value is a string.
-/// @p skipped_variable_metadata counts a row whose `description` or a
-/// meaningfully declared `type` was read and discarded, once per row
-/// regardless of how many of the two it carried. `"default"` is Postman's own
-/// unset marker - every environment and globals export the app can produce
-/// stamps it on every ordinary variable - so it counts no more than an absent
-/// `type` does; only a value naming an actual kind (`"boolean"`, `"number"`,
-/// a custom string) is a declaration Vayu had something to lose.
-json to_var_record (const json* vars, int& skipped_variable_metadata) {
+/// A Postman variable `type` that is one of Vayu's own variable types, cast
+/// the same way at read time (`castByType`).
+bool is_vayu_variable_type (const std::string& type) {
+    return type == "string" || type == "number" || type == "boolean";
+}
+
+/**
+ * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
+ *
+ * `type: "secret"` is `secret: true`; `string`, `number` and `boolean` are
+ * Vayu's own variable types of the same name and stored as `type`, which
+ * casts the value for a script exactly as Postman's typed variable does.
+ * `"default"` is Postman's own unset marker - every environment and globals
+ * export the app can produce stamps it on every ordinary variable - so it
+ * stores nothing and counts no more than an absent `type` does.
+ *
+ * @p keep_description is set for a collection's or folder's variables, which
+ * the Postman exporter writes back with their `description`; an environment
+ * or globals file has no exporter to read one, so there it is dropped.
+ * @p skipped_variable_metadata counts a row whose `description` (when not
+ * kept) or a declared `type` Vayu has no counterpart for (`"any"`, a custom
+ * string) was read and discarded, once per row however many it carried.
+ */
+json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_description) {
     json out = json::object ();
     if (vars == nullptr || !vars->is_array ()) {
         return out;
@@ -195,8 +251,10 @@ json to_var_record (const json* vars, int& skipped_variable_metadata) {
             continue;
         }
         const std::string* declared_type = as_str (prop (record, "type"));
-        if (truthy (prop (record, "description")) ||
-        (declared_type != nullptr && *declared_type != "secret" && *declared_type != "default")) {
+        const json* description          = prop (record, "description");
+        if ((truthy (description) && !keep_description) ||
+        (declared_type != nullptr && *declared_type != "secret" &&
+        *declared_type != "default" && !is_vayu_variable_type (*declared_type))) {
             skipped_variable_metadata += 1;
         }
         // `disabled != null ? !disabled : enabled != null ? !!enabled : true` -
@@ -214,6 +272,11 @@ json to_var_record (const json* vars, int& skipped_variable_metadata) {
         value["enabled"] = enabled;
         if (declared_type != nullptr && *declared_type == "secret") {
             value["secret"] = true;
+        } else if (declared_type != nullptr && is_vayu_variable_type (*declared_type)) {
+            value["type"] = *declared_type;
+        }
+        if (keep_description && truthy (description)) {
+            value["description"] = as_string (description);
         }
         out[as_string (prop (record, "key"))] = std::move (value);
     }
@@ -463,7 +526,21 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
     const bool has_grant_config =
     stated ("grant_type") || stated ("accessTokenUrl") || stated ("authUrl");
     if (!has_grant_config && stated ("accessToken")) {
-        return json{ { "mode", "bearer" }, { "token", detail_text (detail, "accessToken") } };
+        // A seeded token Postman sends as is, with no grant to fetch another:
+        // what Vayu sends it as, placed and prefixed the way Postman would.
+        // The oauth2 block itself rides beside it as the auth's `postman`
+        // source (`with_postman_source`), so an export gives it back.
+        const std::string token = detail_text (detail, "accessToken");
+        if (detail_is (detail, "addTokenTo", "queryParams")) {
+            return json{ { "mode", "apikey" }, { "key", "access_token" },
+                { "value", token }, { "in", "query" } };
+        }
+        const std::string prefix = detail_text (detail, "headerPrefix");
+        if (stated ("headerPrefix") && prefix != "Bearer") {
+            return json{ { "mode", "apikey" }, { "key", "Authorization" },
+                { "value", prefix + " " + token }, { "in", "header" } };
+        }
+        return json{ { "mode", "bearer" }, { "token", token } };
     }
     if (has_grant_config && stated ("accessToken")) {
         dropped_field += 1;
@@ -475,36 +552,25 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
     std::string grant_type = "client_credentials";
     bool pkce              = false;
     if (const std::string* declared = detail_of (detail, "grant_type")) {
-        if (*declared == "authorization_code") {
-            grant_type = "authorization_code";
-        } else if (*declared == "authorization_code_with_pkce" || *declared == "implicit") {
-            // Two spellings, one outcome: PKCE is what the first asks for, and
-            // Vayu has no implicit grant to offer the second - auth code with
-            // PKCE is the nearest thing it can actually run.
-            grant_type = "authorization_code";
-            pkce       = true;
-        } else if (*declared == "password_credentials") {
-            grant_type = "password";
-        } else if (*declared == "client_credentials") {
-            grant_type = "client_credentials";
+        for (const postman::OAuth2Grant& grant : postman::OAUTH2_GRANTS) {
+            if (*declared == grant.postman) {
+                grant_type = grant.vayu;
+                pkce       = grant.pkce;
+                break;
+            }
         }
     }
     if (stated ("challengeAlgorithm")) {
         pkce = true;
     }
 
-    json config                = default_oauth2_config ();
-    config["grantType"]        = grant_type;
-    config["pkce"]             = pkce;
-    config["authorizationUrl"] = detail_text (detail, "authUrl");
-    config["accessTokenUrl"]   = detail_text (detail, "accessTokenUrl");
-    config["refreshTokenUrl"]  = detail_text (detail, "refreshTokenUrl");
-    config["callbackUrl"]      = detail_text (detail, "redirect_uri");
-    config["clientId"]         = detail_text (detail, "clientId");
-    config["clientSecret"]     = detail_text (detail, "clientSecret");
-    config["scope"]            = detail_text (detail, "scope");
-    config["username"]         = detail_text (detail, "username");
-    config["password"]         = detail_text (detail, "password");
+    json config         = default_oauth2_config ();
+    config["grantType"] = grant_type;
+    config["pkce"]      = pkce;
+    for (const postman::OAuth2Field& field : postman::OAUTH2_STRING_FIELDS) {
+        config[std::string (field.vayu)] =
+        detail_text (detail, std::string (field.postman).c_str ());
+    }
     config["credentialsPlacement"] =
     detail_is (detail, "client_authentication", "body") ? "body" : "basic_auth_header";
     config["tokenPlacement"] =
@@ -674,8 +740,8 @@ json map_swagger_oauth2 (const json* scheme) {
 
 /// `mapPostmanAuth(auth)`: a Postman `auth` object (collection, folder or
 /// request) as a Vayu auth. @p skipped_unsupported_auth counts a scheme Vayu
-/// cannot execute and has no config shape for (`hawk`, `oauth1`, `edgegrid`,
-/// or a non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
+/// has no config shape for (a type the schema does not define, or a
+/// non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
 /// the correct mapping rather than a loss. @p oauth2_dropped_field is
 /// `map_postman_oauth2`'s counter, threaded through (issue #1460).
 json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
@@ -709,12 +775,15 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
     // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum) and
     // `aws` internally; the two names diverge, so matching on `"aws"` here is
     // what silently dropped every real SigV4 export.
-    if (*type == "awsv4" || *type == "digest" || *type == "ntlm") {
+    for (const postman::ConfigAuthType& named : postman::CONFIG_AUTH_TYPES) {
+        if (*type != named.postman) {
+            continue;
+        }
         json config = json::object ();
         for (const auto& [key, value] : detail) {
             config[key] = value;
         }
-        return json{ { "mode", *type == "awsv4" ? "aws" : *type },
+        return json{ { "mode", std::string (named.vayu) },
             { "config", std::move (config) } };
     }
     if (*type == "inherit") {
@@ -723,10 +792,68 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
     if (*type == "noauth") {
         return json{ { "mode", "none" } };
     }
-    // `hawk`, `oauth1`, `edgegrid` - schemes Postman defines and Vayu has no
-    // mode for, unlike `awsv4`/`digest`/`ntlm` above, which import as data.
+    // A type Postman's schema does not define (the table above holds every
+    // one it does bar `apikey`, `basic`, `bearer`, `oauth2` and `noauth`).
     skipped_unsupported_auth += 1;
     return json{ { "mode", "none" } };
+}
+
+/// The attribute `type` Postman's v2.0-to-v2.1 conversion gives a value.
+const char* attribute_type_of (const json& value) {
+    if (value.is_string ()) {
+        return "string";
+    }
+    return value.is_boolean () ? "boolean" : "any";
+}
+
+/**
+ * A Postman `auth` object in the v2.1 shape: `{type, <type>: [{key, value,
+ * type}]}`. A v2.0 detail object becomes that attribute array the way
+ * Postman's own v2.0-to-v2.1 conversion writes it (a string `string`, a
+ * boolean `boolean`, anything else `any`); a v2.1 array is kept verbatim.
+ */
+json postman_auth_source (const json& node, const std::string& type) {
+    json source;
+    source["type"]       = type;
+    json attributes      = json::array ();
+    const json* declared = prop (&node, type);
+    if (declared != nullptr && declared->is_array ()) {
+        attributes = *declared;
+    } else if (declared != nullptr && declared->is_object ()) {
+        for (auto entry = declared->begin (); entry != declared->end (); ++entry) {
+            const json& value = entry.value ();
+            attributes.push_back ({ { "key", entry.key () }, { "value", value },
+            { "type", attribute_type_of (value) } });
+        }
+    }
+    source[type] = std::move (attributes);
+    return source;
+}
+
+/**
+ * @p mapped with the Postman `auth` it came from as its `postman` member,
+ * when the exporter would not write that block back from @p mapped alone:
+ * attributes Vayu has no field for (`tokenType`, `state`, a seeded
+ * `accessToken` beside a grant, `authRequestParams`), a type Vayu stores as
+ * another mode (an `oauth2` block holding only a seeded token, sent as a
+ * bearer token), attribute order and types, or `{{ x }}` spacing the
+ * importer tightened. Nothing sends it: the exporter writes it verbatim
+ * while mapping it again still gives the stored auth, and falls back to
+ * the stored auth once the user has changed it (`postman_export.cpp`).
+ */
+json with_postman_source (json mapped, const json* auth) {
+    const json* node = as_record (auth);
+    const std::string* type = node == nullptr ? nullptr : as_str (prop (node, "type"));
+    const std::string& mode = mapped.at ("mode").get_ref<const std::string&> ();
+    if (type == nullptr || mode == "inherit" || mode == "none" || mode == "noauth") {
+        return mapped;
+    }
+    json source                        = postman_auth_source (*node, *type);
+    const std::optional<json> exported = postman_auth_written (mapped);
+    if (!exported || *exported != source) {
+        mapped["postman"] = std::move (source);
+    }
+    return mapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +894,9 @@ struct PostmanCounts {
     int disabled_body              = 0;
     int skipped_certificate        = 0;
     int skipped_proxy              = 0;
+    // An item-level `protocolProfileBehavior` setting Vayu neither stores nor
+    // honours - see `pm_redirects`.
+    int skipped_protocol_behavior = 0;
     // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
     // see `map_postman_oauth2` (issue #1460).
@@ -883,24 +1013,6 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
     return out;
 }
 
-/// `rawBody(content, language)`: Postman's raw body.
-json raw_body (const std::string& content, const std::string* language) {
-    if (language != nullptr) {
-        // `xml` is what gets an imported SOAP request its `application/xml`:
-        // `text` requires no Content-Type, so before this the envelope went out
-        // as libcurl's `x-www-form-urlencoded`.
-        for (const char* mode : { "json", "text", "xml" }) {
-            if (*language == mode) {
-                return json{ { "mode", mode }, { "content", content } };
-            }
-        }
-    }
-    // No explicit language: sniff JSON.
-    const json parsed = json::parse (content, nullptr, false);
-    return json{ { "mode", parsed.is_discarded () ? "text" : "json" },
-        { "content", content } };
-}
-
 json pm_body (const json* body, PostmanCounts& counts) {
     const json* node = as_record (body);
     if (node == nullptr || !truthy (prop (node, "mode"))) {
@@ -919,12 +1031,12 @@ json pm_body (const json* body, PostmanCounts& counts) {
     const std::string named = mode == nullptr ? std::string () : *mode;
     if (named == "raw") {
         const std::string* text = as_str (prop (node, "raw"));
-        return raw_body (text == nullptr ? std::string () : *text,
+        return postman_raw_body (text == nullptr ? std::string () : *text,
         as_str (prop (prop (prop (node, "options"), "raw"), "language")));
     }
     if (named == "urlencoded") {
         return json{ { "mode", "x-www-form-urlencoded" },
-            { "fields", map_key_values (prop (node, "urlencoded")) } };
+            { "fields", map_key_values (prop (node, "urlencoded"), RowExtras::Typed) } };
     }
     if (named == "formdata") {
         return json{ { "mode", "form-data" },
@@ -1211,7 +1323,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     question == std::string::npos ? raw : raw.substr (0, question);
     const std::string base = substitute_path_variables (base_raw,
     prop (url, "variable"), counts.path_variables, counts.skipped_path_variables);
-    json structured        = map_key_values (prop (url, "query"));
+    json structured = map_key_values (prop (url, "query"), RowExtras::Query);
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
     // hand-written or script-generated collections that populate only `raw`.
@@ -1237,15 +1349,45 @@ std::vector<const json*> pm_events (const json* node) {
     return events;
 }
 
-/// The first event listening on @p listen, or nothing.
-const json* pm_event (const std::vector<const json*>& events, const char* listen) {
-    for (const json* event : events) {
-        const json* declared = prop (event, "listen");
-        if (declared != nullptr && *declared == listen) {
-            return event;
-        }
+/// The element kind a Postman `listen` runs as, or nothing for a listen Vayu
+/// has no phase for.
+const char* script_kind_of (const std::string* listen) {
+    if (listen != nullptr && *listen == "prerequest") {
+        return "script.pre";
+    }
+    if (listen != nullptr && *listen == "test") {
+        return "script.post";
     }
     return nullptr;
+}
+
+/**
+ * @p events as `script.pre` / `script.post` elements on @p item, one element
+ * per event and in the order the document lists them - Postman runs every
+ * event of a listen, and a level whose `test` precedes its `prerequest`
+ * exports back in that order. An event Postman marks `disabled: true` is one
+ * its runtime skips, so it imports turned off rather than running; a blank
+ * script contributes nothing, and a `listen` other than the two Vayu runs
+ * is not a script Vayu has a phase for.
+ */
+void set_event_elements (json& item, const std::vector<const json*>& events) {
+    json elements = json::array ();
+    for (const json* event : events) {
+        const char* kind = script_kind_of (as_str (prop (event, "listen")));
+        const std::string script = join_exec (event);
+        if (kind == nullptr || script.find_first_not_of (" \t\r\n") == std::string::npos) {
+            continue;
+        }
+        json element = { { "kind", kind }, { "config", { { "script", script } } } };
+        if (const json* disabled = prop (event, "disabled");
+        disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
+            element["enabled"] = false;
+        }
+        elements.push_back (std::move (element));
+    }
+    if (!elements.empty ()) {
+        item["elements"] = std::move (elements);
+    }
 }
 
 /**
@@ -1258,10 +1400,23 @@ const json* pm_event (const std::vector<const json*>& events, const char* listen
  * being the opposite of it. `strictSSL` follows the same rule onto
  * `verifySSL`, which likewise defaults to `true`.
  */
-void pm_redirects (const json* item, json& request) {
+void pm_redirects (const json* item, json& request, int& skipped_protocol_behavior) {
     const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
     if (behavior == nullptr) {
         return;
+    }
+    // Settings that change what Postman sends and that Vayu has no per-request
+    // place for: its own default headers turned off, the cookie jar ignored,
+    // the URL sent unencoded. Counted once per request that states any
+    // (`disableBodyPruning` is not among them: Vayu always sends a body).
+    for (const char* unhonoured :
+    { "disabledSystemHeaders", "disableCookies", "disableUrlEncoding" }) {
+        if (const json* value = prop (behavior, unhonoured); value != nullptr &&
+        ((value->is_boolean () && value->get<bool> ()) ||
+        (value->is_object () && !value->empty ()))) {
+            skipped_protocol_behavior += 1;
+            break;
+        }
     }
     if (const json* follow = prop (behavior, "followRedirects");
     follow != nullptr && follow->is_boolean ()) {
@@ -1278,12 +1433,36 @@ void pm_redirects (const json* item, json& request) {
 }
 
 /**
+ * The saved response @p saved as `request_examples.postman_response` holds it
+ * (schema version 2): every member verbatim, in the source's order, except
+ * `name` and `body`, which keep only their position (`null`) because the
+ * example's own columns are their values. Nothing when the text would be over
+ * `MAX_POSTMAN_RESPONSE_BYTES` - the export regenerates what it would have
+ * carried, which beats refusing the whole import over one recorded request.
+ */
+std::optional<std::string> pm_stored_response (const json& saved) {
+    json kept = saved;
+    for (const char* member : { "name", "body" }) {
+        if (kept.contains (member)) {
+            kept[member] = nullptr;
+        }
+    }
+    std::string text = kept.dump (-1, ' ', false, json::error_handler_t::replace);
+    if (text.size () > vayu::core::constants::request_example::MAX_POSTMAN_RESPONSE_BYTES) {
+        return std::nullopt;
+    }
+    return std::make_optional (std::move (text));
+}
+
+/**
  * `pmExamples(item)`: Postman's saved responses (`item.response[]`).
  *
  * Read by nothing until the engine had a table to hold them, so importing a
  * collection whose whole value was its documented responses produced one with
  * none. A saved response with no `code` documents a 200, which is what Postman
- * shows for one.
+ * shows for one. What no column models - the request it was recorded against,
+ * the status text, preview settings, cookies, response time, the header rows
+ * as written - rides along as `postmanResponse` for the Postman export.
  */
 json pm_examples (const json* item, PostmanCounts& counts) {
     json out              = json::array ();
@@ -1319,6 +1498,9 @@ json pm_examples (const json* item, PostmanCounts& counts) {
         // `_postman_previewlanguage`, but that is an editor mode rather
         // than a media type.
         { "contentType", content_type } });
+        if (std::optional<std::string> stored = pm_stored_response (*saved)) {
+            out.back ()["postmanResponse"] = std::move (*stored);
+        }
     }
     return out;
 }
@@ -1435,10 +1617,21 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "disabled_body", &PostmanCounts::disabled_body },
 { "certificate", &PostmanCounts::skipped_certificate },
 { "proxy_config", &PostmanCounts::skipped_proxy },
+{ "protocol_behavior", &PostmanCounts::skipped_protocol_behavior },
 { "non_executable_auth", &PostmanCounts::non_executable },
 });
 
 json pm_request (const json* item, PostmanCounts& counts);
+
+/// Whether @p auth is a mode Vayu stores but does not send
+/// (`CONFIG_AUTH_TYPES`), at any level: a collection's or folder's reaches
+/// every request inheriting it, so it is counted where it is declared.
+bool is_data_only_auth (const json& auth) {
+    const std::string mode = as_string (prop (&auth, "mode"));
+    return std::any_of (postman::CONFIG_AUTH_TYPES.begin (),
+    postman::CONFIG_AUTH_TYPES.end (),
+    [&mode] (const postman::ConfigAuthType& named) { return mode == named.vayu; });
+}
 
 /**
  * `pm_request`, noting the request's name against every counter it grew, so
@@ -1462,14 +1655,14 @@ json pm_request_named (const json* item, PostmanCounts& counts) {
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared   = as_record (prop (item, "request"));
-    const json empty       = json::object ();
-    const json* rq         = declared == nullptr ? &empty : declared;
-    auto [url, params]     = pm_url (prop (rq, "url"), counts);
-    json auth              = map_postman_auth (prop (rq, "auth"),
-                 counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
-    const std::string mode = auth.at ("mode").get<std::string> ();
-    if (mode == "digest" || mode == "aws" || mode == "ntlm") {
+    const json* declared = as_record (prop (item, "request"));
+    const json empty     = json::object ();
+    const json* rq       = declared == nullptr ? &empty : declared;
+    auto [url, params]   = pm_url (prop (rq, "url"), counts);
+    json auth            = with_postman_source (
+    map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
+    prop (rq, "auth"));
+    if (is_data_only_auth (auth)) {
         counts.non_executable += 1;
     }
     counts.requests += 1;
@@ -1485,9 +1678,15 @@ json pm_request (const json* item, PostmanCounts& counts) {
     json body                             = pm_body (prop (rq, "body"), counts);
     json examples                         = pm_examples (item, counts);
 
-    const std::string* description = as_str (prop (rq, "description"));
-    const std::string* nested = as_str (prop (prop (rq, "description"), "content"));
-    const json* name = prop (item, "name");
+    // The request's own description, else the item's: the schema allows
+    // either, generated collections write the item's, and Postman's own export
+    // writes the request's - which is where the exporter puts it back.
+    const json* declared_description = truthy (prop (rq, "description")) ?
+    prop (rq, "description") :
+    prop (item, "description");
+    const std::string* description   = as_str (declared_description);
+    const std::string* nested = as_str (prop (declared_description, "content"));
+    const json* name          = prop (item, "name");
 
     bool unsupported_method = false;
     json request;
@@ -1497,17 +1696,16 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (unsupported_method) {
         counts.skipped_unsupported_method += 1;
     }
-    request["url"]    = url;
-    request["params"] = params;
-    request["headers"] =
-    with_required_content_type (map_key_values (prop (rq, "header")), body);
+    request["url"]     = url;
+    request["params"]  = params;
+    request["headers"] = with_required_content_type (
+    map_key_values (prop (rq, "header"), RowExtras::Typed), body);
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {
-        set_script_elements (request, join_exec (pm_event (events, "prerequest")),
-        join_exec (pm_event (events, "test")));
+        set_event_elements (request, events);
     }
-    pm_redirects (item, request);
+    pm_redirects (item, request, counts.skipped_protocol_behavior);
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -1525,7 +1723,9 @@ json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oaut
         return json{ { "mode", "noauth" } };
     }
     json mapped = map_postman_auth (auth, skipped_unsupported_auth, oauth2_dropped_field);
-    return mapped.at ("mode") == "inherit" ? json{ { "mode", "none" } } : mapped;
+    return mapped.at ("mode") == "inherit" ?
+    json{ { "mode", "none" } } :
+    with_postman_source (std::move (mapped), auth);
 }
 
 json pm_folder (const json* node, PostmanCounts& counts) {
@@ -1570,12 +1770,16 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
     collection["description"] = pm_description_text (text, nested);
     collection["variables"] =
-    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata);
+    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
     collection["auth"] = collection_auth (prop (node, "auth"),
     counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
+    if (is_data_only_auth (collection["auth"])) {
+        counts.non_executable += 1;
+        counts.named["non_executable_auth"].push_back (
+        collection["name"].get<std::string> ());
+    }
     if (counts.options.import_scripts) {
-        set_script_elements (collection, join_exec (pm_event (events, "prerequest")),
-        join_exec (pm_event (events, "test")));
+        set_event_elements (collection, events);
     }
     collection["children"] = std::move (children);
     collection["requests"] = std::move (requests);
@@ -1613,6 +1817,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("disabled_body", counts.disabled_body);
     tally.add ("certificate", counts.skipped_certificate);
     tally.add ("proxy_config", counts.skipped_proxy);
+    tally.add ("protocol_behavior", counts.skipped_protocol_behavior);
     for (const auto& [kind, names] : counts.named) {
         tally.name_requests (kind, names);
     }
@@ -1662,7 +1867,7 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // reads "Import environments & variables", and globals are variables.
     int skipped_variable_metadata = 0;
     const json variables          = options.import_environments ?
-             to_var_record (prop (&parsed, "values"), skipped_variable_metadata) :
+             to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false) :
              json::object ();
 
     json environments = json::array ();
@@ -3704,6 +3909,47 @@ json& specs) {
 
 } // namespace
 
+nlohmann::ordered_json postman_auth_mapping (const nlohmann::ordered_json& auth) {
+    int unsupported = 0;
+    int dropped     = 0;
+    return map_postman_auth (&auth, unsupported, dropped);
+}
+
+bool postman_source_stands (const nlohmann::json& auth) {
+    if (!auth.is_object ()) {
+        return false;
+    }
+    const auto found = auth.find ("postman");
+    if (found == auth.end () || !found->is_object ()) {
+        return false;
+    }
+    const auto type = found->find ("type");
+    if (type == found->end () || !type->is_string () ||
+    type->get_ref<const std::string&> ().empty ()) {
+        return false;
+    }
+    nlohmann::json own = auth;
+    own.erase ("postman");
+    // Key order aside: both sides compare as sorted-key documents, the shape
+    // the stored column and a route's parsed body already have.
+    const nlohmann::json remapped = nlohmann::json::parse (
+    postman_auth_mapping (nlohmann::ordered_json::parse (found->dump ())).dump ());
+    return remapped == own;
+}
+
+std::string without_stale_postman_source (std::string stored) {
+    if (stored.find ("\"postman\"") == std::string::npos) {
+        return stored;
+    }
+    nlohmann::json auth =
+    nlohmann::json::parse (stored, nullptr, /*allow_exceptions=*/false);
+    if (!auth.is_object () || !auth.contains ("postman") || postman_source_stands (auth)) {
+        return stored;
+    }
+    auth.erase ("postman");
+    return auth.dump ();
+}
+
 ImportParse parse_import (const std::string& text,
 const ImportOptions& options,
 const ImportSource& source) {
@@ -3794,6 +4040,10 @@ const ImportSource& source) {
         { { "kind", "external_ref" }, { "count", source.unresolved_refs } });
     }
     return parsed;
+}
+
+nlohmann::ordered_json postman_header_rows (const nlohmann::ordered_json& rows) {
+    return map_key_values (&rows);
 }
 
 nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& result) {
