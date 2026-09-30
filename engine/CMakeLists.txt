@@ -563,6 +563,7 @@ add_library(vayu_core STATIC
     src/core/vayu_extensions.cpp
     src/core/path_template.cpp
     src/core/query_encoding.cpp
+    src/core/url_encoding.cpp
     src/core/spec_binding.cpp
     src/core/spec_diff.cpp
     src/core/spec_coverage.cpp
