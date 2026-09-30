@@ -213,10 +213,11 @@ export class RequestTransformer {
 				typeof raw.disableUrlEncoding === "boolean"
 					? raw.disableUrlEncoding
 					: DEFAULT_DISABLE_URL_ENCODING,
-			// The export carrier rides through untouched and only when present,
-			// spread for the `specOperation` reason below.
-			...(asRecord(raw.postmanProtocolBehavior)
-				? { postmanProtocolBehavior: asRecord(raw.postmanProtocolBehavior) }
+			// The export carrier rides through untouched - JSON text, never
+			// parsed - and only when present, spread for the `specOperation`
+			// reason below.
+			...(asStr(raw.postmanProtocolBehavior)
+				? { postmanProtocolBehavior: asStr(raw.postmanProtocolBehavior) }
 				: {}),
 			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
 			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),

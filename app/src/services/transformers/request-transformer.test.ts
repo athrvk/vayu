@@ -266,7 +266,9 @@ describe("RequestTransformer Postman protocol switches (#1765)", () => {
 	});
 
 	it("preserves stored values, and the export carrier verbatim", () => {
-		const carrier = { disableCookies: true, tlsDisabledProtocols: ["TLSv1"] };
+		// The engine's JSON text, member order and all (a parsed object would
+		// lose the order a Duplicate must write back).
+		const carrier = '{"tlsDisabledProtocols":["TLSv1"],"disableCookies":true}';
 		const request = RequestTransformer.toFrontend({
 			...base,
 			disableCookies: true,
@@ -277,7 +279,7 @@ describe("RequestTransformer Postman protocol switches (#1765)", () => {
 		expect(request.disableCookies).toBe(true);
 		expect(request.disabledSystemHeaders).toEqual(["user-agent", "accept"]);
 		expect(request.disableUrlEncoding).toBe(true);
-		expect(request.postmanProtocolBehavior).toEqual(carrier);
+		expect(request.postmanProtocolBehavior).toBe(carrier);
 	});
 
 	it("lowercases, dedupes and drops non-strings in a header list from an older engine", () => {

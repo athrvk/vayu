@@ -330,12 +330,18 @@ Json disabled_system_headers_node (const std::string& stored) {
 }
 
 /**
- * The `postmanProtocolBehavior` object both request serializers emit (issue
- * #1765), on the `spec_operation_node` rule: always a key, `null` when the
- * request carries none or the stored text is not an object.
+ * The `postmanProtocolBehavior` both request serializers emit (issue #1765):
+ * always a key, the stored JSON text itself - a string - when it holds an
+ * object, else `null`. Text rather than a parsed object for the reason the
+ * importer writes text: this reader's objects do not keep member order, and
+ * a client that sends the value back (the app's Duplicate) must write the
+ * source's order, which the export then reproduces byte for byte.
  */
 Json postman_protocol_behavior_node (const std::optional<std::string>& stored) {
-    return spec_operation_node (stored);
+    if (!stored.has_value () || !spec_operation_node (stored).is_object ()) {
+        return nullptr;
+    }
+    return *stored;
 }
 
 } // namespace

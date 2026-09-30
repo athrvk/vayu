@@ -266,6 +266,32 @@ TEST_F (PostmanExportRouteTest, AMalformedDisabledHeaderNameDoesNotFailTheImport
     EXPECT_EQ (exported_protocol_behavior (export_text (id), "Odd"), carried);
 }
 
+// The app's Duplicate sends back the record `GET /requests/:id` answered, the
+// carrier included: a duplicated import exports the same
+// `protocolProfileBehavior` bytes as its source. Mutation check: answer the
+// carrier as a parsed object from `postman_protocol_behavior_node` and the
+// copy's members come out sorted.
+TEST_F (PostmanExportRouteTest, ADuplicatedImportExportsTheSameProtocolBehavior) {
+    const std::string id =
+    import_text (read_text (fixture_path ("postman-export-roundtrip.json")));
+    const auto source = request_named (*db_, id, "Raw and cookieless");
+    ASSERT_HAS_VALUE (source);
+    auto [status, record] =
+    vayu::http::routes::get_request_response (*db_, source->id);
+    ASSERT_EQ (status, 200) << record.dump ();
+    for (const char* key : { "id", "createdAt", "updatedAt" }) {
+        record.erase (key);
+    }
+    record["name"] = "Raw and cookieless (Copy)";
+    auto [copy_status, copy] = vayu::http::routes::create_request_response (*db_, record);
+    ASSERT_EQ (copy_status, 200) << copy.dump ();
+
+    const std::string text = export_text (id);
+    const std::string original = exported_protocol_behavior (text, "Raw and cookieless");
+    ASSERT_FALSE (original.empty ());
+    EXPECT_EQ (exported_protocol_behavior (text, "Raw and cookieless (Copy)"), original);
+}
+
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
     const std::string id =
     import_text (read_text (fixture_path ("postman-export-roundtrip.json")));

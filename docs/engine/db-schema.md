@@ -581,7 +581,8 @@ ones mirror `vayu::Request` fields and ride every composed payload:
 `postman_protocol_behavior` is nothing the engine sends: `POST /export/postman`
 starts from it and overwrites only the keys a typed column now disagrees with,
 so explicit defaults, keys Vayu does not apply and the source's member order
-survive a round trip. The three typed columns are `NOT NULL` with a `DEFAULT`
+survive a round trip; `GET` answers it as this text, so a copy written back
+from it (the app's Duplicate) keeps the same bytes. The three typed columns are `NOT NULL` with a `DEFAULT`
 and the carrier is nullable, for the reason the paragraph above gives.
 
 **spec_operation** - which operation of the collection's bound

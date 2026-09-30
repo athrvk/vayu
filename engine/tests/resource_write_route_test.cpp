@@ -1627,7 +1627,8 @@ TEST_F (ResourceWriteRouteTest, ProtocolSettingsDefaultOffAndRoundTripThroughBot
     EXPECT_EQ (created["disableCookies"], true);
     EXPECT_EQ (created["disabledSystemHeaders"], json::array ({ "user-agent", "accept" }));
     EXPECT_EQ (created["disableUrlEncoding"], true);
-    EXPECT_EQ (created["postmanProtocolBehavior"], json ({ { "disableCookies", true } }));
+    // Answered as the stored JSON text, the spelling a write takes back.
+    EXPECT_EQ (created["postmanProtocolBehavior"], R"({"disableCookies":true})");
 
     const json listed =
     json::parse (vayu::http::routes::list_requests_body (*db_, collection));
@@ -1709,6 +1710,19 @@ TEST_F (ResourceWriteRouteTest, APostmanProtocolBehaviorStringIsStoredInItsOwnMe
     ASSERT_HAS_VALUE (stored->postman_protocol_behavior);
     EXPECT_EQ (*stored->postman_protocol_behavior,
     R"({"followRedirects":true,"disableCookies":false})");
+    // Answered as that text, so a client writing it back (the app's
+    // Duplicate) stores the same bytes. Mutation check: answer the parsed
+    // object from `postman_protocol_behavior_node` and the copy's members
+    // come back sorted.
+    EXPECT_EQ (created["postmanProtocolBehavior"],
+    R"({"followRedirects":true,"disableCookies":false})");
+    json copy                       = protocol_request (body["collectionId"]);
+    copy["postmanProtocolBehavior"] = created["postmanProtocolBehavior"];
+    auto [copy_status, copied]      = create_request_response (*db_, copy);
+    ASSERT_EQ (copy_status, 200) << copied.dump ();
+    const auto stored_copy = db_->get_request (copied["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_copy);
+    EXPECT_EQ (stored_copy->postman_protocol_behavior, stored->postman_protocol_behavior);
 
     auto [cleared_status, cleared] = update_request_response (*db_,
     created["id"].get<std::string> (), json{ { "postmanProtocolBehavior", nullptr } });

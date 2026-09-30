@@ -1251,8 +1251,9 @@ in the new mode. The Sends line and the code snippets substitute path values
 raw, and a query-located API key is appended raw, all matching what the engine
 sends. The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
-the Postman exporter only: `GET /requests` returns it, an import and a Duplicate
-carry it, and nothing sends it. The flat `headers` record every
+the Postman exporter only: `GET /requests` returns it as the stored JSON text,
+which the app keeps as a string and never parses, so an import and a Duplicate
+carry it byte for byte, and nothing sends it. The flat `headers` record every
 inline compose sends loses each row's `source`, so beside it goes
 `bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):
 the names whose row the body mode wrote, which a `content-type` opt-out removes

@@ -820,11 +820,14 @@ export interface Request {
 	 */
 	disableUrlEncoding: boolean;
 	/**
-	 * The imported Postman item's `protocolProfileBehavior`, verbatim. Read by
-	 * the engine's Postman exporter only; nothing sends it and the app never
-	 * edits it. Absent or `null` for a request that did not come from Postman.
+	 * The imported Postman item's `protocolProfileBehavior`, verbatim: the JSON
+	 * text the engine stores, in the source's member order. Read by the
+	 * engine's Postman exporter only; nothing sends it and the app never edits
+	 * or parses it - a Duplicate passes the text back as it came, so the copy
+	 * exports the same bytes. Absent or `null` for a request that did not come
+	 * from Postman.
 	 */
-	postmanProtocolBehavior?: Record<string, unknown> | null;
+	postmanProtocolBehavior?: string | null;
 	/**
 	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
 	 * Stored on the request because it describes the *endpoint* rather than one

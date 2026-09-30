@@ -1451,8 +1451,10 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the
   spelling the importer writes, because it keeps the source's member order
-  (an object crossing the engine's reader does not). `GET` answers it as an
-  object.
+  (an object crossing the engine's reader does not). `GET` answers it as that
+  stored text, a string (or `null`), the way it is written: a client that
+  sends the record back, as the app's Duplicate does, stores the same bytes,
+  and the copy exports the same `protocolProfileBehavior`.
 
 A non-boolean `disableCookies` / `disableUrlEncoding`, a
 `disabledSystemHeaders` that is not an array of header-name tokens, or a

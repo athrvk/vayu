@@ -184,8 +184,12 @@ export interface CreateRequestRequest {
 	disabledSystemHeaders?: string[];
 	/** Send the URL unencoded - see {@link Request.disableUrlEncoding}. */
 	disableUrlEncoding?: boolean;
-	/** Postman's `protocolProfileBehavior`, verbatim - see {@link Request.postmanProtocolBehavior}. */
-	postmanProtocolBehavior?: Record<string, unknown> | null;
+	/**
+	 * Postman's `protocolProfileBehavior`, verbatim - see
+	 * {@link Request.postmanProtocolBehavior}. The engine takes an object too,
+	 * but only the stored text keeps the source's member order.
+	 */
+	postmanProtocolBehavior?: string | Record<string, unknown> | null;
 	/** Which spec operation this request is - see {@link Request.specOperation}. */
 	specOperation?: SpecOperation;
 	/** Which app setting wrote `method` - see {@link Request.methodSource}. */

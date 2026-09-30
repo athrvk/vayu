@@ -75,10 +75,8 @@ const source: Request = {
 	disableCookies: true,
 	disabledSystemHeaders: ["user-agent"],
 	disableUrlEncoding: true,
-	postmanProtocolBehavior: {
-		disableCookies: true,
-		disabledSystemHeaders: { "user-agent": true },
-	},
+	// The stored JSON text, in the source's member order: sent back as-is.
+	postmanProtocolBehavior: '{"disabledSystemHeaders":{"user-agent":true},"disableCookies":true}',
 	stream: true,
 	mockResponseMode: "first",
 	specOperation: { operationId: "getPet", method: "GET", path: "/pets/{id}" },
