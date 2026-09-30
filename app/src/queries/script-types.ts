@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { retryWithin } from "@/lib/query-client";
 
 export function useScriptTypeDefinitionsQuery({ enabled = true }: { enabled?: boolean } = {}) {
 	return useQuery({
@@ -27,6 +28,6 @@ export function useScriptTypeDefinitionsQuery({ enabled = true }: { enabled?: bo
 		gcTime: QUERY_CACHE.SCRIPT_COMPLETIONS_GC_TIME_MS,
 		// Not critical: without it the editor keeps completions and loses only
 		// hover text and diagnostics, so a failure must not retry hard.
-		retry: QUERY_CACHE.SCRIPT_COMPLETIONS_RETRY,
+		retry: retryWithin(QUERY_CACHE.SCRIPT_COMPLETIONS_RETRY),
 	});
 }
