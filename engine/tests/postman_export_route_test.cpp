@@ -214,6 +214,39 @@ request_named (vayu::db::Database& db, const std::string& root, const std::strin
     return std::nullopt;
 }
 
+// Issue #1765: a body given in Vayu to an imported GET needs
+// `disableBodyPruning`, or Postman strips the body Vayu sends; the carrier
+// only had it when the source did. Appended when absent, set in place when
+// `false`, and an untouched bodyless import stays byte-identical. Mutation
+// check: drop the `prunable_body` block from `reconciled_profile` and the two
+// edited expectations red.
+TEST_F (PostmanExportRouteTest, ABodyAddedToAnImportedGetIsKeptFromPruning) {
+    const std::string id        = import_text (postman_collection (R"(
+        {"name":"Absent","protocolProfileBehavior":{"disabledSystemHeaders":{}},
+            "request":{"method":"GET","url":"https://x.com/a"}},
+        {"name":"Off","protocolProfileBehavior":{"disableBodyPruning":false,"strictSSL":true},
+            "request":{"method":"GET","url":"https://x.com/b"}})"));
+    const std::string untouched = export_text (id);
+    EXPECT_EQ (exported_protocol_behavior (untouched, "Absent"),
+    R"({"disabledSystemHeaders":{}})");
+    EXPECT_EQ (exported_protocol_behavior (untouched, "Off"),
+    R"({"disableBodyPruning":false,"strictSSL":true})");
+
+    const json body{ { "body", { { "mode", "json" }, { "content", R"({"a":1})" } } } };
+    for (const char* name : { "Absent", "Off" }) {
+        const auto row = request_named (*db_, id, name);
+        ASSERT_HAS_VALUE (row);
+        auto [status, updated] =
+        vayu::http::routes::update_request_response (*db_, row->id, body);
+        ASSERT_EQ (status, 200) << updated.dump ();
+    }
+    const std::string edited = export_text (id);
+    EXPECT_EQ (exported_protocol_behavior (edited, "Absent"),
+    R"({"disabledSystemHeaders":{},"disableBodyPruning":true})");
+    EXPECT_EQ (exported_protocol_behavior (edited, "Off"),
+    R"({"disableBodyPruning":true,"strictSSL":true})");
+}
+
 // A `disabledSystemHeaders` key that is no header name is dropped from what
 // the request applies instead of failing the whole import, and a truthy
 // non-boolean counts as Postman's runtime counts it; the carrier keeps the

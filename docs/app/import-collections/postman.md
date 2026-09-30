@@ -415,7 +415,10 @@ export writes the edit.
   order. A request with no imported object gets one generated in the order
   `strictSSL, followRedirects, maxRedirects, disableUrlEncoding, disableCookies,
   disabledSystemHeaders, disableBodyPruning`. `disableBodyPruning` stays as
-  imported even if the request later gains or loses a body.
+  imported, except on a GET or HEAD that has a body: Postman strips such a
+  body unless told not to, so an imported object without `disableBodyPruning:
+  true` gets it (in place, or appended). An untouched import with no body is
+  written back unchanged.
 - **Empty-name rows** (a disabled header with no key, an editor's trailing
   blank row) are not imported.
 

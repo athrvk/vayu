@@ -1560,7 +1560,8 @@ std::vector<std::string> truthy_header_set (const json& headers) {
 /// The carried object with every key Vayu owns brought back in line with the
 /// typed columns - see `protocol_profile`.
 json reconciled_profile (const PostmanExportRequest& request,
-const std::vector<std::string>& disabled) {
+const std::vector<std::string>& disabled,
+bool prunable_body) {
     json out = request.postman_protocol_behavior;
     reconcile_flag (out, "strictSSL", request.verify_ssl, true);
     reconcile_flag (out, "followRedirects", request.follow_redirects, true);
@@ -1581,6 +1582,14 @@ const std::vector<std::string>& disabled) {
     if (truthy_header_set (carried != out.end () ? *carried : json ()) != stored_set) {
         out["disabledSystemHeaders"] = disabled_headers_object (disabled);
     }
+    // A body added in Vayu to an imported GET or HEAD: Postman would strip it
+    // unless told not to, and the carrier only says so when the source had one.
+    if (prunable_body) {
+        const auto pruning = out.find ("disableBodyPruning");
+        if (pruning == out.end () || !pruning->is_boolean () || !pruning->get<bool> ()) {
+            out["disableBodyPruning"] = true;
+        }
+    }
     return out;
 }
 
@@ -1593,7 +1602,9 @@ const std::vector<std::string>& disabled) {
  * checked against its typed column (`reconcile_flag`). `disabledSystemHeaders`
  * compares as a set of the names set to `true`: equal keeps the object
  * verbatim (`{}` and `false` entries included), different writes the stored
- * list. `disableBodyPruning` and unknown keys are the carrier's.
+ * list. Unknown keys are the carrier's, and so is `disableBodyPruning` except
+ * on a GET or HEAD with a body, where it is set `true` in place (appended when
+ * absent) because Postman would otherwise strip the body Vayu sends.
  *
  * Without one the object is generated in the order
  * `strictSSL, followRedirects, maxRedirects, disableUrlEncoding,
@@ -1602,8 +1613,12 @@ const std::vector<std::string>& disabled) {
  */
 std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
     const std::vector<std::string> disabled = stored_disabled_headers (request);
+    // Postman strips a GET's body unless told not to, and sets this itself
+    // when one is given a body. Vayu sends it, so the export says so.
+    const bool prunable_body =
+    has_body && (request.method == "GET" || request.method == "HEAD");
     if (request.postman_protocol_behavior.is_object ()) {
-        return std::make_optional (reconciled_profile (request, disabled));
+        return std::make_optional (reconciled_profile (request, disabled, prunable_body));
     }
 
     json out = json::object ();
@@ -1625,9 +1640,7 @@ std::optional<json> protocol_profile (const PostmanExportRequest& request, bool 
     if (!disabled.empty ()) {
         out["disabledSystemHeaders"] = disabled_headers_object (disabled);
     }
-    // Postman strips a GET's body unless told not to, and sets this itself
-    // when one is given a body. Vayu sends it, so the export says so.
-    if (has_body && (request.method == "GET" || request.method == "HEAD")) {
+    if (prunable_body) {
         out["disableBodyPruning"] = true;
     }
     return out.empty () ? std::nullopt : std::make_optional (std::move (out));
