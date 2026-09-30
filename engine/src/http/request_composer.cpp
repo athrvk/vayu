@@ -12,6 +12,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <map>
 #include <random>
 #include <regex>
 #include <string_view>
@@ -962,16 +963,27 @@ const vayu::db::Request& request) {
     return out;
 }
 
+/// A stored headers blob as /execute takes it, plus the names whose winning
+/// row the body mode wrote (`source: "body-mode"`, issue #1765).
+struct FlatHeaders {
+    nlohmann::json headers   = nlohmann::json::object ();
+    nlohmann::json body_mode = nlohmann::json::array ();
+};
+
 // Flatten a stored KeyValueEntry[] headers blob into the object map /execute
-// expects: enabled-only, non-empty keys, later duplicates win.
-nlohmann::json flatten_stored_headers (const std::string& blob) {
-    nlohmann::json out = nlohmann::json::object ();
+// expects: enabled-only, non-empty keys, later duplicates win. A name whose
+// winning row carries the body mode's marker is listed as `bodyModeHeaders`,
+// so a refused Content-Type drops it rather than reading it as the user's.
+FlatHeaders flatten_stored_headers (const std::string& blob) {
+    FlatHeaders flat;
+    nlohmann::json& out = flat.headers;
+    std::map<std::string, bool> marked;
     if (blob.empty ()) {
-        return out;
+        return flat;
     }
     auto rows = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
     if (!rows.is_array ()) {
-        return out;
+        return flat;
     }
     for (const auto& row : rows) {
         if (!row.is_object ()) {
@@ -988,8 +1000,16 @@ nlohmann::json flatten_stored_headers (const std::string& blob) {
         const auto value = row.find ("value");
         out[key->get<std::string> ()] =
         (value != row.end () && value->is_string ()) ? value->get<std::string> () : "";
+        const auto source                = row.find ("source");
+        marked[key->get<std::string> ()] = source != row.end () &&
+        source->is_string () && source->get<std::string> () == "body-mode";
     }
-    return out;
+    for (const auto& [name, is_body_mode] : marked) {
+        if (is_body_mode) {
+            flat.body_mode.push_back (name);
+        }
+    }
+    return flat;
 }
 
 // The stored body blob as an /execute body, or null for "no body".
@@ -1017,9 +1037,12 @@ const std::vector<vayu::db::Collection>& chain) {
     payload["method"] = to_string (request.method);
     payload["url"]    = request.url;
 
-    nlohmann::json headers = flatten_stored_headers (request.headers);
-    if (!headers.empty ()) {
-        payload["headers"] = headers;
+    FlatHeaders headers = flatten_stored_headers (request.headers);
+    if (!headers.headers.empty ()) {
+        payload["headers"] = std::move (headers.headers);
+    }
+    if (!headers.body_mode.empty ()) {
+        payload["bodyModeHeaders"] = std::move (headers.body_mode);
     }
     nlohmann::json body = stored_body (request.body);
     if (!body.is_null ()) {
@@ -1050,7 +1073,18 @@ const std::vector<vayu::db::Collection>& chain) {
     // engine-side, so an omitted `false` would verify the certificate the user
     // explicitly asked the engine not to check (issue #706).
     payload["verifySSL"] = request.verify_ssl;
-    payload["requestId"] = request.id;
+    // Postman's per-request protocol settings (issue #1765), always emitted
+    // for the same reason: each defaults to off engine-side, so an omitted
+    // `true` would send the jar, the header or the encoding the user turned
+    // off. The raw `postman_protocol_behavior` carrier is never sent.
+    payload["disableCookies"]        = request.disable_cookies;
+    payload["disabledSystemHeaders"] = nlohmann::json::parse (
+    request.disabled_system_headers, nullptr, /*allow_exceptions=*/false);
+    if (!payload["disabledSystemHeaders"].is_array ()) {
+        payload["disabledSystemHeaders"] = nlohmann::json::array ();
+    }
+    payload["disableUrlEncoding"] = request.disable_url_encoding;
+    payload["requestId"]          = request.id;
 
     // Identity for the script sandbox (`pm.info.requestName`), not an HTTP
     // field. Only the by-id path has a row to read it from; the inline path's
@@ -1308,8 +1342,14 @@ nlohmann::json& payload) {
         .push_back ({ { "key", segment.name },
         { "value", std::move (resolved) }, { "in", "path" } });
     }
-    *url = vayu::core::substitute_path_variables (url->get<std::string> (),
-    written, [] (const std::string& value) { return value; });
+    // Read after the inline overlay, so an editor toggle not yet saved is the
+    // one that decides (issue #1765).
+    const auto raw_flag = payload.find ("disableUrlEncoding");
+    const bool as_typed = raw_flag != payload.end () &&
+    raw_flag->is_boolean () && raw_flag->get<bool> ();
+    *url = vayu::core::substitute_path_variables (
+    url->get<std::string> (), written,
+    [] (const std::string& value) { return value; }, !as_typed);
     if (!waiting.empty ()) {
         payload["params"] = std::move (waiting);
     }
@@ -1487,6 +1527,12 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     nlohmann::json payload =
     stored ? payload_from_stored (*stored, chain) : nlohmann::json::object ();
     if (has_inline) {
+        // The stored markers describe the stored rows: inline headers replace
+        // those rows, so only the inline request's own `bodyModeHeaders`
+        // (absent: none) may speak for them.
+        if (body["request"].contains ("headers")) {
+            payload.erase ("bodyModeHeaders");
+        }
         for (const auto& [key, value] : body["request"].items ()) {
             payload[key] = value;
         }

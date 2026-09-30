@@ -1010,13 +1010,63 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
 // Requests
 // ---------------------------------------------------------------------------
 
+/// The Content-Type Postman's runtime adds for @p body (an exported Postman
+/// body) as a system header, or "" when it adds none: GraphQL's JSON envelope,
+/// and a raw body's declared language.
+std::string_view postman_implied_content_type (const std::optional<json>& body) {
+    if (!body) {
+        return {};
+    }
+    const std::string mode = text_of (*body, "mode");
+    if (mode == "graphql") {
+        return "application/json";
+    }
+    if (mode != "raw") {
+        return {};
+    }
+    const auto options = body->find ("options");
+    const std::string language = options == body->end () || !options->is_object () ?
+    std::string () :
+    text_of (options->value ("raw", json::object ()), "language");
+    if (language == "json") {
+        return "application/json";
+    }
+    return language == "xml" ? "application/xml" : std::string_view ();
+}
+
+/**
+ * @p headers without the row the body mode wrote (`source: "body-mode"`,
+ * issue #1765) when Postman would add that same header on its own: Postman
+ * treats the body's Content-Type as a system header, so writing it as a
+ * declared row would make a `content-type` opt-out stop working there and
+ * the next import read it as the user's.
+ */
+json without_implied_body_header (const json& headers, const std::optional<json>& body) {
+    const std::string_view implied = postman_implied_content_type (body);
+    if (implied.empty () || !headers.is_array ()) {
+        return headers;
+    }
+    json out = json::array ();
+    for (const json& row : headers) {
+        const bool implied_row = row.is_object () &&
+        text_of (row, "source") == "body-mode" && row_enabled (row) &&
+        vayu::utils::ascii_lower (text_of (row, "key")) == "content-type" &&
+        text_of (row, "value") == implied;
+        if (!implied_row) {
+            out.push_back (row);
+        }
+    }
+    return out;
+}
+
 /// The request half a saved example records, and the request itself.
 json request_core (const PostmanExportRequest& request,
 const std::optional<json>& body,
 Walk& walk) {
     json out;
     out["method"] = request.method;
-    out["header"] = postman_rows (request.headers, RowShape::Typed, walk);
+    out["header"] = postman_rows (
+    without_implied_body_header (request.headers, body), RowShape::Typed, walk);
     if (body) {
         out["body"] = *body;
     }
@@ -1459,13 +1509,119 @@ bool body_has_content (const std::optional<json>& body) {
     return rows != body->end () && rows->is_array () && !rows->empty ();
 }
 
-std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
+/// The stored `disabledSystemHeaders` names, in stored order.
+std::vector<std::string> stored_disabled_headers (const PostmanExportRequest& request) {
+    std::vector<std::string> names;
+    if (!request.disabled_system_headers.is_array ()) {
+        return names;
+    }
+    for (const json& name : request.disabled_system_headers) {
+        if (name.is_string ()) {
+            names.push_back (vayu::utils::ascii_lower (name.get<std::string> ()));
+        }
+    }
+    return names;
+}
+
+/// Postman's `disabledSystemHeaders` object for @p names: each one `true`, in order.
+json disabled_headers_object (const std::vector<std::string>& names) {
     json out = json::object ();
+    for (const std::string& name : names) {
+        out[name] = true;
+    }
+    return out;
+}
+
+/**
+ * Write @p state under @p key of @p out unless what is there already reads as
+ * it. "Reads as" is the importer's reading: a boolean is itself, anything else
+ * (absent included) is @p fallback - so a carried spelling the typed column
+ * still agrees with, explicit default and all, is kept byte for byte, and an
+ * edit since the import overwrites it in place (or appends it when absent).
+ */
+void reconcile_flag (json& out, const char* key, bool state, bool fallback) {
+    const auto found = out.find (key);
+    const bool read =
+    found != out.end () && found->is_boolean () ? found->get<bool> () : fallback;
+    if (read != state) {
+        out[key] = state;
+    }
+}
+
+/// The names @p headers (a `disabledSystemHeaders` object) turns off, sorted:
+/// the set the importer stored, read by the importer's own rule.
+std::vector<std::string> truthy_header_set (const json& headers) {
+    std::vector<std::string> names = postman_disabled_system_headers (headers);
+    std::ranges::sort (names);
+    names.erase (std::ranges::unique (names).begin (), names.end ());
+    return names;
+}
+
+/// The carried object with every key Vayu owns brought back in line with the
+/// typed columns - see `protocol_profile`.
+json reconciled_profile (const PostmanExportRequest& request,
+const std::vector<std::string>& disabled,
+bool prunable_body) {
+    json out = request.postman_protocol_behavior;
+    reconcile_flag (out, "strictSSL", request.verify_ssl, true);
+    reconcile_flag (out, "followRedirects", request.follow_redirects, true);
+    // `apply_int_field`'s reading, then its clamp: an integer, else 10.
+    const auto limit     = out.find ("maxRedirects");
+    const int read_limit = limit != out.end () && limit->is_number_integer () ?
+    static_cast<int> (std::clamp<std::int64_t> (limit->get<std::int64_t> (), 0, 100)) :
+    10;
+    if (read_limit != request.max_redirects) {
+        out["maxRedirects"] = request.max_redirects;
+    }
+    reconcile_flag (out, "disableUrlEncoding", request.disable_url_encoding, false);
+    reconcile_flag (out, "disableCookies", request.disable_cookies, false);
+    std::vector<std::string> stored_set = disabled;
+    std::ranges::sort (stored_set);
+    stored_set.erase (std::ranges::unique (stored_set).begin (), stored_set.end ());
+    const auto carried = out.find ("disabledSystemHeaders");
+    if (truthy_header_set (carried != out.end () ? *carried : json ()) != stored_set) {
+        out["disabledSystemHeaders"] = disabled_headers_object (disabled);
+    }
+    // A body added in Vayu to an imported GET or HEAD: Postman would strip it
+    // unless told not to, and the carrier only says so when the source had one.
+    if (prunable_body) {
+        const auto pruning = out.find ("disableBodyPruning");
+        if (pruning == out.end () || !pruning->is_boolean () || !pruning->get<bool> ()) {
+            out["disableBodyPruning"] = true;
+        }
+    }
+    return out;
+}
+
+/**
+ * The item's `protocolProfileBehavior`, or nothing when it would say nothing.
+ *
+ * With a carried object (`requests.postman_protocol_behavior`, issue #1765)
+ * the export starts from it, so keys Vayu does not apply, explicit defaults
+ * and the source's member order all survive; each key Vayu owns is then
+ * checked against its typed column (`reconcile_flag`). `disabledSystemHeaders`
+ * compares as a set of the names set to `true`: equal keeps the object
+ * verbatim (`{}` and `false` entries included), different writes the stored
+ * list. Unknown keys are the carrier's, and so is `disableBodyPruning` except
+ * on a GET or HEAD with a body, where it is set `true` in place (appended when
+ * absent) because Postman would otherwise strip the body Vayu sends.
+ *
+ * Without one the object is generated in the order
+ * `strictSSL, followRedirects, maxRedirects, disableUrlEncoding,
+ * disableCookies, disabledSystemHeaders, disableBodyPruning`, which agrees with
+ * every relative order Postman's own exports in the corpus show.
+ */
+std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
+    const std::vector<std::string> disabled = stored_disabled_headers (request);
     // Postman strips a GET's body unless told not to, and sets this itself
     // when one is given a body. Vayu sends it, so the export says so.
-    if (has_body && (request.method == "GET" || request.method == "HEAD")) {
-        out["disableBodyPruning"] = true;
+    const bool prunable_body =
+    has_body && (request.method == "GET" || request.method == "HEAD");
+    if (request.postman_protocol_behavior.is_object ()) {
+        return std::make_optional (reconciled_profile (request, disabled, prunable_body));
     }
+
+    json out = json::object ();
     if (!request.verify_ssl) {
         out["strictSSL"] = false;
     }
@@ -1474,6 +1630,18 @@ std::optional<json> protocol_profile (const PostmanExportRequest& request, bool 
     }
     if (request.max_redirects != 10) {
         out["maxRedirects"] = request.max_redirects;
+    }
+    if (request.disable_url_encoding) {
+        out["disableUrlEncoding"] = true;
+    }
+    if (request.disable_cookies) {
+        out["disableCookies"] = true;
+    }
+    if (!disabled.empty ()) {
+        out["disabledSystemHeaders"] = disabled_headers_object (disabled);
+    }
+    if (prunable_body) {
+        out["disableBodyPruning"] = true;
     }
     return out.empty () ? std::nullopt : std::make_optional (std::move (out));
 }

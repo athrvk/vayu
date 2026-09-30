@@ -1398,6 +1398,29 @@ std::string_view code = {}) {
 }
 
 /**
+ * Give a stream @p jar, carrying the pre-request script's @p writes - or, for
+ * a request with `disableCookies` (issue #1765), no jar at all, answering the
+ * writes for the caller to apply once the stream has started, because no
+ * transfer will carry them. Exactly once either way, the same rule the
+ * buffered path follows in `execute_exchange`, and never for a stream the
+ * manager refuses to start - the jar-on writes go with the refused spec.
+ */
+[[nodiscard]] std::vector<vayu::http::CookieWrite> attach_stream_jar (
+vayu::http::SseStreamRequest& spec,
+vayu::http::CookieJar& jar,
+const std::string& scope,
+std::vector<vayu::http::CookieWrite> writes,
+bool jar_off) {
+    if (jar_off) {
+        return writes;
+    }
+    spec.cookie_jar    = &jar;
+    spec.cookie_scope  = scope;
+    spec.cookie_writes = std::move (writes);
+    return {};
+}
+
+/**
  * The streaming half of a design send (issue #573).
  *
  * The same script/send/script ordering a buffered send performs, pulled apart
@@ -1535,18 +1558,15 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
 
     vayu::http::SseStreamRequest spec;
     spec.run_id          = run_id;
+    const bool jar_off   = send.request.disable_cookies;
     spec.request         = std::move (send.request);
     spec.limits          = vayu::http::read_sse_limits (ctx.db);
     spec.transport       = transport;
     spec.default_headers = default_headers;
     spec.max_duration_ms = send.stream.max_duration_ms;
     spec.max_events      = send.stream.max_events;
-    spec.cookie_jar      = &ctx.cookie_jar;
-    spec.cookie_scope    = send.cookie_scope;
-    // The pre-request script's jar writes ride this transfer, which is
-    // what makes them happen exactly once - the same route
-    // `ClientConfig::cookie_writes` gives them on the buffered path.
-    spec.cookie_writes = std::move (pre_cookie_writes);
+    const std::vector<vayu::http::CookieWrite> jarless_writes = attach_stream_jar (
+    spec, ctx.cookie_jar, send.cookie_scope, std::move (pre_cookie_writes), jar_off);
     // Persistence stays the route's decision even though it happens on
     // the worker thread - `ctx.db` outlives the manager, which is why
     // the manager is declared before `server_` (see server.hpp).
@@ -1667,6 +1687,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         refuse_stream_before_it_opens (ctx, res, run_id, 503, "Engine is shutting down");
         return;
     }
+    // Started, so the pre-request script's writes stand - applied only now,
+    // as a refused stream's jar-on writes are dropped with its spec.
+    ctx.cookie_jar.apply (send.cookie_scope, jarless_writes);
 
     nlohmann::json body;
     body["runId"]     = run_id;

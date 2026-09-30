@@ -11,17 +11,21 @@
  */
 
 #include "vayu/core/import_document.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <format>
 #include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace vayu::http::routes {
 
@@ -262,6 +266,143 @@ bool is_create) {
 }
 
 /**
+ * A boolean protocol setting (issue #1765) under the one null-vs-absent rule,
+ * with a non-boolean refused rather than ignored: `disableCookies: "true"`
+ * read as nothing would send the jar the author turned off.
+ */
+static RouteResult
+apply_strict_bool_field (const nlohmann::json& json, const char* key, bool& out, bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = false;
+        }
+        return {};
+    }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = false;
+        return {};
+    }
+    if (!value.is_boolean ()) {
+        return route_error (400, std::format ("Invalid '{}': must be a boolean", key));
+    }
+    out = value.get<bool> ();
+    return {};
+}
+
+/**
+ * Applies `disabledSystemHeaders` (issue #1765): the header names the engine
+ * does not add to this request on its own, stored as a JSON array of lowercased
+ * names, deduplicated, in first-appearance order. `null` resets to `[]`.
+ *
+ * A name is checked as a header token only (`invalid_header_token`), never
+ * with the correlation-id rule: `user-agent` and `content-type` are exactly the
+ * names this list exists to carry.
+ */
+static RouteResult apply_disabled_system_headers_field (const nlohmann::json& json,
+std::string& out,
+bool is_create) {
+    constexpr const char* KEY = "disabledSystemHeaders";
+    if (!json.contains (KEY)) {
+        if (is_create) {
+            out = "[]";
+        }
+        return {};
+    }
+    const auto& value = json[KEY];
+    if (value.is_null ()) {
+        out = "[]";
+        return {};
+    }
+    if (!value.is_array ()) {
+        return route_error (400,
+        "Invalid 'disabledSystemHeaders': must be an array of header names");
+    }
+    nlohmann::json names = nlohmann::json::array ();
+    std::vector<std::string> seen;
+    for (const auto& entry : value) {
+        if (!entry.is_string ()) {
+            return route_error (
+            400, "Invalid 'disabledSystemHeaders': must hold header names as strings");
+        }
+        const auto text = entry.get<std::string> ();
+        if (auto rejection = vayu::http::invalid_header_token (text)) {
+            return route_error (400, "Invalid 'disabledSystemHeaders': " + *rejection);
+        }
+        std::string folded = vayu::utils::ascii_lower (text);
+        if (std::find (seen.begin (), seen.end (), folded) != seen.end ()) {
+            continue;
+        }
+        seen.push_back (folded);
+        names.push_back (std::move (folded));
+    }
+    std::string dumped = names.dump ();
+    if (dumped.size () > vayu::core::constants::json::MAX_FIELD_SIZE) {
+        return route_error (413,
+        std::format (
+        "'disabledSystemHeaders' is {} bytes, over the limit of {}",
+        dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
+    }
+    out = std::move (dumped);
+    return {};
+}
+
+/**
+ * Applies `postmanProtocolBehavior` (issue #1765): the imported Postman
+ * item's `protocolProfileBehavior`, kept for `POST /export/postman` and sent
+ * by nothing. Absent-on-create and `null` both mean none.
+ *
+ * Two spellings of the one value: an object, or a string holding a JSON
+ * object. The string is the one the importer writes, on the
+ * `request_examples.postman_response` precedent, because an object crossing
+ * this engine's JSON reader loses its member order and the export writes the
+ * members back in the order the source had them. The text is stored as
+ * parsed from an order-preserving reader, so a string that is not an object
+ * is refused the same as a non-object value.
+ */
+static RouteResult apply_postman_protocol_behavior_field (const nlohmann::json& json,
+std::optional<std::string>& out,
+bool is_create) {
+    constexpr const char* KEY = "postmanProtocolBehavior";
+    if (!json.contains (KEY)) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return {};
+    }
+    const auto& value = json[KEY];
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    std::string dumped;
+    if (value.is_object ()) {
+        dumped = value.dump ();
+    } else if (value.is_string ()) {
+        const auto parsed = nlohmann::ordered_json::parse (
+        value.get<std::string> (), nullptr, /*allow_exceptions=*/false);
+        if (!parsed.is_object ()) {
+            return route_error (400,
+            "Invalid 'postmanProtocolBehavior': must be an object, a string "
+            "holding a JSON object, or null");
+        }
+        dumped = parsed.dump ();
+    } else {
+        return route_error (400,
+        "Invalid 'postmanProtocolBehavior': must be an object, a string "
+        "holding a JSON object, or null");
+    }
+    if (dumped.size () > vayu::core::constants::json::MAX_FIELD_SIZE) {
+        return route_error (413,
+        std::format (
+        "'postmanProtocolBehavior' is {} bytes, over the limit of {}",
+        dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
+    }
+    out = std::move (dumped);
+    return {};
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
@@ -368,6 +509,30 @@ bool is_create) {
     // applier rather than the by-id route alone, so `POST /import/apply` -
     // which runs this same function over a bulk payload - carries it too.
     apply_bool_field (json, "stream", r.stream, false, is_create);
+
+    // Postman's per-request protocol settings (issue #1765). Here for the
+    // same reason `stream` is: `POST /import/apply` runs this same applier,
+    // which is how an imported item's settings reach the row.
+    if (auto outcome =
+        apply_strict_bool_field (json, "disableCookies", r.disable_cookies, is_create);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome = apply_disabled_system_headers_field (
+        json, r.disabled_system_headers, is_create);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome = apply_strict_bool_field (
+        json, "disableUrlEncoding", r.disable_url_encoding, is_create);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome = apply_postman_protocol_behavior_field (
+        json, r.postman_protocol_behavior, is_create);
+    !outcome) {
+        return outcome;
+    }
 
     // Operation identity (issue #637). Here rather than in the by-id route, for
     // the same reason `stream` is: `POST /import/apply` runs this same applier,

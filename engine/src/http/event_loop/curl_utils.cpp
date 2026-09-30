@@ -371,7 +371,20 @@ Headers* sent) {
     // The Content-Type the body mode implies, when the request declares none.
     // Empty when neither holds - which `append` drops, as it drops any
     // value-less header.
-    append ("Content-Type", body_content_type_value (request));
+    if (!suppresses_default_header (request, "Content-Type")) {
+        append ("Content-Type", body_content_type_value (request));
+    } else if (!request.headers.contains ("Content-Type") &&
+    vayu::http::has_wire_body (request) &&
+    !vayu::http::content_type_is_engine_owned (request.body)) {
+        // Refused (issue #1765, Postman's `disabledSystemHeaders`): libcurl
+        // would otherwise write `application/x-www-form-urlencoded` for any
+        // POSTFIELDS body. `Content-Type:` with nothing after it is libcurl's
+        // spelling of "remove the line", so it is appended directly - the
+        // `append` above drops a value-less header - and not recorded as
+        // sent. Multipart keeps the header libcurl writes: its boundary is
+        // what makes the body readable at all.
+        list = curl_slist_append (list, "Content-Type:");
+    }
 
     if (adds_default ("User-Agent")) {
         append ("User-Agent", policy.user_agent);
@@ -382,6 +395,13 @@ Headers* sent) {
         // transfer of a load run carries its own id instead of replaying the
         // one that was stored - the defect issue #1229 was filed for.
         append (policy.correlation_header, vayu::utils::generate_id (""));
+    }
+
+    // libcurl adds `Accept: */*` to every request that names no Accept. A
+    // request that refuses it (issue #1765) gets libcurl's removal line
+    // instead, appended directly for the reason the Content-Type one is.
+    if (!request.headers.contains ("Accept") && suppresses_default_header (request, "Accept")) {
+        list = curl_slist_append (list, "Accept:");
     }
 
     if (negotiates_compression (request, policy)) {

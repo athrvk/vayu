@@ -86,6 +86,9 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"maxRedirects",
 	"httpVersion",
 	"verifySSL",
+	"disableCookies",
+	"disabledSystemHeaders",
+	"disableUrlEncoding",
 	"stream",
 ];
 

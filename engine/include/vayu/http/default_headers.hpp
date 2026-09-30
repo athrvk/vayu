@@ -135,6 +135,17 @@ struct DeclaredDefaultHeader {
 const DefaultHeaderPolicy& policy);
 
 /**
+ * @brief Why @p name is not an RFC 9110 header name (a `token`), or nothing.
+ *
+ * The whole check for a name a request *refuses* (`disabledDefaultHeaders`,
+ * `disabledSystemHeaders`, issue #1765): opting out of `User-Agent` or
+ * `Content-Type` is exactly what those lists are for, so the correlation-id
+ * rule below - which refuses the names the engine derives - must never be
+ * applied to them.
+ */
+[[nodiscard]] std::optional<std::string> invalid_header_token (std::string_view name);
+
+/**
  * @brief Why @p name cannot be the name the engine adds the correlation id
  *        under, or nothing.
  *

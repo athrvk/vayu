@@ -310,6 +310,40 @@ Json method_source_node (const std::optional<std::string>& stored) {
     return stored.has_value () ? Json (*stored) : Json (nullptr);
 }
 
+/**
+ * The `disabledSystemHeaders` array both request serializers emit (issue
+ * #1765): the stored column, or `[]` for a value that will not parse as an
+ * array of strings - the write route never stores one, so that is a
+ * hand-edited row, and an execute default is safer than a refusal.
+ */
+Json disabled_system_headers_node (const std::string& stored) {
+    Json parsed = Json::parse (stored, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_array ()) {
+        return Json::array ();
+    }
+    for (const auto& name : parsed) {
+        if (!name.is_string ()) {
+            return Json::array ();
+        }
+    }
+    return parsed;
+}
+
+/**
+ * The `postmanProtocolBehavior` both request serializers emit (issue #1765):
+ * always a key, the stored JSON text itself - a string - when it holds an
+ * object, else `null`. Text rather than a parsed object for the reason the
+ * importer writes text: this reader's objects do not keep member order, and
+ * a client that sends the value back (the app's Duplicate) must write the
+ * source's order, which the export then reproduces byte for byte.
+ */
+Json postman_protocol_behavior_node (const std::optional<std::string>& stored) {
+    if (!stored.has_value () || !spec_operation_node (stored).is_object ()) {
+        return nullptr;
+    }
+    return *stored;
+}
+
 } // namespace
 
 Json serialize (const vayu::db::SpecDocument& s) {
@@ -530,11 +564,18 @@ Json serialize (const vayu::db::Request& r) {
             json["elements"] = Json::array ();
         }
     }
-    json["followRedirects"]  = r.follow_redirects;
-    json["maxRedirects"]     = r.max_redirects;
-    json["httpVersion"]      = r.http_version;
-    json["verifySSL"]        = r.verify_ssl;
-    json["stream"]           = r.stream;
+    json["followRedirects"] = r.follow_redirects;
+    json["maxRedirects"]    = r.max_redirects;
+    json["httpVersion"]     = r.http_version;
+    json["verifySSL"]       = r.verify_ssl;
+    json["stream"]          = r.stream;
+    // Postman's per-request protocol settings (issue #1765), always emitted
+    // like every other execution option.
+    json["disableCookies"] = r.disable_cookies;
+    json["disabledSystemHeaders"] = disabled_system_headers_node (r.disabled_system_headers);
+    json["disableUrlEncoding"] = r.disable_url_encoding;
+    json["postmanProtocolBehavior"] =
+    postman_protocol_behavior_node (r.postman_protocol_behavior);
     json["mockResponseMode"] = r.mock_response_mode;
     json["mockExampleId"] =
     r.mock_example_id.has_value () ? Json (*r.mock_example_id) : Json (nullptr);
@@ -931,10 +972,74 @@ std::optional<Error> read_default_header_opt_outs (const Json& json, Request& re
                 "'disabledDefaultHeaders' must hold header names as strings" };
         }
         const auto text = name.get<std::string> ();
-        if (auto rejection = vayu::http::unusable_header_name (text)) {
+        // The token rule alone (issue #1765): `unusable_header_name` is the
+        // correlation-id validator and refuses `User-Agent`, the one name this
+        // list most exists to carry.
+        if (auto rejection = vayu::http::invalid_header_token (text)) {
             return Error{ ErrorCode::InternalError, "'disabledDefaultHeaders': " + *rejection };
         }
         request.suppressed_default_headers.insert (text);
+    }
+    return std::nullopt;
+}
+
+/**
+ * The request's stored `disabledSystemHeaders` (issue #1765, Postman's own
+ * list), unioned into the same set the per-send `disabledDefaultHeaders`
+ * fills: both say "do not add this", one for every send of the request and
+ * one for this send. Same shape rules and the same refusal.
+ */
+std::optional<Error> read_disabled_system_headers (const Json& json, Request& request) {
+    const auto names = json.find ("disabledSystemHeaders");
+    if (names == json.end () || names->is_null ()) {
+        return std::nullopt;
+    }
+    if (!names->is_array ()) {
+        return Error{ ErrorCode::InternalError,
+            "'disabledSystemHeaders' must be an array of header names" };
+    }
+    for (const auto& name : *names) {
+        if (!name.is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'disabledSystemHeaders' must hold header names as strings" };
+        }
+        const auto text = name.get<std::string> ();
+        if (auto rejection = vayu::http::invalid_header_token (text)) {
+            return Error{ ErrorCode::InternalError, "'disabledSystemHeaders': " + *rejection };
+        }
+        request.suppressed_default_headers.insert (text);
+    }
+    return std::nullopt;
+}
+
+/**
+ * `bodyModeHeaders` (issue #1765): the names of headers the request carries
+ * only because its body mode wrote them - a stored row marked
+ * `source: "body-mode"`, the Body panel's Content-Type or the one an importer
+ * adds for a GraphQL, JSON-RPC or XML body. Such a header is a system header
+ * in Postman's sense, not a declaration, so a refused name drops it here and
+ * the header builder then treats the request as declaring none (removing
+ * libcurl's own default in its place). A row the user typed carries no
+ * marker and is always sent. Read after both opt-out lists, which it consults.
+ */
+std::optional<Error> drop_refused_body_mode_headers (const Json& json, Request& request) {
+    const auto names = json.find ("bodyModeHeaders");
+    if (names == json.end () || names->is_null ()) {
+        return std::nullopt;
+    }
+    if (!names->is_array ()) {
+        return Error{ ErrorCode::InternalError,
+            "'bodyModeHeaders' must be an array of header names" };
+    }
+    for (const auto& name : *names) {
+        if (!name.is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'bodyModeHeaders' must hold header names as strings" };
+        }
+        const auto text = name.get<std::string> ();
+        if (request.suppressed_default_headers.contains (text)) {
+            request.headers.erase (text);
+        }
     }
     return std::nullopt;
 }
@@ -957,6 +1062,14 @@ void read_request_options (const Json& json, Request& request) {
     }
     if (json.contains ("verifySSL")) {
         request.verify_ssl = json["verifySSL"].get<bool> ();
+    }
+    // Postman's per-request protocol settings (issue #1765). A non-boolean
+    // throws and fails the parse, the rule every sibling here follows.
+    if (json.contains ("disableCookies") && !json["disableCookies"].is_null ()) {
+        request.disable_cookies = json["disableCookies"].get<bool> ();
+    }
+    if (json.contains ("disableUrlEncoding") && !json["disableUrlEncoding"].is_null ()) {
+        request.disable_url_encoding = json["disableUrlEncoding"].get<bool> ();
     }
     if (json.contains ("httpVersion")) {
         // A corrupted or downgraded stored row must not execute as
@@ -1022,6 +1135,12 @@ Result<Request> deserialize_request (const Json& json) {
             return *refusal;
         }
         if (auto refusal = read_default_header_opt_outs (json, request)) {
+            return *refusal;
+        }
+        if (auto refusal = read_disabled_system_headers (json, request)) {
+            return *refusal;
+        }
+        if (auto refusal = drop_refused_body_mode_headers (json, request)) {
             return *refusal;
         }
         read_request_options (json, request);
@@ -1311,6 +1430,12 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"verifySSL\":" << (r.verify_ssl ? "true" : "false") << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
+    out << "\"disableCookies\":" << (r.disable_cookies ? "true" : "false") << ",";
+    out << "\"disabledSystemHeaders\":"
+        << disabled_system_headers_node (r.disabled_system_headers).dump () << ",";
+    out << "\"disableUrlEncoding\":" << (r.disable_url_encoding ? "true" : "false") << ",";
+    out << "\"postmanProtocolBehavior\":"
+        << postman_protocol_behavior_node (r.postman_protocol_behavior).dump () << ",";
     out << "\"mockResponseMode\":" << Json (r.mock_response_mode).dump () << ",";
     out << "\"mockExampleId\":"
         << (r.mock_example_id.has_value () ? Json (*r.mock_example_id).dump () : "null")

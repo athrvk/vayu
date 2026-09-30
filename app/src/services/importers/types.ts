@@ -239,10 +239,11 @@ export interface SkippedItem {
 		 */
 		| "proxy_config"
 		/**
-		 * A Postman request whose `protocolProfileBehavior` turns off one of
-		 * Postman's own default headers (`disabledSystemHeaders`), its cookie
-		 * jar (`disableCookies`) or URL encoding (`disableUrlEncoding`) - none
-		 * of which Vayu stores per request.
+		 * A Postman request whose `protocolProfileBehavior` names a setting Vayu
+		 * keeps for the export but does not apply (issue #1765): a TLS option,
+		 * `insecureHTTPParser` and the like, or a `disabledSystemHeaders` entry
+		 * for `host` / `content-length`, which HTTP/1.1 framing needs. Cookies,
+		 * URL encoding and the other automatic headers are applied.
 		 */
 		| "protocol_behavior"
 		/**
@@ -431,6 +432,20 @@ export interface RequestDraft {
 	verifySSL?: boolean;
 	httpVersion?: HttpVersion;
 	stream?: boolean;
+	/**
+	 * Postman's per-request protocol switches (issue #1765), when the item's
+	 * `protocolProfileBehavior` states them, and that object verbatim as the
+	 * export carrier. Absent means "engine default" for the reason above.
+	 *
+	 * The engine's parse writes the carrier as JSON text in the source's member
+	 * order (the `postmanResponse` precedent: an object would lose that order
+	 * crossing the engine's JSON reader), and the payload forwards it
+	 * untouched. The object form is what `GET /requests` answers with.
+	 */
+	disableCookies?: boolean;
+	disabledSystemHeaders?: string[];
+	disableUrlEncoding?: boolean;
+	postmanProtocolBehavior?: string | Record<string, unknown> | null;
 	/**
 	 * Saved example responses, in the order the source listed them - which the
 	 * engine stores as their `order`, because "the first example" is what a mock

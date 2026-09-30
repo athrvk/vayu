@@ -216,7 +216,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `docs/engine/db-schema.md#schema-versions` and a line in the next release's
   notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
   literal; a step with nothing to move (version 2's
-  `request_examples.postman_response`) only stamps.
+  `request_examples.postman_response` and #1765's four `requests` protocol
+  columns) only stamps. A column may join a version no released build has
+  stamped (#1765 joined 2) because `sync_schema ()` adds it on every start
+  whatever the stamp; `docs/engine/db-schema.md#schema-versions` carries the
+  merge gate that checks the last tag first.
 - **A log call takes a category, never text alone** (#1557, full account in
   `docs/engine/logging.md`). `LogRecord{level, cat, msg, fields}` is the whole
   API - `log_debug`/`log_info`/`log_warning`/`log_error` (`utils/logger.hpp`)
@@ -708,7 +712,16 @@ logged as a warning: it means a client skipped composition.
   `verify_ssl`, #706). Both clients send them on every execute and load test
   rather than eliding defaults, because the engine defaults to following and
   verifying: an omitted `false` would follow the 3xx the user asked to see, or
-  verify the certificate they opted out for.
+  verify the certificate they opted out for. Postman's
+  `disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` (#1765)
+  follow the same rule on the same columns' pattern and parse onto
+  `vayu::Request` in `read_request_options`: the jar is kept off the transfer
+  where each driver decides whether one rides it (`execute_exchange`, the
+  streaming branch of `execution.cpp`, `scenario_load.cpp`'s `submit_one`),
+  the header names union into `suppressed_default_headers`, and the flag
+  reaches `substitute_path_variables`' `encode` and `append_query_param`. The
+  imported object itself is `requests.postman_protocol_behavior`, read only by
+  the Postman export.
 - **What Vayu adds to a request nobody wrote it into is the engine's, and one
   set** (#1229, `include/vayu/http/default_headers.hpp`): a `User-Agent`, a
   negotiated `Accept-Encoding`, and an opt-in correlation id namespaced to
@@ -717,7 +730,10 @@ logged as a warning: it means a client skipped composition.
   its own compression key, because compression changes what a run measures) and
   applied in `build_request_header_list`, so every driver adds the same set. A
   header the request names always wins, `Request::suppressed_default_headers`
-  refuses one per send, and none of it is stored - the renderer used to write
+  refuses one per send (a stored `disabledSystemHeaders` joins it, and adds
+  libcurl's removal line for `Accept` and a body's `Content-Type`, #1765; a
+  refused name is checked with `invalid_header_token`, never the
+  correlation-id rule), and none of what is added is stored - the renderer used to write
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,

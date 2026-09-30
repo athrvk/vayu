@@ -1590,3 +1590,142 @@ TEST_F (ResourceWriteRouteTest, AConcurrentEnvironmentUpdateWaitsAndKeepsBothFie
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Requests - Postman's per-request protocol settings (issue #1765):
+// disableCookies, disabledSystemHeaders, disableUrlEncoding, and the
+// export-only postmanProtocolBehavior carrier.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+json protocol_request (const std::string& collection) {
+    return json{ { "collectionId", collection }, { "name", "R" },
+        { "method", "GET" }, { "url", "https://example.com" } };
+}
+
+} // namespace
+
+TEST_F (ResourceWriteRouteTest, ProtocolSettingsDefaultOffAndRoundTripThroughBothSerializers) {
+    const std::string collection = make_collection ();
+    auto [plain_status, plain] =
+    create_request_response (*db_, protocol_request (collection));
+    ASSERT_EQ (plain_status, 200) << plain.dump ();
+    EXPECT_EQ (plain["disableCookies"], false);
+    EXPECT_EQ (plain["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (plain["disableUrlEncoding"], false);
+    EXPECT_TRUE (plain["postmanProtocolBehavior"].is_null ());
+
+    json body                       = protocol_request (collection);
+    body["name"]                    = "Set";
+    body["disableCookies"]          = true;
+    body["disabledSystemHeaders"]   = json::array ({ "user-agent", "accept" });
+    body["disableUrlEncoding"]      = true;
+    body["postmanProtocolBehavior"] = json{ { "disableCookies", true } };
+    auto [status, created]          = create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["disableCookies"], true);
+    EXPECT_EQ (created["disabledSystemHeaders"], json::array ({ "user-agent", "accept" }));
+    EXPECT_EQ (created["disableUrlEncoding"], true);
+    // Answered as the stored JSON text, the spelling a write takes back.
+    EXPECT_EQ (created["postmanProtocolBehavior"], R"({"disableCookies":true})");
+
+    const json listed =
+    json::parse (vayu::http::routes::list_requests_body (*db_, collection));
+    ASSERT_EQ (listed.size (), 2u);
+    for (const char* key : { "disableCookies", "disabledSystemHeaders",
+         "disableUrlEncoding", "postmanProtocolBehavior" }) {
+        const auto& row = listed[0]["id"] == created["id"] ? listed[0] : listed[1];
+        EXPECT_EQ (row[key], created[key]) << key;
+    }
+}
+
+// Absent keeps, `null` resets - the one null-vs-absent rule.
+TEST_F (ResourceWriteRouteTest, APartialPutKeepsTheProtocolSettingsItDoesNotName) {
+    const std::string collection  = make_collection ();
+    json body                     = protocol_request (collection);
+    body["disableCookies"]        = true;
+    body["disabledSystemHeaders"] = json::array ({ "accept" });
+    auto [status, created]        = create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ();
+    const std::string id = created["id"];
+
+    auto [kept_status, kept] =
+    update_request_response (*db_, id, json{ { "disableUrlEncoding", true } });
+    ASSERT_EQ (kept_status, 200) << kept.dump ();
+    EXPECT_EQ (kept["disableCookies"], true);
+    EXPECT_EQ (kept["disabledSystemHeaders"], json::array ({ "accept" }));
+    EXPECT_EQ (kept["disableUrlEncoding"], true);
+
+    auto [reset_status, reset] = update_request_response (*db_, id,
+    json{ { "disableCookies", nullptr }, { "disabledSystemHeaders", nullptr } });
+    ASSERT_EQ (reset_status, 200) << reset.dump ();
+    EXPECT_EQ (reset["disableCookies"], false);
+    EXPECT_EQ (reset["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (reset["disableUrlEncoding"], true);
+}
+
+// Stored lowercased, deduplicated, first appearance first. Mutation check:
+// drop the `ascii_lower` in `apply_disabled_system_headers_field` and this
+// reds.
+TEST_F (ResourceWriteRouteTest, DisabledSystemHeadersAreStoredLowercasedAndDeduplicated) {
+    json body = protocol_request (make_collection ());
+    body["disabledSystemHeaders"] = json::array ({ "User-Agent", "Accept", "user-agent" });
+    auto [status, created] = create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["disabledSystemHeaders"], json::array ({ "user-agent", "accept" }));
+    const auto stored = db_->get_request (created["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->disabled_system_headers, R"(["user-agent","accept"])");
+}
+
+TEST_F (ResourceWriteRouteTest, AMalformedProtocolSettingIsA400NamingIt) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    for (const auto& [key, value] :
+    std::vector<std::pair<std::string, json>>{ { "disableCookies", "true" },
+    { "disableUrlEncoding", 1 }, { "disabledSystemHeaders", "user-agent" },
+    { "disabledSystemHeaders", json::array ({ 1 }) },
+    { "disabledSystemHeaders", json::array ({ "user agent" }) },
+    { "postmanProtocolBehavior", 5 }, { "postmanProtocolBehavior", "[1]" } }) {
+        auto [status, body] = update_request_response (*db_, id, json{ { key, value } });
+        EXPECT_EQ (status, 400) << key << " = " << value.dump ();
+        EXPECT_NE (body.dump ().find (key), std::string::npos) << body.dump ();
+    }
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_FALSE (stored->disable_cookies);
+    EXPECT_EQ (stored->disabled_system_headers, "[]");
+}
+
+// The importer's spelling: the carrier as JSON text, kept in source member
+// order - an object would lose its order crossing the engine's JSON reader.
+TEST_F (ResourceWriteRouteTest, APostmanProtocolBehaviorStringIsStoredInItsOwnMemberOrder) {
+    json body = protocol_request (make_collection ());
+    body["postmanProtocolBehavior"] = R"({"followRedirects":true,"disableCookies":false})";
+    auto [status, created] = create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ();
+    const auto stored = db_->get_request (created["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_HAS_VALUE (stored->postman_protocol_behavior);
+    EXPECT_EQ (*stored->postman_protocol_behavior,
+    R"({"followRedirects":true,"disableCookies":false})");
+    // Answered as that text, so a client writing it back (the app's
+    // Duplicate) stores the same bytes. Mutation check: answer the parsed
+    // object from `postman_protocol_behavior_node` and the copy's members
+    // come back sorted.
+    EXPECT_EQ (created["postmanProtocolBehavior"],
+    R"({"followRedirects":true,"disableCookies":false})");
+    json copy                       = protocol_request (body["collectionId"]);
+    copy["postmanProtocolBehavior"] = created["postmanProtocolBehavior"];
+    auto [copy_status, copied]      = create_request_response (*db_, copy);
+    ASSERT_EQ (copy_status, 200) << copied.dump ();
+    const auto stored_copy = db_->get_request (copied["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_copy);
+    EXPECT_EQ (stored_copy->postman_protocol_behavior, stored->postman_protocol_behavior);
+
+    auto [cleared_status, cleared] = update_request_response (*db_,
+    created["id"].get<std::string> (), json{ { "postmanProtocolBehavior", nullptr } });
+    ASSERT_EQ (cleared_status, 200) << cleared.dump ();
+    EXPECT_TRUE (cleared["postmanProtocolBehavior"].is_null ());
+}

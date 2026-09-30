@@ -28,16 +28,17 @@ std::string field (const nlohmann::json& obj, const char* key) {
 }
 
 // Append `key=value` to a URL's query component, preserving any fragment.
-void append_query_param (std::string& url, const std::string& key, const std::string& value) {
+// @p encode false writes both as typed (issue #1765, `disableUrlEncoding`).
+void append_query_param (std::string& url, const std::string& key, const std::string& value, bool encode) {
     std::string fragment;
     if (const auto hash = url.find ('#'); hash != std::string::npos) {
         fragment = url.substr (hash);
         url.erase (hash);
     }
     url.push_back (url.find ('?') == std::string::npos ? '?' : '&');
-    url += vayu::utils::url_encode (key);
+    url += encode ? vayu::utils::url_encode (key) : key;
     url.push_back ('=');
-    url += vayu::utils::url_encode (value);
+    url += encode ? vayu::utils::url_encode (value) : value;
     url += fragment;
 }
 
@@ -102,7 +103,7 @@ resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Data
             if (param.empty ()) {
                 param = "access_token";
             }
-            append_query_param (req->url, param, token.access_token);
+            append_query_param (req->url, param, token.access_token, !req->disable_url_encoding);
         } else if (req->headers.count ("Authorization") == 0) {
             req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
         }
@@ -229,7 +230,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
                 return {};
             }
             if (a.in_query) {
-                append_query_param (req.url, a.key, a.value);
+                append_query_param (req.url, a.key, a.value, !req.disable_url_encoding);
             } else if (req.headers.count (a.key) == 0) {
                 req.headers[a.key] = a.value;
             }

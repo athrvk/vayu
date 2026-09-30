@@ -99,6 +99,9 @@ class StreamServer {
 
         svr_.Get ("/scripted", [this] (const httplib::Request& req, httplib::Response& res) {
             note_request (req);
+            if (const std::string cookie = set_cookie_value (); !cookie.empty ()) {
+                res.set_header ("Set-Cookie", cookie);
+            }
             res.set_chunked_content_provider (
             "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
                 for (const auto& chunk : chunks_) {
@@ -199,7 +202,18 @@ class StreamServer {
         return aside_count_.load ();
     }
 
+    /// A `Set-Cookie` every `/scripted` answer carries from now on; "" for none.
+    void set_cookie (std::string value) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        set_cookie_ = std::move (value);
+    }
+
     private:
+    std::string set_cookie_value () const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        return set_cookie_;
+    }
+
     void note_request (const httplib::Request& req) {
         std::lock_guard<std::mutex> lock (received_mutex_);
         received_headers_.clear ();
@@ -217,6 +231,7 @@ class StreamServer {
     std::atomic<int> pace_ms_{ 0 };
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
+    std::string set_cookie_;
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
 };
@@ -1174,6 +1189,118 @@ TEST_F (StreamExecuteTest, ThePreRequestScriptsEditReachesTheWire) {
     const auto trace = trace_for (run_id);
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ());
     EXPECT_EQ (origin_->received_header ("X-From-Script"), "yes");
+}
+
+// ---------------------------------------------------------------------------
+// Postman's `disableCookies` (issue #1765), on both transports
+//
+// The jar is seeded by an ordinary send first, so the assertion that nothing
+// went out is not vacuous: the same request without the flag is shown to carry
+// the cookie. One `cookie_jar` pointer decides both halves on each transport,
+// so the read and write halves share a mutant there: attach the jar despite
+// the flag (`config.cookie_jar` in `execute_exchange`, `attach_stream_jar`
+// in `execution.cpp`) and each test below reds.
+// ---------------------------------------------------------------------------
+
+TEST_F (StreamExecuteTest, ABufferedSendWithTheJarOffAttachesNoJarCookie) {
+    serve (1);
+    origin_->set_cookie ("seed=1; Path=/");
+    send_buffered (json::object ());
+    origin_->set_cookie ("");
+
+    send_buffered (json::object ());
+    ASSERT_EQ (origin_->received_header ("Cookie"), "seed=1")
+    << "the seeding send did not reach the jar, so the check below proves "
+       "nothing";
+
+    send_buffered (json{ { "disableCookies", true } });
+    EXPECT_EQ (origin_->received_header ("Cookie"), "")
+    << "a request with disableCookies carried the jar's cookie";
+}
+
+TEST_F (StreamExecuteTest, ABufferedSendWithTheJarOffStoresNoSetCookie) {
+    serve (1);
+    origin_->set_cookie ("fresh=1; Path=/");
+    const json answer = send_buffered (json{ { "disableCookies", true } });
+    EXPECT_TRUE (cookie_jar_.lines_for ("").empty ())
+    << "a Set-Cookie on a request with disableCookies reached the jar";
+    // The response still reports what the server set.
+    EXPECT_NE (answer.dump ().find ("fresh=1"), std::string::npos) << answer.dump ();
+}
+
+// The pre-request script's `pm.cookies.jar()` write has no transfer to ride,
+// so it is applied directly - once, and still not sent on this request.
+// Mutation check: drop the `jar.apply` in the jar-off branch of
+// `execute_exchange` and the jar reads empty.
+TEST_F (StreamExecuteTest, ABufferedSendWithTheJarOffStillPersistsThePreRequestWrite) {
+    serve (1);
+    send_buffered (json{ { "disableCookies", true },
+    { "elements",
+    script_elements ("pm.cookies.jar().set('" + origin_->url ("/") +
+    "', { name: 'pre', value: 'v' });") } });
+    EXPECT_EQ (origin_->received_header ("Cookie"), "");
+    const auto lines = cookie_jar_.lines_for ("");
+    ASSERT_EQ (lines.size (), 1u);
+    EXPECT_NE (lines[0].find ("pre\tv"), std::string::npos) << lines[0];
+}
+
+TEST_F (StreamExecuteTest, AStreamWithTheJarOffAttachesNoJarCookieAndStoresNone) {
+    serve (1);
+    origin_->set_cookie ("seed=1; Path=/");
+    send_buffered (json::object ());
+    origin_->set_cookie ("fresh=1; Path=/");
+
+    const auto run_id = start (json{ { "disableCookies", true } });
+    ASSERT_FALSE (run_id.empty ());
+    trace_for (run_id);
+    EXPECT_EQ (origin_->received_header ("Cookie"), "")
+    << "a stream with disableCookies carried the jar's cookie";
+    const auto lines = cookie_jar_.lines_for ("");
+    ASSERT_EQ (lines.size (), 1u)
+    << "a stream with disableCookies stored its Set-Cookie";
+    EXPECT_NE (lines[0].find ("seed"), std::string::npos) << lines[0];
+
+    // The control: the same stream with the jar on sends the cookie.
+    const auto control = start (json::object ());
+    ASSERT_FALSE (control.empty ());
+    trace_for (control);
+    EXPECT_EQ (origin_->received_header ("Cookie"), "seed=1");
+}
+
+// Mutation check: drop the `jar.apply` in `attach_stream_jar`'s jar-off case
+// and the jar reads empty.
+TEST_F (StreamExecuteTest, AStreamWithTheJarOffStillPersistsThePreRequestWrite) {
+    serve (1);
+    const auto run_id = start (json{ { "disableCookies", true },
+    { "elements",
+    script_elements ("pm.cookies.jar().set('" + origin_->url ("/") +
+    "', { name: 'pre', value: 'v' });") } });
+    ASSERT_FALSE (run_id.empty ());
+    trace_for (run_id);
+    EXPECT_EQ (origin_->received_header ("Cookie"), "");
+    EXPECT_EQ (cookie_jar_.lines_for ("").size (), 1u);
+}
+
+// A stream the manager refuses to start (the daemon draining) never ran, so
+// its pre-request write is dropped - as the jar-on path drops the writes it
+// hands the refused spec. Mutation check: apply the jar-off writes inside
+// `attach_stream_jar` again, before `sse_manager.start`, and the jar holds
+// the write.
+TEST_F (StreamExecuteTest, ARefusedStreamWithTheJarOffPersistsNoPreRequestWrite) {
+    serve (1);
+    manager_->shutdown ();
+    json payload{ { "method", "GET" }, { "url", origin_->url ("/scripted") },
+        { "stream", true }, { "disableCookies", true },
+        { "elements",
+        script_elements ("pm.cookies.jar().set('" + origin_->url ("/") +
+        "', { name: 'pre', value: 'v' });") } };
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    auto response = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 503) << response->body;
+    EXPECT_TRUE (cookie_jar_.lines_for ("").empty ())
+    << "a refused stream persisted its pre-request cookie write";
 }
 
 // ---------------------------------------------------------------------------

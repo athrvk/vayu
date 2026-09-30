@@ -146,11 +146,16 @@ find_path_variable_row (const nlohmann::json& rows, std::string_view name);
  * through @ref encode_path_variable_value in place of `:name`, and a suffix
  * after the name stays. A URL with no `:name` segment, or rows with no path
  * row, come back unchanged.
+ *
+ * @p encode false writes the resolved value as typed (issue #1765, Postman's
+ * `disableUrlEncoding`): Postman's own `toNodeUrl (url, disableEncoding)` skips
+ * `encodePath`, so none of the path encode set is applied.
  */
 template <typename Resolve>
 std::string substitute_path_variables (const std::string& url,
 const nlohmann::json& rows,
-const Resolve& resolve) {
+const Resolve& resolve,
+bool encode = true) {
     if (!rows.is_array () || rows.empty ()) {
         return url;
     }
@@ -175,7 +180,7 @@ const Resolve& resolve) {
             continue;
         }
         out.append (url, copied, segment.offset - copied);
-        out += encode_path_variable_value (resolved);
+        out += encode ? encode_path_variable_value (resolved) : resolved;
         copied = segment.offset + segment.length;
     }
     out.append (url, copied);

@@ -51,10 +51,11 @@ import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import { bodyModeHeaders, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
 	disabledDefaults,
+	protocolSettings,
 	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
@@ -256,6 +257,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						url: request.url,
 						params: composePathParams(request.params),
 						headers: headersRecord,
+						// Which of those the body mode wrote (issue #1765).
+						...bodyModeHeaders(request.headers),
 						body: execBody,
 						auth: { ...request.auth },
 						elements: elements.length > 0 ? elements : undefined,
@@ -272,6 +275,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// a resend that verified where the run did not would
 						// fail against the host the run was aimed at.
 						verifySSL: request.verifySSL,
+						// And the protocol switches it ran with (issue #1765):
+						// the jar, the stored header opt-outs, the encoding.
+						...protocolSettings(request),
 						// Identity for the script sandbox (pm.info), not an HTTP
 						// field. A replay copy is detached, so its name is the
 						// only one the engine can be told about.

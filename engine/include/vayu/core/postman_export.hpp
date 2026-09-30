@@ -68,6 +68,16 @@ struct PostmanExportRequest {
     std::string http_version        = "auto";
     bool verify_ssl                 = true;
     bool stream                     = false;
+    /// Postman's per-request protocol settings (issue #1765).
+    bool disable_cookies = false;
+    /// Lowercased header names, in stored order.
+    nlohmann::ordered_json disabled_system_headers = nlohmann::ordered_json::array ();
+    bool disable_url_encoding = false;
+    /// `requests.postman_protocol_behavior` parsed in stored member order: the
+    /// imported `protocolProfileBehavior`, `null` when the request has none.
+    /// Written back while it agrees with the typed fields - see
+    /// `protocol_profile` in the source.
+    nlohmann::ordered_json postman_protocol_behavior = nullptr;
     /// Whether the request is stamped as an operation of a bound OpenAPI
     /// document (`spec_operation`).
     bool has_spec_operation        = false;

@@ -18,6 +18,8 @@ import { describe, it, expect } from "vitest";
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
@@ -151,6 +153,40 @@ describe("seedFromRun", () => {
 
 		expect(request.followRedirects).toBe(DEFAULT_FOLLOW_REDIRECTS);
 		expect(request.maxRedirects).toBe(DEFAULT_MAX_REDIRECTS);
+	});
+
+	it("keeps the protocol switches the run used (#1765)", () => {
+		const recorded = run({
+			configSnapshot: {
+				method: "GET",
+				url: "https://x.test/",
+				disableCookies: true,
+				disabledSystemHeaders: ["user-agent", 7, "accept"],
+				disableUrlEncoding: true,
+			},
+		} as Partial<Run>);
+
+		const { request } = seedFromRun(recorded, liveRequest);
+
+		expect(request.disableCookies).toBe(true);
+		// A non-string entry in a hand-edited or corrupt snapshot is dropped,
+		// not sent to an engine that would 400 on it.
+		expect(request.disabledSystemHeaders).toEqual(["user-agent", "accept"]);
+		expect(request.disableUrlEncoding).toBe(true);
+	});
+
+	it("reads a run from before the protocol switches as jar on, encoded, nothing left out", () => {
+		// What such a run actually did - the same direction every other
+		// fallback in this file takes.
+		const legacy = run({
+			configSnapshot: { method: "GET", url: "https://x.test/" },
+		} as Partial<Run>);
+
+		const { request } = seedFromRun(legacy, liveRequest);
+
+		expect(request.disableCookies).toBe(DEFAULT_DISABLE_COOKIES);
+		expect(request.disabledSystemHeaders).toEqual([]);
+		expect(request.disableUrlEncoding).toBe(DEFAULT_DISABLE_URL_ENCODING);
 	});
 
 	it("keeps the protocol the run used", () => {

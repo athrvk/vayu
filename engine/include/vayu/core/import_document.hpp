@@ -47,6 +47,7 @@
 
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 namespace vayu::core {
 
@@ -102,6 +103,22 @@ const nlohmann::ordered_json& auth);
  * @p auth without the source. The exporter writes such a source verbatim.
  */
 [[nodiscard]] bool postman_source_stands (const nlohmann::json& auth);
+
+/**
+ * The names a Postman `disabledSystemHeaders` object turns off (issue #1765),
+ * as Vayu stores them: lowercased, deduplicated, in source order.
+ *
+ * A name is on when its value is truthy - Postman's runtime reads
+ * `disabledHeaders[key]` in an `if`, so `1` and `"yes"` count as `true` does -
+ * and is kept only when it is a header-name token, so one malformed key is
+ * dropped rather than failing the whole import. Postman looks names up
+ * lowercase without lowercasing the object's keys, so an `"Accept": true` is
+ * inert there; Vayu lowercases it and honours it, a deliberate difference.
+ * The importer stores this list and the exporter compares a carried object
+ * with it, so the two agree on what a carried object says.
+ */
+[[nodiscard]] std::vector<std::string> postman_disabled_system_headers (
+const nlohmann::ordered_json& headers);
 
 /**
  * @p stored (an `auth` column's text) without its `postman` source once the

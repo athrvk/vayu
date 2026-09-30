@@ -35,6 +35,7 @@ import { Checkbox, Eyebrow } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { STANDARD_HEADERS } from "@/constants/http";
 import { EmptyTableHint } from "./EmptyTableHint";
+import { isStoredOff } from "../../../utils/automatic-headers";
 
 /**
  * One declared default, with the tick that keeps it on this send.
@@ -47,10 +48,18 @@ import { EmptyTableHint } from "./EmptyTableHint";
 function DefaultHeaderRow({
 	header,
 	sent,
+	storedOff,
 	onToggle,
 }: {
 	header: RequestDefaultHeader;
 	sent: boolean;
+	/**
+	 * Left off every send by the request's stored `disabledSystemHeaders`
+	 * (issue #1765). The engine unions that list with this send's opt-outs, so
+	 * a tick here could not put the header back: the box shows off and is
+	 * disabled, and the value cell names the tab that owns the setting.
+	 */
+	storedOff: boolean;
 	onToggle: (sent: boolean) => void;
 }) {
 	return (
@@ -58,7 +67,8 @@ function DefaultHeaderRow({
 		// above rather than starting a second, narrower grid.
 		<div className="grid grid-cols-[24px_1fr_1fr_20px_28px] gap-2 items-center px-1 py-0.5">
 			<Checkbox
-				checked={sent}
+				checked={sent && !storedOff}
+				disabled={storedOff}
 				onChange={(e) => onToggle(e.target.checked)}
 				// Named after the header it governs: one per row, and a bare
 				// "checkbox" says nothing about which.
@@ -73,13 +83,18 @@ function DefaultHeaderRow({
 			<span
 				className={cn(
 					"text-xs font-mono text-muted-foreground truncate",
-					!sent && "line-through"
+					(!sent || storedOff) && "line-through"
 				)}
 				title={header.name}
 			>
 				{header.name}
 			</span>
-			{header.generated ? (
+			{storedOff ? (
+				// Wraps rather than truncates: the tab it names is the point.
+				<span className="text-xs italic text-subtle-foreground">
+					off for this request in Settings
+				</span>
+			) : header.generated ? (
 				// A generated header has no value to print - the engine makes a
 				// fresh one per transfer - so the cell says that rather than
 				// showing a blank the reader would take for "no value".
@@ -166,8 +181,8 @@ export default function HeadersPanel() {
 							<Eyebrow>Added by Vayu</Eyebrow>
 							<p className="text-xs text-muted-foreground mt-0.5">
 								Sent by the engine unless you untick one here. A header of the same
-								name in the table above wins, and none of this is saved with the
-								request.
+								name in the table above wins. An untick here is for this send only
+								and is not saved; to leave one off every send, use the Settings tab.
 							</p>
 						</div>
 						{declared.map((header) => (
@@ -175,6 +190,7 @@ export default function HeadersPanel() {
 								key={header.name}
 								header={header}
 								sent={!disabled.includes(header.name)}
+								storedOff={isStoredOff(request.disabledSystemHeaders, header.name)}
 								onToggle={(sent) => toggleDefault(header.name, sent)}
 							/>
 						))}

@@ -36,7 +36,10 @@ namespace vayu::db {
  * without it. A database stamped newer than this is refused at startup. The
  * history is in `docs/engine/db-schema.md` (Schema versions):
  * 1 - scripts folded into `elements` (#1514);
- * 2 - `request_examples.postman_response`.
+ * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
+ *     `disabled_system_headers`, `disable_url_encoding` and
+ *     `postman_protocol_behavior` (#1765, folded into the same unreleased
+ *     version).
  */
 inline constexpr int SCHEMA_VERSION = 2;
 

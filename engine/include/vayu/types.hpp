@@ -341,6 +341,31 @@ struct Request {
     std::vector<std::string> cookie_lines;
 
     /**
+     * @brief Keep the cookie jar out of this transfer (issue #1765, Postman's
+     *        `disableCookies`).
+     *
+     * Neither half runs: no jar cookie is attached and no `Set-Cookie` is
+     * stored. A `Cookie` header the request itself carries still goes out, and
+     * the response still reports what the server set. Read by each driver
+     * where it decides whether a jar rides the transfer - the buffered and
+     * streaming design sends and a scenario load run's per-VU session.
+     */
+    bool disable_cookies = false;
+
+    /**
+     * @brief Write this request's path-variable values and api-key query
+     *        parameter as typed, not percent-encoded (issue #1765, Postman's
+     *        `disableUrlEncoding`).
+     *
+     * With it set, a path value skips Postman's path encode set entirely
+     * (`a"b` goes out as `a"b`, not `a%22b`), exactly as Postman's
+     * `toNodeUrl (url, disableEncoding)` sends it. libcurl's own URL handling
+     * is untouched: a raw space is still refused and dot-segments are still
+     * normalised.
+     */
+    bool disable_url_encoding = false;
+
+    /**
      * @brief Default headers this send refuses, by name (issue #1229).
      *
      * The engine adds a small, declared set to every request nobody wrote them
@@ -1123,6 +1148,24 @@ struct Request {
     // flag off the payload (`read_stream_flag`), and the by-id compose path
     // deliberately does not send it - see `payload_from_stored`.
     bool stream = false; // INTEGER NOT NULL DEFAULT 0
+    // Postman's per-request protocol settings (issue #1765), stored beside
+    // the redirect policy for the same reason it is: each is a property of
+    // this endpoint. `disable_cookies` keeps the cookie jar out of this
+    // request's transfer (neither read nor written); `disabled_system_headers`
+    // is a JSON array of lowercased header names the engine does not add on
+    // its own (unioned into `vayu::Request::suppressed_default_headers`);
+    // `disable_url_encoding` sends path-variable values and api-key query
+    // parameters as written.
+    bool disable_cookies                = false; // INTEGER NOT NULL DEFAULT 0
+    std::string disabled_system_headers = "[]";  // TEXT NOT NULL DEFAULT '[]'
+    bool disable_url_encoding           = false; // INTEGER NOT NULL DEFAULT 0
+    // The Postman item's `protocolProfileBehavior` object, verbatim and in
+    // source key order, when the request was imported with one (issue #1765).
+    // Nothing sends it: `POST /export/postman` is its one reader and writes it
+    // back while it still agrees with the typed columns above, so an explicit
+    // default and a key Vayu does not apply survive a round trip. Nullable on
+    // the `spec_operation` precedent - NULL is "no carrier".
+    std::optional<std::string> postman_protocol_behavior;
     // Which operation of the bound OpenAPI document this request *is*
     // (issue #637): {"operationId"?: "listPets", "method": "GET",
     // "path": "/pets"}. Nullable rather than NOT NULL-with-a-default, on the

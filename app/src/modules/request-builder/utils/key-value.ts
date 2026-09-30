@@ -32,3 +32,26 @@ export const toFlatHeaders = (items: KeyValueItem[]): Record<string, string> => 
 	});
 	return result;
 };
+
+/**
+ * The names among {@link toFlatHeaders}' keys whose winning row the body mode
+ * wrote (`source: "body-mode"`), as the compose field `bodyModeHeaders` - or
+ * nothing when there are none, so a request without one sends the payload it
+ * always did.
+ *
+ * The flat record loses the marker, and the engine needs it (issue #1765): a
+ * body mode's Content-Type is a system header in Postman's sense, which a
+ * stored `content-type` opt-out removes, while a Content-Type the user typed
+ * is always sent. A stored request composed by id carries the same list from
+ * its stored rows.
+ */
+export const bodyModeHeaders = (items: KeyValueItem[]): { bodyModeHeaders?: string[] } => {
+	const marked = new Map<string, boolean>();
+	items.forEach((item) => {
+		if (item.enabled && item.key.trim()) {
+			marked.set(item.key, item.source === "body-mode");
+		}
+	});
+	const names = [...marked].filter(([, isBodyMode]) => isBodyMode).map(([name]) => name);
+	return names.length > 0 ? { bodyModeHeaders: names } : {};
+};

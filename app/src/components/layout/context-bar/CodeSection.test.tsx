@@ -257,4 +257,19 @@ describe("CodeSection - the fidelity it cannot promise", () => {
 		// payload and cannot be in a static command.
 		expect(screen.getByText(/Cookies from the jar/)).toBeInTheDocument();
 	});
+
+	it("says the jar is off instead, for a request that skips it (#1765)", async () => {
+		// The snippet is then the whole request, so the jar line would be a
+		// caveat about cookies the send never attaches.
+		const stored = STORED as Record<string, unknown>;
+		stored.disableCookies = true;
+		try {
+			renderSection();
+			await waitFor(() => expect(snippet()).toContain("curl"));
+			expect(screen.getByText(/The cookie jar is off for this request/)).toBeInTheDocument();
+			expect(screen.queryByText(/Cookies from the jar/)).toBeNull();
+		} finally {
+			delete stored.disableCookies;
+		}
+	});
 });

@@ -253,6 +253,11 @@ function describeElements(elements: ElementDef[] | undefined): string {
 	return enabled.map((e) => e.name ?? e.kind).join(", ");
 }
 
+/** A stored header-name list (issue #1765), for the diff only. */
+function describeHeaderNames(names: readonly string[] | undefined): string {
+	return names && names.length > 0 ? names.join(", ") : "none";
+}
+
 /** Right-aligned label for a key/value field: "2 removed", "1 changed", "3 changes". */
 function entriesLabel(entries: EntryChange[]): string {
 	const kinds = new Set(entries.map((e) => e.kind));
@@ -396,6 +401,21 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 		String(live.verifySSL),
 		String(patch.verifySSL ?? live.verifySSL)
 	);
+	scalar(
+		"Disable cookie jar",
+		String(live.disableCookies),
+		String(patch.disableCookies ?? live.disableCookies)
+	);
+	scalar(
+		"Automatic headers left out",
+		describeHeaderNames(live.disabledSystemHeaders),
+		describeHeaderNames(patch.disabledSystemHeaders ?? live.disabledSystemHeaders)
+	);
+	scalar(
+		"Send URL without encoding",
+		String(live.disableUrlEncoding),
+		String(patch.disableUrlEncoding ?? live.disableUrlEncoding)
+	);
 
 	items.push(authItem(seed, live));
 
@@ -423,6 +443,9 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 		maxRedirects: request.maxRedirects ?? live.maxRedirects,
 		httpVersion: request.httpVersion ?? live.httpVersion,
 		verifySSL: request.verifySSL ?? live.verifySSL,
+		disableCookies: request.disableCookies ?? live.disableCookies,
+		disabledSystemHeaders: request.disabledSystemHeaders ?? live.disabledSystemHeaders,
+		disableUrlEncoding: request.disableUrlEncoding ?? live.disableUrlEncoding,
 	};
 
 	// The body is only written when the run's stored request body was not

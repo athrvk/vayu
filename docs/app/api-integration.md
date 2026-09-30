@@ -149,6 +149,13 @@ renders it as the read-only "Added by Vayu" group, and a row ticked off there
 rides the send as `disabledDefaultHeaders`, which `POST /execute` and
 `POST /runs` both take. None of it is persisted on the request.
 
+The *stored* counterpart is a different field (issue #1765):
+`disabledSystemHeaders`, Postman's per-request list, kept on the request as
+lowercased names and edited in the **Settings** tab's "Don't send automatic
+headers" list. The engine unions the two at send time, so the Headers tab shows
+a name stored there as off (disabled, "off for this request in Settings")
+rather than offering a tick that could not turn it back on.
+
 `scope` (issue #1338) selects which send is being asked about: `"design"`
 (the default, and the Headers tab's own answer) or `"load"`. The two can
 disagree - `negotiateCompression` governs a design send's `Accept-Encoding`
@@ -1190,6 +1197,9 @@ await apiService.executeRequest({
   maxRedirects: 10,
   httpVersion: "auto",
   verifySSL: true,
+  disableCookies: false,
+  disabledSystemHeaders: [],
+  disableUrlEncoding: false,
   requestId: "req_123",
   environmentId: "env_456"
 });
@@ -1225,6 +1235,30 @@ only one, and it governs Send and load test alike. `httpVersion` is
 `"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
 forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
 1.1 over plain `http://` (curl's `CURL_HTTP_VERSION_2TLS` semantics).
+
+**Postman's protocol switches ride the same rule** (issue #1765).
+`disableCookies`, `disabledSystemHeaders` and `disableUrlEncoding` come from the
+Settings tab too, and every Send, streaming Send, load run and History replay
+puts all three on the inline compose request through one helper,
+`protocolSettings()` in `request-builder/utils/execute-mapping.ts`, so the
+editor's value wins over the saved row's and composition carries them on to
+`/execute` and `/runs`. `disableUrlEncoding` also changes what the renderer
+writes: the Params table reads the URL's query into rows without decoding it
+(`parseQueryParams` / `mergeParamsFromUrl` with `decode: false`) and joins them
+back as typed, so editing one row rebuilds exactly the query the others held;
+turning the flag on or off leaves the URL alone and re-derives the rows from it
+in the new mode. The Sends line and the code snippets substitute path values
+raw, and a query-located API key is appended raw, all matching what the engine
+sends. The imported
+`protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
+the Postman exporter only: `GET /requests` returns it as the stored JSON text,
+which the app keeps as a string and never parses, so an import and a Duplicate
+carry it byte for byte, and nothing sends it. The flat `headers` record every
+inline compose sends loses each row's `source`, so beside it goes
+`bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):
+the names whose row the body mode wrote, which a `content-type` opt-out removes
+on the wire while a Content-Type the user typed is always sent. A History
+replay puts the run's recorded list back on its seeded rows.
 
 **Example Response:**
 ```typescript

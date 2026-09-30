@@ -75,6 +75,19 @@ TEST (AuthResolver, ApiKeyInQueryAppendsToUrl) {
     EXPECT_EQ (req.url, "https://api.example.com/v1?api%20key=a%20b");
 }
 
+// Issue #1765: a request whose Postman item says `disableUrlEncoding` sends
+// its api key as typed. Mutation check: pass `true` for `encode` at the
+// ApiKeyAuth call of `append_query_param` and this reds.
+TEST (AuthResolver, ApiKeyInQueryIsWrittenAsTypedWhenUrlEncodingIsOff) {
+    auto req                 = make_request ("https://api.example.com/v1");
+    req.disable_url_encoding = true;
+    auto result              = vayu::http::apply_auth (req,
+                 json{ { "mode", "apikey" }, { "key", "k|1" }, { "value", "a|b" }, { "in", "query" } },
+                 nullptr);
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.url, "https://api.example.com/v1?k|1=a|b");
+}
+
 TEST (AuthResolver, ApiKeyInQueryUsesAmpersandWhenQueryExists) {
     auto req = make_request ("https://api.example.com/v1?page=2");
     vayu::http::apply_auth (req,

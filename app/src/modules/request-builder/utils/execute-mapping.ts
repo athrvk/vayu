@@ -169,6 +169,30 @@ export function execIdentity(request: RequestState): { requestName?: string } {
 }
 
 /**
+ * The request's **stored** protocol settings (issue #1765), for the inline half
+ * of a compose payload.
+ *
+ * Always all three, never elided at the default - the `verifySSL` rule: the
+ * editor may be ahead of the saved row, so an omitted `false` would let the
+ * stored value win, and composition carries them through to `/execute` and
+ * `/runs`. `disabledSystemHeaders` is the stored per-request list; the per-send
+ * {@link disabledDefaults} beside it is a different field, and the engine
+ * unions the two.
+ *
+ * Shared by the builder's Send (buffered and streaming, one compose), its load
+ * run and the History run view's replay.
+ */
+export function protocolSettings(
+	request: Pick<RequestState, "disableCookies" | "disabledSystemHeaders" | "disableUrlEncoding">
+): { disableCookies: boolean; disabledSystemHeaders: string[]; disableUrlEncoding: boolean } {
+	return {
+		disableCookies: request.disableCookies,
+		disabledSystemHeaders: request.disabledSystemHeaders,
+		disableUrlEncoding: request.disableUrlEncoding,
+	};
+}
+
+/**
  * The engine defaults this send refuses (issue #1229), as the wire field - or
  * nothing at all.
  *

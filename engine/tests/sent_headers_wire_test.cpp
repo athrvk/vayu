@@ -32,6 +32,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::http {
 namespace {
@@ -202,6 +203,90 @@ TEST_F (SentHeadersWireTest, StreamConsumerDropsTheSameHeaderAndReportsTheTruth)
     EXPECT_FALSE (response.request_headers.contains ("X-Blank"))
     << "the stream consumer reported a header libcurl dropped as sent";
     EXPECT_EQ (response.request_headers.at ("X-Present"), "kept");
+}
+
+// ---------------------------------------------------------------------------
+// Postman's `disabledSystemHeaders` (issue #1765), from the payload a stored
+// request composes into, on every driver's wire.
+// ---------------------------------------------------------------------------
+
+/// A POST with a JSON body whose payload refuses the three headers a Postman
+/// author can switch off and Vayu would otherwise send.
+Request refusing_system_headers (const std::string& url) {
+    auto parsed = vayu::json::deserialize_request (nlohmann::json{ { "method", "POST" },
+    { "url", url }, { "body", { { "mode", "json" }, { "content", R"({"a":1})" } } },
+    { "disabledSystemHeaders", { "user-agent", "accept", "content-type" } } });
+    EXPECT_TRUE (parsed.is_ok ());
+    Request request    = parsed.is_ok () ? parsed.value () : Request{};
+    request.timeout_ms = 5000;
+    return request;
+}
+
+// Mutation check: drop the `read_disabled_system_headers` call in
+// `deserialize_request` and every header below arrives.
+TEST_F (SentHeadersWireTest, AStoredSystemHeaderRefusalKeepsEachOffTheWire) {
+    ASSERT_TRUE (client_->send (refusing_system_headers (server_->url ())).is_ok ());
+    EXPECT_FALSE (server_->has_header ("User-Agent"));
+    EXPECT_FALSE (server_->has_header ("Accept"));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
+    EXPECT_EQ (server_->body (), R"({"a":1})");
+}
+
+// The refusal is of the engine's default, never of what the author typed.
+TEST_F (SentHeadersWireTest, AUserTypedHeaderStillGoesOutUnderARefusal) {
+    Request request               = refusing_system_headers (server_->url ());
+    request.headers["User-Agent"] = "typed/1";
+    request.headers["Accept"]     = "text/plain";
+    ASSERT_TRUE (client_->send (request).is_ok ());
+    EXPECT_EQ (server_->header ("User-Agent"), "typed/1");
+    EXPECT_EQ (server_->header ("Accept"), "text/plain");
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverHonoursTheSameRefusal) {
+    EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (refusing_system_headers (server_->url ())).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_FALSE (server_->has_header ("User-Agent"));
+    EXPECT_FALSE (server_->has_header ("Accept"));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
+}
+
+/**
+ * The app's Send, as it reaches the wire (issue #1765): a GraphQL body whose
+ * Content-Type row the Body panel wrote travels as a flat header plus its
+ * `bodyModeHeaders` name, and a stored `content-type` refusal keeps it off -
+ * as Postman sends no Content-Type for a refused body header. Without the
+ * marker the same header is the user's and goes out. Mutation check: make
+ * `drop_refused_body_mode_headers` return before its loop and the first
+ * expectation reds.
+ */
+TEST_F (SentHeadersWireTest, ARefusedContentTypeTheBodyModeWroteStaysOffTheWire) {
+    const auto payload = [&] (bool marked) {
+        nlohmann::json out{ { "method", "POST" }, { "url", server_->url () },
+            { "headers", { { "Content-Type", "application/json" } } },
+            { "body", { { "mode", "graphql" }, { "content", R"({"query":"{ me }"})" } } },
+            { "disabledSystemHeaders", { "content-type" } } };
+        if (marked) {
+            out["bodyModeHeaders"] = { "Content-Type" };
+        }
+        return out;
+    };
+    const auto send = [&] (bool marked) {
+        auto parsed = vayu::json::deserialize_request (payload (marked));
+        EXPECT_TRUE (parsed.is_ok ());
+        Request request    = parsed.is_ok () ? parsed.value () : Request{};
+        request.timeout_ms = 5000;
+        return client_->send (request).is_ok ();
+    };
+    ASSERT_TRUE (send (true));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
+    EXPECT_EQ (server_->body (), R"({"query":"{ me }"})");
+
+    ASSERT_TRUE (send (false));
+    EXPECT_EQ (server_->header ("Content-Type"), "application/json");
 }
 
 } // namespace

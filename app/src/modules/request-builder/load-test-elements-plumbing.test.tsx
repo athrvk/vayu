@@ -51,6 +51,9 @@ const requestQuery = {
 		maxRedirects: 10,
 		httpVersion: "auto",
 		verifySSL: true,
+		disableCookies: false,
+		disabledSystemHeaders: [],
+		disableUrlEncoding: false,
 		stream: false,
 	} as unknown,
 	isLoading: false,
@@ -121,6 +124,9 @@ const REQUEST: RequestState = {
 	maxRedirects: 10,
 	httpVersion: "auto",
 	verifySSL: true,
+	disableCookies: false,
+	disabledSystemHeaders: [],
+	disableUrlEncoding: false,
 	stream: false,
 };
 

@@ -26,6 +26,8 @@ import type {
 import { asRecord, asStr } from "@/lib/json-node";
 import { toElements } from "./elements-transformer";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_STREAM,
 	DEFAULT_VERIFY_SSL,
@@ -48,6 +50,22 @@ export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
  * column, which is exactly what this transformer exists to reconcile.
  */
 export type RawRequest = Record<string, unknown>;
+
+/**
+ * Coerce a raw `disabledSystemHeaders` (issue #1765) into lowercased names. The
+ * engine already lowercases and dedupes; this only guards a row from an older
+ * engine (absent) or a malformed one, both of which read as "suppresses none".
+ */
+function toHeaderNames(raw: unknown): string[] {
+	if (!Array.isArray(raw)) return [];
+	const names: string[] = [];
+	for (const entry of raw as unknown[]) {
+		if (typeof entry !== "string") continue;
+		const name = entry.trim().toLowerCase();
+		if (name && !names.includes(name)) names.push(name);
+	}
+	return names;
+}
 
 /**
  * Coerce a raw `maxRedirects` into the range the Settings tab offers. Anything
@@ -183,6 +201,24 @@ export class RequestTransformer {
 			// Event stream: same rule as the redirect policy - a row stored
 			// before this column existed reads as `false`, which is what it was.
 			stream: typeof raw.stream === "boolean" ? raw.stream : DEFAULT_STREAM,
+			// Postman's protocol switches (issue #1765): same rule, a row stored
+			// before the columns existed reads as what it did - jar on, URL
+			// encoded, no automatic header suppressed.
+			disableCookies:
+				typeof raw.disableCookies === "boolean"
+					? raw.disableCookies
+					: DEFAULT_DISABLE_COOKIES,
+			disabledSystemHeaders: toHeaderNames(raw.disabledSystemHeaders),
+			disableUrlEncoding:
+				typeof raw.disableUrlEncoding === "boolean"
+					? raw.disableUrlEncoding
+					: DEFAULT_DISABLE_URL_ENCODING,
+			// The export carrier rides through untouched - JSON text, never
+			// parsed - and only when present, spread for the `specOperation`
+			// reason below.
+			...(asStr(raw.postmanProtocolBehavior)
+				? { postmanProtocolBehavior: asStr(raw.postmanProtocolBehavior) }
+				: {}),
 			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
 			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),
 			// Spread rather than assigned: `Request.specOperation` is optional

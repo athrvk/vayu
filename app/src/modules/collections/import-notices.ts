@@ -206,9 +206,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	},
 	protocol_behavior: {
 		tier: "note",
-		named: "Postman request setting not imported (system headers, cookies or URL encoding)",
-		one: "1 request's Postman setting not imported (system headers, cookies or URL encoding)",
-		many: "{n} requests' Postman settings not imported (system headers, cookies or URL encoding)",
+		named: "Postman request setting kept but not applied (e.g. TLS options, Host header)",
+		one: "1 request's Postman setting kept but not applied (e.g. TLS options, Host header)",
+		many: "{n} requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
 	},
 	elements_invalid: {
 		tier: "action",

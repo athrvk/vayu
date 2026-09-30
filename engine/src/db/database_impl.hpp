@@ -252,6 +252,17 @@ inline auto make_vayu_storage (const std::string& path) {
     // existing requests table and every pre-existing row backfills to "not a
     // stream", which is what they all were.
     make_column ("stream", &Request::stream, default_value (false)),
+    // Postman's per-request protocol settings (issue #1765, schema version
+    // 2). The three typed ones are NOT NULL + default_value for the same
+    // reason `stream` is: sync_schema ALTERs them onto an existing requests
+    // table and every pre-existing row backfills to what it already did.
+    make_column ("disable_cookies", &Request::disable_cookies, default_value (false)),
+    make_column ("disabled_system_headers", &Request::disabled_system_headers,
+    default_value (std::string ("[]"))),
+    make_column ("disable_url_encoding", &Request::disable_url_encoding, default_value (false)),
+    // The imported `protocolProfileBehavior` object, read only by the Postman
+    // export. Nullable on the `spec_operation` precedent below.
+    make_column ("postman_protocol_behavior", &Request::postman_protocol_behavior),
     // Which operation of the bound spec this request is (issue #637). Nullable
     // rather than NOT NULL with a default, on the `config_entries.unit`
     // precedent below: a nullable column is ALTER-friendly without one, and

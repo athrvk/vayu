@@ -33,7 +33,16 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 	{ label: "the elements list", fields: ["elements"] },
 	{
 		label: "settings",
-		fields: ["followRedirects", "maxRedirects", "httpVersion", "verifySSL", "stream"],
+		fields: [
+			"followRedirects",
+			"maxRedirects",
+			"httpVersion",
+			"verifySSL",
+			"disableCookies",
+			"disabledSystemHeaders",
+			"disableUrlEncoding",
+			"stream",
+		],
 	},
 ];
 

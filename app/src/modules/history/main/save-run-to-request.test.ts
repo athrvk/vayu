@@ -132,6 +132,37 @@ describe("applyRunToRequest", () => {
 		expect(patch.httpVersion).toBe("http2");
 	});
 
+	it("writes the protocol switches the run used, and lists each as a change (#1765)", () => {
+		const live = liveRequest({
+			disableCookies: false,
+			disabledSystemHeaders: [],
+			disableUrlEncoding: false,
+		});
+		const recorded = run();
+		Object.assign(recorded.configSnapshot as Record<string, unknown>, {
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+		const seed = seedFromRun(recorded, live);
+
+		const patch = applyRunToRequest(seed, live);
+		expect(patch.disableCookies).toBe(true);
+		expect(patch.disabledSystemHeaders).toEqual(["user-agent"]);
+		expect(patch.disableUrlEncoding).toBe(true);
+
+		// The dialog names what a save would change, so a write it does not
+		// list is a write the user never agreed to.
+		const fields = buildChangeset(seed, live).map((item) => item.field);
+		expect(fields).toEqual(
+			expect.arrayContaining([
+				"Disable cookie jar",
+				"Automatic headers left out",
+				"Send URL without encoding",
+			])
+		);
+	});
+
 	it("writes the request's own elements, not the collection's", () => {
 		const live = liveRequest();
 		const patch = applyRunToRequest(seedFromRun(run(), live), live);
@@ -517,6 +548,10 @@ describe("buildChangeset", () => {
 			// The run's snapshot predates `verifySSL`, so the seed reads it as
 			// verifying - the live request has to match to stay "kept".
 			verifySSL: true,
+			// Same for Postman's protocol switches (#1765).
+			disableCookies: false,
+			disabledSystemHeaders: [],
+			disableUrlEncoding: false,
 			auth: { mode: "bearer", token: "x" },
 		} as Partial<Request>);
 

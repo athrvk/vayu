@@ -328,9 +328,10 @@ inline bool contains_variable_token (const std::string& text) {
 // ---------------------------------------------------------------------------
 
 /// `toQueryString(params)`: the enabled rows, percent-encoded unless they carry
-/// a `{{var}}`, and a bare key for a row with no value.
+/// a `{{var}}` or @p encode is false (issue #1765, a request whose Postman
+/// item says `disableUrlEncoding`), and a bare key for a row with no value.
 template <typename Row>
-std::string query_string (const std::vector<Row>& params) {
+std::string query_string (const std::vector<Row>& params, bool encode = true) {
     std::string out;
     for (const Row& row : params) {
         if (!row.enabled || row.key.find_first_not_of (" \t\n\r\f\v") == std::string::npos) {
@@ -339,11 +340,12 @@ std::string query_string (const std::vector<Row>& params) {
         if (!out.empty ()) {
             out += '&';
         }
-        out += contains_variable_token (row.key) ? row.key :
-                                                   encode_uri_component (row.key);
+        out += !encode || contains_variable_token (row.key) ?
+        row.key :
+        encode_uri_component (row.key);
         if (!row.value.empty ()) {
             out += '=';
-            out += contains_variable_token (row.value) ?
+            out += !encode || contains_variable_token (row.value) ?
             row.value :
             encode_uri_component (row.value);
         }
@@ -362,8 +364,9 @@ std::string query_string (const std::vector<Row>& params) {
  * is compared against.
  */
 template <typename Row>
-std::string append_params (const std::string& url, const std::vector<Row>& params) {
-    const std::string query = query_string (params);
+std::string
+append_params (const std::string& url, const std::vector<Row>& params, bool encode = true) {
+    const std::string query = query_string (params, encode);
     if (query.empty ()) {
         return url;
     }

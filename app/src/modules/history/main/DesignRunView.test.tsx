@@ -403,6 +403,63 @@ describe("DesignRunView - sending it again", () => {
 		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([]);
 	});
 
+	it("replays with the protocol switches the run recorded (#1765)", async () => {
+		// Composed inline, so an omitted switch would let the live request's
+		// stored value win - a replay that used the jar the run skipped.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const recorded = designRun();
+		Object.assign(recorded.configSnapshot as Record<string, unknown>, {
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+
+		renderView(recorded);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request).toMatchObject({
+			disableCookies: true,
+			disabledSystemHeaders: ["user-agent"],
+			disableUrlEncoding: true,
+		});
+	});
+
+	it("replays the body mode's headers as the run recorded them (#1765)", async () => {
+		// The row the body mode wrote comes back marked, so a replay under a
+		// `content-type` opt-out drops it as the recorded Send did. Mutation
+		// check: seed the rows without the recorded `bodyModeHeaders` and the
+		// field goes missing.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const recorded = designRun();
+		Object.assign(recorded.configSnapshot as Record<string, unknown>, {
+			headers: { "X-Plain": "visible", "Content-Type": "application/json" },
+			bodyModeHeaders: ["Content-Type"],
+			disabledSystemHeaders: ["content-type"],
+		});
+
+		renderView(recorded);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request).toMatchObject({
+			bodyModeHeaders: ["Content-Type"],
+			disabledSystemHeaders: ["content-type"],
+		});
+	});
+
 	it("replays a path value composition left pending, not the literal `:name` (#1764)", async () => {
 		// Recorded when `:id` held a token only the pre-request script answers:
 		// the URL kept `:id` and the value rode the payload's own `params`.

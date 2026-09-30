@@ -1251,6 +1251,10 @@ field whole, however large.
     "httpVersion": "auto",
     "verifySSL": true,
     "stream": false,
+    "disableCookies": false,
+    "disabledSystemHeaders": [],
+    "disableUrlEncoding": false,
+    "postmanProtocolBehavior": null,
     "updatedAt": 1234567890,
     "createdAt": 1234567890
   }
@@ -1262,6 +1266,11 @@ the request's stored execution options. They are always present in the response:
 a request saved before these columns existed reads back as the engine defaults
 (`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
 had.
+`disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` are Postman's
+per-request protocol settings (issue #1765), always present too (`false` / `[]` /
+`false` for a request that states none); `postmanProtocolBehavior` is the
+imported Postman object they came from, `null` when there is none - see
+[POST /requests](#post-requests).
 `httpVersion` is `"auto"` | `"http1.1"` | `"http2"` - what was *requested*, not
 what was negotiated; see [POST /execute](#post-execute) for the negotiated
 value on a response.
@@ -1340,7 +1349,12 @@ the null-vs-absent rule.
   "methodSource": null,              // Optional, which app setting wrote `method` - see below
   "mockResponseMode": "first",       // Optional: "first" | "fixed" | "random". Default "first"
                                       // - which saved example a mock server answers with, see below
-  "mockExampleId": null              // Optional, the example id `mockResponseMode: "fixed"` targets
+  "mockExampleId": null,             // Optional, the example id `mockResponseMode: "fixed"` targets
+  "disableCookies": false,           // Optional, keep the cookie jar out of this request. Default false
+  "disabledSystemHeaders": [],       // Optional, header names the engine does not add. Default []
+  "disableUrlEncoding": false,       // Optional, send path values and an api-key query as typed.
+                                      // Default false
+  "postmanProtocolBehavior": null    // Optional, the imported Postman object - see below
 }
 ```
 
@@ -1408,6 +1422,45 @@ it is not checked against the request's saved examples at write time, because
 the target can be created afterwards or deleted later, and a mock server falls
 back to `"first"` for either case rather than this write refusing one up front.
 
+**Postman's per-request protocol settings** (issue #1765), under the same
+null-vs-absent rule (absent keeps on update, `null` resets):
+
+- `disableCookies` keeps the cookie jar out of every send of this request: no
+  jar cookie is attached and no `Set-Cookie` is stored. A `Cookie` header the
+  request carries still goes out, and a pre-request script's
+  `pm.cookies.jar()` write is still persisted.
+- `disabledSystemHeaders` names headers the engine does not add on its own. It
+  is stored lowercased and deduplicated in first-appearance order, and
+  unioned on every send with the per-send `disabledDefaultHeaders` (see
+  [POST /execute](#post-execute)): `user-agent`, `accept-encoding` and the
+  correlation id as that list refuses them, `accept` removes libcurl's implicit
+  `Accept: */*`, `content-type` removes the Content-Type a body implies
+  (multipart keeps its boundary header), and with it a `Content-Type` header
+  row marked `"source": "body-mode"` - the row the app's Body panel writes and
+  the importer adds for a GraphQL, JSON-RPC or XML body, which is the body's
+  own header, not the user's. A `Content-Type` row without that marker is the
+  user's and is always sent. Other names (`host`,
+  `content-length`, `postman-token`, ...) are stored for the export and change
+  nothing on the wire.
+- `disableUrlEncoding` writes a path variable's value and an api-key (or
+  OAuth 2.0 query-placed) credential into the URL as typed rather than
+  percent-encoded: a path value skips Postman's path encode set entirely
+  (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
+  `toNodeUrl (url, disableEncoding)` sends it.
+- `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
+  kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
+  takes an object or a string holding a JSON object; the string is the
+  spelling the importer writes, because it keeps the source's member order
+  (an object crossing the engine's reader does not). `GET` answers it as that
+  stored text, a string (or `null`), the way it is written: a client that
+  sends the record back, as the app's Duplicate does, stores the same bytes,
+  and the copy exports the same `protocolProfileBehavior`.
+
+A non-boolean `disableCookies` / `disableUrlEncoding`, a
+`disabledSystemHeaders` that is not an array of header-name tokens, or a
+`postmanProtocolBehavior` that is not an object, such a string or `null` is a
+`400` naming the field; the last two are `413` over the field cap.
+
 **Response:** The created request object, carrying the engine-generated `id`.
 
 **Errors:** `400` if the body carries an `id`
@@ -1443,9 +1496,11 @@ states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
 `verifySSL` / `stream` / `specOperation` / `methodSource` / `mockResponseMode` /
-`mockExampleId` leaves the stored values untouched; sending `null` resets them
-to `true` / `10` / `true` / `false` / "no operation" / "no marker" / `"first"` /
-"no target".
+`mockExampleId` / `disableCookies` / `disabledSystemHeaders` /
+`disableUrlEncoding` / `postmanProtocolBehavior` leaves the stored values
+untouched; sending `null` resets them to `true` / `10` / `true` / `false` / "no
+operation" / "no marker" / `"first"` / "no target" / `false` / `[]` / `false` /
+"none".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -1487,7 +1542,8 @@ that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
 `methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
 not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
-non-empty string or `null`, or an
+non-empty string or `null`, a malformed protocol setting (see
+[POST /requests](#post-requests)), or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
 `auth` is over the engine's field cap (issue #1485,
@@ -3473,10 +3529,24 @@ variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
 skips it, as Vayu does); saved examples are
-`response` entries with an `originalRequest` (see below); `followRedirects: false`,
-`maxRedirects` other than 10 and `verifySSL: false` are
-`protocolProfileBehavior` (`strictSSL: false` for the last), and a GET or HEAD
-that sends a body carries `disableBodyPruning: true`.
+`response` entries with an `originalRequest` (see below).
+
+**`protocolProfileBehavior`.** A request imported with one (its
+`postmanProtocolBehavior`) is written as that object, member order, explicit
+defaults and keys Vayu does not apply included, with each key Vayu owns checked
+against the stored setting (issue #1765): `strictSSL` (`verifySSL`),
+`followRedirects`, `maxRedirects`, `disableUrlEncoding` and `disableCookies`
+keep the imported spelling while it reads as the stored value (absent or
+not the right type reading as the default) and are otherwise overwritten in
+place, or appended when absent; `disabledSystemHeaders` is kept while its
+names set to `true` are the stored set, and otherwise written as
+`{name: true}` in stored order; `disableBodyPruning` and every other key are
+the imported object's. Without one, the object is generated in the order
+`strictSSL, followRedirects, maxRedirects, disableUrlEncoding, disableCookies,
+disabledSystemHeaders, disableBodyPruning`, each only where it differs from
+Postman's default: `strictSSL: false`, `followRedirects: false`, a
+`maxRedirects` other than 10, `true` for either flag, the non-empty header
+list, and `disableBodyPruning: true` on a GET or HEAD that sends a body.
 
 **Saved examples.** An example imported from Postman carries the saved
 response it came from (`request_examples.postman_response`), and so does one
@@ -4905,7 +4975,11 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
   "maxStreamEvents": 100000,           // Optional, streaming only - see below
   "data": { "id": "7" },               // Optional, one data row - see below
-  "disabledDefaultHeaders": []         // Optional, headers Vayu adds that this send refuses
+  "disabledDefaultHeaders": [],        // Optional, headers Vayu adds that this send refuses
+  "disableCookies": false,             // Optional, default false - stored per request, see below
+  "disabledSystemHeaders": [],         // Optional, default [] - stored per request, see below
+  "disableUrlEncoding": false,         // Optional, default false - stored per request, see below
+  "bodyModeHeaders": ["Content-Type"]  // Optional, which `headers` the body mode wrote - see below
 }
 ```
 
@@ -4918,7 +4992,33 @@ accepted on `POST /execute` and `POST /runs` alike. A value that is not an
 array of header names is a `400` naming the field, because a malformed opt-out
 would otherwise read as one that did nothing. A name matching no current
 default is accepted and does nothing: config can switch a default off between
-the moment a client read the declared set and the moment it sends.
+the moment a client read the declared set and the moment it sends. A name is
+checked as a header token only, so `User-Agent`, `Accept-Encoding` and
+`Content-Type` are all accepted (until issue #1765 the correlation-id
+validator refused those three with a `400`).
+
+**`disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` are the
+request's stored Postman protocol settings** (issue #1765; see
+[POST /requests](#post-requests)). `POST /compose` always emits them from the
+stored row and the app always sends them, on `POST /execute` and
+`POST /runs` alike, because each defaults to off: an omitted `true` would send
+the jar, the header or the encoding the user turned off. `disabledSystemHeaders`
+is unioned with `disabledDefaultHeaders`, which stays the per-send,
+never-stored opt-out, and is refused on the same shape rules. `disableCookies`
+takes the jar off the buffered and the streaming send and off a scenario load
+run's per-virtual-user session (the step neither sends nor updates it); a
+single-request load run never tracks cookies at all.
+
+**`bodyModeHeaders` names the headers the body mode wrote** (issue #1765): the
+`headers` keys whose row carried `"source": "body-mode"`. The flat `headers`
+object has no room for the marker, so `POST /compose` emits this list from a
+stored request's rows (only when it names something) and the app sends it
+beside an inline request's headers; inline `headers` replace the stored ones,
+so the stored list is dropped with them. A name in it that
+`disabledSystemHeaders` or `disabledDefaultHeaders` refuses is left off the
+wire, as Postman leaves off the body's Content-Type as a system header; a name
+not in it is the user's and is sent. A value that is not an array of strings
+is a `400`.
 
 **`stream` consumes a `text/event-stream` response live** (issue #573) instead
 of buffering it. It changes the *execution model*, so it is declared rather than

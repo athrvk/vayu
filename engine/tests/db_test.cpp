@@ -2179,6 +2179,39 @@ TEST_F (DatabaseTest, MigrationDoesNothingOnASecondOpen) {
     << "an already-migrated database must not be re-migrated";
 }
 
+namespace {
+
+/// Drop the four `requests` columns issue #1765 added, the shape a database
+/// written before them has.
+void drop_protocol_setting_columns (const char* path) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path, &handle), SQLITE_OK);
+    for (const char* column : { "disable_cookies", "disabled_system_headers",
+         "disable_url_encoding", "postman_protocol_behavior" }) {
+        char* err = nullptr;
+        const auto sql = std::string ("ALTER TABLE requests DROP COLUMN ") + column;
+        const int code = sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err);
+        EXPECT_EQ (code, SQLITE_OK) << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        EXPECT_FALSE (table_has_column (path, "requests", column))
+        << "test setup did not remove " << column;
+    }
+    sqlite3_close (handle);
+}
+
+/// `req_1` came back with every #1765 column at its default.
+void expect_protocol_settings_backfilled (Database& db) {
+    auto request = db.get_request ("req_1");
+    ASSERT_HAS_VALUE (request)
+    << "the request row did not survive the columns' return";
+    EXPECT_FALSE (request->disable_cookies);
+    EXPECT_EQ (request->disabled_system_headers, "[]");
+    EXPECT_FALSE (request->disable_url_encoding);
+    EXPECT_FALSE (request->postman_protocol_behavior.has_value ());
+}
+
+} // namespace
+
 // Schema version 2 added `request_examples.postman_response`. A version-1
 // database has nothing to fold: `sync_schema ()` adds the nullable column
 // and the migration only stamps it. Mutation check: write a literal `1` back
@@ -2223,6 +2256,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         sqlite3_free (err);
         sqlite3_close (handle);
     }
+    drop_protocol_setting_columns (TEST_DB_PATH);
     ASSERT_FALSE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"))
     << "test setup did not remove the column";
     set_user_version (TEST_DB_PATH, 1);
@@ -2245,6 +2279,51 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
     EXPECT_EQ (after->name, "Created");
     EXPECT_EQ (after->status, 201);
     EXPECT_FALSE (after->postman_response.has_value ());
+    expect_protocol_settings_backfilled (reopened);
+}
+
+// Issue #1765 folded the four `requests` protocol-setting columns into the
+// same version 2 (no released build ever stamped 2), so a database an earlier
+// build of that version already stamped still gets them: `sync_schema ()`
+// adds a NOT NULL-with-default or nullable column by itself on every start,
+// whatever the stamp. Mutation check: drop the `default_value` from
+// `disable_cookies` in `make_vayu_storage` and the request row does not
+// survive the column's return.
+TEST_F (DatabaseTest, AVersionTwoDatabaseWithoutTheProtocolSettingColumnsGetsThem) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+    drop_protocol_setting_columns (TEST_DB_PATH);
+    ASSERT_EQ (read_user_version (TEST_DB_PATH), 2);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 2);
+    for (const char* column : { "disable_cookies", "disabled_system_headers",
+         "disable_url_encoding", "postman_protocol_behavior" }) {
+        EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", column)) << column;
+    }
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    expect_protocol_settings_backfilled (reopened);
 }
 
 // A database stamped by the next schema is refused before anything writes to

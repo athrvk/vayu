@@ -676,8 +676,10 @@ void migrate_before_sync (const std::string& path) {
     if (!requests_need_fold && !collections_need_fold) {
         // Nothing to fold - a fresh schema with no rows yet, a database some
         // other path already brought to this shape, or a version-1 database
-        // (the 1 -> 2 step is `request_examples.postman_response`, a nullable
-        // column `sync_schema ()` adds by itself, so it only needs stamping).
+        // (the 1 -> 2 step is `request_examples.postman_response` and the four
+        // `requests` protocol-setting columns of #1765, nullable or NOT NULL
+        // with a default, which `sync_schema ()` adds by itself, so it only
+        // needs stamping).
         stamp_schema_version (connection.get ());
         return;
     }

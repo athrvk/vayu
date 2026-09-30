@@ -53,6 +53,9 @@ const requestQuery = {
 		maxRedirects: 10,
 		httpVersion: "auto",
 		verifySSL: true,
+		disableCookies: false,
+		disabledSystemHeaders: [],
+		disableUrlEncoding: false,
 		stream: false,
 	} as unknown,
 	isLoading: false,
@@ -123,6 +126,9 @@ const REQUEST: RequestState = {
 	maxRedirects: 10,
 	httpVersion: "auto",
 	verifySSL: true,
+	disableCookies: false,
+	disabledSystemHeaders: [],
+	disableUrlEncoding: false,
 	stream: false,
 };
 
@@ -291,5 +297,66 @@ describe("path rows reach both compose sites", () => {
 			await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(LOAD_CONFIG);
 		});
 		expect(composedRequest().params).toEqual(PATH_ENTRIES);
+	});
+});
+
+/**
+ * The body mode's Content-Type row (`source: "body-mode"`) is a system header
+ * the engine drops under a `content-type` opt-out (issue #1765), and the flat
+ * header record loses the marker - so both compose sites name the marked rows
+ * in `bodyModeHeaders`. Mutation check: drop the `...bodyModeHeaders(...)`
+ * spread from either site and its case reds.
+ */
+describe("the body mode's headers reach both compose sites", () => {
+	const WITH_BODY_MODE: RequestState = {
+		...REQUEST,
+		method: "POST",
+		bodyMode: "graphql",
+		body: '{"query":"{ me }"}',
+		disabledSystemHeaders: ["content-type"],
+		headers: [
+			{
+				id: "h1",
+				key: "Content-Type",
+				value: "application/json",
+				enabled: true,
+				source: "body-mode",
+			},
+			{ id: "h2", key: "X-Typed", value: "1", enabled: true },
+		],
+	};
+	const composedRequest = () => composedBody().request as Record<string, unknown>;
+
+	it("a Send names them", async () => {
+		renderBuilder();
+		await act(async () => {
+			await (providerProps.onExecute as (request: RequestState) => Promise<unknown>)(
+				WITH_BODY_MODE
+			);
+		});
+		expect(composedRequest().bodyModeHeaders).toEqual(["Content-Type"]);
+		expect(composedRequest().headers).toEqual({
+			"Content-Type": "application/json",
+			"X-Typed": "1",
+		});
+	});
+
+	it("a Send with none leaves the field out", async () => {
+		renderBuilder();
+		await act(async () => {
+			await (providerProps.onExecute as (request: RequestState) => Promise<unknown>)(REQUEST);
+		});
+		expect("bodyModeHeaders" in composedRequest()).toBe(false);
+	});
+
+	it("a load run names them", async () => {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)(WITH_BODY_MODE);
+		});
+		await act(async () => {
+			await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(LOAD_CONFIG);
+		});
+		expect(composedRequest().bodyModeHeaders).toEqual(["Content-Type"]);
 	});
 });

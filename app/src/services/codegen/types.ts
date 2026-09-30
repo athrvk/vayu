@@ -79,6 +79,12 @@ export interface SnippetRequest {
 	 * describe the same behaviour.
 	 */
 	followRedirects?: boolean;
+	/**
+	 * The request's `disableUrlEncoding` (issue #1765). Default `false`. On, a
+	 * `:name` path value and an API-key query param go into the URL as written,
+	 * which is what the engine sends; the snippet quotes that URL unchanged.
+	 */
+	disableUrlEncoding?: boolean;
 }
 
 export interface CodegenOptions {

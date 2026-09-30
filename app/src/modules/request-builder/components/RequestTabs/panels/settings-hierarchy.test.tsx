@@ -33,6 +33,14 @@ import { dirname, join } from "node:path";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 
+// The Settings tab reads the engine's declared defaults for its automatic
+// header list (issue #1765); no engine answers here, which is the
+// not-yet-loaded case the panel must render through anyway.
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useRequestDefaultsQuery: () => ({ data: undefined }),
+}));
+
 const PANEL_SOURCE = readFileSync(
 	join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx"),
 	"utf8"
@@ -143,6 +151,8 @@ describe("the Settings tab's hierarchy", () => {
 			"Follow redirects",
 			"Maximum redirects",
 			"Verify TLS certificate",
+			"Disable cookie jar",
+			"Send URL without encoding",
 			"Event stream",
 		]);
 	});

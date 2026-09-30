@@ -34,11 +34,18 @@ const PATH: KeyValueItem = { id: "p", key: "id", value: "42", enabled: true, in:
 function renderPanel(
 	url: string,
 	params: KeyValueItem[],
-	resolveString: (s: string) => string = (s) => s
+	resolveString: (s: string) => string = (s) => s,
+	disableUrlEncoding = false
 ) {
 	const updateField = vi.fn();
 	const value = {
-		request: { ...createDefaultRequestState(), id: `req_${url}`, url, params },
+		request: {
+			...createDefaultRequestState(),
+			id: `req_${url}`,
+			url,
+			params,
+			disableUrlEncoding,
+		},
 		updateField,
 		resolveString,
 		getAllVariables: () => ({}),
@@ -182,5 +189,31 @@ describe("the Path variables table", () => {
 	it("shows the substituted URL on the Sends line", () => {
 		const { container } = renderPanel("https://x/users/:id?page=1", [QUERY, PATH]);
 		expect(sendsLine(container)).toBe("https://x/users/42?page=1");
+	});
+	// A request sent without encoding (#1765): the Sends line shows the raw
+	// value, and a query-table edit writes its row raw into the URL, because
+	// the engine sends both as written.
+	it("shows a raw path value on the Sends line under disableUrlEncoding", () => {
+		const { container } = renderPanel(
+			"https://x/users/:id",
+			[{ ...PATH, value: "a b/c" }],
+			undefined,
+			true
+		);
+		expect(sendsLine(container)).toBe("https://x/users/a b/c");
+	});
+
+	it("writes a query-table edit raw into the URL under disableUrlEncoding", () => {
+		const { lastWrite } = renderPanel(
+			"https://x/users/:id?page=1",
+			[QUERY, PATH],
+			undefined,
+			true
+		);
+		const section = pathSection()!;
+		const pageValue = fields(document).find((el) => !section.contains(el) && el.value === "1")!;
+		fireEvent.change(pageValue, { target: { value: "a|b" } });
+
+		expect(lastWrite("url")).toBe("https://x/users/:id?page=a|b");
 	});
 });

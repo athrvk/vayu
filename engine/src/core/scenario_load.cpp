@@ -757,8 +757,10 @@ class ScenarioLoadDriver {
         const size_t iteration = vu->iteration;
         const size_t vu_index  = vu->index;
         vayu::Request request  = step.request;
-        request.track_cookies  = true;
-        request.cookie_lines   = vu->cookies;
+        // `disableCookies` (issue #1765): this step neither reads nor writes
+        // the VU's session - see the completion's `finish_step` call.
+        request.track_cookies = !request.disable_cookies;
+        request.cookie_lines  = vu->cookies;
 
         // The data pass and the identity pass, per iteration and before the
         // send. A step carrying neither kind of token has empty templates and
@@ -887,7 +889,7 @@ class ScenarioLoadDriver {
             // happened.
             state->coverage.record (step_index, response.status_code);
             finish_step (context, state, plan, vu, step_index, errored,
-            errored ? nullptr : &response.cookie_lines,
+            session_after (errored, step_ptr->request, response, *vu),
             errored ? std::nullopt : next_target_before);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index });
@@ -1085,6 +1087,23 @@ class ScenarioLoadDriver {
                 vu.ready_at_ms = std::max (vu.ready_at_ms, now + *delay);
             }
         }
+    }
+
+    /**
+     * The session @ref finish_step leaves the VU with after a step: none after
+     * an error, the step's own capture after an ordinary send, and - for a
+     * step with `disableCookies` (issue #1765), whose transfer tracked
+     * nothing - the VU's own session unchanged, since its empty capture would
+     * otherwise replace the session with nothing.
+     */
+    static const std::vector<std::string>* session_after (bool errored,
+    const vayu::Request& step_request,
+    const vayu::Response& response,
+    const VirtualUser& vu) {
+        if (errored) {
+            return nullptr;
+        }
+        return step_request.disable_cookies ? &vu.cookies : &response.cookie_lines;
     }
 
     /**

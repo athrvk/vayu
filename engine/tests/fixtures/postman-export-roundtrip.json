@@ -1354,6 +1354,103 @@
 				}
 			},
 			"response": []
+		},
+		{
+			"name": "Explicit defaults",
+			"protocolProfileBehavior": {
+				"followRedirects": true,
+				"disableUrlEncoding": false,
+				"disableCookies": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/defaults",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"defaults"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Quiet headers",
+			"protocolProfileBehavior": {
+				"disabledSystemHeaders": {
+					"accept": true,
+					"accept-encoding": true,
+					"connection": true,
+					"user-agent": true
+				},
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/quiet",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"quiet"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Strict with nothing off",
+			"protocolProfileBehavior": {
+				"strictSSL": true,
+				"disabledSystemHeaders": {}
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/strict",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"strict"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Raw and cookieless",
+			"protocolProfileBehavior": {
+				"disableUrlEncoding": true,
+				"disableCookies": true,
+				"disabledSystemHeaders": {
+					"user-agent": true,
+					"postman-token": true
+				},
+				"tlsDisabledProtocols": [
+					"TLSv1"
+				]
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/raw",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"raw"
+					]
+				}
+			},
+			"response": []
 		}
 	],
 	"auth": {

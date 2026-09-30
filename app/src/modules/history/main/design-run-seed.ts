@@ -28,6 +28,8 @@ import { generateId } from "@/lib/id";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
@@ -64,6 +66,11 @@ interface DesignSnapshot {
 	maxRedirects?: number;
 	httpVersion?: string;
 	verifySSL?: boolean;
+	disableCookies?: boolean;
+	disabledSystemHeaders?: unknown;
+	disableUrlEncoding?: boolean;
+	/** The `headers` names the body mode wrote (issue #1765). */
+	bodyModeHeaders?: unknown;
 }
 
 export interface DesignRunSeed {
@@ -111,7 +118,11 @@ export interface DesignRunSeed {
  * version string of the day it ran, and send both again as ordinary user
  * headers. Same rule as the request loader's, from the same definition.
  */
-function toHeaderItems(headers: Record<string, string> | undefined) {
+function toHeaderItems(headers: Record<string, string> | undefined, bodyMode: unknown = []) {
+	// The run's `bodyModeHeaders` (issue #1765) put back on their rows, so the
+	// replay tells the engine the same thing the recorded Send did: these are
+	// the body mode's own, which a `content-type` opt-out removes.
+	const marked = new Set(Array.isArray(bodyMode) ? bodyMode : []);
 	return toKeyValueItems(
 		Object.entries(headers ?? {})
 			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
@@ -119,6 +130,7 @@ function toHeaderItems(headers: Record<string, string> | undefined) {
 				key,
 				value,
 				enabled: true,
+				...(marked.has(key) ? { source: "body-mode" as const } : {}),
 			}))
 	);
 }
@@ -139,7 +151,7 @@ function paramsFromSnapshot(snapshot: DesignSnapshot) {
 	);
 	const held = new Set(recorded.map((row) => row.key));
 	return [
-		...parseQueryParams(url),
+		...parseQueryParams(url, { decode: snapshot.disableUrlEncoding !== true }),
 		...recorded,
 		...pathRowsFromUrl(url).filter((row) => !held.has(row.key)),
 	];
@@ -187,7 +199,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	 * included - and the copy replays exactly what ran.
 	 */
 	const headers = liveRequest
-		? toHeaderItems(snapshot.headers)
+		? toHeaderItems(snapshot.headers, snapshot.bodyModeHeaders)
 		: toHeaderItems(trace?.request?.headers);
 	const auth: RequestAuth = liveRequest ? liveRequest.auth : { mode: "none" };
 
@@ -241,6 +253,16 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			// verifying - the same direction every other default here takes,
 			// and the only safe one for this field.
 			verifySSL: snapshot.verifySSL ?? DEFAULT_VERIFY_SSL,
+			// Postman's protocol switches (issue #1765), same direction: a run
+			// recorded before they existed used the jar, encoded its URL and
+			// suppressed no automatic header.
+			disableCookies: snapshot.disableCookies ?? DEFAULT_DISABLE_COOKIES,
+			disabledSystemHeaders: Array.isArray(snapshot.disabledSystemHeaders)
+				? (snapshot.disabledSystemHeaders as unknown[]).filter(
+						(name): name is string => typeof name === "string"
+					)
+				: [],
+			disableUrlEncoding: snapshot.disableUrlEncoding ?? DEFAULT_DISABLE_URL_ENCODING,
 		},
 		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
 		collectionPostScripts: collectionParts(snapshot.postRequestScripts),

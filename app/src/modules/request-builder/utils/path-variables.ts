@@ -294,11 +294,16 @@ export function encodePathVariableValue(value: string): string {
  * resolves to nothing leaves the segment literal (`:id` goes out as written,
  * as Postman sends it). Otherwise the resolved value is written through
  * `encodePathVariableValue` in place of `:name`, and a `.suffix` stays.
+ *
+ * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the value
+ * goes in as written, skipping Postman's path encode set entirely, exactly as
+ * the engine's `substitute_path_variables` does with the flag set.
  */
 export function substitutePathVariables(
 	url: string,
 	rows: readonly KeyValueEntry[],
-	resolve: (value: string) => string = (value) => value
+	resolve: (value: string) => string = (value) => value,
+	{ encode = true }: { encode?: boolean } = {}
 ): string {
 	if (rows.length === 0) return url;
 	let out = "";
@@ -308,7 +313,9 @@ export function substitutePathVariables(
 		if (!row) continue;
 		const resolved = resolve(typeof row.value === "string" ? row.value : "");
 		if (!resolved) continue;
-		out += url.slice(copied, segment.offset) + encodePathVariableValue(resolved);
+		out +=
+			url.slice(copied, segment.offset) +
+			(encode ? encodePathVariableValue(resolved) : resolved);
 		copied = segment.offset + segment.length;
 	}
 	return out + url.slice(copied);

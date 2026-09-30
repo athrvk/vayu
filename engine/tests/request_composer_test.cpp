@@ -1560,3 +1560,143 @@ TEST_F (RequestComposerTest, ACompositionThatFinishedItsPathCarriesNoParams) {
     EXPECT_EQ (payload["url"], "https://api.test/1");
     EXPECT_FALSE (payload.contains ("params"));
 }
+
+// --- Postman's per-request protocol settings (issue #1765) -------------------
+
+/**
+ * A stored request's three settings ride every composed payload, defaults
+ * included, and an inline value overlays the stored one; the export-only
+ * carrier never goes out. Mutation check: drop the `disableCookies` line from
+ * `payload_from_stored` and the first expectation reds.
+ */
+TEST_F (RequestComposerTest, EmitsTheStoredProtocolSettingsAndLetsAnInlineValueWin) {
+    seed_collection ("col", "");
+    auto r                      = make_request ("req_1", "col");
+    r.disable_cookies           = true;
+    r.disabled_system_headers   = R"(["user-agent","accept"])";
+    r.disable_url_encoding      = true;
+    r.postman_protocol_behavior = R"({"disableCookies":true})";
+    db_->save_request (r);
+    auto plain = make_request ("req_2", "col");
+    db_->save_request (plain);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["disableCookies"], true);
+    EXPECT_EQ (payload["disabledSystemHeaders"], json::array ({ "user-agent", "accept" }));
+    EXPECT_EQ (payload["disableUrlEncoding"], true);
+    EXPECT_FALSE (payload.contains ("postmanProtocolBehavior"));
+
+    auto [plain_status, defaults] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_2" } });
+    ASSERT_EQ (plain_status, 200) << defaults.dump ();
+    EXPECT_EQ (defaults["disableCookies"], false);
+    EXPECT_EQ (defaults["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (defaults["disableUrlEncoding"], false);
+
+    auto [inline_status, overlaid] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request",
+    { { "disableCookies", false }, { "disabledSystemHeaders", json::array () } } } });
+    ASSERT_EQ (inline_status, 200) << overlaid.dump ();
+    EXPECT_EQ (overlaid["disableCookies"], false);
+    EXPECT_EQ (overlaid["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (overlaid["disableUrlEncoding"], true);
+}
+
+/**
+ * A body mode's Content-Type is a system header (issue #1765): the row the
+ * Body panel writes carries `source: "body-mode"`, and a stored
+ * `content-type` opt-out drops it once the composed payload is parsed, while
+ * a Content-Type the user typed (no marker) is always kept. The stored rows
+ * are the app's own shape. Mutation check: drop the `marked[...]` line in
+ * `flatten_stored_headers` (no `bodyModeHeaders`) and the marked row reaches
+ * the request; drop the `drop_refused_body_mode_headers` call in
+ * `deserialize_request` and the same.
+ */
+TEST_F (RequestComposerTest, ARefusedContentTypeDropsTheBodyModeRowButNotATypedOne) {
+    seed_collection ("col", "");
+    auto marked = make_request ("req_1", "col");
+    marked.url  = "https://api.test/graphql";
+    marked.body = R"({"mode":"graphql","content":"{\"query\":\"{ me }\"}"})";
+    marked.headers = R"([{"id":"h1","key":"Content-Type","value":"application/json","enabled":true,"source":"body-mode"},{"id":"h2","key":"X-Kept","value":"1","enabled":true}])";
+    marked.disabled_system_headers = R"(["content-type"])";
+    db_->save_request (marked);
+    auto typed = marked;
+    typed.id   = "req_2";
+    typed.headers = R"([{"id":"h1","key":"Content-Type","value":"application/json","enabled":true}])";
+    db_->save_request (typed);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["bodyModeHeaders"], json::array ({ "Content-Type" }));
+    auto request = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (request.is_ok ()) << request.error ().message;
+    EXPECT_FALSE (request.value ().headers.contains ("Content-Type"));
+    EXPECT_EQ (request.value ().headers.at ("X-Kept"), "1");
+
+    auto [typed_status, typed_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_2" } });
+    ASSERT_EQ (typed_status, 200) << typed_payload.dump ();
+    EXPECT_FALSE (typed_payload.contains ("bodyModeHeaders"));
+    auto typed_request = vayu::json::deserialize_request (typed_payload);
+    ASSERT_TRUE (typed_request.is_ok ()) << typed_request.error ().message;
+    EXPECT_EQ (typed_request.value ().headers.at ("Content-Type"), "application/json");
+}
+
+/**
+ * The stored marker describes the stored rows only: inline headers replace
+ * them, so an inline request that names no `bodyModeHeaders` leaves none (a
+ * Content-Type it sends is the user's), and one that does names its own.
+ * Mutation check: drop the `payload.erase ("bodyModeHeaders")` overlay line
+ * and the stale stored marker survives.
+ */
+TEST_F (RequestComposerTest, InlineHeadersBringTheirOwnBodyModeMarkers) {
+    seed_collection ("col", "");
+    auto r = make_request ("req_1", "col");
+    r.headers = R"([{"key":"Content-Type","value":"application/json","enabled":true,"source":"body-mode"}])";
+    db_->save_request (r);
+
+    auto [status, typed] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request", { { "headers", { { "Content-Type", "application/json" } } } } } });
+    ASSERT_EQ (status, 200) << typed.dump ();
+    EXPECT_FALSE (typed.contains ("bodyModeHeaders"));
+
+    auto [marked_status, marked] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request",
+    { { "headers", { { "Content-Type", "application/xml" } } },
+    { "bodyModeHeaders", json::array ({ "Content-Type" }) } } } });
+    ASSERT_EQ (marked_status, 200) << marked.dump ();
+    EXPECT_EQ (marked["bodyModeHeaders"], json::array ({ "Content-Type" }));
+}
+
+/**
+ * `disableUrlEncoding` writes a path value as typed, skipping Postman's
+ * path encode set (`a"b/c` keeps its `"`, where the default writes `%22`);
+ * the inline flag decides, stored or not. Mutation check: pass `true` for `encode` in
+ * `substitute_compose_path_variables` and the raw expectations red.
+ */
+TEST_F (RequestComposerTest, APathValueIsWrittenAsTypedWhenUrlEncodingIsOff) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/u/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "a\"b/c" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    r.disable_url_encoding = true;
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/u/a\"b/c");
+
+    auto [inline_status, encoded] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" }, { "request", { { "disableUrlEncoding", false } } } });
+    ASSERT_EQ (inline_status, 200) << encoded.dump ();
+    EXPECT_EQ (encoded["url"], "https://api.test/u/a%22b/c");
+}

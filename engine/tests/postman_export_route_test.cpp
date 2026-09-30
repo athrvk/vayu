@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -151,10 +152,144 @@ TEST_F (PostmanExportRouteTest, TheRoundTripFixtureComesBackByteForByte) {
     json body            = export_ok (id);
     EXPECT_EQ (without_postman_id (body["text"].get<std::string> ()), fixture);
     EXPECT_EQ (body["fileName"], "Round Trip.postman_collection.json");
-    EXPECT_EQ (body["notes"]["requestsExported"], 23);
+    EXPECT_EQ (body["notes"]["requestsExported"], 27);
     EXPECT_EQ (body["notes"]["foldersExported"], 4);
     EXPECT_EQ (body["notes"]["notCarried"], json::array ());
     EXPECT_EQ (body["notes"]["secretsOmitted"], 0);
+}
+
+/// The exported `protocolProfileBehavior` of the root item named @p name, as
+/// the text it was written as (member order is the point).
+std::string exported_protocol_behavior (const std::string& text, const std::string& name) {
+    const ordered doc = ordered::parse (text);
+    for (const ordered& item : doc.at ("item")) {
+        if (item.value ("name", "") == name) {
+            return item.contains ("protocolProfileBehavior") ?
+            item.at ("protocolProfileBehavior").dump () :
+            std::string ();
+        }
+    }
+    ADD_FAILURE () << "no exported item " << name;
+    return {};
+}
+
+// Issue #1765: an edit since the import is written over the carried
+// `protocolProfileBehavior` in place, a key the carrier did not have is
+// appended, and what Vayu does not apply stays. Mutation check: make
+// `protocol_profile` return the carrier unconditionally and this reds.
+TEST_F (PostmanExportRouteTest, AnEditedProtocolSettingIsWrittenOverTheImportedObject) {
+    const std::string id =
+    import_text (read_text (fixture_path ("postman-export-roundtrip.json")));
+    std::string request_id;
+    for (const auto& row : db_->get_requests_in_collection (id)) {
+        if (row.name == "Raw and cookieless") {
+            request_id = row.id;
+        }
+    }
+    ASSERT_FALSE (request_id.empty ());
+    auto [status, updated] = vayu::http::routes::update_request_response (*db_, request_id,
+    json{ { "disableCookies", false }, { "followRedirects", false },
+    { "disabledSystemHeaders", json::array ({ "user-agent", "postman-token", "accept" }) } });
+    ASSERT_EQ (status, 200) << updated.dump ();
+
+    EXPECT_EQ (exported_protocol_behavior (export_text (id), "Raw and cookieless"),
+    R"({"disableUrlEncoding":true,"disableCookies":false,"disabledSystemHeaders":{"user-agent":true,"postman-token":true,"accept":true},"tlsDisabledProtocols":["TLSv1"],"followRedirects":false})");
+}
+
+/// A one-folder Postman v2.1 collection of the items in @p items.
+std::string postman_collection (const std::string& items) {
+    return R"({"info":{"name":"Protocol","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[)" +
+    items + "]}";
+}
+
+/// The stored request named @p name under @p root.
+std::optional<vayu::db::Request>
+request_named (vayu::db::Database& db, const std::string& root, const std::string& name) {
+    for (const auto& row : db.get_requests_in_collection (root)) {
+        if (row.name == name) {
+            return row;
+        }
+    }
+    ADD_FAILURE () << "no request " << name;
+    return std::nullopt;
+}
+
+// Issue #1765: a body given in Vayu to an imported GET needs
+// `disableBodyPruning`, or Postman strips the body Vayu sends; the carrier
+// only had it when the source did. Appended when absent, set in place when
+// `false`, and an untouched bodyless import stays byte-identical. Mutation
+// check: drop the `prunable_body` block from `reconciled_profile` and the two
+// edited expectations red.
+TEST_F (PostmanExportRouteTest, ABodyAddedToAnImportedGetIsKeptFromPruning) {
+    const std::string id        = import_text (postman_collection (R"(
+        {"name":"Absent","protocolProfileBehavior":{"disabledSystemHeaders":{}},
+            "request":{"method":"GET","url":"https://x.com/a"}},
+        {"name":"Off","protocolProfileBehavior":{"disableBodyPruning":false,"strictSSL":true},
+            "request":{"method":"GET","url":"https://x.com/b"}})"));
+    const std::string untouched = export_text (id);
+    EXPECT_EQ (exported_protocol_behavior (untouched, "Absent"),
+    R"({"disabledSystemHeaders":{}})");
+    EXPECT_EQ (exported_protocol_behavior (untouched, "Off"),
+    R"({"disableBodyPruning":false,"strictSSL":true})");
+
+    const json body{ { "body", { { "mode", "json" }, { "content", R"({"a":1})" } } } };
+    for (const char* name : { "Absent", "Off" }) {
+        const auto row = request_named (*db_, id, name);
+        ASSERT_HAS_VALUE (row);
+        auto [status, updated] =
+        vayu::http::routes::update_request_response (*db_, row->id, body);
+        ASSERT_EQ (status, 200) << updated.dump ();
+    }
+    const std::string edited = export_text (id);
+    EXPECT_EQ (exported_protocol_behavior (edited, "Absent"),
+    R"({"disabledSystemHeaders":{},"disableBodyPruning":true})");
+    EXPECT_EQ (exported_protocol_behavior (edited, "Off"),
+    R"({"disableBodyPruning":true,"strictSSL":true})");
+}
+
+// A `disabledSystemHeaders` key that is no header name is dropped from what
+// the request applies instead of failing the whole import, and a truthy
+// non-boolean counts as Postman's runtime counts it; the carrier keeps the
+// object verbatim for the export. Mutation check: drop the
+// `invalid_header_token` filter in `postman_disabled_system_headers` and the
+// import answers 400.
+TEST_F (PostmanExportRouteTest, AMalformedDisabledHeaderNameDoesNotFailTheImport) {
+    const std::string carried =
+    R"({"disabledSystemHeaders":{"accept":true,"bad name":true,"User-Agent":1,"connection":0}})";
+    const std::string id =
+    import_text (postman_collection (R"({"name":"Odd","protocolProfileBehavior":)" +
+    carried + R"(,"request":{"method":"GET","url":"https://x.com"}})"));
+    ASSERT_FALSE (id.empty ());
+    const auto row = request_named (*db_, id, "Odd");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->disabled_system_headers, R"(["accept","user-agent"])");
+    EXPECT_EQ (exported_protocol_behavior (export_text (id), "Odd"), carried);
+}
+
+// The app's Duplicate sends back the record `GET /requests/:id` answered, the
+// carrier included: a duplicated import exports the same
+// `protocolProfileBehavior` bytes as its source. Mutation check: answer the
+// carrier as a parsed object from `postman_protocol_behavior_node` and the
+// copy's members come out sorted.
+TEST_F (PostmanExportRouteTest, ADuplicatedImportExportsTheSameProtocolBehavior) {
+    const std::string id =
+    import_text (read_text (fixture_path ("postman-export-roundtrip.json")));
+    const auto source = request_named (*db_, id, "Raw and cookieless");
+    ASSERT_HAS_VALUE (source);
+    auto [status, record] =
+    vayu::http::routes::get_request_response (*db_, source->id);
+    ASSERT_EQ (status, 200) << record.dump ();
+    for (const char* key : { "id", "createdAt", "updatedAt" }) {
+        record.erase (key);
+    }
+    record["name"] = "Raw and cookieless (Copy)";
+    auto [copy_status, copy] = vayu::http::routes::create_request_response (*db_, record);
+    ASSERT_EQ (copy_status, 200) << copy.dump ();
+
+    const std::string text = export_text (id);
+    const std::string original = exported_protocol_behavior (text, "Raw and cookieless");
+    ASSERT_FALSE (original.empty ());
+    EXPECT_EQ (exported_protocol_behavior (text, "Raw and cookieless (Copy)"), original);
 }
 
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
@@ -727,6 +862,10 @@ json snapshot (vayu::db::Database& db, const std::string& id) {
         { "body", stored (row.body) }, { "auth", stored (row.auth) },
         { "elements", stored (row.elements) }, { "followRedirects", row.follow_redirects },
         { "maxRedirects", row.max_redirects }, { "verifySSL", row.verify_ssl },
+        { "disableCookies", row.disable_cookies },
+        { "disabledSystemHeaders", stored (row.disabled_system_headers) },
+        { "disableUrlEncoding", row.disable_url_encoding },
+        { "postmanProtocolBehavior", row.postman_protocol_behavior.value_or ("") },
         { "order", row.order }, { "examples", examples } });
     }
     out["requests"] = requests;

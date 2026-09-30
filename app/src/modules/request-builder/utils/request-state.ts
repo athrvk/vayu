@@ -13,6 +13,8 @@
 
 import type { RequestState } from "../types";
 import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
@@ -59,6 +61,9 @@ export const createDefaultRequestState = (
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
 		httpVersion,
 		verifySSL: DEFAULT_VERIFY_SSL,
+		disableCookies: DEFAULT_DISABLE_COOKIES,
+		disabledSystemHeaders: [],
+		disableUrlEncoding: DEFAULT_DISABLE_URL_ENCODING,
 		stream: DEFAULT_STREAM,
 	};
 };
@@ -69,7 +74,8 @@ export const createDefaultRequestState = (
  * defaults rather than tracking "the user opened the tab", so a request that is
  * toggled off and back on stops badging again.
  *
- * Covers the redirect policy, the protocol *and* the event-stream flag: a
+ * Covers the redirect policy, the protocol, the event-stream flag *and*
+ * Postman's protocol switches (issue #1765): a
  * request that only changes `httpVersion` (redirects left at their defaults)
  * must still badge, which is why this checks every field the tab owns rather
  * than being named (and scoped) after redirects alone.
@@ -80,7 +86,14 @@ export const createDefaultRequestState = (
 export function isRequestSettingsNonDefault(
 	state: Pick<
 		RequestState,
-		"followRedirects" | "maxRedirects" | "httpVersion" | "verifySSL" | "stream"
+		| "followRedirects"
+		| "maxRedirects"
+		| "httpVersion"
+		| "verifySSL"
+		| "stream"
+		| "disableCookies"
+		| "disabledSystemHeaders"
+		| "disableUrlEncoding"
 	>
 ): boolean {
 	return (
@@ -88,6 +101,9 @@ export function isRequestSettingsNonDefault(
 		state.maxRedirects !== DEFAULT_MAX_REDIRECTS ||
 		state.httpVersion !== DEFAULT_HTTP_VERSION ||
 		state.verifySSL !== DEFAULT_VERIFY_SSL ||
-		state.stream !== DEFAULT_STREAM
+		state.stream !== DEFAULT_STREAM ||
+		state.disableCookies !== DEFAULT_DISABLE_COOKIES ||
+		state.disabledSystemHeaders.length > 0 ||
+		state.disableUrlEncoding !== DEFAULT_DISABLE_URL_ENCODING
 	);
 }

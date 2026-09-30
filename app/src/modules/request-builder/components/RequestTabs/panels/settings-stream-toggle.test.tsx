@@ -29,6 +29,14 @@ import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { RequestState } from "../../../types";
 import type { KeyValueItem } from "@/types";
 
+// The Settings tab reads the engine's declared defaults for its automatic
+// header list (issue #1765); no engine answers here, which is the
+// not-yet-loaded case the panel must render through anyway.
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useRequestDefaultsQuery: () => ({ data: undefined }),
+}));
+
 /**
  * A live-enough context: the panel reads `request` and writes through
  * `setRequest`. Ownership of the row it arms now lives on the row itself

@@ -40,7 +40,10 @@ describe("isRequestSettingsNonDefault", () => {
 		httpVersion: DEFAULT_HTTP_VERSION,
 		verifySSL: true,
 		stream: false,
-	} as const;
+		disableCookies: false,
+		disabledSystemHeaders: [] as string[],
+		disableUrlEncoding: false,
+	};
 
 	it("is false when every field matches the engine defaults", () => {
 		expect(isRequestSettingsNonDefault(defaults)).toBe(false);
@@ -72,5 +75,22 @@ describe("isRequestSettingsNonDefault", () => {
 		// stream is the largest change this tab can make, and it must badge
 		// even though every other setting is untouched.
 		expect(isRequestSettingsNonDefault({ ...defaults, stream: true })).toBe(true);
+	});
+
+	// Postman's protocol switches (issue #1765): each one alone badges the tab,
+	// because a request that skips the jar, a header or the encoding looks
+	// like one that does not until the tab says so.
+	it("is true when the cookie jar is off and nothing else differs", () => {
+		expect(isRequestSettingsNonDefault({ ...defaults, disableCookies: true })).toBe(true);
+	});
+
+	it("is true when a stored automatic header is off and nothing else differs", () => {
+		expect(
+			isRequestSettingsNonDefault({ ...defaults, disabledSystemHeaders: ["user-agent"] })
+		).toBe(true);
+	});
+
+	it("is true when URL encoding is off and nothing else differs", () => {
+		expect(isRequestSettingsNonDefault({ ...defaults, disableUrlEncoding: true })).toBe(true);
 	});
 });

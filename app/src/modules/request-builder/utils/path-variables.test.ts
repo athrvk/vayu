@@ -258,6 +258,19 @@ describe("substitutePathVariables", () => {
 		);
 	});
 
+	it("writes the value as typed under disableUrlEncoding, skipping the path encode set (#1765)", () => {
+		// The engine's raw substitution, as Postman's `toNodeUrl` sends it with
+		// `disableEncoding`: the space stays a space where the default is `%20`.
+		expect(
+			substitutePathVariables("https://x/u/:id?q=1", [path("id", "a b/c")], undefined, {
+				encode: false,
+			})
+		).toBe("https://x/u/a b/c?q=1");
+		expect(substitutePathVariables("https://x/u/:id", [path("id", "a b/c")])).toBe(
+			"https://x/u/a%20b/c"
+		);
+	});
+
 	it("leaves the segment literal for an empty value or a disabled row", () => {
 		expect(substitutePathVariables("https://x/:id", [path("id", "")])).toBe("https://x/:id");
 		expect(substitutePathVariables("https://x/:id", [path("id", "1", false)])).toBe(

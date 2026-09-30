@@ -94,6 +94,13 @@ function FieldProbe() {
 			<span data-testid="url">{request.url}</span>
 			<span data-testid="description">{request.description}</span>
 			<span data-testid="collectionId">{request.collectionId}</span>
+			<span data-testid="protocol">
+				{JSON.stringify([
+					request.disableCookies,
+					request.disabledSystemHeaders,
+					request.disableUrlEncoding,
+				])}
+			</span>
 			<span data-testid="dirty">{String(hasUnsavedChanges)}</span>
 			<span data-testid="conflicts">{Object.keys(fieldConflicts).sort().join(",")}</span>
 			<span data-testid="conflict-url">{String(fieldConflicts.url ?? "")}</span>
@@ -144,6 +151,30 @@ describe("the request builder's draft adopts an external write per field", () =>
 		expect(shown("url")).toBe("https://api.test/b");
 		expect(shown("dirty")).toBe("false");
 		expect(shown("conflicts")).toBe("");
+	});
+
+	it("adopts Postman's protocol switches from an external write (#1765)", () => {
+		// A field missing from the merge list is one an agent's edit never
+		// reaches an open tab with - and the next autosave writes the stale
+		// value back over it.
+		const { rerender } = render(<Harness initialRequest={{ id: "req_1" }} />);
+		expect(shown("protocol")).toBe("[false,[],false]");
+
+		act(() =>
+			rerender(
+				<Harness
+					initialRequest={{
+						id: "req_1",
+						disableCookies: true,
+						disabledSystemHeaders: ["accept"],
+						disableUrlEncoding: true,
+					}}
+				/>
+			)
+		);
+
+		expect(shown("protocol")).toBe('[true,["accept"],true]');
+		expect(shown("dirty")).toBe("false");
 	});
 
 	it("keeps the user's edit and flags a conflict when the same field changed on both sides", () => {
