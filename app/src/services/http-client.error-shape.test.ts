@@ -169,4 +169,31 @@ describe("httpClient transport failures", () => {
 			expect(String(error)).toBe(`Error: ${error.message}`);
 		}
 	});
+
+	/**
+	 * An engine that answered 200 with a body that does not parse was reached.
+	 * Called unreachable, it would keep a query loading through the whole
+	 * start window instead of failing on the first answer.
+	 *
+	 * Mutation-check: wrap `response.json()` in `asTransportError` again and
+	 * this goes red.
+	 */
+	it("does not call a malformed 200 body an unreachable engine", async () => {
+		const malformed = new SyntaxError("Unexpected token <");
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				json: async () => {
+					throw malformed;
+				},
+			})
+		);
+
+		const error = await failedGet();
+		expect(error).not.toBeInstanceOf(EngineUnreachableError);
+		expect(error).toBe(malformed);
+	});
 });

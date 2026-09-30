@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { retryWithin } from "@/lib/query-client";
 
 /**
  * Fetch script completions for Monaco editor
@@ -29,6 +30,6 @@ export function useScriptCompletionsQuery({ enabled = true }: { enabled?: boolea
 		staleTime: QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS,
 		gcTime: QUERY_CACHE.SCRIPT_COMPLETIONS_GC_TIME_MS,
 		// Don't retry hard if it fails - not critical
-		retry: QUERY_CACHE.SCRIPT_COMPLETIONS_RETRY,
+		retry: retryWithin(QUERY_CACHE.SCRIPT_COMPLETIONS_RETRY),
 	});
 }

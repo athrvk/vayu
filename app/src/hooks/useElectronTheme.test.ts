@@ -137,8 +137,12 @@ describe("useElectronTheme - restoring the saved theme mode at launch", () => {
 		}
 	);
 
-	it("leaves the main process alone when nothing or an unknown value is saved", async () => {
-		localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, "sepia");
+	it.each([
+		["nothing", null],
+		["an unknown value", "sepia"],
+		["system, which the main process already holds", "system"],
+	])("leaves the main process alone when %s is saved", async (_label, saved) => {
+		if (saved !== null) localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, saved);
 		const setTheme = stubFreshLaunch();
 
 		const { result } = renderHook(() => useElectronTheme());

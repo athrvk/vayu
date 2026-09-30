@@ -688,20 +688,10 @@ json postman_ordered (const json& source) {
  * order and with the attribute types Postman wrote.
  */
 std::optional<json> standing_source (const json& stored) {
-    const auto found = stored.find ("postman");
-    if (found == stored.end () || !found->is_object () ||
-    text_of (*found, "type").empty ()) {
+    if (!postman_source_stands (nlohmann::json::parse (stored.dump ()))) {
         return std::nullopt;
     }
-    json own = stored;
-    own.erase ("postman");
-    // Key order aside: the stored column went through a sorted-key writer.
-    const nlohmann::json remapped =
-    nlohmann::json::parse (postman_auth_mapping (*found).dump ());
-    if (remapped != nlohmann::json::parse (own.dump ())) {
-        return std::nullopt;
-    }
-    return std::make_optional (postman_ordered (*found));
+    return std::make_optional (postman_ordered (stored.at ("postman")));
 }
 
 /// A stored auth as Postman's `auth`, or nothing to write - an inheriting
