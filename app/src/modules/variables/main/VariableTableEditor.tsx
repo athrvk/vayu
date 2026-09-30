@@ -99,6 +99,12 @@ export interface VariableRowData {
 	type?: VariableType;
 	createdAt?: number;
 	isNew?: boolean;
+	/**
+	 * Whatever the stored value carries that this table has no column for (a
+	 * Postman import's `description`), written back untouched so editing a
+	 * variable does not drop it.
+	 */
+	extra?: Record<string, unknown>;
 }
 
 /**
@@ -155,6 +161,7 @@ function sameRows(a: VariableRowData[], b: VariableRowData[]): boolean {
 
 function toVariableValue(row: VariableRowData): VariableValue {
 	return {
+		...row.extra,
 		value: row.value,
 		enabled: row.enabled,
 		secret: row.secret ?? false,
@@ -166,14 +173,16 @@ function toVariableValue(row: VariableRowData): VariableValue {
 }
 
 function rowFromValue(key: string, value: VariableValue, id?: string): VariableRowData {
+	const { value: text, enabled, secret, type, createdAt, ...extra } = value;
 	return {
 		id: id ?? nextRowId(),
 		key,
-		value: value.value,
-		enabled: value.enabled,
-		secret: value.secret ?? false,
-		type: value.type ?? "string",
-		createdAt: value.createdAt,
+		value: text,
+		enabled,
+		secret: secret ?? false,
+		type: type ?? "string",
+		createdAt,
+		...(Object.keys(extra).length > 0 && { extra }),
 	};
 }
 
@@ -566,15 +575,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		}
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
 			const entries = sortByCreatedAt(Object.entries(dataVariables));
-			const rows: VariableRowData[] = entries.map(([key, val]) => ({
-				id: carriedIds.get(key) ?? nextRowId(),
-				key,
-				value: val.value,
-				enabled: val.enabled,
-				secret: val.secret ?? false,
-				type: val.type ?? "string",
-				createdAt: val.createdAt,
-			}));
+			const rows: VariableRowData[] = entries.map(([key, val]) =>
+				rowFromValue(key, val, carriedIds.get(key))
+			);
 			rows.push(blankRow(carriedBlankId));
 			setVariables(rows);
 		} else {
