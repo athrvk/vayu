@@ -31,7 +31,15 @@ import { createDefaultRequestState } from "../../utils/request-state";
 import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, HTTP_VERSIONS } from "@/constants/request";
 import RequestTabs from "./index";
 
-function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()) {
+// The Settings tab reads the engine's declared defaults for its automatic
+// header list (issue #1765); no engine answers here, which is the
+// not-yet-loaded case the panel must render through anyway.
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useRequestDefaultsQuery: () => ({ data: undefined }),
+}));
+
+function renderTabsView(overrides: Partial<RequestState> = {}, updateField = vi.fn()) {
 	const request: RequestState = { ...createDefaultRequestState(), ...overrides };
 	const value = {
 		request,
@@ -40,11 +48,15 @@ function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()
 		activeTab: "settings",
 		setActiveTab: vi.fn(),
 	} as unknown as RequestBuilderContextValue;
-	render(
+	return render(
 		<RequestBuilderContext.Provider value={value}>
 			<RequestTabs />
 		</RequestBuilderContext.Provider>
 	);
+}
+
+function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()) {
+	renderTabsView(overrides, updateField);
 	return updateField;
 }
 
@@ -101,6 +113,21 @@ describe("Settings tab", () => {
 		// exists for.
 		renderTabs({ httpVersion: "http2" });
 		expect(settingsTab().textContent).toContain("1");
+	});
+
+	it("badges for each of Postman's protocol switches on its own (#1765)", () => {
+		// An imported request that skips the jar, a header or the encoding
+		// sends differently from one that does not, and nothing else on screen
+		// says so until this tab is opened.
+		for (const overrides of [
+			{ disableCookies: true },
+			{ disabledSystemHeaders: ["user-agent"] },
+			{ disableUrlEncoding: true },
+		] satisfies Partial<RequestState>[]) {
+			const view = renderTabsView(overrides);
+			expect(settingsTab().textContent).toContain("1");
+			view.unmount();
+		}
 	});
 });
 

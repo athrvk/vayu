@@ -39,11 +39,19 @@
  * sibling headings read where three groups were meant. Sections are `Eyebrow`
  * now (11px, uppercase, muted), and a section holding one row *is* that row,
  * which is why Protocol and Streaming carry no heading of their own.
+ *
+ * **Postman's per-request protocol switches live here too** (issue #1765):
+ * the cookie jar, URL encoding, and the automatic headers this request never
+ * sends. The header list is *stored* (`disabledSystemHeaders`), unlike the
+ * Headers tab's per-send untick (`disabledDefaultHeaders`, #1229), and the copy
+ * says so, because the two lists name the same headers. Names Vayu keeps for
+ * the Postman export without applying are shown, read-only, beside it.
  */
 
 import { AlertTriangle } from "lucide-react";
 
-import { Eyebrow } from "@/components/ui";
+import { Badge, Checkbox, Eyebrow } from "@/components/ui";
+import { useRequestDefaultsQuery } from "@/queries";
 import {
 	ACCEPT_HEADER,
 	DEFAULT_MAX_REDIRECTS,
@@ -60,16 +68,47 @@ import {
 } from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
 import { switchAutoHeader } from "../../../utils/auto-header";
+import {
+	automaticHeaderOptions,
+	displayHeaderName,
+	unappliedStoredHeaders,
+} from "../../../utils/automatic-headers";
 
 const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
 const PROTOCOL_LABEL = "Protocol";
 const STREAM_LABEL = "Event stream";
 const VERIFY_LABEL = "Verify TLS certificate";
+const COOKIES_LABEL = "Disable cookie jar";
+const ENCODING_LABEL = "Send URL without encoding";
+
+/** "A", "A and B", "A, B and C" - for the read-only names' reason line. */
+function listNames(keys: readonly string[]): string {
+	const names = keys.map(displayHeaderName);
+	return names.length <= 1
+		? names.join("")
+		: `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
 
 export default function SettingsPanel() {
 	const { request, setRequest, updateField } = useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
+	const { data: requestDefaults } = useRequestDefaultsQuery();
+	const storedOff = request.disabledSystemHeaders;
+	const headerOptions = automaticHeaderOptions(requestDefaults?.headers ?? [], storedOff);
+	const unapplied = unappliedStoredHeaders(storedOff);
+
+	/**
+	 * Stored, so `updateField`: unlike the Headers tab's per-send untick, this
+	 * is a change to the request and should mark it unsaved. Names are kept
+	 * lowercased, the form the engine stores and Postman writes.
+	 */
+	const setHeaderOff = (key: string, off: boolean) => {
+		updateField(
+			"disabledSystemHeaders",
+			off ? [...storedOff.filter((n) => n !== key), key] : storedOff.filter((n) => n !== key)
+		);
+	};
 
 	const handleProtocolChange = (value: string) => {
 		if (!isHttpVersion(value)) return;
@@ -202,6 +241,97 @@ export default function SettingsPanel() {
 							This request accepts any certificate. A machine in the middle can read
 							and rewrite it - Send, load tests, and streams alike.
 						</span>
+					</div>
+				)}
+			</div>
+
+			<div className="space-y-4">
+				<Eyebrow>Cookies &amp; URL</Eyebrow>
+
+				<ToggleRow
+					label={COOKIES_LABEL}
+					checked={request.disableCookies}
+					onChange={(checked) => updateField("disableCookies", checked)}
+					description={
+						<>
+							No cookie from the jar is attached and no <code>Set-Cookie</code> is
+							stored. A <code>Cookie</code> header in the Headers tab is still sent.
+						</>
+					}
+				/>
+
+				<ToggleRow
+					label={ENCODING_LABEL}
+					checked={request.disableUrlEncoding}
+					onChange={(checked) => updateField("disableUrlEncoding", checked)}
+					description={
+						<>
+							Path variable values, query rows and an API key in the query go out as
+							typed instead of percent-encoded, so a <code>/</code> in a value becomes
+							a path separator. A URL with a space in it is still refused.
+						</>
+					}
+				/>
+			</div>
+
+			<div className="space-y-2">
+				<div>
+					<Eyebrow>Don&apos;t send automatic headers</Eyebrow>
+					<p className="text-xs text-muted-foreground mt-0.5">
+						Ticked headers are left off every send of this request. Unticking one in the
+						Headers tab skips it for a single send only.
+					</p>
+				</div>
+
+				<div className="space-y-1">
+					{headerOptions.map((option) => (
+						<label
+							key={option.key}
+							className="flex w-fit items-center gap-2 text-xs"
+							data-automatic-header={option.key}
+						>
+							<Checkbox
+								checked={storedOff.includes(option.key)}
+								onChange={(e) => setHeaderOff(option.key, e.target.checked)}
+								aria-label={`Don't send ${option.name}`}
+								// `size-target` (issue #1679): the box is its own hit target
+								// beside a label, as in the Headers tab's rows.
+								className="size-target"
+							/>
+							<span className="font-mono">{option.name}</span>
+							<span className="text-muted-foreground">{option.detail}</span>
+						</label>
+					))}
+				</div>
+
+				{/*
+				 * Read-only: Postman lets these be switched off, Vayu cannot honour
+				 * that, and the name is kept only so the export writes back what
+				 * was imported. The reason is spelled out rather than implied by a
+				 * disabled checkbox, which would read as "on, but locked".
+				 */}
+				{unapplied.neverSent.length + unapplied.cannotOmit.length > 0 && (
+					<div className="space-y-1" data-kept-not-applied>
+						<div className="flex flex-wrap items-center gap-1">
+							<span className="text-xs text-muted-foreground">
+								Kept for the Postman export:
+							</span>
+							{[...unapplied.neverSent, ...unapplied.cannotOmit].map((key) => (
+								<Badge
+									key={key}
+									variant="outline"
+									className="font-mono font-normal"
+								>
+									{displayHeaderName(key)}
+								</Badge>
+							))}
+						</div>
+						<p className="text-xs text-muted-foreground">
+							{unapplied.neverSent.length > 0 &&
+								`Vayu never sends ${listNames(unapplied.neverSent)}. `}
+							{unapplied.cannotOmit.length > 0 &&
+								`Vayu can't leave out ${listNames(unapplied.cannotOmit)}: HTTP/1.1 needs ${unapplied.cannotOmit.length === 1 ? "it" : "them"}.`}
+						</p>
 					</div>
 				)}
 			</div>

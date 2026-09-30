@@ -215,3 +215,39 @@ describe("switching one off", () => {
 		expect(keys).toEqual([""]);
 	});
 });
+
+describe("a header the request stores as off (#1765)", () => {
+	// The stored `disabledSystemHeaders` and this send's untick are unioned by
+	// the engine, so a tick here cannot put a stored-off header back. The row
+	// says so and points at the tab that owns it, instead of offering a
+	// control that does nothing.
+	it("shows off, cannot be ticked back on, and names Settings", () => {
+		const h = harness({ disabledSystemHeaders: ["user-agent"] });
+		const ui = mount(h);
+
+		const box = ui.tick("User-Agent");
+		expect(box).not.toBeChecked();
+		expect(box).toBeDisabled();
+		expect(screen.getByText("off for this request in Settings")).toBeInTheDocument();
+		// The declared value is not shown as if it were sent.
+		expect(screen.queryByText("Vayu/0.1.1")).toBeNull();
+	});
+
+	it("leaves every other declared row as it was", () => {
+		const h = harness({ disabledSystemHeaders: ["user-agent"] });
+		const ui = mount(h);
+
+		expect(ui.tick("Accept-Encoding")).toBeChecked();
+		expect(ui.tick("Accept-Encoding")).not.toBeDisabled();
+	});
+
+	it("writes nothing to the per-send list for a stored-off row", () => {
+		// The two lists stay apart: the stored one is not copied into
+		// `disabledDefaultHeaders`, which would then ride every send twice.
+		const h = harness({ disabledSystemHeaders: ["user-agent"] });
+		mount(h);
+
+		expect(h.request.disabledDefaultHeaders).toEqual([]);
+		expect(disabledDefaults(h.request)).toEqual({});
+	});
+});
