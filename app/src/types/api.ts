@@ -326,6 +326,12 @@ export interface ExampleSavedFrom {
 	statusText: string;
 	/** Absent writes `responseTime: null`. */
 	responseTimeMs?: number;
+	/**
+	 * When the response came in, in epoch milliseconds (0 or more) - the
+	 * time a cookie's `Max-Age` counts from. Absent uses the engine's clock
+	 * at the save.
+	 */
+	receivedAt?: number;
 }
 
 /** The rows as written - one drop is one transaction, so this is all of them. */

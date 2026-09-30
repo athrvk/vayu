@@ -330,7 +330,8 @@ cookies as recorded; the recorded request stays as recorded.
 (issue #1763). *Save as example* on a response you just sent records the
 request as it was when you pressed Send - method, URL, params, headers and
 body, with `{{variables}}` left unresolved and auth left out - together with
-the server's own status text, the response's cookies and its response time.
+the server's own status text, the response's cookies (a `Max-Age` counted from
+when the response arrived) and its response time.
 The export writes those back, so editing the request afterwards does not change
 what the example says it was sent with. A value typed literally into a header
 or the URL at Send stays in that example after you remove it from the request,

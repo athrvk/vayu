@@ -64,7 +64,9 @@ function headerEntries(headers: Record<string, string>): KeyValueEntry[] {
  * something is served.
  *
  * `savedFrom` rides only when the response has a Send snapshot: without one
- * there is no request to report, and the engine regenerates on export.
+ * there is no request to report, and the engine regenerates on export. Its
+ * `receivedAt` is when the response came in, the time a cookie's `Max-Age`
+ * counts from - not the Save, which may be minutes later.
  */
 export function exampleFromResponse(
 	response: ResponseState,
@@ -89,7 +91,19 @@ export function exampleFromResponse(
 				request: response.sentRequest,
 				statusText: response.statusText,
 				responseTimeMs: response.time,
+				...receivedAtOf(response),
 			},
 		}),
 	};
+}
+
+/**
+ * When @p response came in, as `savedFrom.receivedAt` (epoch ms): the live
+ * funnel's `receivedAt`, else the stored run's time a stream's reloaded copy
+ * carries in `restoredFrom.at`. Nothing when neither parses, and the engine
+ * uses its own clock.
+ */
+function receivedAtOf(response: ResponseState): { receivedAt?: number } {
+	const at = Date.parse(response.receivedAt ?? response.restoredFrom?.at ?? "");
+	return Number.isFinite(at) && at >= 0 ? { receivedAt: at } : {};
 }

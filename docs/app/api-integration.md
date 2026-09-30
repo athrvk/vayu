@@ -205,8 +205,11 @@ shapes from `sentRequestOf` in `utils/execute-mapping.ts`; issue #1763).
 `RequestBuilderProvider` attaches it - to the `/execute` result on the buffered
 path, and on a stream to the stored run's response at stream end, only when
 that run is the one the snapshot was taken for. The save sends it as the
-create-only **`savedFrom`**: `{ request, statusText, responseTimeMs }`, the
-server's own reason phrase and the response time beside it. The engine builds
+create-only **`savedFrom`**: `{ request, statusText, responseTimeMs,
+receivedAt }`, the server's own reason phrase, the response time and when the
+response came in (epoch ms, from `receivedAt`, or the stored run's
+`restoredFrom.at` on a stream's reloaded copy - the time a cookie's `Max-Age`
+counts from) beside it. The engine builds
 the Postman saved-response shape from it once and stores it for the export. A
 response restored from a stored run has no snapshot, so its save omits
 `savedFrom` and the export regenerates that example.
