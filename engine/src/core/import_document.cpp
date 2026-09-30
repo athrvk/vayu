@@ -1623,6 +1623,16 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 
 json pm_request (const json* item, PostmanCounts& counts);
 
+/// Whether @p auth is a mode Vayu stores but does not send
+/// (`CONFIG_AUTH_TYPES`), at any level: a collection's or folder's reaches
+/// every request inheriting it, so it is counted where it is declared.
+bool is_data_only_auth (const json& auth) {
+    const std::string mode = as_string (prop (&auth, "mode"));
+    return std::any_of (postman::CONFIG_AUTH_TYPES.begin (),
+    postman::CONFIG_AUTH_TYPES.end (),
+    [&mode] (const postman::ConfigAuthType& named) { return mode == named.vayu; });
+}
+
 /**
  * `pm_request`, noting the request's name against every counter it grew, so
  * the preview can say which request to finish by hand. A diff of the counters
@@ -1652,11 +1662,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     json auth            = with_postman_source (
     map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
     prop (rq, "auth"));
-    const std::string mode = auth.at ("mode").get<std::string> ();
-    if (std::any_of (postman::CONFIG_AUTH_TYPES.begin (),
-        postman::CONFIG_AUTH_TYPES.end (), [&mode] (const postman::ConfigAuthType& named) {
-            return mode == named.vayu;
-        })) {
+    if (is_data_only_auth (auth)) {
         counts.non_executable += 1;
     }
     counts.requests += 1;
@@ -1767,6 +1773,11 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
     collection["auth"] = collection_auth (prop (node, "auth"),
     counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
+    if (is_data_only_auth (collection["auth"])) {
+        counts.non_executable += 1;
+        counts.named["non_executable_auth"].push_back (
+        collection["name"].get<std::string> ());
+    }
     if (counts.options.import_scripts) {
         set_event_elements (collection, events);
     }
