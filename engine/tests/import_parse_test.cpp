@@ -1300,6 +1300,30 @@ TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
 }
 
+/// A collection's or folder's data-only auth reaches every request inheriting
+/// it, so it is counted where it is declared - once, named - rather than
+/// nowhere. Mutation check: drop the count in `pm_folder` and this goes red.
+TEST (PostmanImport, CountsADataOnlyAuthOnACollectionOrFolder) {
+    const ImportParse parsed = parse_import (
+    R"({"info":{"name":"Signed API","schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
+        "auth":{"type":"hawk","hawk":[{"key":"authId","value":"id"}]},
+        "item":[
+        {"name":"Reports","auth":{"type":"digest","digest":[{"key":"username","value":"u"}]},
+         "item":[{"name":"R","request":{"method":"GET","url":"https://x.com/r"}}]},
+        {"name":"A","request":{"method":"GET","url":"https://x.com/a"}},
+        {"name":"B","request":{"method":"GET","url":"https://x.com/b"}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& root = parsed.result.at ("collections")[0];
+    EXPECT_EQ (root.at ("auth").at ("mode"), "hawk");
+    EXPECT_EQ (root.at ("children")[0].at ("auth").at ("mode"), "digest");
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
+    EXPECT_EQ (meta.at ("nonExecutableAuthRequests").get<Names> (),
+    (Names{ "Reports", "Signed API" }));
+}
+
 /**
  * A Postman `:name` segment stays in the URL and its `url.variable[]` entry
  * becomes the request's own path row (issue #1764): value, description,

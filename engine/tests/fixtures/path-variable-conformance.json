@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for Postman `:name` path variables (issue #1764). Read by BOTH the engine gtest suite (path_variables_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/path-variables.conformance.test.ts). The engine composes the request (`core::path_variable_segments`, `core::substitute_path_variables`); the app draws the Params tab's Sends line and the code snippets from its own copy (`pathVariableSegments`, `substitutePathVariables`), so a case answered two ways is a request that shows one URL and sends another. Each case: `url`; `rows`, a request's Params rows; `segments`, every `:name` segment of `url` with the offset of its colon and the length of `:name` (a `.suffix` excluded); `composed`, `url` with the rows substituted under the identity resolver. URLs are ASCII so an offset is the same number in both languages.",
+  "$comment": "Cross-language conformance fixture for Postman `:name` path variables (issue #1764). Read by BOTH the engine gtest suite (path_variables_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/path-variables.conformance.test.ts). The engine composes the request (`core::path_variable_segments`, `core::substitute_path_variables`); the app draws the Params tab's Sends line and the code snippets from its own copy (`pathVariableSegments`, `substitutePathVariables`), so a case answered two ways is a request that shows one URL and sends another. Each case: `url`; `rows`, a request's Params rows; `segments`, every `:name` segment of `url` with the offset of its colon and the length of `:name` (a `.suffix` excluded); `composed`, `url` with the rows substituted under the identity resolver, each value percent-encoded with `postman-url-encoder` 3.0.8's `PATH_ENCODE_SET` (the C0 controls, DEL and every byte above it as UTF-8, space, `\"`, `<`, `>`, backtick, `#`, `?`, `{`, `}`; nothing else, so `/`, `%` and the rest of the reserved set pass) with a whole `{{token}}` kept verbatim. URLs are ASCII so an offset is the same number in both languages.",
   "cases": [
     {
       "name": "an IPv6 host and its port are the authority",
@@ -363,7 +363,7 @@
       "composed": "https://h/:{{a.b}}"
     },
     {
-      "name": "a pre-encoded %XX in a value is sent as written",
+      "name": "% is not in the path set, so a pre-encoded %XX in a value is sent as written",
       "url": "https://h/users/:email",
       "rows": [
         {
@@ -382,7 +382,7 @@
       "composed": "https://h/users/a%40b.com"
     },
     {
-      "name": "a bare % in a value is encoded, a malformed triplet too",
+      "name": "a bare % and a malformed triplet in a value are sent as written",
       "url": "https://h/:id",
       "rows": [
         {
@@ -398,10 +398,10 @@
           "length": 3
         }
       ],
-      "composed": "https://h/100%25%20%25zz%20%254"
+      "composed": "https://h/100%%20%zz%20%4"
     },
     {
-      "name": "a / ? # and space in a value are data in one segment",
+      "name": "a / in a value makes segments, and ? # and space are encoded so a value never leaves the path",
       "url": "https://h/:id",
       "rows": [
         {
@@ -417,7 +417,7 @@
           "length": 3
         }
       ],
-      "composed": "https://h/a%20b%2Fc%3Fd%23e"
+      "composed": "https://h/a%20b/c%3Fd%23e"
     },
     {
       "name": "a non-ASCII value is UTF-8 percent-encoded",
@@ -795,7 +795,7 @@
       "composed": "https://h/a-b_c.d~e"
     },
     {
-      "name": "pre-encoded triplets of either case are kept, a trailing % is encoded",
+      "name": "pre-encoded triplets of either case and a trailing % are kept",
       "url": "https://h/:id",
       "rows": [
         {
@@ -811,7 +811,7 @@
           "length": 3
         }
       ],
-      "composed": "https://h/%2f%2F%2F%25"
+      "composed": "https://h/%2f%2F/%"
     },
     {
       "name": "a lone {{ is no token and is encoded",
@@ -831,6 +831,44 @@
         }
       ],
       "composed": "https://h/%7B%7Bx"
+    },
+    {
+      "name": "every ASCII byte of Postman's path encode set is encoded",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "\u0001 \"<>`#?{}",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/%01%20%22%3C%3E%60%23%3F%7B%7D%7F"
+    },
+    {
+      "name": "the reserved set outside the path encode set is sent as typed",
+      "url": "https://h/:id",
+      "rows": [
+        {
+          "key": "id",
+          "value": "user@x.com:12:30;a=b&c+d,e!$'()*[]|^\\",
+          "in": "path"
+        }
+      ],
+      "segments": [
+        {
+          "name": "id",
+          "offset": 10,
+          "length": 3
+        }
+      ],
+      "composed": "https://h/user@x.com:12:30;a=b&c+d,e!$'()*[]|^\\"
     }
   ]
 }

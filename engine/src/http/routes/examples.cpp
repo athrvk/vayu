@@ -27,7 +27,9 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -214,6 +216,9 @@ struct SavedFrom {
     vayu::core::PostmanExportRequest request;
     std::string status_text;
     std::optional<double> response_time_ms;
+    /// When the response came in, the clock a cookie's `Max-Age` counts
+    /// from; nothing counts it from the save.
+    std::optional<std::time_t> received_at;
 };
 
 /// @p json as the exporter's key-ordered JSON. A request body arrives parsed
@@ -243,14 +248,23 @@ nlohmann::ordered_json& out) {
 
 /// The Vayu verb @p text names, in any case, as the request column spells it.
 std::optional<std::string> canonical_method (const std::string& text) {
-    for (const vayu::HttpMethod method : { vayu::HttpMethod::GET,
-         vayu::HttpMethod::POST, vayu::HttpMethod::PUT, vayu::HttpMethod::DELETE,
-         vayu::HttpMethod::PATCH, vayu::HttpMethod::HEAD, vayu::HttpMethod::OPTIONS }) {
-        if (vayu::utils::ascii_lower_equal (text, vayu::to_string (method))) {
-            return std::make_optional<std::string> (vayu::to_string (method));
+    const std::optional<vayu::HttpMethod> method =
+    vayu::parse_method (vayu::utils::ascii_upper (text));
+    return method ? std::make_optional<std::string> (vayu::to_string (*method)) :
+                    std::nullopt;
+}
+
+/// Every verb `parse_method` takes, as a refusal lists them: the enum's
+/// values in order, up to the first one `to_string` has no name for.
+std::string method_names () {
+    std::string out;
+    for (unsigned at = 0;; ++at) {
+        const char* name = vayu::to_string (static_cast<vayu::HttpMethod> (at));
+        if (!vayu::parse_method (name)) {
+            return out;
         }
+        out += (out.empty () ? "" : ", ") + std::string (name);
     }
-    return std::nullopt;
 }
 
 /// `savedFrom.request`: the stored request columns' shapes, as sent.
@@ -266,9 +280,8 @@ vayu::core::PostmanExportRequest& out) {
     }
     if (!verb) {
         return route_error (400,
-        "Invalid 'savedFrom.request.method': must be an HTTP method (GET, "
-        "POST, "
-        "PUT, DELETE, PATCH, HEAD or OPTIONS)");
+        "Invalid 'savedFrom.request.method': must be an HTTP method (" +
+        method_names () + ")");
     }
     out.method     = std::move (*verb);
     const auto url = request.find ("url");
@@ -342,6 +355,21 @@ RouteResult read_saved_from (const nlohmann::json& json, std::optional<SavedFrom
         }
         saved.response_time_ms = time->get<double> ();
     }
+    if (const auto received = found->find ("receivedAt");
+    received != found->end () && !received->is_null ()) {
+        if (!received->is_number () || received->get<double> () < 0) {
+            return route_error (400,
+            "Invalid 'savedFrom.receivedAt': must be a time in milliseconds "
+            "since the epoch, 0 or more");
+        }
+        // Whole seconds, held to what `time_t` holds (2^63 itself does not
+        // convert, hence `>=`).
+        const double seconds = std::floor (received->get<double> () / 1000.0);
+        constexpr auto LAST  = std::numeric_limits<std::time_t>::max ();
+        saved.received_at    = seconds >= static_cast<double> (LAST) ?
+           LAST :
+           static_cast<std::time_t> (seconds);
+    }
     out = std::move (saved);
     return {};
 }
@@ -361,7 +389,8 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
         example.headers = nlohmann::ordered_json::array ();
     }
     x.postman_response = vayu::core::postman_saved_response_text (saved.request,
-    example, saved.status_text, saved.response_time_ms, std::time (nullptr));
+    example, saved.status_text, saved.response_time_ms,
+    saved.received_at.value_or (std::time (nullptr)));
     if (!x.postman_response) {
         vayu::utils::log_warning ("http",
         "Saved example kept without its recorded request: over the size limit",
@@ -647,9 +676,11 @@ void register_request_example_routes (RouteContext& ctx) {
      * bodyTruncated (default false - true when `body` is only the first slice
      * of the response it was captured from), savedFrom (optional, #1763:
      * `{request: {method, url, params?, headers?, body?}, statusText,
-     * responseTimeMs?}` - the request as written when it was sent and the
-     * server's reason phrase, which the engine records as the example's
-     * Postman saved response; a 400 beside a non-null postmanResponse).
+     * responseTimeMs?, receivedAt?}` - the request as written when it was
+     * sent, the server's reason phrase and when the response came in (epoch
+     * ms; a cookie's Max-Age counts from it), which the engine records as the
+     * example's Postman saved response; a 400 beside a non-null
+     * postmanResponse).
      * Returns: the created example, 404 if the request does not exist, 400 on a
      * rejected field, or 409 at the cap.
      */

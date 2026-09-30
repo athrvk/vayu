@@ -213,6 +213,18 @@ TEST (MatchOperations, MatchesAColonPathVariableToItsTemplatedOperation) {
     (std::vector<std::string>{ "getPet" }));
 }
 
+/// An Express-style spec path (`/users/:id`, invalid OpenAPI the importer keeps
+/// verbatim) still matches the request drafted from it, which keeps `:id`.
+/// Mutation check: drop the flattening from `spec_path_shape` and it matches
+/// nothing.
+TEST (MatchOperations, MatchesAColonSpecPathToTheRequestDraftedFromIt) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "{{baseUrl}}/users/:id") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/users/:id", "getUser") };
+    const auto result = match_operations (requests, operations);
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "getUser" }));
+}
+
 TEST (MatchOperations, DoesNotMatchAcrossMethods) {
     const std::vector<MatchableRequest> requests{ request (
     "r1", "DELETE", "{{baseUrl}}/pets/{{petId}}") };

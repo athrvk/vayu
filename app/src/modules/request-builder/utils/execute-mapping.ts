@@ -79,8 +79,10 @@ export function toBodyPayload(request: RequestState): RequestBody {
 /**
  * The request as the user wrote it, in the stored request-column shapes
  * (issue #1763) - the same row mapping the builder's save sends, path rows
- * included, so the engine reads it with the appliers a request save uses.
- * Taken at Send and carried on the response as `sentRequest`.
+ * included. The engine reads it with its own `savedFrom` reader, which checks
+ * only the outer shapes (an HTTP method, a string url, arrays of rows, an
+ * object body), not with a request save's appliers. Taken at Send and
+ * carried on the response as `sentRequest`.
  */
 export function sentRequestOf(request: RequestState): ExampleSentRequest {
 	return {

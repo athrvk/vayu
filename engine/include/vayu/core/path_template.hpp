@@ -108,23 +108,29 @@ struct PathVariableSegment {
 [[nodiscard]] bool is_path_variable_row (const nlohmann::json& row);
 
 /**
- * @brief @p value percent-encoded as one path segment, with every
- *        `{{variable}}` token in it kept verbatim.
+ * @brief @p value percent-encoded the way Postman writes a path variable's
+ *        value into the path, with every `{{variable}}` token in it kept
+ *        verbatim.
  *
- * RFC 3986's unreserved set passes through and every other byte is `%XX`
- * (`vayu::utils::url_encode`), so a `/`, `?`, `#` or a bare `%` in a value is
- * data in one segment rather than structure. A `%XX` triplet already in the
- * value is copied as written, as `postman-url-encoder` does: a value imported
- * pre-encoded (`a%40b.com`) goes out as Postman sends it, not encoded twice.
- * A token is kept whole: composition never writes a value that still holds
- * one (it waits, see @ref settle_path_variables), so a token here is one
- * nothing answered, and it goes out as the name it is rather than `%7B%7B`.
+ * Postman joins the raw value into the path (`postman-collection`'s
+ * `Url.getPath`) and then encodes the whole path with `postman-url-encoder`'s
+ * `PATH_ENCODE_SET`: the C0 controls, every byte above `~` (UTF-8, `%XX`
+ * uppercase), space, `"`, `<`, `>`, backtick, `#`, `?`, `{` and `}`. Every
+ * other byte goes out as written, so a `/` in a value makes more segments
+ * (`a b/c` sends `a%20b/c`), `@`, `:`, `%` and the rest of the reserved set
+ * are sent as typed (`a%40b.com` is not encoded twice), and a `?` or `#` is
+ * `%3F` / `%23`, so a value never ends the path. The one departure is a
+ * token: composition never writes a value that still holds one (it waits,
+ * see @ref settle_path_variables), so a token here is one nothing answered,
+ * and it goes out as the name it is rather than `%7B%7B`, as an unanswered
+ * token anywhere else in a Vayu URL does.
  */
-[[nodiscard]] std::string encode_path_segment_value (std::string_view value);
+[[nodiscard]] std::string encode_path_variable_value (std::string_view value);
 
 /// The last enabled `in: "path"` row of @p rows whose key is @p name, or
-/// `nullptr` - Postman's `VariableList` answers a duplicated key with its last
-/// enabled entry.
+/// `nullptr`. Postman's `VariableList` answers a duplicated key with its
+/// last entry whatever its `disabled` flag (its UI has no toggle for a path
+/// variable); Vayu has one, and a disabled row answers nothing.
 [[nodiscard]] const nlohmann::json*
 find_path_variable_row (const nlohmann::json& rows, std::string_view name);
 
@@ -137,13 +143,13 @@ find_path_variable_row (const nlohmann::json& rows, std::string_view name);
  * resolution); a value that resolves to nothing leaves the
  * segment literal, as Postman's `Url.getPath` and Insomnia's
  * `applyPathParametersToUrl` both do. Otherwise the resolved value is written
- * through @ref encode_path_segment_value in place of `:name`, and a suffix
+ * through @ref encode_path_variable_value in place of `:name`, and a suffix
  * after the name stays. A URL with no `:name` segment, or rows with no path
  * row, come back unchanged.
  *
  * @p encode false writes the resolved value as typed (issue #1765, Postman's
- * `disableUrlEncoding`): a `/` in it is a segment boundary, as Postman's own
- * `toNodeUrl (url, disableEncoding)` sends it.
+ * `disableUrlEncoding`): Postman's own `toNodeUrl (url, disableEncoding)` skips
+ * `encodePath`, so none of the path encode set is applied.
  */
 template <typename Resolve>
 std::string substitute_path_variables (const std::string& url,
@@ -174,7 +180,7 @@ bool encode = true) {
             continue;
         }
         out.append (url, copied, segment.offset - copied);
-        out += encode ? encode_path_segment_value (resolved) : resolved;
+        out += encode ? encode_path_variable_value (resolved) : resolved;
         copied = segment.offset + segment.length;
     }
     out.append (url, copied);
@@ -204,13 +210,14 @@ enum class PathSettle : std::uint8_t {
 
 /**
  * @brief Write @p request's waiting path variables into their `:name`
- *        segments, each value encoded as one segment, and forget them.
+ *        segments, each value encoded as Postman encodes one, and forget them.
  *
  * The same writing composition does (@ref substitute_path_variables with the
  * value already resolved), deferred to the pass that answered the value: a
- * data cell `a b/c` bound into `/users/:id` goes out as `/users/a%20b%2Fc`,
- * where joining it into a composed `/users/{{id}}` would have sent two raw
- * segments. An empty value leaves its segment literal, as at composition.
+ * data cell `a b?c` bound into `/users/:id` goes out as `/users/a%20b%3Fc`,
+ * where joining it into a composed `/users/{{id}}` would have sent a raw
+ * space and started the query. An empty value leaves its segment literal, as
+ * at composition.
  */
 void settle_path_variables (vayu::Request& request, PathSettle which);
 

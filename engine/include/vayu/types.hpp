@@ -292,11 +292,12 @@ struct Request {
      * @brief The `:name` segments of `url` still waiting for their value.
      *
      * Composition writes a path variable's value into its segment, encoded as
-     * one segment (`core::encode_path_segment_value`). A value that still holds
-     * a token after composition - a data column bound per iteration, a deferred
-     * `{{$guid}}`, a variable the pre-request script sets - cannot be encoded
-     * yet, because encoding is a property of the *answer*: joined into the URL
-     * afterwards, `a b/c` would go out as two raw segments. So its segment
+     * Postman encodes one (`core::encode_path_variable_value`). A value that
+     * still holds a token after composition - a data column bound per
+     * iteration, a deferred `{{$guid}}`, a variable the pre-request script
+     * sets - cannot be encoded yet, because encoding is a property of the
+     * *answer*: joined into the URL afterwards, `a b?c` would go out with a raw
+     * space and a query. So its segment
      * stays `:name` in `url` and the value waits here, read from the payload's
      * `params` (the `in: "path"` rows composition left), until the bind or the
      * residual pass answers it and `core::settle_path_variables` writes it in.

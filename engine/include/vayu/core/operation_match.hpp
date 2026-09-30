@@ -155,7 +155,8 @@ struct RequestUrlParts {
 
 /**
  * A spec path (`/pets/{petId}`) reduced to the same shape a request URL reduces
- * to, so the two are comparable.
+ * to, so the two are comparable - an Express-style `/pets/:petId` included,
+ * flattened as a request's `:petId` is.
  */
 [[nodiscard]] std::string spec_path_shape (std::string_view path);
 

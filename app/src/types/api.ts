@@ -322,8 +322,9 @@ export interface CreateRequestExampleRequest {
 /**
  * The request as the user wrote it at Send (issue #1763): `{{vars}}`
  * unresolved, the request's own URL before any redirect, path rows included.
- * The stored request-column shapes, so the engine reads it with the same
- * appliers as a request save. Auth is deliberately not part of it.
+ * The stored request-column shapes; the engine's `savedFrom` reader checks
+ * only their outer shapes (not a request save's appliers) before mapping them
+ * as the export maps a request. Auth is deliberately not part of it.
  */
 export interface ExampleSentRequest {
 	method: string;
@@ -340,6 +341,12 @@ export interface ExampleSavedFrom {
 	statusText: string;
 	/** Absent writes `responseTime: null`. */
 	responseTimeMs?: number;
+	/**
+	 * When the response came in, in epoch milliseconds (0 or more) - the
+	 * time a cookie's `Max-Age` counts from. Absent uses the engine's clock
+	 * at the save.
+	 */
+	receivedAt?: number;
 }
 
 /** The rows as written - one drop is one transaction, so this is all of them. */

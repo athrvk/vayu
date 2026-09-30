@@ -256,6 +256,44 @@ describe("save response as example", () => {
 		});
 	});
 
+	it("sends when the response came in, the time a cookie's Max-Age counts from", async () => {
+		const sentRequest: ExampleSentRequest = {
+			method: "GET",
+			url: "{{baseUrl}}/login",
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+		};
+		// Buffered: the live funnel's own `receivedAt`.
+		state.response = okResponse({ sentRequest, receivedAt: "2026-01-01T00:00:00.500Z" });
+		renderViewer();
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].savedFrom.receivedAt).toBe(1767225600500);
+		cleanup();
+
+		// Stream: the reloaded copy carries the stored run's time instead.
+		state.response = okResponse({
+			sentRequest,
+			restoredFrom: { runId: "run_1", at: "2026-01-02T00:00:00.000Z" },
+		});
+		renderViewer();
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(2));
+		expect(createRequestExample.mock.calls[1][1].savedFrom.receivedAt).toBe(1767312000000);
+		cleanup();
+
+		// Neither: absent, and the engine uses its own clock.
+		state.response = okResponse({ sentRequest });
+		renderViewer();
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(3));
+		expect("receivedAt" in createRequestExample.mock.calls[2][1].savedFrom).toBe(false);
+	});
+
 	it("sends no savedFrom for a restored response, which has no Send snapshot", async () => {
 		state.response = okResponse({
 			restoredFrom: { runId: "run_1", at: "2026-01-01T00:00:00Z" },

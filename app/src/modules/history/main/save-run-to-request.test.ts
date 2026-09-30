@@ -331,6 +331,24 @@ describe("buildChangeset", () => {
 		]);
 	});
 
+	it("keeps a path value the run left pending rather than blanking the row (#1764)", () => {
+		const live = liveRequest({
+			url: "https://api.example.test/users/:id",
+			params: [{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" }],
+		});
+		const snapshot = {
+			...run().configSnapshot,
+			url: "https://api.example.test/users/:id",
+			params: [{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" }],
+		};
+		const seed = seedFromRun(run({ configSnapshot: snapshot } as Partial<Run>), live);
+
+		expect(applyRunToRequest(seed, live).params).toEqual([
+			{ key: "id", value: "{{fromScript}}", enabled: true, in: "path" },
+		]);
+		expect(buildChangeset(seed, live).find((i) => i.field === "Params")).toBeUndefined();
+	});
+
 	it("shows a Protocol diff row when the run's requested protocol differs from the request's", () => {
 		// live: "auto" (fixture default); run recorded "http2".
 		const live = liveRequest();

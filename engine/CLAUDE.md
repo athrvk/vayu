@@ -387,7 +387,10 @@ logged as a warning: it means a client skipped composition.
   request's `collectionId` / `name` / `method` / `url`) rejects `null` with a
   `400`. The rule lives in one place per side, `apply_*_field` in
   `engine/include/vayu/http/routes.hpp` and `apiService.updateX` in
-  `app/src/services/api.ts`; add fields there, never per handler. **The engine
+  `app/src/services/api.ts`; add fields there, never per handler. The one
+  deliberate exception is an example's `savedFrom`, read by the create handler
+  after `apply_request_example_fields`: it describes a live send, so it is
+  create-only and `POST /import/apply` must not take it. **The engine
   owns every id** (#97): a create carrying an `id` is a `400` (presence alone,
   `null` included), and a `PUT` whose body `id` disagrees with the path is a
   `400`; `reject_client_supplied_id` / `reject_mismatched_body_id` in

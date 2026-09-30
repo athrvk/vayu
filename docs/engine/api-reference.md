@@ -1518,6 +1518,14 @@ the write is a `400` naming the index, the kind and the field. The only script
 source - `GET /requests/:id` and every list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
+**`auth.postman`**, the Postman block an import kept beside the mapped auth
+(see [`db-schema.md`](db-schema.md)), is kept on a write only while mapping it
+through the Postman importer still gives the auth being written; otherwise it
+is dropped. So a changed credential never leaves the old one behind in the
+stored block, whichever client wrote it, and a save that changed nothing keeps
+it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
+`POST /import/apply` apply the same rule.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
@@ -1806,7 +1814,9 @@ request is edited.
     "body": {"mode": "none"}            // Optional object, default {"mode":"none"}
   },
   "statusText": "Totally Fine",         // Required string; "" = the status table's
-  "responseTimeMs": 123                 // Optional number, 0 or more; absent = null
+  "responseTimeMs": 123,                // Optional number, 0 or more; absent = null
+  "receivedAt": 1767225600000           // Optional epoch ms, 0 or more: when the
+                                        // response came in; absent = the save's clock
 }
 ```
 
@@ -1816,8 +1826,12 @@ body and url as the export writes a request's, with no `auth`), `status`
 own rows), `cookie` (one entry per cookie the enabled `Set-Cookie` rows set,
 in Postman's member order: `expires`, `hostOnly`, `httpOnly`, `domain`, `path`,
 `secure`, `session`, `value`, `key`; `expires` is JavaScript's date text in
-UTC, from `Max-Age` counted from the save when there is one, else `Expires`,
-and `"Invalid Date"` with `session: true` for a cookie with neither),
+UTC, from `Max-Age` counted from `receivedAt` (the engine's clock at the save
+when absent) when there is one, else `Expires`, and `"Invalid Date"` with
+`session: true` for a cookie with neither; the attributes are read as RFC 6265
+and Postman's cookie store read them: an empty `Domain` is ignored, a leading
+`.` dropped, a `Path` not starting with `/` is `/`, and the space around `=` is
+not part of a name or value),
 `responseTime` (whole milliseconds) and `body` (`null`). When it
 would be over the 1 MiB cap (a large request body) the example is still
 created, without it, and a warning is logged; the export then regenerates
@@ -1846,8 +1860,8 @@ is not a string holding a JSON object or is over its cap. `400` naming the field
 on a `savedFrom` that is not an object, whose `request` is not an object, whose
 `method` is missing or not an HTTP method, whose `url` is not a string, whose
 `params` or `headers` is not an array, whose `body` is not an object, whose
-`statusText` is not a string or whose `responseTimeMs` is negative or not a
-number, and on a `savedFrom` beside a non-null `postmanResponse` (two writers of
+`statusText` is not a string, whose `responseTimeMs` or `receivedAt` is
+negative or not a number, and on a `savedFrom` beside a non-null `postmanResponse` (two writers of
 one column). `409` when the request
 already holds the maximum number of examples.
 
@@ -3535,9 +3549,11 @@ recorded, not the request's current state), `responseTime`,
 `_postman_previewtype` and any other member as stored; `name`, `code` and
 `body` from the example's own fields. The status text is the stored one while
 `status` is still the code it was recorded with, `header[]` (its `name` fields
-and number values included) and `cookie` while `headers` still reads the same
-(after an edit `cookie` is rebuilt from the enabled `Set-Cookie` rows, so a
-removed row's value is not exported), and the
+and number values included) while `headers` still reads the same, `cookie`
+while the enabled `Set-Cookie` rows (name in any case, and value) still read as
+the recorded `header[]` has them (an edit to those rows rebuilds `cookie` from
+them, a `Max-Age` counted from the export, so a removed row's value is not
+exported; an unrelated header edit keeps it byte for byte), and the
 preview language and type while the declared Content-Type is unchanged; an
 edit to any of those regenerates the part it made stale. A member the source
 left out (`code`, `status`) stays out until an edit gives it a value. The
@@ -4751,15 +4767,22 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
   `{{variable}}` token is opaque, a backslash is a `/`, and a port
   (`host:8080`), the query and the fragment are never read.
 - Only an **enabled** row answers; among several rows of one key the **last**
-  enabled one does (Postman's `VariableList`). A segment with no such row
+  enabled one does. Postman's `VariableList` answers with the last row whatever
+  its `disabled` flag, but Postman's editor has no toggle for a path variable;
+  Vayu's does, and a disabled row answers nothing. A segment with no such row
   stays literal, which is also how every request stored before #1764 composes:
   a `:x` segment with no path row is sent as written.
-- The value is `{{var}}`-resolved exactly as the URL is, then written as **one
-  percent-encoded segment**: RFC 3986's unreserved set (`A-Z a-z 0-9 - _ . ~`)
-  passes through and every other byte is `%XX` with uppercase hex, so a `/`,
-  `?`, `#` or a bare `%` in a value is data, not structure. A `%XX` triplet
-  already in the value is sent as written (`postman-url-encoder`'s
-  `isPreEncoded`), so an imported `a%40b.com` is not encoded twice.
+- The value is `{{var}}`-resolved exactly as the URL is, then written in place
+  of `:name` percent-encoded as Postman encodes it: Postman joins the raw value
+  into the path (`Url.getPath`) and encodes the path with
+  `postman-url-encoder`'s `PATH_ENCODE_SET`, which is the C0 controls, DEL and
+  every byte above it (UTF-8, `%XX` with uppercase hex), space, `"`, `<`, `>`,
+  `` ` ``, `#`, `?`, `{` and `}` - and nothing else. So a `/` in a value makes
+  more segments (`a b/c` sends `/users/a%20b/c`), `@ : , ; = & + ! $ ' ( ) *`
+  and `%` go out as typed (`user@x.com`, `12:30`, `100%`, and an imported
+  `a%40b.com` is not encoded twice), and a `?` or `#` is `%3F` / `%23`, so a
+  value never ends the path. A whole `{{token}}` in the value is kept verbatim
+  rather than encoded (see the next point).
 - A value that still holds a `{{token}}` after that resolution - a bound data
   column, a deferred `{{$guid}}`, a name a pre-request script sets - is **not
   written yet**: its segment stays `:name` in the composed `url`, and the row
@@ -4768,7 +4791,7 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
   far as composition could. Whatever answers the token later - the
   per-iteration bind, or the residual pass after the pre-request script -
   writes the answer into the segment through the same encoding, so a data cell
-  `a b/c` goes out as `/users/a%20b%2Fc`, never as two raw segments. A token
+  `a b?c` goes out as `/users/a%20b%3Fc`, never with a raw space and a query. A token
   nothing answers is written verbatim, as composition keeps one. Until then a
   pre-request script reads `pm.request.url` with the `:name` still in it.
 - A value that resolves to the **empty string leaves the segment literal**

@@ -175,8 +175,8 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
 
     visit (request.url, FieldContext::Plain);
-    // A path variable's value is joined raw and encoded as one segment when it
-    // is written into the URL (`settle_path_variables`), which is why it is a
+    // A path variable's value is joined raw and encoded (Postman's path set)
+    // when it is written into the URL (`settle_path_variables`), which is why it is a
     // field of its own rather than text already in the URL (issue #1764).
     for (auto& variable : request.path_variables) {
         visit (variable.value, FieldContext::Plain);

@@ -148,9 +148,11 @@ export function pathRowsFromUrl(url: string): KeyValueItem[] {
 }
 
 /**
- * The path row that answers `name`: the last enabled one with that key, as
- * Postman's `VariableList` and the engine's `find_path_variable_row` pick it.
- * An `enabled` that is absent (or not a boolean) counts as enabled.
+ * The path row that answers `name`: the last enabled one with that key, as the
+ * engine's `find_path_variable_row` picks it. Postman's `VariableList` answers
+ * with the last entry whatever its `disabled` flag (its UI has no toggle for a
+ * path variable); Vayu has one, so a disabled row answers nothing. An
+ * `enabled` that is absent (or not a boolean) counts as enabled.
  */
 function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string): T | undefined {
 	for (let i = rows.length - 1; i >= 0; i--) {
@@ -236,48 +238,38 @@ export function displayPathRows(existing: readonly KeyValueItem[], url: string):
 
 const encoder = new TextEncoder();
 
-/** RFC 3986's unreserved set, the only bytes a path segment value keeps. */
-const UNRESERVED = /[A-Za-z0-9\-._~]/;
-
-/** A `%XX` triplet at the start: already encoded, so copied as written. */
-const PRE_ENCODED = /^%[0-9A-Fa-f]{2}/;
-
 /**
- * Every byte outside the unreserved set as `%XX` (uppercase), over UTF-8 -
- * except a `%XX` triplet already in `text`, copied as written
- * (`postman-url-encoder`'s `isPreEncoded`), so `a%40b.com` is not sent as
- * `a%2540b.com`. A `%` that starts no triplet is data and is encoded.
+ * The ASCII bytes of `postman-url-encoder` 3.0.8's `PATH_ENCODE_SET`
+ * (`encoder/encode-set.js`) beyond the C0 controls and DEL: the fragment
+ * set's space `"` `<` `>` and backtick, then the path set's own `#` `?` `{`
+ * `}`. Every byte above `~` is in it too; nothing else is.
  */
-function urlEncode(text: string): string {
+const PATH_ENCODE_ASCII = new Set([...' "<>`#?{}'].map((char) => char.charCodeAt(0)));
+
+const inPathEncodeSet = (byte: number) => byte < 0x20 || byte > 0x7e || PATH_ENCODE_ASCII.has(byte);
+
+/** Each byte of `text` (UTF-8) in Postman's path encode set as `%XX` (uppercase). */
+function percentEncodePath(text: string): string {
 	let out = "";
-	for (let at = 0; at < text.length;) {
-		const triplet = PRE_ENCODED.exec(text.slice(at, at + 3));
-		if (triplet) {
-			out += triplet[0];
-			at += 3;
-			continue;
-		}
-		const char = String.fromCodePoint(text.codePointAt(at) ?? 0);
-		at += char.length;
-		if (UNRESERVED.test(char)) {
-			out += char;
-			continue;
-		}
-		for (const byte of encoder.encode(char)) {
-			out += `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
-		}
+	for (const byte of encoder.encode(text)) {
+		out += inPathEncodeSet(byte)
+			? `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
+			: String.fromCharCode(byte);
 	}
 	return out;
 }
 
 /**
- * `value` percent-encoded as one path segment, with every `{{variable}}` token
- * in it kept verbatim - the engine's `encode_path_segment_value`. A `/`, `?`,
- * `#` or a bare `%` in a value is data in one segment rather than structure, a
- * `%XX` already in it is sent as written; a token is kept whole, so a
- * snippet shows the name a run answers rather than `%7B%7B`.
+ * `value` percent-encoded as Postman writes a path variable's value into the
+ * path, with every `{{variable}}` token in it kept verbatim - the engine's
+ * `encode_path_variable_value`. Postman joins the raw value and encodes the
+ * path with `PATH_ENCODE_SET`, so a `/` makes more segments, `@ : , ; = & + %`
+ * and the rest of the reserved set are sent as typed (a `%XX` is not encoded
+ * twice), and `?` / `#` are `%3F` / `%23`, so a value never ends the path. A
+ * token is kept whole, so a snippet shows the name a run answers rather than
+ * `%7B%7B`.
  */
-export function encodePathSegmentValue(value: string): string {
+export function encodePathVariableValue(value: string): string {
 	let out = "";
 	let plain = 0;
 	for (let at = 0; at < value.length;) {
@@ -286,10 +278,10 @@ export function encodePathSegmentValue(value: string): string {
 			at++;
 			continue;
 		}
-		out += urlEncode(value.slice(plain, at)) + value.slice(at, end);
+		out += percentEncodePath(value.slice(plain, at)) + value.slice(at, end);
 		plain = at = end;
 	}
-	return out + urlEncode(value.slice(plain));
+	return out + percentEncodePath(value.slice(plain));
 }
 
 /**
@@ -301,10 +293,10 @@ export function encodePathSegmentValue(value: string): string {
  * resolution; the identity where the snippet stays templated); a value that
  * resolves to nothing leaves the segment literal (`:id` goes out as written,
  * as Postman sends it). Otherwise the resolved value is written through
- * `encodePathSegmentValue` in place of `:name`, and a `.suffix` stays.
+ * `encodePathVariableValue` in place of `:name`, and a `.suffix` stays.
  *
  * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the value
- * goes in as written, so a `/` in it is structure (two segments), exactly as
+ * goes in as written, skipping Postman's path encode set entirely, exactly as
  * the engine's `substitute_path_variables` does with the flag set.
  */
 export function substitutePathVariables(
@@ -323,7 +315,7 @@ export function substitutePathVariables(
 		if (!resolved) continue;
 		out +=
 			url.slice(copied, segment.offset) +
-			(encode ? encodePathSegmentValue(resolved) : resolved);
+			(encode ? encodePathVariableValue(resolved) : resolved);
 		copied = segment.offset + segment.length;
 	}
 	return out + url.slice(copied);

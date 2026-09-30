@@ -498,7 +498,12 @@ A Postman import may add `postman` to any of these: the document's own `auth`
 block (`{"type":"oauth2","oauth2":[{"key","value","type"}]}`), kept when the
 Postman exporter could not otherwise write it back as it was. Nothing sends
 it; the exporter writes it verbatim while it still maps to the stored auth,
-and every secret-blanking export blanks its credential attributes.
+and every secret-blanking export blanks its credential attributes, the PKCE
+`code_verifier` and the credentials among an `oauth2` block's
+`tokenRequestParams` / `authRequestParams` / `refreshRequestParams` rows
+included. Every write of an `auth` column drops it once it no longer maps to
+the auth being written (`without_stale_postman_source`), so an edited
+credential does not stay behind in it.
 
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
@@ -735,8 +740,9 @@ language and type, cookies, the response time, and the header rows as written
 (`name` fields, numeric values). The Postman export is the one reader
 (`core/postman_export.cpp`): it writes `originalRequest`,
 `responseTime` and unknown members back as stored, and the status text,
-`header[]`, `cookie` and preview members only while `status` and `headers` still say
-what was imported, regenerating them otherwise - so an edit made in Vayu is
+`header[]` and preview members only while `status` and `headers` still say
+what was imported, and `cookie` while the enabled `Set-Cookie` rows do,
+regenerating them otherwise - so an edit made in Vayu is
 never contradicted by a stale copy. An import or a save in the app writes
 it: `POST /import/apply` and `POST /requests/:id/examples` accept a string that
 parses as a JSON object (capped at

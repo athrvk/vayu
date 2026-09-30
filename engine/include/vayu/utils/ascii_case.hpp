@@ -39,6 +39,7 @@
  * lowered copy built (`vayu::CaseInsensitiveLess`, and the four sites that
  * compared header names by hand). They agree by construction - the string and
  * the comparison are both written in terms of the character fold.
+ * `ascii_upper` is the same fold the other way, for an HTTP method name.
  */
 
 #include <algorithm>
@@ -73,6 +74,22 @@ inline std::string ascii_lower (std::string_view text) {
     std::transform (lowered.begin (), lowered.end (), lowered.begin (),
     [] (char c) { return ascii_lower (c); });
     return lowered;
+}
+
+/// @brief @p c raised if it is an ASCII lower-case letter, unchanged
+/// otherwise; the mirror of `ascii_lower`, safe on a byte above 127 the same
+/// way.
+constexpr char ascii_upper (char c) {
+    return (c >= 'a' && c <= 'z') ? static_cast<char> (c - 'a' + 'A') : c;
+}
+
+/// @brief @p text with every ASCII lower-case letter raised - locale-free,
+/// unlike `std::toupper`.
+inline std::string ascii_upper (std::string_view text) {
+    std::string raised (text);
+    std::transform (raised.begin (), raised.end (), raised.begin (),
+    [] (char c) { return ascii_upper (c); });
+    return raised;
 }
 
 /**

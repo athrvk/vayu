@@ -48,6 +48,18 @@ export function isEngineStartFailure(error: unknown): boolean {
 }
 
 /**
+ * A retry budget of @p budget attempts that, like the default predicate, does
+ * not spend it on an engine that is still starting. A query that states a
+ * bare number for `retry` replaces `shouldRetryQuery` outright, and with it
+ * the start-window rule, so a launch-time query with its own budget states it
+ * through this instead.
+ */
+export function retryWithin(budget: number) {
+	return (failureCount: number, error: unknown): boolean =>
+		isEngineStartFailure(error) || failureCount < budget;
+}
+
+/**
  * Exported so a query with its own retry rule can be checked against this one.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {

@@ -8,7 +8,6 @@
 #include "vayu/core/path_template.hpp"
 
 #include "vayu/utils/ascii_case.hpp"
-#include "vayu/utils/encoding.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -277,32 +276,48 @@ find_path_variable_row (const nlohmann::json& rows, std::string_view name) {
 
 namespace {
 
-bool is_hex_digit (char ch) {
-    return std::isxdigit (static_cast<unsigned char> (ch)) != 0;
+/**
+ * Whether @p byte is in `postman-url-encoder`'s `PATH_ENCODE_SET` (3.0.8,
+ * `encoder/encode-set.js`): the C0 controls and every byte above `~` (so each
+ * byte of a UTF-8 sequence), then the fragment set's space `"` `<` `>` and
+ * backtick, then the path set's own `#` `?` `{` `}`. Nothing else - `/`, `%`,
+ * `@`, `:`, a backslash and the rest of the reserved set go out as written.
+ */
+bool in_postman_path_encode_set (unsigned char byte) {
+    if (byte < 0x20 || byte > 0x7E) {
+        return true;
+    }
+    switch (byte) {
+    case ' ':
+    case '"':
+    case '#':
+    case '<':
+    case '>':
+    case '?':
+    case '`':
+    case '{':
+    case '}': return true;
+    default: return false;
+    }
 }
 
-/// @p text through `url_encode`, except that a `%XX` triplet already in it is
-/// copied as written - `postman-url-encoder`'s `isPreEncoded` - so a value
-/// imported pre-encoded (`a%40b.com`) is sent as it was, not as `a%2540b.com`.
-/// A `%` that starts no triplet is data and is encoded.
 void append_encoded (std::string& out, std::string_view text) {
-    std::size_t plain = 0;
-    for (std::size_t at = 0; at + 2 < text.size (); ++at) {
-        if (text[at] != '%' || !is_hex_digit (text[at + 1]) ||
-        !is_hex_digit (text[at + 2])) {
+    static constexpr std::string_view hex = "0123456789ABCDEF";
+    for (const char ch : text) {
+        const auto byte = static_cast<unsigned char> (ch);
+        if (!in_postman_path_encode_set (byte)) {
+            out += ch;
             continue;
         }
-        out += vayu::utils::url_encode (text.substr (plain, at - plain));
-        out += text.substr (at, 3);
-        plain = at + 3;
-        at += 2;
+        out += '%';
+        out += hex[byte >> 4U];
+        out += hex[byte & 0x0FU];
     }
-    out += vayu::utils::url_encode (text.substr (plain));
 }
 
 } // namespace
 
-std::string encode_path_segment_value (std::string_view value) {
+std::string encode_path_variable_value (std::string_view value) {
     std::string out;
     std::size_t plain = 0;
     for (std::size_t at = 0; at < value.size ();) {

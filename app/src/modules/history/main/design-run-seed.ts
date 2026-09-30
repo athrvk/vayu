@@ -22,7 +22,9 @@
 import type { Run, Request, RequestAuth, ScriptPart, ElementDef, KeyValueEntry } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
-import { paramsFromUrl } from "@/modules/request-builder/utils/url";
+import { parseQueryParams } from "@/modules/request-builder/utils/url";
+import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
+import { generateId } from "@/lib/id";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
@@ -40,6 +42,12 @@ interface DesignSnapshot {
 	method?: string;
 	url?: string;
 	headers?: Record<string, string>;
+	/**
+	 * The path rows composition could not write into `url` (issue #1764): a
+	 * value still holding a token, left at `:name` for the send to answer.
+	 * Absent when every `:name` was written, which is the usual case.
+	 */
+	params?: KeyValueEntry[];
 	body?: {
 		mode?: string;
 		content?: string;
@@ -120,6 +128,28 @@ function toHeaderItems(headers: Record<string, string> | undefined) {
 	);
 }
 
+/**
+ * The copy's Params rows: the URL's query, then the path rows the run sent.
+ *
+ * A `:name` still in the recorded URL is one composition left for the send to
+ * answer (its value held a token), and the value is in the snapshot's own
+ * `params`, not in the URL - so a copy seeded from the URL alone would replay
+ * `:name` literally, and "Save to request" would blank the row. A name the
+ * snapshot has no row for (a run recorded before #1764) gets an empty one.
+ */
+function paramsFromSnapshot(snapshot: DesignSnapshot) {
+	const url = snapshot.url ?? "";
+	const recorded = pathRowsOf(Array.isArray(snapshot.params) ? snapshot.params : []).map(
+		(row) => ({ ...row, id: generateId() })
+	);
+	const held = new Set(recorded.map((row) => row.key));
+	return [
+		...parseQueryParams(url),
+		...recorded,
+		...pathRowsFromUrl(url).filter((row) => !held.has(row.key)),
+	];
+}
+
 /** The request's own part, or "" when the run predates script parts. */
 function ownScript(parts: ScriptPart[] | undefined): string {
 	return parts?.find((p) => p.origin === "request")?.script ?? "";
@@ -176,7 +206,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			collectionId: null,
 			method: (snapshot.method ?? "GET") as RequestState["method"],
 			url: snapshot.url ?? "",
-			params: paramsFromUrl(snapshot.url ?? ""),
+			params: paramsFromSnapshot(snapshot),
 			headers,
 			bodyMode,
 			body: body?.content ?? "",

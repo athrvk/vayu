@@ -727,10 +727,28 @@ TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
     PostmanExportRequest aws   = request ("aws", "u");
     aws.auth                   = ordered{ { "mode", "aws" },
                           { "config", { { "accessKey", "A" }, { "secretKey", "S" }, { "region", "r" } } } };
-    root.requests              = { basic, key, oauth, aws };
+    // An imported OAuth 2.0 block kept as the auth's source: its PKCE
+    // verifier and the credentials in its extra request parameters are
+    // nested where a top-level walk does not look.
+    const ordered source = ordered::parse (R"({"type":"oauth2","oauth2":[
+        {"key":"code_verifier","value":"verifier-1","type":"string"},
+        {"key":"tokenRequestParams","value":[
+            {"key":"client_secret","value":"param-secret","enabled":true,"send_as":"request_body"},
+            {"key":"client_assertion","value":"{{assertion}}","enabled":true,"send_as":"request_body"},
+            {"key":"audience","value":"api","enabled":true,"send_as":"request_body"}],"type":"any"},
+        {"key":"refreshRequestParams","value":[
+            {"key":"refresh_token","value":"rt-1","enabled":true,"send_as":"request_body"}],"type":"any"},
+        {"key":"grant_type","value":"authorization_code_with_pkce","type":"string"}]})");
+    PostmanExportRequest nested = request ("nested", "u");
+    nested.auth                 = vayu::core::postman_auth_mapping (source);
+    nested.auth["postman"]      = source;
+    root.requests               = { basic, key, oauth, aws, nested };
 
     const auto blanked = run (root, /*secrets=*/false);
-    EXPECT_EQ (blanked.notes.secrets_omitted, 7);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 10);
+    for (const char* secret : { "verifier-1", "param-secret", "rt-1" }) {
+        EXPECT_EQ (blanked.text.find (secret), std::string::npos) << secret;
+    }
     ordered doc = ordered::parse (blanked.text);
     // A whole-value `{{variable}}` reference names a secret without being one.
     EXPECT_EQ (doc["auth"]["bearer"][0]["value"], "{{token}}");
@@ -746,12 +764,18 @@ TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][0]["key"], "region");
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][1]["value"], "");
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][2]["value"], "");
+    const ordered params =
+    doc["item"][4]["request"]["auth"]["oauth2"][1]["value"];
+    EXPECT_EQ (params[1]["value"], "{{assertion}}")
+    << "a reference is not a secret";
+    EXPECT_EQ (params[2]["value"], "api");
 
     const auto kept = run (root, /*secrets=*/true);
     EXPECT_EQ (kept.notes.secrets_omitted, 0);
     ordered clear = ordered::parse (kept.text);
     EXPECT_EQ (clear["variable"][0]["value"], "k");
     EXPECT_EQ (clear["item"][0]["request"]["auth"]["basic"][1]["value"], "pw");
+    EXPECT_NE (kept.text.find ("param-secret"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +945,158 @@ TEST (PostmanExport, ASavedResponsesCookiesAreWrittenAsPostmanWritesThem) {
     << "an Expires that does not parse is no expiry";
     EXPECT_EQ (cookies[2]["session"], true);
     EXPECT_EQ (cookies[2]["httpOnly"], true);
+}
+
+/// The `cookie[]` a save records for the Set-Cookie header @p value, as
+/// received at @p received_at.
+ordered saved_cookies (const std::string& value, std::time_t received_at) {
+    PostmanExportExample example;
+    example.headers = ordered::array ({ row ("Set-Cookie", value) });
+    const auto text = vayu::core::postman_saved_response_text (
+    request ("r", "u"), example, "", std::nullopt, received_at);
+    return text ? ordered::parse (*text).at ("cookie") : ordered ();
+}
+
+// 2026-01-01T00:00:00Z.
+constexpr std::time_t NEW_YEAR_2026 = 1767225600;
+
+// An expiry reads the same on every platform: ASP.NET's "never"
+// (year 9999) and a date before 1970, which Windows' `_gmtime64_s` refuses,
+// are JavaScript's date text, not "Invalid Date". Mutation check: have
+// `js_date_utc` refuse a time past 32535215999 or below 0 (what
+// `_gmtime64_s` refuses) and the matching assertion reds.
+TEST (PostmanExport, ACookieExpiryReadsTheSameOnEveryPlatform) {
+    const ordered never =
+    saved_cookies ("a=1; Expires=Fri, 31 Dec 9999 23:59:59 GMT", NEW_YEAR_2026);
+    ASSERT_EQ (never.size (), 1u) << never.dump ();
+    EXPECT_EQ (never[0]["expires"],
+    "Fri Dec 31 9999 23:59:59 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (never[0]["session"], false);
+
+    const ordered past =
+    saved_cookies ("b=1; Expires=Wed, 01 Jan 1969 00:00:00 GMT", NEW_YEAR_2026);
+    ASSERT_EQ (past.size (), 1u) << past.dump ();
+    EXPECT_EQ (past[0]["expires"],
+    "Wed Jan 01 1969 00:00:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (past[0]["session"], false);
+}
+
+// A Max-Age past what the clock holds is held to its end (past the calendar,
+// so JavaScript's unprintable date, but not a session cookie); a negative one
+// has already expired, at the moment the response came in; and an unknown
+// receive time (`std::time`'s -1) leaves the Max-Age unread rather than
+// overflowing the room left on the clock. Mutation checks: drop the clamp's
+// lower bound and the negative age reds; drop the `received_at >= 0` guard
+// and the unknown-time cookie stops being a session cookie.
+TEST (PostmanExport, AnOutOfRangeMaxAgeIsClamped) {
+    const ordered huge = saved_cookies ("a=1; Max-Age=9223372036854775807", NEW_YEAR_2026);
+    ASSERT_EQ (huge.size (), 1u) << huge.dump ();
+    EXPECT_EQ (huge[0]["expires"], "Invalid Date");
+    EXPECT_EQ (huge[0]["session"], false);
+
+    const ordered negative = saved_cookies ("b=1; Max-Age=-5", NEW_YEAR_2026);
+    ASSERT_EQ (negative.size (), 1u) << negative.dump ();
+    EXPECT_EQ (negative[0]["expires"],
+    "Thu Jan 01 2026 00:00:00 GMT+0000 (Coordinated Universal Time)");
+    EXPECT_EQ (negative[0]["session"], false);
+
+    const ordered unknown = saved_cookies ("c=1; Max-Age=60", -1);
+    ASSERT_EQ (unknown.size (), 1u) << unknown.dump ();
+    EXPECT_EQ (unknown[0]["expires"], "Invalid Date");
+    EXPECT_EQ (unknown[0]["session"], true);
+}
+
+// The attributes read as RFC 6265 5.2 and tough-cookie (Postman's cookie
+// store) read them: an empty Domain is ignored (host-only), a leading `.` is
+// dropped, a Path not starting with `/` is the default path, and the space
+// around `=` is not part of a name or value. Mutation checks: skip the empty
+// test, the `.` strip, the `/` test or the trim, and the matching assertion
+// reds.
+TEST (PostmanExport, CookieAttributesReadAsACookieStoreReadsThem) {
+    const ordered empty = saved_cookies ("e=1; Domain=; Path=relative", NEW_YEAR_2026);
+    ASSERT_EQ (empty.size (), 1u) << empty.dump ();
+    EXPECT_EQ (empty[0]["hostOnly"], true);
+    EXPECT_EQ (empty[0]["domain"], "");
+    EXPECT_EQ (empty[0]["path"], "/");
+
+    const ordered spaced = saved_cookies (
+    "f=2; Domain = .Example.TEST ; Path = /x ; Max-Age = 60", NEW_YEAR_2026);
+    ASSERT_EQ (spaced.size (), 1u) << spaced.dump ();
+    EXPECT_EQ (spaced[0]["hostOnly"], false);
+    EXPECT_EQ (spaced[0]["domain"], "example.test");
+    EXPECT_EQ (spaced[0]["path"], "/x");
+    EXPECT_EQ (spaced[0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+}
+
+/// An example saved at @p received_at with a Max-Age cookie beside a
+/// Content-Type, its saved response stored as a save records it.
+PostmanExportExample saved_with_cookie (std::time_t received_at) {
+    PostmanExportExample example;
+    example.name    = "Saved";
+    example.status  = 200;
+    example.headers = ordered::array ({ row ("Content-Type", "text/plain"),
+    row ("Set-Cookie", "sid=s1; Max-Age=60; Path=/") });
+    const auto text = vayu::core::postman_saved_response_text (
+    request ("r", "u"), example, "", std::nullopt, received_at);
+    if (text) {
+        example.postman_response = ordered::parse (*text);
+    }
+    return example;
+}
+
+// An edit that leaves the enabled Set-Cookie rows alone keeps the recorded
+// `cookie[]` byte for byte - its Max-Age still counted from when the response
+// came in, not re-counted from the export - while an edit to those rows
+// rebuilds it from them, a Max-Age then counted from the export. Mutation
+// checks: guard `cookie` with `rows_same` again and the Content-Type edit
+// reds; rebuild with 0 instead of `walk.now` and the rebuilt expiry reds.
+TEST (PostmanExport, OnlyAnEditToTheSetCookieRowsRebuildsTheCookies) {
+    const PostmanExportExample saved = saved_with_cookie (NEW_YEAR_2026);
+    ASSERT_FALSE (saved.postman_response.is_null ());
+    const ordered recorded = saved.postman_response.at ("cookie");
+
+    PostmanExportRequest retyped         = request ("r", "u");
+    PostmanExportExample content_type    = saved;
+    content_type.headers.at (0)["value"] = "application/json";
+    retyped.examples.push_back (content_type);
+    const ordered kept = only_item (retyped)["response"][0];
+    EXPECT_EQ (kept["cookie"].dump (), recorded.dump ());
+    EXPECT_EQ (kept["_postman_previewlanguage"], "json")
+    << "the edit itself shows";
+
+    // A turned-off row sets no cookie, so turning an unrelated row off is
+    // not an edit to the cookies either.
+    PostmanExportRequest toggled = request ("r", "u");
+    PostmanExportExample off     = saved;
+    off.headers.push_back (row ("Set-Cookie", "gone=1", false));
+    toggled.examples.push_back (off);
+    EXPECT_EQ (only_item (toggled)["response"][0]["cookie"].dump (), recorded.dump ());
+
+    const std::time_t before        = std::time (nullptr);
+    PostmanExportRequest rewrote    = request ("r", "u");
+    PostmanExportExample changed    = saved;
+    changed.headers.at (1)["value"] = "sid=s2; Max-Age=60; Path=/";
+    rewrote.examples.push_back (changed);
+    const ordered rebuilt   = only_item (rewrote)["response"][0]["cookie"];
+    const std::time_t after = std::time (nullptr);
+    ASSERT_EQ (rebuilt.size (), 1u) << rebuilt.dump ();
+    EXPECT_EQ (rebuilt[0]["value"], "s2");
+    bool counted_from_export = false;
+    for (std::time_t at = before; at <= after; ++at) {
+        const ordered expected = saved_cookies ("sid=s2; Max-Age=60; Path=/", at);
+        counted_from_export =
+        counted_from_export || expected[0]["expires"] == rebuilt[0]["expires"];
+    }
+    EXPECT_TRUE (counted_from_export) << rebuilt.dump ();
+
+    PostmanExportRequest removed = request ("r", "u");
+    PostmanExportExample dropped = saved;
+    dropped.headers.erase (1);
+    removed.examples.push_back (dropped);
+    const ordered none = only_item (removed)["response"][0];
+    EXPECT_EQ (none["cookie"], ordered::array ());
+    EXPECT_EQ (none.dump ().find ("s1"), std::string::npos);
 }
 
 // A stored `cookie[]` is written as recorded only while the header rows are;

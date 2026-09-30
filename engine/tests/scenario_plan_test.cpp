@@ -688,7 +688,7 @@ TEST_F (ScenarioPlanTest, AStepSendsItsOwnPathVariablesAndBindsAColumnInOne) {
     with_path_row ("bound", 2, "{{username}}");
 
     json scenario    = block ("col");
-    scenario["data"] = json::array ({ json{ { "username", "a b/c" } } });
+    scenario["data"] = json::array ({ json{ { "username", "a b?c" } } });
     const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_EQ (resolved.plan.steps.size (), 3u);
@@ -697,22 +697,22 @@ TEST_F (ScenarioPlanTest, AStepSendsItsOwnPathVariablesAndBindsAColumnInOne) {
     // The bound value waits for its row: its segment stays `:id`.
     EXPECT_EQ (resolved.plan.steps[2].request.url, "https://api.test/users/:id?r=eu");
 
-    // The cell is written as one segment, as composition writes a value it
-    // could answer itself. Mutation check: join the token into the URL at
-    // composition (the pre-fix behaviour) and this reads `/users/a b/c`.
+    // The cell is encoded as composition encodes a value it could answer
+    // itself. Mutation check: join the token into the URL at composition (the
+    // pre-fix behaviour) and this reads `/users/a b?c`, a query.
     vayu::Request bound = resolved.plan.steps[2].request;
     ASSERT_TRUE (vayu::core::apply_iteration_template (bound,
     resolved.plan.steps[2].data_template,
     vayu::core::IterationBinding{ resolved.data_rows.data (), 0, {} })
     .ok);
-    EXPECT_EQ (bound.url, "https://api.test/users/a%20b%2Fc?r=eu");
+    EXPECT_EQ (bound.url, "https://api.test/users/a%20b%3Fc?r=eu");
     EXPECT_TRUE (bound.path_variables.empty ());
 }
 
 /**
  * A path value holding a token a row does not answer waits past the bind for
- * the residual pass, which writes the value a pre-request script set as one
- * segment (issue #1764); a column in the same value is bound first.
+ * the residual pass, which writes the value a pre-request script set, encoded as
+ * Postman encodes it (issue #1764); a column in the same value is bound first.
  */
 TEST_F (ScenarioPlanTest, APathValueTheScriptAnswersIsEncodedByTheResidualPass) {
     seed_collection ("col", "");
@@ -738,9 +738,9 @@ TEST_F (ScenarioPlanTest, APathValueTheScriptAnswersIsEncodedByTheResidualPass) 
     ASSERT_EQ (request.path_variables.size (), 1u);
     EXPECT_EQ (request.path_variables[0].value, "a b-{{fromScript}}");
 
-    vayu::http::VariableValues vars{ { "fromScript", "c/d" } };
+    vayu::http::VariableValues vars{ { "fromScript", "c?d" } };
     ASSERT_FALSE (vayu::http::routes::resolve_residual_tokens (request, vars));
-    EXPECT_EQ (request.url, "https://api.test/users/a%20b-c%2Fd");
+    EXPECT_EQ (request.url, "https://api.test/users/a%20b-c%3Fd");
     EXPECT_TRUE (request.path_variables.empty ());
 }
 

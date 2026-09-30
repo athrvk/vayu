@@ -37,6 +37,15 @@ std::pair<int, nlohmann::json>
 export_postman_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 import_response (vayu::db::Database& db, const nlohmann::json& body);
+// Defined in requests.cpp and collections.cpp.
+std::pair<int, nlohmann::json>
+get_request_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
 // Defined in examples.cpp.
 std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
@@ -50,9 +59,6 @@ std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
-std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
-const std::string& id,
-const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -262,8 +268,9 @@ TEST_F (PostmanExportRouteTest, AnEditedImportedExampleExportsItsEditNotTheStale
     R"([{"key":"Content-Type","value":"application/json"}])");
     EXPECT_EQ (response["_postman_previewlanguage"], "json");
     EXPECT_FALSE (response.contains ("_postman_previewtype"));
-    EXPECT_EQ (response["cookie"], ordered::array ())
-    << "the cookies are the Set-Cookie rows', and the edited rows set none";
+    EXPECT_EQ (response["cookie"], before[0]["cookie"])
+    << "the edit left the enabled Set-Cookie rows as recorded (there were "
+       "none), so the recorded cookies stay";
     EXPECT_EQ (response["responseTime"], "493");
     EXPECT_EQ (after.at (1), before.at (1))
     << "the untouched example is unchanged";
@@ -401,6 +408,128 @@ TEST_F (PostmanExportRouteTest, ARemovedSetCookieRowTakesItsCookieWithIt) {
     ASSERT_EQ (responses[1]["cookie"].size (), 1u);
     EXPECT_EQ (responses[1]["cookie"][0]["key"], "keep");
     EXPECT_EQ (responses[1]["cookie"][0]["value"], "kept1");
+}
+
+// An edit that leaves the Set-Cookie rows alone - a Content-Type fixed after
+// the save - keeps the recorded `cookie[]` byte for byte, its Max-Age still
+// counted from `receivedAt` rather than from the export. Mutation check:
+// guard `cookie` with `rows_same` again and this reds.
+TEST_F (PostmanExportRouteTest, AnUnrelatedHeaderEditKeepsTheRecordedCookies) {
+    using namespace vayu::http::routes;
+    auto [collection_status, collection] =
+    create_collection_response (*db_, json{ { "name", "Jar" } });
+    ASSERT_EQ (collection_status, 200) << collection.dump ();
+    const std::string collection_id = collection["id"].get<std::string> ();
+    auto [request_status, request]  = create_request_response (*db_,
+     json{ { "collectionId", collection_id }, { "name", "Login" },
+     { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
+    ASSERT_EQ (request_status, 200) << request.dump ();
+    const std::string request_id = request["id"].get<std::string> ();
+
+    const json saved_from = { { "request", { { "method", "GET" }, { "url", "{{baseUrl}}/login" } } },
+        { "statusText", "OK" }, { "receivedAt", 1767225600000.0 } };
+    const json set_cookie = kv ("Set-Cookie", "sid=s1; Max-Age=60; Path=/");
+    auto [saved_status, saved] = create_request_example_response (*db_, request_id,
+    json{ { "name", "Saved" }, { "status", 200 }, { "origin", "user" },
+    { "headers", json::array ({ kv ("Content-Type", "text/plain"), set_cookie }) },
+    { "savedFrom", saved_from } });
+    ASSERT_EQ (saved_status, 200) << saved.dump ();
+    const ordered before =
+    exported_responses (export_text (collection_id), "Login").at (0)["cookie"];
+    ASSERT_EQ (before.size (), 1u) << before.dump ();
+    EXPECT_EQ (before[0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+
+    auto [edit_status, edited] = update_request_example_response (*db_,
+    request_id, saved["id"].get<std::string> (),
+    json{ { "headers",
+    json::array ({ kv ("Content-Type", "application/json"), set_cookie }) } });
+    ASSERT_EQ (edit_status, 200) << edited.dump ();
+    const ordered after =
+    exported_responses (export_text (collection_id), "Login").at (0);
+    EXPECT_EQ (after["cookie"].dump (), before.dump ());
+    EXPECT_EQ (after["_postman_previewlanguage"], "json");
+}
+
+/// A collection whose root and one request carry an OAuth 2.0 block with a
+/// literal client secret and an attribute Vayu has no field for
+/// (`tokenName`), so the import keeps the block as the auth's `postman`
+/// source.
+constexpr const char* OAUTH2_SOURCE_DOCUMENT = R"({
+  "info": {"name": "Rotated", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "item": [{"name": "Token", "request": {"method": "GET", "url": "https://api.test/me",
+    "auth": {"type": "oauth2", "oauth2": [
+      {"key": "clientSecret", "value": "live-request", "type": "string"},
+      {"key": "clientId", "value": "id", "type": "string"},
+      {"key": "accessTokenUrl", "value": "https://auth.test/token", "type": "string"},
+      {"key": "tokenName", "value": "Mine", "type": "string"},
+      {"key": "grant_type", "value": "client_credentials", "type": "string"}]}}}],
+  "auth": {"type": "oauth2", "oauth2": [
+    {"key": "clientSecret", "value": "live-root", "type": "string"},
+    {"key": "clientId", "value": "id", "type": "string"},
+    {"key": "accessTokenUrl", "value": "https://auth.test/token", "type": "string"},
+    {"key": "tokenName", "value": "Root", "type": "string"},
+    {"key": "grant_type", "value": "client_credentials", "type": "string"}]}
+})";
+
+// A replaced credential leaves with the source that still held it, whoever
+// wrote the replacement (the app's editors, an MCP tool, the API): the write
+// boundary drops a `postman` source that no longer describes the auth, and
+// keeps one that does, so an untouched save still exports byte-identically.
+// Mutation check: make `without_stale_postman_source` return its input and
+// the "live" assertions go red.
+TEST_F (PostmanExportRouteTest, AReplacedCredentialDropsTheSourceThatHeldIt) {
+    using vayu::http::routes::get_request_response;
+    using vayu::http::routes::update_collection_response;
+    using vayu::http::routes::update_request_response;
+    const std::string id = import_text (OAUTH2_SOURCE_DOCUMENT);
+    const auto rows      = db_->get_requests_in_collection (id);
+    ASSERT_EQ (rows.size (), 1U);
+    const std::string request_id = rows[0].id;
+    const std::string before     = without_postman_id (export_text (id));
+    ASSERT_NE (before.find ("\"tokenName\""), std::string::npos) << before;
+
+    auto [got_status, got] = get_request_response (*db_, request_id);
+    ASSERT_EQ (got_status, 200) << got.dump ();
+    json auth = got["auth"];
+    ASSERT_TRUE (auth.contains ("postman")) << auth.dump ();
+    const auto root = db_->get_collection (id);
+    ASSERT_HAS_VALUE (root);
+    json root_auth = json::parse (root->auth);
+    ASSERT_TRUE (root_auth.contains ("postman")) << root_auth.dump ();
+
+    // Saved as loaded: the source still describes the auth and stays.
+    auto [same_status, same] =
+    update_request_response (*db_, request_id, json{ { "auth", auth } });
+    ASSERT_EQ (same_status, 200) << same.dump ();
+    auto [same_root_status, same_root] =
+    update_collection_response (*db_, id, json{ { "auth", root_auth } });
+    ASSERT_EQ (same_root_status, 200) << same_root.dump ();
+    EXPECT_EQ (without_postman_id (export_text (id)), before);
+
+    // Rotated, with the stale block still attached the way a client that
+    // spreads the loaded auth sends it.
+    auth["config"]["clientSecret"]      = "rotated-request";
+    root_auth["config"]["clientSecret"] = "rotated-root";
+    auto [put_status, put] =
+    update_request_response (*db_, request_id, json{ { "auth", auth } });
+    ASSERT_EQ (put_status, 200) << put.dump ();
+    auto [root_status, root_put] =
+    update_collection_response (*db_, id, json{ { "auth", root_auth } });
+    ASSERT_EQ (root_status, 200) << root_put.dump ();
+
+    auto [after_status, after] = get_request_response (*db_, request_id);
+    ASSERT_EQ (after_status, 200);
+    EXPECT_EQ (after.dump ().find ("live-request"), std::string::npos) << after.dump ();
+    EXPECT_FALSE (after["auth"].contains ("postman"));
+    EXPECT_EQ (after["auth"]["config"]["clientSecret"], "rotated-request");
+    const auto rotated_root = db_->get_collection (id);
+    ASSERT_HAS_VALUE (rotated_root);
+    EXPECT_EQ (rotated_root->auth.find ("live-root"), std::string::npos)
+    << rotated_root->auth;
+    const std::string exported = export_text (id);
+    EXPECT_EQ (exported.find ("live-"), std::string::npos) << exported;
+    EXPECT_NE (exported.find ("rotated-request"), std::string::npos) << exported;
 }
 
 TEST_F (PostmanExportRouteTest, WritesNothing) {
