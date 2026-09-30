@@ -1498,18 +1498,10 @@ void reconcile_flag (json& out, const char* key, bool state, bool fallback) {
     }
 }
 
-/// The names @p headers (a `disabledSystemHeaders` object) sets to `true`,
-/// lowercased, sorted and deduplicated - the set the importer stored.
+/// The names @p headers (a `disabledSystemHeaders` object) turns off, sorted:
+/// the set the importer stored, read by the importer's own rule.
 std::vector<std::string> truthy_header_set (const json& headers) {
-    std::vector<std::string> names;
-    if (!headers.is_object ()) {
-        return names;
-    }
-    for (auto header = headers.begin (); header != headers.end (); ++header) {
-        if (header.value ().is_boolean () && header.value ().get<bool> ()) {
-            names.push_back (vayu::utils::ascii_lower (header.key ()));
-        }
-    }
+    std::vector<std::string> names = postman_disabled_system_headers (headers);
     std::ranges::sort (names);
     names.erase (std::ranges::unique (names).begin (), names.end ());
     return names;

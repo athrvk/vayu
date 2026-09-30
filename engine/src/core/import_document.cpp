@@ -31,6 +31,7 @@
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
@@ -1368,7 +1369,7 @@ bool names_unapplied_protocol_behavior (const json& behavior) {
             for (auto header = value.begin (); header != value.end (); ++header) {
                 const std::string name = vayu::utils::ascii_lower (header.key ());
                 if ((name == "host" || name == "content-length") &&
-                header.value ().is_boolean () && header.value ().get<bool> ()) {
+                truthy (&header.value ())) {
                     return true;
                 }
             }
@@ -1436,14 +1437,8 @@ void pm_redirects (const json* item, json& request, int& skipped_protocol_behavi
     if (const json* headers = prop (behavior, "disabledSystemHeaders");
     headers != nullptr && headers->is_object ()) {
         json names = json::array ();
-        for (auto header = headers->begin (); header != headers->end (); ++header) {
-            if (!header.value ().is_boolean () || !header.value ().get<bool> ()) {
-                continue;
-            }
-            std::string name = vayu::utils::ascii_lower (header.key ());
-            if (std::find (names.begin (), names.end (), name) == names.end ()) {
-                names.push_back (std::move (name));
-            }
+        for (std::string& name : postman_disabled_system_headers (*headers)) {
+            names.push_back (std::move (name));
         }
         request["disabledSystemHeaders"] = std::move (names);
     }
@@ -3926,6 +3921,25 @@ nlohmann::ordered_json postman_auth_mapping (const nlohmann::ordered_json& auth)
     int unsupported = 0;
     int dropped     = 0;
     return map_postman_auth (&auth, unsupported, dropped);
+}
+
+std::vector<std::string> postman_disabled_system_headers (
+const nlohmann::ordered_json& headers) {
+    std::vector<std::string> names;
+    if (!headers.is_object ()) {
+        return names;
+    }
+    for (auto header = headers.begin (); header != headers.end (); ++header) {
+        if (!js::truthy (&header.value ()) ||
+        vayu::http::invalid_header_token (header.key ()).has_value ()) {
+            continue;
+        }
+        std::string name = vayu::utils::ascii_lower (header.key ());
+        if (std::ranges::find (names, name) == names.end ()) {
+            names.push_back (std::move (name));
+        }
+    }
+    return names;
 }
 
 bool postman_source_stands (const nlohmann::json& auth) {

@@ -157,12 +157,24 @@ stored and applied per request, the same optional-on-the-draft way:
 `disableCookies` (the cookie jar neither sends nor stores for the request),
 `disableUrlEncoding` (path values and an api-key query sent as typed; the
 query rows of such a request are joined into its URL unencoded too) and
-`disabledSystemHeaders` (Postman's names set to `true`: `user-agent`,
+`disabledSystemHeaders` (Postman's names set to a truthy value: `user-agent`,
 `accept`, `accept-encoding` and `content-type` are refused on the wire,
 `connection`, `cache-control` and `postman-token` are headers Vayu never sends
 anyway). The whole object also rides along as `postmanProtocolBehavior`, JSON
 text rather than an object so its member order survives the apply, and the
 export writes it back.
+
+`disabledSystemHeaders` is read the way Postman's runtime reads it, with one
+deliberate difference. A value counts when it is truthy (`true`, `1`,
+`"yes"`, an object), since the runtime tests `disabledHeaders[key]` in an
+`if`; `false`, `0`, `""` and `null` do not. A key that is not a header name
+(`"bad name"`) is left out of what the request applies rather than failing the
+whole import, and still rides in the carried object. The difference: the
+runtime looks each header up by its lowercase name without lowercasing the
+object's keys, so an `"Accept": true` written by hand does nothing in Postman,
+while Vayu lowercases the keys and honours it. Postman's own editor only ever
+writes lowercase keys set to `true`, so the two agree on anything Postman
+wrote.
 
 A request is counted once as `protocol_behavior` only when its object names
 something Vayu keeps for the export but does not apply: a key outside

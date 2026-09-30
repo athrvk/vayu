@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -193,6 +194,43 @@ TEST_F (PostmanExportRouteTest, AnEditedProtocolSettingIsWrittenOverTheImportedO
 
     EXPECT_EQ (exported_protocol_behavior (export_text (id), "Raw and cookieless"),
     R"({"disableUrlEncoding":true,"disableCookies":false,"disabledSystemHeaders":{"user-agent":true,"postman-token":true,"accept":true},"tlsDisabledProtocols":["TLSv1"],"followRedirects":false})");
+}
+
+/// A one-folder Postman v2.1 collection of the items in @p items.
+std::string postman_collection (const std::string& items) {
+    return R"({"info":{"name":"Protocol","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[)" +
+    items + "]}";
+}
+
+/// The stored request named @p name under @p root.
+std::optional<vayu::db::Request>
+request_named (vayu::db::Database& db, const std::string& root, const std::string& name) {
+    for (const auto& row : db.get_requests_in_collection (root)) {
+        if (row.name == name) {
+            return row;
+        }
+    }
+    ADD_FAILURE () << "no request " << name;
+    return std::nullopt;
+}
+
+// A `disabledSystemHeaders` key that is no header name is dropped from what
+// the request applies instead of failing the whole import, and a truthy
+// non-boolean counts as Postman's runtime counts it; the carrier keeps the
+// object verbatim for the export. Mutation check: drop the
+// `invalid_header_token` filter in `postman_disabled_system_headers` and the
+// import answers 400.
+TEST_F (PostmanExportRouteTest, AMalformedDisabledHeaderNameDoesNotFailTheImport) {
+    const std::string carried =
+    R"({"disabledSystemHeaders":{"accept":true,"bad name":true,"User-Agent":1,"connection":0}})";
+    const std::string id =
+    import_text (postman_collection (R"({"name":"Odd","protocolProfileBehavior":)" +
+    carried + R"(,"request":{"method":"GET","url":"https://x.com"}})"));
+    ASSERT_FALSE (id.empty ());
+    const auto row = request_named (*db_, id, "Odd");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->disabled_system_headers, R"(["accept","user-agent"])");
+    EXPECT_EQ (exported_protocol_behavior (export_text (id), "Odd"), carried);
 }
 
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
