@@ -3904,6 +3904,41 @@ nlohmann::ordered_json postman_auth_mapping (const nlohmann::ordered_json& auth)
     return map_postman_auth (&auth, unsupported, dropped);
 }
 
+bool postman_source_stands (const nlohmann::json& auth) {
+    if (!auth.is_object ()) {
+        return false;
+    }
+    const auto found = auth.find ("postman");
+    if (found == auth.end () || !found->is_object ()) {
+        return false;
+    }
+    const auto type = found->find ("type");
+    if (type == found->end () || !type->is_string () ||
+    type->get_ref<const std::string&> ().empty ()) {
+        return false;
+    }
+    nlohmann::json own = auth;
+    own.erase ("postman");
+    // Key order aside: both sides compare as sorted-key documents, the shape
+    // the stored column and a route's parsed body already have.
+    const nlohmann::json remapped = nlohmann::json::parse (
+    postman_auth_mapping (nlohmann::ordered_json::parse (found->dump ())).dump ());
+    return remapped == own;
+}
+
+std::string without_stale_postman_source (std::string stored) {
+    if (stored.find ("\"postman\"") == std::string::npos) {
+        return stored;
+    }
+    nlohmann::json auth =
+    nlohmann::json::parse (stored, nullptr, /*allow_exceptions=*/false);
+    if (!auth.is_object () || !auth.contains ("postman") || postman_source_stands (auth)) {
+        return stored;
+    }
+    auth.erase ("postman");
+    return auth.dump ();
+}
+
 ImportParse parse_import (const std::string& text,
 const ImportOptions& options,
 const ImportSource& source) {

@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -245,6 +246,8 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
+    // The same rule as a request's auth (`without_stale_postman_source`).
+    c.auth = vayu::core::without_stale_postman_source (std::move (c.auth));
     // Scripts are elements now (issue #1514's clean cut) - see the
     // equivalent comment in requests.cpp's apply_request_fields.
     if (auto refusal = refuse_legacy_script_fields (json)) {

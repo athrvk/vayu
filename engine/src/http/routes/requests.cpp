@@ -10,6 +10,7 @@
  * @brief Request management routes
  */
 
+#include "vayu/core/import_document.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -327,6 +328,9 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
+    // An imported `postman` source that no longer describes the auth holds
+    // the credential this write replaced; it goes with it.
+    r.auth = vayu::core::without_stale_postman_source (std::move (r.auth));
     // Scripts are elements now (issue #1514's clean cut - no transitional
     // alias, per the owner's decision on #1512): `preRequestScript` /
     // `postRequestScript` refuse rather than write.

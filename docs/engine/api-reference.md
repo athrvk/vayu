@@ -1460,6 +1460,14 @@ the write is a `400` naming the index, the kind and the field. The only script
 source - `GET /requests/:id` and every list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
+**`auth.postman`**, the Postman block an import kept beside the mapped auth
+(see [`db-schema.md`](db-schema.md)), is kept on a write only while mapping it
+through the Postman importer still gives the auth being written; otherwise it
+is dropped. So a changed credential never leaves the old one behind in the
+stored block, whichever client wrote it, and a save that changed nothing keeps
+it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
+`POST /import/apply` apply the same rule.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
