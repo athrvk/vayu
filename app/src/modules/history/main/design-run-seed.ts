@@ -144,7 +144,7 @@ function paramsFromSnapshot(snapshot: DesignSnapshot) {
 	);
 	const held = new Set(recorded.map((row) => row.key));
 	return [
-		...parseQueryParams(url),
+		...parseQueryParams(url, { decode: snapshot.disableUrlEncoding !== true }),
 		...recorded,
 		...pathRowsFromUrl(url).filter((row) => !held.has(row.key)),
 	];

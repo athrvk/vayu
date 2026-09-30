@@ -92,13 +92,27 @@ export function appendParamsToUrl(url: string, params: readonly KeyValueEntry[])
 	return /[?&]$/.test(url) ? `${url}${query}` : `${url}&${query}`;
 }
 
+/** Whether rows parsed from a URL are percent-decoded - see `parseQueryParams`. */
+export interface UrlDecodeOptions {
+	decode?: boolean;
+}
+
 /**
  * Parse the query string of a URL into key/value items.
  *
  * Variable tokens (`{{var}}`) are preserved verbatim - decoding is skipped for
  * any segment that contains them so the variable syntax survives round-trips.
+ *
+ * `decode: false` is the read side of `toQueryString`'s `encode: false`, for a
+ * request under `disableUrlEncoding` (issue #1765): the rows hold the query as
+ * written, so rebuilding the URL from them joins back exactly what was there.
+ * Decoded rows joined raw would turn `%26` inside one value into a new `&`
+ * row and `%20` into a space libcurl refuses.
  */
-export function parseQueryParams(url: string): KeyValueItem[] {
+export function parseQueryParams(
+	url: string,
+	{ decode = true }: UrlDecodeOptions = {}
+): KeyValueItem[] {
 	try {
 		const queryStart = url.indexOf("?");
 		if (queryStart === -1) return [];
@@ -113,8 +127,8 @@ export function parseQueryParams(url: string): KeyValueItem[] {
 			const value = valueParts.join("=");
 			return {
 				id: generateId(),
-				key: safeDecode(key || ""),
-				value: safeDecode(value || ""),
+				key: decode ? safeDecode(key || "") : key || "",
+				value: decode ? safeDecode(value || "") : value,
 				enabled: true,
 			};
 		});
@@ -146,13 +160,17 @@ export function paramsFromUrl(url: string): KeyValueItem[] {
  * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
  * `syncPathRows`, which reads `previousUrl` to tell an edit of those segments
  * from one that leaves them alone, and come after the query rows.
+ *
+ * `options.decode` is `parseQueryParams`'s: off for a request under
+ * `disableUrlEncoding`.
  */
 export function mergeParamsFromUrl(
 	existing: readonly KeyValueItem[],
 	url: string,
-	previousUrl: string
+	previousUrl: string,
+	options: UrlDecodeOptions = {}
 ): KeyValueItem[] {
-	const fromUrl = parseQueryParams(url);
+	const fromUrl = parseQueryParams(url, options);
 	const consumed = new Array(fromUrl.length).fill(false);
 
 	const merged: KeyValueItem[] = [];

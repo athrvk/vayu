@@ -68,6 +68,7 @@ import {
 } from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
 import { switchAutoHeader } from "../../../utils/auto-header";
+import { mergeParamsFromUrl } from "../../../utils/url";
 import {
 	automaticHeaderOptions,
 	displayHeaderName,
@@ -107,6 +108,20 @@ export default function SettingsPanel() {
 		updateField(
 			"disabledSystemHeaders",
 			off ? [...storedOff.filter((n) => n !== key), key] : storedOff.filter((n) => n !== key)
+		);
+	};
+
+	/**
+	 * The URL is the query's truth, so turning the flag on or off leaves it
+	 * alone and re-derives the Params rows from it in the new mode (#1765):
+	 * decoded while the URL is encoded on send, as written while it is not. A
+	 * row edit after the switch then rebuilds the same query the URL holds.
+	 */
+	const handleEncodingChange = (checked: boolean) => {
+		updateField("disableUrlEncoding", checked);
+		updateField(
+			"params",
+			mergeParamsFromUrl(request.params, request.url, request.url, { decode: !checked })
 		);
 	};
 
@@ -263,7 +278,7 @@ export default function SettingsPanel() {
 				<ToggleRow
 					label={ENCODING_LABEL}
 					checked={request.disableUrlEncoding}
-					onChange={(checked) => updateField("disableUrlEncoding", checked)}
+					onChange={handleEncodingChange}
 					description={
 						<>
 							Path variable values, query rows and an API key in the query go out as

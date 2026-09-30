@@ -162,6 +162,40 @@ describe("mergeParamsFromUrl", () => {
 });
 
 /**
+ * A request under `disableUrlEncoding` (issue #1765) joins its rows raw, so the
+ * rows must hold the query as written: decoded rows joined raw turn a `%26`
+ * inside one value into a new `&` pair and a `%20` into a raw space.
+ */
+describe("the query under disableUrlEncoding", () => {
+	const URL = "https://x/y?redirect=https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2&q=a%20b&b=1";
+
+	it("reads rows as written and rebuilds exactly the query they came from", () => {
+		// Mutation check: dropping `decode: false` (so the rows are decoded)
+		// rebuilds `redirect=https://a.b/?x=1&y=2&q=a b&b=2` here.
+		const rows = parseQueryParams(URL, { decode: false });
+		expect(rows.map(({ key, value }) => [key, value])).toEqual([
+			["redirect", "https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2"],
+			["q", "a%20b"],
+			["b", "1"],
+		]);
+		const edited = rows.map((r) => (r.key === "b" ? { ...r, value: "2" } : r));
+		expect(buildUrlWithParams(URL, edited, { encode: false })).toBe(
+			"https://x/y?redirect=https%3A%2F%2Fa.b%2F%3Fx%3D1%26y%3D2&q=a%20b&b=2"
+		);
+	});
+
+	it("merges the URL's query as written, and decoded by default", () => {
+		const existing = [item("1", "q", "old")];
+		expect(mergeParamsFromUrl(existing, URL, URL, { decode: false })[0]).toMatchObject({
+			id: "1",
+			key: "q",
+			value: "a%20b",
+		});
+		expect(mergeParamsFromUrl(existing, URL, URL)[0]).toMatchObject({ value: "a b" });
+	});
+});
+
+/**
  * Path rows (issue #1764) live in the same `params` array as the query rows,
  * and neither join rule may write one into the query string.
  */

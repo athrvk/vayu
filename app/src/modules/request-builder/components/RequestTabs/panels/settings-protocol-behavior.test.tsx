@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import type { RequestDefaults } from "@/types";
 import { createDefaultRequestState } from "../../../utils/request-state";
@@ -78,6 +78,29 @@ describe("the cookie jar and encoding toggles", () => {
 		const updateField = mount();
 		fireEvent.click(screen.getByRole("switch", { name: "Send URL without encoding" }));
 		expect(updateField).toHaveBeenCalledWith("disableUrlEncoding", true);
+	});
+
+	it("re-derives the query rows from the URL in the new mode, leaving the URL alone", () => {
+		// Mutation check: writing only the flag leaves `a b` in the row, which
+		// the Params table then joins raw into `q=a b`.
+		const url = "https://x/y?q=a%20b";
+		const on = mount({ url, params: [{ id: "p1", key: "q", value: "a b", enabled: true }] });
+		fireEvent.click(screen.getByRole("switch", { name: "Send URL without encoding" }));
+		expect(on).toHaveBeenCalledWith("params", [
+			{ id: "p1", key: "q", value: "a%20b", enabled: true },
+		]);
+		expect(on.mock.calls.some(([field]) => field === "url")).toBe(false);
+		cleanup();
+
+		const off = mount({
+			url,
+			disableUrlEncoding: true,
+			params: [{ id: "p1", key: "q", value: "a%20b", enabled: true }],
+		});
+		fireEvent.click(screen.getByRole("switch", { name: "Send URL without encoding" }));
+		expect(off).toHaveBeenCalledWith("params", [
+			{ id: "p1", key: "q", value: "a b", enabled: true },
+		]);
 	});
 });
 

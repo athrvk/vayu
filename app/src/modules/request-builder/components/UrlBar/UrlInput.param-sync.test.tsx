@@ -25,10 +25,10 @@ import { emptyDrafts } from "../../utils/body-drafts";
 import type { KeyValueItem } from "@/types";
 import UrlInput from "./UrlInput";
 
-function renderUrlInput(url: string, params: KeyValueItem[]) {
+function renderUrlInput(url: string, params: KeyValueItem[], disableUrlEncoding = false) {
 	const updateField = vi.fn();
 	const context = {
-		request: { ...createDefaultRequestState(), url, params },
+		request: { ...createDefaultRequestState(), url, params, disableUrlEncoding },
 		setRequest: vi.fn(),
 		updateField,
 		getBodyDrafts: () => emptyDrafts(null),
@@ -126,6 +126,23 @@ describe("UrlInput param sync", () => {
 		// Removed with its segment; the query row is untouched.
 		expect(paramsAfter("https://x/users?page=1", [query, idRow])).toEqual([
 			{ key: "page", value: "1", in: undefined },
+		]);
+	});
+
+	it("keeps the query as written for a request sent without encoding (#1765)", () => {
+		// Mutation check: passing `decode: true` (or nothing) here stores
+		// `a b`, which the Params table then joins raw into a malformed URL.
+		const { updateField } = renderUrlInput("https://x/y", [], true);
+
+		fireEvent.change(screen.getByLabelText("Request URL"), {
+			target: { value: "https://x/y?q=a%20b&r=x%26y" },
+		});
+
+		const paramsCall = updateField.mock.calls.find(([field]) => field === "params");
+		const merged = paramsCall![1] as KeyValueItem[];
+		expect(merged.map(({ key, value }) => [key, value])).toEqual([
+			["q", "a%20b"],
+			["r", "x%26y"],
 		]);
 	});
 });
