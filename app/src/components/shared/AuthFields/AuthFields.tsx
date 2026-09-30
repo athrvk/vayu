@@ -43,7 +43,7 @@ import {
 } from "@/components/ui";
 import { OAuth2Form } from "../OAuth2Form";
 import { cn } from "@/lib/utils";
-import type { AuthFieldsProps, AuthTextInput } from "./types";
+import type { AuthFieldsProps, AuthTextInput, EditableAuth } from "./types";
 
 /**
  * Plain-input fallback for a host that injects nothing. It keeps the `{{var}}`
@@ -69,6 +69,19 @@ function SentAs({ children }: { children: React.ReactNode }) {
 			Sent as <code className="bg-muted px-1 rounded-md font-mono text-xs">{children}</code>
 		</p>
 	);
+}
+
+/**
+ * @p value with @p patch applied and without the `postman` source an import
+ * may have attached. The source is the Postman block the auth came from,
+ * credentials included; once a field is edited it no longer describes the
+ * auth, and re-sending it would keep the replaced credential in the stored
+ * row. The engine drops a stale source at the write too
+ * (`without_stale_postman_source`); this keeps the editor from sending one.
+ */
+function edited<T extends EditableAuth>(value: T, patch: Partial<T>): T {
+	const { postman: _source, ...own } = value as T & { postman?: unknown };
+	return { ...own, ...patch } as T;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -107,7 +120,7 @@ export default function AuthFields({
 				<Field label="Token">
 					<TextInput
 						value={value.token}
-						onChange={(token) => onChange({ ...value, token })}
+						onChange={(token) => onChange(edited(value, { token }))}
 						placeholder="Bearer token or {{variable}}"
 					/>
 				</Field>
@@ -123,14 +136,14 @@ export default function AuthFields({
 					<Field label="Username">
 						<TextInput
 							value={value.username}
-							onChange={(username) => onChange({ ...value, username })}
+							onChange={(username) => onChange(edited(value, { username }))}
 							placeholder="Username or {{variable}}"
 						/>
 					</Field>
 					<Field label="Password">
 						<TextInput
 							value={value.password}
-							onChange={(password) => onChange({ ...value, password })}
+							onChange={(password) => onChange(edited(value, { password }))}
 							placeholder="Password"
 							type="password"
 						/>
@@ -152,7 +165,7 @@ export default function AuthFields({
 					<Select
 						value={value.in}
 						onValueChange={(next: "header" | "query") =>
-							onChange({ ...value, in: next })
+							onChange(edited(value, { in: next }))
 						}
 					>
 						{/* `w-[12rem]`, not `w-48`: the trigger holds a fixed option
@@ -176,14 +189,14 @@ export default function AuthFields({
 					<Field label="Key name">
 						<TextInput
 							value={value.key}
-							onChange={(key) => onChange({ ...value, key })}
+							onChange={(key) => onChange(edited(value, { key }))}
 							placeholder="X-API-Key"
 						/>
 					</Field>
 					<Field label="Value">
 						<TextInput
 							value={value.value}
-							onChange={(v) => onChange({ ...value, value: v })}
+							onChange={(v) => onChange(edited(value, { value: v }))}
 							placeholder="{{api_key}}"
 						/>
 					</Field>
@@ -196,7 +209,7 @@ export default function AuthFields({
 		return (
 			<OAuth2Form
 				value={value.config}
-				onChange={(config) => onChange({ ...value, config })}
+				onChange={(config) => onChange(edited(value, { config }))}
 				resolveString={resolveString}
 				resolveKey={resolveKey}
 				TextInput={TextInput}

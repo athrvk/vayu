@@ -96,6 +96,22 @@ postman_raw_body (const std::string& content, const std::string* language);
 [[nodiscard]] nlohmann::ordered_json postman_auth_mapping (
 const nlohmann::ordered_json& auth);
 
+/**
+ * Whether @p auth (a stored Vayu auth) carries a `postman` source that still
+ * describes it: mapping the source through `postman_auth_mapping` gives
+ * @p auth without the source. The exporter writes such a source verbatim.
+ */
+[[nodiscard]] bool postman_source_stands (const nlohmann::json& auth);
+
+/**
+ * @p stored (an `auth` column's text) without its `postman` source once the
+ * source no longer describes it. Every auth write goes through this
+ * (`routes/requests.cpp`, `routes/collections.cpp`): a source kept past an
+ * edit would hold the credential the edit replaced, and every read of the
+ * row (`GET /requests`, the MCP tools) would return it.
+ */
+[[nodiscard]] std::string without_stale_postman_source (std::string stored);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {

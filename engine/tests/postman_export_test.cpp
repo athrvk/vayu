@@ -676,10 +676,28 @@ TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
     PostmanExportRequest aws   = request ("aws", "u");
     aws.auth                   = ordered{ { "mode", "aws" },
                           { "config", { { "accessKey", "A" }, { "secretKey", "S" }, { "region", "r" } } } };
-    root.requests              = { basic, key, oauth, aws };
+    // An imported OAuth 2.0 block kept as the auth's source: its PKCE
+    // verifier and the credentials in its extra request parameters are
+    // nested where a top-level walk does not look.
+    const ordered source = ordered::parse (R"({"type":"oauth2","oauth2":[
+        {"key":"code_verifier","value":"verifier-1","type":"string"},
+        {"key":"tokenRequestParams","value":[
+            {"key":"client_secret","value":"param-secret","enabled":true,"send_as":"request_body"},
+            {"key":"client_assertion","value":"{{assertion}}","enabled":true,"send_as":"request_body"},
+            {"key":"audience","value":"api","enabled":true,"send_as":"request_body"}],"type":"any"},
+        {"key":"refreshRequestParams","value":[
+            {"key":"refresh_token","value":"rt-1","enabled":true,"send_as":"request_body"}],"type":"any"},
+        {"key":"grant_type","value":"authorization_code_with_pkce","type":"string"}]})");
+    PostmanExportRequest nested = request ("nested", "u");
+    nested.auth                 = vayu::core::postman_auth_mapping (source);
+    nested.auth["postman"]      = source;
+    root.requests               = { basic, key, oauth, aws, nested };
 
     const auto blanked = run (root, /*secrets=*/false);
-    EXPECT_EQ (blanked.notes.secrets_omitted, 7);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 10);
+    for (const char* secret : { "verifier-1", "param-secret", "rt-1" }) {
+        EXPECT_EQ (blanked.text.find (secret), std::string::npos) << secret;
+    }
     ordered doc = ordered::parse (blanked.text);
     // A whole-value `{{variable}}` reference names a secret without being one.
     EXPECT_EQ (doc["auth"]["bearer"][0]["value"], "{{token}}");
@@ -695,12 +713,18 @@ TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][0]["key"], "region");
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][1]["value"], "");
     EXPECT_EQ (doc["item"][3]["request"]["auth"]["awsv4"][2]["value"], "");
+    const ordered params =
+    doc["item"][4]["request"]["auth"]["oauth2"][1]["value"];
+    EXPECT_EQ (params[1]["value"], "{{assertion}}")
+    << "a reference is not a secret";
+    EXPECT_EQ (params[2]["value"], "api");
 
     const auto kept = run (root, /*secrets=*/true);
     EXPECT_EQ (kept.notes.secrets_omitted, 0);
     ordered clear = ordered::parse (kept.text);
     EXPECT_EQ (clear["variable"][0]["value"], "k");
     EXPECT_EQ (clear["item"][0]["request"]["auth"]["basic"][1]["value"], "pw");
+    EXPECT_NE (kept.text.find ("param-secret"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

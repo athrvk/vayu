@@ -31,6 +31,7 @@ import { QUERY_CACHE } from "@/config/cache";
 import { TIMING } from "@/config/timing";
 import { ApiError, EngineUnreachableError } from "@/services/http-client";
 import { useEngineStore } from "@/stores/engine-store";
+import { elementKindsQueryOptions } from "@/queries/elements";
 
 const apiError = (status: number) => new ApiError(status, "CODE", `HTTP ${status}`);
 
@@ -184,6 +185,54 @@ describe("a query racing an engine that is still starting", () => {
 		expect(observer.getCurrentResult().status).toBe("error");
 		expect(queryFn).toHaveBeenCalledTimes(QUERY_CACHE.DEFAULT_QUERY_RETRY + 1);
 		unsubscribe();
+	});
+});
+
+/**
+ * A launch-time query with a budget of its own. A bare number for `retry`
+ * replaced the default predicate, start-window rule included, so the element
+ * catalogue (and the two script-editor queries beside it) spent their one
+ * retry on the engine that had not arrived yet.
+ *
+ * Mutation-check: put `retry: QUERY_CACHE.ELEMENT_KINDS_RETRY` back in
+ * `elementKindsQueryOptions` and the query settles into `error`.
+ */
+describe("a query with its own budget racing an engine that is still starting", () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ now: 1_000_000 });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		useEngineStore.setState({ engineStartWindow: null });
+	});
+
+	it("stays loading past its budget and loads once the engine answers", async () => {
+		useEngineStore.setState({ engineStartWindow: Date.now() });
+		let engineUp = false;
+		const queryFn = vi.fn(async () => {
+			if (!engineUp) throw new EngineUnreachableError("refused");
+			return [];
+		});
+		const client = new QueryClient({ defaultOptions: appQueryClient.getDefaultOptions() });
+		const observer = new QueryObserver(client, { ...elementKindsQueryOptions(), queryFn });
+		const unsubscribe = observer.subscribe(() => undefined);
+
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(queryFn.mock.calls.length).toBeGreaterThan(QUERY_CACHE.ELEMENT_KINDS_RETRY + 1);
+		expect(observer.getCurrentResult().status).toBe("pending");
+
+		engineUp = true;
+		await vi.advanceTimersByTimeAsync(QUERY_CACHE.ENGINE_START_RETRY_DELAY_MS);
+		expect(observer.getCurrentResult().status).toBe("success");
+		unsubscribe();
+	});
+
+	it("keeps its own budget with nothing starting", () => {
+		const retry = elementKindsQueryOptions().retry;
+		const refused = new EngineUnreachableError("refused");
+		expect(retry(QUERY_CACHE.ELEMENT_KINDS_RETRY - 1, refused)).toBe(true);
+		expect(retry(QUERY_CACHE.ELEMENT_KINDS_RETRY, refused)).toBe(false);
 	});
 });
 

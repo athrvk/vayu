@@ -485,7 +485,12 @@ A Postman import may add `postman` to any of these: the document's own `auth`
 block (`{"type":"oauth2","oauth2":[{"key","value","type"}]}`), kept when the
 Postman exporter could not otherwise write it back as it was. Nothing sends
 it; the exporter writes it verbatim while it still maps to the stored auth,
-and every secret-blanking export blanks its credential attributes.
+and every secret-blanking export blanks its credential attributes, the PKCE
+`code_verifier` and the credentials among an `oauth2` block's
+`tokenRequestParams` / `authRequestParams` / `refreshRequestParams` rows
+included. Every write of an `auth` column drops it once it no longer maps to
+the auth being written (`without_stale_postman_source`), so an edited
+credential does not stay behind in it.
 
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored

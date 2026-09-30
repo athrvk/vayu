@@ -1253,18 +1253,18 @@ nlohmann::json& field) {
  * `{{baseUrl}}` holding `host:8080` or a path of its own is never read for a
  * `:name`, which is what Postman's parse of the unresolved `raw` does too.
  *
- * The rows are the inline request's `params` when it carries any (editor
- * state, which may be ahead of the saved row), otherwise the stored
- * request's. Each value is `{{var}}`-resolved once, through the same call the
- * URL uses. A value that comes out token-free is written into its segments,
- * encoded as one segment. A value still holding a token - a bound data
- * column, a deferred `{{$guid}}`, a name the pre-request script may set - is
- * not written: its segment stays `:name` and the row goes out as the
+ * The rows are the inline request's `params` when it carries an array (editor
+ * state, which may be ahead of the saved row; `[]` included), otherwise the
+ * stored request's. Each value is `{{var}}`-resolved once, through the same
+ * call the URL uses. A value that comes out token-free is written into its
+ * segments, encoded as Postman encodes it. A value still holding a token - a
+ * bound data column, a deferred `{{$guid}}`, a name the pre-request script may
+ * set - is not written: its segment stays `:name` and the row goes out as the
  * payload's `params`, so the bind or the residual pass that answers the token
  * encodes the answer (`core::settle_path_variables`). Joined into the URL
- * now, that answer would be raw text in the path, `/` and all. The payload's
- * own `params` is replaced either way: it carries exactly the rows still
- * waiting, and is absent when none is.
+ * now, that answer would be raw text in the path, a space or `?` and all. The
+ * payload's own `params` is replaced either way: it carries exactly the rows
+ * still waiting, and is absent when none is.
  */
 void substitute_compose_path_variables (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
@@ -1273,9 +1273,12 @@ const std::optional<vayu::db::Request>& stored,
 nlohmann::json& payload) {
     nlohmann::json rows;
     if (const auto own = payload.find ("params"); own != payload.end ()) {
-        rows = std::move (*own);
+        if (own->is_array ()) {
+            rows = std::move (*own);
+        }
         payload.erase ("params");
-    } else if (stored && !stored->params.empty ()) {
+    }
+    if (!rows.is_array () && stored && !stored->params.empty ()) {
         rows = nlohmann::json::parse (stored->params, nullptr, /*allow_exceptions=*/false);
     }
     const auto url = payload.find ("url");

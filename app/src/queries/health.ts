@@ -114,16 +114,16 @@ export function useHealthQuery() {
 			setEngineRecovery(query.data.recovery ?? null);
 			setWorkers(query.data.workers);
 
-			// Nothing else in the app notices an engine that arrives late. Every
-			// other query gives up after `shouldRetryQuery`'s two attempts, and a
-			// connection refused by a port nothing is listening on is a plain
-			// `Error`, not an `ApiError` - so collections, runs and config settle
-			// into an error state that no interval revisits. `refetchOnReconnect`
-			// does not cover this: it fires on the browser's online/offline event,
-			// which localhost never changes. Since the window now loads while the
-			// engine is still starting, that state is reachable on an ordinary
-			// launch rather than only on an engine crash. Same move the manual
-			// restart makes (`useEngineRestart`), for the same reason.
+			// Nothing else in the app notices an engine that comes back. While a
+			// start is in flight a refused connection (`EngineUnreachableError`)
+			// does not spend a query's retry budget (`isEngineStartFailure`), but
+			// outside that window every other query gives up after its budget,
+			// so collections, runs and config settle into an error state that no
+			// interval revisits - after an engine crash, or a start that outlived
+			// its window. `refetchOnReconnect` does not cover this: it fires on
+			// the browser's online/offline event, which localhost never changes.
+			// Same move the manual restart makes (`useEngineRestart`), for the
+			// same reason.
 			if (sawDisconnect.current) {
 				sawDisconnect.current = false;
 				void queryClient.invalidateQueries();

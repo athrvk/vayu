@@ -81,6 +81,24 @@ describe("AuthFields edits in the domain vocabulary", () => {
 		});
 	});
 
+	it("drops an imported `postman` source once a field is edited", () => {
+		// The source is the Postman block the auth was imported from, the
+		// credential included. Spread along with an edit, it would keep the
+		// replaced token in the stored row.
+		const imported = {
+			mode: "bearer",
+			token: "live",
+			postman: { type: "bearer", bearer: [{ key: "token", value: "live" }] },
+		} as EditableAuth;
+		const { onChange } = renderFields(imported);
+
+		fireEvent.change(screen.getByPlaceholderText(/Bearer token or/i), {
+			target: { value: "rotated" },
+		});
+
+		expect(onChange).toHaveBeenCalledWith({ mode: "bearer", token: "rotated" });
+	});
+
 	it("renders nothing for a mode the engine cannot resolve", () => {
 		// digest/aws/ntlm have no fields, but they are never collapsed to "none"
 		// either - the host names the stored mode, and the config rides along in

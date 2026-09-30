@@ -18,15 +18,21 @@ import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { retryWithin } from "@/lib/query-client";
 
-export function useElementKindsQuery() {
-	return useQuery({
+/** Exported so the retry wiring can be driven without rendering. */
+export function elementKindsQueryOptions() {
+	return {
 		queryKey: queryKeys.elementKinds.all,
 		queryFn: () => apiService.getElementKinds(),
 		// The catalogue is static per engine version - not worth refetching on
 		// every mount, same as script completions.
 		staleTime: QUERY_CACHE.ELEMENT_KINDS_STALE_TIME_MS,
 		gcTime: QUERY_CACHE.ELEMENT_KINDS_GC_TIME_MS,
-		retry: QUERY_CACHE.ELEMENT_KINDS_RETRY,
-	});
+		retry: retryWithin(QUERY_CACHE.ELEMENT_KINDS_RETRY),
+	};
+}
+
+export function useElementKindsQuery() {
+	return useQuery(elementKindsQueryOptions());
 }

@@ -1471,6 +1471,14 @@ the write is a `400` naming the index, the kind and the field. The only script
 source - `GET /requests/:id` and every list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
+**`auth.postman`**, the Postman block an import kept beside the mapped auth
+(see [`db-schema.md`](db-schema.md)), is kept on a write only while mapping it
+through the Postman importer still gives the auth being written; otherwise it
+is dropped. So a changed credential never leaves the old one behind in the
+stored block, whichever client wrote it, and a save that changed nothing keeps
+it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
+`POST /import/apply` apply the same rule.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
@@ -4689,15 +4697,22 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
   `{{variable}}` token is opaque, a backslash is a `/`, and a port
   (`host:8080`), the query and the fragment are never read.
 - Only an **enabled** row answers; among several rows of one key the **last**
-  enabled one does (Postman's `VariableList`). A segment with no such row
+  enabled one does. Postman's `VariableList` answers with the last row whatever
+  its `disabled` flag, but Postman's editor has no toggle for a path variable;
+  Vayu's does, and a disabled row answers nothing. A segment with no such row
   stays literal, which is also how every request stored before #1764 composes:
   a `:x` segment with no path row is sent as written.
-- The value is `{{var}}`-resolved exactly as the URL is, then written as **one
-  percent-encoded segment**: RFC 3986's unreserved set (`A-Z a-z 0-9 - _ . ~`)
-  passes through and every other byte is `%XX` with uppercase hex, so a `/`,
-  `?`, `#` or a bare `%` in a value is data, not structure. A `%XX` triplet
-  already in the value is sent as written (`postman-url-encoder`'s
-  `isPreEncoded`), so an imported `a%40b.com` is not encoded twice.
+- The value is `{{var}}`-resolved exactly as the URL is, then written in place
+  of `:name` percent-encoded as Postman encodes it: Postman joins the raw value
+  into the path (`Url.getPath`) and encodes the path with
+  `postman-url-encoder`'s `PATH_ENCODE_SET`, which is the C0 controls, DEL and
+  every byte above it (UTF-8, `%XX` with uppercase hex), space, `"`, `<`, `>`,
+  `` ` ``, `#`, `?`, `{` and `}` - and nothing else. So a `/` in a value makes
+  more segments (`a b/c` sends `/users/a%20b/c`), `@ : , ; = & + ! $ ' ( ) *`
+  and `%` go out as typed (`user@x.com`, `12:30`, `100%`, and an imported
+  `a%40b.com` is not encoded twice), and a `?` or `#` is `%3F` / `%23`, so a
+  value never ends the path. A whole `{{token}}` in the value is kept verbatim
+  rather than encoded (see the next point).
 - A value that still holds a `{{token}}` after that resolution - a bound data
   column, a deferred `{{$guid}}`, a name a pre-request script sets - is **not
   written yet**: its segment stays `:name` in the composed `url`, and the row
@@ -4706,7 +4721,7 @@ own `{{var}}` pass, on the URL as written, and follows Postman's parse
   far as composition could. Whatever answers the token later - the
   per-iteration bind, or the residual pass after the pre-request script -
   writes the answer into the segment through the same encoding, so a data cell
-  `a b/c` goes out as `/users/a%20b%2Fc`, never as two raw segments. A token
+  `a b?c` goes out as `/users/a%20b%3Fc`, never with a raw space and a query. A token
   nothing answers is written verbatim, as composition keeps one. Until then a
   pre-request script reads `pm.request.url` with the `:name` still in it.
 - A value that resolves to the **empty string leaves the segment literal**
