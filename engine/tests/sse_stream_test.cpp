@@ -1281,6 +1281,28 @@ TEST_F (StreamExecuteTest, AStreamWithTheJarOffStillPersistsThePreRequestWrite) 
     EXPECT_EQ (cookie_jar_.lines_for ("").size (), 1u);
 }
 
+// A stream the manager refuses to start (the daemon draining) never ran, so
+// its pre-request write is dropped - as the jar-on path drops the writes it
+// hands the refused spec. Mutation check: apply the jar-off writes inside
+// `attach_stream_jar` again, before `sse_manager.start`, and the jar holds
+// the write.
+TEST_F (StreamExecuteTest, ARefusedStreamWithTheJarOffPersistsNoPreRequestWrite) {
+    serve (1);
+    manager_->shutdown ();
+    json payload{ { "method", "GET" }, { "url", origin_->url ("/scripted") },
+        { "stream", true }, { "disableCookies", true },
+        { "elements",
+        script_elements ("pm.cookies.jar().set('" + origin_->url ("/") +
+        "', { name: 'pre', value: 'v' });") } };
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    auto response = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 503) << response->body;
+    EXPECT_TRUE (cookie_jar_.lines_for ("").empty ())
+    << "a refused stream persisted its pre-request cookie write";
+}
+
 // ---------------------------------------------------------------------------
 // `pm.sendRequest` on a stream (issue #653)
 //
