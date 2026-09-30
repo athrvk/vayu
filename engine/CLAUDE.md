@@ -216,7 +216,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `docs/engine/db-schema.md#schema-versions` and a line in the next release's
   notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
   literal; a step with nothing to move (version 2's
-  `request_examples.postman_response`) only stamps.
+  `request_examples.postman_response` and #1765's four `requests` protocol
+  columns) only stamps. A column may join a version no released build has
+  stamped (#1765 joined 2) because `sync_schema ()` adds it on every start
+  whatever the stamp; `docs/engine/db-schema.md#schema-versions` carries the
+  merge gate that checks the last tag first.
 - **A log call takes a category, never text alone** (#1557, full account in
   `docs/engine/logging.md`). `LogRecord{level, cat, msg, fields}` is the whole
   API - `log_debug`/`log_info`/`log_warning`/`log_error` (`utils/logger.hpp`)

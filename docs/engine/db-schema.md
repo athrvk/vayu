@@ -267,7 +267,16 @@ release that carries a bump says so in its notes.
 |---------|--------|----------------|
 | `0` | Every database before #1514 (never stamped) | - |
 | `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
-| `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from) | none: `sync_schema ()` adds the nullable column, the migration only stamps |
+| `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
+
+The #1765 columns joined version `2` rather than bumping to `3` because no
+released build has ever stamped `2`: the version shipped only on the unreleased
+branch that carried both changes. `sync_schema ()` runs on every start whatever
+the stamp, so a development database an earlier build of that branch already
+stamped `2` still gets the four columns. **Merge gate:** before this merges, run
+`git grep "SCHEMA_VERSION\s*=" $(git describe --tags --abbrev=0)`; if the last
+tag already shows `2` (the `postman_response` change was released on its own),
+the #1765 columns need their own bump to `3` and a row of their own here.
 
 ---
 
@@ -432,6 +441,10 @@ Stores individual HTTP request definitions.
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
+| `disable_cookies`     | INTEGER | Boolean; keep the cookie jar out of this request's transfer; default 0 (issue #1765) |
+| `disabled_system_headers` | TEXT | JSON array of lowercased header names the engine does not add on its own; default `"[]"` (issue #1765) |
+| `disable_url_encoding` | INTEGER | Boolean; write path values and an api-key query parameter as typed; default 0 (issue #1765) |
+| `postman_protocol_behavior` | TEXT | The imported Postman item's `protocolProfileBehavior`, JSON text in source member order; NULL when none (issue #1765) |
 | `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
 | `mock_response_mode`  | TEXT    | Which saved example a mock server answers with; default `'first'` (issue #481 phase 3) |
 | `mock_example_id`     | TEXT    | The example id `mock_response_mode == 'fixed'` names; NULL when none |
@@ -533,6 +546,36 @@ Rows written before the columns existed backfill to `1` / `10` / `'auto'` / `0`,
 i.e. the behaviour they already had (a row predating `http_version` could only
 ever have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
 clamped to `0..100` on write.
+
+**disable_cookies / disabled_system_headers / disable_url_encoding /
+postman_protocol_behavior** - Postman's per-request `protocolProfileBehavior`
+settings (issue #1765), serialized as `disableCookies` /
+`disabledSystemHeaders` / `disableUrlEncoding` / `postmanProtocolBehavior` and
+surfaced beside the redirect options in the **Settings** tab. The three typed
+ones mirror `vayu::Request` fields and ride every composed payload:
+
+- `disable_cookies` keeps the cookie jar out of the transfer, both halves - no
+  jar cookie is attached and no `Set-Cookie` is stored - on the buffered and
+  streaming design sends and a scenario load run's per-virtual-user session. A
+  pre-request script's `pm.cookies.jar()` write is still persisted, applied
+  directly because no transfer carries it.
+- `disabled_system_headers` is unioned into the per-send
+  `suppressed_default_headers`, so `user-agent`, `accept-encoding` and the
+  correlation id are refused as a per-send opt-out refuses them, and two more
+  names gain meaning: `accept` removes libcurl's implicit `Accept: */*` and
+  `content-type` removes the Content-Type a body implies (multipart keeps its
+  boundary header). `host`, `content-length`, `connection`, `cache-control`
+  and `postman-token` are stored and exported but change nothing on the wire.
+- `disable_url_encoding` writes a path variable's value (at composition and
+  when a bind or the residual pass settles it) and an api-key or OAuth 2.0
+  query parameter as typed. libcurl's own URL handling is unchanged: a raw
+  space is still refused and dot-segments are still normalised.
+
+`postman_protocol_behavior` is nothing the engine sends: `POST /export/postman`
+starts from it and overwrites only the keys a typed column now disagrees with,
+so explicit defaults, keys Vayu does not apply and the source's member order
+survive a round trip. The three typed columns are `NOT NULL` with a `DEFAULT`
+and the carrier is nullable, for the reason the paragraph above gives.
 
 **spec_operation** - which operation of the collection's bound
 [`openapi`](#collections) document this request *is* (issue #637):

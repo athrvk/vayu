@@ -310,6 +310,34 @@ Json method_source_node (const std::optional<std::string>& stored) {
     return stored.has_value () ? Json (*stored) : Json (nullptr);
 }
 
+/**
+ * The `disabledSystemHeaders` array both request serializers emit (issue
+ * #1765): the stored column, or `[]` for a value that will not parse as an
+ * array of strings - the write route never stores one, so that is a
+ * hand-edited row, and an execute default is safer than a refusal.
+ */
+Json disabled_system_headers_node (const std::string& stored) {
+    Json parsed = Json::parse (stored, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_array ()) {
+        return Json::array ();
+    }
+    for (const auto& name : parsed) {
+        if (!name.is_string ()) {
+            return Json::array ();
+        }
+    }
+    return parsed;
+}
+
+/**
+ * The `postmanProtocolBehavior` object both request serializers emit (issue
+ * #1765), on the `spec_operation_node` rule: always a key, `null` when the
+ * request carries none or the stored text is not an object.
+ */
+Json postman_protocol_behavior_node (const std::optional<std::string>& stored) {
+    return spec_operation_node (stored);
+}
+
 } // namespace
 
 Json serialize (const vayu::db::SpecDocument& s) {
@@ -530,11 +558,18 @@ Json serialize (const vayu::db::Request& r) {
             json["elements"] = Json::array ();
         }
     }
-    json["followRedirects"]  = r.follow_redirects;
-    json["maxRedirects"]     = r.max_redirects;
-    json["httpVersion"]      = r.http_version;
-    json["verifySSL"]        = r.verify_ssl;
-    json["stream"]           = r.stream;
+    json["followRedirects"] = r.follow_redirects;
+    json["maxRedirects"]    = r.max_redirects;
+    json["httpVersion"]     = r.http_version;
+    json["verifySSL"]       = r.verify_ssl;
+    json["stream"]          = r.stream;
+    // Postman's per-request protocol settings (issue #1765), always emitted
+    // like every other execution option.
+    json["disableCookies"] = r.disable_cookies;
+    json["disabledSystemHeaders"] = disabled_system_headers_node (r.disabled_system_headers);
+    json["disableUrlEncoding"] = r.disable_url_encoding;
+    json["postmanProtocolBehavior"] =
+    postman_protocol_behavior_node (r.postman_protocol_behavior);
     json["mockResponseMode"] = r.mock_response_mode;
     json["mockExampleId"] =
     r.mock_example_id.has_value () ? Json (*r.mock_example_id) : Json (nullptr);
@@ -1314,6 +1349,12 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"verifySSL\":" << (r.verify_ssl ? "true" : "false") << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
+    out << "\"disableCookies\":" << (r.disable_cookies ? "true" : "false") << ",";
+    out << "\"disabledSystemHeaders\":"
+        << disabled_system_headers_node (r.disabled_system_headers).dump () << ",";
+    out << "\"disableUrlEncoding\":" << (r.disable_url_encoding ? "true" : "false") << ",";
+    out << "\"postmanProtocolBehavior\":"
+        << postman_protocol_behavior_node (r.postman_protocol_behavior).dump () << ",";
     out << "\"mockResponseMode\":" << Json (r.mock_response_mode).dump () << ",";
     out << "\"mockExampleId\":"
         << (r.mock_example_id.has_value () ? Json (*r.mock_example_id).dump () : "null")
