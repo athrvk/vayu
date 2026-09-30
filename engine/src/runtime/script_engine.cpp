@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
@@ -7399,6 +7400,11 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (auto reason = interpolate_send_request (ctx, request, auth)) {
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
     }
+    // Postman builds this call's Item with `protocolProfileBehavior` of its
+    // own (`disableBodyPruning` alone, `event.command.js`) and no parent, so
+    // neither the enclosing request's `disableUrlEncoding` nor anything the
+    // script passes turns this off.
+    request.url = vayu::core::encode_url_as_postman (request.url);
     // The engine's own composition rather than a second copy of it: a header
     // the script set still wins, and an api key sent as a query parameter is
     // percent-encoded onto the URL exactly as every other send does it. `db` is

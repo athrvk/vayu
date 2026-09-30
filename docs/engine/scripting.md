@@ -1602,6 +1602,22 @@ that payload was resolved before the script ran and nothing here revisits it.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
 
+**The URL goes out encoded as Postman sends it.** Once its variables resolve,
+the URL is percent-encoded component by component as `postman-url-encoder`'s
+`toNodeUrl` writes it (`core::encode_url_as_postman`): the path by Postman's
+path set and the query by its query set (both listed under
+[Query encoding](api-reference.md#query-encoding)), user info by its user-info
+set, the host lowercased. So `pm.sendRequest("https://x/a b?q=c d&r=\"x\"", cb)`
+sends `/a%20b?q=c%20d&r=%22x%22`, where before the space made libcurl refuse
+the URL. `&` and `=` in the query stay separators, and `%` is never encoded, so
+an escape already written (or a URL composition already encoded, such as
+`pm.request.url`) is sent unchanged. There is no way to turn this off: Postman
+builds the call with a `protocolProfileBehavior` of its own, so neither the
+enclosing request's `disableUrlEncoding` nor anything in the options reaches
+it. A `{{name}}` nothing answered goes out as written, where Postman would
+encode its braces in the path; and a non-ASCII host is not converted to
+punycode, because libcurl is built without IDN support.
+
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
 names that resolve to one name would send the request a header short, so the

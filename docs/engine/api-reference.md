@@ -4802,6 +4802,12 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
 - A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
   and is written by the row rule above
   ([scripting](scripting.md#writing)).
+- A `pm.sendRequest` URL is encoded whole after its variables resolve, as
+  Postman's `toNodeUrl` writes it (`core::encode_url_as_postman` in
+  `core/url_encoding.hpp`): its query text by the set above with `&` and `=`
+  left as separators, its path by the path set under
+  [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
+  ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
