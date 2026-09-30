@@ -223,7 +223,7 @@ QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment
 
 **Which platforms does Vayu support?**
 Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon + Intel universal), and Linux
-(x86_64 AppImage).
+(x86_64 AppImage, glibc 2.35 or later: Ubuntu 22.04, Debian 12 or newer).
 
 ---
 
