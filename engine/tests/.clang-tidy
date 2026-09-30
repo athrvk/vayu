@@ -5,4 +5,21 @@
 # and has no remedy for it that leaves the test readable.
 Checks: '-readability-function-cognitive-complexity'
 InheritParentConfig: true
+# The static analyzer's default inlining mode, `dynamic-bifurcate`, forks every
+# path at a virtual call whose receiver's dynamic type it cannot prove, once
+# per candidate type. gtest's assertion macros put such calls in every
+# EXPECT/ASSERT, so a test body multiplies its paths per assertion: measured on
+# clang-tidy 19, import_parse_test.cpp spent 258 s of its 306 s in the analyzer
+# and script_engine_test.cpp 560 s of its 604 s. `dynamic` still inlines a
+# virtual call wherever the type is known and evaluates the rest without
+# forking; the analyzer then takes 26 s on import_parse_test.cpp. The engine's
+# own sources keep the default - they have no such fan-out (run_manager.cpp
+# costs the same under either mode), so nothing is traded away there. The
+# 155 test files were at zero analyzer findings in both modes when this was set.
+#
+# Set here rather than on the pre-commit hook's command line because both
+# consumers read this file, and a hook that analysed less than the gate would
+# pass commits the gate then refuses.
+CheckOptions:
+  clang-analyzer-ipa: dynamic
 ...
