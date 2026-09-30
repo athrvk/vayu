@@ -1435,7 +1435,11 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   [POST /execute](#post-execute)): `user-agent`, `accept-encoding` and the
   correlation id as that list refuses them, `accept` removes libcurl's implicit
   `Accept: */*`, `content-type` removes the Content-Type a body implies
-  (multipart keeps its boundary header). Other names (`host`,
+  (multipart keeps its boundary header), and with it a `Content-Type` header
+  row marked `"source": "body-mode"` - the row the app's Body panel writes and
+  the importer adds for a GraphQL, JSON-RPC or XML body, which is the body's
+  own header, not the user's. A `Content-Type` row without that marker is the
+  user's and is always sent. Other names (`host`,
   `content-length`, `postman-token`, ...) are stored for the export and change
   nothing on the wire.
 - `disableUrlEncoding` writes a path variable's value and an api-key (or
@@ -4972,7 +4976,8 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "disabledDefaultHeaders": [],        // Optional, headers Vayu adds that this send refuses
   "disableCookies": false,             // Optional, default false - stored per request, see below
   "disabledSystemHeaders": [],         // Optional, default [] - stored per request, see below
-  "disableUrlEncoding": false          // Optional, default false - stored per request, see below
+  "disableUrlEncoding": false,         // Optional, default false - stored per request, see below
+  "bodyModeHeaders": ["Content-Type"]  // Optional, which `headers` the body mode wrote - see below
 }
 ```
 
@@ -5001,6 +5006,17 @@ never-stored opt-out, and is refused on the same shape rules. `disableCookies`
 takes the jar off the buffered and the streaming send and off a scenario load
 run's per-virtual-user session (the step neither sends nor updates it); a
 single-request load run never tracks cookies at all.
+
+**`bodyModeHeaders` names the headers the body mode wrote** (issue #1765): the
+`headers` keys whose row carried `"source": "body-mode"`. The flat `headers`
+object has no room for the marker, so `POST /compose` emits this list from a
+stored request's rows (only when it names something) and the app sends it
+beside an inline request's headers; inline `headers` replace the stored ones,
+so the stored list is dropped with them. A name in it that
+`disabledSystemHeaders` or `disabledDefaultHeaders` refuses is left off the
+wire, as Postman leaves off the body's Content-Type as a system header; a name
+not in it is the user's and is sent. A value that is not an array of strings
+is a `400`.
 
 **`stream` consumes a `text/event-stream` response live** (issue #573) instead
 of buffering it. It changes the *execution model*, so it is declared rather than

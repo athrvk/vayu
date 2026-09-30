@@ -569,7 +569,9 @@ ones mirror `vayu::Request` fields and ride every composed payload:
   correlation id are refused as a per-send opt-out refuses them, and two more
   names gain meaning: `accept` removes libcurl's implicit `Accept: */*` and
   `content-type` removes the Content-Type a body implies (multipart keeps its
-  boundary header). `host`, `content-length`, `connection`, `cache-control`
+  boundary header) and a `headers` row marked `"source": "body-mode"`, the
+  body's own Content-Type row (composition lists those names as
+  `bodyModeHeaders`). `host`, `content-length`, `connection`, `cache-control`
   and `postman-token` are stored and exported but change nothing on the wire.
 - `disable_url_encoding` writes a path variable's value (at composition and
   when a bind or the residual pass settles it) and an api-key or OAuth 2.0

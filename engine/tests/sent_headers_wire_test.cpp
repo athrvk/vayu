@@ -254,5 +254,40 @@ TEST_F (SentHeadersWireTest, TheLoadDriverHonoursTheSameRefusal) {
     EXPECT_FALSE (server_->has_header ("Content-Type"));
 }
 
+/**
+ * The app's Send, as it reaches the wire (issue #1765): a GraphQL body whose
+ * Content-Type row the Body panel wrote travels as a flat header plus its
+ * `bodyModeHeaders` name, and a stored `content-type` refusal keeps it off -
+ * as Postman sends no Content-Type for a refused body header. Without the
+ * marker the same header is the user's and goes out. Mutation check: make
+ * `drop_refused_body_mode_headers` return before its loop and the first
+ * expectation reds.
+ */
+TEST_F (SentHeadersWireTest, ARefusedContentTypeTheBodyModeWroteStaysOffTheWire) {
+    const auto payload = [&] (bool marked) {
+        nlohmann::json out{ { "method", "POST" }, { "url", server_->url () },
+            { "headers", { { "Content-Type", "application/json" } } },
+            { "body", { { "mode", "graphql" }, { "content", R"({"query":"{ me }"})" } } },
+            { "disabledSystemHeaders", { "content-type" } } };
+        if (marked) {
+            out["bodyModeHeaders"] = { "Content-Type" };
+        }
+        return out;
+    };
+    const auto send = [&] (bool marked) {
+        auto parsed = vayu::json::deserialize_request (payload (marked));
+        EXPECT_TRUE (parsed.is_ok ());
+        Request request    = parsed.is_ok () ? parsed.value () : Request{};
+        request.timeout_ms = 5000;
+        return client_->send (request).is_ok ();
+    };
+    ASSERT_TRUE (send (true));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
+    EXPECT_EQ (server_->body (), R"({"query":"{ me }"})");
+
+    ASSERT_TRUE (send (false));
+    EXPECT_EQ (server_->header ("Content-Type"), "application/json");
+}
+
 } // namespace
 } // namespace vayu::http

@@ -51,7 +51,7 @@ import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import { bodyModeHeaders, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
 	disabledDefaults,
@@ -257,6 +257,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						url: request.url,
 						params: composePathParams(request.params),
 						headers: headersRecord,
+						// Which of those the body mode wrote (issue #1765).
+						...bodyModeHeaders(request.headers),
 						body: execBody,
 						auth: { ...request.auth },
 						elements: elements.length > 0 ? elements : undefined,

@@ -1010,13 +1010,63 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
 // Requests
 // ---------------------------------------------------------------------------
 
+/// The Content-Type Postman's runtime adds for @p body (an exported Postman
+/// body) as a system header, or "" when it adds none: GraphQL's JSON envelope,
+/// and a raw body's declared language.
+std::string_view postman_implied_content_type (const std::optional<json>& body) {
+    if (!body) {
+        return {};
+    }
+    const std::string mode = text_of (*body, "mode");
+    if (mode == "graphql") {
+        return "application/json";
+    }
+    if (mode != "raw") {
+        return {};
+    }
+    const auto options = body->find ("options");
+    const std::string language = options == body->end () || !options->is_object () ?
+    std::string () :
+    text_of (options->value ("raw", json::object ()), "language");
+    if (language == "json") {
+        return "application/json";
+    }
+    return language == "xml" ? "application/xml" : std::string_view ();
+}
+
+/**
+ * @p headers without the row the body mode wrote (`source: "body-mode"`,
+ * issue #1765) when Postman would add that same header on its own: Postman
+ * treats the body's Content-Type as a system header, so writing it as a
+ * declared row would make a `content-type` opt-out stop working there and
+ * the next import read it as the user's.
+ */
+json without_implied_body_header (const json& headers, const std::optional<json>& body) {
+    const std::string_view implied = postman_implied_content_type (body);
+    if (implied.empty () || !headers.is_array ()) {
+        return headers;
+    }
+    json out = json::array ();
+    for (const json& row : headers) {
+        const bool implied_row = row.is_object () &&
+        text_of (row, "source") == "body-mode" && row_enabled (row) &&
+        vayu::utils::ascii_lower (text_of (row, "key")) == "content-type" &&
+        text_of (row, "value") == implied;
+        if (!implied_row) {
+            out.push_back (row);
+        }
+    }
+    return out;
+}
+
 /// The request half a saved example records, and the request itself.
 json request_core (const PostmanExportRequest& request,
 const std::optional<json>& body,
 Walk& walk) {
     json out;
     out["method"] = request.method;
-    out["header"] = postman_rows (request.headers, RowShape::Typed, walk);
+    out["header"] = postman_rows (
+    without_implied_body_header (request.headers, body), RowShape::Typed, walk);
     if (body) {
         out["body"] = *body;
     }

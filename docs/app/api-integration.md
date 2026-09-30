@@ -1252,7 +1252,12 @@ raw, and a query-located API key is appended raw, all matching what the engine
 sends. The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
 the Postman exporter only: `GET /requests` returns it, an import and a Duplicate
-carry it, and nothing sends it.
+carry it, and nothing sends it. The flat `headers` record every
+inline compose sends loses each row's `source`, so beside it goes
+`bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):
+the names whose row the body mode wrote, which a `content-type` opt-out removes
+on the wire while a Content-Type the user typed is always sent. A History
+replay puts the run's recorded list back on its seeded rows.
 
 **Example Response:**
 ```typescript

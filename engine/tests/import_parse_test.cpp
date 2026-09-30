@@ -1787,6 +1787,32 @@ TEST (PostmanImport, StoresTheProtocolSettingsAndKeepsTheWholeObject) {
     EXPECT_EQ (item.at ("followRedirects"), true);
 }
 
+// A GraphQL body's Content-Type is Postman's system header (issue #1765): the
+// importer writes it as the body mode's own row, marked the way the Body panel
+// marks it, and writes none for a request that refuses `content-type` - as
+// Postman sends none. Truthy non-boolean values count, as Postman's runtime
+// reads them. Mutation check: pass `false` for `refused` at the Postman call
+// of `with_required_content_type` and the refused request gains the row.
+TEST (PostmanImport, AGraphqlContentTypeIsTheBodyModesRowUnlessRefused) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Kept","request":{"method":"POST","url":"https://x.com/g",
+            "body":{"mode":"graphql","graphql":{"query":"{ me }"}}}},
+        {"name":"Refused","protocolProfileBehavior":{"disabledSystemHeaders":{"content-type":1}},
+            "request":{"method":"POST","url":"https://x.com/g",
+            "body":{"mode":"graphql","graphql":{"query":"{ me }"}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const auto& requests = parsed.result.at ("collections")[0].at ("requests");
+    ASSERT_EQ (requests.size (), 2u);
+    EXPECT_EQ (json::parse (requests[0].at ("headers").dump ()),
+    json::parse (R"([{"key":"Content-Type","value":"application/json","enabled":true,"source":"body-mode"}])"));
+    EXPECT_EQ (requests[1].at ("headers"), nlohmann::ordered_json::array ());
+    EXPECT_EQ (requests[1].at ("disabledSystemHeaders"),
+    nlohmann::ordered_json::array ({ "content-type" }));
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

@@ -1006,6 +1006,38 @@ std::optional<Error> read_disabled_system_headers (const Json& json, Request& re
     return std::nullopt;
 }
 
+/**
+ * `bodyModeHeaders` (issue #1765): the names of headers the request carries
+ * only because its body mode wrote them - a stored row marked
+ * `source: "body-mode"`, the Body panel's Content-Type or the one an importer
+ * adds for a GraphQL, JSON-RPC or XML body. Such a header is a system header
+ * in Postman's sense, not a declaration, so a refused name drops it here and
+ * the header builder then treats the request as declaring none (removing
+ * libcurl's own default in its place). A row the user typed carries no
+ * marker and is always sent. Read after both opt-out lists, which it consults.
+ */
+std::optional<Error> drop_refused_body_mode_headers (const Json& json, Request& request) {
+    const auto names = json.find ("bodyModeHeaders");
+    if (names == json.end () || names->is_null ()) {
+        return std::nullopt;
+    }
+    if (!names->is_array ()) {
+        return Error{ ErrorCode::InternalError,
+            "'bodyModeHeaders' must be an array of header names" };
+    }
+    for (const auto& name : *names) {
+        if (!name.is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'bodyModeHeaders' must hold header names as strings" };
+        }
+        const auto text = name.get<std::string> ();
+        if (request.suppressed_default_headers.contains (text)) {
+            request.headers.erase (text);
+        }
+    }
+    return std::nullopt;
+}
+
 /** The per-request options, each optional and each with a documented default. */
 void read_request_options (const Json& json, Request& request) {
     // Options
@@ -1100,6 +1132,9 @@ Result<Request> deserialize_request (const Json& json) {
             return *refusal;
         }
         if (auto refusal = read_disabled_system_headers (json, request)) {
+            return *refusal;
+        }
+        if (auto refusal = drop_refused_body_mode_headers (json, request)) {
             return *refusal;
         }
         read_request_options (json, request);

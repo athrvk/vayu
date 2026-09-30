@@ -1606,6 +1606,75 @@ TEST_F (RequestComposerTest, EmitsTheStoredProtocolSettingsAndLetsAnInlineValueW
 }
 
 /**
+ * A body mode's Content-Type is a system header (issue #1765): the row the
+ * Body panel writes carries `source: "body-mode"`, and a stored
+ * `content-type` opt-out drops it once the composed payload is parsed, while
+ * a Content-Type the user typed (no marker) is always kept. The stored rows
+ * are the app's own shape. Mutation check: drop the `marked[...]` line in
+ * `flatten_stored_headers` (no `bodyModeHeaders`) and the marked row reaches
+ * the request; drop the `drop_refused_body_mode_headers` call in
+ * `deserialize_request` and the same.
+ */
+TEST_F (RequestComposerTest, ARefusedContentTypeDropsTheBodyModeRowButNotATypedOne) {
+    seed_collection ("col", "");
+    auto marked = make_request ("req_1", "col");
+    marked.url  = "https://api.test/graphql";
+    marked.body = R"({"mode":"graphql","content":"{\"query\":\"{ me }\"}"})";
+    marked.headers = R"([{"id":"h1","key":"Content-Type","value":"application/json","enabled":true,"source":"body-mode"},{"id":"h2","key":"X-Kept","value":"1","enabled":true}])";
+    marked.disabled_system_headers = R"(["content-type"])";
+    db_->save_request (marked);
+    auto typed = marked;
+    typed.id   = "req_2";
+    typed.headers = R"([{"id":"h1","key":"Content-Type","value":"application/json","enabled":true}])";
+    db_->save_request (typed);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["bodyModeHeaders"], json::array ({ "Content-Type" }));
+    auto request = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (request.is_ok ()) << request.error ().message;
+    EXPECT_FALSE (request.value ().headers.contains ("Content-Type"));
+    EXPECT_EQ (request.value ().headers.at ("X-Kept"), "1");
+
+    auto [typed_status, typed_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_2" } });
+    ASSERT_EQ (typed_status, 200) << typed_payload.dump ();
+    EXPECT_FALSE (typed_payload.contains ("bodyModeHeaders"));
+    auto typed_request = vayu::json::deserialize_request (typed_payload);
+    ASSERT_TRUE (typed_request.is_ok ()) << typed_request.error ().message;
+    EXPECT_EQ (typed_request.value ().headers.at ("Content-Type"), "application/json");
+}
+
+/**
+ * The stored marker describes the stored rows only: inline headers replace
+ * them, so an inline request that names no `bodyModeHeaders` leaves none (a
+ * Content-Type it sends is the user's), and one that does names its own.
+ * Mutation check: drop the `payload.erase ("bodyModeHeaders")` overlay line
+ * and the stale stored marker survives.
+ */
+TEST_F (RequestComposerTest, InlineHeadersBringTheirOwnBodyModeMarkers) {
+    seed_collection ("col", "");
+    auto r = make_request ("req_1", "col");
+    r.headers = R"([{"key":"Content-Type","value":"application/json","enabled":true,"source":"body-mode"}])";
+    db_->save_request (r);
+
+    auto [status, typed] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request", { { "headers", { { "Content-Type", "application/json" } } } } } });
+    ASSERT_EQ (status, 200) << typed.dump ();
+    EXPECT_FALSE (typed.contains ("bodyModeHeaders"));
+
+    auto [marked_status, marked] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request",
+    { { "headers", { { "Content-Type", "application/xml" } } },
+    { "bodyModeHeaders", json::array ({ "Content-Type" }) } } } });
+    ASSERT_EQ (marked_status, 200) << marked.dump ();
+    EXPECT_EQ (marked["bodyModeHeaders"], json::array ({ "Content-Type" }));
+}
+
+/**
  * `disableUrlEncoding` writes a path value as typed, skipping Postman's
  * path encode set (`a"b/c` keeps its `"`, where the default writes `%22`);
  * the inline flag decides, stored or not. Mutation check: pass `true` for `encode` in

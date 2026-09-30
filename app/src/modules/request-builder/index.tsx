@@ -58,7 +58,7 @@ import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import { composePathParams } from "./utils/path-variables";
-import { toFlatHeaders } from "./utils/key-value";
+import { bodyModeHeaders, toFlatHeaders } from "./utils/key-value";
 import { elementsParts, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
@@ -417,6 +417,8 @@ export default function RequestBuilder() {
 					// Always sent, `[]` included (#1764) - see composePathParams.
 					params: composePathParams(request.params),
 					headers: headersRecord,
+					// Which of those the body mode wrote (issue #1765).
+					...bodyModeHeaders(request.headers),
 					body: execBody,
 					auth: { ...request.auth },
 					elements,
@@ -727,6 +729,7 @@ export default function RequestBuilder() {
 						url: pendingLoadTestRequest.url,
 						params: composePathParams(pendingLoadTestRequest.params),
 						headers: toFlatHeaders(pendingLoadTestRequest.headers),
+						...bodyModeHeaders(pendingLoadTestRequest.headers),
 						body: bodyPayload,
 						auth: { ...pendingLoadTestRequest.auth },
 						elements: requestElements,

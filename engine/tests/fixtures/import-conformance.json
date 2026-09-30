@@ -763,7 +763,8 @@
                       {
                         "key": "Content-Type",
                         "value": "application/xml",
-                        "enabled": true
+                        "enabled": true,
+                        "source": "body-mode"
                       }
                     ],
                     "body": {
@@ -816,7 +817,8 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json",
-                    "enabled": true
+                    "enabled": true,
+                    "source": "body-mode"
                   }
                 ],
                 "body": {
@@ -978,7 +980,8 @@
               {
                 "key": "Content-Type",
                 "value": "application/json",
-                "enabled": true
+                "enabled": true,
+                "source": "body-mode"
               }
             ],
             "body": {
@@ -1074,7 +1077,8 @@
               {
                 "key": "Content-Type",
                 "value": "application/xml",
-                "enabled": true
+                "enabled": true,
+                "source": "body-mode"
               }
             ],
             "body": {
@@ -1800,7 +1804,8 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json",
-                    "enabled": true
+                    "enabled": true,
+                    "source": "body-mode"
                   }
                 ],
                 "body": {
@@ -1905,7 +1910,8 @@
               {
                 "key": "Content-Type",
                 "value": "application/json",
-                "enabled": true
+                "enabled": true,
+                "source": "body-mode"
               }
             ],
             "body": {

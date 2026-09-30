@@ -69,6 +69,8 @@ interface DesignSnapshot {
 	disableCookies?: boolean;
 	disabledSystemHeaders?: unknown;
 	disableUrlEncoding?: boolean;
+	/** The `headers` names the body mode wrote (issue #1765). */
+	bodyModeHeaders?: unknown;
 }
 
 export interface DesignRunSeed {
@@ -116,7 +118,11 @@ export interface DesignRunSeed {
  * version string of the day it ran, and send both again as ordinary user
  * headers. Same rule as the request loader's, from the same definition.
  */
-function toHeaderItems(headers: Record<string, string> | undefined) {
+function toHeaderItems(headers: Record<string, string> | undefined, bodyMode: unknown = []) {
+	// The run's `bodyModeHeaders` (issue #1765) put back on their rows, so the
+	// replay tells the engine the same thing the recorded Send did: these are
+	// the body mode's own, which a `content-type` opt-out removes.
+	const marked = new Set(Array.isArray(bodyMode) ? bodyMode : []);
 	return toKeyValueItems(
 		Object.entries(headers ?? {})
 			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
@@ -124,6 +130,7 @@ function toHeaderItems(headers: Record<string, string> | undefined) {
 				key,
 				value,
 				enabled: true,
+				...(marked.has(key) ? { source: "body-mode" as const } : {}),
 			}))
 	);
 }
@@ -192,7 +199,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	 * included - and the copy replays exactly what ran.
 	 */
 	const headers = liveRequest
-		? toHeaderItems(snapshot.headers)
+		? toHeaderItems(snapshot.headers, snapshot.bodyModeHeaders)
 		: toHeaderItems(trace?.request?.headers);
 	const auth: RequestAuth = liveRequest ? liveRequest.auth : { mode: "none" };
 

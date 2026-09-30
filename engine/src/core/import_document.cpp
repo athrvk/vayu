@@ -353,12 +353,14 @@ std::string required_content_type (const std::string& mode) {
  * default `x-www-form-urlencoded`, which most GraphQL servers answer with a
  * 400. A request that already declares the header keeps what it has, including
  * a deliberate `application/graphql`; a disabled row does not count as
- * declaring one, since it is not sent.
+ * declaring one, since it is not sent. A request that refuses Content-Type
+ * (@p refused: Postman's `disabledSystemHeaders`, issue #1765) is sent with
+ * none, so none is added.
  */
-json with_required_content_type (json headers, const json& body) {
+json with_required_content_type (json headers, const json& body, bool refused = false) {
     const std::string required =
     required_content_type (body.at ("mode").get<std::string> ());
-    if (required.empty ()) {
+    if (required.empty () || refused) {
         return headers;
     }
     for (const json& header : headers) {
@@ -372,8 +374,11 @@ json with_required_content_type (json headers, const json& body) {
             return headers;
         }
     }
-    headers.push_back (
-    { { "key", "Content-Type" }, { "value", required }, { "enabled", true } });
+    // Marked as the body mode's own row, as the Body panel marks the one it
+    // writes: the mode implies it, so a stored `content-type` opt-out refuses
+    // it (issue #1765) and a mode switch in the app takes it back.
+    headers.push_back ({ { "key", "Content-Type" }, { "value", required },
+    { "enabled", true }, { "source", "body-mode" } });
     return headers;
 }
 
@@ -1716,10 +1721,16 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (unsupported_method) {
         counts.skipped_unsupported_method += 1;
     }
-    request["url"]     = url;
-    request["params"]  = params;
+    request["url"]       = url;
+    request["params"]    = params;
+    const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
+    const json* system_headers =
+    behavior == nullptr ? nullptr : prop (behavior, "disabledSystemHeaders");
+    const bool content_type_refused = system_headers != nullptr &&
+    std::ranges::contains (postman_disabled_system_headers (*system_headers),
+    std::string ("content-type"));
     request["headers"] = with_required_content_type (
-    map_key_values (prop (rq, "header"), RowExtras::Typed), body);
+    map_key_values (prop (rq, "header"), RowExtras::Typed), body, content_type_refused);
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {
