@@ -295,7 +295,10 @@ TEST_F (LoadStrategyTest, TheFastPathSendsAPathValueAsTypedWhenUrlEncodingIsOff)
     vayu::db::Database db (TEST_DB_PATH);
     auto strategy = vayu::core::LoadStrategy::create (config);
     strategy->execute (context, db, request);
-    context->event_loop->stop (false);
+    // Drained, not cancelled: `execute` returns once the iteration is
+    // submitted, and a cancelled transfer under a loaded `ctest -j` can
+    // leave before the echo server records a target at all.
+    context->event_loop->stop (true);
 
     ASSERT_EQ (context->requests_sent.load (), 1u);
     EXPECT_EQ (echo.target (), "/echo/u/a\"b/c");
