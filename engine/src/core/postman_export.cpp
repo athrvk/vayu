@@ -1068,6 +1068,22 @@ bool same_rows (const json& left, const json& right) {
     return true;
 }
 
+/// The values of the enabled `Set-Cookie` rows of @p rows, in order: what a
+/// saved response's `cookie[]` is built from.
+std::vector<std::string> set_cookie_values (const json& rows) {
+    std::vector<std::string> out;
+    if (!rows.is_array ()) {
+        return out;
+    }
+    for (const json& row : rows) {
+        if (row_enabled (row) &&
+        vayu::utils::ascii_lower_equal (text_of (row, "key"), "set-cookie")) {
+            out.push_back (text_of (row, "value"));
+        }
+    }
+    return out;
+}
+
 /// What a stored saved response still says about the example it came from.
 struct Recorded {
     /// `status` is the code the response was recorded with.
@@ -1076,6 +1092,11 @@ struct Recorded {
     bool rows_same = false;
     /// The declared Content-Type is the recorded one.
     bool type_same = false;
+    /// `headers` holds the enabled `Set-Cookie` rows the recorded `header[]`
+    /// holds. Finer than `rows_same`: an unrelated header edit keeps a
+    /// `cookie[]` whose `Max-Age` expiry was counted from when the response
+    /// came in, which a rebuild at export time could only re-count from now.
+    bool cookies_same = false;
 };
 
 Recorded compare_recorded (const PostmanExportExample& example,
@@ -1088,7 +1109,8 @@ const std::optional<std::string>& declared) {
     const bool coded = code != stored.end () && code->is_number_integer ();
     // An absent code is the 200 the importer stored for it.
     return { (coded ? code->get<int> () : 200) == example.status,
-        same_rows (rows, example.headers), declared_content_type (rows) == declared };
+        same_rows (rows, example.headers), declared_content_type (rows) == declared,
+        set_cookie_values (rows) == set_cookie_values (example.headers) };
 }
 
 /// @p value as a member to write. `std::optional<json>`'s converting
@@ -1312,7 +1334,7 @@ Walk& walk) {
         // Built from the Set-Cookie rows, so an edit that removes one must
         // not leave its value behind here.
         return write (
-        recorded.rows_same ? value : postman_cookies (example.headers, walk.now));
+        recorded.cookies_same ? value : postman_cookies (example.headers, walk.now));
     }
     if (key == "_postman_previewlanguage") {
         return write (
@@ -1341,8 +1363,9 @@ Walk& walk) {
  * describing a column is written as stored only while that column still says
  * what was imported. `name`, `code` and `body` are always the columns. The
  * status text is kept while `status` is the code it was recorded with,
- * `header[]` (its `name` fields and number values included) and `cookie[]` while `headers`
- * reads the same through the importer's own row mapping, and the preview
+ * `header[]` (its `name` fields and number values included) while `headers`
+ * reads the same through the importer's own row mapping, `cookie[]` while its
+ * enabled `Set-Cookie` rows do, and the preview
  * language and type while the declared Content-Type is unchanged; otherwise
  * each is regenerated, and a regenerated preview type is left out, since it
  * is Postman's own guess. `originalRequest` is kept verbatim: it records the

@@ -3487,9 +3487,11 @@ recorded, not the request's current state), `responseTime`,
 `_postman_previewtype` and any other member as stored; `name`, `code` and
 `body` from the example's own fields. The status text is the stored one while
 `status` is still the code it was recorded with, `header[]` (its `name` fields
-and number values included) and `cookie` while `headers` still reads the same
-(after an edit `cookie` is rebuilt from the enabled `Set-Cookie` rows, so a
-removed row's value is not exported), and the
+and number values included) while `headers` still reads the same, `cookie`
+while the enabled `Set-Cookie` rows (name in any case, and value) still read as
+the recorded `header[]` has them (an edit to those rows rebuilds `cookie` from
+them, a `Max-Age` counted from the export, so a removed row's value is not
+exported; an unrelated header edit keeps it byte for byte), and the
 preview language and type while the declared Content-Type is unchanged; an
 edit to any of those regenerates the part it made stale. A member the source
 left out (`code`, `status`) stays out until an edit gives it a value. The

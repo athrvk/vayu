@@ -978,6 +978,76 @@ TEST (PostmanExport, CookieAttributesReadAsACookieStoreReadsThem) {
     "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
 }
 
+/// An example saved at @p received_at with a Max-Age cookie beside a
+/// Content-Type, its saved response stored as a save records it.
+PostmanExportExample saved_with_cookie (std::time_t received_at) {
+    PostmanExportExample example;
+    example.name    = "Saved";
+    example.status  = 200;
+    example.headers = ordered::array ({ row ("Content-Type", "text/plain"),
+    row ("Set-Cookie", "sid=s1; Max-Age=60; Path=/") });
+    const auto text = vayu::core::postman_saved_response_text (
+    request ("r", "u"), example, "", std::nullopt, received_at);
+    if (text) {
+        example.postman_response = ordered::parse (*text);
+    }
+    return example;
+}
+
+// An edit that leaves the enabled Set-Cookie rows alone keeps the recorded
+// `cookie[]` byte for byte - its Max-Age still counted from when the response
+// came in, not re-counted from the export - while an edit to those rows
+// rebuilds it from them, a Max-Age then counted from the export. Mutation
+// checks: guard `cookie` with `rows_same` again and the Content-Type edit
+// reds; rebuild with 0 instead of `walk.now` and the rebuilt expiry reds.
+TEST (PostmanExport, OnlyAnEditToTheSetCookieRowsRebuildsTheCookies) {
+    const PostmanExportExample saved = saved_with_cookie (NEW_YEAR_2026);
+    ASSERT_FALSE (saved.postman_response.is_null ());
+    const ordered recorded = saved.postman_response.at ("cookie");
+
+    PostmanExportRequest retyped         = request ("r", "u");
+    PostmanExportExample content_type    = saved;
+    content_type.headers.at (0)["value"] = "application/json";
+    retyped.examples.push_back (content_type);
+    const ordered kept = only_item (retyped)["response"][0];
+    EXPECT_EQ (kept["cookie"].dump (), recorded.dump ());
+    EXPECT_EQ (kept["_postman_previewlanguage"], "json")
+    << "the edit itself shows";
+
+    // A turned-off row sets no cookie, so turning an unrelated row off is
+    // not an edit to the cookies either.
+    PostmanExportRequest toggled = request ("r", "u");
+    PostmanExportExample off     = saved;
+    off.headers.push_back (row ("Set-Cookie", "gone=1", false));
+    toggled.examples.push_back (off);
+    EXPECT_EQ (only_item (toggled)["response"][0]["cookie"].dump (), recorded.dump ());
+
+    const std::time_t before        = std::time (nullptr);
+    PostmanExportRequest rewrote    = request ("r", "u");
+    PostmanExportExample changed    = saved;
+    changed.headers.at (1)["value"] = "sid=s2; Max-Age=60; Path=/";
+    rewrote.examples.push_back (changed);
+    const ordered rebuilt   = only_item (rewrote)["response"][0]["cookie"];
+    const std::time_t after = std::time (nullptr);
+    ASSERT_EQ (rebuilt.size (), 1u) << rebuilt.dump ();
+    EXPECT_EQ (rebuilt[0]["value"], "s2");
+    bool counted_from_export = false;
+    for (std::time_t at = before; at <= after; ++at) {
+        const ordered expected = saved_cookies ("sid=s2; Max-Age=60; Path=/", at);
+        counted_from_export =
+        counted_from_export || expected[0]["expires"] == rebuilt[0]["expires"];
+    }
+    EXPECT_TRUE (counted_from_export) << rebuilt.dump ();
+
+    PostmanExportRequest removed = request ("r", "u");
+    PostmanExportExample dropped = saved;
+    dropped.headers.erase (1);
+    removed.examples.push_back (dropped);
+    const ordered none = only_item (removed)["response"][0];
+    EXPECT_EQ (none["cookie"], ordered::array ());
+    EXPECT_EQ (none.dump ().find ("s1"), std::string::npos);
+}
+
 // A stored `cookie[]` is written as recorded only while the header rows are;
 // an edit rebuilds it from the Set-Cookie rows, so a removed row's value does
 // not outlive it. Mutation check: write the stored `cookie` unconditionally

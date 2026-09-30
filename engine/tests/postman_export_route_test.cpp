@@ -230,8 +230,9 @@ TEST_F (PostmanExportRouteTest, AnEditedImportedExampleExportsItsEditNotTheStale
     R"([{"key":"Content-Type","value":"application/json"}])");
     EXPECT_EQ (response["_postman_previewlanguage"], "json");
     EXPECT_FALSE (response.contains ("_postman_previewtype"));
-    EXPECT_EQ (response["cookie"], ordered::array ())
-    << "the cookies are the Set-Cookie rows', and the edited rows set none";
+    EXPECT_EQ (response["cookie"], before[0]["cookie"])
+    << "the edit left the enabled Set-Cookie rows as recorded (there were "
+       "none), so the recorded cookies stay";
     EXPECT_EQ (response["responseTime"], "493");
     EXPECT_EQ (after.at (1), before.at (1))
     << "the untouched example is unchanged";
@@ -369,6 +370,47 @@ TEST_F (PostmanExportRouteTest, ARemovedSetCookieRowTakesItsCookieWithIt) {
     ASSERT_EQ (responses[1]["cookie"].size (), 1u);
     EXPECT_EQ (responses[1]["cookie"][0]["key"], "keep");
     EXPECT_EQ (responses[1]["cookie"][0]["value"], "kept1");
+}
+
+// An edit that leaves the Set-Cookie rows alone - a Content-Type fixed after
+// the save - keeps the recorded `cookie[]` byte for byte, its Max-Age still
+// counted from `receivedAt` rather than from the export. Mutation check:
+// guard `cookie` with `rows_same` again and this reds.
+TEST_F (PostmanExportRouteTest, AnUnrelatedHeaderEditKeepsTheRecordedCookies) {
+    using namespace vayu::http::routes;
+    auto [collection_status, collection] =
+    create_collection_response (*db_, json{ { "name", "Jar" } });
+    ASSERT_EQ (collection_status, 200) << collection.dump ();
+    const std::string collection_id = collection["id"].get<std::string> ();
+    auto [request_status, request]  = create_request_response (*db_,
+     json{ { "collectionId", collection_id }, { "name", "Login" },
+     { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
+    ASSERT_EQ (request_status, 200) << request.dump ();
+    const std::string request_id = request["id"].get<std::string> ();
+
+    const json saved_from = { { "request", { { "method", "GET" }, { "url", "{{baseUrl}}/login" } } },
+        { "statusText", "OK" }, { "receivedAt", 1767225600000.0 } };
+    const json set_cookie = kv ("Set-Cookie", "sid=s1; Max-Age=60; Path=/");
+    auto [saved_status, saved] = create_request_example_response (*db_, request_id,
+    json{ { "name", "Saved" }, { "status", 200 }, { "origin", "user" },
+    { "headers", json::array ({ kv ("Content-Type", "text/plain"), set_cookie }) },
+    { "savedFrom", saved_from } });
+    ASSERT_EQ (saved_status, 200) << saved.dump ();
+    const ordered before =
+    exported_responses (export_text (collection_id), "Login").at (0)["cookie"];
+    ASSERT_EQ (before.size (), 1u) << before.dump ();
+    EXPECT_EQ (before[0]["expires"],
+    "Thu Jan 01 2026 00:01:00 GMT+0000 (Coordinated Universal Time)");
+
+    auto [edit_status, edited] = update_request_example_response (*db_,
+    request_id, saved["id"].get<std::string> (),
+    json{ { "headers",
+    json::array ({ kv ("Content-Type", "application/json"), set_cookie }) } });
+    ASSERT_EQ (edit_status, 200) << edited.dump ();
+    const ordered after =
+    exported_responses (export_text (collection_id), "Login").at (0);
+    EXPECT_EQ (after["cookie"].dump (), before.dump ());
+    EXPECT_EQ (after["_postman_previewlanguage"], "json");
 }
 
 /// A collection whose root and one request carry an OAuth 2.0 block with a

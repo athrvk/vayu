@@ -321,9 +321,10 @@ does - only for a file that stays with you.
 Postman keeps the request it was recorded against, its status text, preview
 settings, cookies and response time, and exports with them. Change its status or
 headers (through the API or an MCP agent) and the export writes that change, regenerating the status text,
-header rows, cookies and preview settings that described the old value, so a
-cookie whose `Set-Cookie` header you removed is not exported; the recorded
-request stays as recorded.
+header rows and preview settings that described the old value. The cookies are
+rebuilt only when a `Set-Cookie` header changes, so a cookie whose `Set-Cookie`
+header you removed is not exported, while fixing an unrelated header keeps the
+cookies as recorded; the recorded request stays as recorded.
 
 **A response you save as an example keeps the request that produced it**
 (issue #1763). *Save as example* on a response you just sent records the
