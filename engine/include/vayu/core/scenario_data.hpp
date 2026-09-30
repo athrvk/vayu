@@ -189,6 +189,12 @@ enum class DataValueEncoding : std::uint8_t {
     XmlInComment,
     /// Not writable: the token sits inside an XML processing instruction.
     XmlInProcessingInstruction,
+    /// Encoded by Postman's query rule as a key (`=` included), for a token
+    /// in a query key of a URL sent encoded (issue #1773).
+    QueryKey,
+    /// Encoded by Postman's query rule as a value, for a token in a query value
+    /// of a URL sent encoded.
+    QueryValue,
 };
 
 /**

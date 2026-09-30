@@ -17,6 +17,7 @@
 #include <variant>
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/graphql_body.hpp"
 // `describe_empty_header_name` - the wording every layer that can leave a
 // header nameless shares, this one included (issue #1095).
@@ -71,8 +72,12 @@ std::string bound_subject (const IterationBinding& binding) {
 
 /// What kind of text a visited field is, for the rules that depend on it.
 enum class FieldContext : std::uint8_t {
-    /// A URL, a form field, a text body: no quoting rule of its own.
+    /// A form field, a text body, a URL sent as typed: no quoting rule of its
+    /// own.
     Plain,
+    /// A URL whose query is encoded (issue #1773): a token in a query key or
+    /// value is written by Postman's query rule, anywhere else as @ref Plain.
+    Url,
     /// A header name or value, or a credential `apply_auth` writes into a
     /// header line. Plain text like @ref Plain - a header has no quoting rule -
     /// except that a CR or LF in a bound value ends the line rather than
@@ -174,7 +179,8 @@ template <typename Visit>
 HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
 
-    visit (request.url, FieldContext::Plain);
+    visit (request.url,
+    request.disable_url_encoding ? FieldContext::Plain : FieldContext::Url);
     // A path variable's value is joined raw and encoded (Postman's path set)
     // when it is written into the URL (`settle_path_variables`), which is why it is a
     // field of its own rather than text already in the URL (issue #1764).
@@ -555,6 +561,17 @@ bool keeps_deferrable_credential_namespace (const std::string& name) {
     vayu::http::is_identity_variable_name (name);
 }
 
+/// How a token at @p where in an encoded URL is written.
+DataValueEncoding url_encoding_at (UrlComponent where) {
+    switch (where) {
+    case UrlComponent::QueryKey: return DataValueEncoding::QueryKey;
+    case UrlComponent::QueryValue: return DataValueEncoding::QueryValue;
+    case UrlComponent::Head:
+    case UrlComponent::Fragment: break;
+    }
+    return DataValueEncoding::Verbatim;
+}
+
 /**
  * Split each visited field around the reserved tokens of one namespace, keeping
  * only the fields that carry one.
@@ -598,10 +615,16 @@ class FieldSplitter {
         entry.encodings.reserve (split.names.size ());
         bool in_string = false;
         XmlScanState xml_state;
+        auto url_component = UrlComponent::Head;
         for (size_t i = 0; i < split.names.size (); ++i) {
             entry.tokens.push_back (split.names[i]);
             DataValueEncoding encoding = DataValueEncoding::Verbatim;
-            if (context == FieldContext::JsonDocument) {
+            if (context == FieldContext::Url) {
+                // Read from the literals alone: a bound value in the query is
+                // encoded, so it cannot move the component itself.
+                url_component = advance_url_component (entry.literals[i], url_component);
+                encoding = url_encoding_at (url_component);
+            } else if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
                 encoding = in_string ? DataValueEncoding::JsonString :
                                        DataValueEncoding::Verbatim;
@@ -725,6 +748,10 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
     case DataValueEncoding::XmlAttributeSingle:
         return escape_xml_content (rendered, '\'');
     case DataValueEncoding::XmlCdata: return escape_xml_cdata (rendered);
+    case DataValueEncoding::QueryKey:
+        return encode_query_component (rendered, QueryPart::Key);
+    case DataValueEncoding::QueryValue:
+        return encode_query_component (rendered, QueryPart::Value);
     // The two unwritable placements never reach this: the join refuses the row
     // before it renders a value for them.
     case DataValueEncoding::XmlInComment:

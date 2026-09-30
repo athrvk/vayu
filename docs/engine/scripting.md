@@ -1098,7 +1098,7 @@ pm.request.url.query.remove('page');                    // every match, not the 
 pm.request.url.query.clear();                           // and the '?' with them
 ```
 
-Four rules behind those, each the reason for a decision you might otherwise
+Five rules behind those, each the reason for a decision you might otherwise
 undo:
 
 - **A URL nobody edited is sent exactly as it arrived.** The parts are
@@ -1110,6 +1110,14 @@ undo:
   query.
 - **`remove(name)` takes every match.** Removing `page` from `?page=1&page=2`
   and getting one back has removed nothing the caller can observe.
+- **`add` and `upsert` encode what they are given**, by the rule the send
+  writes a query with ([Query encoding](api-reference.md#query-encoding)):
+  `add({ key: 'k', value: 'a b' })` sends `k=a%20b`, and `get('k')`, `all()`
+  and `getQueryString()` then read `a%20b`, because the query is the wire bytes.
+  `%` is never encoded, so a value already encoded passes as it is; under
+  `disableUrlEncoding` the pair is written as typed. Postman keeps the text as
+  given and encodes it when it sends, so its `getQueryString()` answers
+  `k=a b` here - Vayu answers what goes out.
 - **An edit that cannot reach the wire is an error, never a no-op.** A URL the
   parser could not read has no parts to edit, so a write is refused rather than
   composing `://` out of empty pieces, and a path segment that is not a string

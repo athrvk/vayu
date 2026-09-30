@@ -20,6 +20,7 @@
 
 #include "vayu/core/elements.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
@@ -527,6 +528,38 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
     return substitute_tokens_nested (input, resolve, expanding);
 }
 
+std::string substitute_url_tokens (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve,
+bool encode_query) {
+    if (!encode_query) {
+        return substitute_tokens (input, resolve);
+    }
+    std::string out;
+    out.reserve (input.size ());
+    auto where       = vayu::core::UrlComponent::Head;
+    const auto write = [&out, &where] (std::string_view text) {
+        where = vayu::core::advance_url_component (text, where);
+        out += text;
+    };
+    std::vector<std::string> expanding;
+    auto it = std::sregex_iterator (input.begin (), input.end (), token_pattern ());
+    const auto end = std::sregex_iterator ();
+    size_t last    = 0;
+    for (; it != end; ++it) {
+        const auto& match = *it;
+        write (std::string_view (input).substr (
+        last, static_cast<size_t> (match.position ()) - last));
+        last = static_cast<size_t> (match.position () + match.length ());
+        // One token through the ordinary scanner, so nesting and the cycle
+        // rule are its own; a token nothing answers comes back as written,
+        // and the encoder keeps a whole token verbatim.
+        write (vayu::core::encode_at_url_component (
+        substitute_tokens_nested (match.str (), resolve, expanding), where));
+    }
+    write (std::string_view (input).substr (last));
+    return out;
+}
+
 TokenSplit split_tokens (const std::string& input,
 const std::function<bool (const std::string&)>& keep) {
     TokenSplit split;
@@ -652,6 +685,19 @@ const std::optional<IterationIdentity>& identity) {
         }
         return lookup_variable (name, vars, bound_columns, dynamic);
     });
+}
+
+std::string resolve_url_template (const std::string& input,
+const VariableValues& vars,
+bool encode_query,
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic) {
+    return substitute_url_tokens (
+    input,
+    [&vars, &bound_columns, dynamic] (const std::string& name) {
+        return lookup_variable (name, vars, bound_columns, dynamic);
+    },
+    encode_query);
 }
 
 std::string render_data_value (const nlohmann::json& value) {
@@ -1207,6 +1253,13 @@ DynamicResolution dynamic) {
     return out;
 }
 
+/// The payload's `disableUrlEncoding`, read after the inline overlay so an
+/// editor toggle not yet saved is the one that decides (issue #1765).
+bool url_encoding_disabled (const nlohmann::json& payload) {
+    const auto flag = payload.find ("disableUrlEncoding");
+    return flag != payload.end () && flag->is_boolean () && flag->get<bool> ();
+}
+
 /**
  * The method, the URL and the headers.
  *
@@ -1233,7 +1286,8 @@ nlohmann::json& payload) {
     }
 
     if (auto url = payload.find ("url"); url != payload.end () && url->is_string ()) {
-        *url = resolve_template (url->get<std::string> (), vars, bound_columns, dynamic);
+        *url = resolve_url_template (url->get<std::string> (), vars,
+        !url_encoding_disabled (payload), bound_columns, dynamic);
     }
 
     if (auto headers = payload.find ("headers");
@@ -1342,14 +1396,9 @@ nlohmann::json& payload) {
         .push_back ({ { "key", segment.name },
         { "value", std::move (resolved) }, { "in", "path" } });
     }
-    // Read after the inline overlay, so an editor toggle not yet saved is the
-    // one that decides (issue #1765).
-    const auto raw_flag = payload.find ("disableUrlEncoding");
-    const bool as_typed = raw_flag != payload.end () &&
-    raw_flag->is_boolean () && raw_flag->get<bool> ();
     *url = vayu::core::substitute_path_variables (
     url->get<std::string> (), written,
-    [] (const std::string& value) { return value; }, !as_typed);
+    [] (const std::string& value) { return value; }, !url_encoding_disabled (payload));
     if (!waiting.empty ()) {
         payload["params"] = std::move (waiting);
     }

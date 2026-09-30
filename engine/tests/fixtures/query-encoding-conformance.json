@@ -343,5 +343,118 @@
       "encode": false,
       "query": "k=a&b"
     }
-  ]
+  ],
+  "substitutions": {
+    "$comment": "Issue #1773: a `{{var}}` in a request's URL substituted at send time. Postman resolves the variables and then encodes the query with `toNodeUrl`, so a value landing in the query is written by the rule above - as a key when the token sits in a key, as a value when it sits in a value - and a value landing in the host, the path or the fragment is not touched by this rule. Which part a token sits in is read left to right from the text written so far: the first `?` opens the query at a key, `=` moves a key to its value, `&` starts the next key, `#` opens the fragment, and a whole `{{...}}` token is skipped. A layered value is resolved whole and then encoded once. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
+    "cases": [
+      {
+        "name": "a value in the query is encoded (the issue's case)",
+        "url": "https://x/?q={{term}}",
+        "variables": {
+          "term": "a b#c"
+        },
+        "sent": "https://x/?q=a%20b%23c"
+      },
+      {
+        "name": "a key token is encoded by the key rule",
+        "url": "https://x/?{{k}}=1",
+        "variables": {
+          "k": "a=b&c d"
+        },
+        "sent": "https://x/?a%3Db%26c%20d=1"
+      },
+      {
+        "name": "a value keeps = and encodes &",
+        "url": "https://x/?q={{v}}",
+        "variables": {
+          "v": "a=b&c"
+        },
+        "sent": "https://x/?q=a=b%26c"
+      },
+      {
+        "name": "a token beside literal text in a key is still in the key",
+        "url": "https://x/?a{{k}}b=1",
+        "variables": {
+          "k": "="
+        },
+        "sent": "https://x/?a%3Db=1"
+      },
+      {
+        "name": "an escape in a value passes, so nothing is encoded twice",
+        "url": "https://x/?q={{v}}",
+        "variables": {
+          "v": "%41 b"
+        },
+        "sent": "https://x/?q=%41%20b"
+      },
+      {
+        "name": "the host and the path take a value as it stands",
+        "url": "https://{{host}}/{{p}}?q=1",
+        "variables": {
+          "host": "h.test",
+          "p": "a&b"
+        },
+        "sent": "https://h.test/a&b?q=1"
+      },
+      {
+        "name": "a fragment takes a value as it stands",
+        "url": "https://x/?q=1#{{f}}",
+        "variables": {
+          "f": "a b"
+        },
+        "sent": "https://x/?q=1#a b"
+      },
+      {
+        "name": "a layered value is resolved whole, then encoded once",
+        "url": "https://x/?q={{outer}}",
+        "variables": {
+          "outer": "{{inner}} x",
+          "inner": "a&b"
+        },
+        "sent": "https://x/?q=a%26b%20x"
+      },
+      {
+        "name": "a token nothing answers is kept",
+        "url": "https://x/?q={{missing}}",
+        "variables": {},
+        "sent": "https://x/?q={{missing}}"
+      },
+      {
+        "name": "a ? a head value brings in opens the query for the tokens after it",
+        "url": "{{base}}&q={{v}}",
+        "variables": {
+          "base": "https://x/?a=1",
+          "v": "b c"
+        },
+        "sent": "https://x/?a=1&q=b%20c"
+      },
+      {
+        "name": "a token after a bare key sits in the next key or value",
+        "url": "https://x/?flag&q={{v}}&{{k}}",
+        "variables": {
+          "v": "a b",
+          "k": "c=d"
+        },
+        "sent": "https://x/?flag&q=a%20b&c%3Dd"
+      },
+      {
+        "name": "a separator inside a kept token's name moves nothing",
+        "url": "https://x/?{{un=known}}{{k}}=1",
+        "variables": {
+          "k": "a=b"
+        },
+        "sent": "https://x/?{{un=known}}a%3Db=1"
+      },
+      {
+        "name": "disableUrlEncoding writes every value as it stands",
+        "url": "https://x/?{{k}}={{term}}",
+        "variables": {
+          "k": "a=b",
+          "term": "a b#c"
+        },
+        "encode": false,
+        "sent": "https://x/?a=b=a b#c"
+      }
+    ]
+  }
 }

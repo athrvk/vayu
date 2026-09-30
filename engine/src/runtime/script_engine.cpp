@@ -36,6 +36,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
@@ -5048,6 +5049,17 @@ JSValue* func_data) {
     vayu::http::UrlQueryParam param;
     if (!read_query_param_arg (ctx, argv[0], member, param)) {
         return JS_EXCEPTION;
+    }
+    // Encoded here, as the send would write it (issue #1773): the rows hold
+    // wire bytes, so `get`, `all` and `getQueryString()` read what goes out.
+    const auto* data = get_context_data (ctx);
+    if (data == nullptr || data->request == nullptr || !data->request->disable_url_encoding) {
+        param.key =
+        vayu::core::encode_query_component (param.key, vayu::core::QueryPart::Key);
+        if (param.value) {
+            param.value = vayu::core::encode_query_component (
+            *param.value, vayu::core::QueryPart::Value);
+        }
     }
     auto& params = state->parts.query_params;
     if (magic == QUERY_UPSERT) {

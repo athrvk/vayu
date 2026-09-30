@@ -4783,9 +4783,18 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   ([POST /import/parse](#post-importparse)), which writes a row with an
   empty value as a bare `key` where Postman writes `key=` (issue #1772). A
   request with `disableUrlEncoding` writes the pair as typed.
-- Not yet covered (issue #1773): a value substituted into a `{{variable}}`
-  token at send time, and a pair a script adds with `pm.request.url.query.add`
-  or `upsert`, go out unencoded, where Postman encodes both.
+- A value known only at send time is written by the same rule, as Postman
+  resolves variables and then encodes the query: a `{{variable}}` substituted
+  into the URL's query (by composition, a data row's bind, or the residual
+  pass after the pre-request script), encoded as a key or as a value by where
+  the token sits, and a pair a script adds with `pm.request.url.query.add` or
+  `upsert` ([scripting](scripting.md#writing)). `GET {{base}}/?q={{term}}`
+  with `term = "a b#c"` sends `/?q=a%20b%23c`. Where the token sits is read
+  left to right from the URL written so far: the first `?` opens the query at
+  a key, `=` moves to the value, `&` starts the next key, `#` opens the
+  fragment. A layered value is resolved whole and encoded once. A value
+  substituted into the host, the path or the fragment is not touched by this
+  rule, and `disableUrlEncoding` writes every value as typed.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.

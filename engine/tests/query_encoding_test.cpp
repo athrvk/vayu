@@ -22,10 +22,15 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
+#include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 
 namespace {
@@ -180,5 +185,159 @@ TEST_F (PostmanQueryOnTheWire, TheIssuesItemReachesTheServerAsStored) {
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
     EXPECT_EQ (server_->target (), "/echo?q=a|b&r=c%20d");
 }
+
+// ---------------------------------------------------------------------------
+// Values known only at send time (issue #1773): a `{{var}}` in the URL and a
+// script's `query.add`, written by the same rule once they are known.
+// ---------------------------------------------------------------------------
+
+TEST (QueryEncodingConformance, EverySubstitutionIsWrittenByTheRuleOfItsComponent) {
+    const json fixture = load_fixture ();
+    const json& cases  = fixture.at ("substitutions").at ("cases");
+    ASSERT_GT (cases.size (), 10U);
+    for (const json& c : cases) {
+        vayu::http::VariableValues vars;
+        for (const auto& [name, value] : c.at ("variables").items ()) {
+            vars[name] = value.get<std::string> ();
+        }
+        EXPECT_EQ (vayu::http::resolve_url_template (
+                   c.at ("url").get<std::string> (), vars, c.value ("encode", true)),
+        c.at ("sent").get<std::string> ())
+        << c.at ("name");
+    }
+}
+
+/// A database with one environment, for the cases that compose: composition
+/// is the first place a `{{var}}` in the URL is answered.
+class SendTimeQueryValues : public PostmanQueryOnTheWire {
+    protected:
+    static constexpr const char* DB_PATH = "test_send_time_query_values.db";
+
+    void SetUp () override {
+        PostmanQueryOnTheWire::SetUp ();
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+    }
+
+    void TearDown () override {
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+        PostmanQueryOnTheWire::TearDown ();
+    }
+
+    /// `url` composed against an environment holding @p variables, then sent;
+    /// answers the target the server read.
+    std::string compose_and_send (const std::string& url, const json& variables, bool encode) {
+        vayu::db::Environment env;
+        env.id         = "env_1";
+        env.name       = "Env";
+        env.variables  = variables.dump ();
+        env.created_at = 1;
+        env.updated_at = 1;
+        db_->save_environment (env);
+
+        json request = { { "method", "GET" }, { "url", url } };
+        if (!encode) {
+            request["disableUrlEncoding"] = true;
+        }
+        auto [status, payload] = vayu::http::compose_request_core (
+        *db_, json{ { "request", request }, { "environmentId", "env_1" } });
+        if (status != 200) {
+            ADD_FAILURE () << payload.dump ();
+            return {};
+        }
+        return send (payload.at ("url").get<std::string> ());
+    }
+
+    std::string send (const std::string& url, bool encode = true) {
+        vayu::Request request;
+        request.method               = vayu::HttpMethod::GET;
+        request.url                  = url;
+        request.disable_url_encoding = !encode;
+        auto result                  = client_->send (request);
+        if (!result.is_ok ()) {
+            ADD_FAILURE () << result.error ().message;
+            return {};
+        }
+        return server_->target ();
+    }
+
+    static json variable (const std::string& value) {
+        return json{ { "value", value }, { "enabled", true } };
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+};
+
+// The issue's acceptance: `GET {{base}}?q={{term}}` with `term = "a b#c"`.
+// Raw, libcurl refuses the space; with the space gone, the `#` would start a
+// fragment and cut the query short.
+TEST_F (SendTimeQueryValues, AComposedQueryValueReachesTheWireEncoded) {
+    const json variables = { { "base", variable (server_->url ()) },
+        { "term", variable ("a b#c") }, { "k", variable ("x=y") } };
+    EXPECT_EQ (compose_and_send ("{{base}}?q={{term}}&{{k}}=1", variables, true),
+    "/echo?q=a%20b%23c&x%3Dy=1");
+}
+
+TEST_F (SendTimeQueryValues, DisableUrlEncodingComposesTheValueAsItStands) {
+    const json variables = { { "base", variable (server_->url ()) },
+        { "term", variable ("a\"b") } };
+    EXPECT_EQ (compose_and_send ("{{base}}?q={{term}}", variables, false), "/echo?q=a\"b");
+}
+
+// A name composition could not answer, set by the pre-request script, is
+// resolved by the residual pass under the same rule.
+TEST_F (SendTimeQueryValues, TheResidualPassEncodesAValueTheScriptSet) {
+    vayu::Request request;
+    request.url = server_->url () + "?{{k}}={{term}}";
+    EXPECT_FALSE (vayu::http::routes::resolve_residual_tokens (request,
+    vayu::http::VariableValues{ { "k", "a=b" }, { "term", "c d%41" } }));
+    EXPECT_EQ (request.url, server_->url () + "?a%3Db=c%20d%41");
+    EXPECT_EQ (send (request.url), "/echo?a%3Db=c%20d%41");
+
+    vayu::Request as_typed;
+    as_typed.url                  = server_->url () + "?q={{term}}";
+    as_typed.disable_url_encoding = true;
+    EXPECT_FALSE (vayu::http::routes::resolve_residual_tokens (
+    as_typed, vayu::http::VariableValues{ { "term", "a\"b" } }));
+    EXPECT_EQ (as_typed.url, server_->url () + "?q=a\"b");
+}
+
+#ifdef VAYU_HAS_QUICKJS
+// `getQueryString()` reports the rows as they go out, so a signature computed
+// over it signs the bytes the server receives.
+TEST_F (SendTimeQueryValues, AScriptQueryAddIsEncodedAndGetQueryStringIsTheWire) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::Request request;
+    request.method    = vayu::HttpMethod::GET;
+    request.url       = server_->url ();
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.query.add({ key: 'k', value: 'a b' });
+        pm.request.url.query.upsert({ key: 'x=y', value: 'c#d' });
+        pm.environment.set('qs', pm.request.url.getQueryString());
+    )JS",
+    request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+
+    const std::string target = send (request.url);
+    EXPECT_EQ (target, "/echo?k=a%20b&x%3Dy=c%23d");
+    ASSERT_EQ (env.count ("qs"), 1U);
+    EXPECT_EQ ("/echo?" + env.at ("qs").value, target);
+}
+
+TEST_F (SendTimeQueryValues, AScriptQueryAddIsWrittenAsTypedWhenUrlEncodingIsOff) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::Request request;
+    request.url                  = "https://x/";
+    request.disable_url_encoding = true;
+    const auto result            = engine.execute_prerequest (
+    "pm.request.url.query.add({ key: 'k', value: 'a\"b' });", request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://x/?k=a\"b");
+}
+#endif
 
 } // namespace

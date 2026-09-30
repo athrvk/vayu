@@ -210,6 +210,24 @@ bool is_bound_column_name (const std::string& name, const BoundColumnNames& boun
 std::string substitute_tokens (const std::string& input,
 const std::function<std::optional<std::string> (const std::string& name)>& resolve);
 
+/**
+ * @ref substitute_tokens over a URL, writing each replacement by the rule of
+ * the component it lands in (issue #1773): a query key or value is encoded by
+ * Postman's query rule (`core::encode_query_component`), the head and the
+ * fragment take the value as it stands. A layered value is resolved whole
+ * first and encoded once, so a `%` a value carries is never encoded twice.
+ *
+ * The component is read left to right from the text written so far, the
+ * literal around the tokens and the values already written, so a `?` that a
+ * `{{baseUrl}}` brings in opens the query for the tokens after it - as it
+ * does for a later pass that meets the same text as a literal.
+ *
+ * @p encode_query false is `disableUrlEncoding`: every value as it stands.
+ */
+std::string substitute_url_tokens (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve,
+bool encode_query);
+
 /** One string split around the `{{name}}` occurrences a caller kept. */
 struct TokenSplit {
     /// `literals.size() == names.size() + 1`, always - a string with no kept
@@ -319,6 +337,18 @@ const VariableValues& vars,
 const BoundColumnNames& bound_columns            = {},
 DynamicResolution dynamic                        = DynamicResolution::Generate,
 const std::optional<IterationIdentity>& identity = std::nullopt);
+
+/**
+ * @ref resolve_template for a request's URL: the same lookup, written through
+ * @ref substitute_url_tokens, so a value that lands in the query is encoded by
+ * Postman's query rule unless @p encode_query is false (`disableUrlEncoding`).
+ * Composition and the residual pass both resolve the URL through this.
+ */
+std::string resolve_url_template (const std::string& input,
+const VariableValues& vars,
+bool encode_query,
+const BoundColumnNames& bound_columns = {},
+DynamicResolution dynamic             = DynamicResolution::Generate);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.

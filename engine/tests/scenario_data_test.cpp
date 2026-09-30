@@ -560,7 +560,8 @@ TEST (ScenarioDataJsonBodyTest, ANonJsonBodyTakesTheValueByteForByte) {
 
 TEST (ScenarioDataJsonBodyTest, TheUrlAndHeadersAreNeverEscapedForAJsonBody) {
     // The context is per field, not per request: a JSON body must not make the
-    // URL of the same request start escaping quotes.
+    // URL of the same request start escaping quotes. The URL's query has a rule
+    // of its own (issue #1773), and it is not JSON's.
     auto request = request_with_url ("https://api.test/?q={{data.q}}");
     request.headers["X-Note"] = "{{data.q}}";
     request.body.mode         = vayu::BodyMode::Json;
@@ -569,7 +570,7 @@ TEST (ScenarioDataJsonBodyTest, TheUrlAndHeadersAreNeverEscapedForAJsonBody) {
     const auto result = bind_data_row (request, json{ { "q", R"(a"b)" } }, 0);
 
     ASSERT_TRUE (result.ok) << result.error;
-    EXPECT_EQ (request.url, R"(https://api.test/?q=a"b)");
+    EXPECT_EQ (request.url, "https://api.test/?q=a%22b");
     EXPECT_EQ (request.headers.at ("X-Note"), R"(a"b)");
     EXPECT_EQ (request.body.content, "{\"q\":\"a\\\"b\"}");
 }
@@ -855,7 +856,8 @@ TEST (ScenarioDataXmlBodyTest, AnOrdinaryValueIsByteIdenticalToBeforeTheRule) {
 }
 
 TEST (ScenarioDataXmlBodyTest, TheUrlAndHeadersAreNeverEscapedForAnXmlBody) {
-    // Per field, not per request - the same rule the JSON context follows.
+    // Per field, not per request - the same rule the JSON context follows. The
+    // URL's query is written by the query rule (issue #1773), not XML's.
     auto request = request_with_url ("https://api.test/?q={{data.q}}");
     request.headers["X-Note"] = "{{data.q}}";
     request.body.mode         = vayu::BodyMode::Xml;
@@ -864,7 +866,7 @@ TEST (ScenarioDataXmlBodyTest, TheUrlAndHeadersAreNeverEscapedForAnXmlBody) {
     const auto result = bind_data_row (request, json{ { "q", "a&b" } }, 0);
 
     ASSERT_TRUE (result.ok) << result.error;
-    EXPECT_EQ (request.url, "https://api.test/?q=a&b");
+    EXPECT_EQ (request.url, "https://api.test/?q=a%26b");
     EXPECT_EQ (request.headers.at ("X-Note"), "a&b");
     EXPECT_EQ (request.body.content, "<o>a&amp;b</o>");
 }
