@@ -977,6 +977,35 @@ std::optional<Error> read_default_header_opt_outs (const Json& json, Request& re
     return std::nullopt;
 }
 
+/**
+ * The request's stored `disabledSystemHeaders` (issue #1765, Postman's own
+ * list), unioned into the same set the per-send `disabledDefaultHeaders`
+ * fills: both say "do not add this", one for every send of the request and
+ * one for this send. Same shape rules and the same refusal.
+ */
+std::optional<Error> read_disabled_system_headers (const Json& json, Request& request) {
+    const auto names = json.find ("disabledSystemHeaders");
+    if (names == json.end () || names->is_null ()) {
+        return std::nullopt;
+    }
+    if (!names->is_array ()) {
+        return Error{ ErrorCode::InternalError,
+            "'disabledSystemHeaders' must be an array of header names" };
+    }
+    for (const auto& name : *names) {
+        if (!name.is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'disabledSystemHeaders' must hold header names as strings" };
+        }
+        const auto text = name.get<std::string> ();
+        if (auto rejection = vayu::http::invalid_header_token (text)) {
+            return Error{ ErrorCode::InternalError, "'disabledSystemHeaders': " + *rejection };
+        }
+        request.suppressed_default_headers.insert (text);
+    }
+    return std::nullopt;
+}
+
 /** The per-request options, each optional and each with a documented default. */
 void read_request_options (const Json& json, Request& request) {
     // Options
@@ -995,6 +1024,14 @@ void read_request_options (const Json& json, Request& request) {
     }
     if (json.contains ("verifySSL")) {
         request.verify_ssl = json["verifySSL"].get<bool> ();
+    }
+    // Postman's per-request protocol settings (issue #1765). A non-boolean
+    // throws and fails the parse, the rule every sibling here follows.
+    if (json.contains ("disableCookies") && !json["disableCookies"].is_null ()) {
+        request.disable_cookies = json["disableCookies"].get<bool> ();
+    }
+    if (json.contains ("disableUrlEncoding") && !json["disableUrlEncoding"].is_null ()) {
+        request.disable_url_encoding = json["disableUrlEncoding"].get<bool> ();
     }
     if (json.contains ("httpVersion")) {
         // A corrupted or downgraded stored row must not execute as
@@ -1060,6 +1097,9 @@ Result<Request> deserialize_request (const Json& json) {
             return *refusal;
         }
         if (auto refusal = read_default_header_opt_outs (json, request)) {
+            return *refusal;
+        }
+        if (auto refusal = read_disabled_system_headers (json, request)) {
             return *refusal;
         }
         read_request_options (json, request);

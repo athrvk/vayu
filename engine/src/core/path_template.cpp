@@ -367,7 +367,8 @@ void settle_path_variables (vayu::Request& request, PathSettle which) {
     request.path_variables = std::move (waiting);
     if (!rows.empty ()) {
         request.url = substitute_path_variables (
-        request.url, rows, [] (const std::string& value) { return value; });
+        request.url, rows, [] (const std::string& value) { return value; },
+        !request.disable_url_encoding);
     }
 }
 

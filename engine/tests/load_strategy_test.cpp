@@ -267,6 +267,40 @@ TEST_F (LoadStrategyTest, FastPathWithAnUnresolvedTokenCountsAndWarnsWithoutRefu
     EXPECT_EQ (names[0], "missing");
 }
 
+// Issue #1765: the shared-request fast path settles a waiting path value
+// once, and with `disableUrlEncoding` it goes on the wire as typed. Read off
+// the server's own record of the target. Mutation check: make
+// `settle_path_variables` ignore the flag and the target reads
+// `/echo/u/a%7Cb%2Fc`.
+TEST_F (LoadStrategyTest, TheFastPathSendsAPathValueAsTypedWhenUrlEncodingIsOff) {
+    vayu::tests::EchoServer echo;
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", 1 },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-fastpath-raw-path", config);
+    vayu::http::EventLoopConfig loop_config;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method               = vayu::HttpMethod::GET;
+    request.url                  = echo.url () + "/u/:id";
+    request.timeout_ms           = 30000;
+    request.disable_url_encoding = true;
+    request.path_variables       = { { "id", "a|b/c" } };
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    ASSERT_EQ (context->requests_sent.load (), 1u);
+    EXPECT_EQ (echo.target (), "/echo/u/a|b/c");
+}
+
 // The companion shapes: `load_unresolved_tokens` left empty (a request
 // resolved cleanly, or carries only a reserved name like `{{$vu}}`, which
 // `start_run` never puts in the set) records nothing on the fast path.

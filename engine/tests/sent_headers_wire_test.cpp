@@ -32,6 +32,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::http {
 namespace {
@@ -202,6 +203,55 @@ TEST_F (SentHeadersWireTest, StreamConsumerDropsTheSameHeaderAndReportsTheTruth)
     EXPECT_FALSE (response.request_headers.contains ("X-Blank"))
     << "the stream consumer reported a header libcurl dropped as sent";
     EXPECT_EQ (response.request_headers.at ("X-Present"), "kept");
+}
+
+// ---------------------------------------------------------------------------
+// Postman's `disabledSystemHeaders` (issue #1765), from the payload a stored
+// request composes into, on every driver's wire.
+// ---------------------------------------------------------------------------
+
+/// A POST with a JSON body whose payload refuses the three headers a Postman
+/// author can switch off and Vayu would otherwise send.
+Request refusing_system_headers (const std::string& url) {
+    auto parsed = vayu::json::deserialize_request (nlohmann::json{ { "method", "POST" },
+    { "url", url }, { "body", { { "mode", "json" }, { "content", R"({"a":1})" } } },
+    { "disabledSystemHeaders", { "user-agent", "accept", "content-type" } } });
+    EXPECT_TRUE (parsed.is_ok ());
+    Request request    = parsed.is_ok () ? parsed.value () : Request{};
+    request.timeout_ms = 5000;
+    return request;
+}
+
+// Mutation check: drop the `read_disabled_system_headers` call in
+// `deserialize_request` and every header below arrives.
+TEST_F (SentHeadersWireTest, AStoredSystemHeaderRefusalKeepsEachOffTheWire) {
+    ASSERT_TRUE (client_->send (refusing_system_headers (server_->url ())).is_ok ());
+    EXPECT_FALSE (server_->has_header ("User-Agent"));
+    EXPECT_FALSE (server_->has_header ("Accept"));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
+    EXPECT_EQ (server_->body (), R"({"a":1})");
+}
+
+// The refusal is of the engine's default, never of what the author typed.
+TEST_F (SentHeadersWireTest, AUserTypedHeaderStillGoesOutUnderARefusal) {
+    Request request               = refusing_system_headers (server_->url ());
+    request.headers["User-Agent"] = "typed/1";
+    request.headers["Accept"]     = "text/plain";
+    ASSERT_TRUE (client_->send (request).is_ok ());
+    EXPECT_EQ (server_->header ("User-Agent"), "typed/1");
+    EXPECT_EQ (server_->header ("Accept"), "text/plain");
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverHonoursTheSameRefusal) {
+    EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (refusing_system_headers (server_->url ())).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_FALSE (server_->has_header ("User-Agent"));
+    EXPECT_FALSE (server_->has_header ("Accept"));
+    EXPECT_FALSE (server_->has_header ("Content-Type"));
 }
 
 } // namespace

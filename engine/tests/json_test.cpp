@@ -448,6 +448,42 @@ TEST (JsonTest, ADefaultHeaderOptOutMayNameTheHeadersTheEngineDerives) {
     .is_error ());
 }
 
+// The stored `disabledSystemHeaders` and the per-send `disabledDefaultHeaders`
+// land in one set (issue #1765), and the two protocol flags parse. Mutation
+// check: drop the `read_disabled_system_headers` call in `deserialize_request`
+// and the union assertions red.
+TEST (JsonTest, TheStoredSystemHeaderOptOutsJoinThePerSendOnes) {
+    auto result = deserialize_request (std::string (R"({
+        "method": "GET",
+        "url": "https://example.com/",
+        "disabledDefaultHeaders": ["X-Vayu-Request-Id"],
+        "disabledSystemHeaders": ["user-agent", "accept"],
+        "disableCookies": true,
+        "disableUrlEncoding": true
+    })"));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& request = result.value ();
+    EXPECT_TRUE (request.suppressed_default_headers.contains ("User-Agent"));
+    EXPECT_TRUE (request.suppressed_default_headers.contains ("Accept"));
+    EXPECT_TRUE (
+    request.suppressed_default_headers.contains ("x-vayu-request-id"));
+    EXPECT_TRUE (request.disable_cookies);
+    EXPECT_TRUE (request.disable_url_encoding);
+
+    const auto defaults = deserialize_request (
+    std::string (R"({"method":"GET","url":"https://example.com/"})"));
+    ASSERT_TRUE (defaults.is_ok ());
+    EXPECT_FALSE (defaults.value ().disable_cookies);
+    EXPECT_FALSE (defaults.value ().disable_url_encoding);
+
+    EXPECT_TRUE (deserialize_request (
+    std::string (R"({"method":"GET","url":"https://e/","disabledSystemHeaders":"user-agent"})"))
+    .is_error ());
+    EXPECT_TRUE (deserialize_request (
+    std::string (R"({"method":"GET","url":"https://e/","disabledSystemHeaders":["a b"]})"))
+    .is_error ());
+}
+
 TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
     // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
     // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.

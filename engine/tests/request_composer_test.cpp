@@ -1531,3 +1531,74 @@ TEST_F (RequestComposerTest, ACompositionThatFinishedItsPathCarriesNoParams) {
     EXPECT_EQ (payload["url"], "https://api.test/1");
     EXPECT_FALSE (payload.contains ("params"));
 }
+
+// --- Postman's per-request protocol settings (issue #1765) -------------------
+
+/**
+ * A stored request's three settings ride every composed payload, defaults
+ * included, and an inline value overlays the stored one; the export-only
+ * carrier never goes out. Mutation check: drop the `disableCookies` line from
+ * `payload_from_stored` and the first expectation reds.
+ */
+TEST_F (RequestComposerTest, EmitsTheStoredProtocolSettingsAndLetsAnInlineValueWin) {
+    seed_collection ("col", "");
+    auto r                      = make_request ("req_1", "col");
+    r.disable_cookies           = true;
+    r.disabled_system_headers   = R"(["user-agent","accept"])";
+    r.disable_url_encoding      = true;
+    r.postman_protocol_behavior = R"({"disableCookies":true})";
+    db_->save_request (r);
+    auto plain = make_request ("req_2", "col");
+    db_->save_request (plain);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["disableCookies"], true);
+    EXPECT_EQ (payload["disabledSystemHeaders"], json::array ({ "user-agent", "accept" }));
+    EXPECT_EQ (payload["disableUrlEncoding"], true);
+    EXPECT_FALSE (payload.contains ("postmanProtocolBehavior"));
+
+    auto [plain_status, defaults] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_2" } });
+    ASSERT_EQ (plain_status, 200) << defaults.dump ();
+    EXPECT_EQ (defaults["disableCookies"], false);
+    EXPECT_EQ (defaults["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (defaults["disableUrlEncoding"], false);
+
+    auto [inline_status, overlaid] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" },
+    { "request",
+    { { "disableCookies", false }, { "disabledSystemHeaders", json::array () } } } });
+    ASSERT_EQ (inline_status, 200) << overlaid.dump ();
+    EXPECT_EQ (overlaid["disableCookies"], false);
+    EXPECT_EQ (overlaid["disabledSystemHeaders"], json::array ());
+    EXPECT_EQ (overlaid["disableUrlEncoding"], true);
+}
+
+/**
+ * `disableUrlEncoding` writes a path value as typed, so `a|b/c` is two
+ * segments exactly as Postman sends it; the inline flag decides, stored or
+ * not. Mutation check: pass `true` for `encode` in
+ * `substitute_compose_path_variables` and the raw expectations red.
+ */
+TEST_F (RequestComposerTest, APathValueIsWrittenAsTypedWhenUrlEncodingIsOff) {
+    seed_collection ("col", "");
+    auto r   = make_request ("req_1", "col");
+    r.url    = "https://api.test/u/:id";
+    r.params = json::array (
+    { { { "key", "id" }, { "value", "a|b/c" }, { "enabled", true }, { "in", "path" } } })
+               .dump ();
+    r.disable_url_encoding = true;
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/u/a|b/c");
+
+    auto [inline_status, encoded] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_1" }, { "request", { { "disableUrlEncoding", false } } } });
+    ASSERT_EQ (inline_status, 200) << encoded.dump ();
+    EXPECT_EQ (encoded["url"], "https://api.test/u/a%7Cb%2Fc");
+}

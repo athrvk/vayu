@@ -1050,7 +1050,18 @@ const std::vector<vayu::db::Collection>& chain) {
     // engine-side, so an omitted `false` would verify the certificate the user
     // explicitly asked the engine not to check (issue #706).
     payload["verifySSL"] = request.verify_ssl;
-    payload["requestId"] = request.id;
+    // Postman's per-request protocol settings (issue #1765), always emitted
+    // for the same reason: each defaults to off engine-side, so an omitted
+    // `true` would send the jar, the header or the encoding the user turned
+    // off. The raw `postman_protocol_behavior` carrier is never sent.
+    payload["disableCookies"]        = request.disable_cookies;
+    payload["disabledSystemHeaders"] = nlohmann::json::parse (
+    request.disabled_system_headers, nullptr, /*allow_exceptions=*/false);
+    if (!payload["disabledSystemHeaders"].is_array ()) {
+        payload["disabledSystemHeaders"] = nlohmann::json::array ();
+    }
+    payload["disableUrlEncoding"] = request.disable_url_encoding;
+    payload["requestId"]          = request.id;
 
     // Identity for the script sandbox (`pm.info.requestName`), not an HTTP
     // field. Only the by-id path has a row to read it from; the inline path's
@@ -1305,8 +1316,14 @@ nlohmann::json& payload) {
         .push_back ({ { "key", segment.name },
         { "value", std::move (resolved) }, { "in", "path" } });
     }
-    *url = vayu::core::substitute_path_variables (url->get<std::string> (),
-    written, [] (const std::string& value) { return value; });
+    // Read after the inline overlay, so an editor toggle not yet saved is the
+    // one that decides (issue #1765).
+    const auto raw_flag = payload.find ("disableUrlEncoding");
+    const bool as_typed = raw_flag != payload.end () &&
+    raw_flag->is_boolean () && raw_flag->get<bool> ();
+    *url = vayu::core::substitute_path_variables (
+    url->get<std::string> (), written,
+    [] (const std::string& value) { return value; }, !as_typed);
     if (!waiting.empty ()) {
         payload["params"] = std::move (waiting);
     }

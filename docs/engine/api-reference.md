@@ -4930,7 +4930,10 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
   "maxStreamEvents": 100000,           // Optional, streaming only - see below
   "data": { "id": "7" },               // Optional, one data row - see below
-  "disabledDefaultHeaders": []         // Optional, headers Vayu adds that this send refuses
+  "disabledDefaultHeaders": [],        // Optional, headers Vayu adds that this send refuses
+  "disableCookies": false,             // Optional, default false - stored per request, see below
+  "disabledSystemHeaders": [],         // Optional, default [] - stored per request, see below
+  "disableUrlEncoding": false          // Optional, default false - stored per request, see below
 }
 ```
 
@@ -4943,7 +4946,22 @@ accepted on `POST /execute` and `POST /runs` alike. A value that is not an
 array of header names is a `400` naming the field, because a malformed opt-out
 would otherwise read as one that did nothing. A name matching no current
 default is accepted and does nothing: config can switch a default off between
-the moment a client read the declared set and the moment it sends.
+the moment a client read the declared set and the moment it sends. A name is
+checked as a header token only, so `User-Agent`, `Accept-Encoding` and
+`Content-Type` are all accepted (until issue #1765 the correlation-id
+validator refused those three with a `400`).
+
+**`disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` are the
+request's stored Postman protocol settings** (issue #1765; see
+[POST /requests](#post-requests)). `POST /compose` always emits them from the
+stored row and the app always sends them, on `POST /execute` and
+`POST /runs` alike, because each defaults to off: an omitted `true` would send
+the jar, the header or the encoding the user turned off. `disabledSystemHeaders`
+is unioned with `disabledDefaultHeaders`, which stays the per-send,
+never-stored opt-out, and is refused on the same shape rules. `disableCookies`
+takes the jar off the buffered and the streaming send and off a scenario load
+run's per-virtual-user session (the step neither sends nor updates it); a
+single-request load run never tracks cookies at all.
 
 **`stream` consumes a `text/event-stream` response live** (issue #573) instead
 of buffering it. It changes the *execution model*, so it is declared rather than

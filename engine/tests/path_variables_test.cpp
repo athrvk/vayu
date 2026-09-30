@@ -131,6 +131,19 @@ TEST (SettlePathVariables, WritesAnAnsweredValueAsOneSegmentAndLeavesATokenWaiti
     EXPECT_TRUE (request.path_variables.empty ());
 }
 
+// Issue #1765: a request with `disableUrlEncoding` settles its waiting values
+// as typed - the bind and residual passes on every driver go through here.
+// Mutation check: pass `true` for `encode` in `settle_path_variables` and this
+// reds.
+TEST (SettlePathVariables, WritesAValueAsTypedWhenUrlEncodingIsOff) {
+    vayu::Request request;
+    request.url                  = "https://h/u/:id";
+    request.disable_url_encoding = true;
+    request.path_variables       = { { "id", "a|b/c" } };
+    vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
+    EXPECT_EQ (request.url, "https://h/u/a|b/c");
+}
+
 TEST (PendingPathVariablesOf, KeepsTheAnsweringPathRowOfEachKey) {
     const json rows    = json::parse (R"([
         {"key":"q","value":"query"},

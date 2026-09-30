@@ -752,10 +752,17 @@ ExchangeInputs inputs) {
     } else {
         vayu::http::ClientConfig config;
         config.default_headers = inputs.default_headers;
-        config.cookie_jar      = &jar;
-        config.cookie_scope    = cookie_scope;
-        config.cookie_writes   = std::move (pre_cookie_writes);
-        config.transport       = inputs.transport;
+        if (outcome.request.disable_cookies) {
+            // No jar rides this transfer (issue #1765), so nothing would
+            // carry the pre-request script's writes: they are applied here,
+            // once, the way the post-request writes below always are.
+            jar.apply (cookie_scope, pre_cookie_writes);
+        } else {
+            config.cookie_jar    = &jar;
+            config.cookie_scope  = cookie_scope;
+            config.cookie_writes = std::move (pre_cookie_writes);
+        }
+        config.transport = inputs.transport;
         // Design mode's own bound, and the reading of it that keeps the prefix
         // (issue #1157). A body past it stops being read here rather than
         // being buffered whole and then found to be too large downstream - the

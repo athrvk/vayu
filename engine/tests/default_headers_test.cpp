@@ -148,6 +148,54 @@ TEST (DefaultHeadersTest, EveryDefaultCanBeRefusedBySend) {
     EXPECT_TRUE (built.sent.empty ());
 }
 
+// Issue #1765: Postman's `disabledSystemHeaders` names two headers the engine
+// never appends itself - libcurl's implicit `Accept: */*` and the Content-Type
+// a body implies (or libcurl's form-urlencoded default). Refusing one is
+// libcurl's removal line, which is neither an append nor a sent record.
+// Mutation check: drop the `"Accept:"` append in `build_request_header_list`
+// and the first assertion reds; drop the Content-Type branch and the second.
+TEST (DefaultHeadersTest, RefusingAcceptOrContentTypeWritesLibcurlsRemovalLine) {
+    vayu::Request request = get_request ();
+    request.method        = vayu::HttpMethod::POST;
+    request.body.mode     = vayu::BodyMode::Json;
+    request.body.content  = R"({"a":1})";
+    request.suppressed_default_headers.insert ("accept");
+    request.suppressed_default_headers.insert ("content-type");
+
+    const auto built = build (request, full_policy ());
+    EXPECT_TRUE (has_line (built.lines, "Accept:"));
+    EXPECT_TRUE (has_line (built.lines, "Content-Type:"));
+    EXPECT_FALSE (has_line (built.lines, "Content-Type: application/json"));
+    EXPECT_FALSE (built.sent.contains ("Accept"));
+    EXPECT_FALSE (built.sent.contains ("Content-Type"));
+
+    // A header the request names itself is never removed.
+    request.headers["Accept"]       = "application/json";
+    request.headers["Content-Type"] = "text/plain";
+    const auto typed                = build (request, full_policy ());
+    EXPECT_FALSE (has_line (typed.lines, "Accept:"));
+    EXPECT_FALSE (has_line (typed.lines, "Content-Type:"));
+    EXPECT_TRUE (has_line (typed.lines, "Accept: application/json"));
+    EXPECT_TRUE (has_line (typed.lines, "Content-Type: text/plain"));
+}
+
+// No body, nothing to describe: no removal line either. And a multipart body
+// keeps the header libcurl writes, because its boundary is the body's framing.
+TEST (DefaultHeadersTest, AContentTypeRefusalLeavesABodilessOrMultipartRequestAlone) {
+    vayu::Request request = get_request ();
+    request.suppressed_default_headers.insert ("content-type");
+    EXPECT_FALSE (has_line (build (request, full_policy ()).lines, "Content-Type:"));
+
+    request.method    = vayu::HttpMethod::POST;
+    request.body.mode = vayu::BodyMode::FormData;
+    vayu::FormField field;
+    field.key     = "a";
+    field.value   = "1";
+    field.enabled = true;
+    request.body.fields.push_back (field);
+    EXPECT_FALSE (has_line (build (request, full_policy ()).lines, "Content-Type:"));
+}
+
 TEST (DefaultHeadersTest, TheCorrelationIdIsFreshOnEveryTransfer) {
     const auto policy = full_policy ();
     const auto first  = build (get_request (), policy);

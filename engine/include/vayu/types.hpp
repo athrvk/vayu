@@ -340,6 +340,29 @@ struct Request {
     std::vector<std::string> cookie_lines;
 
     /**
+     * @brief Keep the cookie jar out of this transfer (issue #1765, Postman's
+     *        `disableCookies`).
+     *
+     * Neither half runs: no jar cookie is attached and no `Set-Cookie` is
+     * stored. A `Cookie` header the request itself carries still goes out, and
+     * the response still reports what the server set. Read by each driver
+     * where it decides whether a jar rides the transfer - the buffered and
+     * streaming design sends and a scenario load run's per-VU session.
+     */
+    bool disable_cookies = false;
+
+    /**
+     * @brief Write this request's path-variable values and api-key query
+     *        parameter as typed, not percent-encoded (issue #1765, Postman's
+     *        `disableUrlEncoding`).
+     *
+     * With it set, `a/b` as a path value is two segments, exactly as Postman
+     * sends it. libcurl's own URL handling is untouched: a raw space is still
+     * refused and dot-segments are still normalised.
+     */
+    bool disable_url_encoding = false;
+
+    /**
      * @brief Default headers this send refuses, by name (issue #1229).
      *
      * The engine adds a small, declared set to every request nobody wrote them

@@ -436,6 +436,53 @@ TEST_F (ScenarioLoadTest, CookiesRideAnIterationAndAreClearedAtTheNextOne) {
        "boundary";
 }
 
+// Issue #1765, the read half: a step with `disableCookies` sends none of the
+// VU's session, and the session survives it for the step after. Mutation
+// checks: `request.track_cookies = true` in `submit_one` reds the first
+// expectation; handing `finish_step` the jar-off step's own (empty)
+// `response.cookie_lines` instead of `&vu->cookies` clears the session and
+// reds the second.
+TEST_F (ScenarioLoadTest, AStepWithTheJarOffSendsNoCookieAndKeepsTheSession) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/login"), server.url ("/echo"), server.url ("/s0") });
+    execution.plan.steps[1].request.disable_cookies = true;
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution, /*pool_size=*/1);
+
+    const auto echoes = server.hits_for ("/echo");
+    const auto after  = server.hits_for ("/s0");
+    ASSERT_EQ (echoes.size (), 1u);
+    ASSERT_EQ (after.size (), 1u);
+    EXPECT_EQ (echoes[0].cookie, "")
+    << "a jar-off step carried the VU's session";
+    EXPECT_EQ (after[0].cookie, "sid=1")
+    << "a jar-off step dropped the VU's session";
+}
+
+// The write half: a `Set-Cookie` answering a jar-off step does not replace
+// the VU's session. Mutation check: set `request.track_cookies = true` for
+// every step in `submit_one` and hand `finish_step` the captured
+// `&response.cookie_lines` for a jar-off step too - the pair a driver that
+// ignored the flag would be - and the echo carries `sid=2`.
+TEST_F (ScenarioLoadTest, AStepWithTheJarOffStoresNoSetCookie) {
+    ScenarioMockServer server;
+    auto execution = plan_over (
+    { server.url ("/login"), server.url ("/login"), server.url ("/echo") });
+    execution.plan.steps[1].request.disable_cookies = true;
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution, /*pool_size=*/1);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 1u);
+    EXPECT_EQ (echoes[0].cookie, "sid=1")
+    << "the jar-off step's Set-Cookie (sid=2) replaced the VU's session";
+}
+
 // Two VUs, both held inside `/login` at the same time, must still leave with
 // their own session. A shared jar - or a cookie engine left on a pooled handle
 // - hands one of them the other's.
