@@ -522,6 +522,7 @@ add_library(vayu_core STATIC
     src/http/default_headers.cpp
     src/http/form_body.cpp
     src/http/file_access_policy.cpp
+    src/http/file_ref.cpp
     src/http/header_text.cpp
     src/http/header_names.cpp
     src/http/graphql_body.cpp

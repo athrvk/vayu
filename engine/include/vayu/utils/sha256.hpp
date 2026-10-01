@@ -64,4 +64,29 @@ inline std::array<uint8_t, 32> hmac_sha256 (std::string_view key, std::string_vi
     return out;
 }
 
+/**
+ * @brief SHA-256 over bytes that arrive in pieces - a file hashed while it is
+ * read, without holding the whole of it.
+ */
+class Sha256Stream {
+    public:
+    Sha256Stream () {
+        ensure_sodium_initialized ();
+        crypto_hash_sha256_init (&state_);
+    }
+
+    void update (std::string_view data) {
+        crypto_hash_sha256_update (&state_, detail::sodium_bytes (data), data.size ());
+    }
+
+    [[nodiscard]] std::array<uint8_t, 32> finish () {
+        std::array<uint8_t, 32> out{};
+        crypto_hash_sha256_final (&state_, out.data ());
+        return out;
+    }
+
+    private:
+    crypto_hash_sha256_state state_{};
+};
+
 } // namespace vayu::utils

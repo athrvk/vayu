@@ -9,14 +9,10 @@
 
 #include <curl/curl.h>
 
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/url_parts.hpp"
-#include "vayu/utils/reentrant.hpp"
-
-#include <cerrno>
-#include <cstdio>
-#include <memory>
 
 namespace vayu::http {
 
@@ -147,6 +143,12 @@ bool has_wire_body (const Body& body) {
     if (body.mode == BodyMode::None) {
         return false;
     }
+    // The file is the body, an empty one included: a zero-byte upload is
+    // still a body frame, and a file that was never chosen is refused by the
+    // file rule rather than quietly sent as nothing.
+    if (body.mode == BodyMode::Binary) {
+        return true;
+    }
     if (is_form_mode (body.mode)) {
         for (const auto& field : body.fields) {
             if (field.enabled) {
@@ -164,8 +166,11 @@ std::string wire_body_bytes (const Body& body) {
     }
     switch (body.mode) {
     case BodyMode::Form: return encode_urlencoded (body.fields);
-    // Multipart is libcurl's to encode - see the header.
-    case BodyMode::FormData: return {};
+    // Multipart is libcurl's to encode - see the header. A binary body's bytes
+    // are never a string here either: a small file is shared by pointer from
+    // the plan and a large one streams (`apply_method_and_body`).
+    case BodyMode::FormData:
+    case BodyMode::Binary: return {};
     case BodyMode::GraphQL: return graphql_wire_body (body.content);
     case BodyMode::JsonRpc: return jsonrpc_wire_body (body.content);
     default: return body.content;
@@ -184,10 +189,20 @@ std::string implied_content_type (const Body& body) {
     case BodyMode::GraphQL:
     case BodyMode::JsonRpc: return "application/json";
     case BodyMode::Xml: return "application/xml";
+    // The file's declared type, else what its extension names, else the
+    // type that claims nothing. An empty string is absent at every tier.
+    case BodyMode::Binary: {
+        if (!body.file.content_type.empty ()) {
+            return body.file.content_type;
+        }
+        const auto by_extension = media_type_for_extension (body.file.src);
+        return by_extension.empty () ?
+        std::string{ "application/octet-stream" } :
+        std::string (by_extension);
+    }
     // `text` is the one content mode with no answer, and that is a decision
     // rather than a gap (issue #889): `text/plain`, `text/csv`, a JWT and a
     // raw signature are all this mode, so the header is the author's to write.
-    // `binary` is the same question with the same answer.
     default: return {};
     }
 }
@@ -261,49 +276,6 @@ bool has_file_parts (const Body& body) {
         }
     }
     return false;
-}
-
-std::optional<std::string> unsendable_file_part (const Body& body) {
-    if (!has_file_parts (body)) {
-        return std::nullopt;
-    }
-    for (const auto& field : enabled_fields (body.fields)) {
-        if (field.type != FormFieldType::File) {
-            continue;
-        }
-        const std::string name =
-        field.key.empty () ? std::string{ "(unnamed)" } : field.key;
-        if (field.src.empty ()) {
-            return "Form field '" + name + "' is a file part with no file selected - choose a file or remove the part";
-        }
-        // fopen rather than a stat: the question is whether *this* process can
-        // read the bytes, which permissions and a dangling symlink both answer
-        // differently from mere existence. A directory opens on some platforms
-        // and fails to read, so it is rejected on the read attempt below.
-        //
-        // The handle owns itself, which is what removes the two findings a bare
-        // `std::FILE*` and a matching `std::fclose` carried: a close return
-        // nobody read (`cert-err33-c`) and a resource held by a plain pointer
-        // (`cppcoreguidelines-owning-memory`). There is nothing to discard and
-        // no path out of the loop that forgets to close - including the early
-        // return below, which the hand-written version reached only because the
-        // close sat above it.
-        const std::unique_ptr<std::FILE, int (*) (std::FILE*)> handle (
-        std::fopen (field.src.c_str (), "rb"), &std::fclose);
-        if (!handle) {
-            return "Form field '" + name + "': cannot read file '" + field.src +
-            "' (" + vayu::utils::errno_message (errno) + ")";
-        }
-        char probe           = 0;
-        const size_t read    = std::fread (&probe, 1, 1, handle.get ());
-        const bool readable  = read == 1 || std::feof (handle.get ()) != 0;
-        const int read_errno = errno;
-        if (!readable) {
-            return "Form field '" + name + "': cannot read file '" + field.src +
-            "' (" + vayu::utils::errno_message (read_errno) + ")";
-        }
-    }
-    return std::nullopt;
 }
 
 } // namespace vayu::http

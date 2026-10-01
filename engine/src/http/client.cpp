@@ -26,6 +26,7 @@
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
 
@@ -317,6 +318,18 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
  * one CRLF or two is libcurl's business, and the body must not run into the
  * last header line.
  */
+/**
+ * @brief The body the raw-request view shows: the wire bytes, or for a binary
+ * body the file's placeholder (`<file a.bin, 1234 bytes>`) - a view never
+ * carries a file's contents, however small.
+ */
+std::string raw_view_body (const Request& request) {
+    if (request.body.mode == BodyMode::Binary && vayu::http::has_wire_body (request)) {
+        return vayu::http::body_file_placeholder (request.body.file);
+    }
+    return vayu::http::wire_body_bytes (request);
+}
+
 std::string raw_request_from_wire (std::string header_frame, const std::string& body) {
     while (!header_frame.empty () &&
     (header_frame.back () == '\r' || header_frame.back () == '\n')) {
@@ -395,12 +408,17 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
 
     // The bytes the transfer would have carried, not `body.content` - for a
     // form or graphql body those are two different strings, and a view that
-    // showed the second would describe a request nothing ever sent.
-    const std::string body = vayu::http::wire_body_bytes (request);
+    // showed the second would describe a request nothing ever sent. A file
+    // body is named, never inlined: its length is the file's.
+    const std::string body = raw_view_body (request);
+    const std::uint64_t length =
+    request.body.mode == BodyMode::Binary && vayu::http::has_wire_body (request) ?
+    request.body.file.size :
+    body.size ();
 
     // Add Content-Length for body
     if (!body.empty ()) {
-        raw_req << "Content-Length: " << body.size () << "\r\n";
+        raw_req << "Content-Length: " << length << "\r\n";
     }
 
     // End of headers
@@ -490,7 +508,8 @@ Result<Response> Client::send (const Request& request) {
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
-    curl_mime* mime = detail::apply_method_and_body (curl, request);
+    detail::BodySource body_source;
+    detail::apply_method_and_body (curl, request, body_source);
 
     // Set headers, and record the same set as what was sent.
     struct curl_slist* headers_list = detail::build_request_header_list (
@@ -576,13 +595,10 @@ Result<Response> Client::send (const Request& request) {
     auto completion   = std::chrono::steady_clock::now ();
     flush_transfer_debug (transfer_debug);
 
-    // Cleanup headers and the multipart body, both of which had to outlive the
-    // transfer that just finished.
+    // Cleanup headers, which had to outlive the transfer that just finished;
+    // the body source (a multipart tree, a streamed file) releases itself.
     if (headers_list) {
         curl_slist_free_all (headers_list);
-    }
-    if (mime) {
-        curl_mime_free (mime);
     }
 
     // Before any error return below: a failed transfer can still have
@@ -642,8 +658,7 @@ Result<Response> Client::send (const Request& request) {
     // back to the composed request, which is all that ever existed for it.
     response.raw_request = transfer_debug.last_header_out.empty () ?
     synthesize_raw_request (request, response) :
-    raw_request_from_wire (
-    transfer_debug.last_header_out, vayu::http::wire_body_bytes (request));
+    raw_request_from_wire (transfer_debug.last_header_out, raw_view_body (request));
 
     // The bound was reached and this caller asked to keep what was read
     // (issue #1157). Everything the transfer did produce before the write

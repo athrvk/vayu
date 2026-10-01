@@ -430,7 +430,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     errors.attach (curl);
     set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request.request).c_str ());
-    curl_mime* mime = detail::apply_method_and_body (curl, request.request);
+    detail::BodySource body_source;
+    detail::apply_method_and_body (curl, request.request, body_source);
 
     struct curl_slist* headers_list = detail::build_request_header_list (
     request.request, request.default_headers, &response.request_headers);
@@ -482,9 +483,6 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     if (headers_list) {
         curl_slist_free_all (headers_list);
-    }
-    if (mime) {
-        curl_mime_free (mime);
     }
     if (request.cookie_jar) {
         detail::capture_jar_cookies (curl, *request.cookie_jar, request.cookie_scope);
