@@ -521,6 +521,7 @@ add_library(vayu_core STATIC
     src/http/cookie_jar.cpp
     src/http/default_headers.cpp
     src/http/form_body.cpp
+    src/http/file_access_policy.cpp
     src/http/header_text.cpp
     src/http/header_names.cpp
     src/http/graphql_body.cpp
@@ -767,6 +768,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/client_certificates.cpp
+        src/http/routes/file_roots.cpp
         src/http/routes/globals.cpp
         src/http/routes/runs.cpp
         src/http/routes/execution.cpp

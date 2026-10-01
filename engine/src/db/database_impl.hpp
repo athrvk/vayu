@@ -519,7 +519,17 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("cert_format", &ClientCertificate::cert_format, default_value ("pem")),
     make_column ("passphrase", &ClientCertificate::passphrase),
     make_column ("created_at", &ClientCertificate::created_at),
-    make_column ("updated_at", &ClientCertificate::updated_at)));
+    make_column ("updated_at", &ClientCertificate::updated_at)),
+
+    // Folders the user allowed request-body files to be read from (schema
+    // version 3). A new table, created outright by sync_schema() like
+    // `client_certificates`; the version bump is the fence that keeps an
+    // older engine off a workspace whose binary bodies it would send empty.
+    // `path` is canonical and UNIQUE, so two spellings of one folder are one
+    // row and the route's 409 is backed by the schema.
+    make_table ("file_roots", make_column ("id", &FileRoot::id, primary_key ()),
+    make_column ("path", &FileRoot::path, unique ()),
+    make_column ("created_at", &FileRoot::created_at)));
 }
 
 using Storage = decltype (make_vayu_storage (std::string{}));

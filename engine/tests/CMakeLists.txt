@@ -199,6 +199,7 @@ add_executable(vayu_tests
     ../src/http/routes/collections.cpp
     ../src/http/routes/environments.cpp
     ../src/http/routes/client_certificates.cpp
+    ../src/http/routes/file_roots.cpp
     ../src/http/routes/globals.cpp
     ../src/http/routes/metrics.cpp
     ../src/http/routes/oauth.cpp

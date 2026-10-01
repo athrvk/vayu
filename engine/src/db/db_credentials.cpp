@@ -7,8 +7,8 @@
 
 /**
  * @file db_credentials.cpp
- * @brief Client-certificate registry (issue #707) and the OAuth token cache
- * (issue #1614).
+ * @brief Client-certificate registry (issue #707), the allowed folders for
+ * request-body files (`file_roots`) and the OAuth token cache (issue #1614).
  */
 
 #include "database_impl.hpp"
@@ -65,6 +65,36 @@ void Database::delete_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting client certificate", { { "id", id } });
     impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
+}
+
+// ---------------------------------------------------------------------------
+// Allowed folders for request-body files (`file_roots`, schema version 3)
+// ---------------------------------------------------------------------------
+
+void Database::save_file_root (const FileRoot& root) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("db", "Saving allowed folder", { { "id", root.id } });
+    impl_->storage.replace (root);
+}
+
+std::vector<FileRoot> Database::get_file_roots () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<FileRoot> (order_by (&FileRoot::path));
+}
+
+std::optional<FileRoot> Database::get_file_root (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<FileRoot> (where (c (&FileRoot::id) == id));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    return rows.front ();
+}
+
+void Database::delete_file_root (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("db", "Deleting allowed folder", { { "id", id } });
+    impl_->storage.remove_all<FileRoot> (where (c (&FileRoot::id) == id));
 }
 
 // ============================================================================
