@@ -2659,8 +2659,11 @@ no override, and a mode with no OpenAPI name (`digest`, `aws`, `ntlm`) gets no
 and JSON-RPC as JSON, GraphQL as the `{query, variables}` envelope a
 GraphQL-over-HTTP server receives, XML and text as the text they are, a form as
 its fields (file parts `format: binary`) with the enabled text values as the
-example - filed under the media type an enabled `Content-Type` row names
-(`application/vnd.api+json`) rather than the mode's generic one. What the
+example, a binary body as one file's bytes (`type: string, format: binary`, no
+example) - filed under the media type an enabled `Content-Type` row names
+(`application/vnd.api+json`) rather than the mode's generic one; a binary body
+with no such row is filed under its file's own `contentType`, else
+`application/octet-stream`. What the
 standard members cannot state exactly travels in `x-vayu-request` and
 `x-vayu-collection` (below), so every one of these reads back as it was.
 
@@ -3514,6 +3517,7 @@ Postman's own export does.
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
 | `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
+| `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
 | `event_stream` | A request consumed as an event stream |
 | `mock_response_mode` | A mock response mode other than `first` |
@@ -3537,7 +3541,8 @@ are `raw` with that `options.raw.language` (or the language a Postman import
 kept as `rawLanguage`, none at all for `""`, while the body still sniffs to its
 mode), `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
-`form-data` is `formdata` with a file part's `src`; `script.pre` /
+`form-data` is `formdata` with a file part's `src`, `binary` is `file` with
+`file.src` (`file: {}` when no file is chosen); `script.pre` /
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
 skips it, as Vayu does); saved examples are

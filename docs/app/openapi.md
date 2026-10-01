@@ -567,8 +567,10 @@ Everything in it is something the collection actually holds:
 - **Bodies are written as another tool can send them.** JSON as JSON, GraphQL
   as the `{query, variables}` envelope a GraphQL server receives, XML and text
   as the text they are, a form as its fields (a file part as `format: binary`)
-  with the enabled values as the example - under the media type your
-  `Content-Type` row names, when it names one.
+  with the enabled values as the example, a binary body as one file's bytes
+  (`format: binary`, no example) - under the media type your `Content-Type` row
+  names, when it names one, else (for a binary body) the file's own content
+  type or `application/octet-stream`.
 - **No schema Vayu did not see.** A request or response body is described only
   where there is a body to read a shape off, and what is written is the shape of
   that one example - types, nothing more - carrying a `description` that says so.
@@ -594,8 +596,9 @@ values.
 **Secrets are the one thing left behind.** A token, password, API-key value,
 client secret or a variable you marked secret is exported empty, and the dialog
 says how many. A value that is just a `{{variable}}` reference is kept - it
-names where the secret lives without being one. A form's file part keeps its
-name but not the path of the file on your machine.
+names where the secret lives without being one. A form's file part, and a
+binary body's file, keep their name but not the path of the file on your
+machine.
 
 If a document with these extensions is edited by hand and a piece no longer
 makes sense, the import skips that piece, keeps what the rest of the document

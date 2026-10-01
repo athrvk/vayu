@@ -64,6 +64,7 @@ enum class Loss : std::uint8_t {
     UnsupportedAuth,
     OAuth2Settings,
     FormFileNames,
+    BodyFileDetails,
     HttpVersion,
     EventStream,
     MockResponseMode,
@@ -92,6 +93,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "unsupported_auth", "Auth in a mode Postman lacks was left out" },
 { "oauth2_settings", "Some OAuth 2.0 settings have no Postman equivalent" },
 { "form_file_names", "Custom file names on form-data files were left out" },
+{ "body_file_details", "Content types and file names set on a binary body's file were left out - Postman reads the Content-Type header" },
 { "http_version", "HTTP version choices have no Postman equivalent" },
 { "event_stream", "Event-stream (SSE) settings have no Postman equivalent" },
 { "mock_response_mode", "Mock response choices have no Postman equivalent" },
@@ -834,6 +836,27 @@ json form_part (const json& field, Walk& walk) {
     return out;
 }
 
+/**
+ * A `binary` body as Postman's `file` mode: `file.src`, the path, which is all
+ * that mode carries - `{}` when no file is chosen, as Postman writes it. The
+ * file's own `contentType` and `fileName` have no member there.
+ */
+json file_body (const json& body, Walk& walk) {
+    const auto stored     = body.find ("file");
+    const json file       = stored == body.end () ? json::object () : *stored;
+    const std::string src = text_of (file, "src");
+    if (!text_of (file, "contentType").empty () ||
+    (!text_of (file, "fileName").empty () &&
+    text_of (file, "fileName") != file_base_name (src))) {
+        walk.lose (Loss::BodyFileDetails);
+    }
+    json out = json::object ();
+    if (!src.empty ()) {
+        out["src"] = src;
+    }
+    return json{ { "mode", "file" }, { "file", std::move (out) } };
+}
+
 json form_body (const json& fields, Walk& walk) {
     json parts = json::array ();
     if (fields.is_array ()) {
@@ -874,6 +897,9 @@ std::optional<json> postman_body (const json& body, Walk& walk) {
     }
     if (mode == "form-data") {
         return std::make_optional (form_body (fields == body.end () ? none : *fields, walk));
+    }
+    if (mode == "binary") {
+        return std::make_optional (file_body (body, walk));
     }
     walk.lose (Loss::UnsupportedBodies);
     return std::nullopt;
@@ -1504,6 +1530,9 @@ bool body_has_content (const std::optional<json>& body) {
     }
     if (mode == "graphql") {
         return !text_of (body->at ("graphql"), "query").empty ();
+    }
+    if (mode == "file") {
+        return !text_of (body->at ("file"), "src").empty ();
     }
     const auto rows = body->find (mode);
     return rows != body->end () && rows->is_array () && !rows->empty ();

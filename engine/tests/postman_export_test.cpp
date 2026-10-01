@@ -445,12 +445,58 @@ TEST (PostmanExport, FormDataFilePartsNameTheirPath) {
 
 TEST (PostmanExport, UnknownBodyModeIsANote) {
     PostmanExportRequest entry = request ("r", "u");
-    entry.body = ordered{ { "mode", "binary" }, { "content", "x" } };
+    entry.body = ordered{ { "mode", "telepathy" }, { "content", "x" } };
     PostmanExportFolder root = collection ();
     root.requests.push_back (entry);
     const auto outcome = run (root);
     EXPECT_FALSE (ordered::parse (outcome.text)["item"][0]["request"].contains ("body"));
     EXPECT_EQ (losses (outcome), (json{ { "unsupported_bodies", 1 } }));
+}
+
+/// A binary body is Postman's `file` mode, `file.src` its path - written, not
+/// left out as a mode Postman lacks. `{}` when no file is chosen, which is
+/// what Postman itself writes and what its importer reads back as empty.
+TEST (PostmanExport, ABinaryBodyIsPostmansFileModeNamingItsPath) {
+    const ordered chosen = body_of (ordered::parse (
+    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png","unresolved":true}})"));
+    EXPECT_EQ (chosen.dump (), R"({"mode":"file","file":{"src":"/home/ada/photo.png"}})");
+    const ordered unpicked =
+    body_of (ordered::parse (R"({"mode":"binary","file":{"src":""}})"));
+    EXPECT_EQ (unpicked.dump (), R"({"mode":"file","file":{}})");
+
+    PostmanExportRequest entry = request ("r", "u");
+    entry.body = ordered::parse (R"({"mode":"binary","file":{"src":"/a/b.bin"}})");
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    EXPECT_EQ (losses (run (root)), json::object ());
+}
+
+/// Postman's `file` mode has no member for the file's own content type or a
+/// declared name other than the path's, so either is a note.
+TEST (PostmanExport, ABinaryBodysOwnContentTypeIsANote) {
+    PostmanExportRequest typed = request ("r", "u");
+    typed.body                 = ordered::parse (
+    R"({"mode":"binary","file":{"src":"/a/b.bin","contentType":"image/png"}})");
+    PostmanExportRequest renamed = request ("s", "u");
+    renamed.body                 = ordered::parse (
+    R"({"mode":"binary","file":{"src":"/a/b.bin","fileName":"c.bin"}})");
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (typed);
+    root.requests.push_back (renamed);
+    EXPECT_EQ (losses (run (root)), (json{ { "body_file_details", 2 } }));
+}
+
+/// The file mode reads as a body for the GET-pruning rule only when it names
+/// a file - an unpicked one sends nothing.
+TEST (PostmanExport, AGetThatSendsAFileTellsPostmanNotToPruneIt) {
+    PostmanExportRequest chosen = request ("r", "u");
+    chosen.method               = "GET";
+    chosen.body = ordered::parse (R"({"mode":"binary","file":{"src":"/a/b.bin"}})");
+    EXPECT_EQ (only_item (chosen)["protocolProfileBehavior"].dump (),
+    R"({"disableBodyPruning":true})");
+    PostmanExportRequest unpicked = chosen;
+    unpicked.body = ordered::parse (R"({"mode":"binary","file":{"src":""}})");
+    EXPECT_FALSE (only_item (unpicked).contains ("protocolProfileBehavior"));
 }
 
 // ---------------------------------------------------------------------------

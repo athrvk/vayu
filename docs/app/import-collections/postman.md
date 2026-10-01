@@ -384,6 +384,10 @@ the request as it is at export time.
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.
 
+A binary body exports as Postman's `file` mode naming the file's path
+(`file.src`), as a form-data file part names its own; a file's own content type
+or a file name other than its path's has no place in that mode and is listed.
+
 An agent can ask for the same document over MCP (`export_postman`), which always
 leaves credentials out.
 
