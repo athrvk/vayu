@@ -1234,7 +1234,8 @@ const nlohmann::json& config,
 vayu::db::Database& db,
 std::shared_ptr<const ScenarioExecution> scenario,
 std::unique_ptr<LoadDataSet> data,
-LoadAuthPlan auth_plan) {
+LoadAuthPlan auth_plan,
+std::shared_ptr<vayu::http::FilePlan> files) {
     return spawn_run (run_id, config, db, [&] (const std::shared_ptr<RunContext>& context) {
         // Set before either thread starts: the worker reads it to choose an
         // executor, and a later write would race the run it is meant to shape.
@@ -1245,6 +1246,8 @@ LoadAuthPlan auth_plan) {
         // And the credential plan beside it, which `build_load_request` reads
         // to decide whether the build resolves this run's auth at all.
         context->load_auth = std::move (auth_plan);
+        // And the files the route already checked, which the build fills from.
+        context->file_plan = std::move (files);
         // Spawn metrics collection thread first - it is NOT detached and is
         // joined by the worker thread below.
         context->metrics_thread =
@@ -1433,6 +1436,26 @@ vayu::Request& request) {
     // builder serves `POST /execute`, whose stream is managed by
     // `SseStreamManager` and must not acquire load bounds (issue #576).
     request.stream_bounds = context->stream_bounds;
+
+    // The file rule (`http/file_ref.hpp`), once for the run: filled from the
+    // route's plan, or checked here for a run started without one. A path a
+    // row binds is filled per submission from the same plan instead.
+    if (vayu::http::has_file_refs (request.body)) {
+        std::optional<std::string> refusal;
+        if (!context->file_plan) {
+            context->file_plan = std::make_shared<vayu::http::FilePlan> (
+            vayu::http::FileAccessPolicy::from_database (db));
+            refusal = plan_load_files (
+            *context->file_plan, request, context->load_data.get ());
+        } else if (!vayu::http::has_templated_file_path (request.body)) {
+            refusal = context->file_plan->fill (request);
+        }
+        if (refusal) {
+            vayu::utils::log_error (
+            "run", "Load test: " + *refusal, { { "runId", context->run_id } });
+            return false;
+        }
+    }
 
     // A run that outlives its OAuth 2.0 token used to become a 401
     // storm the report never explained. Armed here, while the token

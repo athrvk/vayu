@@ -52,6 +52,7 @@ class EchoServer {
         auto record = [this] (const httplib::Request& req, httplib::Response& res) {
             {
                 std::lock_guard<std::mutex> lock (mutex_);
+                method_       = req.method;
                 path_         = req.path;
                 target_       = req.target;
                 headers_      = req.headers;
@@ -78,6 +79,7 @@ class EchoServer {
         svr_.Get ("/echo.*", record);
         svr_.Post ("/echo.*", record);
         svr_.Put ("/echo.*", record);
+        svr_.Patch ("/echo.*", record);
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -102,6 +104,12 @@ class EchoServer {
     std::string body () const {
         std::lock_guard<std::mutex> lock (mutex_);
         return body_;
+    }
+
+    /// The method the last request arrived with.
+    std::string method () const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return method_;
     }
 
     /// The path the server was asked for, including anything appended to
@@ -152,6 +160,7 @@ class EchoServer {
     std::thread thread_;
     int port_ = 0;
     mutable std::mutex mutex_;
+    std::string method_;
     std::string path_;
     std::string target_;
     httplib::Headers headers_;

@@ -736,6 +736,77 @@ TEST_F (RequestComposerTest, DeferDynamicVariablesKeepsTheTokensForTheRunToBind)
     EXPECT_NE (composed["body"]["content"], R"({"id":"{{$guid}}"})");
 }
 
+// A file path a variable filled was chosen by the variable, not by a person in
+// the editor: composition marks it `unresolved`, so the send accepts it only
+// from under an allowed folder (`http/file_ref.hpp`). The mark rides the wire,
+// which is how it survives compose -> app -> execute. A literal path keeps the
+// flag it arrived with. Mutation check: drop the `unresolved` write in
+// `resolve_file_strings` and both templated paths come back trusted.
+TEST_F (RequestComposerTest, AFilePathAVariableFilledIsMarkedUnresolved) {
+    seed_collection ("col", "", R"({"fixtures":{"value":"/data/fx","enabled":true}})", "");
+
+    const json binary = { { "method", "post" }, { "url", "https://example.test" },
+        { "body",
+        { { "mode", "binary" },
+        { "file", { { "src", "{{fixtures}}/a.bin" }, { "fileName", "{{fixtures}}.bin" } } } } } };
+    auto [status, composed] = vayu::http::compose_request_core (
+    *db_, json{ { "request", binary }, { "collectionId", "col" } });
+    ASSERT_EQ (status, 200) << composed.dump ();
+    EXPECT_EQ (composed["body"]["file"]["src"], "/data/fx/a.bin");
+    EXPECT_EQ (composed["body"]["file"]["fileName"], "/data/fx.bin");
+    EXPECT_EQ (composed["body"]["file"]["unresolved"], true);
+
+    const json part = { { "method", "post" }, { "url", "https://example.test" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "a" }, { "type", "file" }, { "src", "{{fixtures}}/p.png" } },
+        { { "key", "b" }, { "type", "file" }, { "src", "/abs/q.png" } } }) } } } };
+    auto [part_status, parts] = vayu::http::compose_request_core (
+    *db_, json{ { "request", part }, { "collectionId", "col" } });
+    ASSERT_EQ (part_status, 200) << parts.dump ();
+    EXPECT_EQ (parts["body"]["fields"][0]["src"], "/data/fx/p.png");
+    EXPECT_EQ (parts["body"]["fields"][0]["unresolved"], true);
+    EXPECT_FALSE (parts["body"]["fields"][1].contains ("unresolved"))
+    << "a literal path a person typed stays trusted";
+}
+
+// The composed payload names the Content-Type the send will use, so a reader of
+// it (code generation) agrees with the wire: the file's own type, else the
+// extension's, else octet-stream - and nothing under a Content-Type header row,
+// which wins at send. Mutation check: drop the `fill_binary_content_type` call
+// in `resolve_compose_body` and the png composes with no type.
+TEST_F (RequestComposerTest, ABinaryBodyComposesItsEffectiveContentType) {
+    seed_collection ("col", "");
+    const auto compose_file = [&] (const json& file, const json& headers) {
+        json request = { { "method", "post" }, { "url", "https://example.test" },
+            { "body", { { "mode", "binary" }, { "file", file } } } };
+        if (!headers.is_null ()) {
+            request["headers"] = headers;
+        }
+        auto [status, composed] = vayu::http::compose_request_core (
+        *db_, json{ { "request", request }, { "collectionId", "col" } });
+        EXPECT_EQ (status, 200) << composed.dump ();
+        return composed["body"]["file"];
+    };
+
+    EXPECT_EQ (
+    compose_file (json{ { "src", "/a/photo.PNG" } }, nullptr)["contentType"], "image/png");
+    EXPECT_EQ (
+    compose_file (json{ { "src", "/a/blob.weird" } }, nullptr)["contentType"],
+    "application/octet-stream");
+    EXPECT_EQ (compose_file (json{ { "src", "/a/photo.png" }, { "contentType", "image/webp" } },
+               nullptr)["contentType"],
+    "image/webp");
+    EXPECT_EQ (compose_file (json{ { "src", "/a/photo.png" }, { "contentType", "" } },
+               nullptr)["contentType"],
+    "image/png");
+    EXPECT_FALSE (compose_file (json{ { "src", "/a/photo.png" } },
+    json{ { "Content-Type", "application/vnd.x" } })
+    .contains ("contentType"))
+    << "a header row wins at send, so compose writes nothing under it";
+}
+
 TEST_F (RequestComposerTest, DeferDynamicVariablesMustBeABoolean) {
     auto [status, payload] = vayu::http::compose_request_core (*db_,
     json{ { "request", { { "url", "https://example.test" } } },

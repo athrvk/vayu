@@ -2266,7 +2266,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 2);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 3);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
@@ -2310,13 +2310,13 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseWithoutTheProtocolSettingColumnsGetsThe
         db.save_request (r);
     }
     drop_protocol_setting_columns (TEST_DB_PATH);
-    ASSERT_EQ (read_user_version (TEST_DB_PATH), 2);
+    set_user_version (TEST_DB_PATH, 2);
 
     {
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    EXPECT_EQ (read_user_version (TEST_DB_PATH), 2);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     for (const char* column : { "disable_cookies", "disabled_system_headers",
          "disable_url_encoding", "postman_protocol_behavior" }) {
         EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", column)) << column;
@@ -2324,6 +2324,48 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseWithoutTheProtocolSettingColumnsGetsThe
     Database reopened (TEST_DB_PATH);
     reopened.init ();
     expect_protocol_settings_backfilled (reopened);
+}
+
+// Schema version 3 is the `file_roots` table (the folders request-body files
+// may be read from) and nothing to move: a version-2 database is stamped 3 and
+// gains the table, and its rows round-trip. Mutation check: skip the stamp on
+// `migrate_before_sync`'s no-fold path and the version stays 2.
+TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedThreeAndGainsTheFileRootsTable) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        ASSERT_EQ (
+        sqlite3_exec (handle, "DROP TABLE file_roots", nullptr, nullptr, nullptr), SQLITE_OK);
+        sqlite3_close (handle);
+    }
+    set_user_version (TEST_DB_PATH, 2);
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "file_roots", "path"));
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 3);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "file_roots", "path"));
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    vayu::FileRoot root;
+    root.id         = "froot_1";
+    root.path       = "/data/fixtures";
+    root.created_at = 7;
+    reopened.save_file_root (root);
+    const auto rows = reopened.get_file_roots ();
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].path, "/data/fixtures");
+    EXPECT_EQ (rows[0].created_at, 7);
+    ASSERT_HAS_VALUE (reopened.get_file_root ("froot_1"));
+    reopened.delete_file_root ("froot_1");
+    EXPECT_TRUE (reopened.get_file_roots ().empty ());
 }
 
 // A database stamped by the next schema is refused before anything writes to

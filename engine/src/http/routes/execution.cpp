@@ -31,6 +31,8 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
@@ -1421,6 +1423,30 @@ bool jar_off) {
 }
 
 /**
+ * What refuses a streaming send before its stream opens, in the order the
+ * buffered send meets them: the residual pass (issue #1008), then the file rule
+ * (`file_ref.hpp`) over the allowed folders as they stand, code
+ * `unsendable_file`.
+ */
+std::optional<ResidualRefusal> refuse_before_stream (vayu::db::Database& db,
+vayu::Request& request,
+const ScriptVariableScopes& scopes) {
+    if (auto refusal = resolve_residual_tokens (request, scopes)) {
+        return refusal;
+    }
+    if (!vayu::http::has_file_refs (request.body)) {
+        return std::nullopt;
+    }
+    vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (db));
+    if (auto refusal = files.prepare (request)) {
+        return ResidualRefusal{
+            vayu::Error{ vayu::ErrorCode::InternalError, std::move (*refusal) }, "unsendable_file"
+        };
+    }
+    return std::nullopt;
+}
+
+/**
  * The streaming half of a design send (issue #573).
  *
  * The same script/send/script ordering a buffered send performs, pulled apart
@@ -1545,7 +1571,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // (issue #1008), here because this path runs the pre-request script itself
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
-    if (auto refusal = resolve_residual_tokens (send.request, scopes)) {
+    if (auto refusal = refuse_before_stream (ctx.db, send.request, scopes)) {
         // What that pass can refuse (issues #1051 and #1084), in the same words
         // the buffered send refuses it with and under the code composition
         // refuses it under; what differs is where the caller reads it, this
@@ -1729,6 +1755,9 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     ctx.db, vayu::http::DefaultHeaderScope::Design);
     inputs.max_response_bytes     = design_response_body_bound (ctx.db);
     inputs.max_element_body_bytes = element_body_bound (ctx.db);
+    // The allowed folders as they stand at this send, read once.
+    vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (ctx.db));
+    inputs.files = &files;
     if (send.data_row) {
         inputs.iteration_data = &*send.data_row;
         // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
@@ -1774,9 +1803,12 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // Build and send response
     // Engine returns 200 - the server's status is in the response body
     res.status = 200;
-    res.set_content (
-    build_response_json (exchange.response, scripts, validation, elements).dump (2),
-    "application/json");
+    nlohmann::json body =
+    build_response_json (exchange.response, scripts, validation, elements);
+    if (auto file = body_file_node (exchange.request)) {
+        body["bodyFile"] = std::move (*file);
+    }
+    res.set_content (body.dump (2), "application/json");
 }
 
 /**
@@ -1993,7 +2025,9 @@ nlohmann::json& scenario_manifest) {
     // so coverage counts against the document that was bound when the
     // plan resolved (issue #629) rather than whatever it is by the time
     // the run ends. The manifest above already stamped its identity.
-    execution->spec    = std::move (resolved.spec);
+    execution->spec = std::move (resolved.spec);
+    // Every file the steps can send, checked once while resolving.
+    execution->files   = std::move (resolved.files);
     scenario_execution = std::move (execution);
 
     vayu::utils::log_info ("run", "Scenario resolved",
@@ -2094,6 +2128,73 @@ const vayu::core::ScenarioExecution* scenario_execution) {
     }
 }
 
+/**
+ * The file rule for a single-request load run, applied before the run row
+ * exists (`core::plan_load_files`). Leaves @p out null for a request that names
+ * no file, and for one the payload cannot even describe - the run's own build
+ * reports that.
+ */
+std::optional<std::string> plan_single_load_files (RouteContext& ctx,
+const nlohmann::json& json,
+bool is_scenario,
+const vayu::core::LoadDataSet* data,
+std::shared_ptr<vayu::http::FilePlan>& out,
+std::optional<nlohmann::json>& body_file) {
+    if (is_scenario) {
+        return std::nullopt; // A scenario's steps are planned by `resolve_scenario`.
+    }
+    auto parsed = vayu::json::deserialize_request (json);
+    if (parsed.is_error ()) {
+        return std::nullopt;
+    }
+    vayu::Request request = std::move (parsed).value ();
+    if (!vayu::http::has_file_refs (request.body)) {
+        return std::nullopt;
+    }
+    auto files = std::make_shared<vayu::http::FilePlan> (
+    vayu::http::FileAccessPolicy::from_database (ctx.db));
+    if (auto refusal = vayu::core::plan_load_files (*files, request, data)) {
+        return refusal;
+    }
+    if (!vayu::http::has_templated_file_path (request.body)) {
+        body_file = body_file_node (request);
+    }
+    out = std::move (files);
+    return std::nullopt;
+}
+
+/// A single-request run's inputs that must hold before a run row exists: the
+/// data set (`invalid_run_config`), then its files (`unsendable_file`).
+std::optional<std::pair<std::string, std::string>> refuse_load_inputs (RouteContext& ctx,
+const nlohmann::json& json,
+bool is_scenario,
+const LoadDataRows& load_data,
+std::shared_ptr<vayu::http::FilePlan>& files,
+std::optional<nlohmann::json>& body_file) {
+    if (!load_data.ok) {
+        return std::pair{ load_data.error, std::string{ "invalid_run_config" } };
+    }
+    if (auto refusal = plan_single_load_files (
+        ctx, json, is_scenario, load_data.set.get (), files, body_file)) {
+        return std::pair{ std::move (*refusal), std::string{ "unsendable_file" } };
+    }
+    return std::nullopt;
+}
+
+/// @p snapshot with the planned file's `bodyFile` added, when there is one.
+std::string with_body_file (std::string snapshot,
+const std::optional<nlohmann::json>& body_file) {
+    if (!body_file) {
+        return snapshot;
+    }
+    auto parsed = nlohmann::json::parse (snapshot, nullptr, false);
+    if (!parsed.is_object ()) {
+        return snapshot;
+    }
+    parsed["bodyFile"] = *body_file;
+    return parsed.dump ();
+}
+
 void handle_start_load_test (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -2142,9 +2243,14 @@ httplib::Response& res) {
     // planned here for the reason the scenario block is resolved here: a set the
     // engine cannot read must leave no run row behind.
     auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
-    if (!load_data.ok) {
-        vayu::utils::log_warning ("http", "POST /runs - " + load_data.error);
-        send_error (res, 400, load_data.error, "invalid_run_config");
+    // Every file the run's request can send, checked and read once here too,
+    // for the same reason: a file the run cannot send leaves no run row.
+    std::shared_ptr<vayu::http::FilePlan> load_files;
+    std::optional<nlohmann::json> load_body_file;
+    if (auto refusal = refuse_load_inputs (
+        ctx, json, is_scenario, load_data, load_files, load_body_file)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
+        send_error (res, 400, refusal->first, refusal->second);
         return;
     }
 
@@ -2171,6 +2277,9 @@ httplib::Response& res) {
     ctx.db, compression_scope_of (run.type));
     run.config_snapshot = run_config_snapshot (req.body, is_scenario,
     scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes);
+    // The file a single-request run sends, as the plan checked it: name, size
+    // and digest for the report (`metadata.bodyFile`), never the bytes.
+    run.config_snapshot = with_body_file (std::move (run.config_snapshot), load_body_file);
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {
@@ -2212,7 +2321,7 @@ httplib::Response& res) {
     run_id, json, scenario_execution, ctx.db, ctx.cookie_jar) :
     ctx.run_manager.start_run (run_id, json, ctx.db,
     is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set),
-    std::move (load_data.auth));
+    std::move (load_data.auth), std::move (load_files));
     if (!started) {
         send_error (res, 503, "Engine is shutting down");
         return;

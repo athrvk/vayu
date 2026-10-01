@@ -221,12 +221,12 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `2`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `3`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path rather than being read
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
    is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
-   proceeds to fold. `1` has no script column left, so it skips the fold and is only stamped.
+   proceeds to fold. `1` and `2` have no script column left, so they skip the fold and are only stamped.
 2. **Fold, if either table still has a script column.** For each of `requests` and `collections`
    that does (either `pre_request_script` or `post_request_script` alone is enough - a table needs
    folding for): `<db>.pre-migration.bak` is written once, immediately before the first row is
@@ -268,6 +268,7 @@ release that carries a bump says so in its notes.
 | `0` | Every database before #1514 (never stamped) | - |
 | `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
 | `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
+| `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -477,7 +478,16 @@ query row's boolean `equals`.
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
+{"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png","unresolved":true}}
 ```
+A `form-data` file part carries `"type":"file"` and, in place of `value`, the
+same file members a binary body's `file` does: `src` (an absolute path, stored
+as written), `fileName` and `contentType` (both optional, omitted when empty) and
+`unresolved` (written only when `true`: no person chose the path in the editor -
+an import, a curl paste, an MCP agent - so it is sent only from under an
+allowed folder, see [`file_roots`](#file_roots)). A text part may also carry
+`"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
+object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:
 the `options.raw.language` the document declared when it named no Vayu mode
 (`"javascript"`, `"html"`), or `""` when it declared none. Nothing sends it;
@@ -987,6 +997,26 @@ unchanged. Several rows may still *match* one transfer once patterns overlap
 (#803), and they are ranked rather than tie-broken: closest host, then port. A
 tie would need the same host and port twice, which is the pair the `409`
 forbids.
+
+---
+
+### `file_roots`
+
+The folders a request-body file may be read from without a person having chosen
+it in the editor (schema version 3). A file reference marked `unresolved` (see
+[`requests.body`](#requests)) is sent only when its canonical path lies under
+one of these; read once per design send and once per run. See
+[api-reference.md](api-reference.md#allowed-folders-file-roots) for the routes.
+
+| Column       | Type         | Notes                                                    |
+|--------------|--------------|----------------------------------------------------------|
+| `id`         | TEXT PK      | `froot_` + UUID                                          |
+| `path`       | TEXT UNIQUE  | Canonical absolute folder path, no trailing separator    |
+| `created_at` | INTEGER      | Unix ms                                                  |
+
+`path` is canonical when written (symlinks resolved, `.` and `..` folded), so
+two spellings of one folder are one row, and the `409` the route answers for a
+second is backed by the constraint.
 
 ---
 

@@ -29,9 +29,8 @@
  * generates as part of `curl_mime`, so the encoder and the Content-Type that
  * describes it stay together inside libcurl. See `content_type_is_engine_owned`.
  *
- * The one question a *file* part adds - "is this file actually sendable?" - is
- * answered here too, because it has to be answered identically by both drivers
- * and before either of them starts a transfer. See `unsendable_file_part`.
+ * The one question a *file* part adds - "may this file be sent?" - is not
+ * answered here: a binary body asks it too, so both share `file_ref.hpp`.
  */
 
 namespace vayu::http {
@@ -101,7 +100,7 @@ namespace vayu::http {
  *
  * The one predicate every caller uses, because "has a body" is mode-dependent:
  * a content mode needs a non-empty `content`, a form mode needs at least one
- * enabled field.
+ * enabled field, and a binary body always has one - the file is the body.
  */
 [[nodiscard]] bool has_wire_body (const Body& body);
 
@@ -114,9 +113,12 @@ namespace vayu::http {
  * HTTP drivers read it, and so does the raw-request view - a view that
  * rebuilt the body itself would show something the transfer did not send.
  *
- * Empty for a body with nothing to send (`has_wire_body` is false) and empty
+ * Empty for a body with nothing to send (`has_wire_body` is false), empty
  * for **multipart**, whose bytes belong to libcurl: it encodes the parts and
- * generates the boundary, so no faithful string exists outside the transfer.
+ * generates the boundary, so no faithful string exists outside the transfer -
+ * and empty for **binary**, whose bytes are the file's (`FileRef`): shared by
+ * pointer from the plan or streamed, never copied into a string, and shown in
+ * a view as `body_file_placeholder`.
  */
 [[nodiscard]] std::string wire_body_bytes (const Body& body);
 
@@ -141,9 +143,13 @@ namespace vayu::http {
  * Deriving it here takes no header away from anyone, because a declared one
  * still wins.
  *
- * Empty for **text** and **binary**, and that one *is* restraint: `text/plain`,
- * `text/csv`, a JWT and a raw signature are all `text`, so there is no answer to
- * derive and the header stays the author's.
+ * Empty for **text**, and that one *is* restraint: `text/plain`, `text/csv`, a
+ * JWT and a raw signature are all `text`, so there is no answer to derive and
+ * the header stays the author's.
+ *
+ * **binary** answers from the file: `FileRef::content_type`, else the type its
+ * extension names (`media_type_for_extension`), else `application/octet-stream`
+ * - so a file body never goes out as libcurl's `x-www-form-urlencoded`.
  *
  * Only ever a *default*: a Content-Type the caller set wins in every case
  * (`body_content_type_value`), which is how an explicit `application/graphql` -
@@ -195,8 +201,8 @@ namespace vayu::http {
 /**
  * @brief True when this body has at least one enabled file part.
  *
- * The cheap gate every hot-path caller checks first: a body without one pays
- * nothing for the filesystem check below, which is one `stat` per transfer.
+ * The cheap gate a caller checks first: a body without one pays nothing for
+ * the file rule (`file_ref.hpp`).
  */
 [[nodiscard]] bool has_file_parts (const Body& body);
 
@@ -216,22 +222,5 @@ namespace vayu::http {
  * #1003) are the two surfaces that show a part, and they show this.
  */
 [[nodiscard]] std::string declared_file_name (const FormField& field);
-
-/**
- * @brief Why this body's file parts cannot be sent, if any of them cannot.
- *
- * A part with no `src` (a row authored but never pointed at a file, or one
- * imported from another machine) and a part naming a file this process cannot
- * read are both failures of the *request*, not of the transfer, and both are
- * answered here rather than left to libcurl: curl reports an unreadable file as
- * a generic read error naming nothing, and the failure mode this whole feature
- * exists to remove is a part that disappears without a word.
- *
- * The returned message names the field and the path. `std::nullopt` means every
- * enabled file part is readable *right now* - the file can still vanish between
- * this check and the send, which libcurl then reports on its own terms; this is
- * the loud, attributable answer for the case that is actually common.
- */
-[[nodiscard]] std::optional<std::string> unsendable_file_part (const Body& body);
 
 } // namespace vayu::http

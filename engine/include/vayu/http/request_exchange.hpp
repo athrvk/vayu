@@ -41,6 +41,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -127,6 +128,17 @@ const vayu::Environment& collectionVariables);
  */
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
+
+/**
+ * @brief `{fileName, size, sha256}` for a binary body, or nothing.
+ *
+ * What a record of a send says about the file it carried: never its bytes and
+ * never its path, which is this machine's layout. `size` and `sha256` are
+ * present once the file rule read the file (`FilePlan`); a send refused before
+ * that carries `fileName` alone. Written as `request.bodyFile` on a trace and
+ * at the top level of the `/execute` response.
+ */
+std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
 
 /**
  * What an execution's two scripts produced, as the four keys every client
@@ -434,6 +446,14 @@ struct ExchangeInputs {
     /// recording nowhere; the scenario runner is the one caller that binds
     /// this, to its run's `MetricsCollector`.
     std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
+
+    /// The file rule for this exchange (`file_ref.hpp`): the design send's own
+    /// plan over the stored `file_roots`, or the run's, which already checked
+    /// every path its steps can name. Applied after the residual pass and
+    /// before the send. Null checks against no allowed folder at all, so a
+    /// caller that forgets it refuses every file nobody chose in the editor
+    /// rather than sending it.
+    vayu::http::FilePlan* files = nullptr;
 };
 
 /** What one exchange produced. */

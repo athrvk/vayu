@@ -618,7 +618,7 @@ const std::function<bool (const std::string&)>& probe) {
  * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
  *
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
- * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 is stamped without a fold; already at
+ * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 and 2 are stamped without a fold; already at
  * `SCHEMA_VERSION` is a fast no-op; newer than `SCHEMA_VERSION` refuses to
  * start rather than silently serving - and possibly writing - settings this
  * build does not understand.
@@ -675,11 +675,12 @@ void migrate_before_sync (const std::string& path) {
     table_has_script_columns (connection.get (), "collections");
     if (!requests_need_fold && !collections_need_fold) {
         // Nothing to fold - a fresh schema with no rows yet, a database some
-        // other path already brought to this shape, or a version-1 database
-        // (the 1 -> 2 step is `request_examples.postman_response` and the four
-        // `requests` protocol-setting columns of #1765, nullable or NOT NULL
-        // with a default, which `sync_schema ()` adds by itself, so it only
-        // needs stamping).
+        // other path already brought to this shape, or a version-1 or -2
+        // database. Both later steps only stamp: 1 -> 2 is
+        // `request_examples.postman_response` and the four `requests`
+        // protocol-setting columns of #1765, nullable or NOT NULL with a
+        // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
+        // `file_roots` table, which `sync_schema ()` creates outright.
         stamp_schema_version (connection.get ());
         return;
     }

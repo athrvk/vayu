@@ -27,6 +27,7 @@
 #include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -296,35 +297,32 @@ TEST_F (FormBodyWireTest, ADisabledFilePartIsNeitherSentNorRead) {
 }
 
 // The failure the issue names: a file that is not there must fail the request
-// with a message naming it, never a part that quietly does not go out.
-// Mutation-check: drop the unsendable_file_part call from validate_transferable
-// and this reaches the server as a 200 with the part missing.
+// with a message naming it, never a part that quietly does not go out. The
+// refusal is the file rule's (`file_ref.hpp`), which every driver's caller
+// applies once per send or run before the transfer.
+// Mutation-check: drop the file-part loop from `FilePlan::prepare` and this
+// answers nothing.
 TEST_F (FormBodyWireTest, AMissingFileFailsTheRequestByName) {
     const std::string missing =
     (std::filesystem::temp_directory_path () / "vayu-no-such-file.png").string ();
     auto request = form_request (
     server_->url (), BodyMode::FormData, { file_field ("avatar", missing) });
 
-    auto result = client_->send (request);
-    ASSERT_TRUE (result.is_ok ())
-    << "a refusal is a failed response, not an Error";
-    EXPECT_EQ (result.value ().status_code, 0);
-    EXPECT_EQ (result.value ().error_code, ErrorCode::InternalError);
-    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
-    << result.value ().error_message;
-    EXPECT_NE (result.value ().error_message.find (missing), std::string::npos)
-    << result.value ().error_message;
+    FilePlan plan;
+    const auto refusal = plan.prepare (request);
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_NE (refusal->find ("avatar"), std::string::npos) << *refusal;
+    EXPECT_NE (refusal->find (missing), std::string::npos) << *refusal;
 }
 
 TEST_F (FormBodyWireTest, AFilePartWithNoFileChosenFailsTheRequest) {
     auto request =
     form_request (server_->url (), BodyMode::FormData, { file_field ("avatar", "") });
 
-    auto result = client_->send (request);
-    ASSERT_TRUE (result.is_ok ());
-    EXPECT_EQ (result.value ().status_code, 0);
-    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
-    << result.value ().error_message;
+    FilePlan plan;
+    const auto refusal = plan.prepare (request);
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_NE (refusal->find ("avatar"), std::string::npos) << *refusal;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,25 +381,6 @@ TEST_F (FormBodyWireTest, LoadDriverUploadsAFilePartOnEveryIteration) {
     }
 
     loop.stop ();
-}
-
-// The refusal is the same on the load path - both drivers gate on
-// validate_transferable, and a load run that silently dropped the file would
-// measure a request nobody asked for.
-TEST_F (FormBodyWireTest, LoadDriverRefusesAMissingFileByName) {
-    EventLoop loop;
-    loop.start ();
-
-    auto request = form_request (server_->url (), BodyMode::FormData,
-    { file_field ("avatar", "/nonexistent/vayu/avatar.png") });
-    auto result  = loop.submit_async (request).future.get ();
-    loop.stop ();
-
-    ASSERT_TRUE (result.is_ok ())
-    << "a refusal is a failed response, not an Error";
-    EXPECT_EQ (result.value ().status_code, 0);
-    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
-    << result.value ().error_message;
 }
 
 // The multipart body is attached to a pooled handle and freed with the
@@ -473,8 +452,8 @@ TEST (FormBodyRules, RenderFormDataSkipsDisabledPartsAndNamesUnchosenFiles) {
     off.enabled   = false;
     EXPECT_EQ (render_form_data_parts ({ { "on", "1", true }, off }), "on=1");
 
-    // A part authored but never pointed at a file. `unsendable_file_part`
-    // refuses it before the transfer, but a pre-request script runs first and
+    // A part authored but never pointed at a file. The file rule
+    // (`file_ref.hpp`) refuses it before the transfer, but a pre-request script runs first and
     // reads the body as it stands - and a bare `@` is still not `chosen=`.
     EXPECT_EQ (render_form_data_parts ({ file_field ("chosen", "") }), "chosen=@");
 }
@@ -564,7 +543,9 @@ TEST (FormBodyRules, FilePartDetectionIsModeAndRowAware) {
     text.mode   = BodyMode::FormData;
     text.fields = { { "a", "1", true } };
     EXPECT_FALSE (has_file_parts (text));
-    EXPECT_FALSE (unsendable_file_part (text).has_value ());
+    Request text_request;
+    text_request.body = text;
+    EXPECT_FALSE (FilePlan{}.prepare (text_request).has_value ());
 
     Body with_file;
     with_file.mode = BodyMode::FormData;
@@ -578,10 +559,12 @@ TEST (FormBodyRules, FilePartDetectionIsModeAndRowAware) {
     // Off means off: neither counted nor opened.
     with_file.fields[0].enabled = false;
     EXPECT_FALSE (has_file_parts (with_file));
-    EXPECT_FALSE (unsendable_file_part (with_file).has_value ());
+    Request off_request;
+    off_request.body = with_file;
+    EXPECT_FALSE (FilePlan{}.prepare (off_request).has_value ());
 }
 
-TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
+TEST (FormBodyRules, TheFileRuleNamesTheFieldAndThePath) {
     Body body;
     body.mode = BodyMode::FormData;
     FormField file;
@@ -590,7 +573,9 @@ TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
     file.src    = "/nonexistent/vayu/avatar.png";
     body.fields = { file };
 
-    const auto missing = unsendable_file_part (body);
+    Request request;
+    request.body       = body;
+    const auto missing = FilePlan{}.prepare (request);
     ASSERT_HAS_VALUE (missing);
     EXPECT_NE (missing->find ("avatar"), std::string::npos) << *missing;
     EXPECT_NE (missing->find ("/nonexistent/vayu/avatar.png"), std::string::npos)
@@ -598,8 +583,8 @@ TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
 
     // No file chosen at all is its own message - "cannot read ''" would point
     // the user at a path that does not exist because they never named one.
-    body.fields[0].src = "";
-    const auto unset   = unsendable_file_part (body);
+    request.body.fields[0].src = "";
+    const auto unset           = FilePlan{}.prepare (request);
     ASSERT_HAS_VALUE (unset);
     EXPECT_NE (unset->find ("avatar"), std::string::npos) << *unset;
     EXPECT_NE (unset->find ("no file selected"), std::string::npos) << *unset;
