@@ -29,6 +29,7 @@ import McpSettingsPanel from "./panels/McpSettingsPanel";
 import NotificationsPanel from "./panels/NotificationsPanel";
 import GeneralPanel from "./panels/GeneralPanel";
 import KeyboardShortcutsPanel from "./panels/KeyboardShortcutsPanel";
+import FilesPanel from "./panels/FilesPanel";
 
 export const APP_PANEL_COMPONENTS: Record<ClientSettingsCategory, ComponentType> = {
 	general: GeneralPanel,
@@ -39,4 +40,5 @@ export const APP_PANEL_COMPONENTS: Record<ClientSettingsCategory, ComponentType>
 	notifications: NotificationsPanel,
 	shortcuts: KeyboardShortcutsPanel,
 	mcp: McpSettingsPanel,
+	files: FilesPanel,
 };

@@ -98,6 +98,13 @@ export {
 	useDeleteClientCertificateMutation,
 } from "./client-certificates";
 
+// Allowed folders for request-body files
+export {
+	useFileRootsQuery,
+	useCreateFileRootMutation,
+	useDeleteFileRootMutation,
+} from "./file-roots";
+
 // Webhook inbox
 export {
 	useInboxesQuery,

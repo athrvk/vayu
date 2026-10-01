@@ -369,6 +369,15 @@ export const APP_SETTINGS = [
 		searchText: "Whether agents may change saved requests, environments and engine config.",
 		keywords: ["read-only", "safety", "permission"],
 	},
+	// Files
+	{
+		anchor: "allowed-folders",
+		panel: "files",
+		label: "Allowed folders",
+		searchText:
+			"Folders Vayu may send request-body files from without picking each file - for imported collections, data files and paths with variables.",
+		keywords: ["file roots", "binary body", "upload", "file part", "relink", "trust"],
+	},
 	// Keyboard shortcuts
 	{
 		anchor: "keyboard-shortcuts",

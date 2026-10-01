@@ -57,6 +57,10 @@ vi.mock("@/queries", () => ({
 	useEnvironmentsQuery: () => ({ data: [], isLoading: false, error: null }),
 	useConfigQuery: () => ({ data: { entries: [] }, isLoading: false, error: null }),
 	useUpdateConfigMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	// Settings > Files lists and edits the engine's allowed folders.
+	useFileRootsQuery: () => ({ data: [], isLoading: false, isError: false }),
+	useCreateFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 beforeEach(cleanup);

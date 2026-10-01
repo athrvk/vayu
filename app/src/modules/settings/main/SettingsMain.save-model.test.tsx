@@ -45,6 +45,10 @@ let selectedCategory: SettingsCategory = "appearance";
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: [] }, isLoading: false, error: null }),
 	useUpdateConfigMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	// Settings > Files lists and edits the engine's allowed folders.
+	useFileRootsQuery: () => ({ data: [], isLoading: false, isError: false }),
+	useCreateFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // The panels are rendered for real - the statement under test is in their

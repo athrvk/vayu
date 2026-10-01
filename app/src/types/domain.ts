@@ -2929,7 +2929,8 @@ export type ClientSettingsCategory =
 	| "notifications"
 	| "general"
 	| "shortcuts"
-	| "mcp";
+	| "mcp"
+	| "files";
 
 /**
  * Engine settings categories (data-driven from the engine `/config` API).

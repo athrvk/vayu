@@ -173,6 +173,23 @@ apiService.clearCookies(scope?: { environmentId: string | null }): Promise<Clear
 The engine keeps one cookie jar per environment for design-mode requests
 (issue #301); `CookiesCard` in Settings → General shows and clears them.
 
+#### Allowed folders
+
+```typescript
+apiService.getFileRoots(): Promise<FileRoot[]>                 // GET /file-roots, a bare array
+apiService.createFileRoot({ path }): Promise<FileRoot>         // POST /file-roots -> 201 row
+apiService.deleteFileRoot(id: string): Promise<void>           // DELETE /file-roots/:id
+```
+
+The folders a request-body file may be sent from without a per-file pick -
+the second half of the trust rule under [Request bodies](#request-bodies).
+`POST` carries the path alone (the engine owns the id) and answers the row as
+stored: canonical, so it can differ from what was typed. A path that is not an
+existing directory is a `400`, one already allowed a `409`; `useAllowFolder`
+(`hooks/useAllowFolder.ts`) is the one caller that interprets them, for
+Settings > Files (`FilesPanel`), the binary body editor and the import
+preview, and it treats the `409` as success.
+
 #### Request examples
 
 ```typescript

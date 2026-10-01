@@ -1062,6 +1062,15 @@ export interface ClientCertificateInput {
 	passphrase?: string | null;
 }
 
+/**
+ * `POST /file-roots`'s body: an absolute path to an existing directory. The
+ * engine owns the id and stores the canonical path, so the row it answers is
+ * the one to show - not this input.
+ */
+export interface FileRootInput {
+	path: string;
+}
+
 // Transport diagnostics (issue #708)
 
 /**
