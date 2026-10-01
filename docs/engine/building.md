@@ -1306,6 +1306,22 @@ rule (one name per defect - a `cert-*` alias of an enabled check is off so
 nothing reports twice). Every enabled family is at zero tree-wide since #946's
 close-out, and the whole-file gates are what hold an edited file there.
 
+**Test files run the analyzer in `ipa: dynamic` mode**, set in
+`engine/tests/.clang-tidy`, because the default mode made each test file
+cost minutes. The default (`dynamic-bifurcate`) forks a path at every
+virtual call whose receiver type it cannot prove, and gtest's assertion
+macros put such a call in every `EXPECT`/`ASSERT`. On clang-tidy 19 that was
+most of the lint time:
+
+| File | Analyzer | Whole file, default | Whole file, `dynamic` |
+|------|----------|---------------------|-----------------------|
+| `import_parse_test.cpp` | 258 s to 26 s | 306 s | 75 s |
+| `script_engine_test.cpp` | 560 s to 42 s | 604 s | 78 s |
+
+Both the hook and CI read that file, so they stay in agreement.
+`engine/src` keeps the default: it has no such fan-out, and
+`run_manager.cpp` costs the same under either mode.
+
 **An empty `catch` says so in words** (#944). `bugprone-empty-catch` is enabled,
 and a comment does not satisfy it: the check reads only the keywords in its
 `IgnoreCatchWithKeywords` option, so that option carries `@deliberate` beside
