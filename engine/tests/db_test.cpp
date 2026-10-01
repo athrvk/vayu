@@ -2328,8 +2328,8 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseWithoutTheProtocolSettingColumnsGetsThe
 
 // Schema version 3 is the `file_roots` table (the folders request-body files
 // may be read from) and nothing to move: a version-2 database is stamped 3 and
-// gains the table, and its rows round-trip. Mutation check: drop the
-// `file_roots` `make_table` and the table is never created.
+// gains the table, and its rows round-trip. Mutation check: skip the stamp on
+// `migrate_before_sync`'s no-fold path and the version stays 2.
 TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedThreeAndGainsTheFileRootsTable) {
     {
         Database db (TEST_DB_PATH);

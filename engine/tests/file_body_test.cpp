@@ -314,8 +314,8 @@ TEST (FileRule, AFormPartIsNamedByItsKey) {
 }
 
 // A small file is read once by the plan and every later copy shares the bytes;
-// `fill` never touches the disk. Mutation check: have `fill_one` call
-// `check_locked` (re-reading) and the open count rises.
+// `fill` never touches the disk. Mutation check: drop the cache-hit return
+// from `FilePlan::check_locked` and the open count rises.
 TEST (FileRule, ThePlanReadsAFileOnceAndFillsEveryCopy) {
     ScratchDir scratch;
     const std::string payload = binary_payload (1000);
@@ -457,9 +457,8 @@ TEST_F (BinaryBodyWireTest, ContentTypeFollowsHeaderThenFileThenExtensionThenOct
     EXPECT_EQ (server_->content_type (), "application/octet-stream");
 }
 
-// A file over the inline limit streams through the read callback. Mutation
-// check: drop `CURLOPT_INFILESIZE_LARGE` and the upload goes out chunked (no
-// Content-Length); force the inline arm and the open count stays at the plan's.
+// A file over the inline limit streams through the read callback, with its
+// planned size as the Content-Length and its verb restored over UPLOAD's PUT.
 TEST_F (BinaryBodyWireTest, ALargeFileStreamsAndKeepsItsMethod) {
     const std::string payload = binary_payload (LARGE);
     const std::string src     = scratch_.write ("big.bin", payload);
