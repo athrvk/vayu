@@ -2686,8 +2686,10 @@ importer reads them back (see [`POST /import/parse`](#post-importparse)).
 AWS key and variable marked secret, at every level either key writes, is
 written as `""` and counted as `secretsOmitted` - except a value that is one
 `{{variable}}` reference and nothing else, which names where the secret lives
-without being one. A form's file part keeps its name and declared file name,
-never the local path it was read from.
+without being one. A form's file part, and a binary body's `file`, keep their
+name, declared file name and content type, never the local path they were read
+from (`src`) nor `unresolved`. A path a hand-edited `x-vayu-request` does carry
+is read back marked `unresolved`.
 
 **`x-vayu-elements`** carries a request's or the collection's whole `elements`
 array verbatim, the same vendor-extension convention `x-vayu-enabled` already
@@ -3167,7 +3169,17 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `vayu_extension_invalid`. Not every kind is a
 loss: `default_response` and `url_without_raw` count a mapping
 the import made rather than something it dropped (see
-`docs/app/import-collections/postman.md`). An import that loses something and
+`docs/app/import-collections/postman.md`), and so does `file_body`: a
+whole-file body (Postman `file`, Insomnia binary, an OpenAPI
+`application/octet-stream` or `format: binary` body) imports as a `binary` body
+naming the file, and the count, with its `requests`, says which bodies have a
+file to relink or choose. **Every file reference an import writes** - a binary
+body's `file`, a form-data file part - carries the path the document named, and
+`"unresolved": true` whenever that path is non-empty: the engine sends it only
+once the file is chosen again in the editor or lies under an allowed folder.
+A reference with no path (`"src": ""`) imports as no file chosen and claims
+nothing, so it is not marked; form parts in that state are counted in
+`meta.unattachedFileParts`. An import that loses something and
 says nothing is the defect this list exists to prevent, so a format with
 nothing to report answers `[]` rather than omitting the field. **A JMeter
 import's `kind` is not limited to this list** (issue #1518): a `.jmx` class

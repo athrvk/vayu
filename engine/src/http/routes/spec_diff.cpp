@@ -259,6 +259,12 @@ nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft)
     nlohmann::json body{ { "mode", draft.body.mode } };
     if (draft.body.mode == "form-data" || draft.body.mode == "x-www-form-urlencoded") {
         body["fields"] = rows_json (draft.body.fields);
+    } else if (draft.body.mode == "binary") {
+        // The import's shape: the upload with no file chosen yet.
+        body["file"] = nlohmann::json{ { "src", "" } };
+        if (!draft.body.content_type.empty ()) {
+            body["file"]["contentType"] = draft.body.content_type;
+        }
     } else if (draft.body.mode != "none") {
         body["content"] = draft.body.content;
     }

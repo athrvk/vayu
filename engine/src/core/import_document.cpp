@@ -122,6 +122,21 @@ const std::string* content_type) {
     return entry;
 }
 
+nlohmann::ordered_json
+imported_body_file (const std::string& src, const std::string* content_type) {
+    nlohmann::ordered_json file{ { "src", src } };
+    if (const std::string base = file_base_name (src); !base.empty ()) {
+        file["fileName"] = base;
+    }
+    if (content_type != nullptr && !content_type->empty ()) {
+        file["contentType"] = *content_type;
+    }
+    if (!src.empty ()) {
+        file["unresolved"] = true;
+    }
+    return nlohmann::ordered_json{ { "mode", "binary" }, { "file", std::move (file) } };
+}
+
 namespace {
 
 using json = nlohmann::ordered_json;
@@ -890,10 +905,11 @@ std::string to_method (const json* declared, bool* unsupported = nullptr) {
 /// What a Postman parse accumulates across its recursive walk.
 struct PostmanCounts {
     ImportOptions options;
-    int requests                   = 0;
-    int folders                    = 0;
-    int non_executable             = 0;
-    int skipped_file_body          = 0;
+    int requests       = 0;
+    int folders        = 0;
+    int non_executable = 0;
+    // Whole-file bodies, imported as `binary` references the user relinks.
+    int file_bodies                = 0;
     int skipped_malformed          = 0;
     int skipped_unsupported_method = 0;
     int skipped_unsupported_auth   = 0;
@@ -966,8 +982,9 @@ std::string graphql_content (const json* graphql) {
  * A file row names its path in `src`, which is **either a string or an array** -
  * Postman lets one field carry several files, and a multipart body repeats the
  * field name rather than nesting, which is what Postman itself sends. A file
- * row with no usable `src` has nothing to point at, so it is counted as skipped
- * rather than imported as a part that could never be sent.
+ * row with no usable `src` imports as a part with no file chosen, the shape an
+ * OpenAPI upload takes (#425): the field is the user's, and only the file is
+ * missing.
  */
 /** The file paths a `file` row points at, in either shape Postman writes them. */
 std::vector<std::string> file_part_paths (const json* src) {
@@ -1004,10 +1021,12 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
             }
             continue;
         }
-        const std::vector<std::string> paths = file_part_paths (prop (&row, "src"));
-        if (mapped.empty () || paths.empty ()) {
-            counts.skipped_file_body += 1;
+        if (mapped.empty ()) {
             continue;
+        }
+        std::vector<std::string> paths = file_part_paths (prop (&row, "src"));
+        if (paths.empty ()) {
+            paths.emplace_back ();
         }
         const std::string* content_type = as_str (prop (&row, "contentType"));
         for (const std::string& path : paths) {
@@ -1051,7 +1070,12 @@ json pm_body (const json* body, PostmanCounts& counts) {
             { "content", graphql_content (as_record (prop (node, "graphql"))) } };
     }
     if (named == "file") {
-        counts.skipped_file_body += 1;
+        // Postman's binary body: one file, `file.src`, which Postman writes as
+        // `null` (or leaves out) until a file is chosen. Its own exports carry
+        // no content type for it - the request's headers do.
+        counts.file_bodies += 1;
+        const std::string* src = as_str (prop (prop (node, "file"), "src"));
+        return imported_body_file (src == nullptr ? std::string () : *src, nullptr);
     }
     return json{ { "mode", "none" } };
 }
@@ -1633,7 +1657,7 @@ void pm_certificate (const json* cert, const std::string& url, PostmanCounts& co
 /// The counters `pm_request` can grow for one request, by tally kind.
 constexpr auto PM_REQUEST_COUNTERS =
 std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
-{ "file_body", &PostmanCounts::skipped_file_body },
+{ "file_body", &PostmanCounts::file_bodies },
 { "unsupported_method", &PostmanCounts::skipped_unsupported_method },
 { "unsupported_auth", &PostmanCounts::skipped_unsupported_auth },
 { "oauth2_dropped_field", &PostmanCounts::oauth2_dropped_field },
@@ -1826,7 +1850,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
 
     ImportTally tally;
-    tally.add ("file_body", counts.skipped_file_body);
+    tally.add ("file_body", counts.file_bodies);
     tally.add ("malformed_item", counts.skipped_malformed);
     tally.add ("unsupported_method", counts.skipped_unsupported_method);
     tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
@@ -1927,9 +1951,8 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
 // `insomnia-v4.ts`
 // ---------------------------------------------------------------------------
 
-/// What an Insomnia parse accumulates. `file_body` is the one loss it counts
-/// from inside a body: a binary body and a file part with no path are the two
-/// things Vayu genuinely cannot store.
+/// What an Insomnia parse accumulates. `file_body` counts binary bodies, which
+/// import as file references the user relinks rather than being dropped.
 struct InsomniaCounts {
     ImportOptions options;
     int non_executable = 0;
@@ -2078,11 +2101,10 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
 /**
  * Insomnia's multipart params, files included. A file param keeps its path in
  * `fileName` - the field is the *path* on the exporting machine, not a declared
- * part name - and its `value` is empty. One with no path names no file, so it
- * is counted as skipped rather than imported as a part that could never be
- * sent.
+ * part name - and its `value` is empty. One with no path imports as a part with
+ * no file chosen, as Postman's does.
  */
-json multipart_fields (const json* rows, InsomniaCounts& counts) {
+json multipart_fields (const json* rows) {
     json out = json::array ();
     if (rows == nullptr) {
         return out;
@@ -2097,12 +2119,12 @@ json multipart_fields (const json* rows, InsomniaCounts& counts) {
             }
             continue;
         }
-        const std::string* path = as_str (prop (&row, "fileName"));
-        if (mapped.empty () || path == nullptr || path->empty ()) {
-            counts.file_body += 1;
+        if (mapped.empty ()) {
             continue;
         }
-        out.push_back (imported_file_part (mapped[0], *path, nullptr));
+        const std::string* path = as_str (prop (&row, "fileName"));
+        out.push_back (imported_file_part (
+        mapped[0], path == nullptr ? std::string () : *path, nullptr));
     }
     return out;
 }
@@ -2136,10 +2158,10 @@ std::string to_graphql_envelope (const std::string& body) {
  * Any mime outside the seven Insomnia body modes. Its YAML/CSV/"Other" bodies
  * are plain text in `body.text`, so they import as `text` rather than being
  * dropped (the Postman parser's raw fallback does the same). A binary body
- * carries a `fileName` and no text - that one Vayu genuinely cannot store, so
- * it is dropped and counted instead of vanishing.
+ * carries a `fileName` - the path on the exporting machine - and no text, and
+ * imports as a `binary` body sending that file, under the declared @p mime.
  */
-json unlisted_body (const json* body, InsomniaCounts& counts) {
+json unlisted_body (const json* body, const std::string& mime, InsomniaCounts& counts) {
     if (const std::string* text = as_str (prop (body, "text"));
     text != nullptr && !text->empty ()) {
         return json{ { "mode", "text" }, { "content", normalize_vars (*text) } };
@@ -2147,6 +2169,7 @@ json unlisted_body (const json* body, InsomniaCounts& counts) {
     if (const std::string* name = as_str (prop (body, "fileName"));
     name != nullptr && !name->empty ()) {
         counts.file_body += 1;
+        return imported_body_file (*name, &mime);
     }
     return json{ { "mode", "none" } };
 }
@@ -2200,9 +2223,9 @@ json insomnia_body (const json* body, InsomniaCounts& counts) {
     }
     if (mime == "multipart/form-data") {
         const json* rows = rows_or_throw (prop (node, "params"), "`body.params`");
-        return json{ { "mode", "form-data" }, { "fields", multipart_fields (rows, counts) } };
+        return json{ { "mode", "form-data" }, { "fields", multipart_fields (rows) } };
     }
-    return unlisted_body (node, counts);
+    return unlisted_body (node, mime, counts);
 }
 
 /**
@@ -2940,6 +2963,9 @@ json draft_body (const DraftBody& body) {
         }
         return json{ { "mode", body.mode }, { "fields", std::move (fields) } };
     }
+    if (body.mode == "binary") {
+        return imported_body_file ("", &body.content_type);
+    }
     return json{ { "mode", body.mode }, { "content", body.content } };
 }
 
@@ -3165,8 +3191,9 @@ json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally&
 
 namespace ext = vayu::core::vayu_ext;
 
-/// A form body's file parts as an import writes one: named, no file attached
-/// yet - the export never carries the path it was read from.
+/// A form body's file parts as an import writes one: named, and with no file
+/// attached yet - the export never carries the path it was read from. A path a
+/// hand-edited document carries is kept, unresolved (`imported_file_part`).
 json with_unattached_files (json body) {
     const auto fields = body.find ("fields");
     if (fields == body.end () || !fields->is_array ()) {
@@ -3174,13 +3201,9 @@ json with_unattached_files (json body) {
     }
     for (json& field : *fields) {
         if (field.value ("type", "") == "file") {
-            // `imported_file_part` spells "no file" as `src: ""`; a part the
-            // export wrote had no `src` at all, which says the same thing.
-            const bool had_src = field.contains ("src");
-            field              = imported_file_part (field, "", nullptr);
-            if (!had_src) {
-                field.erase ("src");
-            }
+            // A file part carries no text value; `ext::body_of` has already
+            // marked a carried path unresolved.
+            field["value"] = "";
         }
     }
     return body;

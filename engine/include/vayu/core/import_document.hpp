@@ -62,15 +62,26 @@ namespace vayu::core {
  *
  * @p src is kept exactly as the source wrote it and a row that has one is
  * marked **unresolved**, because it names a file on the exporting machine, not
- * one Vayu can read. Shared by every importer that has to turn a
- * source-machine file reference into a formdata part - Postman/Insomnia
- * (`import_document.cpp`) and a JMeter `HTTPsampler.Files` upload
- * (`jmeter_import.cpp`, issue #1657) - so the row shape cannot drift between
- * them.
+ * one Vayu can read: the engine sends it only once the user picks it again or
+ * it lies under an allowed folder (`FileRef::unresolved`). Shared by every
+ * importer that has to turn a source-machine file reference into a formdata
+ * part - Postman/Insomnia (`import_document.cpp`) and a JMeter
+ * `HTTPsampler.Files` upload (`jmeter_import.cpp`, issue #1657) - so the row
+ * shape cannot drift between them.
  */
 [[nodiscard]] nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
 const std::string& src,
 const std::string* content_type);
+
+/**
+ * A `binary` body that sends the file at @p src, under the same rule as
+ * `imported_file_part`: the path kept as written, its base name as `fileName`,
+ * **unresolved** whenever there is a path. @p src may be empty - a document
+ * that declares a file upload without naming the file - and the body then
+ * imports as "no file chosen" rather than being dropped.
+ */
+[[nodiscard]] nlohmann::ordered_json
+imported_body_file (const std::string& src, const std::string* content_type);
 
 /**
  * A Postman raw body as the Vayu body the importer stores: `{mode, content}`,

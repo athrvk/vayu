@@ -869,6 +869,13 @@
                       "unresolved": true
                     },
                     {
+                      "key": "orphan",
+                      "value": "",
+                      "enabled": true,
+                      "type": "file",
+                      "src": ""
+                    },
+                    {
                       "key": "note",
                       "value": "hi",
                       "enabled": true
@@ -910,16 +917,12 @@
           "exampleCount": 1,
           "skipped": [
             {
-              "kind": "file_body",
-              "count": 1
-            },
-            {
               "kind": "malformed_item",
               "count": 1
             }
           ],
           "nonExecutableAuth": 1,
-          "unattachedFileParts": 0
+          "unattachedFileParts": 1
         },
         "clientCertificates": []
       },
@@ -1034,6 +1037,13 @@
                   "src": "/tmp/b.png",
                   "fileName": "b.png",
                   "unresolved": true
+                },
+                {
+                  "key": "orphan",
+                  "value": "",
+                  "enabled": true,
+                  "type": "file",
+                  "src": ""
                 },
                 {
                   "key": "note",
@@ -1780,6 +1790,13 @@
                           "unresolved": true
                         },
                         {
+                          "key": "empty",
+                          "value": "",
+                          "enabled": true,
+                          "type": "file",
+                          "src": ""
+                        },
+                        {
                           "key": "note",
                           "value": "hi",
                           "enabled": true
@@ -1855,14 +1872,10 @@
             {
               "kind": "grpc",
               "count": 1
-            },
-            {
-              "kind": "file_body",
-              "count": 1
             }
           ],
           "nonExecutableAuth": 1,
-          "unattachedFileParts": 0
+          "unattachedFileParts": 1
         }
       },
       "payload": {
@@ -1960,6 +1973,13 @@
                   "src": "/tmp/a.png",
                   "fileName": "a.png",
                   "unresolved": true
+                },
+                {
+                  "key": "empty",
+                  "value": "",
+                  "enabled": true,
+                  "type": "file",
+                  "src": ""
                 },
                 {
                   "key": "note",
