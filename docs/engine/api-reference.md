@@ -287,6 +287,7 @@ so a body that round-trips through storage sends the same bytes.
 | `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
+| `binary` | `file` (a file reference) | the file's bytes, verbatim (see [File references](#file-references-binary-bodies-and-file-parts)) |
 
 `fields` is an array of `{key: string, value: string, enabled?: bool}` - the
 same row shape `params` and `headers` use. `key` is required and must be a
@@ -294,8 +295,8 @@ string; `value` defaults to `""` and a non-boolean `enabled` reads as enabled.
 A form mode carrying no `fields` array is a `400`, as is a `fields` on a mode
 whose content is a string. Rows with `enabled: false` are stored and returned
 but never sent, so switching one back on needs no re-compose; `{{variables}}`
-resolve inside `key`, `value`, and a file part's `src` / `fileName` /
-`contentType` during composition.
+resolve inside `key`, `value`, and a file reference's `src` / `fileName` /
+`contentType` (a file part's, or a binary body's `file`) during composition.
 
 Five Content-Type rules follow from the encoding:
 
@@ -322,7 +323,17 @@ Five Content-Type rules follow from the encoding:
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
 
-`text` and `binary` derive nothing, and that is a decision rather than a gap:
+- `binary` derives its Content-Type from the file, in four tiers, an empty
+  string counting as absent at each: an enabled `Content-Type` header row, then
+  `file.contentType`, then the type the file's extension names (one engine
+  table of common types), then `application/octet-stream`. A binary body never
+  goes out as libcurl's `x-www-form-urlencoded` default. `POST /compose` writes
+  the effective type into an empty `file.contentType` (unless a non-blank
+  `Content-Type` header row is present, which wins at send anyway), so the
+  composed payload - and a snippet generated from it - names the type the send
+  uses.
+
+`text` derives nothing, and that is a decision rather than a gap:
 `text/plain`, `text/csv`, a JWT and a raw signature are all `text`, so there is
 no single right answer and the header stays the author's.
 
@@ -411,10 +422,28 @@ the *resolved* text; a body still holding a token at wire time does not parse,
 so it is passed through as typed rather than completed into a well-formed
 request carrying an unresolved template.
 
-#### File parts (`form-data` only)
+<a id="file-parts-form-data-only"></a>
 
-A `form-data` row with `"type": "file"` uploads a file from the machine running
-the engine. It carries a path rather than bytes:
+#### File references: `binary` bodies and file parts
+
+Two body shapes name a file on the machine running the engine. They carry a
+path, never bytes, and answer to one rule.
+
+A **`binary`** body is one whole file:
+
+```json
+{
+  "mode": "binary",
+  "file": {
+    "src": "/home/ada/fixtures/avatar.png",
+    "fileName": "avatar.png",
+    "contentType": "image/png",
+    "unresolved": true
+  }
+}
+```
+
+A **`form-data` file part** is a row with `"type": "file"`:
 
 ```json
 {
@@ -435,31 +464,79 @@ the engine. It carries a path rather than bytes:
 
 | Member | Meaning |
 |---|---|
-| `type` | `"text"` (default) or `"file"`. Any other value is a `400`. |
-| `src` | Path the engine opens at transfer time. Required for a file part. |
-| `fileName` | Name the part declares. Defaults to the basename of `src`. |
-| `contentType` | Per-part Content-Type. Defaults to libcurl's guess. |
+| `type` | Form rows only: `"text"` (default) or `"file"`. Any other value is a `400`. |
+| `src` | Absolute path of the file. Required. |
+| `fileName` | The name the file goes by. Defaults to the basename of `src`. |
+| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
+| `unresolved` | `true` when no person chose `src` in the editor. Optional, default `false`. |
 
-Rules, all of them refusals rather than silent omissions:
+Shape refusals (`400`):
 
-- A file part in an `x-www-form-urlencoded` body is a `400` - that media type's
-  wire form is a string of pairs and has no file form.
-- A `src` on a part that is not `"type": "file"` is a `400`: it names a file
-  nothing would send.
-- An **enabled** file part whose `src` is empty, or whose file this process
-  cannot read, fails the request before it is sent - `statusCode: 0`,
-  `errorCode: INTERNAL_ERROR`, and a message naming the field and the path.
-  Identical on `POST /execute` and `POST /runs`. A **disabled** file part is
-  neither sent nor opened.
-- In a load run the file is read from disk on **every iteration** (libcurl
-  streams it during the transfer), and the readability check above costs one
-  open per request. A body with no file part pays neither.
+- `mode: "binary"` without a `file` object, or a `file` object on any other
+  mode. An engine older than this shape sent a binary body bodiless, which is
+  why the workspace schema moved to version 3 with it.
+- A file part in an `x-www-form-urlencoded` body - that media type's wire form
+  is a string of pairs and has no file form.
+- A `src` on a part that is not `"type": "file"`: it names a file nothing would
+  send.
 
-MCP has no file-part surface: `run_request` / `create_request` /
-`update_request` describe a body as a string, and a path on the user's machine
-is not something an agent can choose for them - see
-[MCP](mcp.md). The renderer authors file parts in the form-data editor, and the
-Postman and Insomnia importers map them to file rows.
+**The trust rule.** Vayu sends a file you chose in the editor, or any file under
+a folder you allowed in Settings ([Allowed folders](#allowed-folders-file-roots)).
+A reference is sendable when `!unresolved || allowed(canonical(src))`:
+containment is decided on canonical paths, component by component, so a
+symlink inside an allowed folder that points outside it is outside, and
+`/data/fixtures-old` is not under `/data/fixtures`. Every writer that is not a
+person in the editor writes `unresolved: true` - importers, curl paste, MCP -
+and **composition sets it too** whenever `src` held a `{{` before resolution
+(`POST /compose`, and a data row bound into the path by a run), so a path a
+variable or a data set chose is sent only from under an allowed folder. The
+flag rides the wire, which is how it survives compose -> app -> execute.
+**Scripts can never choose a path**: the residual pass after the pre-request
+script resolves a reference's `fileName` and `contentType` but never `src`.
+
+Every enabled reference is checked, in this order, and the first failure
+refuses the send:
+
+1. `src` is empty: `"Body file has no file selected - ..."` (a part:
+   `"Form field 'avatar' has no file selected - ..."`).
+2. `src` still holds `{{`: an unresolved variable.
+3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
+4. Untrusted: `"Body file '<path>' was not chosen in the editor and is not
+   under an allowed folder - pick it again in the request, or allow its folder
+   in Settings > Files"`.
+5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
+6. It cannot be opened: refused, naming the path and the reason.
+
+On `POST /execute` a refusal is the pre-send gate's shape: `200` with
+`statusCode: 0`, `errorCode: INTERNAL_ERROR` and the message above in
+`errorMessage`. A streaming execute (`stream: true`) answers `400` with code
+`unsendable_file`. `POST /runs` checks every file the run can send before the
+run row exists and answers `400` with code `unsendable_file`; for a path a data
+row binds, each distinct bound path is checked and the message starts with
+`data row N:` (a scenario's with `Step N ('name'):` too). A path that changes
+per iteration in a way no row explains (an identity or generator token) cannot
+be checked ahead and is refused per submission.
+
+**Sending.** The check runs **once per send** and **once per run**, never per
+transfer. A file of at most 4 MiB is read in that pass and its bytes are shared
+by every transfer of the run; a larger one is hashed in that pass and streamed
+from disk per transfer (`Content-Length` from the planned size; a redirect
+rewinds it). A file that vanishes mid-run fails that transfer with libcurl's own
+read error. A form part's bytes are always read by libcurl during the transfer.
+A **disabled** file part is neither checked nor sent.
+
+**What a record keeps.** A view of a request never carries a file's bytes: the
+raw-request view shows `<file avatar.png, 1234 bytes>` in their place. A binary
+body's send records `bodyFile: {fileName, size, sha256}` (`sha256` lowercase
+hex; `size` and `sha256` absent when the send was refused before the file was
+read) - never the path:
+
+| Where | JSON path |
+|---|---|
+| `POST /execute` response | `bodyFile` (top level) |
+| A design send's or a collection run step's stored trace (`GET /runs/:id`, `result.trace`; `GET /runs/:id/results`) | `trace.request.bodyFile` |
+| A single-request load run | `config_snapshot.bodyFile`, echoed by `GET /runs/:id/report` as `metadata.bodyFile` |
+| A scenario run's steps | `config_snapshot.scenario.steps[i].bodyFile` (absent for a step whose path a data row binds) |
 
 The older mode spellings `form` (for `x-www-form-urlencoded`) and `formdata`
 (for `form-data`) are still accepted on input; responses always use the long
@@ -3979,6 +4056,37 @@ row would be a bundle naming a key file.
 Remove an entry; `404` if it does not exist. The certificate and key files
 themselves are never touched - the registry only ever held the way to find
 them.
+
+## Allowed folders (file roots)
+
+The folders a request-body file may be read from without a person having chosen
+it in the editor - the second half of the [trust rule](#file-references-binary-bodies-and-file-parts).
+Stored in `file_roots` (schema version 3); read once per design send and once
+per run, so a change applies to the next send.
+
+### GET /file-roots
+
+Every allowed folder, ordered by path, as a bare array:
+
+```json
+[{ "id": "froot_...", "path": "/home/ada/fixtures", "createdAt": 1764000000000 }]
+```
+
+### POST /file-roots
+
+Allows a folder. Body: `{ "path": "/abs/dir" }`. Create only; the engine owns
+the id, so a body `id` is a `400`.
+
+- `201` with the row. `path` is stored canonical (symlinks resolved, `.` and
+  `..` folded, no trailing separator).
+- `400` when `path` is missing, not a string, not absolute, or not an existing
+  directory.
+- `409` when the canonical path is already allowed, naming the existing row's id.
+
+### DELETE /file-roots/:id
+
+Stops allowing a folder; the folder and its files are untouched.
+`{"success": true}`, or `404` when no such row exists.
 
 ## Transport diagnostics
 

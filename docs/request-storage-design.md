@@ -95,6 +95,21 @@ to `mode: "none"` when the content is an empty (falsy) string, which used to
 collapse a cleared JSON/text/XML/GraphQL/JSON-RPC body to `none` on save (issue
 #1490) while the mode selector kept showing the old mode until the next reload.
 
+#### A file body stores a path, never bytes
+
+A `binary` body is stored as `{ "mode": "binary", "file": { "src", "fileName"?,
+"contentType"?, "unresolved"? } }`, and a `form-data` file part carries the same
+members on its row. `src` is the absolute path as written; the file itself is
+never stored, so a request moves between machines as a name plus a path to
+relink. `unresolved: true` is stored for a path no person chose in the editor
+(an import, a curl paste, an MCP agent); such a path is sent only from under an
+allowed folder (`file_roots`, Settings > Files), and choosing or typing the path
+in the editor writes `unresolved: false`. Composition marks a path a
+`{{variable}}` filled as `unresolved` too, on the payload rather than the row.
+A send's history record keeps `request.bodyFile {fileName, size, sha256}` for a
+binary body - never the bytes or the path; see
+[the engine API reference](engine/api-reference.md#file-references-binary-bodies-and-file-parts).
+
 ### 2. Request Execution
 
 **Process**:
