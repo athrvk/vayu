@@ -847,7 +847,8 @@ TEST (SkeletonExport, FilesTheBodyUnderTheMediaTypeItsContentTypeRowNames) {
 /**
  * A binary body is one file's bytes: a `format: binary` string with no example,
  * under the media type the request sends - an enabled Content-Type row, else the
- * file's own content type, else `application/octet-stream`. The path is one
+ * file's own content type, else what its extension implies, else
+ * `application/octet-stream`. The path is one
  * machine's and never leaves it; `x-vayu-request.body` keeps the file's name and
  * type, without `src` or `unresolved`.
  */
@@ -865,8 +866,10 @@ TEST (SkeletonExport, DescribesABinaryBodyAsOneFilesBytesUnderItsMediaType) {
     ExportRequest headed = binary ("/headed",
     R"({"mode":"binary","file":{"src":"/home/me/a.bin","contentType":"image/png"}})");
     headed.headers       = { row ("Content-Type", "application/pdf") };
+    ExportRequest inferred =
+    binary ("/inferred", R"({"mode":"binary","file":{"src":"/home/me/report.pdf"}})");
 
-    const Exported exported = export_json ({ typed, plain, headed });
+    const Exported exported = export_json ({ typed, plain, headed, inferred });
     const json file_schema = json::parse (R"({"type":"string","format":"binary"})");
     EXPECT_EQ (operation_of (exported.document, "/typed", "put")["requestBody"],
     (json{ { "content", { { "image/png", { { "schema", file_schema } } } } } }));
@@ -875,6 +878,9 @@ TEST (SkeletonExport, DescribesABinaryBodyAsOneFilesBytesUnderItsMediaType) {
     EXPECT_TRUE (
     operation_of (exported.document, "/headed", "put")["requestBody"]["content"].contains (
     "application/pdf"));
+    EXPECT_EQ (
+    operation_of (exported.document, "/inferred", "put")["requestBody"],
+    (json{ { "content", { { "application/pdf", { { "schema", file_schema } } } } } }));
 
     // Compared as values: the extension's keys are written in sorted order.
     const json& carried =

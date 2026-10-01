@@ -20,6 +20,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/operation_match.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
@@ -1331,13 +1332,31 @@ std::string file_media_type (const ExportRequest& entry) {
     return vayu::utils::ascii_lower (type);
 }
 
+/// The media type a binary body's file name implies, by the same extension
+/// table the send uses, or `""` for an unknown extension or no file.
+std::string file_extension_media_type (const ExportRequest& entry) {
+    const auto file = entry.stored_body.find ("file");
+    if (file == entry.stored_body.end () || !file->is_object ()) {
+        return {};
+    }
+    const auto src = file->find ("src");
+    if (src == file->end () || !src->is_string ()) {
+        return {};
+    }
+    return std::string{ vayu::http::media_type_for_extension (
+    src->get_ref<const std::string&> ()) };
+}
+
 /**
- * A binary body, under the media type it is sent with as far as the request
- * itself says: an enabled `Content-Type` row, else the file's own
- * `contentType`, else `application/octet-stream`.
+ * A binary body, under the media type it is sent with: an enabled
+ * `Content-Type` row, else the file's own `contentType`, else what its
+ * extension implies, else `application/octet-stream` - the send's own order.
  */
 BodyExample binary_example_of (const ExportRequest& entry) {
-    const std::string stated = file_media_type (entry);
+    std::string stated = file_media_type (entry);
+    if (stated.empty ()) {
+        stated = file_extension_media_type (entry);
+    }
     BodyExample body{ body_media_type (entry,
                       stated.empty () ? "application/octet-stream" : stated),
         Json (), std::nullopt };
