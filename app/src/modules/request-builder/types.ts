@@ -24,6 +24,7 @@ import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
+	FileRef,
 	ExampleSentRequest,
 	DataContractScope,
 	ElementDef,
@@ -165,6 +166,14 @@ export interface RequestState {
 	body: string; // Raw body content for json/text/graphql modes
 	formData: KeyValueItem[]; // Fields for form-data mode
 	urlEncoded: KeyValueItem[]; // Fields for x-www-form-urlencoded mode
+	/**
+	 * The file a `binary` body sends - a path, never bytes; the engine opens
+	 * it at send time. Kept beside the other modes' state like `formData`, so a
+	 * mode switch and back does not lose the pick. `unresolved` is the trust
+	 * flag (`FileRef`): the editor clears it on a pick or a typed path, and
+	 * every other writer (import, curl paste, an agent) sets it.
+	 */
+	binaryFile: FileRef;
 
 	// Auth
 	auth: RequestAuth;

@@ -80,6 +80,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"body",
 	"formData",
 	"urlEncoded",
+	"binaryFile",
 	"auth",
 	"elements",
 	"followRedirects",

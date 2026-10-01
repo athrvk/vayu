@@ -22,6 +22,7 @@ import {
 	execIdentity,
 	protocolSettings,
 	responseFromExecuteResult,
+	toBodyPayload,
 } from "./execute-mapping";
 // The threshold itself, not a second spelling of it: the mapping and the pane
 // share one number and a test that pinned its own would keep passing after a
@@ -199,7 +200,7 @@ describe("buildExecBody form modes", () => {
 		expect(body).not.toHaveProperty("content");
 	});
 
-	it("sends a file part as its path, never as a value", () => {
+	it("sends a file part as its path, never as a value, with its trust flag", () => {
 		const request = stateWith({
 			bodyMode: "form-data",
 			formData: [
@@ -213,9 +214,9 @@ describe("buildExecBody form modes", () => {
 					src: "/tmp/a.png",
 					fileName: "profile.png",
 					contentType: "image/png",
-					// An editor annotation about where the path came from - the
-					// engine's answer to a path it cannot open is the same either
-					// way, so it must not ride along on the payload.
+					// The engine's trust input: a path nobody chose in the editor
+					// is sent only from an allowed folder, so dropping the flag
+					// here would wave an imported path through.
 					unresolved: true,
 				},
 			],
@@ -233,6 +234,7 @@ describe("buildExecBody form modes", () => {
 				src: "/tmp/a.png",
 				fileName: "profile.png",
 				contentType: "image/png",
+				unresolved: true,
 			},
 		]);
 	});
@@ -284,6 +286,66 @@ describe("buildExecBody form modes", () => {
 		);
 
 		expect(body?.fields).toEqual([{ key: "key", value: "val", enabled: true }]);
+	});
+});
+
+/**
+ * A `binary` body is a file reference, never bytes - and its `unresolved` flag
+ * is what the engine's trust rule reads, so it has to reach both the stored
+ * shape (`toBodyPayload`, the save) and the sent one (`buildExecBody`).
+ */
+describe("binary bodies", () => {
+	function binaryState(file: RequestState["binaryFile"]): RequestState {
+		return { ...createDefaultRequestState(), bodyMode: "binary", binaryFile: file };
+	}
+
+	it("sends the file reference, unresolved flag included", () => {
+		const request = binaryState({
+			src: "/fixtures/a.bin",
+			fileName: "a.bin",
+			contentType: "image/png",
+			unresolved: true,
+		});
+
+		expect(buildExecBody(request, (s) => s)).toEqual({
+			mode: "binary",
+			file: {
+				src: "/fixtures/a.bin",
+				fileName: "a.bin",
+				contentType: "image/png",
+				unresolved: true,
+			},
+		});
+	});
+
+	it("stores the same reference the send carries", () => {
+		const request = binaryState({ src: "/fixtures/a.bin", unresolved: true });
+
+		expect(toBodyPayload(request)).toEqual({
+			mode: "binary",
+			file: { src: "/fixtures/a.bin", unresolved: true },
+		});
+	});
+
+	it("leaves empty members and a false flag off the wire", () => {
+		const request = binaryState({
+			src: "/fixtures/a.bin",
+			fileName: "",
+			contentType: "",
+			unresolved: false,
+		});
+
+		expect(buildExecBody(request, (s) => s)).toEqual({
+			mode: "binary",
+			file: { src: "/fixtures/a.bin" },
+		});
+	});
+
+	it("sends an empty path rather than no body, so the engine can say why", () => {
+		expect(buildExecBody(binaryState({ src: "" }), (s) => s)).toEqual({
+			mode: "binary",
+			file: { src: "" },
+		});
 	});
 });
 

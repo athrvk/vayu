@@ -55,6 +55,7 @@ export const createDefaultRequestState = (
 		body: "",
 		formData: [createEmptyKeyValue()],
 		urlEncoded: [createEmptyKeyValue()],
+		binaryFile: { src: "" },
 		auth: { mode: "none" },
 		elements: [],
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,

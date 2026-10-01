@@ -452,3 +452,76 @@ describe("seedFromRun", () => {
 		});
 	});
 });
+
+/**
+ * A `binary` run replays its file reference and reports what it sent. The
+ * reference comes from the snapshot (what was composed); the name/size/sha256
+ * record comes from the trace's request node, which is where the engine
+ * writes it at send time.
+ */
+describe("seedFromRun, binary bodies", () => {
+	function binaryRun(file: unknown, bodyFile?: unknown): Run {
+		const base = run();
+		return run({
+			configSnapshot: { ...base.configSnapshot, body: { mode: "binary", file } },
+			result: {
+				...base.result!,
+				trace: {
+					...base.result!.trace,
+					request: { ...base.result!.trace!.request, body: "", bodyFile },
+				},
+			},
+		} as Partial<Run>);
+	}
+
+	it("seeds the file reference, its trust flag included", () => {
+		const { request } = seedFromRun(
+			binaryRun({ src: "/data/a.bin", contentType: "image/png", unresolved: true }),
+			liveRequest
+		);
+
+		expect(request.bodyMode).toBe("binary");
+		expect(request.binaryFile).toEqual({
+			src: "/data/a.bin",
+			contentType: "image/png",
+			unresolved: true,
+		});
+	});
+
+	it("seeds an empty pick when the snapshot holds no file object", () => {
+		const { request } = seedFromRun(binaryRun("not-an-object"), liveRequest);
+
+		expect(request.binaryFile).toEqual({ src: "" });
+	});
+
+	it("reads what was sent off the trace's request node", () => {
+		const seed = seedFromRun(
+			binaryRun(
+				{ src: "/data/a.bin" },
+				{ fileName: "a.bin", size: 1234, sha256: "ab".repeat(32) }
+			),
+			liveRequest
+		);
+
+		expect(seed.requestBodyFile).toEqual({
+			fileName: "a.bin",
+			size: 1234,
+			sha256: "ab".repeat(32),
+		});
+	});
+
+	it("drops members of the wrong type, and a record with none left", () => {
+		const partial = seedFromRun(
+			binaryRun({ src: "/data/a.bin" }, { fileName: 7, size: "12", sha256: "ff" }),
+			liveRequest
+		);
+		expect(partial.requestBodyFile).toEqual({ sha256: "ff" });
+
+		const empty = seedFromRun(binaryRun({ src: "/data/a.bin" }, { fileName: 7 }), liveRequest);
+		expect(empty.requestBodyFile).toBeUndefined();
+	});
+
+	it("reports no file for a run with another body", () => {
+		expect(seedFromRun(run(), liveRequest).requestBodyFile).toBeUndefined();
+	});
+});
