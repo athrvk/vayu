@@ -88,6 +88,13 @@ export function generateCurl(
 		// name, which silently sends the wrong bytes for any payload that begins
 		// with one.
 		args.push(`--data-raw ${shellQuote(prepared.body.content)}`);
+	} else if (prepared.body?.kind === "binary") {
+		// `--data-binary @path` sends the file byte for byte; `-d @path` would
+		// strip its newlines. The `@` stays outside the quotes so the path is
+		// quoted like any other value. Content-Type is already among the headers
+		// above: `prepare.ts` always supplies one, because curl's own default for
+		// `--data-binary` is `application/x-www-form-urlencoded`.
+		args.push(`--data-binary @${shellQuote(prepared.body.path)}`);
 	} else if (prepared.body?.kind === "form-data") {
 		for (const [key, value] of prepared.body.fields) {
 			// `--form-string`, not `-F`: `-F` reads a value beginning with `@` or

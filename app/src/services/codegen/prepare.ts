@@ -38,6 +38,7 @@ export interface PreparedFilePart {
 
 export type PreparedBody =
 	| { kind: "raw"; content: string }
+	| { kind: "binary"; path: string }
 	| { kind: "form-data"; fields: Array<[string, string]>; files: PreparedFilePart[] }
 	| { kind: "urlencoded"; fields: Array<[string, string]> };
 
@@ -158,11 +159,29 @@ function withImpliedContentType(
 	headers: Array<[string, string]>,
 	body: unknown
 ): Array<[string, string]> {
-	const mode = typeof body === "object" && body !== null ? (body as SnippetBody).mode : "";
-	const implied = IMPLIED_CONTENT_TYPE[mode ?? ""];
+	const shape = typeof body === "object" && body !== null ? (body as SnippetBody) : undefined;
+	const implied =
+		shape?.mode === "binary"
+			? binaryContentType(shape)
+			: IMPLIED_CONTENT_TYPE[shape?.mode ?? ""];
 	if (!implied) return headers;
 	if (headers.some(([key]) => key.toLowerCase() === "content-type")) return headers;
 	return [...headers, ["Content-Type", implied]];
+}
+
+/**
+ * The Content-Type a `binary` body is snippeted under when no header declares
+ * one: the file's own declared type, else `application/octet-stream`. Always
+ * a value, never absent, because every client here has a worse default for a
+ * file body than "bytes" - curl's `--data-binary` sends
+ * `application/x-www-form-urlencoded`, and a server that believes it parses
+ * the file as form fields. The engine's extension table (a `.png` goes out as
+ * `image/png`) is not mirrored here; a snippet that wants that type names it
+ * on the file or as a header, and octet-stream is the honest fallback.
+ */
+function binaryContentType(body: SnippetBody): string {
+	const declared = body.file?.contentType?.trim();
+	return declared ? declared : "application/octet-stream";
 }
 
 function normalizeBody(body: unknown): PreparedBody | undefined {
@@ -174,6 +193,13 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 
 	const shape = body as SnippetBody;
 	if (shape.mode === "none") return undefined;
+
+	// A file body with no file chosen sends nothing (the engine refuses it), so
+	// there is no command to write for it.
+	if (shape.mode === "binary") {
+		const path = shape.file?.src ?? "";
+		return path ? { kind: "binary", path } : undefined;
+	}
 
 	if (shape.mode === "form-data" || shape.mode === "x-www-form-urlencoded") {
 		const enabled = (shape.fields ?? []).filter((f) => f.enabled !== false);
@@ -203,11 +229,12 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 
 /**
  * The body with every string a secret could sit in run through the masker - a
- * file part's path included, since a `{{token}}`-built path would otherwise
+ * file part's or a binary body's path included, since a `{{token}}`-built path would otherwise
  * print the secret the rest of the snippet hides.
  */
 function maskedBody(body: PreparedBody, mask: (text: string) => string): PreparedBody {
 	if (body.kind === "raw") return { kind: "raw", content: mask(body.content) };
+	if (body.kind === "binary") return { kind: "binary", path: mask(body.path) };
 	const fields = body.fields.map(([k, v]): [string, string] => [k, mask(v)]);
 	if (body.kind === "urlencoded") return { kind: "urlencoded", fields };
 	return {
