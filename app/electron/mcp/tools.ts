@@ -1098,9 +1098,7 @@ const FORM_BODY_MODES = new Set(["form-data", "x-www-form-urlencoded"]);
  * promise true.
  *
  * Every field produced here is a **text** part. A `form-data` file part
- * (issue #393) names a path on the user's machine, which an agent has no way to
- * choose on their behalf and no way to verify - so MCP states the limit in the
- * two `bodyType` descriptions rather than inventing a shape for it.
+ * (issue #393) has no spelling in a `key=value` string, and the tools say so.
  */
 function bodyPayload(bodyType: string, content: string): Record<string, unknown> {
 	if (!FORM_BODY_MODES.has(bodyType)) return { mode: bodyType, content };
@@ -1110,6 +1108,114 @@ function bodyPayload(bodyType: string, content: string): Record<string, unknown>
 		enabled: true,
 	}));
 	return { mode: bodyType, fields };
+}
+
+/**
+ * The `file` argument of a `binary` body, as the two write tools declare it.
+ * No `unresolved` member: what an agent says about it is never read (see
+ * `shapeBody`).
+ */
+const fileRefInput = z
+	.object({
+		src: z
+			.string()
+			.describe(
+				"Absolute path of the file on the user's machine (may contain {{variables}})."
+			),
+		contentType: z
+			.string()
+			.optional()
+			.describe(
+				"Content-Type to send it under, when no Content-Type header is set. Omitted, the engine derives one from the file extension, else application/octet-stream."
+			),
+		fileName: z.string().optional().describe("Display name of the file."),
+	})
+	.optional()
+	.describe(
+		'The file a `bodyType: "binary"` body sends, instead of `body`. Stored as a path the user has not chosen: the engine sends it only once they pick it again in the request editor, or when it lives under a folder they allowed in Settings > Files.'
+	);
+
+/**
+ * `file` on the tools that send an ad-hoc request. Declared only so that it
+ * reaches the handler and is refused there: the SDK strips an undeclared key,
+ * and a stripped `file` would send the request with no body at all.
+ */
+const inlineFileInput = z
+	.unknown()
+	.optional()
+	.describe(
+		"Not accepted here: a body that sends a file is refused on an ad-hoc request. Save it with create_request and run the saved request by id."
+	);
+
+/**
+ * Why a file body cannot be sent inline, and what to do instead. Shared by
+ * every tool that sends an ad-hoc request, so the advice cannot drift.
+ */
+export const INLINE_FILE_REFUSAL =
+	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. A file must be chosen in the editor or live under an allowed folder in Settings > Files before the engine sends it.';
+
+/**
+ * The body a write tool stores, from the `body` / `bodyType` / `file`
+ * arguments, or undefined when the caller named none of them.
+ *
+ * The one funnel every MCP-written body passes through, which is why the
+ * trust rule lives here: every file reference it emits - a binary body's
+ * `file`, or a form-data file part - is `unresolved: true`, whatever the
+ * arguments said. An agent names a path; only a person in the editor (or an
+ * allowed folder) makes the engine read it.
+ */
+function shapeBody(
+	args: Record<string, unknown>
+): { body: Record<string, unknown>; bodyType: string } | undefined {
+	const content = str(args, "body");
+	const file = args.file;
+	const named = str(args, "bodyType");
+	if (content === undefined && file === undefined && named === undefined) return undefined;
+	const bodyType = named ?? (file !== undefined ? "binary" : "text");
+	let body: Record<string, unknown>;
+	if (bodyType === "binary") {
+		if (content !== undefined) {
+			throw new ToolArgError(
+				'A "binary" body is the file named by "file" - pass "file" instead of "body".'
+			);
+		}
+		if (!isRecord(file) || typeof file.src !== "string" || file.src.trim() === "") {
+			throw new ToolArgError(
+				'bodyType "binary" needs "file": { "src": "<absolute path>" } - the file it sends.'
+			);
+		}
+		const ref: Record<string, unknown> = { src: file.src };
+		if (typeof file.fileName === "string" && file.fileName) ref.fileName = file.fileName;
+		if (typeof file.contentType === "string" && file.contentType) {
+			ref.contentType = file.contentType;
+		}
+		body = { mode: "binary", file: ref };
+	} else {
+		if (file !== undefined) {
+			throw new ToolArgError(
+				`"file" is the file a "binary" body sends - it does not apply to bodyType "${bodyType}".`
+			);
+		}
+		if (content === undefined) {
+			throw new ToolArgError(
+				'"bodyType" describes "body" - pass the body it applies to, or leave both out.'
+			);
+		}
+		body = bodyPayload(bodyType, content);
+	}
+	return { body: withUnresolvedFileRefs(body), bodyType };
+}
+
+/** The body with every file reference it carries marked `unresolved: true`. */
+function withUnresolvedFileRefs(body: Record<string, unknown>): Record<string, unknown> {
+	const out = { ...body };
+	if (isRecord(out.file)) out.file = { ...out.file, unresolved: true };
+	if (Array.isArray(out.fields)) {
+		out.fields = out.fields.map((field: unknown) =>
+			isRecord(field) && field.type === "file" ? { ...field, unresolved: true } : field
+		);
+	}
+	return out;
 }
 
 /**
@@ -1480,6 +1586,11 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
 			headers[key] = String(value);
 		}
 		out.headers = headers;
+	}
+	// Before anything is composed: an inline body is never a file, because
+	// nothing here can stand for the person who has to choose it.
+	if (str(args, "bodyType") === "binary" || args.file !== undefined) {
+		throw new ToolArgError(INLINE_FILE_REFUSAL);
 	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
@@ -4732,11 +4843,12 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Request headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
+			file: inlineFileInput,
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported. For graphql, a bare query document is enveloped as `{"query": ...}` and sent as application/json; an envelope you write yourself is sent unchanged. That is the POST transport: with `method` GET the same document is sent as `query`/`operationName`/`variables` query parameters and no body, which is what GraphQL-over-HTTP defines GET to mean - so use POST for a mutation, and note that a GET is what a request gets by default. For jsonrpc, a bare call object gains `"jsonrpc":"2.0"` - plus `"id":1` when it names no id - and is sent as application/json; a frame already declaring a string `"jsonrpc"` is sent byte for byte, so write the frame yourself to choose your own id or to send a notification (no id). A top-level array is a batch call and is sent unchanged. An xml `body` is sent byte for byte as application/xml; a Content-Type you set yourself wins.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A body that sends a file (`binary`, or a form-data file part) cannot be sent from here - save it with create_request and run the saved request by id (start_load_run with `requestId`, or run_collection). For graphql, a bare query document is enveloped as `{"query": ...}` and sent as application/json; an envelope you write yourself is sent unchanged. That is the POST transport: with `method` GET the same document is sent as `query`/`operationName`/`variables` query parameters and no body, which is what GraphQL-over-HTTP defines GET to mean - so use POST for a mutation, and note that a GET is what a request gets by default. For jsonrpc, a bare call object gains `"jsonrpc":"2.0"` - plus `"id":1` when it names no id - and is sent as application/json; a frame already declaring a string `"jsonrpc"` is sent byte for byte, so write the frame yourself to choose your own id or to send a notification (no id). A top-level array is a batch call and is sent unchanged. An xml `body` is sent byte for byte as application/xml; a Content-Type you set yourself wins.'
 				),
 			auth: authInput,
 			httpVersion: z
@@ -5757,7 +5869,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
+			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app\'s builder stores except form-data file parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -5774,11 +5886,12 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
+			file: fileRefInput,
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). The path is stored as one the user has not chosen - the engine sends it only once they pick it again in the request editor or it lives under a folder allowed in Settings > Files, because an agent cannot choose a file on their behalf. Form-data file parts are not supported here; author them in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			description: z.string().optional(),
 			auth: storedAuthInput(
@@ -5805,14 +5918,15 @@ export const TOOLS: McpTool[] = [
 			if (args.headers && typeof args.headers === "object") {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
-			const body = str(args, "body");
-			if (body !== undefined) {
-				const bodyType = str(args, "bodyType") ?? "text";
-				// The engine stores the body blob verbatim; the canonical shape keys
-				// off `mode` (not `type`), so a `type`-keyed body would not round-trip
-				// in the app. `bodyType` mirrors it into the denormalized column.
-				payload.body = bodyPayload(bodyType, body);
-				payload.bodyType = bodyType;
+			// The engine stores the body blob verbatim; the canonical shape keys
+			// off `mode` (not `type`), so a `type`-keyed body would not round-trip
+			// in the app. `bodyType` mirrors it into the denormalized column.
+			// A malformed body throws `ToolArgError`, which `dispatchTool` answers
+			// as a tool error before anything is written.
+			const shaped = shapeBody(args);
+			if (shaped) {
+				payload.body = shaped.body;
+				payload.bodyType = shaped.bodyType;
 			}
 			// Pass-through strings: absent leaves the engine's own default (empty),
 			// so only what the caller actually named is sent.
@@ -5866,11 +5980,12 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Replacement headers as a string map (replaces the stored list)."),
 			body: z.string().optional().describe("New request body content."),
+			file: fileRefInput,
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
+					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded, binary. Only meaningful alongside `body`, or alongside `file` for binary, which replaces the body with that file exactly as `create_request` describes - stored as a path the user has not chosen, sent only once they pick it in the editor or it lives under a folder allowed in Settings > Files. A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. Form-data file parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
 			auth: storedAuthInput(
@@ -5938,19 +6053,16 @@ export const TOOLS: McpTool[] = [
 				);
 			}
 			if (mockResponseMode !== undefined) payload.mockResponseMode = mockResponseMode;
-			const body = str(args, "body");
-			const bodyType = str(args, "bodyType");
-			if (body !== undefined) {
-				// Both keys move together, the way create_request writes them: the
-				// blob is what round-trips in the app, `bodyType` the denormalized
-				// column beside it. Writing one without the other leaves the two
-				// disagreeing about what the request sends.
-				payload.body = bodyPayload(bodyType ?? "text", body);
-				payload.bodyType = bodyType ?? "text";
-			} else if (bodyType !== undefined) {
-				return errorResult(
-					'"bodyType" describes "body" - pass the body it applies to, or leave both out.'
-				);
+			// Both keys move together, the way create_request writes them: the
+			// blob is what round-trips in the app, `bodyType` the denormalized
+			// column beside it. Writing one without the other leaves the two
+			// disagreeing about what the request sends.
+			// A malformed body throws `ToolArgError`, which `dispatchTool` answers
+			// as a tool error before anything is written.
+			const shaped = shapeBody(args);
+			if (shaped) {
+				payload.body = shaped.body;
+				payload.bodyType = shaped.bodyType;
 			}
 			const elementsGiven = elementsArg(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
@@ -5964,7 +6076,7 @@ export const TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript)."
+					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript)."
 				);
 			}
 			// Scripts are `elements` now (issue #1514), and `PUT /requests/:id`
@@ -7178,6 +7290,7 @@ export const TOOLS: McpTool[] = [
 				),
 			headers: z.record(z.string(), z.string()).optional(),
 			body: z.string().optional().describe("Request body content."),
+			file: inlineFileInput,
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
 			// had no way to discover the mode from the schema. The GET transport
@@ -7188,7 +7301,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the run on the GET an unnamed method defaults to. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the run on the GET an unnamed method defaults to. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. A body that sends a file (`binary`, or a form-data file part) cannot be given here - save it with create_request and load-test the saved request by `requestId`. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			auth: authInput,
 			httpVersion: z

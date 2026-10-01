@@ -73,6 +73,21 @@ size_t load_response_body_bound (vayu::db::Database& db) {
     static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
 }
 
+std::optional<nlohmann::json> body_file_node (const vayu::Request& request) {
+    if (request.body.mode != vayu::BodyMode::Binary) {
+        return std::nullopt;
+    }
+    const vayu::FileRef& file = request.body.file;
+    nlohmann::json node{ { "fileName", vayu::http::declared_file_name (file) } };
+    if (vayu::http::is_prepared (file)) {
+        node["size"]   = file.size;
+        node["sha256"] = file.sha256;
+    }
+    // In place: `json` converts to `std::optional<json>` itself, and GCC 13
+    // under -Wconversion reports the two routes as ambiguous.
+    return std::optional<nlohmann::json> (std::in_place, std::move (node));
+}
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -80,6 +95,9 @@ const vayu::Response& response) {
         { "url", request.url }, { "headers", request.headers } };
     if (!request.body.content.empty ()) {
         trace["request"]["body"] = request.body.content;
+    }
+    if (auto file = body_file_node (request)) {
+        trace["request"]["bodyFile"] = std::move (*file);
     }
 
     // The *sent* record, beside the composed map (issue #664). `headers` above
@@ -394,15 +412,18 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     }
     targets.push_back (&request.body.content);
     for (auto& field : request.body.fields) {
-        // The same five strings composition resolves, a file part's path
-        // included: a fixture directory is exactly the kind of thing an
-        // environment variable holds, and a literal `{{...}}` reaching the
-        // transfer would be opened as a filename.
-        for (std::string* part : { &field.key, &field.value, &field.src,
-             &field.file_name, &field.content_type }) {
+        // A file part's path is not here, though composition resolves it: a
+        // script can never choose which file is sent. A `{{token}}` still in
+        // `src` after composition is refused by the file rule as an
+        // unresolved variable. The name and type a script may still shape.
+        for (std::string* part :
+        { &field.key, &field.value, &field.file_name, &field.content_type }) {
             targets.push_back (part);
         }
     }
+    // A binary body's file follows the same rule: `src` is composition's alone.
+    targets.push_back (&request.body.file.file_name);
+    targets.push_back (&request.body.file.content_type);
     return targets;
 }
 
@@ -610,6 +631,23 @@ ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base
     return scopes;
 }
 
+namespace {
+
+/// The file rule for one exchange, through the caller's plan or - when it
+/// passed none - one that allows no folder.
+std::optional<std::string> check_files (vayu::http::FilePlan* files, vayu::Request& request) {
+    if (!vayu::http::has_file_refs (request.body)) {
+        return std::nullopt;
+    }
+    if (files != nullptr) {
+        return files->prepare (request);
+    }
+    vayu::http::FilePlan none;
+    return none.prepare (request);
+}
+
+} // namespace
+
 std::vector<std::string> unresolved_token_names (vayu::Request& request) {
     std::vector<std::string> names;
     for (const std::string* text : resolvable_strings (request)) {
@@ -753,6 +791,13 @@ ExchangeInputs inputs) {
         // reads a response reporting an error rather than a status - the
         // false-pass rule issue #180 exists for.
         outcome.response = vayu::http::detail::error_response (refusal->error);
+        outcome.response.request_headers = outcome.request.headers;
+    } else if (auto unsendable = check_files (inputs.files, outcome.request)) {
+        // The file rule (`file_ref.hpp`), after the residual pass and before
+        // the send, answered in the pre-send gate's shape for the reason the
+        // refusal above is.
+        outcome.response = vayu::http::detail::error_response (
+        vayu::Error{ vayu::ErrorCode::InternalError, std::move (*unsendable) });
         outcome.response.request_headers = outcome.request.headers;
     } else {
         vayu::http::ClientConfig config;

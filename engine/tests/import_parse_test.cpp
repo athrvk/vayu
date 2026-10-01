@@ -40,6 +40,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -322,6 +324,32 @@ TEST (InsomniaImport, KeepsAPathParameterAsTheRequestsOwnPathRow) {
         {"key":"userId","value":"42","enabled":true,"in":"path"}])"));
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
+}
+
+/**
+ * An Insomnia binary body keeps the path in `fileName` and its media type in
+ * `mimeType`: it imports as a `binary` body sending that file under that type,
+ * unresolved and counted, where it used to be dropped. A multipart file param
+ * with no path imports as a part with no file chosen.
+ */
+TEST (InsomniaImport, ABinaryBodyImportsAsAnUnresolvedBinaryBody) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"Put","method":"PUT",
+            "url":"https://x.com/a",
+            "body":{"mimeType":"application/octet-stream","fileName":"C:\\data\\a.bin"}},
+        {"_id":"req2","_type":"request","parentId":"wrk","name":"Form","method":"POST",
+            "url":"https://x.com/b",
+            "body":{"mimeType":"multipart/form-data","params":[{"name":"doc","type":"file"}]}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const auto& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("body").dump (),
+    R"({"mode":"binary","file":{"src":"C:\\data\\a.bin","fileName":"a.bin","contentType":"application/octet-stream","unresolved":true}})");
+    EXPECT_EQ (requests[1].at ("body").dump (),
+    R"({"mode":"form-data","fields":[{"key":"doc","value":"","enabled":true,"type":"file","src":""}]})");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("file_body"), 1);
+    EXPECT_EQ (parsed.result.at ("meta").at ("unattachedFileParts"), 1);
 }
 
 /**
@@ -747,7 +775,7 @@ TEST (ImportParse, NamesTheRequestsACountIsAbout) {
             "responses":{}}}}})",
     {}, {});
     ASSERT_TRUE (spec.ok ()) << spec.error;
-    EXPECT_EQ (skipped_named (spec, "unmapped_body"), Names{ "Upload an image" });
+    EXPECT_EQ (skipped_named (spec, "file_body"), Names{ "Upload an image" });
     EXPECT_EQ (skipped_named (spec, "security_unmapped_or"), Names{ "Find pet by ID" });
     // A second server is the document's, not any request's.
     EXPECT_EQ (skipped_named (spec, "servers_dropped"), Names{});
@@ -1000,6 +1028,92 @@ TEST (ImportParse, ReadsAnXmlRequestBodyAsTheXmlMode) {
     EXPECT_TRUE (parsed.result.at ("meta").at ("skipped").empty ());
 }
 
+/**
+ * A whole-file request body imports as a `binary` body with no file chosen -
+ * the document names the upload, never the file - under the media type it
+ * declares, and is counted as a file to choose rather than as an unmapped
+ * body: `application/octet-stream` whatever its schema, any other type whose
+ * schema is one `format: binary` string, and no content type at all for a
+ * wildcard no request can be sent under.
+ */
+TEST (ImportParse, ReadsAWholeFileRequestBodyAsTheBinaryMode) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},
+        "paths":{
+          "/raw":{"put":{"operationId":"raw","responses":{},
+            "requestBody":{"content":{"application/octet-stream":{}}}}},
+          "/png":{"put":{"operationId":"png","responses":{},
+            "requestBody":{"content":{"image/png":{"schema":{"$ref":"#/components/schemas/Bytes"}}}}}},
+          "/any":{"put":{"operationId":"any","responses":{},
+            "requestBody":{"content":{"image/*":{"schema":{"type":"string","format":"binary"}}}}}},
+          "/note":{"put":{"operationId":"note","responses":{},
+            "requestBody":{"content":{"image/png":{"schema":{"type":"object"}}}}}}},
+        "components":{"schemas":{"Bytes":{"type":"string","format":"binary"}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    std::map<std::string, std::string> bodies;
+    const std::function<void (const nlohmann::ordered_json&)> walk =
+    [&] (const nlohmann::ordered_json& collection) {
+        for (const auto& request : collection.at ("requests")) {
+            bodies[request.at ("name").get<std::string> ()] =
+            request.at ("body").dump ();
+        }
+        for (const auto& child : collection.at ("children")) {
+            walk (child);
+        }
+    };
+    walk (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (bodies.at ("raw"),
+    R"({"mode":"binary","file":{"src":"","contentType":"application/octet-stream"}})");
+    EXPECT_EQ (bodies.at ("png"),
+    R"({"mode":"binary","file":{"src":"","contentType":"image/png"}})");
+    EXPECT_EQ (bodies.at ("any"), R"({"mode":"binary","file":{"src":""}})");
+    EXPECT_EQ (bodies.at ("note"), R"({"mode":"none"})");
+    const json counts = skip_counts (parsed.result.at ("meta").at ("skipped"));
+    EXPECT_EQ (counts.at ("file_body"), 3);
+    EXPECT_EQ (counts.at ("unmapped_body"), 1);
+}
+
+/// The 2.0 spelling: an `in: body` parameter whose schema is one binary
+/// string, its media type read off `consumes`.
+TEST (ImportParse, ReadsASwagger20BinaryBodyParameterAsTheBinaryMode) {
+    const ImportParse parsed = parse_import (R"({"swagger":"2.0","info":{"title":"T"},
+        "paths":{"/raw":{"put":{"operationId":"raw","responses":{},
+          "consumes":["application/json","application/octet-stream"],
+          "parameters":[{"name":"body","in":"body",
+            "schema":{"type":"string","format":"binary"}}]}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("body").dump (),
+    R"({"mode":"binary","file":{"src":"","contentType":"application/octet-stream"}})");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("file_body"), 1);
+}
+
+/**
+ * An `x-vayu-request` binary body round-trips its file's name and content
+ * type; the export never writes the path, so none comes back. A path a
+ * hand-edited document does carry - on the binary body or a form file part -
+ * is kept and marked unresolved: nobody chose it in this editor.
+ */
+TEST (ImportParse, ReadsAnXVayuBinaryBodyAndMarksACarriedPathUnresolved) {
+    const auto body_of = [] (const std::string& stated) {
+        const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+            "paths":{"/up":{"put":{"responses":{},"x-vayu-request":{"body":)" +
+        stated + "}}}}}",
+        {}, {});
+        EXPECT_TRUE (parsed.ok ()) << parsed.error;
+        return first_request (parsed.result.at ("collections")[0]).at ("body").dump ();
+    };
+    EXPECT_EQ (body_of (R"({"mode":"binary","file":{"fileName":"a.png","contentType":"image/png"}})"),
+    R"({"mode":"binary","file":{"src":"","fileName":"a.png","contentType":"image/png"}})");
+    EXPECT_EQ (body_of (R"({"mode":"binary","file":{"src":"/x/a.png","unresolved":false}})"),
+    R"({"mode":"binary","file":{"src":"/x/a.png","unresolved":true}})");
+    EXPECT_EQ (body_of (R"({"mode":"form-data","fields":[{"key":"f","type":"file","src":"/x/a.png"},
+        {"key":"t","value":"v","src":"/x/b.png"}]})"),
+    R"({"mode":"form-data","fields":[{"key":"f","value":"","enabled":true,"type":"file","src":"/x/a.png","unresolved":true},{"key":"t","value":"v","enabled":true}]})");
+}
+
 /// An `x-vayu-request` piece that fails its check is dropped and counted, and
 /// the request keeps what the standard members said - a hand-edited vendor
 /// key never refuses the import or reaches a write route malformed.
@@ -1105,6 +1219,60 @@ TEST (PostmanImport, ADisabledBodyImportsAsNoneAndIsCounted) {
     "none");
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("disabled_body"), 1);
+}
+
+/**
+ * Postman's `file` mode imports as a `binary` body naming the file, not as no
+ * body: the path as written, its base name, and **unresolved**, because it is
+ * a path on the exporting machine that the engine sends only once the user
+ * picks it again or allows its folder. Postman writes `src: null` (or no
+ * `file` at all) until a file is chosen; that imports as no file chosen,
+ * which claims nothing and so is not unresolved. Each is counted, by request,
+ * as a file reference to relink.
+ */
+TEST (PostmanImport, AFileBodyImportsAsAnUnresolvedBinaryBody) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Upload","request":{"method":"PUT","url":"https://x.com/a",
+            "body":{"mode":"file","file":{"src":"/home/ada/photo.png"}}}},
+        {"name":"Unpicked","request":{"method":"PUT","url":"https://x.com/b",
+            "body":{"mode":"file","file":{"src":null}}}},
+        {"name":"Bare","request":{"method":"PUT","url":"https://x.com/c",
+            "body":{"mode":"file"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const auto& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("body").dump (),
+    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png","unresolved":true}})");
+    EXPECT_EQ (requests[1].at ("body").dump (), R"({"mode":"binary","file":{"src":""}})");
+    EXPECT_EQ (requests[2].at ("body").dump (), R"({"mode":"binary","file":{"src":""}})");
+    const json skipped = parsed.result.at ("meta").at ("skipped");
+    EXPECT_EQ (skip_counts (skipped).at ("file_body"), 3);
+    for (const json& entry : skipped) {
+        if (entry.at ("kind") == "file_body") {
+            EXPECT_EQ (entry.at ("requests"), (json{ "Upload", "Unpicked", "Bare" }));
+        }
+    }
+}
+
+/// A form-data file row with no path imports as a part with no file chosen -
+/// the field is the user's, only the file is missing - rather than vanishing
+/// into a count.
+TEST (PostmanImport, AFileRowWithNoPathImportsAsAnUnattachedPart) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"formdata","formdata":[{"key":"doc","type":"file"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("body").dump (),
+    R"({"mode":"form-data","fields":[{"key":"doc","value":"","enabled":true,"type":"file","src":""}]})");
+    EXPECT_EQ (parsed.result.at ("meta").at ("unattachedFileParts"), 1);
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("file_body"));
 }
 
 /// `proxy` has no per-request field to land in - Vayu's proxy config is
@@ -1933,6 +2101,22 @@ TEST_F (ImportParseRoute, PersistsTheWholeTreeInOneCall) {
     EXPECT_TRUE (body.at ("idMap").contains ("c1"));
     EXPECT_TRUE (body.at ("idMap").contains ("r1"));
     EXPECT_EQ (db_->get_collections ().size (), 1U);
+}
+
+/// What an import writes is what the write routes accept: a binary body
+/// persists through `POST /import` with its file reference intact.
+TEST_F (ImportParseRoute, PersistsAnImportedBinaryBody) {
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", R"({"info":{"name":"CB","schema":"v2.1.0"},"item":[
+        {"name":"Put","request":{"method":"PUT","url":"https://x/put",
+            "body":{"mode":"file","file":{"src":"/data/a.bin"}}}}]})" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto collections = db_->get_collections ();
+    ASSERT_EQ (collections.size (), 1U);
+    const auto requests = db_->get_requests_in_collection (collections[0].id);
+    ASSERT_EQ (requests.size (), 1U);
+    EXPECT_EQ (json::parse (requests[0].body),
+    json::parse (R"({"mode":"binary","file":{"src":"/data/a.bin","fileName":"a.bin","unresolved":true}})"));
 }
 
 /**

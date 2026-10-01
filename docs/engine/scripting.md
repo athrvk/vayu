@@ -764,24 +764,26 @@ property at all, so `typeof pm.request.body === 'undefined'` still separates
 was a string.
 
 ```javascript
-pm.request.body.mode         // 'urlencoded' | 'formdata' | 'graphql' | 'raw'
+pm.request.body.mode         // 'urlencoded' | 'formdata' | 'graphql' | 'file' | 'raw'
 pm.request.body.raw          // the body as a string, for every mode
 pm.request.body.urlencoded   // [{key, value, disabled}, ...] or undefined
 pm.request.body.formdata     // [{key, value?, type, fileName?, disabled}, ...] or undefined
 pm.request.body.graphql      // {query, variables?} or undefined
+pm.request.body.file         // {name, size?} or undefined
 pm.request.body.length       // the body string's own length
 ```
 
 `.mode` reads `raw` for every content mode without a Postman name of its own -
-`json`, `text`, `xml`, `binary` and `jsonrpc` all carry their body as one
-string, which is what `raw` means.
+`json`, `text`, `xml` and `jsonrpc` all carry their body as one string, which
+is what `raw` means.
 
-Postman's fifth mode, `file`, is deliberately not answered: it promises
-`file.src`, a path, and a `binary` body here carries **bytes**. The only path
-this model holds belongs to a form-data file part, which is a different mode and
-is never disclosed to a script (issue #411). A `binary` body therefore reads
-`raw`, and that is a stated divergence rather than an omission - see
-[pm-api-compatibility.md](../app/pm-api-compatibility.md).
+A `binary` body - one file sent as the whole body - reads `file`, Postman's
+name for it. `.file` answers `{ name, size? }`: `name` is the file name the
+request declares, else the last part of its path, and `size` its length in
+bytes, present once the send has read the file. Postman's `file.src`, the path,
+is never answered - a local path is one machine's filesystem and is not
+disclosed to a script, the rule a form-data file part already follows (issue
+#411) - see [pm-api-compatibility.md](../app/pm-api-compatibility.md).
 
 ### `graphql` bodies (issue #1111)
 
@@ -832,6 +834,7 @@ its **enabled** fields encoded `key=value&…`:
 | `json` / `text` / `xml` / `graphql` / … | the content, as stored | replaces it |
 | `x-www-form-urlencoded` | the encoded fields - **exactly** the bytes sent | parses back into the fields |
 | `form-data` | the encoded fields, file parts as `key=@filename` - a *rendering*, not the bytes sent | refused with a named error |
+| `binary` | `@` and the file name, as a form-data file part is named - never the file's bytes | refused with a named error: a script never chooses the file |
 | none | the property is absent (`undefined`) | sends that string as raw text |
 
 A **file part** reads `avatar=@portrait.png`, borrowing curl's `-F` spelling,
@@ -861,8 +864,8 @@ otherwise re-add. A file part carries no `value` at all, rather than the `""`
 an empty text field would hold - an empty string there would read as a text
 field that happens to be empty - and never the local path.
 
-Both lists are **read-only**, and so are `.mode` and `.length`. Assigning any of
-the four throws naming the member, and so does `push`ing into a list, which is
+Both lists are **read-only**, and so are `.mode`, `.graphql`, `.file` and
+`.length`. Assigning any of them throws naming the member, and so does `push`ing into a list, which is
 frozen. Writing to a field *inside* an entry is the one edit that does not throw
 - a frozen object drops a write silently in non-strict code, which is
 JavaScript's own rule rather than one this surface adds - and it reaches nothing

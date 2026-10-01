@@ -32,7 +32,8 @@
  * a stored trace body, and the config snapshot's own body, at `maxTraceBodyBytes`,
  * so such a run holds only a slice of what was sent; writing that slice back
  * would corrupt the saved body. When `seed.requestBodyTruncated` is set the
- * body is left off the patch.
+ * body is left off the patch. The same goes for a `binary` body whose
+ * snapshot recorded no path: writing it would point the request at no file.
  *
  * None is silent: {@link buildChangeset} emits each as a `kept` row, in the
  * same list as every change, with the reason inline. That is what makes "an
@@ -53,6 +54,7 @@ import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value"
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import { isPathRow } from "@/modules/request-builder/utils/path-variables";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { toFileRef } from "@/modules/request-builder/utils/execute-mapping";
 import type { DesignRunSeed } from "./design-run-seed";
 
 /** How one key/value entry differs between the request and the run. */
@@ -222,6 +224,9 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 	if (mode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: items(request.urlEncoded) };
 	}
+	if (mode === "binary") {
+		return { mode: "binary", file: toFileRef(request.binaryFile) };
+	}
 	if (mode !== "none" && request.body) {
 		return {
 			mode: mode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
@@ -229,6 +234,24 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 		};
 	}
 	return { mode: "none" };
+}
+
+const TRUNCATED_BODY_NOTE =
+	"This run's request body was too large to store in full, so only a slice was kept. It is not written back, to avoid overwriting the saved body with an incomplete copy.";
+const PATHLESS_FILE_NOTE =
+	"This run did not record which file it sent, so the saved body is left alone rather than pointed at no file.";
+
+/**
+ * Why the run's body must not be written back, or null when it may be. A
+ * truncated body is a slice; a binary body whose snapshot holds no path would
+ * replace the request's file with an empty pick.
+ */
+function unwritableBodyNote(seed: DesignRunSeed): string | null {
+	if (seed.requestBodyTruncated) return TRUNCATED_BODY_NOTE;
+	if (seed.request.bodyMode === "binary" && !seed.request.binaryFile?.src) {
+		return PATHLESS_FILE_NOTE;
+	}
+	return null;
 }
 
 /** A stable, human-readable rendering of a key/value list, for the diff only. */
@@ -243,6 +266,7 @@ function describeBody(body: RequestBody | undefined): string {
 	// against whatever the request query returned - so do not assume the field.
 	if (!body || body.mode === "none") return "none";
 	if ("fields" in body) return `${body.mode} (${describeEntries(body.fields)})`;
+	if (body.mode === "binary") return `binary (${body.file.src || "no file"})`;
 	return `${body.mode} (${body.content || ""})`;
 }
 
@@ -361,13 +385,14 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 	// A truncated run stores only a slice of its request body, so the body is not
 	// written (applyRunToRequest omits it). Shown as a kept row with the reason,
 	// the same way Auth is - never silently dropped.
-	if (seed.requestBodyTruncated) {
+	const bodyNote = unwritableBodyNote(seed);
+	if (bodyNote) {
 		items.push({
 			field: "Body",
 			state: "kept",
 			detail: "kept",
 			value: describeBody(live.body),
-			note: "This run's request body was too large to store in full, so only a slice was kept. It is not written back, to avoid overwriting the saved body with an incomplete copy.",
+			note: bodyNote,
 		});
 	} else {
 		scalar("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
@@ -453,7 +478,7 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 	// that slice back would silently corrupt the saved request - so the body (and
 	// bodyType) are left off the patch entirely, the same way auth never is. Note
 	// there is no `body: undefined`, which some serialisers would still send.
-	if (!seed.requestBodyTruncated) {
+	if (!unwritableBodyNote(seed)) {
 		patch.body = body;
 		patch.bodyType = body.mode;
 	}

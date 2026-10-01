@@ -72,6 +72,20 @@ export function generateFetch(
 
 	if (prepared.body?.kind === "raw") {
 		bodyExpression = jsString(prepared.body.content);
+	} else if (prepared.body?.kind === "binary") {
+		// Unlike a file part, a whole-body file has a runnable Node form: a
+		// Buffer is a valid `fetch` body. A browser cannot open a path, which
+		// the note says rather than leaving the import to fail there.
+		lines.push(
+			`import { readFile } from "node:fs/promises";`,
+			"",
+			`const body = await readFile(${jsString(prepared.body.path)});`,
+			""
+		);
+		bodyExpression = "body";
+		notes.push(
+			"The body file is read with Node's fs - in a browser, pass a File or Blob as the body instead."
+		);
 	} else if (prepared.body) {
 		const ctor = prepared.body.kind === "form-data" ? "FormData" : "URLSearchParams";
 		lines.push(`const body = new ${ctor}();`);

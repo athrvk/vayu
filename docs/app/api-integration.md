@@ -122,9 +122,22 @@ untransformed. The mode strings are a contract: the engine matches
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
 engine writes the Content-Type each form mode implies. A `form-data` row may be
-a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
-sends the path the user picked - never the bytes - and the engine opens the file
-at send time. See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
+a **file part** (`{type: "file", src, fileName?, contentType?, unresolved?}`): the
+renderer sends the path the user picked - never the bytes - and the engine opens
+the file at send time. A **`binary`** body is one file as the whole body,
+`{mode: "binary", file: {src, fileName?, contentType?, unresolved?}}`, built from
+`RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
+refuse it as "no file selected" rather than send a bodiless request.
+
+`unresolved` travels on both, and is the engine's trust input rather than an
+editor note: a file reference is sent only when someone chose it in the editor
+(the flag is absent) or it lies under a folder allowed in Settings > Files
+([allowed folders](#allowed-folders)). The editor clears it on a pick, a drop or a
+typed path; an import, a curl paste and an MCP agent set it; and composition sets
+it whenever `src` held a `{{variable}}`. A refused file comes back as a send
+failure (status 0, the engine's message naming the field or "Body file", the path
+and what to do), which the response pane's `ClientErrorView` prints as-is under
+"Couldn't send the request". See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
 for the full contract.
 
 ### API Methods
@@ -172,6 +185,23 @@ apiService.clearCookies(scope?: { environmentId: string | null }): Promise<Clear
 
 The engine keeps one cookie jar per environment for design-mode requests
 (issue #301); `CookiesCard` in Settings → General shows and clears them.
+
+#### Allowed folders
+
+```typescript
+apiService.getFileRoots(): Promise<FileRoot[]>                 // GET /file-roots, a bare array
+apiService.createFileRoot({ path }): Promise<FileRoot>         // POST /file-roots -> 201 row
+apiService.deleteFileRoot(id: string): Promise<void>           // DELETE /file-roots/:id
+```
+
+The folders a request-body file may be sent from without a per-file pick -
+the second half of the trust rule under [Request bodies](#request-bodies).
+`POST` carries the path alone (the engine owns the id) and answers the row as
+stored: canonical, so it can differ from what was typed. A path that is not an
+existing directory is a `400`, one already allowed a `409`; `useAllowFolder`
+(`hooks/useAllowFolder.ts`) is the one caller that interprets them, for
+Settings > Files (`FilesPanel`), the binary body editor and the import
+preview, and it treats the `409` as success.
 
 #### Request examples
 

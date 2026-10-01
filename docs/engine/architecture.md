@@ -744,7 +744,8 @@ its hot path.
 
 **Data rows bind per iteration.** A `scenario.data` array - rows the app parsed
 from a CSV, TSV, JSON or JSONL file, sent inline, because the sandbox has no
-filesystem and a user-supplied path would be a new trust boundary - binds row
+filesystem and the engine reads a user's file only under the request-body
+trust rule (see [Security](#security)) - binds row
 `i % rows` to iteration `i`, read by the run's scripts as `pm.iterationData`.
 The rows ride the `ScenarioExecution` the worker holds and are never
 persisted: the snapshot keeps
@@ -1288,6 +1289,23 @@ record shape, the category list, the redaction rule and the file layout
   [webhook inbox](#listeners) is the single listener that may bind wider, and only when the
   caller confirms it explicitly; it serves no engine route.
 - **Script sandboxing**: QuickJS contexts have no filesystem/network access
+- **Request-body files: one trust rule.** The engine reads a file from this
+  machine for exactly two body shapes - a `binary` body's `file` and a
+  `form-data` file part - and sends one only when *a person chose it in the
+  editor, or it lies under a folder they allowed in Settings*
+  (`file_roots`). A reference is sendable iff `!unresolved ||
+  allowed(canonical(src))`, decided on canonical paths component by component,
+  so a symlink escaping an allowed folder is outside it. `unresolved` is forced
+  by every writer that is not a person in the editor (importers, curl paste,
+  MCP) and by composition whenever `src` held a `{{` - a path a variable or a
+  data row chose. Scripts can never set a path: the residual pass does not
+  resolve `src`. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
+  `http/file_access_policy.hpp`, runs once per design send after the residual
+  pass and once per run at plan time (every distinct data-bound path
+  included), and refuses before any transfer; the send gate
+  (`validate_transferable`) refuses a binary body no plan checked. A record
+  of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
+  path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: File lock prevents multiple daemon instances
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
   are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its

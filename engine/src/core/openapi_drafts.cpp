@@ -140,6 +140,15 @@ class Sampler {
         return fields;
     }
 
+    /// Whether @p schema is one file's bytes - a `format: binary` string, behind
+    /// any `$ref` or first composed branch. An array of them is not: one body
+    /// sends one file.
+    [[nodiscard]] bool declares_file (const json* schema) const {
+        const json* resolved      = resolve_to_schema (schema, 0, SeenRefs{});
+        const std::string* format = as_str (prop (resolved, "format"));
+        return format != nullptr && *format == "binary";
+    }
+
     /// `deref(value, resolveRef)`: a `$ref`-following read, single-hop.
     [[nodiscard]] const json* deref (const json* value) const {
         const std::string* ref = as_str (prop (value, "$ref"));
@@ -714,6 +723,49 @@ std::optional<DraftBody> text_body_v3 (const json& content) {
     return body;
 }
 
+/// Defined below with the 2.0 body rules it was written for; a binary body and
+/// the documented responses need it to read a media type the same way.
+std::string media_type (const json& value);
+
+/// The media type a `binary` body is sent under: @p declared lowered and without
+/// parameters, or `""` for a wildcard (`image/*`), which no request can send and
+/// which leaves the send to derive one from the file.
+std::string sendable_media_type (const std::string& declared) {
+    std::string type = media_type (json (declared));
+    return type.find ('*') == std::string::npos ? type : std::string ();
+}
+
+/**
+ * A whole-file request body (3.x): `application/octet-stream`, whatever its
+ * schema says, or else the first media type whose schema is one file's bytes
+ * (`format: binary`). It imports as a `binary` body with no file chosen - the
+ * document names the upload, never the file - under that media type.
+ */
+std::optional<DraftBody> binary_body_v3 (const Sampler& sampler, const json& content) {
+    std::optional<std::string> declared;
+    for (auto entry = content.begin (); entry != content.end (); ++entry) {
+        if (media_type (json (entry.key ())) == "application/octet-stream") {
+            declared = entry.key ();
+            break;
+        }
+    }
+    if (!declared) {
+        for (auto entry = content.begin (); entry != content.end (); ++entry) {
+            if (sampler.declares_file (prop (&entry.value (), "schema"))) {
+                declared = entry.key ();
+                break;
+            }
+        }
+    }
+    if (!declared) {
+        return std::nullopt;
+    }
+    DraftBody body;
+    body.mode         = "binary";
+    body.content_type = sendable_media_type (*declared);
+    return body;
+}
+
 /// An operation's `requestBody` → the request's body (3.x).
 DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally* tally) {
     DraftBody body;
@@ -764,11 +816,16 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         }
         return body;
     }
-    // A body in a media type the importer has no mode for - `application/xml`,
-    // `image/*` - is `none`, the same as no body, and the draft is identical.
-    // The two are told apart only for the tally: an operation with no
-    // `requestBody` at all lost nothing, and one that declared a media type
-    // imported without the body it declared (issue #719).
+    if (std::optional<DraftBody> file = binary_body_v3 (sampler, *content)) {
+        // Not a loss: counted so the preview can say a file is still to choose.
+        tally_add (tally, "file_body");
+        return std::move (*file);
+    }
+    // A body in a media type the importer has no mode for - an `image/png`
+    // with no binary schema, say - is `none`, the same as no body, and the
+    // draft is identical. The two are told apart only for the tally: an
+    // operation with no `requestBody` at all lost nothing, and one that
+    // declared a media type imported without the body it declared (issue #719).
     if (!content->empty ()) {
         tally_add (tally, "unmapped_body");
     }
@@ -778,10 +835,6 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
 // ---------------------------------------------------------------------------
 // Documented responses
 // ---------------------------------------------------------------------------
-
-/// Defined below with the 2.0 body rules it was written for; the documented
-/// responses need it to read a `produces` entry the same way.
-std::string media_type (const json& value);
 
 /// `findJsonMediaType(content)`: the *key* of a 3.x `content` map's JSON media
 /// type. `find_json_media` answers with the node; an example needs the name of
@@ -1115,6 +1168,12 @@ std::vector<DraftField>& form_fields) {
         // carrying it would be a field nothing reads.
         draft.headers.push_back (
         declared_param_row (name, value, required, nullptr, enabled_override));
+    } else if (dialect == walk::Dialect::V2 && kind == "body" &&
+    sampler.declares_file (prop (parameter, "schema"))) {
+        // One file's bytes; its media type comes from `consumes`, below.
+        draft.body.mode    = "binary";
+        draft.body.content = "";
+        tally_add (tally, "file_body");
     } else if (dialect == walk::Dialect::V2 && kind == "body") {
         const json* schema = prop (parameter, "schema");
         const json sample = truthy (schema) ? sampler.sample (schema) : json::object ();
@@ -1168,6 +1227,24 @@ const json* operation,
 std::vector<DraftField>& form_fields,
 DraftRequest& draft) {
     const std::vector<std::string> consumes = consumes_of (document, operation);
+    if (draft.body.mode == "binary") {
+        // `application/octet-stream` when listed, else the first type a
+        // request can be sent under, else none (derived from the file).
+        const auto octet = std::find_if (
+        consumes.begin (), consumes.end (), [] (const std::string& type) {
+            return media_type (type) == "application/octet-stream";
+        });
+        if (octet != consumes.end ()) {
+            draft.body.content_type = media_type (*octet);
+        } else {
+            for (const std::string& type : consumes) {
+                if (std::string sendable = sendable_media_type (type); !sendable.empty ()) {
+                    draft.body.content_type = std::move (sendable);
+                    break;
+                }
+            }
+        }
+    }
     if (draft.body.mode == "json") {
         const bool json_consumed = consumes.empty () ||
         std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {

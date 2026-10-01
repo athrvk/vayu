@@ -39,9 +39,12 @@ namespace vayu::db {
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
  *     `disabled_system_headers`, `disable_url_encoding` and
  *     `postman_protocol_behavior` (#1765, folded into the same unreleased
- *     version).
+ *     version);
+ * 3 - `file_roots`, the folders request-body files may be read from without
+ *     being chosen in the editor. Also the fence that keeps an older engine,
+ *     which would send a `binary` body bodiless, off a workspace holding one.
  */
-inline constexpr int SCHEMA_VERSION = 2;
+inline constexpr int SCHEMA_VERSION = 3;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
@@ -597,6 +600,19 @@ class Database {
     std::vector<ClientCertificate> get_client_certificates ();
     std::optional<ClientCertificate> get_client_certificate (const std::string& id);
     void delete_client_certificate (const std::string& id);
+
+    /**
+     * Allowed folders for request-body files (`file_roots`, schema version 3).
+     * Plain CRUD like the registry above: `routes/file_roots.cpp` owns the
+     * path rules and the uniqueness answer. Read once per design send and once
+     * per run (`vayu::http::FileAccessPolicy::from_database`), never per
+     * transfer. `get_file_roots` answers ordered by path.
+     */
+    // db_credentials.cpp
+    void save_file_root (const FileRoot& root);
+    std::vector<FileRoot> get_file_roots ();
+    std::optional<FileRoot> get_file_root (const std::string& id);
+    void delete_file_root (const std::string& id);
 
     // Globals (singleton) - db_environments.cpp
     void save_globals (const Globals& g);

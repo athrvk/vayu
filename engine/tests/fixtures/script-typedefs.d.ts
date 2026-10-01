@@ -802,11 +802,17 @@ declare const pm: {
 	 */
 	request: {
 		/**
-		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists and the graphql pair.
+		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists, the graphql pair and the file.
 		 * 
-		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused. A binary body reads as @ and its file name, and an assignment is refused: a script never chooses the file.
 		 */
 		get body(): string & {
+			/**
+			 * { name, size? } for a binary body, or undefined in any other mode. name is the file name the request declares, or the last part of its path; size is the file's length in bytes once the send has read it. Postman's src is never answered - the local path is not disclosed, as for a form-data file part.
+			 * 
+			 * Read-only: choose the file in the request.
+			 */
+			file: { [key: string]: any } | undefined;
 			/**
 			 * { key, value?, type, fileName?, disabled } for each multipart part, or undefined in any other mode. A text part carries type "text" and a value; a file part carries type "file" and the fileName the server is told, with no value at all - an empty string there would read as a text field that happens to be empty, and the local path is never disclosed.
 			 * 
@@ -826,7 +832,7 @@ declare const pm: {
 			 */
 			length: number;
 			/**
-			 * Postman's mode name: "urlencoded", "formdata", "graphql", or "raw" for every other content mode - json, text, xml, binary and jsonrpc all carry their body as one string, which is what raw means. Postman's fifth mode, "file", is never answered: it promises a path, and a binary body here carries bytes. Read-only; the mode follows the request's body type.
+			 * Postman's mode name: "urlencoded", "formdata", "graphql", "file" for a binary body, or "raw" for every other content mode - json, text, xml and jsonrpc all carry their body as one string, which is what raw means. Read-only; the mode follows the request's body type.
 			 */
 			mode: string;
 			/**

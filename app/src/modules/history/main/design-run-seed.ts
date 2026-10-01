@@ -19,12 +19,21 @@
  *                     sanitize_config_snapshot keeps only the auth mode
  */
 
-import type { Run, Request, RequestAuth, ScriptPart, ElementDef, KeyValueEntry } from "@/types";
+import type {
+	Run,
+	Request,
+	RequestAuth,
+	ScriptPart,
+	ElementDef,
+	KeyValueEntry,
+	FileRef,
+} from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
+import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
@@ -52,6 +61,8 @@ interface DesignSnapshot {
 		mode?: string;
 		content?: string;
 		fields?: KeyValueEntry[];
+		/** A `binary` body's file. Read defensively: the snapshot is not typed engine-side. */
+		file?: unknown;
 		/** Set by `sanitize_config_snapshot` when `content` exceeded `maxTraceBodyBytes`. */
 		bodyTruncated?: boolean;
 		/** The body's original byte length, present only when truncated. */
@@ -106,6 +117,24 @@ export interface DesignRunSeed {
 	 * not write a possibly-incomplete body back - see {@link applyRunToRequest}.
 	 */
 	requestBodyTruncated?: boolean;
+	/**
+	 * What a `binary` body sent, as the engine recorded it at send time:
+	 * the file's name, its size and its sha256 - never its bytes, and never
+	 * its path. Read off the trace's request node (`request.bodyFile`), and
+	 * absent for every other body and for a run stored before the field.
+	 */
+	requestBodyFile?: SentBodyFile;
+}
+
+/** A snapshot body's `file` as an editor `FileRef`, or an empty one. */
+function fileRefOf(node: unknown): FileRef {
+	if (!node || typeof node !== "object") return { src: "" };
+	const raw = node as Record<string, unknown>;
+	const file: FileRef = { src: typeof raw.src === "string" ? raw.src : "" };
+	if (typeof raw.fileName === "string" && raw.fileName) file.fileName = raw.fileName;
+	if (typeof raw.contentType === "string" && raw.contentType) file.contentType = raw.contentType;
+	if (raw.unresolved === true) file.unresolved = true;
+	return file;
 }
 
 /**
@@ -221,6 +250,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			urlEncoded: toKeyValueItems(
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),
+			binaryFile: bodyMode === "binary" ? fileRefOf(body?.file) : { src: "" },
 			auth,
 			elements: [
 				...(ownScript(snapshot.preRequestScripts).trim()
@@ -276,5 +306,6 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		// are capped independently, at the same limit.
 		requestBodyTruncated:
 			trace?.request?.bodyTruncated || body?.bodyTruncated ? true : undefined,
+		requestBodyFile: sentBodyFileOf(trace?.request?.bodyFile),
 	};
 }

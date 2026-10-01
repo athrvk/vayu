@@ -28,6 +28,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
+import { apiService } from "@/services/api";
 import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 function renderModal() {
@@ -117,7 +118,7 @@ describe("the import preview's notices", () => {
 
 		await waitFor(() =>
 			expect(
-				screen.getByText("Upload an image: body not imported (binary file)")
+				screen.getByText("Upload an image: body not imported (unsupported media type)")
 			).toBeInTheDocument()
 		);
 		expect(severityOf(/Upload an image: body not imported/)).toContain("text-destructive-text");
@@ -194,5 +195,84 @@ describe("the import preview's notices", () => {
 
 		await waitFor(() => expect(screen.getByText(/1 collections/i)).toBeInTheDocument());
 		expect(screen.queryByText(/Collections grouped/i)).not.toBeInTheDocument();
+	});
+});
+
+/**
+ * Imported file paths are unresolved, so the engine sends them only from an
+ * allowed folder. The preview offers each distinct folder once, and its action
+ * posts that folder - one click for a collection exported on this machine.
+ */
+describe("the import preview's file folders", () => {
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		useImportModalStore.setState({ isOpen: true });
+	});
+
+	const withFiles = () =>
+		result({
+			collections: [
+				collection({
+					name: "Uploads",
+					requests: [
+						request({
+							name: "Put blob",
+							body: {
+								mode: "binary",
+								file: { src: "/home/me/fixtures/a.bin", unresolved: true },
+							},
+						}),
+						request({
+							name: "Post form",
+							body: {
+								mode: "form-data",
+								fields: [
+									{
+										key: "f",
+										value: "",
+										enabled: true,
+										type: "file",
+										src: "/home/me/fixtures/b.png",
+										unresolved: true,
+									},
+								],
+							},
+						}),
+					],
+				}),
+			],
+		});
+
+	it("lists each folder once, and Allow folder posts it", async () => {
+		vi.spyOn(apiService, "getFileRoots").mockResolvedValue([]);
+		const create = vi
+			.spyOn(apiService, "createFileRoot")
+			.mockResolvedValue({ id: "r1", path: "/home/me/fixtures", createdAt: 1 });
+		stubParse(withFiles);
+		preview();
+
+		const list = await screen.findByRole("list", {
+			name: "Folders the imported files are in",
+		});
+		expect(list.querySelectorAll("li")).toHaveLength(1);
+		expect(screen.getByText("2 files")).toBeInTheDocument();
+		expect(
+			screen.getByText(/2 imported file paths are sent only from an allowed folder/)
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder /home/me/fixtures" }));
+
+		await waitFor(() => expect(create).toHaveBeenCalledWith({ path: "/home/me/fixtures" }));
+	});
+
+	it("marks a folder already allowed instead of offering it again", async () => {
+		vi.spyOn(apiService, "getFileRoots").mockResolvedValue([
+			{ id: "r1", path: "/home/me", createdAt: 1 },
+		]);
+		stubParse(withFiles);
+		preview();
+
+		expect(await screen.findByText("Allowed")).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /Allow folder/ })).toBeNull();
 	});
 });

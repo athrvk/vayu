@@ -739,6 +739,15 @@ struct RunContext {
      */
     LoadAuthPlan load_auth;
 
+    /**
+     * Every file a *single-request* load run can send, checked once before the
+     * run started (`plan_load_files`), or by `build_load_request` for a run
+     * started without one. Read-only once the first submission is made; a
+     * submission whose path a row bound fills from it (`fill_bound_files`).
+     * Null for a run whose request names no file.
+     */
+    std::shared_ptr<vayu::http::FilePlan> file_plan;
+
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
     std::atomic<size_t> requests_expected{ 0 }; // Total expected requests for this run
@@ -1461,13 +1470,17 @@ class RunManager {
      *             identity defers on a run that has no rows at all; default for
      *             a run whose credentials carry no token, which is the build
      *             resolving its auth once exactly as it always did.
+     * @param files The route's plan-time check of a single-request run's files
+     *             (`plan_load_files`), so the run reads each one once. Null
+     *             makes the build check them itself.
      */
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     std::shared_ptr<const ScenarioExecution> scenario = nullptr,
     std::unique_ptr<LoadDataSet> data                 = nullptr,
-    LoadAuthPlan auth_plan                            = {});
+    LoadAuthPlan auth_plan                            = {},
+    std::shared_ptr<vayu::http::FilePlan> files       = nullptr);
 
     /**
      * @brief Start a scenario run: the same lifecycle, a different executor.

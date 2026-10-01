@@ -118,6 +118,7 @@ const REQUEST: RequestState = {
 	body: "",
 	formData: [],
 	urlEncoded: [],
+	binaryFile: { src: "" },
 	auth: { mode: "none" },
 	elements: [PRE_SCRIPT],
 	followRedirects: true,

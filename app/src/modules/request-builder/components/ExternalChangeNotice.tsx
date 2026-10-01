@@ -11,10 +11,10 @@
  * (issue #1436) - the per-field conflict `RequestBuilderProvider`'s merge
  * surfaces instead of silently overwriting either side.
  *
- * One callout per logical group rather than per `RequestState` key: the four
+ * One callout per logical group rather than per `RequestState` key: the
  * fields the editor splits a request's body across (`bodyMode`, `body`,
- * `formData`, `urlEncoded`) are one thing to a user, and four separate "body"
- * callouts would look like a bug of their own.
+ * `formData`, `urlEncoded`, `binaryFile`) are one thing to a user, and a
+ * separate "body" callout per field would look like a bug of its own.
  */
 
 import { ExternalChangeCallout } from "@/components/shared";
@@ -28,7 +28,7 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 	{ label: "URL", fields: ["url"] },
 	{ label: "params", fields: ["params"] },
 	{ label: "headers", fields: ["headers"] },
-	{ label: "body", fields: ["bodyMode", "body", "formData", "urlEncoded"] },
+	{ label: "body", fields: ["bodyMode", "body", "formData", "urlEncoded", "binaryFile"] },
 	{ label: "auth", fields: ["auth"] },
 	{ label: "the elements list", fields: ["elements"] },
 	{

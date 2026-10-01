@@ -265,11 +265,43 @@ describe("parseCommand - curl", () => {
 		expect(r.method).toBe("HEAD");
 	});
 
-	test("-T implies PUT (file path discarded)", () => {
-		const r = parseCommand(`curl -T upload.bin https://x.com`)!;
+	test("-T uploads the file as a binary body, sent as a PUT", () => {
+		const imported = importCommand(`curl -T /data/upload.bin https://x.com/files/a`)!;
+		const r = imported.request;
 		expect(r.method).toBe("PUT");
-		expect(r.url).toBe("https://x.com");
-		expect(r.bodyMode).toBe("none");
+		expect(r.url).toBe("https://x.com/files/a");
+		expect(r.bodyMode).toBe("binary");
+		expect(r.binaryFile).toEqual({
+			src: "/data/upload.bin",
+			fileName: "upload.bin",
+			unresolved: true,
+		});
+		// Carried, so nothing to disclose.
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test("--upload-file is -T's long spelling", () => {
+		const r = parseCommand(`curl --upload-file=/data/a.bin https://x.com/a`)!;
+		expect(r.bodyMode).toBe("binary");
+		expect(r.binaryFile.src).toBe("/data/a.bin");
+	});
+
+	test("-T appends the file name to a URL that names no file, as curl does", () => {
+		expect(parseCommand(`curl -T '/d/a b.bin' https://x.com/dir/`)?.url).toBe(
+			"https://x.com/dir/a%20b.bin"
+		);
+		expect(parseCommand(`curl -T /d/a.bin https://x.com:8443`)?.url).toBe(
+			"https://x.com:8443/a.bin"
+		);
+		expect(parseCommand(`curl -T /d/a.bin 'https://x.com/dir/?v=1'`)?.url).toBe(
+			"https://x.com/dir/a.bin?v=1"
+		);
+	});
+
+	test("-T takes its Content-Type from -H as a header row, never the file", () => {
+		const r = parseCommand(`curl -T /d/a.png -H 'Content-Type: image/png' https://x.com/a`)!;
+		expect(r.headers).toEqual(kv([{ key: "Content-Type", value: "image/png" }]));
+		expect(r.binaryFile.contentType).toBeUndefined();
 	});
 
 	test("explicit -X overrides -T's PUT inference", () => {
@@ -277,8 +309,10 @@ describe("parseCommand - curl", () => {
 		expect(r.method).toBe("PATCH");
 	});
 
-	test("-T is disclosed as an upload, not silently dropped (issue #1445)", () => {
-		const imported = importCommand(`curl -T upload.bin https://x.com`)!;
+	test("-T from standard input is a PUT with no body, disclosed (issue #1445)", () => {
+		const imported = importCommand(`curl -T - https://x.com`)!;
+		expect(imported.request.method).toBe("PUT");
+		expect(imported.request.bodyMode).toBe("none");
 		expect(imported.dropped).toEqual([
 			expect.objectContaining({ flag: "-T", what: expect.stringContaining("uploaded") }),
 		]);
@@ -311,11 +345,50 @@ describe("parseCommand - curl", () => {
 		expect(imported.dropped.map((d) => d.flag)).toContain("--negotiate");
 	});
 
-	test("-d @file is skipped", () => {
-		const r = parseCommand(`curl -X POST https://x.com -d @body.json`)!;
+	test("--data-binary @file is a binary body, unresolved, POST by default", () => {
+		const imported = importCommand(`curl https://x.com --data-binary @/data/body.bin`)!;
+		const r = imported.request;
 		expect(r.method).toBe("POST");
+		expect(r.bodyMode).toBe("binary");
 		expect(r.body).toBe("");
-		expect(r.bodyMode).toBe("none");
+		expect(r.binaryFile).toEqual({
+			src: "/data/body.bin",
+			fileName: "body.bin",
+			unresolved: true,
+		});
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test("-d @file is a binary body too, and says curl would strip its newlines", () => {
+		const imported = importCommand(`curl -X POST https://x.com -d @body.json`)!;
+		expect(imported.request.bodyMode).toBe("binary");
+		expect(imported.request.binaryFile.src).toBe("body.json");
+		expect(imported.dropped).toEqual([
+			expect.objectContaining({ flag: "-d", what: expect.stringContaining("newlines") }),
+		]);
+	});
+
+	test("--data-raw never reads a file: a leading @ is body text", () => {
+		const r = parseCommand(`curl https://x.com --data-raw @handle`)!;
+		expect(r.bodyMode).toBe("text");
+		expect(r.body).toBe("@handle");
+	});
+
+	test("a file body beside other data is disclosed, not spliced", () => {
+		const imported = importCommand(`curl https://x.com -d '{"a":1}' --data-binary @extra.bin`)!;
+		expect(imported.request.bodyMode).toBe("text");
+		expect(imported.request.body).toBe('{"a":1}');
+		expect(imported.dropped.map((d) => d.flag)).toEqual(["--data-binary"]);
+	});
+
+	test("a body read from standard input is disclosed", () => {
+		const imported = importCommand(`curl https://x.com --data-binary @-`)!;
+		expect(imported.request.bodyMode).toBe("none");
+		expect(imported.dropped.map((d) => d.flag)).toEqual(["--data-binary"]);
+	});
+
+	test("every paste resets the binary file, so no stale one survives", () => {
+		expect(parseCommand(`curl https://x.com`)?.binaryFile).toEqual({ src: "" });
 	});
 
 	test("query string in URL is mirrored to params", () => {
@@ -452,11 +525,18 @@ describe("parseCommand - wget", () => {
 		expect(r.auth).toEqual({ mode: "basic", username: "admin", password: "secret" });
 	});
 
-	test("--post-file is skipped (not mapped to form-data)", () => {
-		const r = parseCommand(`wget --post-file=body.txt https://x.com`)!;
-		expect(r.bodyMode).toBe("none");
-		expect(r.method).toBe("GET");
-		expect(r.url).toBe("https://x.com");
+	test("--post-file is a binary body, POST, unresolved", () => {
+		const imported = importCommand(`wget --post-file=/d/body.txt https://x.com`)!;
+		expect(imported.request.bodyMode).toBe("binary");
+		expect(imported.request.method).toBe("POST");
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.request.binaryFile).toEqual({
+			src: "/d/body.txt",
+			fileName: "body.txt",
+			unresolved: true,
+		});
+		// wget sends the file as is, so there is no newline caveat to say.
+		expect(imported.dropped).toEqual([]);
 	});
 
 	test("an unknown flag's swallowed value never outraces the URL (issue #1445)", () => {

@@ -38,12 +38,15 @@
  * The form modes are not Monaco at all - `form-data` and
  * `x-www-form-urlencoded` render the key/value table, whose cells are
  * `VariableInput`, which pops the same list from the same rule in
- * `lib/variable-completion.ts`. Asserted below so the coverage claim is about
- * the whole panel, not just the code editors.
+ * `lib/variable-completion.ts`. `binary` is the same case: its path and
+ * Content-Type fields are `VariableInput`, so `{{fixturesDir}}/a.bin` is
+ * written with the completion every other field offers. Asserted below so the
+ * coverage claim is about the whole panel, not just the code editors.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
 import { BODY_MODES } from "./body-modes";
@@ -77,7 +80,7 @@ const TABLE_MODES: BodyMode[] = ["form-data", "x-www-form-urlencoded"];
  * whether it edits text, so a new mode either mounts an editor (and is checked
  * below) or is added here by someone who decided it should not.
  */
-const NON_EDITOR_MODES: BodyMode[] = ["none", ...TABLE_MODES];
+const NON_EDITOR_MODES: BodyMode[] = ["none", ...TABLE_MODES, "binary"];
 
 /*
  * `GraphQLBody` is lazy since #1146, so BodyPanel first renders it as the
@@ -105,12 +108,17 @@ async function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> =
 		updateVariable: () => {},
 	} as unknown as RequestBuilderContextValue;
 
+	// The binary pane reads the allowed folders; nothing here answers, which
+	// is the "none allowed yet" state.
+	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	const result = render(
-		<TooltipProvider>
-			<RequestBuilderContext.Provider value={value}>
-				<BodyPanel />
-			</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		<QueryClientProvider client={queryClient}>
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={value}>
+					<BodyPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		</QueryClientProvider>
 	);
 	await act(async () => {});
 	return result;
@@ -175,6 +183,16 @@ describe("the modes with no code editor", () => {
 			expect(screen.getAllByDisplayValue("{{merchant}}").length).toBeGreaterThan(0);
 		}
 	);
+
+	it("binary writes its path in a variable field, so {{fixturesDir}} completes", async () => {
+		await renderMode("binary", {
+			binaryFile: { src: "{{fixturesDir}}/a.bin", contentType: "{{ct}}" },
+		});
+
+		expect(mounted).toHaveLength(0);
+		expect(screen.getByDisplayValue("{{fixturesDir}}/a.bin")).toBeInTheDocument();
+		expect(screen.getByDisplayValue("{{ct}}")).toBeInTheDocument();
+	});
 
 	it("mounts nothing for none, which sends no body", async () => {
 		await renderMode("none");

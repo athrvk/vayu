@@ -207,9 +207,9 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 |---------------------|--------------------|-------|
 | `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)`, a row's non-`"text"` `type` kept as on a header |
-| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. Only a file entry naming no path adds to `ctx.skippedFileBody`. |
+| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
-| `file` | `{ mode: "none" }` | adds 1 to `ctx.skippedFileBody` - a whole-body file is a shape Vayu has no mode for (unlike a multipart file *part*, which imports) |
+| `file` | `{ mode: "binary", file: { src, fileName, unresolved: true } }` | `src` is `body.file.src` as written and `fileName` its base name; `src: null` or no `file` (Postman's shape before a file is chosen) imports as `{ src: "" }`, no file chosen. Counted as `file_body`, a file reference to relink |
 | anything else | `{ mode: "none" }` | |
 
 **GraphQL `variables` (`graphqlContent`):** Postman stores `body.graphql` as `{ query, variables }` where `variables` is the *text* of the Variables pane - a JSON-encoded string. Vayu's own `serializeGraphQLBody` writes `variables` as an object, and the engine sends the stored content verbatim, so the string is parsed here; embedding it as-is put `"variables": "{\"limit\": 10}"` on the wire (spec-invalid) and showed a double-escaped blob in the Variables pane. Two deliberate fallbacks: a variables string that is **not valid JSON is kept as text** (the pane text is the only copy of the user's work, so an import that deletes it is worse than one that shows it unparsed - and the pane now shows a string-typed `variables` verbatim rather than as an escaped blob, converting it to an object once an edit makes it parse), and an **empty or whitespace-only** string drops the key entirely, which is what Vayu writes for an empty pane. Every other key on the object rides along untouched.
@@ -240,7 +240,14 @@ An unlabelled body is never sniffed into `xml`: without Postman's language, a
 a Content-Type the server may disagree with. `"xml"` is the only new mapping -
 `"html"`, `"javascript"` and the rest still fall through to the sniff.
 
-**Dropped:** binary/file bodies (mode `file`) and per-field file uploads inside `formdata`. Both are counted into `ctx.skippedFileBody` and surface as a single `{ kind: "file_body", count }` `SkippedItem`.
+**File references are imported, never dropped.** A `file` body and every
+`formdata` file entry keep the path the export named, and each one with a path
+is marked `unresolved`: it names a file on the exporting machine, so Vayu sends
+it only once you choose the file again in the request, or once it lies under a
+folder you allowed in Settings > Files. Each `file` body is counted as
+`{ kind: "file_body", count, requests }` - informational, the requests whose
+body file to relink - and each file entry with no path as an
+`unattachedFileParts` field to fill.
 
 ## Auth mapping
 
@@ -311,7 +318,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request, folder or collection** whose own mapped auth mode is one of `CONFIG_AUTH_TYPES` (`aws`, `digest`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), and each is named in `meta.nonExecutableAuthRequests`. A folder's or collection's is counted once where it is declared, not once per request inheriting it. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is mapped to an executable config and does **not** count.
 
@@ -374,6 +381,10 @@ the request as it is at export time.
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.
+
+A binary body exports as Postman's `file` mode naming the file's path
+(`file.src`), as a form-data file part names its own; a file's own content type
+or a file name other than its path's has no place in that mode and is listed.
 
 An agent can ask for the same document over MCP (`export_postman`), which always
 leaves credentials out.

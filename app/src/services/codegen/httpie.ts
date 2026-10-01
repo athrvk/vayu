@@ -83,6 +83,11 @@ export function generateHttpie(
 		// `--raw`, so the body goes out byte for byte. HTTPie's `key=value` syntax
 		// would build a *new* JSON object instead of sending the one composed.
 		args.push(`--raw ${shellQuote(prepared.body.content)}`);
+	} else if (prepared.body?.kind === "binary") {
+		// A bare `@path` item is HTTPie's whole-body file upload. Its Content-Type
+		// would otherwise be sniffed from the extension; the header `prepare.ts`
+		// always supplies is emitted above and wins.
+		args.push(shellQuote(`@${prepared.body.path}`));
 	} else if (prepared.body) {
 		if (prepared.body.kind === "urlencoded") args.push("--form");
 		for (const [key, value] of prepared.body.fields) {

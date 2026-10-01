@@ -12,6 +12,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <initializer_list>
 #include <map>
 #include <random>
 #include <regex>
@@ -21,6 +22,7 @@
 #include "vayu/core/elements.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
@@ -1315,24 +1317,32 @@ nlohmann::json& payload) {
     return std::nullopt;
 }
 
-/** The body: its content, and every string its form fields carry. */
 /**
- * Every string a form field carries, including a file part's path: a fixture
- * directory is exactly the kind of thing an environment variable holds, and an
- * unresolved `{{...}}` reaching the transfer would be opened as a literal
- * filename.
+ * Every string a file reference carries - a form field, or a binary body's
+ * `file` - including its path: a fixture directory is exactly the kind of thing
+ * an environment variable holds.
+ *
+ * A path that held a `{{` before resolution is marked `unresolved`, whatever it
+ * resolved to: a variable chose that file, not a person in the editor, so it is
+ * sent only from under an allowed folder (`file_ref.hpp`). The mark is on the
+ * wire, so it survives the compose -> app -> execute round trip.
  */
-void resolve_form_field (const VariableValues& vars,
+void resolve_file_strings (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
 DynamicResolution dynamic,
-nlohmann::json& field) {
-    if (!field.is_object ()) {
+nlohmann::json& entry,
+std::initializer_list<const char*> names) {
+    if (!entry.is_object ()) {
         return;
     }
-    for (const char* name : { "key", "value", "src", "fileName", "contentType" }) {
-        if (auto entry = field.find (name); entry != field.end () && entry->is_string ()) {
-            *entry = resolve_template (
-            entry->get<std::string> (), vars, bound_columns, dynamic);
+    if (auto src = entry.find ("src"); src != entry.end () && src->is_string () &&
+    src->get<std::string> ().find ("{{") != std::string::npos) {
+        entry["unresolved"] = true;
+    }
+    for (const char* name : names) {
+        if (auto value = entry.find (name); value != entry.end () && value->is_string ()) {
+            *value = resolve_template (
+            value->get<std::string> (), vars, bound_columns, dynamic);
         }
     }
 }
@@ -1406,6 +1416,44 @@ nlohmann::json& payload) {
     }
 }
 
+/**
+ * A binary body's effective Content-Type, written into the payload when the
+ * file declares none, so every reader of the composed request (code
+ * generation included) names the type the send will use. The send's own tiers
+ * are `implied_content_type`'s: a header row, then `contentType`, then the
+ * extension, then `application/octet-stream`. A non-blank `Content-Type` row
+ * wins at send, so nothing is written under one.
+ */
+void fill_binary_content_type (const nlohmann::json& payload,
+const nlohmann::json& body,
+nlohmann::json& file) {
+    const auto mode = body.find ("mode");
+    if (mode == body.end () || !mode->is_string () ||
+    mode->get<std::string> () != "binary" || !file.is_object ()) {
+        return;
+    }
+    if (const auto declared = file.find ("contentType"); declared != file.end () &&
+    declared->is_string () && !declared->get<std::string> ().empty ()) {
+        return;
+    }
+    if (const auto headers = payload.find ("headers");
+    headers != payload.end () && headers->is_object ()) {
+        for (const auto& [name, value] : headers->items ()) {
+            if (vayu::utils::ascii_lower_equal (name, "content-type") && value.is_string () &&
+            value.get<std::string> ().find_first_not_of (" \t") != std::string::npos) {
+                return;
+            }
+        }
+    }
+    const auto src = file.find ("src");
+    const std::string_view by_extension = src != file.end () && src->is_string () ?
+    media_type_for_extension (src->get<std::string> ()) :
+    std::string_view{};
+    file["contentType"] = by_extension.empty () ?
+    std::string{ "application/octet-stream" } :
+    std::string (by_extension);
+}
+
 /** The body: its content, and every string its form fields carry. */
 void resolve_compose_body (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
@@ -1430,8 +1478,14 @@ nlohmann::json& payload) {
     }
     if (auto fields = it->find ("fields"); fields != it->end () && fields->is_array ()) {
         for (auto& field : *fields) {
-            resolve_form_field (vars, bound_columns, dynamic, field);
+            resolve_file_strings (vars, bound_columns, dynamic, field,
+            { "key", "value", "src", "fileName", "contentType" });
         }
+    }
+    if (auto file = it->find ("file"); file != it->end ()) {
+        resolve_file_strings (vars, bound_columns, dynamic, *file,
+        { "src", "fileName", "contentType" });
+        fill_binary_content_type (payload, *it, *file);
     }
 }
 

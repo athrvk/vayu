@@ -26,7 +26,8 @@ export type BodyMode =
 	| "jsonrpc"
 	| "xml"
 	| "form-data"
-	| "x-www-form-urlencoded";
+	| "x-www-form-urlencoded"
+	| "binary";
 
 export type AuthMode =
 	| "none"
@@ -144,6 +145,27 @@ export interface FormFieldEntry extends KeyValueEntry {
 }
 
 /**
+ * The file a `binary` body sends: an absolute path on this machine, read by the
+ * engine at send time, never held here. The members mean what they mean on a
+ * form-data file part. `unresolved` marks a path no one chose in the editor (an
+ * import, a curl paste, an MCP agent); the engine sends such a path only when it
+ * resolves under a folder allowed in Settings (`FileRoot`).
+ */
+export interface FileRef {
+	src: string;
+	fileName?: string;
+	contentType?: string;
+	unresolved?: boolean;
+}
+
+/** A folder Vayu may read request-body files from without a per-file pick. */
+export interface FileRoot {
+	id: string;
+	path: string;
+	createdAt: number;
+}
+
+/**
  * Request body as a discriminated union.
  * `body_type` on the domain `Request` is a denormalized mirror of `body.mode`.
  */
@@ -151,7 +173,8 @@ export type RequestBody =
 	| { mode: "none" }
 	| { mode: "json" | "text" | "graphql" | "jsonrpc" | "xml"; content: string }
 	| { mode: "form-data"; fields: FormFieldEntry[] }
-	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] };
+	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] }
+	| { mode: "binary"; file: FileRef };
 
 /**
  * Auth configuration for requests.
@@ -1380,6 +1403,13 @@ export interface RunResultTrace {
 		 * `rawRequest`.
 		 */
 		sentHeaders?: Record<string, string>;
+		/**
+		 * What a `binary` body sent: the file's name, size in bytes and
+		 * sha256, recorded at send time - never the bytes and never the path.
+		 * `unknown` because a stored row is whatever its engine wrote;
+		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
+		 */
+		bodyFile?: unknown;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -2906,7 +2936,8 @@ export type ClientSettingsCategory =
 	| "notifications"
 	| "general"
 	| "shortcuts"
-	| "mcp";
+	| "mcp"
+	| "files";
 
 /**
  * Engine settings categories (data-driven from the engine `/config` API).

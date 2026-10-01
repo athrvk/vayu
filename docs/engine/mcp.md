@@ -317,7 +317,7 @@ Notes:
   afterwards rather than written over, because `POST /globals` replaces the whole
   set and must not run in front of a write that can still fail. The caveat
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
-  an import that dropped a WebSocket request, a file body or an operation's
+  an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. **External `$ref`s are
   not followed** - resolving one means fetching a URL or reading a file beside
   the document, which is the import dialog's business (a URL proxy and a gated
@@ -935,8 +935,7 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   wrote it (see *Storing a request's elements* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
   (`json` | `text` | `graphql` | `jsonrpc` | `xml` | `form-data` |
-  `x-www-form-urlencoded`,
-  default `text`). The two form modes carry their content as **fields**, not as
+  `x-www-form-urlencoded` | `binary`, default `text`). The two form modes carry their content as **fields**, not as
   a string, so `body` is written as `key=value&key=value` and split into the
   `fields` rows the engine reads - see
   [the `body` union](api-reference.md#the-request-body-union). A `graphql`
@@ -955,11 +954,25 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   `body` has no envelope at all: it is stored and sent byte for byte and carries
   `application/xml` unless the agent set a Content-Type of its own, which is how
   a SOAP 1.2 endpoint gets `application/soap+xml`.
-  `create_request` stores the same shape. Every field an agent writes is a **text** part: a
-  `form-data` [file part](api-reference.md#file-parts-form-data-only) names a
-  path on the user's machine, which an agent cannot choose for them or verify,
-  so the tools state the limit rather than inventing a shape for it. A stored
-  file part is left alone unless `body` replaces the whole body.
+  `create_request` stores the same shape. Every form field an agent writes is a
+  **text** part: a `form-data`
+  [file part](api-reference.md#file-references-binary-bodies-and-file-parts) has no spelling in a
+  `key=value` string, and a stored one is left alone unless `body` replaces the
+  whole body.
+- **File bodies** - `create_request` and `update_request` store a `binary`
+  body, one file sent as the whole body: `file: {src, contentType?, fileName?}`
+  in place of `body` (a lone `file` implies `bodyType: "binary"`). Every file
+  reference an MCP tool writes is stored `unresolved: true`, whatever the
+  arguments say, so the engine sends it only once the user picks the file
+  again in the request editor or it lives under a folder they allowed in
+  Settings > Files: an agent can name a path, never choose one for the user.
+  The tools that send an ad-hoc request (`run_request`, `start_load_run`)
+  refuse a body that names a file (`bodyType: "binary"` or any `file`
+  argument) before composing anything, and say to run the saved request by id
+  instead - `start_load_run` with `requestId`, or `run_collection` /
+  `run_collection_smoke` over its collection. Both declare `file` only so the
+  refusal is reachable: an undeclared key is stripped by the SDK, and the
+  request would go out with no body at all.
 - **What actually went out** - the engine adds headers an agent never wrote: the
   body-implied `Content-Type` (a `graphql` body on `POST`, or a `jsonrpc` body,
   sends `application/json`; a `graphql` body on `GET` has no body, so the engine

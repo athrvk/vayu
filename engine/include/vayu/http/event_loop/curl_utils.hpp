@@ -17,6 +17,7 @@
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -117,11 +118,13 @@ int extract_port (const std::string& url);
  *
  * Both clients call this before configuring a handle. Four such requests:
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
- * drops the body, so honouring both is impossible), a multipart body naming a
- * file this process cannot read, header text carrying a byte no header line
- * can hold - see `vayu::http::unsendable_header_text` - and a non-ASCII host
- * with no ASCII name (`vayu::http::unsendable_host`). In each case the caller
- * is told rather than having half its request silently discarded.
+ * drops the body, so honouring both is impossible), a binary body whose file
+ * no plan checked (`vayu::http::FilePlan` - the file rule runs once per send or
+ * run, before this, and a body that skipped it is refused rather than read),
+ * header text carrying a byte no header line can hold - see
+ * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
+ * name (`vayu::http::unsendable_host`). In each case the caller is told rather
+ * than having half its request silently discarded.
  *
  * Being the one gate every driver passes through *before* configuring anything
  * is what makes it the home for a rule that has to hold for every origin -
@@ -151,13 +154,20 @@ Response error_response (const Error& error);
  *
  * Requires `validate_transferable(request)` to have passed.
  *
- * @return The multipart body attached to the handle, which the caller **must**
- *         free with `curl_mime_free` once the transfer has finished, or
- *         nullptr for every other body mode. Returned rather than owned here
- *         because the two drivers keep per-transfer state in different places:
- *         a local for the single-request client, `TransferData` for the loop.
+ * A **binary** body is the one mode with two transports. A file the plan read
+ * (`FileRef::inline_bytes`, at most `INLINE_FILE_LIMIT`) goes out as
+ * `CURLOPT_POSTFIELDS` pointing at the shared bytes - no copy per transfer. A
+ * larger one streams: `CURLOPT_UPLOAD` with `INFILESIZE_LARGE`, a read callback
+ * over a `FILE*` this transfer owns, and a **seek callback**, which libcurl needs
+ * to rewind the body for a redirect or the second leg of Digest/NTLM - without
+ * it that leg fails rather than resending. `UPLOAD` means PUT to libcurl, so the
+ * method is re-asserted with `CURLOPT_CUSTOMREQUEST` afterwards.
+ *
+ * @param source Receives what the handle now points into (the multipart tree,
+ *        the open file), which must outlive the transfer: a local for the
+ *        single-request client, `TransferData::body` for the loop.
  */
-[[nodiscard]] curl_mime* apply_method_and_body (CURL* curl, const Request& request);
+void apply_method_and_body (CURL* curl, const Request& request, BodySource& source);
 
 /**
  * @brief The Content-Type value the body implies, or empty.

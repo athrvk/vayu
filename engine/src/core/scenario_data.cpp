@@ -153,7 +153,8 @@ struct HeaderFaults {
 
 /**
  * The one list of strings a data row binds: URL, header names and values, raw
- * body, and both halves of every form field.
+ * body, both halves of every form field, and every file reference's path, name
+ * and type.
  *
  * Splitting and joining both drive it, so neither can cover a field the other
  * does not - a field only the splitter walked would be a token nobody joins,
@@ -175,6 +176,26 @@ struct HeaderFaults {
  * keys cannot collide, and a name that is empty before any row is bound into it
  * is one no row emptied - it is composition's to refuse, and composition does.
  */
+/**
+ * A file reference's three strings. A path a row binds into was chosen by the
+ * data set, not by a person in the editor, so it is marked `unresolved` before
+ * the bind - and is then sent only from under an allowed folder
+ * (`http/file_ref.hpp`), checked once per distinct path when the run is planned.
+ */
+template <typename Visit>
+void visit_file_strings (std::string& src,
+std::string& file_name,
+std::string& content_type,
+bool& unresolved,
+Visit& visit) {
+    if (src.find ("{{") != std::string::npos) {
+        unresolved = true;
+    }
+    visit (src, FieldContext::Plain);
+    visit (file_name, FieldContext::Plain);
+    visit (content_type, FieldContext::Plain);
+}
+
 template <typename Visit>
 HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
@@ -233,6 +254,15 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     for (auto& field : request.body.fields) {
         visit (field.key, FieldContext::Plain);
         visit (field.value, FieldContext::Plain);
+        if (field.type == FormFieldType::File) {
+            visit_file_strings (field.src, field.file_name, field.content_type,
+            field.unresolved, visit);
+        }
+    }
+    if (request.body.mode == BodyMode::Binary) {
+        auto& file = request.body.file;
+        visit_file_strings (
+        file.src, file.file_name, file.content_type, file.unresolved, visit);
     }
 
     return faults;

@@ -134,6 +134,13 @@ export const API_ENDPOINTS = {
 	CLIENT_CERTIFICATES: `/client-certificates`,
 	CLIENT_CERTIFICATE_BY_ID: (id: string) => `/client-certificates/${id}`,
 
+	// Folders a request-body file may be sent from without a per-file pick.
+	// GET answers a bare array; POST takes `{path}` and the engine stores the
+	// canonical form, answering 400 for a path that is not an existing
+	// directory and 409 for one already allowed.
+	FILE_ROOTS: `/file-roots`,
+	FILE_ROOT_BY_ID: (id: string) => `/file-roots/${id}`,
+
 	// Scripting
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 	SCRIPT_TYPES: `/scripting/types`,

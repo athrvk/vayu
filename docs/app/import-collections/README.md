@@ -369,6 +369,20 @@ import complete-but-empty and the user picks the file. Every parser gets it from
 `unattached_file_parts(collections)` in `import_document.cpp`, which reads the finished drafts rather
 than tallying while building them, so the number and the rows cannot disagree.
 
+**Imported file paths, and the folders they sit in.** Every path an import carries - a
+`binary` body's `file.src`, a form-data file part's `src` - arrives `unresolved`: nobody chose
+it on this machine, so the engine sends it only when it lies under a folder allowed in
+Settings > Files. The Preview reads the drafts (`fileReferenceNeeds` in
+`app/src/modules/collections/import-notices.ts`) and lists each distinct parent folder once,
+with how many files it holds and an **Allow folder** action (`ImportFileFolders.tsx`, through
+`hooks/useAllowFolder.ts`), so a collection exported on this same machine is one click per
+folder rather than a relink per request; a folder already allowed reads *Allowed*. A batch
+lists the folders of every file it will import, once. A folder that does not exist here is
+refused by the engine with its own message, and those files are relinked in their requests
+instead. A path whose folder is still a `{{variable}}` names no folder and is left out. A
+`binary` body that arrived with no path at all is counted beside `unattachedFileParts` as
+"N file bodies need files", the whole-body counterpart of that line.
+
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
@@ -409,10 +423,17 @@ counter at all. `cookie_param` is a parameter declared `in: "cookie"`: Vayu's co
 from the jar, and folding one declaration at a time into a single joined `Cookie` header
 would mean inventing a merge the document never wrote, so mapping them is a recorded
 non-goal and naming the loss is the honest half. `unmapped_body` is a `requestBody`
-declaring only media types with no Vayu mode - `application/octet-stream`,
-`application/xml`, `image/*` - which used to return `{ mode: "none" }` on the same path as
-*no body at all*, so a binary upload imported as a bodyless POST reporting nothing skipped;
-an operation that declared no body is still not counted, because it lost nothing.
+declaring only media types with no Vayu mode and no binary schema - an `image/png` whose
+schema is an object, say - which used to return `{ mode: "none" }` on the same path as
+*no body at all*, reporting nothing skipped; an operation that declared no body is still not
+counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
+`format: binary` schema) is no longer one of them: it imports as a `binary` body with no
+file chosen.
+
+`file_body` is not a loss either. Every whole-file body - Postman's `file` mode, an Insomnia
+binary body, an OpenAPI whole-file `requestBody` - imports as a `binary` body naming its file
+(the path the export carried, marked `unresolved`, or none), and the count with its
+`requests` names the bodies whose file the user has to relink or choose.
 `unresolved_base_url` is a `servers[0].url` that could not be made into an address a request
 could reach - a `{variable}` the document declares no default for, or a relative URL in a
 document that arrived with no URL to resolve it against (see

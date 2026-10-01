@@ -18,6 +18,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/types.hpp"
 
@@ -95,6 +96,18 @@ struct LoadAuthPlan {
                                       vayu::http::AuthResolution::Defer;
     }
 };
+
+/**
+ * @brief Check every file a single-request load run can send, once, before it
+ * starts (`http/file_ref.hpp`).
+ *
+ * @p request as it stands when its file paths hold no token - a binary body's
+ * bytes are then read into it - and otherwise each distinct path @p data's rows
+ * bind into it. Answers the refusal, naming the row where one is at fault.
+ */
+[[nodiscard]] std::optional<std::string> plan_load_files (vayu::http::FilePlan& files,
+vayu::Request& request,
+const LoadDataSet* data);
 
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the

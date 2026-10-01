@@ -21,11 +21,18 @@ import type { KeyValueEntry } from "@/types";
 /**
  * The body shape the engine takes on `/compose`, `/execute` and `/runs`
  * (`ExecBody` in the request builder) and hands back composed. Field-based
- * modes carry `fields`; every other mode carries `content`.
+ * modes carry `fields`, `binary` carries `file`, and every other mode carries
+ * `content`.
  */
 export interface SnippetBody {
 	mode: string;
 	content?: string;
+	/** The `binary` mode's file: the whole body is this file's bytes. */
+	file?: {
+		src?: string;
+		fileName?: string;
+		contentType?: string;
+	};
 	fields?: Array<{
 		key: string;
 		value: string;

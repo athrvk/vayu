@@ -73,8 +73,27 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.content_type.empty ()) {
                 entry["contentType"] = field.content_type;
             }
+            if (field.unresolved) {
+                entry["unresolved"] = true;
+            }
         }
         out.push_back (std::move (entry));
+    }
+    return out;
+}
+
+// A binary body's file reference. The plan-time members (`inline_bytes`,
+// `sha256`, `size`) are engine-internal and never leave it.
+Json serialize_file_ref (const FileRef& file) {
+    Json out{ { "src", file.src } };
+    if (!file.file_name.empty ()) {
+        out["fileName"] = file.file_name;
+    }
+    if (!file.content_type.empty ()) {
+        out["contentType"] = file.content_type;
+    }
+    if (file.unresolved) {
+        out["unresolved"] = true;
     }
     return out;
 }
@@ -120,8 +139,8 @@ Json serialize (const Request& request) {
             body_json["fields"] = serialize_form_fields (request.body.fields);
             break;
         case BodyMode::Binary:
-            body_json["mode"]    = "binary";
-            body_json["content"] = request.body.content;
+            body_json["mode"] = "binary";
+            body_json["file"] = serialize_file_ref (request.body.file);
             break;
         case BodyMode::GraphQL:
             body_json["mode"]    = "graphql";
@@ -825,6 +844,10 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
         }
         *target = member->get<std::string> ();
     }
+    if (const auto unresolved = item.find ("unresolved");
+    unresolved != item.end () && unresolved->is_boolean ()) {
+        field.unresolved = unresolved->get<bool> ();
+    }
     // A text part carrying a file's source is ambiguous in the one direction
     // that matters: the caller pointed at a file and nothing would send it.
     if (field.type == FormFieldType::Text && !field.src.empty ()) {
@@ -882,6 +905,59 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
     return fields;
 }
 
+/**
+ * A `binary` body's `file` object. The mode's whole content is the reference,
+ * so a binary body without one is refused rather than sent bodiless - the
+ * silent outcome an engine older than this shape produces.
+ */
+Result<FileRef> parse_file_ref (const Json& body_json) {
+    const auto entry = body_json.find ("file");
+    if (entry == body_json.end () || !entry->is_object ()) {
+        return Error{ ErrorCode::InternalError,
+            "A 'binary' body needs a 'file' object naming the file to send" };
+    }
+    FileRef file;
+    for (const auto& [name, target] :
+    { std::pair<const char*, std::string*>{ "src", &file.src },
+    { "fileName", &file.file_name }, { "contentType", &file.content_type } }) {
+        const auto member = entry->find (name);
+        if (member == entry->end () || member->is_null ()) {
+            continue;
+        }
+        if (!member->is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                std::string{ "Body file '" } + name + "' must be a string" };
+        }
+        *target = member->get<std::string> ();
+    }
+    if (const auto unresolved = entry->find ("unresolved");
+    unresolved != entry->end () && unresolved->is_boolean ()) {
+        file.unresolved = unresolved->get<bool> ();
+    }
+    return file;
+}
+
+/// The structured halves of a body whose `mode` is already read: the form
+/// modes' `fields` and the binary mode's `file`.
+std::optional<Error> read_body_parts (const Json& body_json, Body& body) {
+    auto fields = parse_form_fields (body_json, body.mode);
+    if (fields.is_error ()) {
+        return fields.error ();
+    }
+    body.fields = std::move (fields).value ();
+
+    if (body.mode == BodyMode::Binary) {
+        auto file = parse_file_ref (body_json);
+        if (file.is_error ()) {
+            return file.error ();
+        }
+        body.file = std::move (file).value ();
+    } else if (body_json.contains ("file")) {
+        return Error{ ErrorCode::InternalError, "Body 'file' is only valid for the 'binary' mode" };
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 namespace {
@@ -937,11 +1013,9 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
             }
         }
 
-        auto fields = parse_form_fields (body_json, request.body.mode);
-        if (fields.is_error ()) {
-            return fields.error ();
+        if (auto refusal = read_body_parts (body_json, request.body)) {
+            return refusal;
         }
-        request.body.fields = std::move (fields).value ();
     }
     return std::nullopt;
 }

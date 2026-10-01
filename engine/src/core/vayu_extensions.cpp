@@ -53,8 +53,8 @@ std::to_array<std::string_view> ({ "client_secret", "client_assertion", "code_ve
 "refresh_token", "access_token", "id_token", "password", "assertion" });
 
 /// Vayu's body modes (`RequestBody["mode"]` in the app's `domain.ts`).
-constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json",
-"text", "graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded" });
+constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json", "text",
+"graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded", "binary" });
 
 /// Vayu's auth modes (`AuthMode` in `domain.ts`).
 constexpr auto AUTH_MODES =
@@ -65,9 +65,10 @@ std::to_array<std::string_view> ({ "none", "noauth", "inherit", "bearer", "basic
 constexpr auto HTTP_VERSIONS =
 std::to_array<std::string_view> ({ "auto", "http1.1", "http2" });
 
-/// A form-data part's optional members besides the row's own.
+/// A form-data part's optional members besides the row's own. `src` is kept
+/// only on a file part, and always as unresolved - see `body_of`.
 constexpr auto FORM_PART_KEYS =
-std::to_array<std::string_view> ({ "type", "fileName", "contentType" });
+std::to_array<std::string_view> ({ "type", "src", "fileName", "contentType" });
 
 /// A Params row's optional members besides the row's own.
 constexpr auto PARAM_ROW_KEYS = std::to_array<std::string_view> ({ "in", "type" });
@@ -289,7 +290,11 @@ Json redact_variables (const Json& variables, int& omitted) {
 }
 
 Json portable_body (const Json& body) {
-    Json out          = body;
+    Json out = body;
+    if (const auto file = out.find ("file"); file != out.end () && file->is_object ()) {
+        file->erase ("src");
+        file->erase ("unresolved");
+    }
     const auto fields = out.find ("fields");
     if (fields == out.end () || !fields->is_array ()) {
         return out;
@@ -306,6 +311,46 @@ Json portable_body (const Json& body) {
 std::optional<Json> rows_of (const Json& value) {
     return rows_with (value, std::array<std::string_view, 0>{});
 }
+
+namespace {
+
+/// @p ref (a form file part, or a binary body's `file`) as an import may store
+/// it: a path is one nobody chose in this editor, so it is marked unresolved.
+void mark_imported_path (Json& ref) {
+    const auto src = ref.find ("src");
+    if (src != ref.end () && src->is_string () &&
+    !src->get_ref<const std::string&> ().empty ()) {
+        ref["unresolved"] = true;
+    }
+}
+
+/// A `binary` body: its `file` object's string members (`src`, `fileName`,
+/// `contentType`), `src` marked as an import's. A missing `file` is a body with
+/// no file chosen; a `file` of another type, or a member that is not a string,
+/// is refused.
+std::optional<Json> file_body_of (const Json& value) {
+    const auto stated = value.find ("file");
+    Json file{ { "src", "" } };
+    if (stated != value.end ()) {
+        if (!stated->is_object ()) {
+            return std::nullopt;
+        }
+        for (const char* key : { "src", "fileName", "contentType" }) {
+            const auto member = stated->find (key);
+            if (member == stated->end ()) {
+                continue;
+            }
+            if (!member->is_string ()) {
+                return std::nullopt;
+            }
+            file[key] = *member;
+        }
+    }
+    mark_imported_path (file);
+    return std::make_optional (Json{ { "mode", "binary" }, { "file", std::move (file) } });
+}
+
+} // namespace
 
 std::optional<Json> param_rows_of (const Json& value) {
     std::optional<Json> rows = rows_with (value, PARAM_ROW_KEYS);
@@ -334,6 +379,9 @@ std::optional<Json> body_of (const Json& value) {
     if (mode == "none") {
         return std::make_optional (Json{ { "mode", "none" } });
     }
+    if (mode == "binary") {
+        return file_body_of (value);
+    }
     if (mode == "form-data" || mode == "x-www-form-urlencoded") {
         const auto fields        = value.find ("fields");
         std::optional<Json> rows = std::make_optional (Json::array ());
@@ -343,6 +391,14 @@ std::optional<Json> body_of (const Json& value) {
         }
         if (!rows) {
             return std::nullopt;
+        }
+        for (Json& row : *rows) {
+            // A text part never carries a path: the write routes refuse one.
+            if (row.value ("type", "") == "file") {
+                mark_imported_path (row);
+            } else {
+                row.erase ("src");
+            }
         }
         return std::make_optional (
         Json{ { "mode", mode }, { "fields", std::move (*rows) } });

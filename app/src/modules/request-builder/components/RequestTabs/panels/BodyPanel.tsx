@@ -9,8 +9,8 @@
  * BodyPanel Component
  *
  * Mode selection, and whichever editor that mode needs: a code editor for JSON,
- * JSON-RPC, XML and text, the key/value table for form-data and urlencoded, and
- * `GraphQLBody` for GraphQL.
+ * JSON-RPC, XML and text, the key/value table for form-data and urlencoded,
+ * `GraphQLBody` for GraphQL, and `BinaryBodyPanel` for a whole-file body.
  *
  * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
  * plus an XML document the user writes whole, so the mode buys highlighting
@@ -84,6 +84,8 @@ import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { switchGraphQLMethod } from "./body/graphql-method";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
+import BinaryBodyPanel from "./body/BinaryBodyPanel";
+import { binaryContentType } from "./body/binary-content-type";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 
 /*
@@ -270,6 +272,15 @@ export default function BodyPanel() {
 	};
 
 	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
+	// A binary body's type depends on the request, not on the mode.
+	const binaryType =
+		request.bodyMode === "binary"
+			? binaryContentType(request.headers, request.binaryFile)
+			: null;
+	const wireContentType =
+		binaryType && binaryType.from !== "extension"
+			? binaryType.value
+			: (activeMode?.contentType ?? null);
 	const hasVariables = containsVariableToken(request.body);
 	// Memoized for the same reason as `resolvedGqlUrl` above, and a `useMemo`
 	// for the same reason too: an unmemoized call rerolled every
@@ -326,10 +337,14 @@ export default function BodyPanel() {
 					 * content type it implies was one click away and invisible the rest
 					 * of the time.
 					 */}
-					{activeMode?.contentType ? (
+					{wireContentType ? (
 						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-label text-muted-foreground">
-							{activeMode.contentType}
+							{wireContentType}
 						</code>
+					) : request.bodyMode === "binary" ? (
+						<span className="text-xs text-muted-foreground">
+							Type from the file extension
+						</span>
 					) : (
 						<span className="text-xs text-muted-foreground">No body will be sent.</span>
 					)}
@@ -425,6 +440,8 @@ export default function BodyPanel() {
 					</Suspense>
 				</div>
 			)}
+
+			{request.bodyMode === "binary" && <BinaryBodyPanel />}
 
 			{/*
 			 * form-data and urlencoded render through one branch. They were two

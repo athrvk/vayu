@@ -15,16 +15,17 @@
  * `collectionId`, `elements`) are deliberately never included - curl can't
  * express them, so the caller keeps its own.
  *
- * A body read from a file (`-d @body.json`) is still skipped: the contents are
- * the body, and a pasted command cannot supply them. A **form file part**
- * (`-F field=@file`) is different - the engine opens the file at send time, so
- * only its path has to survive, and it imports as a file row marked unresolved
- * (issue #393). Before that it landed as a text field whose value was the
- * literal `@path`.
+ * A file the command reads is never read here: the engine opens it at send
+ * time, so only its path has to survive. A **form file part**
+ * (`-F field=@file`) imports as a file row (issue #393), and a **whole-body
+ * file** (`--data-binary @file`, `-d @file`, `-T file`) as a `binary` body.
+ * Both are marked unresolved: the path names a file on whoever's machine the
+ * command came from, and the engine sends it only once it is picked again in
+ * the editor or lives under a folder allowed in Settings > Files.
  */
 
 import type { HttpMethod, SettingsCategory } from "@/types";
-import type { BodyMode, KeyValueItem } from "@/types";
+import type { BodyMode, FileRef, KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
@@ -49,6 +50,7 @@ export type ParsedRequest = Pick<
 	| "body"
 	| "formData"
 	| "urlEncoded"
+	| "binaryFile"
 	| "auth"
 	| "stream"
 	| "verifySSL"
@@ -240,9 +242,18 @@ interface Builder {
 	dataParts: string[]; // -d / --data*
 	urlEncodeParts: string[]; // --data-urlencode
 	formParts: FormPart[]; // -F
+	/**
+	 * `-d @path` and its kin, in order: a body the command reads from a file.
+	 * Only a lone one becomes a `binary` body - see `resolve`.
+	 */
+	dataFiles: Array<{ flag: string; src: string }>;
+	/**
+	 * curl `-T <path>`: the file uploaded as the whole body. Empty for an
+	 * upload from standard input, which still makes the request a PUT.
+	 */
+	uploadPath: string | null;
 	forceGet: boolean; // -G
 	jsonShortcut: boolean; // curl --json
-	uploadFile: boolean; // curl -T (implies PUT)
 	basic: { username: string; password: string } | null;
 	/** `--digest` / `--ntlm` beside `-u` - which scheme the credentials are for. */
 	authScheme: "digest" | "ntlm" | null;
@@ -270,9 +281,10 @@ function newBuilder(): Builder {
 		dataParts: [],
 		urlEncodeParts: [],
 		formParts: [],
+		dataFiles: [],
+		uploadPath: null,
 		forceGet: false,
 		jsonShortcut: false,
-		uploadFile: false,
 		basic: null,
 		authScheme: null,
 		bearer: null,
@@ -446,9 +458,68 @@ function findHeader(b: Builder, name: string): string | undefined {
 	return b.headers.find((h) => h.key.toLowerCase() === lower)?.value;
 }
 
+/** The data flags whose `@file` curl reads with newlines stripped. */
+const STRIPS_NEWLINES = new Set(["-d", "--data", "--data-ascii"]);
+
+/**
+ * The file a command sends as its whole body, or null.
+ *
+ * `-T` wins outright: curl sends the upload and nothing else. Otherwise a body
+ * read from a file is one only when it is the command's *only* data: curl
+ * joins every `-d` with `&`, and a file's bytes spliced between text parts is
+ * not something one file reference can say. Anything else keeps the text
+ * parts and discloses each file part, as `-G` does (its data becomes the query,
+ * and a file's contents cannot).
+ */
+function wholeBodyFile(b: Builder): string | null {
+	if (b.uploadPath !== null) return b.uploadPath || null;
+	const lone =
+		b.dataFiles.length === 1 &&
+		b.dataParts.length === 0 &&
+		b.urlEncodeParts.length === 0 &&
+		!b.jsonShortcut &&
+		!b.forceGet &&
+		b.formParts.length === 0;
+	if (lone) {
+		const [only] = b.dataFiles;
+		if (STRIPS_NEWLINES.has(only.flag)) {
+			// curl's `-d @file` strips carriage returns and newlines from the
+			// file; only `--data-binary` sends it as is. Vayu always sends the
+			// bytes unchanged, so the difference is said rather than imitated.
+			recordDropped(b, only.flag, {
+				what: "strips newlines from its body file; Vayu sends the file unchanged",
+			});
+		}
+		return only.src;
+	}
+	for (const file of b.dataFiles) {
+		recordDropped(b, file.flag, {
+			what: "read part of the body from a file, which cannot be combined with other body data",
+		});
+	}
+	return null;
+}
+
+/**
+ * curl `-T`'s URL rule: a URL with no file name in its path (none at all, or
+ * one ending in `/`) gets the local file's name appended, so the command
+ * uploads to `…/dir/a.bin`, not `…/dir/`.
+ */
+function withUploadName(url: string, path: string): string {
+	const name = encodeURIComponent(fileBaseName(path));
+	const cut = url.search(/[?#]/);
+	const base = cut === -1 ? url : url.slice(0, cut);
+	const rest = cut === -1 ? "" : url.slice(cut);
+	if (base.endsWith("/")) return `${base}${name}${rest}`;
+	// Scheme and authority with no path at all: `https://host[:port]`.
+	if (/^[a-z][a-z0-9+.-]*:\/\/[^/]*$/i.test(base)) return `${base}/${name}${rest}`;
+	return url;
+}
+
 function resolve(b: Builder): CommandImport {
 	// --- URL + params -------------------------------------------------------
 	let url = b.url || pickUrl(b);
+	if (b.uploadPath) url = withUploadName(url, b.uploadPath);
 	const dataJoined = b.dataParts.join("&");
 
 	// -G moves data onto the query string as params.
@@ -460,14 +531,19 @@ function resolve(b: Builder): CommandImport {
 	const params = paramsFromUrl(url);
 
 	// --- method -------------------------------------------------------------
-	const hasBody = b.dataParts.length > 0 || b.urlEncodeParts.length > 0 || b.jsonShortcut;
+	const bodyFile = wholeBodyFile(b);
+	const hasBody =
+		b.dataParts.length > 0 ||
+		b.urlEncodeParts.length > 0 ||
+		b.jsonShortcut ||
+		bodyFile !== null;
 	const hasForm = b.formParts.length > 0;
 	let method: HttpMethod;
 	if (b.method) {
 		method = b.method;
 	} else if (b.forceGet) {
 		method = "GET";
-	} else if (b.uploadFile) {
+	} else if (b.uploadPath !== null) {
 		method = "PUT";
 	} else if (hasBody || hasForm) {
 		method = "POST";
@@ -520,10 +596,16 @@ function resolve(b: Builder): CommandImport {
 	let body = "";
 	let formData: KeyValueItem[] = [];
 	let urlEncoded: KeyValueItem[] = [];
+	let binaryFile: FileRef = { src: "" };
 
 	const contentType = (b.jsonShortcut ? "application/json" : findHeader(b, "content-type")) ?? "";
 
-	if (hasForm) {
+	if (bodyFile !== null) {
+		// The Content-Type a `-H` declared stays a header row, which outranks
+		// anything the file itself could declare, so the file carries none.
+		bodyMode = "binary";
+		binaryFile = { src: bodyFile, fileName: fileBaseName(bodyFile), unresolved: true };
+	} else if (hasForm) {
 		bodyMode = "form-data";
 		formData = toFormItems(b.formParts);
 	} else if (b.urlEncodeParts.length > 0) {
@@ -561,6 +643,7 @@ function resolve(b: Builder): CommandImport {
 			body,
 			formData,
 			urlEncoded,
+			binaryFile,
 			auth,
 			stream: b.stream,
 			// `-k` says "do not verify", so the stored field is its inverse.
@@ -752,13 +835,21 @@ function parseCurl(args: string[]): CommandImport {
 				// curl's dedicated OAuth 2.0 bearer flag → Vayu bearer auth.
 				b.bearer = value();
 				break;
+			case "--data-raw":
+				// The one data flag that never reads a file: a leading `@` is
+				// part of the body.
+				b.dataParts.push(value());
+				break;
 			case "-d":
 			case "--data":
-			case "--data-raw":
 			case "--data-ascii":
 			case "--data-binary": {
 				const v = value();
+				const src = v.slice(1).trim();
+				// `@-` is standard input, which a pasted command cannot supply.
 				if (!isFileRef(v)) b.dataParts.push(v);
+				else if (src && src !== "-") b.dataFiles.push({ flag, src });
+				else recordDropped(b, flag, { what: "read its body from standard input" });
 				break;
 			}
 			case "--data-urlencode": {
@@ -794,16 +885,22 @@ function parseCurl(args: string[]): CommandImport {
 				b.forceGet = true;
 				break;
 			case "-T":
-			case "--upload-file":
-				// File contents can't be read from a pasted command, but the flag
-				// implies a PUT - record the intent and discard the path. Ledgered
-				// with its own text (issue #1445) rather than through the shared
-				// table: curl's `-T` uploads, wget's means a timeout, and the two
-				// disagree about the same flag spelling.
-				value();
-				b.uploadFile = true;
-				recordDropped(b, flag, { what: "uploaded a local file as the request body" });
+			case "--upload-file": {
+				// The whole body is the file, sent as a PUT unless `-X` says
+				// otherwise. Standard input (`-` or `.`) is the one upload a
+				// pasted command cannot carry; it is ledgered with its own text
+				// rather than through the shared table, because curl's `-T`
+				// uploads and wget's means a timeout (issue #1445).
+				const src = value().trim();
+				const stdin = !src || src === "-" || src === ".";
+				b.uploadPath = stdin ? "" : src;
+				if (stdin) {
+					recordDropped(b, flag, {
+						what: "uploaded standard input as the request body",
+					});
+				}
 				break;
+			}
 			case "-k":
 			case "--insecure":
 				b.insecure = true;
@@ -943,10 +1040,13 @@ function parseWget(args: string[]): CommandImport {
 			case "--http-password":
 				password = value();
 				break;
-			// --post-file sends file contents as the body; can't read it → skip.
-			case "--post-file":
-				value();
+			// The file is the body, sent as is - the same `binary` body curl's
+			// `--data-binary @file` imports as.
+			case "--post-file": {
+				const src = value().trim();
+				if (src) b.dataFiles.push({ flag, src });
 				break;
+			}
 			// wget's spelling of `-k`, mapped for the same reason and through
 			// the same builder field - the two commands resolve into one
 			// request, so honouring the intent on one path and eating it on the

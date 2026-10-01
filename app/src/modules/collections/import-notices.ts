@@ -23,8 +23,16 @@
  * line names them too, so "1 request body..." becomes the request to open.
  */
 
-import type { ImportMeta, SkippedItem } from "@/services/importers/types";
+import type {
+	CollectionDraft,
+	ImportMeta,
+	ImportResult,
+	RequestDraft,
+	SkippedItem,
+} from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { containsVariableToken } from "@/constants/variables";
+import { parentFolder } from "@/lib/file-path";
 
 export type NoticeTier = "action" | "note";
 
@@ -82,11 +90,14 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 Insomnia unit test not imported",
 		many: "{n} Insomnia unit tests not imported",
 	},
+	// A whole-file body imports as a `binary` body now, with the path the
+	// source named marked unresolved; the folder lines below are where the
+	// user acts on it, so this line only says what arrived.
 	file_body: {
-		tier: "action",
-		named: "body not imported (file upload)",
-		one: "1 request body not imported (file upload)",
-		many: "{n} request bodies not imported (file upload)",
+		tier: "note",
+		named: "file body imported - choose the file or allow its folder to send it",
+		one: "1 file body imported - choose the file or allow its folder to send it",
+		many: "{n} file bodies imported - choose each file or allow its folder to send them",
 	},
 	malformed_item: {
 		tier: "action",
@@ -139,9 +150,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	// XML imports as `xml`; what reaches this is a binary or image body.
 	unmapped_body: {
 		tier: "action",
-		named: "body not imported (binary file)",
-		one: "1 request body not imported (binary file)",
-		many: "{n} request bodies not imported (binary file)",
+		named: "body not imported (unsupported media type)",
+		one: "1 request body not imported (unsupported media type)",
+		many: "{n} request bodies not imported (unsupported media type)",
 	},
 	unresolved_base_url: {
 		tier: "action",
@@ -329,4 +340,69 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 		...notices.filter((n) => n.tier === "action"),
 		...notices.filter((n) => n.tier === "note"),
 	];
+}
+
+/** Distinct folders holding imported file references, and how many each holds. */
+export interface FileReferenceFolder {
+	folder: string;
+	count: number;
+}
+
+/**
+ * What an import's file references need before they can be sent, read off the
+ * drafts themselves rather than a counter, so every format answers alike.
+ *
+ * - `folders`: every imported path is `unresolved` - nobody chose it on this
+ *   machine - so the engine sends it only from an allowed folder. One entry
+ *   per distinct parent folder, so a collection exported on this same machine
+ *   is one "Allow folder" click rather than a relink per request. A path with
+ *   a `{{variable}}` in its folder names no folder yet and is left out.
+ * - `bodiesWithoutFile`: `binary` bodies that arrived with no path at all (an
+ *   OpenAPI upload documents the type, never the file). Form-data parts in the
+ *   same state are the engine's `unattachedFileParts`, already a line of its
+ *   own; this is the whole-body counterpart.
+ */
+export function fileReferenceNeeds(results: readonly ImportResult[]): {
+	folders: FileReferenceFolder[];
+	bodiesWithoutFile: number;
+} {
+	const counts = new Map<string, number>();
+	let bodiesWithoutFile = 0;
+
+	const reference = (src: string | undefined, unresolved: boolean | undefined) => {
+		if (!unresolved || !src?.trim()) return;
+		const folder = parentFolder(src);
+		if (!folder || containsVariableToken(folder)) return;
+		counts.set(folder, (counts.get(folder) ?? 0) + 1);
+	};
+	const visitRequest = (request: RequestDraft) => {
+		const body = request.body;
+		if (body?.mode === "binary") {
+			if (!body.file?.src?.trim()) bodiesWithoutFile += 1;
+			else reference(body.file.src, body.file.unresolved);
+		} else if (body?.mode === "form-data") {
+			for (const field of body.fields ?? []) {
+				if (field.type === "file") reference(field.src, field.unresolved);
+			}
+		}
+	};
+	const visit = (collection: CollectionDraft) => {
+		collection.requests.forEach(visitRequest);
+		collection.children.forEach(visit);
+	};
+	for (const result of results) result.collections.forEach(visit);
+
+	const folders = [...counts]
+		.map(([folder, count]) => ({ folder, count }))
+		.sort((a, b) => a.folder.localeCompare(b.folder));
+	return { folders, bodiesWithoutFile };
+}
+
+/** The line for `bodiesWithoutFile`, in the words the form-part line uses. */
+export function bodiesWithoutFileNotice(n: number): ImportNotice | null {
+	if (n === 0) return null;
+	return {
+		tier: "action",
+		text: `${n} ${pluralize(n, "file body", "file bodies")} ${pluralize(n, "needs", "need")} ${pluralize(n, "a file", "files")}`,
+	};
 }

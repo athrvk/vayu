@@ -91,6 +91,31 @@ TEST (VayuExtensions, NeverCarriesAFilePartsLocalPath) {
     EXPECT_EQ (body["fields"][0]["type"], "file");
 }
 
+/// A binary body's file travels by name and type: the path is one machine's,
+/// and `unresolved` describes that path.
+TEST (VayuExtensions, StripsTheLocalPathFromABinaryBodysFile) {
+    const Json body = ext::portable_body (Json::parse (R"({"mode":"binary","file":{
+        "src":"/home/me/a.png","fileName":"a.png","contentType":"image/png","unresolved":true}})"));
+    EXPECT_EQ (body,
+    Json::parse (R"({"mode":"binary","file":{"fileName":"a.png","contentType":"image/png"}})"));
+}
+
+/// Re-reading a binary body: a path it carries is nobody's choice here, so it
+/// is marked unresolved whatever the document says; a `file` member that is
+/// not an object, or one whose members are not strings, is refused.
+TEST (VayuExtensions, ReadsABinaryBodyAndMarksACarriedPathUnresolved) {
+    const auto carried = ext::body_of (Json::parse (
+    R"({"mode":"binary","file":{"src":"/x/a.bin","unresolved":false}})"));
+    ASSERT_HAS_VALUE (carried);
+    EXPECT_EQ (*carried,
+    Json::parse (R"({"mode":"binary","file":{"src":"/x/a.bin","unresolved":true}})"));
+    const auto bare = ext::body_of (Json::parse (R"({"mode":"binary"})"));
+    ASSERT_HAS_VALUE (bare);
+    EXPECT_EQ (*bare, Json::parse (R"({"mode":"binary","file":{"src":""}})"));
+    EXPECT_FALSE (ext::body_of (Json::parse (R"({"mode":"binary","file":"/x/a.bin"})")));
+    EXPECT_FALSE (ext::body_of (Json::parse (R"({"mode":"binary","file":{"src":7}})")));
+}
+
 TEST (VayuExtensions, GivesEveryRowTheFieldsTheWriteRoutesRequire) {
     // `enabled` absent reads as enabled (D17) and `value` absent as "" -
     // exactly what `apply_key_value_field` then requires to be present.

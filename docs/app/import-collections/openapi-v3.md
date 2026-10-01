@@ -214,6 +214,7 @@ Why optional value-less parameters import **disabled** (issues #622, #658): the 
 | `application/xml`, `text/xml`, or any `+xml` type | `{ mode: "xml", content }` | the same: the `example` as the text it is, else empty - a Vayu skeleton export writes an `xml` body exactly this way |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
+| `application/octet-stream` (any schema), else the first media type whose schema is one `format: binary` string (`$ref` and the first composed branch followed) | `{ mode: "binary", file: { src: "", contentType } }` | a **whole-file body** with no file chosen: the spec names the upload, never the file. `contentType` is that media type, lowered and without parameters; a wildcard such as `image/*` gives none, and the send derives one from the file. Counted as `file_body` |
 | no `content`, or none of the above | `{ mode: "none" }` | |
 
 ### File parts
@@ -312,7 +313,7 @@ Dropped / not represented:
 - **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 - **Form-field property schemas:** only field **names** and whether the field is a file (`format: binary`) are imported; `required`, other types, and nested structure are not.
-- **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and the operation is counted as `unmapped_body` (issue #719) - unlike a multipart file part, which imports (see [File parts](#file-parts)). An operation that declares no `requestBody` at all is **not** counted: it lost nothing, and the two used to be indistinguishable.
+- **A body in a media type with no mode and no binary schema** (an `image/png` whose schema is an object, say): no body is produced (`{ mode: "none" }`) and the operation is counted as `unmapped_body` (issue #719). A whole-file body - `application/octet-stream`, or a `format: binary` schema - imports as a `binary` body instead (see [Request body generation](#request-body-generation)). An operation that declares no `requestBody` at all is **not** counted: it lost nothing, and the two used to be indistinguishable.
 - **Cookie parameters** (`in: "cookie"`): dropped and counted as `cookie_param` (issue #719). Vayu has no cookie-parameter row - a request's cookies come from the jar - and mapping them onto a `Cookie` header is a recorded non-goal: the header is one joined value while a spec declares these one at a time, so building it would mean inventing a merge the document never wrote. `in: "path"` is neither dropped nor counted; it is already carried, as the `{{param}}` the URL template holds.
 
 `meta` population: `format = "OpenAPI 3.0"` or `"OpenAPI 3.1"`, read off the document's own `openapi` string rather than assumed (issue #1444 - every 3.x document used to report `"OpenAPI 3.0"`), `requestCount` = total operations built (TRACE excluded), `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them (`"tags"` / `"paths"` / `"mixed"`, absent when there are no folders), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `count_examples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattached_file_parts` = file parts imported with no file attached (`unattached_file_parts`, read off the finished drafts), and `skipped` from the `ImportTally`:
@@ -325,7 +326,8 @@ Dropped / not represented:
 | `default_response` | a response keyed `default` - conformant, and reported as information rather than as a loss |
 | `duplicate_operation_id` | an `operationId` another operation in this document already declared (see [Operation identity](#operation-identity)) |
 | `cookie_param` | a parameter declared `in: "cookie"` - one per distinct cookie parameter per operation |
-| `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode - one per operation, however many such media types it listed |
+| `file_body` | a whole-file `requestBody`, imported as a `binary` body with no file chosen - informational, the requests whose file to choose |
+| `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode and no binary schema - one per operation, however many such media types it listed |
 | `unresolved_base_url` | `servers[0].url` still carries a `{variable}` with no declared default, or is relative in a document with no source URL (see [The base URL](#the-base-url)) |
 | `servers_dropped` | the document declares more than one `servers` entry - counted per entry past the first (issue #1444) |
 | `security_unmapped_or` | an operation's `security` offers more than one alternative requirement (an OR) - see [Auth / security](#auth--security) (issue #1444) |

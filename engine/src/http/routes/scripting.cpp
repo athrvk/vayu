@@ -848,7 +848,8 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.body" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
     "The request body (if any), as Postman's RequestBody object: mode, raw, "
-    "the urlencoded/formdata field lists and the graphql pair.\n\nIt still "
+    "the urlencoded/formdata field lists, the graphql pair and the file.\n\nIt "
+    "still "
     "behaves as the "
     "string it used to be - concatenation, template literals, ==, the String "
     "methods and .length all give the body - so `===` and `typeof` are two of "
@@ -865,18 +866,17 @@ nlohmann::json get_script_completions () {
     "x-www-form-urlencoded that is the exact wire body and an assignment "
     "parses back into the fields, while for form-data it is a rendering of the "
     "parts (the multipart bytes carry a boundary that does not exist until the "
-    "send) and an assignment is refused." },
+    "send) and an assignment is refused. A binary body reads as @ and its file "
+    "name, and an assignment is refused: a script never chooses the file." },
     { "sortText", "1_pm_request_body" } });
 
     completions.push_back ({ { "label", "pm.request.body.mode" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body.mode" }, { "detail", "string" },
     { "documentation",
-    "Postman's mode name: \"urlencoded\", \"formdata\", \"graphql\", or "
-    "\"raw\" for every other content mode - json, text, xml, binary and "
-    "jsonrpc all carry their body as one string, which is what raw means. "
-    "Postman's fifth mode, \"file\", is never answered: it promises a path, "
-    "and a binary body here carries bytes. Read-only; the mode follows the "
-    "request's body type." },
+    "Postman's mode name: \"urlencoded\", \"formdata\", \"graphql\", "
+    "\"file\" for a binary body, or \"raw\" for every other content mode - "
+    "json, text, xml and jsonrpc all carry their body as one string, which is "
+    "what raw means. Read-only; the mode follows the request's body type." },
     { "sortText", "2_pm_request_body_mode" } });
 
     completions.push_back ({ { "label", "pm.request.body.raw" }, { "kind", KIND_FIELD },
@@ -944,6 +944,18 @@ nlohmann::json get_script_completions () {
     "passes through untouched. body.raw still carries the string.\n\n"
     "Read-only: assign body.raw to change what is sent." },
     { "sortText", "2_pm_request_body_graphql" } });
+
+    completions.push_back ({ { "label", "pm.request.body.file" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.request.body.file" },
+    // `object` for the reason the graphql row above gives.
+    { "detail", "object | undefined" },
+    { "documentation",
+    "{ name, size? } for a binary body, or undefined in any other mode. name "
+    "is the file name the request declares, or the last part of its path; "
+    "size is the file's length in bytes once the send has read it. Postman's "
+    "src is never answered - the local path is not disclosed, as for a "
+    "form-data file part.\n\nRead-only: choose the file in the request." },
+    { "sortText", "2_pm_request_body_file" } });
 
     completions.push_back ({ { "label", "pm.request.body.length" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body.length" }, { "detail", "number" },

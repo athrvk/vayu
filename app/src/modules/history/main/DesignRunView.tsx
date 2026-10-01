@@ -49,7 +49,7 @@ import {
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
-import { ErrorState } from "@/components/shared";
+import { ErrorState, SentBodyFileNote } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import { bodyModeHeaders, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
@@ -419,6 +419,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						Run sent auth: {seed.recordedAuthMode}
 					</Badge>
 				)}
+				{/* Which file a binary body sent, as the engine recorded it at
+				    send time - the file on disk may have changed since, and the
+				    sha256 is what says whether it did. */}
+				{seed.requestBodyFile && <SentBodyFileNote file={seed.requestBodyFile} />}
 				<div className="ml-auto flex items-center gap-2">
 					<Button
 						variant="outline"

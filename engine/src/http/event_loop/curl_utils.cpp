@@ -13,6 +13,8 @@
 #include <cassert>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -23,6 +25,7 @@
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
@@ -81,6 +84,37 @@ bool looks_like_ipv4_literal (std::string_view host) {
     return has_dot;
 }
 
+/// libcurl's read callback for a streamed binary body. A file that could not
+/// be opened (it vanished after the plan checked it) aborts the transfer, which
+/// libcurl reports as its own read failure.
+size_t read_body_file (char* buffer, size_t size, size_t nitems, void* userdata) {
+    auto* stream = static_cast<std::FILE*> (userdata);
+    if (stream == nullptr) {
+        return CURL_READFUNC_ABORT;
+    }
+    const size_t got = std::fread (buffer, size, nitems, stream);
+    if (got < nitems && std::ferror (stream) != 0) {
+        return CURL_READFUNC_ABORT;
+    }
+    return got;
+}
+
+/// libcurl's seek callback, so a redirect or an auth retry can rewind the body.
+int seek_body_file (void* userdata, curl_off_t offset, int origin) {
+    auto* stream = static_cast<std::FILE*> (userdata);
+    if (stream == nullptr) {
+        return CURL_SEEKFUNC_FAIL;
+    }
+    // `fseek` takes a `long`, which is 32 bits on Windows; an offset past it
+    // cannot be honoured there, so it is refused rather than truncated.
+    if (offset > std::numeric_limits<long>::max ()) {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+    return std::fseek (stream, static_cast<long> (offset), origin) == 0 ?
+    CURL_SEEKFUNC_OK :
+    CURL_SEEKFUNC_FAIL;
+}
+
 } // namespace
 
 UrlAuthority parse_authority (const std::string& url) {
@@ -137,12 +171,15 @@ std::optional<Error> validate_transferable (const Request& request) {
         return Error{ ErrorCode::InvalidMethod,
             "HEAD requests cannot carry a body - remove the body or use GET" };
     }
-    // A file part that cannot be read is refused here rather than encoded and
-    // left to fail on the wire: libcurl would report a read error naming
-    // nothing, and an omitted part is the silence this feature exists to end.
-    // Costs one open per transfer, and only for a body that has a file part.
-    if (auto problem = vayu::http::unsendable_file_part (request.body)) {
-        return Error{ ErrorCode::InternalError, std::move (*problem) };
+    // The file rule (`file_ref.hpp`) ran once for this send or run, before
+    // any driver; what is left here is the proof it did. A binary body without
+    // its plan-time members never went through it, and is refused rather than
+    // read on the transfer's behalf.
+    if (has_body && request.body.mode == BodyMode::Binary &&
+    !vayu::http::is_prepared (request.body.file)) {
+        return Error{
+            ErrorCode::InternalError, "Body file '" + request.body.file.src + "' was not checked before the send - this driver skipped the file rule"
+        };
     }
     // Header text that would end or truncate the line it is written into. Here
     // rather than in `build_request_header_list` because that function has no
@@ -173,46 +210,86 @@ Response error_response (const Error& error) {
     return response;
 }
 
-curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
+namespace {
+
+/// A `form-data` body as a libcurl multipart tree, owned by @p source.
+void attach_multipart (CURL* curl, const Request& request, BodySource& source) {
+    // Multipart: libcurl encodes the parts and generates the boundary, so
+    // the body and the Content-Type that describes it cannot disagree.
+    //
+    // A file part is `curl_mime_filedata`, which means libcurl reads the
+    // file *during the transfer* - so a load run re-reads it once per
+    // iteration (the page cache absorbs that; slurping it into memory at
+    // plan time would trade a bounded read for an unbounded allocation and
+    // a snapshot that goes stale). The file rule (`file_ref.hpp`) already
+    // checked it once for the send or the run, so a failure here is a
+    // file that vanished since, which libcurl reports on its own.
+    curl_mime* mime = curl_mime_init (curl);
+    source.mime     = mime;
+    for (const auto& field : vayu::http::enabled_fields (request.body.fields)) {
+        curl_mimepart* part = curl_mime_addpart (mime);
+        curl_mime_name (part, field.key.c_str ());
+        if (field.type == FormFieldType::File) {
+            curl_mime_filedata (part, field.src.c_str ());
+            // filedata already declares the basename; an explicit name
+            // overrides it, which is how an imported part keeps the
+            // filename the exporting app recorded.
+            if (!field.file_name.empty ()) {
+                curl_mime_filename (part, field.file_name.c_str ());
+            }
+        } else {
+            curl_mime_data (part, field.value.c_str (), field.value.size ());
+        }
+        if (!field.content_type.empty ()) {
+            curl_mime_type (part, field.content_type.c_str ());
+        }
+    }
+    // Like POSTFIELDS below, this switches curl's method to POST, so the
+    // method is (re-)asserted afterwards.
+    set_opt<CURLOPT_MIMEPOST> (curl, mime);
+}
+
+/// A binary body: the plan's shared bytes, or the file streamed through
+/// @p source. True when it streams, which sets `CURLOPT_UPLOAD`.
+bool attach_binary (CURL* curl, const Request& request, BodySource& source) {
+    const FileRef& file = request.body.file;
+    if (file.inline_bytes) {
+        // Read once by the plan and shared by every transfer of the run:
+        // POSTFIELDS keeps the pointer, and the request this transfer
+        // carries holds the bytes alive for as long as it does.
+        set_opt<CURLOPT_POSTFIELDSIZE_LARGE> (
+        curl, static_cast<curl_off_t> (file.inline_bytes->size ()));
+        set_opt<CURLOPT_POSTFIELDS> (curl, file.inline_bytes->data ());
+        return false;
+    }
+    source.stream = vayu::http::open_body_file (file);
+    set_opt<CURLOPT_UPLOAD> (curl, 1L);
+    set_opt<CURLOPT_INFILESIZE_LARGE> (curl, static_cast<curl_off_t> (file.size));
+    set_opt<CURLOPT_READFUNCTION> (curl, &read_body_file);
+    set_opt<CURLOPT_READDATA> (curl, source.stream.get ());
+    // Mandatory, not an optimisation: a redirect and the second leg of Digest
+    // or NTLM rewind the body, and without a seek callback libcurl fails that
+    // leg instead of resending.
+    set_opt<CURLOPT_SEEKFUNCTION> (curl, &seek_body_file);
+    set_opt<CURLOPT_SEEKDATA> (curl, source.stream.get ());
+    return true;
+}
+
+} // namespace
+
+void apply_method_and_body (CURL* curl, const Request& request, BodySource& source) {
     // The request-level answer, not the body-level one: a GraphQL body on a
     // GET travels in the URL, so this is where "no body frame" comes from and
     // what makes the GET arm below take `CURLOPT_HTTPGET` (issue #1228).
     const bool has_body = vayu::http::has_wire_body (request);
-    curl_mime* mime     = nullptr;
+    // A streamed binary body: `CURLOPT_UPLOAD` is set, so the method below is
+    // re-asserted by name for every verb, POST included.
+    bool uploads = false;
 
     if (has_body && request.body.mode == BodyMode::FormData) {
-        // Multipart: libcurl encodes the parts and generates the boundary, so
-        // the body and the Content-Type that describes it cannot disagree.
-        //
-        // A file part is `curl_mime_filedata`, which means libcurl reads the
-        // file *during the transfer* - so a load run re-reads it once per
-        // iteration (the page cache absorbs that; slurping it into memory at
-        // plan time would trade a bounded read for an unbounded allocation and
-        // a snapshot that goes stale). Readability was already checked by
-        // `validate_transferable`, so a failure here is a file that vanished
-        // between the two, which libcurl reports on its own.
-        mime = curl_mime_init (curl);
-        for (const auto& field : vayu::http::enabled_fields (request.body.fields)) {
-            curl_mimepart* part = curl_mime_addpart (mime);
-            curl_mime_name (part, field.key.c_str ());
-            if (field.type == FormFieldType::File) {
-                curl_mime_filedata (part, field.src.c_str ());
-                // filedata already declares the basename; an explicit name
-                // overrides it, which is how an imported part keeps the
-                // filename the exporting app recorded.
-                if (!field.file_name.empty ()) {
-                    curl_mime_filename (part, field.file_name.c_str ());
-                }
-            } else {
-                curl_mime_data (part, field.value.c_str (), field.value.size ());
-            }
-            if (!field.content_type.empty ()) {
-                curl_mime_type (part, field.content_type.c_str ());
-            }
-        }
-        // Like POSTFIELDS below, this switches curl's method to POST, so the
-        // method is (re-)asserted afterwards.
-        set_opt<CURLOPT_MIMEPOST> (curl, mime);
+        attach_multipart (curl, request, source);
+    } else if (has_body && request.body.mode == BodyMode::Binary) {
+        uploads = attach_binary (curl, request, source);
     } else if (has_body) {
         // Setting POSTFIELDS switches curl's method to POST, so it goes first
         // and the method is (re-)asserted below.
@@ -223,6 +300,14 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         const std::string body = vayu::http::wire_body_bytes (request);
         set_opt<CURLOPT_POSTFIELDSIZE> (curl, static_cast<long> (body.size ()));
         set_opt<CURLOPT_COPYPOSTFIELDS> (curl, body.c_str ());
+    }
+
+    if (uploads) {
+        // `CURLOPT_UPLOAD` makes every transfer a PUT; the verb the request
+        // names is restored by name. HEAD never reaches here - a body on it is
+        // refused by validate_transferable.
+        set_opt<CURLOPT_CUSTOMREQUEST> (curl, to_string (request.method));
+        return;
     }
 
     switch (request.method) {
@@ -240,7 +325,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // to a POSTFIELDS-style post, and the mime attached above goes with it.
         // MIMEPOST already makes the request a POST, so re-asserting the verb
         // is both unnecessary and destructive here.
-        if (!mime) {
+        if (source.mime == nullptr) {
             set_opt<CURLOPT_POST> (curl, 1L);
             // CURLOPT_POST alone does not say "no body" - it says "a body, of a
             // length I have not told you", and libcurl then reads that body
@@ -278,8 +363,6 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         set_opt<CURLOPT_CUSTOMREQUEST> (curl, "OPTIONS");
         break;
     }
-
-    return mime;
 }
 
 std::string body_content_type_value (const Request& request) {
@@ -288,8 +371,14 @@ std::string body_content_type_value (const Request& request) {
         return {};
     }
     // A Content-Type the caller set wins - the same rule the request builder
-    // applies renderer-side, where "someone who typed this means it".
-    if (request.headers.contains ("Content-Type")) {
+    // applies renderer-side, where "someone who typed this means it". For a
+    // binary body an empty row is absent rather than a removal, as an empty
+    // `FileRef::content_type` is: the file's own type then applies, where a
+    // removal would leave the upload with no type at all.
+    const auto declared = request.headers.find ("Content-Type");
+    if (declared != request.headers.end () &&
+    (request.body.mode != BodyMode::Binary ||
+    header_value_reaches_wire (declared->second))) {
         return {};
     }
     return implied;
@@ -849,7 +938,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // Set method and body (shared with the single-request client - see
     // apply_method_and_body for why the two are set together and in that order)
-    data->mime = apply_method_and_body (curl, request);
+    apply_method_and_body (curl, request, data->body);
 
     // Bound what one transfer may buffer in memory. write_callback reports the
     // overrun by returning a short count, which curl turns into a failed

@@ -84,7 +84,12 @@ export function generatePowerShell(
 	}
 
 	let bodyVariable: string | null = null;
-	if (prepared.body?.kind === "raw") {
+	let inFile: string | null = null;
+	if (prepared.body?.kind === "binary") {
+		// `-InFile` sends the file as the body; `-Body` would want its bytes
+		// read into a variable first.
+		inFile = prepared.body.path;
+	} else if (prepared.body?.kind === "raw") {
 		bodyVariable = "$body";
 		lines.push(`$body = ${powerShellQuote(prepared.body.content)}`, "");
 	} else if (prepared.body) {
@@ -117,6 +122,7 @@ export function generatePowerShell(
 		`-Uri ${powerShellQuote(prepared.url)}`,
 	];
 	if (headers.length > 0) call.push("-Headers $headers");
+	if (inFile !== null) call.push(`-InFile ${powerShellQuote(inFile)}`);
 	if (bodyVariable) {
 		// `-Form` is the multipart switch (PowerShell 6.1+); `-Body` with a
 		// hashtable is urlencoded, and with a string is sent as-is.
