@@ -35,7 +35,8 @@ import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { isBlankRow } from "./key-value";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
-import FilePartCell, { type PickedFile } from "./FilePartCell";
+import FilePartCell from "./FilePartCell";
+import type { PickedFile } from "../file-pick";
 
 interface KeyValueRowProps {
 	item: KeyValueItem;

@@ -22,18 +22,11 @@
  * is the only event that proves it exists. See `FormFieldEntry.unresolved`.
  */
 
-import { useRef } from "react";
 import { FileUp, TriangleAlert } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { fileBaseName } from "@/lib/file-path";
 import { cn } from "@/lib/utils";
-
-export interface PickedFile {
-	/** Absolute path, or "" outside Electron - the caller keeps the row unresolved then. */
-	src: string;
-	fileName: string;
-	contentType: string;
-}
+import { useFilePick, type PickedFile } from "../file-pick";
 
 /** The label on the button: what will be uploaded, in one line. */
 function displayName(fileName: string | undefined, src: string | undefined): string {
@@ -53,22 +46,9 @@ export default function FilePartCell({
 	disabled?: boolean;
 	onPick: (file: PickedFile) => void;
 }) {
-	const inputRef = useRef<HTMLInputElement>(null);
+	const { open, inputProps } = useFilePick(onPick);
 	const name = displayName(fileName, src);
 	const chosen = Boolean(name);
-
-	const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0];
-		// The same value twice in a row is not a change event, so clearing lets
-		// the user re-pick the file they just replaced.
-		event.target.value = "";
-		if (!file) return;
-		onPick({
-			src: window.electronAPI?.getFilePath(file) ?? "",
-			fileName: file.name,
-			contentType: file.type,
-		});
-	};
 
 	const label = chosen ? name : "Choose file";
 	const button = (
@@ -77,7 +57,7 @@ export default function FilePartCell({
 			variant="outline"
 			size="sm"
 			disabled={disabled}
-			onClick={() => inputRef.current?.click()}
+			onClick={open}
 			aria-label={chosen ? `Replace file ${name}` : "Choose file"}
 			className="h-8 w-full justify-start gap-1.5 rounded-md px-2 font-normal"
 		>
@@ -96,16 +76,7 @@ export default function FilePartCell({
 
 	return (
 		<div className="min-w-0">
-			<input
-				ref={inputRef}
-				type="file"
-				className="hidden"
-				onChange={handleChange}
-				// Named so a screen reader announces the row this belongs to; the
-				// visible control is the button above.
-				aria-hidden="true"
-				tabIndex={-1}
-			/>
+			<input {...inputProps} />
 			<Tooltip>
 				<TooltipTrigger asChild>{button}</TooltipTrigger>
 				<TooltipContent side="left" className="max-w-md">

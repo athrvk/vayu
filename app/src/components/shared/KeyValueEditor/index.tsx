@@ -48,7 +48,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { KeyValueItem, KeyValueEditorProps } from "@/types";
 import { withTrailingBlank } from "./key-value";
 import KeyValueRow from "./KeyValueRow";
-import type { PickedFile } from "./FilePartCell";
+import type { PickedFile } from "../file-pick";
 import { EYEBROW_CLASS } from "@/components/ui/eyebrow";
 import { cn } from "@/lib/utils";
 
