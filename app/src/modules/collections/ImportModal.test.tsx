@@ -46,6 +46,8 @@ describe("ImportModal", () => {
 	 * names the code's bookkeeping rather than what the reader lost. It matters
 	 * more since issue #393: multipart file parts now import, so a remaining
 	 * `file_body` is only a *whole-body* file, and the line has to say which.
+	 * Whole-file bodies import too now (as `binary`), so the line says what
+	 * arrived and what it takes to send it.
 	 */
 	it("names a skipped item in words, not as a counter slug", async () => {
 		const withFileBody = JSON.stringify({ any: "document" });
@@ -64,7 +66,9 @@ describe("ImportModal", () => {
 		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 
 		await waitFor(() =>
-			expect(screen.getByText(/body not imported \(file upload\)/i)).toBeInTheDocument()
+			expect(
+				screen.getByText(/file body imported - choose the file or allow its folder/i)
+			).toBeInTheDocument()
 		);
 		expect(screen.queryByText(/file_body/)).not.toBeInTheDocument();
 	});

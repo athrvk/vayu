@@ -50,6 +50,7 @@ import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type ImportResult } from "@/services/importers/types";
 import { importNotices, type ImportNotice } from "./import-notices";
+import { ImportFileFolders } from "./ImportFileFolders";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import {
 	applicableEntries,
@@ -1158,6 +1159,7 @@ function PreviewView({
 				</p>
 			)}
 			<NoticeList notices={importNotices(meta)} />
+			<ImportFileFolders results={[result]} />
 		</div>
 	);
 }
@@ -1206,6 +1208,14 @@ function BatchLedger({
 					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />
 				))}
 			</div>
+			{/* Once for the batch rather than per row: a folder several files
+			    reference is one allow, and a row is a <label> that cannot hold
+			    a button of its own. */}
+			<ImportFileFolders
+				results={applicableEntries(entries).flatMap((entry) =>
+					entry.result ? [entry.result] : []
+				)}
+			/>
 		</div>
 	);
 }
