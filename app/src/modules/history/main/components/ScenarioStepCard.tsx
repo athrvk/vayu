@@ -50,7 +50,8 @@ import { memo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, SentBodyFileNote } from "@/components/shared";
+import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
 	SampledExchange,
@@ -119,6 +120,8 @@ function ScenarioStepCard({
 	const openRequestWithDataRow = useTabsStore((s) => s.openRequestWithDataRow);
 
 	const response = step.result ? responseFromRunResult(step.result, runId) : null;
+	// A binary body's file, from the step's stored request node.
+	const sentFile = sentBodyFileOf(step.result?.trace?.request?.bodyFile);
 	const phases = phasesFromTrace(step.result?.trace);
 
 	// The schema verdict from whichever source this row has (issue #681): the
@@ -286,6 +289,8 @@ function ScenarioStepCard({
 			{response?.elements && response.elements.length > 0 && (
 				<ElementOutcomes outcomes={response.elements} inset={false} />
 			)}
+
+			{sentFile && <SentBodyFileNote file={sentFile} />}
 
 			{response && (
 				<div className="space-y-2">

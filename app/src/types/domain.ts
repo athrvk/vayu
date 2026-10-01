@@ -1400,7 +1400,7 @@ export interface RunResultTrace {
 		 * What a `binary` body sent: the file's name, size in bytes and
 		 * sha256, recorded at send time - never the bytes and never the path.
 		 * `unknown` because a stored row is whatever its engine wrote;
-		 * `sentBodyFileOf` (`design-run-seed.ts`) is the one reader.
+		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
 		 */
 		bodyFile?: unknown;
 	};

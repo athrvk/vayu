@@ -33,6 +33,7 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
+import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
@@ -123,28 +124,6 @@ export interface DesignRunSeed {
 	 * absent for every other body and for a run stored before the field.
 	 */
 	requestBodyFile?: SentBodyFile;
-}
-
-/** The `bodyFile` record a binary send leaves on its trace. */
-export interface SentBodyFile {
-	fileName?: string;
-	size?: number;
-	sha256?: string;
-}
-
-/**
- * The trace's `bodyFile`, keeping only the members of the right type - a
- * stored row is whatever the engine that wrote it wrote, and a record with
- * nothing usable in it is no record.
- */
-export function sentBodyFileOf(node: unknown): SentBodyFile | undefined {
-	if (!node || typeof node !== "object") return undefined;
-	const raw = node as Record<string, unknown>;
-	const file: SentBodyFile = {};
-	if (typeof raw.fileName === "string" && raw.fileName) file.fileName = raw.fileName;
-	if (typeof raw.size === "number" && Number.isFinite(raw.size)) file.size = raw.size;
-	if (typeof raw.sha256 === "string" && raw.sha256) file.sha256 = raw.sha256;
-	return Object.keys(file).length > 0 ? file : undefined;
 }
 
 /** A snapshot body's `file` as an editor `FileRef`, or an empty one. */
