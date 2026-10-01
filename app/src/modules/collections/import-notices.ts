@@ -150,9 +150,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	// XML imports as `xml`; what reaches this is a binary or image body.
 	unmapped_body: {
 		tier: "action",
-		named: "body not imported (binary file)",
-		one: "1 request body not imported (binary file)",
-		many: "{n} request bodies not imported (binary file)",
+		named: "body not imported (unsupported media type)",
+		one: "1 request body not imported (unsupported media type)",
+		many: "{n} request bodies not imported (unsupported media type)",
 	},
 	unresolved_base_url: {
 		tier: "action",

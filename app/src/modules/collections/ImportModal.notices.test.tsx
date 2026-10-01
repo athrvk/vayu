@@ -118,7 +118,7 @@ describe("the import preview's notices", () => {
 
 		await waitFor(() =>
 			expect(
-				screen.getByText("Upload an image: body not imported (binary file)")
+				screen.getByText("Upload an image: body not imported (unsupported media type)")
 			).toBeInTheDocument()
 		);
 		expect(severityOf(/Upload an image: body not imported/)).toContain("text-destructive-text");

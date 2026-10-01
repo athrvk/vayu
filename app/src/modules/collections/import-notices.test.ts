@@ -57,7 +57,7 @@ describe("importNotices", () => {
 				skipped: [{ kind: "unmapped_body", count: 1, requests: ["Uploads an image."] }],
 			})
 		);
-		expect(notice.text).toBe("Uploads an image: body not imported (binary file)");
+		expect(notice.text).toBe("Uploads an image: body not imported (unsupported media type)");
 	});
 
 	it("names the requests whose auth will not be sent", () => {
@@ -73,7 +73,7 @@ describe("importNotices", () => {
 
 	it("falls back to the count when the engine named no request", () => {
 		expect(importNotices(meta({ skipped: [{ kind: "unmapped_body", count: 2 }] }))).toEqual([
-			{ tier: "action", text: "2 request bodies not imported (binary file)" },
+			{ tier: "action", text: "2 request bodies not imported (unsupported media type)" },
 		]);
 	});
 

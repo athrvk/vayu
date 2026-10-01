@@ -317,7 +317,7 @@ Notes:
   afterwards rather than written over, because `POST /globals` replaces the whole
   set and must not run in front of a write that can still fail. The caveat
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
-  an import that dropped a WebSocket request, a file body or an operation's
+  an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. **External `$ref`s are
   not followed** - resolving one means fetching a URL or reading a file beside
   the document, which is the import dialog's business (a URL proxy and a gated
