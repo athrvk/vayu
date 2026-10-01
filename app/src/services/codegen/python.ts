@@ -71,6 +71,11 @@ export function generatePython(
 		// would re-serialize a payload that is already serialized.
 		lines.push(`data = ${pythonString(prepared.body.content)}`, "");
 		callArgs.push("    data=data,");
+	} else if (prepared.body?.kind === "binary") {
+		// A file object as `data=`, which requests streams as the body - the
+		// same left-open handle a file part uses, said the same way.
+		callArgs.push(`    data=open(${pythonString(prepared.body.path)}, "rb"),`);
+		notes.push("The file handle is opened inline and left for the interpreter to close.");
 	} else if (prepared.body) {
 		const name = prepared.body.kind === "form-data" ? "files" : "data";
 		const entries = dictLiteral(prepared.body.fields);

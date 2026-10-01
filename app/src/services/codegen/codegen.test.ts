@@ -1094,3 +1094,101 @@ describe("path variables", () => {
 		expect(code).toContain(`'https://x/u/a"b/c?k=p|q'`);
 	});
 });
+
+/**
+ * A `binary` body: the whole body is one file, named by path. Every target
+ * has a form for it, and every one of them sends a Content-Type, because the
+ * clients' own defaults for a file body are wrong - curl's `--data-binary`
+ * sends `application/x-www-form-urlencoded`.
+ */
+describe("a binary body", () => {
+	const withFile = (file: Record<string, string>): SnippetRequest => ({
+		...GET,
+		method: "PUT",
+		body: { mode: "binary", file },
+	});
+	const upload = withFile({ src: "/data/it's a.bin", fileName: "a.bin" });
+
+	it("curl sends the file with --data-binary and an explicit octet-stream type", () => {
+		const { code } = generateCurl(upload);
+		const arg = code.split(" \\\n  ").find((a) => a.startsWith("--data-binary @"));
+		expect(arg).toBeDefined();
+		expect(unquoteShell(arg!.slice("--data-binary @".length))).toBe("/data/it's a.bin");
+		expect(code).toContain(`-H 'Content-Type: application/octet-stream'`);
+		expect(code).not.toContain("--data-raw");
+	});
+
+	it("uses the file's declared Content-Type over the octet-stream fallback", () => {
+		const { code } = generateCurl(withFile({ src: "/data/a.png", contentType: "image/png" }));
+		expect(code).toContain(`-H 'Content-Type: image/png'`);
+		expect(code).not.toContain("octet-stream");
+	});
+
+	it("keeps a declared Content-Type header instead of adding one", () => {
+		const { code } = generateCurl({
+			...withFile({ src: "/data/a.png", contentType: "image/png" }),
+			headers: { "content-type": "image/webp" },
+		});
+		expect(code).toContain("image/webp");
+		expect(code).not.toContain("image/png");
+		expect(code.match(/content-type/gi)).toHaveLength(1);
+	});
+
+	it("every target names the path and sends a Content-Type", () => {
+		for (const target of CODE_TARGETS) {
+			const { code } = target.generate(upload);
+			expect(code, `${target.id} lost the type`).toContain("application/octet-stream");
+			expect(code, `${target.id} lost the path`).toContain("a.bin");
+		}
+	});
+
+	it("python streams an open file as data=", () => {
+		const { code, notes } = generatePython(withFile({ src: "/data/a.bin" }));
+		expect(code).toContain(`data=open("/data/a.bin", "rb"),`);
+		expect(notes.join(" ")).toContain("left for the interpreter to close");
+	});
+
+	it("httpie uploads it as a bare @path item", () => {
+		const { code } = generateHttpie(withFile({ src: "/data/a.bin" }));
+		expect(code).toContain("'@/data/a.bin'");
+	});
+
+	it("powershell sends it with -InFile, not -Body", () => {
+		const { code } = generatePowerShell(withFile({ src: "/data/a.bin" }));
+		expect(code).toContain("-InFile '/data/a.bin'");
+		expect(code).not.toContain("-Body");
+	});
+
+	it("fetch reads it with Node's fs and says so", () => {
+		const { code, notes } = generateFetch(withFile({ src: "/data/a.bin" }));
+		expect(code).toContain(`import { readFile } from "node:fs/promises";`);
+		expect(code).toContain(`const body = await readFile("/data/a.bin");`);
+		expect(code).toContain("body: body,");
+		expect(notes.join(" ")).toContain("File or Blob");
+	});
+
+	it("hides a secret that appears inside the path, in every target", () => {
+		for (const target of CODE_TARGETS) {
+			const { code, masked } = target.generate(withFile({ src: "/home/s3cr3t/a.bin" }), {
+				mask: true,
+				secrets: ["s3cr3t"],
+			});
+			expect(code, target.id).not.toContain("s3cr3t");
+			expect(masked).toBe(true);
+		}
+	});
+
+	it("curl's command parses back into the same file body", () => {
+		const { code } = generateCurl(upload);
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.method).toBe("PUT");
+		expect(reparsed?.bodyMode).toBe("binary");
+		expect(reparsed?.binaryFile.src).toBe("/data/it's a.bin");
+	});
+
+	it("emits no body and no Content-Type when no file is chosen", () => {
+		const { code } = generateCurl(withFile({ src: "" }));
+		expect(code).not.toContain("--data-binary");
+		expect(code).not.toContain("Content-Type");
+	});
+});

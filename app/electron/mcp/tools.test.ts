@@ -12,6 +12,7 @@ import {
 	DEFAULT_RUN_SAMPLE_LIMIT,
 	DEFAULT_RUN_SERIES_LIMIT,
 	dispatchTool,
+	INLINE_FILE_REFUSAL,
 	INSECURE_TLS_REFUSAL,
 	MAX_EXAMPLES_BODY_BYTES,
 	MAX_INBOX_CAPTURE_LIMIT,
@@ -9328,5 +9329,153 @@ describe("resolve_variables", () => {
 		const res = await dispatchTool("resolve_variables", {}, ctxWith(client));
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).not.toContain("must be an array");
+	});
+});
+
+/**
+ * A `binary` body names a file on the user's machine. An agent may store one,
+ * but never as a file the user chose: every MCP-written file reference is
+ * `unresolved`, so the engine sends it only once a person picks it in the
+ * editor or it sits under an allowed folder. And an agent may never *send* a
+ * file inline - the refusal points it at running the saved request by id.
+ * `dispatchTool` hands handlers the raw arguments (no zod stripping), so an
+ * agent's own `unresolved: false` really does reach `shapeBody` here.
+ */
+describe("binary file bodies", () => {
+	const WRITE = { allowWrites: true };
+
+	test("create_request stores a binary body unresolved, whatever the agent claims", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_request",
+			{
+				collectionId: "c1",
+				name: "Upload",
+				url: "https://api.example.com/upload",
+				method: "PUT",
+				bodyType: "binary",
+				file: { src: "/data/a.png", contentType: "image/png", unresolved: false },
+			},
+			ctxWith(client, WRITE)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.body).toEqual({
+			mode: "binary",
+			file: { src: "/data/a.png", contentType: "image/png", unresolved: true },
+		});
+		expect(payload.bodyType).toBe("binary");
+	});
+
+	test("a lone `file` implies the binary mode", async () => {
+		const client = fakeClient();
+		await dispatchTool(
+			"create_request",
+			{ collectionId: "c1", name: "U", url: "https://x.test", file: { src: "/d/a.bin" } },
+			ctxWith(client, WRITE)
+		);
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.body).toEqual({
+			mode: "binary",
+			file: { src: "/d/a.bin", unresolved: true },
+		});
+		expect(payload.bodyType).toBe("binary");
+	});
+
+	test("update_request replaces the body with an unresolved file", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{
+				requestId: "req_1",
+				bodyType: "binary",
+				file: { src: "/d/a.bin", fileName: "a.bin" },
+			},
+			ctxWith(client, WRITE)
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload.body).toEqual({
+			mode: "binary",
+			file: { src: "/d/a.bin", fileName: "a.bin", unresolved: true },
+		});
+		expect(payload.bodyType).toBe("binary");
+	});
+
+	test.each([
+		["binary with a body string", { bodyType: "binary", body: "x", file: { src: "/d/a" } }],
+		["binary with no file", { bodyType: "binary" }],
+		["binary with an empty path", { bodyType: "binary", file: { src: " " } }],
+		["a file on another mode", { bodyType: "json", body: "{}", file: { src: "/d/a" } }],
+	])("create_request refuses %s and writes nothing", async (_label, body) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_request",
+			{ collectionId: "c1", name: "U", url: "https://x.test", ...body },
+			ctxWith(client, WRITE)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.createRequest).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		["bodyType binary", { bodyType: "binary", file: { src: "/etc/passwd" } }],
+		["a bare file", { file: { src: "/etc/passwd" } }],
+	])("run_request refuses an inline file body (%s) before composing", async (_label, body) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/upload", method: "PUT", ...body },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toContain("saved request by id");
+		expect(client.composeRequest).not.toHaveBeenCalled();
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run refuses an inline file body, even over a saved request", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				bodyType: "binary",
+				file: { src: "/etc/passwd" },
+				mode: "iterations",
+				iterations: 1,
+				concurrency: 1,
+				confirmed: true,
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("every body-taking tool declares `file`, and none calls file parts unsupported wholesale", () => {
+		const schemaOf = (name: string) =>
+			TOOLS.find((tool) => tool.name === name)?.inputSchema as Record<string, unknown>;
+		expect(schemaOf("create_request").file).toBeDefined();
+		expect(schemaOf("update_request").file).toBeDefined();
+		// The ad-hoc senders declare it too, only so it survives the SDK's zod
+		// parse and reaches the refusal: stripped, it would send no body at all.
+		for (const name of ["run_request", "start_load_run"]) {
+			const parsed = z
+				.object(schemaOf(name) as z.ZodRawShape)
+				.parse({ url: "https://x.test", file: { src: "/d/a" } });
+			expect(parsed.file, name).toEqual({ src: "/d/a" });
+		}
+		const descriptions = TOOLS.flatMap((tool) => {
+			const schema = tool.inputSchema as Record<string, { description?: string }>;
+			return schema?.bodyType?.description ? [schema.bodyType.description] : [];
+		});
+		expect(descriptions).toHaveLength(4);
+		for (const description of descriptions) {
+			expect(description).toContain("binary");
+			expect(description).not.toContain("File parts are not supported");
+		}
 	});
 });
