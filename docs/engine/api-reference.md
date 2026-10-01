@@ -4833,8 +4833,10 @@ rules included: Node does not enforce them, so `bücher-.example` and
 path, query and fragment keep their bytes, and an ASCII host, an unresolved
 `{{host}}` included, is not touched. The raw request a response carries shows
 the punycode name, because that is what was sent. Everything that compares a
-host beside the transfer uses the same name - the cookie jar and the DNS
-cache - so a cookie written with either spelling applies to both.
+host beside the transfer uses the same name - the cookie jar, the DNS cache,
+the client-certificate registry, the proxy bypass list and a proxy URL - so a
+cookie, certificate or bypass entry written with either spelling applies to
+both.
 
 A host with no ASCII name at all, such as `xn--iñvalid.com` (a punycode label
 that does not decode) or one holding a space, is refused before anything is

@@ -996,6 +996,21 @@ TEST_F (ClientCertificateDbTest, TheRegistryReachesTheResolvedPolicy) {
     EXPECT_EQ (matched->key_path, key_.path ());
 }
 
+// The request's host reaches the matcher in the ASCII form libcurl dials
+// (`parse_authority`), so a row written with the Unicode spelling must be
+// held in that form too, or it answers for nothing.
+TEST_F (ClientCertificateDbTest, AnInternationalizedHostAnswersForItsPunycodeName) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("bücher.example")).first, 200);
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("*.faß.example")).first, 200);
+
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_EQ (policy.client_certificates.size (), 2u);
+    EXPECT_NE (match_client_certificate (policy, "xn--bcher-kva.example", 443), nullptr);
+    EXPECT_NE (match_client_certificate (policy, "api.xn--fa-hia.example", 443), nullptr);
+}
+
 TEST_F (ClientCertificateDbTest, AStoredWildcardSurvivesTheResolverAndAnswers) {
     // The stored-to-matched path in one test, because the resolver re-runs
     // `client_cert_rejection` on every row it reads (a row hand-edited around

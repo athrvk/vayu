@@ -300,6 +300,32 @@ TEST_F (TransportPolicyDbTest, ManualCarriesUrlAndBypass) {
     EXPECT_EQ (policy.proxy_bypass, "localhost,.internal.example.com");
 }
 
+// libcurl matches the list against the ASCII name it dials, so a Unicode
+// entry is written in that form; separators and ASCII entries stay as typed.
+TEST_F (TransportPolicyDbTest, AnInternationalizedBypassEntryIsWrittenInItsPunycodeForm) {
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", "http://proxy.example:8080");
+    set_config ("proxyBypass", "localhost, .Bücher.example,faß.de");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.proxy_bypass, "localhost, .xn--bcher-kva.example,xn--fa-hia.de");
+}
+
+// libcurl has no IDN support, so the proxy host is dialled by its punycode
+// name; one with no ASCII name is unusable, which manual mode answers with Off.
+TEST_F (TransportPolicyDbTest, ANonAsciiProxyHostIsDialledByItsPunycodeName) {
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", "http://user@Bücher.example:8080");
+    EXPECT_EQ (resolve_transport_policy (*db_).proxy_url,
+    "http://user@xn--bcher-kva.example:8080");
+
+    set_config ("proxyUrl", "http://xn--iñvalid.example:8080");
+    const auto refused = resolve_transport_policy (*db_);
+    EXPECT_EQ (refused.proxy_mode, ProxyMode::Off);
+    EXPECT_TRUE (refused.proxy_url.empty ());
+    EXPECT_TRUE (proxy_url_rejection ("http://xn--iñvalid.example:8080").has_value ());
+}
+
 TEST_F (TransportPolicyDbTest, StoredUrlIsNotReadOutsideManualMode) {
     // Keeping a proxy URL while the mode is off is a normal thing to do. What
     // must not happen is the URL reaching a handle anyway.
