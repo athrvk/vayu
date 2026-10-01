@@ -39,13 +39,8 @@ import { detectCommand } from "./detect-command";
 
 export { detectCommand };
 
-/**
- * The subset of RequestState a curl/wget command can populate.
- *
- * `binaryFile` is the editor's binary-body file (`bodyMode: "binary"`); it is
- * intersected rather than picked until `RequestState` declares it.
- */
-export type ParsedRequest = { binaryFile: FileRef } & Pick<
+/** The subset of RequestState a curl/wget command can populate. */
+export type ParsedRequest = Pick<
 	RequestState,
 	| "method"
 	| "url"
@@ -55,6 +50,7 @@ export type ParsedRequest = { binaryFile: FileRef } & Pick<
 	| "body"
 	| "formData"
 	| "urlEncoded"
+	| "binaryFile"
 	| "auth"
 	| "stream"
 	| "verifySSL"
