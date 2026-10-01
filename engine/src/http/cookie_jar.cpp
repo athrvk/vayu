@@ -20,6 +20,7 @@
 #include <ctime>
 #include <utility>
 
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -83,7 +84,11 @@ std::optional<UrlScope> url_scope_of (const std::string& url) {
     std::optional<std::string> path;
     std::optional<std::string> scheme;
     if (curl_url_set (parsed, CURLUPART_URL, url.c_str (), 0) == CURLUE_OK) {
-        host   = url_part (parsed, CURLUPART_HOST);
+        // Punycode for a non-ASCII host: libcurl stores and matches cookies
+        // on the name it dials, which `wire_url` made the punycode one.
+        if (const auto typed = url_part (parsed, CURLUPART_HOST)) {
+            host = ascii_host (*typed);
+        }
         path   = url_part (parsed, CURLUPART_PATH);
         scheme = url_part (parsed, CURLUPART_SCHEME);
     }
@@ -251,6 +256,17 @@ std::optional<JarCookie> cookie_for_url (const std::string& url, JarCookie cooki
         if (field.find_first_of ("\t\r\n") != std::string_view::npos) {
             return std::nullopt;
         }
+    }
+
+    if (!cookie.domain.empty ()) {
+        // In the punycode form libcurl matches on, or it would never be sent.
+        const bool dotted = cookie.domain.starts_with (".");
+        auto ascii =
+        ascii_host (std::string_view (cookie.domain).substr (dotted ? 1 : 0));
+        if (!ascii) {
+            return std::nullopt;
+        }
+        cookie.domain = dotted ? "." + *ascii : std::move (*ascii);
     }
 
     if (!cookie.domain.empty () && !cookie.path.empty ()) {

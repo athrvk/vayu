@@ -156,6 +156,7 @@ add_executable(vayu_tests
     path_variables_test.cpp
     query_encoding_test.cpp
     url_encoding_test.cpp
+    idn_host_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
     jmeter_import_test.cpp

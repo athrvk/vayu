@@ -39,10 +39,9 @@ namespace vayu::core {
  * is idempotent. A whole `{{...}}` token is kept verbatim, as it is by every
  * other Vayu URL encoder; Postman would write a brace in the path as `%7B`.
  *
- * `toNodeUrl` also converts an IDN host to punycode (`url.domainToASCII`).
- * That is not done here: libcurl is built without IDN support (no `idn`
- * feature in `vcpkg.json`), so a non-ASCII host fails to resolve on every
- * Vayu send path alike, and the answer belongs in libcurl's build.
+ * The host is lowercased and, when it is not ASCII, converted to punycode
+ * (`http::ascii_host`, the `url.domainToASCII` `toNodeUrl` calls); one with no
+ * ASCII name is kept as typed, as Postman keeps it, and the send refuses it.
  */
 [[nodiscard]] std::string encode_url_as_postman (std::string_view url);
 

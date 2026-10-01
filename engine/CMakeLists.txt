@@ -350,6 +350,10 @@ find_package(ryml CONFIG REQUIRED)
 # hashTree/testElement XML dialect; core/jmeter_import.cpp is the only
 # translation unit that includes it.
 find_package(pugixml CONFIG REQUIRED)
+# WHATWG URL host processing (UTS #46 IDNA), the library Node's
+# `url.domainToASCII` is built on: a non-ASCII host is sent by the punycode
+# name Postman sends it by (http/url_parts.cpp, `ascii_host`).
+find_package(ada CONFIG REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -617,6 +621,7 @@ target_link_libraries(vayu_core PUBLIC
     ryml::ryml
     # Same reasoning: only jmeter_import.cpp includes pugixml.hpp.
     pugixml::pugixml
+    ada::ada
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
     hdrhistogram

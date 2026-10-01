@@ -241,10 +241,14 @@ std::string implied_content_type (const Request& request) {
 }
 
 std::string wire_url (const Request& request) {
-    if (const auto parameters = graphql_url_transport (request)) {
-        return url_with_query (request.url, *parameters);
-    }
-    return request.url;
+    const auto parameters = graphql_url_transport (request);
+    std::string url =
+    parameters ? url_with_query (request.url, *parameters) : request.url;
+    // A host with no ASCII name is refused by `validate_transferable` before
+    // any driver asks for this URL; a caller that did not ask that gate (the
+    // raw-request view of a refused send) is shown the host as typed.
+    (void)to_ascii_host (url);
+    return url;
 }
 
 bool content_type_is_engine_owned (const Body& body) {

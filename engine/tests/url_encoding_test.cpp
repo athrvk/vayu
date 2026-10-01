@@ -73,6 +73,21 @@ TEST (PostmanUrlEncoding, AnUnansweredTokenIsKeptWholeAndSplitsNothing) {
     EXPECT_EQ (encode_url_as_postman ("http://h/x?q={{a#b c}}"), "http://h/x?q={{a#b c}}");
 }
 
+// `encodeHost`: `url.domainToASCII`, or the host as typed when that answers
+// `""` (the send then refuses it, see idn_host_test.cpp).
+TEST (PostmanUrlEncoding, ANonAsciiHostIsWrittenAsPunycode) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { "https://BÜCHER.example:8080/ä?q=ü", "https://xn--bcher-kva.example:8080/%C3%A4?q=%C3%BC" },
+        { "https://user:pw@faß.de/x", "https://user:pw@xn--fa-hia.de/x" },
+        { "https://bücher-.example/", "https://xn--bcher--3ya.example/" },
+        { "https://xn--iñvalid.com/", "https://xn--iñvalid.com/" },
+        { "http://{{host}}.example/a", "http://{{host}}.example/a" },
+    };
+    for (const auto& [url, sent] : cases) {
+        EXPECT_EQ (encode_url_as_postman (url), sent) << url;
+    }
+}
+
 TEST (PostmanUrlEncoding, AFileUrlKeepsItsPathSlash) {
     // The kept slash is where the path starts, so nothing after it is read
     // as a host and lowercased.

@@ -1615,8 +1615,9 @@ an escape already written (or a URL composition already encoded, such as
 builds the call with a `protocolProfileBehavior` of its own, so neither the
 enclosing request's `disableUrlEncoding` nor anything in the options reaches
 it. A `{{name}}` nothing answered goes out as written, where Postman would
-encode its braces in the path; and a non-ASCII host is not converted to
-punycode, because libcurl is built without IDN support.
+encode its braces in the path. A non-ASCII host is dialled by its punycode
+name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
+path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two

@@ -4812,6 +4812,36 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
 
+#### Non-ASCII hosts
+
+A host written with non-ASCII characters is dialled by its ASCII (punycode)
+name, on every send path: Send, a load or collection run, History replay, MCP,
+`pm.sendRequest`, an OAuth 2.0 token request and GraphQL introspection.
+`https://bücher.example/` goes to `xn--bcher-kva.example`, which is the name
+DNS resolves, the `Host` header and TLS SNI carry and the server certificate is
+checked against. It is the name Postman sends to (`url.domainToASCII`, UTS #46
+nontransitional processing): uppercase and full-width letters are mapped
+(`BÜCHER`, `ＡＢＣ`), and `ß` is kept, so `faß.de` is `xn--fa-hia.de`, not
+`fass.de`. The stored URL and `pm.request.url` keep the spelling that was
+typed.
+
+The conversion is ada's, the WHATWG URL library Node's `domainToASCII` is
+built on, applied to the one URL every driver hands libcurl (which is built
+without IDN support), so it matches Postman case for case, the IDNA hyphen
+rules included: Node does not enforce them, so `bücher-.example` and
+`ab--cd.bücher.example` convert. Only the host is rewritten; userinfo, port,
+path, query and fragment keep their bytes, and an ASCII host, an unresolved
+`{{host}}` included, is not touched. The raw request a response carries shows
+the punycode name, because that is what was sent. Everything that compares a
+host beside the transfer uses the same name - the cookie jar and the DNS
+cache - so a cookie written with either spelling applies to both.
+
+A host with no ASCII name at all, such as `xn--iñvalid.com` (a punycode label
+that does not decode) or one holding a space, is refused before anything is
+sent: status `0`, error code `INVALID_URL`, and a message naming the host.
+Postman sends such a host as typed and the lookup fails; libcurl without IDN
+would refuse it as "IDN support not present", which names the wrong cause.
+
 #### Path variables
 
 A `:name` segment of the URL is answered by the request's own `in: "path"`

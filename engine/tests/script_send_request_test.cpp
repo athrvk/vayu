@@ -1089,4 +1089,17 @@ TEST_F (SendRequestUrlTest, TheEnclosingRequestsDisableUrlEncodingDoesNotApply) 
     EXPECT_EQ (sent_target ("{ url: pm.request.url, method: 'POST' }"), "/echo/a%20b?q=%22x%22");
 }
 
+// Postman dials an internationalized host by its punycode name
+// (`url.domainToASCII`). `*.localhost` is resolved to loopback by libcurl
+// itself, so the Host header is the name the call dialled.
+TEST_F (SendRequestUrlTest, ANonAsciiHostIsDialledByItsPunycodeName) {
+    const std::string url = server.url ();
+    const std::string port =
+    url.substr (url.rfind (':'), url.find ('/', url.rfind (':')) - url.rfind (':'));
+    std::string idn_url = url;
+    idn_url.replace (idn_url.find ("127.0.0.1"), 9, "BÜCHER.localhost");
+    EXPECT_EQ (sent_target ("'" + idn_url + "/x'"), "/echo/x");
+    EXPECT_EQ (server.header ("Host"), "xn--bcher-kva.localhost" + port);
+}
+
 } // namespace

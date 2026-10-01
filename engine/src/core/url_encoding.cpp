@@ -11,6 +11,7 @@
 
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::core {
@@ -147,6 +148,23 @@ std::string rewrite_outside_tokens (std::string_view text, bool lowercase, bool 
     return out;
 }
 
+/// `toNodeUrl`'s host: lowercased, then `encodeHost` - `url.domainToASCII`,
+/// or the host as typed when that answers `""`. @p host_port may end in a
+/// `:port`; an IPv6 literal is ASCII and only lowercased.
+std::string postman_host (std::string_view host_port) {
+    std::string out =
+    rewrite_outside_tokens (host_port, /*lowercase=*/true, /*slashes=*/false);
+    if (out.starts_with ('[')) {
+        return out;
+    }
+    const std::size_t colon = Scanner (out).find (':', 0, out.size ());
+    const std::size_t end   = colon == npos ? out.size () : colon;
+    if (auto ascii = vayu::http::ascii_host (std::string_view (out).substr (0, end))) {
+        out.replace (0, end, *ascii);
+    }
+    return out;
+}
+
 } // namespace
 
 std::string encode_url_as_postman (std::string_view url) {
@@ -194,8 +212,7 @@ std::string encode_url_as_postman (std::string_view url) {
         out += '@';
         host = at_sign + 1;
     }
-    out += rewrite_outside_tokens (std::string_view (head).substr (host, path_at - host),
-    /*lowercase=*/true, /*slashes=*/false);
+    out += postman_host (std::string_view (head).substr (host, path_at - host));
     out += encode_path_variable_value (std::string_view (head).substr (path_at));
 
     if (query_at != npos) {
