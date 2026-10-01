@@ -243,6 +243,7 @@ function describeBody(body: RequestBody | undefined): string {
 	// against whatever the request query returned - so do not assume the field.
 	if (!body || body.mode === "none") return "none";
 	if ("fields" in body) return `${body.mode} (${describeEntries(body.fields)})`;
+	if (body.mode === "binary") return `binary (${body.file.src || "no file"})`;
 	return `${body.mode} (${body.content || ""})`;
 }
 

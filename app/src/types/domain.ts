@@ -26,7 +26,8 @@ export type BodyMode =
 	| "jsonrpc"
 	| "xml"
 	| "form-data"
-	| "x-www-form-urlencoded";
+	| "x-www-form-urlencoded"
+	| "binary";
 
 export type AuthMode =
 	| "none"
@@ -137,6 +138,27 @@ export interface FormFieldEntry extends KeyValueEntry {
 }
 
 /**
+ * The file a `binary` body sends: an absolute path on this machine, read by the
+ * engine at send time, never held here. The members mean what they mean on a
+ * form-data file part. `unresolved` marks a path no one chose in the editor (an
+ * import, a curl paste, an MCP agent); the engine sends such a path only when it
+ * resolves under a folder allowed in Settings (`FileRoot`).
+ */
+export interface FileRef {
+	src: string;
+	fileName?: string;
+	contentType?: string;
+	unresolved?: boolean;
+}
+
+/** A folder Vayu may read request-body files from without a per-file pick. */
+export interface FileRoot {
+	id: string;
+	path: string;
+	createdAt: number;
+}
+
+/**
  * Request body as a discriminated union.
  * `body_type` on the domain `Request` is a denormalized mirror of `body.mode`.
  */
@@ -144,7 +166,8 @@ export type RequestBody =
 	| { mode: "none" }
 	| { mode: "json" | "text" | "graphql" | "jsonrpc" | "xml"; content: string }
 	| { mode: "form-data"; fields: FormFieldEntry[] }
-	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] };
+	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] }
+	| { mode: "binary"; file: FileRef };
 
 /**
  * Auth configuration for requests.

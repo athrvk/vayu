@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -161,6 +163,45 @@ enum class BodyMode : std::uint8_t {
 enum class FormFieldType : std::uint8_t { Text, File };
 
 /**
+ * @brief A file on this machine that a request body sends: the whole body of a
+ * `binary` request, or one `form-data` file part (whose members `FormField`
+ * mirrors).
+ *
+ * `src` is an absolute path, stored as written. `unresolved` marks a path no
+ * human chose in the editor - an import, a curl paste or an MCP agent wrote it,
+ * or composition filled a `{{variable}}` into it - and such a path is sent only
+ * when it resolves under a folder the user allowed (`file_roots`,
+ * `vayu::http::FileAccessPolicy`). See `vayu/http/file_ref.hpp` for the rule.
+ *
+ * The last three members are filled once per send or run by the plan step, never
+ * stored: a file at or under `INLINE_FILE_LIMIT` is read once into
+ * `inline_bytes` and shared by every transfer of a run; a larger one streams.
+ */
+struct FileRef {
+    std::string src;
+    std::string file_name;    // declared filename; empty = basename of `src`
+    std::string content_type; // empty = derived (see `implied_content_type`)
+    bool unresolved = false;
+    std::shared_ptr<const std::string> inline_bytes;
+    std::string sha256;
+    std::uint64_t size = 0;
+};
+
+/// The largest file a run reads once and shares across its transfers; larger
+/// files stream from disk per transfer.
+inline constexpr std::size_t INLINE_FILE_LIMIT = std::size_t{ 4 } * 1024 * 1024;
+
+/**
+ * @brief A folder the user allowed Vayu to read request-body files from without
+ * choosing each one in the editor (`file_roots` table, schema version 3).
+ */
+struct FileRoot {
+    std::string id;
+    std::string path;
+    std::int64_t created_at = 0;
+};
+
+/**
  * @brief One entry of a form body.
  *
  * Mirrors the renderer's `KeyValueEntry`: a disabled row is stored and
@@ -192,18 +233,21 @@ struct FormField {
     std::string src;          // file parts only - a path on this machine
     std::string file_name;    // declared filename; empty = basename of `src`
     std::string content_type; // per-part Content-Type; empty = libcurl's guess
+    bool unresolved = false;  // see `FileRef::unresolved`
 };
 
 /**
  * @brief Request body
  *
- * Exactly one of `content` and `fields` carries the body: the two form modes
- * use `fields`, every other content-bearing mode uses `content`.
+ * Exactly one of `content`, `fields` and `file` carries the body: the two form
+ * modes use `fields`, `Binary` uses `file`, every other content-bearing mode
+ * uses `content`.
  */
 struct Body {
     BodyMode mode = BodyMode::None;
     std::string content;
     std::vector<FormField> fields;
+    FileRef file;
 };
 
 /**
