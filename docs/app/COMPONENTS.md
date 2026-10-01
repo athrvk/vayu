@@ -260,7 +260,7 @@ The app's primary navigation, on the window's left edge rather than its bottom (
 - **Roving `tabindex`, `role="toolbar"`-free** - the same choice the Dock nav this replaces made, restated: that role promises full toolbar semantics beyond arrow-key traversal, and six toggle buttons in a `<nav>` are not a toolbar. `ArrowUp`/`ArrowDown` move focus without activating, mirroring `TabStrip`'s own arrow-key handler (reset every button's `tabindex` before promoting the destination, then focus it) - the roving stop tracks the *selected* Drawer view, not whether the Drawer is currently open, so a closed Drawer never leaves the rail with zero tab stops.
 - **A fifth stop in the F6 region cycle** (`"rail"` in `region-focus.ts`'s `AppRegion`), so a keyboard user reaches the app's primary navigation even with the Drawer collapsed.
 
-### `ContextRail` — see the `ContextBar` section above.
+### `ContextRail` - see the `ContextBar` section above.
 
 ### `Dock` (`components/layout/Dock.tsx`)
 

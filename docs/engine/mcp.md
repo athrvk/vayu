@@ -956,7 +956,7 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   a SOAP 1.2 endpoint gets `application/soap+xml`.
   `create_request` stores the same shape. Every form field an agent writes is a
   **text** part: a `form-data`
-  [file part](api-reference.md#file-parts-form-data-only) has no spelling in a
+  [file part](api-reference.md#file-references-binary-bodies-and-file-parts) has no spelling in a
   `key=value` string, and a stored one is left alone unless `body` replaces the
   whole body.
 - **File bodies** - `create_request` and `update_request` store a `binary`

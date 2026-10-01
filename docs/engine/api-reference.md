@@ -422,8 +422,6 @@ the *resolved* text; a body still holding a token at wire time does not parse,
 so it is passed through as typed rather than completed into a well-formed
 request carrying an unresolved template.
 
-<a id="file-parts-form-data-only"></a>
-
 #### File references: `binary` bodies and file parts
 
 Two body shapes name a file on the machine running the engine. They carry a
