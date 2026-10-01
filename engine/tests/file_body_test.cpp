@@ -79,12 +79,15 @@ using vayu::tests::EchoServer;
 /// A directory of its own per test, removed with everything in it.
 class ScratchDir {
     public:
+    // Under the working directory, which `main` has already made private to
+    // this process (`enter_process_scratch_dir`): ctest runs each test in its
+    // own process at once, and a name under the shared temp directory - the
+    // gtest seed is 0 in every one of them - let two tests delete each other's
+    // files mid-run.
     ScratchDir () {
         static std::atomic<int> counter{ 0 };
-        path_ = fs::temp_directory_path () /
-        ("vayu-file-body-" +
-        std::to_string (::testing::UnitTest::GetInstance ()->random_seed ()) +
-        "-" + std::to_string (counter.fetch_add (1)));
+        path_ = fs::current_path () /
+        ("vayu-file-body-" + std::to_string (counter.fetch_add (1)));
         fs::remove_all (path_);
         fs::create_directories (path_);
         path_ = fs::canonical (path_);
