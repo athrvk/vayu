@@ -170,7 +170,11 @@ std::uint64_t& size_out) {
         }
     }
     const auto digest = hash.finish ();
-    sha_out  = vayu::utils::hex_encode (vayu::utils::byte_view (digest));
+    // Assigned in place rather than move-assigned from a temporary: GCC 13 at
+    // -O3 reports the inlined small-string move as an out-of-bounds memcpy
+    // (-Warray-bounds), a false positive that fails the -Werror release build.
+    const std::string hex = vayu::utils::hex_encode (vayu::utils::byte_view (digest));
+    sha_out.assign (hex);
     size_out = total;
     if (inline_ok) {
         bytes_out = std::make_shared<const std::string> (std::move (whole));

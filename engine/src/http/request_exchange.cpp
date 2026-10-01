@@ -83,7 +83,9 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request) {
         node["size"]   = file.size;
         node["sha256"] = file.sha256;
     }
-    return node;
+    // In place: `json` converts to `std::optional<json>` itself, and GCC 13
+    // under -Wconversion reports the two routes as ambiguous.
+    return std::optional<nlohmann::json> (std::in_place, std::move (node));
 }
 
 nlohmann::json build_result_trace (const vayu::Request& request,
