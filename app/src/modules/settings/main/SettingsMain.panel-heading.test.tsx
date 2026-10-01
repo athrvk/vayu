@@ -48,6 +48,7 @@ const PANEL_FILES: Record<string, string> = {
 	notifications: "panels/NotificationsPanel.tsx",
 	shortcuts: "panels/KeyboardShortcutsPanel.tsx",
 	mcp: "panels/McpSettingsPanel.tsx",
+	files: "panels/FilesPanel.tsx",
 };
 
 /**

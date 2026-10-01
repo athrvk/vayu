@@ -1396,6 +1396,13 @@ export interface RunResultTrace {
 		 * `rawRequest`.
 		 */
 		sentHeaders?: Record<string, string>;
+		/**
+		 * What a `binary` body sent: the file's name, size in bytes and
+		 * sha256, recorded at send time - never the bytes and never the path.
+		 * `unknown` because a stored row is whatever its engine wrote;
+		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
+		 */
+		bodyFile?: unknown;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -2922,7 +2929,8 @@ export type ClientSettingsCategory =
 	| "notifications"
 	| "general"
 	| "shortcuts"
-	| "mcp";
+	| "mcp"
+	| "files";
 
 /**
  * Engine settings categories (data-driven from the engine `/config` API).

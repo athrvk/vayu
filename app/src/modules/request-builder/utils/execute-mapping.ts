@@ -23,7 +23,13 @@
  * are in scope.
  */
 
-import type { ExampleSentRequest, RequestBody, ResolvedElement, SanityResult } from "@/types";
+import type {
+	ExampleSentRequest,
+	FileRef,
+	RequestBody,
+	ResolvedElement,
+	SanityResult,
+} from "@/types";
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
@@ -33,6 +39,8 @@ export interface ExecBody {
 	mode: string;
 	content?: string;
 	fields?: ExecField[];
+	/** A `binary` body's file - a path, never bytes. */
+	file?: FileRef;
 }
 
 /**
@@ -40,9 +48,10 @@ export interface ExecBody {
  * part should declare about itself - never bytes: the engine opens the file, so
  * a renderer that read it would be copying the upload through two processes.
  *
- * `unresolved` is deliberately absent - it is an editor annotation about where
- * a path came from, and the engine's answer to a path it cannot open is the
- * same either way.
+ * `unresolved` travels: it is the engine's trust input, not an editor
+ * annotation. A path nobody chose in the editor is sent only when it lies
+ * under a folder allowed in Settings, so dropping the flag here would let an
+ * imported path through as though the user had picked it.
  */
 export interface ExecField {
 	key: string;
@@ -52,6 +61,24 @@ export interface ExecField {
 	src?: string;
 	fileName?: string;
 	contentType?: string;
+	unresolved?: boolean;
+}
+
+/**
+ * A binary body's file as the stored and the wire shape both take it: empty
+ * optional members left out, and `unresolved` only when it is true, so a file
+ * chosen in the editor reads the same as one stored before the flag existed.
+ */
+export function toFileRef(
+	file: FileRef | undefined,
+	resolveString: (input: string) => string = (s) => s
+): FileRef {
+	if (!file) return { src: "" };
+	const ref: FileRef = { src: resolveString(file.src ?? "") };
+	if (file.fileName) ref.fileName = resolveString(file.fileName);
+	if (file.contentType) ref.contentType = resolveString(file.contentType);
+	if (file.unresolved) ref.unresolved = true;
+	return ref;
 }
 
 /**
@@ -66,6 +93,9 @@ export function toBodyPayload(request: RequestState): RequestBody {
 	}
 	if (request.bodyMode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
+	}
+	if (request.bodyMode === "binary") {
+		return { mode: "binary", file: toFileRef(request.binaryFile) };
 	}
 	if (request.bodyMode !== "none") {
 		return {
@@ -100,8 +130,8 @@ export function sentRequestOf(request: RequestState): ExampleSentRequest {
  * is omitted rather than sent as an empty object.
  *
  * The two field-based modes resolve each key and value individually; the
- * content-based modes resolve the whole string. `mode: "none"` and an empty
- * body both mean "no body".
+ * content-based modes resolve the whole string, and `binary` resolves its
+ * file's three strings. `mode: "none"` and an empty body both mean "no body".
  */
 export function buildExecBody(
 	request: RequestState,
@@ -125,6 +155,7 @@ export function buildExecBody(
 				field.src = resolveString(e.src ?? "");
 				if (e.fileName) field.fileName = resolveString(e.fileName);
 				if (e.contentType) field.contentType = resolveString(e.contentType);
+				if (e.unresolved) field.unresolved = true;
 				return field;
 			}),
 		};
@@ -139,6 +170,12 @@ export function buildExecBody(
 				enabled: e.enabled,
 			})),
 		};
+	}
+
+	// Sent even with an empty path: the engine refuses it as "no file
+	// selected", which says more than a request that went out bodiless.
+	if (request.bodyMode === "binary") {
+		return { mode: "binary", file: toFileRef(request.binaryFile, resolveString) };
 	}
 
 	const resolvedBody = request.body ? resolveString(request.body) : request.body;

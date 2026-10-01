@@ -62,6 +62,8 @@ import type {
 	ClearCookiesResponse,
 	ClientCertificate,
 	ClientCertificateInput,
+	FileRoot,
+	FileRootInput,
 	ConnectionTestResult,
 	WorkspaceBackupResult,
 	GetConfigResponse,
@@ -576,6 +578,20 @@ export const apiService = {
 
 	async deleteClientCertificate(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.CLIENT_CERTIFICATE_BY_ID(id));
+	},
+
+	// Allowed folders for request-body files (Settings > Files)
+	async getFileRoots(): Promise<FileRoot[]> {
+		return await httpClient.get<FileRoot[]>(API_ENDPOINTS.FILE_ROOTS);
+	},
+
+	/** Rejects with the engine's 400 (not a directory) or 409 (already allowed). */
+	async createFileRoot(input: FileRootInput): Promise<FileRoot> {
+		return await httpClient.post<FileRoot>(API_ENDPOINTS.FILE_ROOTS, { path: input.path });
+	},
+
+	async deleteFileRoot(id: string): Promise<void> {
+		await httpClient.delete(API_ENDPOINTS.FILE_ROOT_BY_ID(id));
 	},
 
 	// Webhook inbox (issue #480)

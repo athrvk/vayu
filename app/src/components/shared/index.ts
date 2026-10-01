@@ -22,6 +22,9 @@ export * from "./AuthFields";
 
 // One notice treatment: warnings, blockers and confirmations
 export * from "./Callout";
+
+// The file a stored run's binary body sent - name, size, sha256
+export * from "./SentBodyFileNote";
 export * from "./callout-severity";
 
 // "Someone else changed this while you were editing" - collection tabs and

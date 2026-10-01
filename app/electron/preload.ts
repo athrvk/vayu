@@ -297,6 +297,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		}
 	},
 
+	// The system folder picker, for Settings > Files and the body editor's
+	// "Allow folder...". Resolves to the chosen folder, or null on cancel; the
+	// engine stores and re-checks it (`POST /file-roots`).
+	selectDirectory: (options?: { defaultPath?: string; title?: string }): Promise<string | null> =>
+		ipcRenderer.invoke("file:selectDirectory", options),
+
+	// A binary body file's size for the editor's file line - never its bytes:
+	// the engine reads the file at send time. Null for a relative path, a
+	// missing file, or anything that is not a regular file. See file-ipc.ts.
+	statFile: (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
+		ipcRenderer.invoke("file:stat", path),
+
 	// Re-read a collection's declared data file by path (issue #599) - the one
 	// channel on which the renderer *does* name a path, because the Run dialog
 	// has to re-open a file the user picked in an earlier session and the `File`

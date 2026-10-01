@@ -539,6 +539,39 @@ describe("DesignRunView - saving back to the request", () => {
 		expect(screen.queryByText(/run sent auth:/i)).toBeNull();
 	});
 
+	it("names the file a binary body sent, from the trace's request node", () => {
+		const base = designRun();
+		const sha = "0123456789abcdef".repeat(4);
+		renderView(
+			designRun({
+				configSnapshot: {
+					...base.configSnapshot,
+					body: { mode: "binary", file: { src: "/data/a.bin" } },
+				},
+				result: {
+					...base.result!,
+					trace: {
+						...base.result!.trace,
+						request: {
+							...base.result!.trace!.request,
+							bodyFile: { fileName: "a.bin", size: 2048, sha256: sha },
+						},
+					},
+				},
+			} as Partial<Run>)
+		);
+
+		expect(screen.getByText(/Sent file a\.bin · 2\.0 KB · sha256/)).toBeTruthy();
+		const hash = screen.getByText("0123456789ab");
+		// The full hash is the hover, for comparing two runs exactly.
+		expect(hash.getAttribute("title")).toBe(sha);
+	});
+
+	it("says nothing about a file for a run with another body", () => {
+		renderView(designRun());
+		expect(screen.queryByText(/Sent file/)).toBeNull();
+	});
+
 	it("hides Save when the request has been deleted", () => {
 		// A genuine deletion settles as the sentinel, not as bare null data -
 		// that is what production produces, and what seeds the orphan copy.

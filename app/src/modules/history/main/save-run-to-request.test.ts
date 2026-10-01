@@ -560,3 +560,42 @@ describe("buildChangeset", () => {
 		expect(set.map((i) => i.field)).toEqual(["Auth"]);
 	});
 });
+
+describe("applyRunToRequest, binary bodies", () => {
+	function binaryRun(file: unknown): Run {
+		const base = run();
+		return run({
+			configSnapshot: { ...base.configSnapshot, body: { mode: "binary", file } },
+		} as Partial<Run>);
+	}
+
+	it("writes the run's file reference back", () => {
+		const live = liveRequest();
+		const patch = applyRunToRequest(
+			seedFromRun(binaryRun({ src: "/data/a.bin", contentType: "image/png" }), live),
+			live
+		);
+
+		expect(patch.body).toEqual({
+			mode: "binary",
+			file: { src: "/data/a.bin", contentType: "image/png" },
+		});
+		expect(patch.bodyType).toBe("binary");
+	});
+
+	it("keeps the saved body when the run recorded no path", () => {
+		const live = liveRequest({
+			body: { mode: "binary", file: { src: "/mine/keep.bin" } },
+			bodyType: "binary",
+		});
+		const seed = seedFromRun(binaryRun({ fileName: "a.bin" }), live);
+
+		const patch = applyRunToRequest(seed, live);
+		expect(patch).not.toHaveProperty("body");
+		expect(patch).not.toHaveProperty("bodyType");
+
+		const bodyRow = buildChangeset(seed, live).find((item) => item.field === "Body");
+		expect(bodyRow?.state).toBe("kept");
+		expect(bodyRow?.note).toMatch(/did not record which file/);
+	});
+});

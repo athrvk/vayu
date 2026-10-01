@@ -29,7 +29,11 @@ import type { BodyMode } from "../../../../types";
 export interface BodyModeOption {
 	value: BodyMode;
 	label: string;
-	/** What goes on the wire in this mode, or null when nothing is sent. */
+	/**
+	 * What goes on the wire in this mode, or null when no one type can be
+	 * named: nothing is sent (`none`), or the type depends on the file
+	 * (`binary`, which `binary-content-type.ts` answers per request).
+	 */
 	contentType: string | null;
 }
 
@@ -46,4 +50,5 @@ export const BODY_MODES: BodyModeOption[] = [
 		label: "URL-encoded",
 		contentType: "application/x-www-form-urlencoded",
 	},
+	{ value: "binary", label: "Binary file", contentType: null },
 ];

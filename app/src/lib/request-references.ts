@@ -20,8 +20,9 @@
  *   audit (`services/data-files/column-audit.ts`) is its consumer - it answers
  *   "which declared columns does a run bind", so it must not walk a field the
  *   binder never touches.
- * - `templatedStrings` is that set plus a form-data file part's `src`,
- *   `fileName` and `contentType` - the wider set the **composer**
+ * - `templatedStrings` is that set plus a form-data file part's (or a
+ *   `binary` body's file's) `src`, `fileName` and `contentType` - the wider
+ *   set the **composer**
  *   (`request_composer.cpp` `resolve_form_field`) interpolates `{{...}}` into.
  *   A `{{token}}` in a file part's content type is a real variable reference the
  *   send resolves, so the request tab's variables view walks it, while the data
@@ -138,6 +139,12 @@ export function bindableStrings(
 		}
 	} else if (body?.mode === "x-www-form-urlencoded") {
 		entries(body.fields);
+	} else if (body?.mode === "binary" && options?.includeFileFields) {
+		// The same three strings a form file part contributes, on the same
+		// side of the binder/composer line.
+		if (body.file?.src) strings.push(body.file.src);
+		if (body.file?.fileName) strings.push(body.file.fileName);
+		if (body.file?.contentType) strings.push(body.file.contentType);
 	}
 	// Bound per iteration since #591, and applied (base64, percent-encoding) only
 	// after the bind - so what a token sits in is the credential itself.

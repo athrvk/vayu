@@ -124,7 +124,8 @@ function buildUpdatePayload(
 		changedFields.has("bodyMode") ||
 		changedFields.has("body") ||
 		changedFields.has("formData") ||
-		changedFields.has("urlEncoded")
+		changedFields.has("urlEncoded") ||
+		changedFields.has("binaryFile")
 	) {
 		const bodyPayload = toBodyPayload(request);
 		payload.body = bodyPayload;
@@ -331,7 +332,9 @@ export default function RequestBuilder() {
 									? "jsonrpc"
 									: body.mode === "xml"
 										? "xml"
-										: "none";
+										: body.mode === "binary"
+											? "binary"
+											: "none";
 
 		const rawBody = "content" in body ? body.content : "";
 		const formFields = "fields" in body && body.mode === "form-data" ? body.fields : [];
@@ -351,6 +354,7 @@ export default function RequestBuilder() {
 			body: rawBody,
 			formData: toKeyValueItems(formFields),
 			urlEncoded: toKeyValueItems(urlEncodedFields),
+			binaryFile: body.mode === "binary" && body.file ? body.file : { src: "" },
 			auth: fetchedRequest.auth,
 			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,

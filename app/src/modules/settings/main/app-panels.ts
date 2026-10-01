@@ -25,7 +25,17 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info, Keyboard } from "lucide-react";
+import {
+	Palette,
+	Code2,
+	LayoutDashboard,
+	Gauge,
+	Bell,
+	Plug,
+	Info,
+	Keyboard,
+	FolderOpen,
+} from "lucide-react";
 import { ICON_MOTION, type IconMotion } from "@/components/ui";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 
@@ -104,6 +114,13 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 			"Where toasts appear, how long they stay, how many stack at once, and which ones are worth showing",
 		icon: Bell,
 		motion: ICON_MOTION.ring,
+	},
+	{
+		id: "files",
+		label: "Files",
+		description: "The folders request-body files may be sent from",
+		icon: FolderOpen,
+		motion: ICON_MOTION.tilt,
 	},
 	{
 		id: "shortcuts",

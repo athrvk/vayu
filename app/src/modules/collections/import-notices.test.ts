@@ -13,8 +13,9 @@
 
 import { describe, it, expect } from "vitest";
 
-import type { ImportMeta } from "@/services/importers/types";
-import { importNotices } from "./import-notices";
+import type { ImportMeta, RequestDraft } from "@/services/importers/types";
+import { bodiesWithoutFileNotice, fileReferenceNeeds, importNotices } from "./import-notices";
+import { collection, request, result } from "./import-preview.testkit";
 
 function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
 	return {
@@ -138,5 +139,79 @@ describe("importNotices", () => {
 		expect(texts).toEqual([
 			"2 requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
 		]);
+	});
+});
+
+describe("fileReferenceNeeds", () => {
+	function binary(src: string, unresolved = true): RequestDraft {
+		return request({ body: { mode: "binary", file: { src, unresolved } } });
+	}
+	function formFile(src: string, unresolved = true): RequestDraft {
+		return request({
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "caption", value: "hi", enabled: true },
+					{ key: "file", value: "", enabled: true, type: "file", src, unresolved },
+				],
+			},
+		});
+	}
+
+	it("groups unresolved binary and form-part paths by their folder", () => {
+		const needs = fileReferenceNeeds([
+			result({
+				collections: [
+					collection({
+						requests: [binary("/data/a.bin"), formFile("/data/b.png")],
+						children: [collection({ requests: [binary("C:\\up\\c.bin")] })],
+					}),
+				],
+			}),
+		]);
+
+		expect(needs.folders).toEqual([
+			{ folder: "/data", count: 2 },
+			{ folder: "C:\\up", count: 1 },
+		]);
+		expect(needs.bodiesWithoutFile).toBe(0);
+	});
+
+	it("leaves out paths someone chose, and folders that are still a variable", () => {
+		const needs = fileReferenceNeeds([
+			result({
+				collections: [
+					collection({
+						requests: [
+							binary("/mine/a.bin", false),
+							formFile("{{dir}}/b.png"),
+							binary("a.bin"),
+						],
+					}),
+				],
+			}),
+		]);
+
+		expect(needs.folders).toEqual([]);
+	});
+
+	it("counts across every file of a batch, once per folder", () => {
+		const one = result({ collections: [collection({ requests: [binary("/data/a.bin")] })] });
+		const two = result({ collections: [collection({ requests: [binary("/data/b.bin")] })] });
+
+		expect(fileReferenceNeeds([one, two]).folders).toEqual([{ folder: "/data", count: 2 }]);
+	});
+
+	it("counts binary bodies that arrived with no file at all", () => {
+		const needs = fileReferenceNeeds([
+			result({ collections: [collection({ requests: [binary(""), binary("  ")] })] }),
+		]);
+
+		expect(needs.bodiesWithoutFile).toBe(2);
+		expect(bodiesWithoutFileNotice(needs.bodiesWithoutFile)).toEqual({
+			tier: "action",
+			text: "2 file bodies need files",
+		});
+		expect(bodiesWithoutFileNotice(0)).toBeNull();
 	});
 });

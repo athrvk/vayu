@@ -160,4 +160,15 @@ describe("bindableStrings - the binder-versus-composer field set", () => {
 		expect(strings).toContain("{{fname}}");
 		expect(strings).toContain("{{fct}}");
 	});
+	it("puts a binary body's file on the same side of the line", () => {
+		const binary: RequestBody = {
+			mode: "binary",
+			file: { src: "{{fixturesDir}}/a.bin", fileName: "{{fname}}", contentType: "{{fct}}" },
+		};
+		expect(bindableStrings(source({ body: binary }))).not.toContain("{{fixturesDir}}/a.bin");
+		const strings = bindableStrings(source({ body: binary }), { includeFileFields: true });
+		expect(strings).toEqual(
+			expect.arrayContaining(["{{fixturesDir}}/a.bin", "{{fname}}", "{{fct}}"])
+		);
+	});
 });

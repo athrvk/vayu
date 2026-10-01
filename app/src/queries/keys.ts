@@ -242,6 +242,11 @@ export const queryKeys = {
 		all: ["clientCertificates"] as const,
 	},
 
+	// Allowed folders for request-body files
+	fileRoots: {
+		all: ["fileRoots"] as const,
+	},
+
 	// Health
 	health: {
 		all: ["health"] as const,
