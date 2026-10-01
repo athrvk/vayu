@@ -25,6 +25,9 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/rate_limiter.hpp"
 
+// The platform socket header declares it; only a pointer crosses here.
+struct addrinfo;
+
 namespace vayu::http::detail {
 
 // Forward declaration
@@ -43,6 +46,11 @@ struct TransferData;
  */
 [[nodiscard]] bool
 dns_entry_is_fresh (bool negative, std::chrono::steady_clock::duration age, long ttl_seconds);
+
+/// Every IPv4 and IPv6 address in a getaddrinfo result, in its order, once
+/// each, as CURLOPT_RESOLVE's ADDRESS list ("127.0.0.1,[::1]"). Empty when
+/// it holds neither family.
+[[nodiscard]] std::string curl_address_list (const ::addrinfo* addresses);
 
 /**
  * @brief Thread-safe DNS cache for pre-resolved hostnames
@@ -64,7 +72,9 @@ dns_entry_is_fresh (bool negative, std::chrono::steady_clock::duration age, long
  */
 class DnsCache {
     public:
-    /// Hostname -> address, or empty string when the lookup failed.
+    /// Hostname -> every address it resolved to, in CURLOPT_RESOLVE's
+    /// ADDRESS form (comma-separated, IPv6 bracketed), or an empty string
+    /// when the lookup failed.
     using Resolver = std::function<std::string (const std::string&)>;
 
     /// Uses the system resolver. Tests inject a stub to make TTL and
@@ -74,10 +84,13 @@ class DnsCache {
 
     /// Pre-resolve a hostname, honouring and refreshing the cache.
     /// @param ttl_seconds >0 entry lifetime, 0 disables caching, <0 never expires
-    /// @return the resolved IP, or an empty string on failure
+    /// @return the resolved addresses, or an empty string on failure
     std::string resolve (const std::string& hostname, long ttl_seconds);
 
-    /// Get curl-compatible resolve entry: "hostname:port:ip"
+    /// Get curl-compatible resolve entry: "hostname:port:address[,address]".
+    /// Every address is pinned, not just the first: a name that resolves to
+    /// both ::1 and 127.0.0.1 (`*.localhost` under nss-myhostname) must
+    /// still reach a server listening on only one of them.
     /// Returns nullptr if the hostname could not be resolved
     struct curl_slist* get_resolve_list (const std::string& hostname, int port, long ttl_seconds);
 
@@ -89,7 +102,7 @@ class DnsCache {
 
     private:
     struct Entry {
-        std::string ip; // Empty for a remembered failure
+        std::string ip; // Address list; empty for a remembered failure
         std::chrono::steady_clock::time_point stored_at;
     };
 
