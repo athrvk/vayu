@@ -162,6 +162,12 @@ FieldValue body_value (const DraftBody& body) {
         const FieldValue fields = rows_value (body.fields);
         return { body.mode + " " + fields.compare, body.mode + ": " + fields.display };
     }
+    if (body.mode == "binary") {
+        // The mode alone, as a file part compares by its `[file]` flag alone: the
+        // document names no file, and a content type the user set or a file
+        // picked since import is the user's, which a sync must not undo.
+        return { "binary", "binary" };
+    }
     return { body.mode + " " + body.content,
         // The mode leads because a body's first 120 characters are frequently
         // identical between two different stubs (`{`, two keys, a newline).

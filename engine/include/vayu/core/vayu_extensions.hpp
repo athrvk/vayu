@@ -84,9 +84,10 @@ void redact_postman_auth (Json& source, int& omitted);
 [[nodiscard]] Json redact_variables (const Json& variables, int& omitted);
 
 /**
- * A stored body as another machine can use it: a file part keeps its name,
- * type and declared file name, never the local path (`src`) it was read from,
- * which is one machine's filesystem and can carry a user name.
+ * A stored body as another machine can use it: a file part, or a binary body's
+ * `file`, keeps its type, declared file name and content type, never the local
+ * path (`src`) it was read from - one machine's filesystem, which can carry a
+ * user name - nor `unresolved`, which describes that path.
  */
 [[nodiscard]] Json portable_body (const Json& body);
 
@@ -106,7 +107,9 @@ void redact_postman_auth (Json& source, int& omitted);
  */
 [[nodiscard]] std::optional<Json> param_rows_of (const Json& value);
 
-/// A request body in one of Vayu's own modes, or nothing.
+/// A request body in one of Vayu's own modes, or nothing. A file path it
+/// carries (a form file part's or a binary body's `src`, which a hand-edited
+/// document may hold) is kept and marked `unresolved`: no one chose it here.
 [[nodiscard]] std::optional<Json> body_of (const Json& value);
 
 /// An auth object naming one of Vayu's modes, or nothing. @p collection

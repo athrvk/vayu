@@ -415,10 +415,17 @@ counter at all. `cookie_param` is a parameter declared `in: "cookie"`: Vayu's co
 from the jar, and folding one declaration at a time into a single joined `Cookie` header
 would mean inventing a merge the document never wrote, so mapping them is a recorded
 non-goal and naming the loss is the honest half. `unmapped_body` is a `requestBody`
-declaring only media types with no Vayu mode - `application/octet-stream`,
-`application/xml`, `image/*` - which used to return `{ mode: "none" }` on the same path as
-*no body at all*, so a binary upload imported as a bodyless POST reporting nothing skipped;
-an operation that declared no body is still not counted, because it lost nothing.
+declaring only media types with no Vayu mode and no binary schema - an `image/png` whose
+schema is an object, say - which used to return `{ mode: "none" }` on the same path as
+*no body at all*, reporting nothing skipped; an operation that declared no body is still not
+counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
+`format: binary` schema) is no longer one of them: it imports as a `binary` body with no
+file chosen.
+
+`file_body` is not a loss either. Every whole-file body - Postman's `file` mode, an Insomnia
+binary body, an OpenAPI whole-file `requestBody` - imports as a `binary` body naming its file
+(the path the export carried, marked `unresolved`, or none), and the count with its
+`requests` names the bodies whose file the user has to relink or choose.
 `unresolved_base_url` is a `servers[0].url` that could not be made into an address a request
 could reach - a `{variable}` the document declares no default for, or a relative URL in a
 document that arrived with no URL to resolve it against (see

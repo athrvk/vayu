@@ -100,10 +100,11 @@ your afternoon:
 
 Postman Collection **v2.0 and v2.1** exports import with the folder tree,
 collection and folder variables, auth, pre-request and test scripts, query
-parameters, and raw, JSON, URL-encoded, form-data and GraphQL bodies. Postman
-exports **environments** and **globals** as separate files; drop those in too and
-they import as a Vayu environment and into the globals scope respectively.
-Binary and file bodies are dropped with a count rather than silently, and
+parameters, and raw, JSON, URL-encoded, form-data, GraphQL and binary (file)
+bodies. Postman exports **environments** and **globals** as separate files; drop
+those in too and they import as a Vayu environment and into the globals scope
+respectively. A file a body or form field names comes across as its path, which
+Vayu sends once you choose the file again or allow its folder in Settings, and
 Digest / AWS / NTLM auth imports as data but will not execute. Most `pm.*` test
 scripts run unmodified - [what is covered](../app/pm-api-compatibility.md), and
 [what carries over per format](../app/import-collections/postman.md).

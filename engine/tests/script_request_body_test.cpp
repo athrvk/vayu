@@ -91,6 +91,13 @@ constexpr std::string_view GRAPHQL_UNRESOLVED = R"({"query":"{{savedQuery}},)";
 constexpr std::string_view GRAPHQL_BOM_ENVELOPE = "\xEF\xBB\xBF"
                                                   R"({"query":"query Ping { ping }"})";
 
+Body binary_body () {
+    Body body;
+    body.mode     = BodyMode::Binary;
+    body.file.src = "/home/ada/pictures/portrait.png";
+    return body;
+}
+
 Body graphql_body (std::string_view content) {
     Body body;
     body.mode    = BodyMode::GraphQL;
@@ -181,12 +188,12 @@ TEST_F (ScriptRequestBodyTest, JsonParseOfRawIsTheImportedIdiomAndRoundTrips) {
  *
  * `graphql` left this list in #1111, which is a *break* for a lifted
  * `body.mode === 'raw'` guard over a GraphQL body - and the compatible answer,
- * since Postman names that mode too. `binary` stays here: Postman's `file` mode
- * promises the path `file.src`, and this one carries bytes.
+ * since Postman names that mode too. `binary` left it when it became a file
+ * (Postman's `file` mode, `ABinaryBodyIsPostmansFileModeAndNeverItsPath`).
  */
 TEST_F (ScriptRequestBodyTest, EveryContentModeAnswersRaw) {
-    for (const BodyMode mode : { BodyMode::Json, BodyMode::Text,
-         BodyMode::Binary, BodyMode::JsonRpc, BodyMode::Xml }) {
+    for (const BodyMode mode :
+    { BodyMode::Json, BodyMode::Text, BodyMode::JsonRpc, BodyMode::Xml }) {
         request.body.mode    = mode;
         request.body.content = "payload";
         expect_script_passes (R"JS(
@@ -356,6 +363,49 @@ TEST_F (ScriptRequestBodyTest, AFormDataBodyNamesItsFilePartAndNeverItsPath) {
     )JS");
 }
 
+/**
+ * A binary body is Postman's `file` mode. `.file` answers the file's name and
+ * never `src` - the local path is one machine's filesystem, held back exactly
+ * as a form-data file part's is (issue #411) - and the string view names it
+ * the way a form-data file part is named, `@<file name>`.
+ */
+TEST_F (ScriptRequestBodyTest, ABinaryBodyIsPostmansFileModeAndNeverItsPath) {
+    request.body = binary_body ();
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.mode).to.equal('file');
+        pm.expect(pm.request.body.file.name).to.equal('portrait.png');
+        pm.expect(pm.request.body.file.src).to.equal(undefined);
+        pm.expect(JSON.stringify(pm.request.body.file)).to.not.include('/home/ada');
+        pm.expect(String(pm.request.body)).to.equal('@portrait.png');
+        pm.expect(pm.request.body.raw).to.equal('@portrait.png');
+        pm.expect(pm.request.body.formdata).to.equal(undefined);
+        pm.expect(Object.isExtensible(pm.request.body.file)).to.equal(false);
+    )JS");
+}
+
+/// A declared file name is the one a script sees, and `size` appears once the
+/// send has measured the file (the plan step sets `sha256` beside it).
+TEST_F (ScriptRequestBodyTest, ABinaryBodysFileNamesItsDeclaredNameAndMeasuredSize) {
+    request.body                = binary_body ();
+    request.body.file.file_name = "avatar.png";
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.file.name).to.equal('avatar.png');
+        pm.expect('size' in pm.request.body.file).to.equal(false);
+    )JS");
+    request.body.file.size   = 1234;
+    request.body.file.sha256 = "ab";
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.file.size).to.equal(1234);
+    )JS");
+}
+
+/// Every other mode has no file to answer about.
+TEST_F (ScriptRequestBodyTest, OnlyABinaryBodyHasAFile) {
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.file).to.equal(undefined);
+    )JS");
+}
+
 TEST_F (ScriptRequestBodyTest, ABodylessRequestStillDefinesNoBodyAtAll) {
     request.body = Body{};
     expect_script_passes (R"JS(
@@ -504,6 +554,29 @@ TEST_F (ScriptRequestBodyTest, AssigningRawOnAFormDataBodyIsRefusedRatherThanDro
     ASSERT_EQ (request.body.fields.size (), before.fields.size ());
     EXPECT_EQ (request.body.fields[1].src, before.fields[1].src)
     << "the upload survives";
+}
+
+/// A script never chooses the file a binary body sends: a string written back
+/// is refused, the file kept, and reading the body without changing it is not
+/// a write.
+TEST_F (ScriptRequestBodyTest, AssigningABinaryBodyIsRefusedAndTheFileKept) {
+    request.body = binary_body ();
+    auto refused = engine.execute_prerequest (R"JS(
+        pm.request.body.raw = '/etc/passwd';
+    )JS",
+    request, env);
+    EXPECT_FALSE (refused.success);
+    EXPECT_NE (refused.error_message.find ("binary"), std::string::npos)
+    << refused.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::Binary);
+    EXPECT_EQ (request.body.file.src, "/home/ada/pictures/portrait.png");
+
+    auto read = engine.execute_prerequest (R"JS(
+        var seen = String(pm.request.body) + pm.request.body.file.name;
+    )JS",
+    request, env);
+    EXPECT_TRUE (read.success) << read.error_message;
+    EXPECT_EQ (request.body.file.src, "/home/ada/pictures/portrait.png");
 }
 
 /// The shipped whole-string write, unchanged - the object is only a second way

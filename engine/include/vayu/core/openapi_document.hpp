@@ -323,12 +323,17 @@ struct DraftExample {
 
 /// A draft request's body, in the shape `requests.body` stores.
 struct DraftBody {
-    /// `none`, `json`, `text`, `xml`, `form-data` or `x-www-form-urlencoded`.
+    /// `none`, `json`, `text`, `xml`, `binary`, `form-data` or
+    /// `x-www-form-urlencoded`.
     std::string mode = "none";
-    /// The `json` / `text` / `xml` payload, and `""` for the form and `none` modes.
+    /// The `json` / `text` / `xml` payload, and `""` for every other mode.
     std::string content;
     /// The form modes' fields, empty for every other mode.
     std::vector<DraftField> fields;
+    /// The `binary` mode's media type, the file's `contentType`: `""` when the
+    /// document names none a request can send (a wildcard such as `image/*`).
+    /// A document names the upload, never the file, so a binary draft has no path.
+    std::string content_type;
 };
 
 /**

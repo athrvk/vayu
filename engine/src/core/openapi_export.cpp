@@ -1225,7 +1225,8 @@ std::string body_media_type (const ExportRequest& entry, std::string_view fallba
  *
  * GraphQL is written as the JSON envelope a GraphQL-over-HTTP server receives
  * (`{query, variables}`, which is what Vayu stores), a form as the object of
- * its enabled text fields. Every mode round-trips exactly through
+ * its enabled text fields, a binary body as a `format: binary` string with no
+ * example - the file is one machine's. Every mode round-trips exactly through
  * `x-vayu-request.body`; this is what another tool reads.
  */
 struct BodyExample {
@@ -1234,7 +1235,14 @@ struct BodyExample {
     /// Set for a form: its fields as schema properties, file parts as
     /// `format: binary`, described where the row is.
     std::optional<Json> form_schema;
+    /// A binary body: one file's bytes, which no example states.
+    bool file = false;
 };
+
+/// The schema of one file's bytes, in either vocabulary.
+Json file_schema () {
+    return Json{ { "type", "string" }, { "format", "binary" } };
+}
 
 /// A GraphQL body as the JSON envelope a GraphQL-over-HTTP server receives -
 /// what Vayu stores, or a bare query wrapped as one.
@@ -1303,10 +1311,47 @@ std::optional<BodyExample> form_example_of (const ExportRequest& entry) {
         Json{ { "type", "object" }, { "properties", std::move (properties) } }) };
 }
 
+/// A binary body's own `contentType`, lowered and without its parameters, or
+/// `""` when it states none or one that is still a `{{variable}}`.
+std::string file_media_type (const ExportRequest& entry) {
+    const auto file = entry.stored_body.find ("file");
+    if (file == entry.stored_body.end () || !file->is_object ()) {
+        return {};
+    }
+    const auto stated = file->find ("contentType");
+    if (stated == file->end () || !stated->is_string ()) {
+        return {};
+    }
+    const std::string& text     = stated->get_ref<const std::string&> ();
+    const std::string_view type = trim (
+    std::string_view (text).substr (0, std::min (text.find (';'), text.size ())));
+    if (type.find ("{{") != std::string_view::npos) {
+        return {};
+    }
+    return vayu::utils::ascii_lower (type);
+}
+
+/**
+ * A binary body, under the media type it is sent with as far as the request
+ * itself says: an enabled `Content-Type` row, else the file's own
+ * `contentType`, else `application/octet-stream`.
+ */
+BodyExample binary_example_of (const ExportRequest& entry) {
+    const std::string stated = file_media_type (entry);
+    BodyExample body{ body_media_type (entry,
+                      stated.empty () ? "application/octet-stream" : stated),
+        Json (), std::nullopt };
+    body.file = true;
+    return body;
+}
+
 std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
     const ExportBody& body = entry.body;
     if (body.mode == "graphql") {
         return graphql_example_of (entry);
+    }
+    if (body.mode == "binary") {
+        return binary_example_of (entry);
     }
     if (body.mode == "form-data" || body.mode == "x-www-form-urlencoded") {
         return form_example_of (entry);
@@ -1330,6 +1375,9 @@ std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
 /// One body example as a 3.x media object: the schema read off it (or the
 /// form's own fields), and the example itself when it says anything.
 Json media_object_of (const BodyExample& body) {
+    if (body.file) {
+        return Json{ { "schema", file_schema () } };
+    }
     Json media = Json::object ();
     media["schema"] =
     body.form_schema ? *body.form_schema : schema_from_example (body.value);
@@ -1370,6 +1418,11 @@ Json body_parameters_v2 (const ExportRequest& entry) {
             }
             parameters.push_back (std::move (parameter));
         }
+        return parameters;
+    }
+    if (body->file) {
+        parameters.push_back (
+        Json{ { "name", "body" }, { "in", "body" }, { "schema", file_schema () } });
         return parameters;
     }
     Json schema       = schema_from_example (body->value);
@@ -2180,6 +2233,25 @@ const BoundSchemes& schemes) {
     return true; // inherit / a mode OpenAPI cannot state: nothing to write
 }
 
+/// @p body written into a media object the operation already declares: its
+/// example where the document states none, its schema only where it has none.
+/// A file states no example.
+void write_into_media (Json& media, const BodyExample& body) {
+    if (!body.file && !media.contains ("examples") &&
+    !(body.value.is_object () && body.value.empty ())) {
+        media["example"] = body.value;
+    }
+    if (media.contains ("schema")) {
+        return;
+    }
+    if (body.file) {
+        media["schema"] = file_schema ();
+    } else {
+        media["schema"] =
+        body.form_schema ? *body.form_schema : schema_from_example (body.value);
+    }
+}
+
 /**
  * A request body written into an operation the document declares (full mode).
  *
@@ -2228,14 +2300,7 @@ void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vo
         content[body->media_type] = media_object_of (*body);
         return;
     }
-    if (!media->contains ("examples") &&
-    !(body->value.is_object () && body->value.empty ())) {
-        (*media)["example"] = body->value;
-    }
-    if (!media->contains ("schema")) {
-        (*media)["schema"] =
-        body->form_schema ? *body->form_schema : schema_from_example (body->value);
-    }
+    write_into_media (*media, *body);
 }
 
 /// A 2.0 operation's saved examples merged into the responses it declares.

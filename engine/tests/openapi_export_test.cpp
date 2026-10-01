@@ -844,6 +844,47 @@ TEST (SkeletonExport, FilesTheBodyUnderTheMediaTypeItsContentTypeRowNames) {
     "application/vnd.api+json"));
 }
 
+/**
+ * A binary body is one file's bytes: a `format: binary` string with no example,
+ * under the media type the request sends - an enabled Content-Type row, else the
+ * file's own content type, else `application/octet-stream`. The path is one
+ * machine's and never leaves it; `x-vayu-request.body` keeps the file's name and
+ * type, without `src` or `unresolved`.
+ */
+TEST (SkeletonExport, DescribesABinaryBodyAsOneFilesBytesUnderItsMediaType) {
+    const auto binary = [] (const std::string& path, const std::string& stored) {
+        ExportRequest put = request ("PUT", "{{baseUrl}}" + path);
+        put.body          = { "binary", "", {} };
+        put.stored_body   = nlohmann::json::parse (stored);
+        return put;
+    };
+    ExportRequest typed = binary ("/typed",
+    R"({"mode":"binary","file":{"src":"/home/me/a.png","fileName":"a.png","contentType":"image/png","unresolved":true}})");
+    ExportRequest plain =
+    binary ("/plain", R"({"mode":"binary","file":{"src":"/home/me/a.bin"}})");
+    ExportRequest headed = binary ("/headed",
+    R"({"mode":"binary","file":{"src":"/home/me/a.bin","contentType":"image/png"}})");
+    headed.headers       = { row ("Content-Type", "application/pdf") };
+
+    const Exported exported = export_json ({ typed, plain, headed });
+    const json file_schema = json::parse (R"({"type":"string","format":"binary"})");
+    EXPECT_EQ (operation_of (exported.document, "/typed", "put")["requestBody"],
+    (json{ { "content", { { "image/png", { { "schema", file_schema } } } } } }));
+    EXPECT_EQ (operation_of (exported.document, "/plain", "put")["requestBody"],
+    (json{ { "content", { { "application/octet-stream", { { "schema", file_schema } } } } } }));
+    EXPECT_TRUE (
+    operation_of (exported.document, "/headed", "put")["requestBody"]["content"].contains (
+    "application/pdf"));
+
+    // Compared as values: the extension's keys are written in sorted order.
+    const json& carried =
+    operation_of (exported.document, "/typed", "put")["x-vayu-request"]["body"];
+    EXPECT_EQ (nlohmann::json::parse (carried.dump ()),
+    nlohmann::json::parse (
+    R"({"mode":"binary","file":{"fileName":"a.png","contentType":"image/png"}})"));
+    EXPECT_EQ (exported.text.find ("/home/me"), std::string::npos) << exported.text;
+}
+
 TEST (SkeletonExport, GivesATemplatedBaseUrlServerVariableItsRealDefault) {
     ExportCollection collection = named_collection ("Petstore");
     collection.base_url_value   = "https://api.example.com";
