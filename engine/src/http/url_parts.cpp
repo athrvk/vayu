@@ -7,6 +7,9 @@
 
 #include "vayu/http/url_parts.hpp"
 
+#include <algorithm>
+
+#include <ada.h>
 #include <curl/curl.h>
 
 namespace vayu::http {
@@ -241,6 +244,112 @@ UrlParts parse_url_parts (const std::string& url) {
     }
     curl_url_cleanup (handle);
     return parts;
+}
+
+namespace {
+
+bool is_ascii (std::string_view text) {
+    return std::none_of (text.begin (), text.end (),
+    [] (char c) { return static_cast<unsigned char> (c) >= 0x80; });
+}
+
+} // namespace
+
+std::optional<std::string> ascii_host (std::string_view host) {
+    if (is_ascii (host)) {
+        return std::string (host);
+    }
+    // Node's `domainToASCII` call for call (`src/node_url.cc`): the hostname
+    // setter on a URL whose scheme is special, because only a special scheme's
+    // host is parsed as a domain (IDNA) rather than as an opaque host.
+    auto url = ada::parse<ada::url> ("ws://x");
+    if (!url || !url->set_hostname (host)) {
+        return std::nullopt;
+    }
+    return url->get_hostname ();
+}
+
+std::optional<UrlHostSpan> url_host_span (std::string_view url) {
+    std::size_t begin = 0;
+    // A "://" after a path separator belongs to the path, not to a scheme.
+    const std::size_t scheme_end  = url.find ("://");
+    const std::size_t first_slash = url.find ('/');
+    if (scheme_end != std::string_view::npos &&
+    (first_slash == std::string_view::npos || scheme_end < first_slash)) {
+        begin = scheme_end + 3;
+    }
+    std::size_t end = url.find_first_of ("/?#", begin);
+    end             = end == std::string_view::npos ? url.size () : end;
+
+    // userinfo's colon is not a port separator; the last '@' so a userinfo
+    // containing one still leaves the host intact.
+    const std::string_view authority = url.substr (begin, end - begin);
+    if (const std::size_t at = authority.rfind ('@'); at != std::string_view::npos) {
+        begin += at + 1;
+    }
+
+    UrlHostSpan span;
+    span.begin                  = begin;
+    span.authority_end          = end;
+    const std::string_view rest = url.substr (begin, end - begin);
+    if (!rest.empty () && rest.front () == '[') {
+        // The colons inside the brackets belong to the address.
+        const std::size_t close = rest.find (']');
+        if (close == std::string_view::npos) {
+            return std::nullopt;
+        }
+        span.size      = close + 1;
+        span.bracketed = true;
+    } else {
+        span.size = std::min (rest.find (':'), rest.size ());
+    }
+    return span;
+}
+
+namespace {
+
+/// The host of a URL holding a non-ASCII byte, when that host is the one
+/// holding it; `nullopt` when the host is ASCII (or a literal) and the byte is
+/// elsewhere.
+std::optional<UrlHostSpan> non_ascii_host_span (std::string_view url) {
+    if (is_ascii (url)) {
+        return std::nullopt;
+    }
+    auto span = url_host_span (url);
+    if (!span || span->bracketed || is_ascii (url.substr (span->begin, span->size))) {
+        return std::nullopt;
+    }
+    return span;
+}
+
+} // namespace
+
+bool to_ascii_host (std::string& url) {
+    const auto span = non_ascii_host_span (url);
+    if (!span) {
+        return true;
+    }
+    const auto ascii =
+    ascii_host (std::string_view (url).substr (span->begin, span->size));
+    if (!ascii) {
+        return false;
+    }
+    url.replace (span->begin, span->size, *ascii);
+    return true;
+}
+
+std::optional<std::string> unsendable_host (std::string_view url) {
+    const auto span = non_ascii_host_span (url);
+    if (!span) {
+        return std::nullopt;
+    }
+    const std::string_view host = url.substr (span->begin, span->size);
+    if (ascii_host (host)) {
+        return std::nullopt;
+    }
+    return "host '" + std::string (host) +
+    "' has no ASCII (IDNA) name to look up; check it for a stray character, "
+    "or an 'xn--' label that is not valid punycode";
 }
 
 } // namespace vayu::http

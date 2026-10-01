@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -92,6 +93,72 @@ struct UrlParts {
  * back on that is more useful than an error.
  */
 [[nodiscard]] UrlParts parse_url_parts (const std::string& url);
+
+/**
+ * @brief @p host as Postman dials it: Node's `url.domainToASCII`, which
+ *        `postman-url-encoder`'s `toNodeUrl` applies to every host.
+ *
+ * A host with a byte above 127 goes through the WHATWG URL host parser (UTS
+ * #46 nontransitional processing, then punycode), from ada, the library Node's
+ * `domainToASCII` is itself built on, so the two cannot disagree about a name:
+ * case and width are folded (`BÜCHER`, `ＡＢＣ`), `ß` is kept (`faß.de` is
+ * `xn--fa-hia.de`), and the IDNA hyphen rules are not enforced (`bücher-.example`
+ * converts). libcurl is built without IDN support and refuses a non-ASCII host,
+ * so this is the only conversion there is.
+ *
+ * An ASCII host is returned as it is without reaching ada: no case folding, no
+ * validation, a `{{variable}}` kept. `nullopt` is a non-ASCII host with no
+ * ASCII name (Node answers `""`), such as `xn--iñvalid.com`.
+ */
+[[nodiscard]] std::optional<std::string> ascii_host (std::string_view host);
+
+/**
+ * @brief Where the host sits in @p url, by the rules every host comparison
+ *        beside the transfer reads a URL with.
+ *
+ * The authority follows a `://` that comes before any `/` (or starts the
+ * string when there is none) and ends at the first `/`, `?` or `#`; the host
+ * follows its last `@` and ends at the first `:`, or is a bracketed IPv6
+ * literal, brackets included. `nullopt` for a `[` with no `]`.
+ */
+struct UrlHostSpan {
+    /// Offset of the host's first byte (a `[` for an IPv6 literal).
+    std::size_t begin = 0;
+    /// The host's length, brackets included.
+    std::size_t size = 0;
+    /// Offset one past the authority: what lies between the host and here is
+    /// empty or a `:port` (or, after a literal, junk the caller refuses).
+    std::size_t authority_end = 0;
+    /// The host is an IPv6 literal in brackets.
+    bool bracketed = false;
+};
+
+/// @copydoc UrlHostSpan
+[[nodiscard]] std::optional<UrlHostSpan> url_host_span (std::string_view url);
+
+/**
+ * @brief Replace a non-ASCII host in @p url by its @ref ascii_host name, every
+ *        other byte kept.
+ *
+ * What every transfer is handed (`wire_url`), so each send path dials the name
+ * Postman dials. A URL with no byte above 127, which is every URL a load test
+ * is normally aimed at, costs one scan and no allocation. False, with @p url
+ * left as it was, when the host has no ASCII name; `validate_transferable`
+ * refuses that request (@ref unsendable_host) before a handle is configured.
+ */
+[[nodiscard]] bool to_ascii_host (std::string& url);
+
+/**
+ * @brief Why @p url cannot be sent, as a lowercase clause, when its host is
+ *        non-ASCII and has no ASCII name; `nullopt` otherwise, after one scan
+ *        for an ASCII URL.
+ *
+ * Postman sends such a host as typed (`encodeHost` answers the input when
+ * `domainToASCII` answers `""`) and the lookup fails. libcurl, built without
+ * IDN, would refuse it as "IDN support not present", which names the wrong
+ * cause; this names the host instead.
+ */
+[[nodiscard]] std::optional<std::string> unsendable_host (std::string_view url);
 
 /**
  * @brief Split a raw query string (no leading `?`) on `&`, in wire order.

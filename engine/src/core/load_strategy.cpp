@@ -28,6 +28,7 @@
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
@@ -542,6 +543,10 @@ class SubmissionRequest {
         // now, once, exactly as the residual pass would have written it.
         if (sends_the_shared_request (*context)) {
             settle_path_variables (request_, PathSettle::All);
+            // Once here rather than in every transfer's `wire_url` and DNS-cache
+            // pin, which then take their ASCII fast path. A host with no ASCII
+            // name stays as typed for `validate_transferable` to refuse.
+            (void)vayu::http::to_ascii_host (request_.url);
         }
     }
 

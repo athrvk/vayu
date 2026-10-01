@@ -117,6 +117,9 @@ export default function KeyValueEditor({
 				if (item.id !== id) return item;
 				const updated = { ...item, [field]: value };
 				if (field === "key" || field === "value") delete updated.source;
+				// A query row's value typed or cleared by hand is a value, so the
+				// row writes `key=` from then on, not a bare `key` (issue #1772).
+				if (field === "value") delete updated.valueless;
 				return updated;
 			});
 			onChange(withTrailingBlank(newItems));

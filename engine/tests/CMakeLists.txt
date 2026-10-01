@@ -154,6 +154,9 @@ add_executable(vayu_tests
     spec_bind_route_test.cpp
     operation_match_test.cpp
     path_variables_test.cpp
+    query_encoding_test.cpp
+    url_encoding_test.cpp
+    idn_host_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
     jmeter_import_test.cpp
@@ -391,6 +394,7 @@ set(vayu_scratch_database_suites
     ScriptRequestNameTest
     ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
+    SendTimeQueryValues
     ServerBindTest
     SpecBindRouteTest
     SpecExportRouteTest

@@ -17,6 +17,7 @@
 #include <variant>
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/graphql_body.hpp"
 // `describe_empty_header_name` - the wording every layer that can leave a
 // header nameless shares, this one included (issue #1095).
@@ -71,8 +72,12 @@ std::string bound_subject (const IterationBinding& binding) {
 
 /// What kind of text a visited field is, for the rules that depend on it.
 enum class FieldContext : std::uint8_t {
-    /// A URL, a form field, a text body: no quoting rule of its own.
+    /// A form field, a text body, a URL sent as typed: no quoting rule of its
+    /// own.
     Plain,
+    /// A URL whose query is encoded (issue #1773): a token in a query key or
+    /// value is written by Postman's query rule, anywhere else as @ref Plain.
+    Url,
     /// A header name or value, or a credential `apply_auth` writes into a
     /// header line. Plain text like @ref Plain - a header has no quoting rule -
     /// except that a CR or LF in a bound value ends the line rather than
@@ -174,7 +179,8 @@ template <typename Visit>
 HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
 
-    visit (request.url, FieldContext::Plain);
+    visit (request.url,
+    request.disable_url_encoding ? FieldContext::Plain : FieldContext::Url);
     // A path variable's value is joined raw and encoded (Postman's path set)
     // when it is written into the URL (`settle_path_variables`), which is why it is a
     // field of its own rather than text already in the URL (issue #1764).
@@ -601,7 +607,11 @@ class FieldSplitter {
         for (size_t i = 0; i < split.names.size (); ++i) {
             entry.tokens.push_back (split.names[i]);
             DataValueEncoding encoding = DataValueEncoding::Verbatim;
-            if (context == FieldContext::JsonDocument) {
+            if (context == FieldContext::Url) {
+                // Where in the URL is read at join time: a bound value can
+                // open the query for the tokens after it.
+                encoding = DataValueEncoding::Url;
+            } else if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
                 encoding = in_string ? DataValueEncoding::JsonString :
                                        DataValueEncoding::Verbatim;
@@ -725,6 +735,8 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
     case DataValueEncoding::XmlAttributeSingle:
         return escape_xml_content (rendered, '\'');
     case DataValueEncoding::XmlCdata: return escape_xml_cdata (rendered);
+    // Written by the join, which carries the URL component across the field.
+    case DataValueEncoding::Url:
     // The two unwritable placements never reach this: the join refuses the row
     // before it renders a value for them.
     case DataValueEncoding::XmlInComment:
@@ -796,6 +808,14 @@ class TemplateJoiner {
         ++cursor_;
 
         std::string out = entry.literals[0];
+        // Only a URL field reads it: the component the text written so far
+        // (bound values included) has reached, which is the rule composition
+        // and the residual pass follow over the same text.
+        const bool in_url = context == FieldContext::Url;
+        if (in_url) {
+            url_component_ =
+            advance_url_component (entry.literals[0], UrlComponent::Head);
+        }
         for (size_t i = 0; i < entry.tokens.size (); ++i) {
             const auto encoded = encode_token (entry, i, context);
             if (!encoded) {
@@ -803,6 +823,10 @@ class TemplateJoiner {
             }
             out += *encoded;
             out += entry.literals[i + 1];
+            if (in_url) {
+                url_component_ =
+                advance_url_component (entry.literals[i + 1], url_component_);
+            }
         }
         field = std::move (out);
     }
@@ -833,7 +857,9 @@ class TemplateJoiner {
         if (!value) {
             return std::nullopt; // `value_of` recorded why
         }
-        std::string encoded = encode_data_value (*value, entry.encodings[index]);
+        std::string encoded = entry.encodings[index] == DataValueEncoding::Url ?
+        encode_at_url_component (vayu::http::render_data_value (*value), url_component_) :
+        encode_data_value (*value, entry.encodings[index]);
         // Checked on the encoded text rather than the value, because that is
         // what the field ends up holding - and only in a header, where a line
         // break is a line terminator. Everywhere else the same bytes are
@@ -925,6 +951,8 @@ class TemplateJoiner {
     size_t next_field_ = 0;
     size_t cursor_     = 0;
     DataBindResult result_{ true, {} };
+    /// The URL component the field being joined has reached; see operator().
+    UrlComponent url_component_ = UrlComponent::Head;
 };
 
 } // namespace

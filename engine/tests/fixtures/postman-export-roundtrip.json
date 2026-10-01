@@ -574,7 +574,7 @@
 							}
 						],
 						"url": {
-							"raw": "{{baseUrl}}/products?where=sku%3D1",
+							"raw": "{{baseUrl}}/products?where=sku=1&flag=&debug",
 							"host": [
 								"{{baseUrl}}"
 							],
@@ -592,6 +592,14 @@
 									"value": "",
 									"equals": true,
 									"disabled": true
+								},
+								{
+									"key": "flag",
+									"value": ""
+								},
+								{
+									"key": "debug",
+									"value": null
 								}
 							]
 						}

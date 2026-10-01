@@ -7,6 +7,7 @@
 
 #include "vayu/http/auth_resolver.hpp"
 
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
@@ -28,17 +29,22 @@ std::string field (const nlohmann::json& obj, const char* key) {
 }
 
 // Append `key=value` to a URL's query component, preserving any fragment.
-// @p encode false writes both as typed (issue #1765, `disableUrlEncoding`).
+// Postman adds an API key or OAuth2 query token as a query param, so it goes
+// through Postman's query rule (issue #1771); @p encode false writes both as
+// typed (issue #1765, `disableUrlEncoding`). `key=` is written even for an
+// empty value, because the value is a string.
 void append_query_param (std::string& url, const std::string& key, const std::string& value, bool encode) {
+    using vayu::core::encode_query_component;
+    using vayu::core::QueryPart;
     std::string fragment;
     if (const auto hash = url.find ('#'); hash != std::string::npos) {
         fragment = url.substr (hash);
         url.erase (hash);
     }
     url.push_back (url.find ('?') == std::string::npos ? '?' : '&');
-    url += encode ? vayu::utils::url_encode (key) : key;
+    url += encode ? encode_query_component (key, QueryPart::Key) : key;
     url.push_back ('=');
-    url += encode ? vayu::utils::url_encode (value) : value;
+    url += encode ? encode_query_component (value, QueryPart::Value) : value;
     url += fragment;
 }
 

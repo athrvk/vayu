@@ -68,7 +68,6 @@ import {
 } from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
 import { switchAutoHeader } from "../../../utils/auto-header";
-import { mergeParamsFromUrl } from "../../../utils/url";
 import {
 	automaticHeaderOptions,
 	displayHeaderName,
@@ -112,17 +111,11 @@ export default function SettingsPanel() {
 	};
 
 	/**
-	 * The URL is the query's truth, so turning the flag on or off leaves it
-	 * alone and re-derives the Params rows from it in the new mode (#1765):
-	 * decoded while the URL is encoded on send, as written while it is not. A
-	 * row edit after the switch then rebuilds the same query the URL holds.
+	 * The URL is the query's truth and the rows hold it as written in either
+	 * mode (#1771), so the flag is all the switch changes.
 	 */
 	const handleEncodingChange = (checked: boolean) => {
 		updateField("disableUrlEncoding", checked);
-		updateField(
-			"params",
-			mergeParamsFromUrl(request.params, request.url, request.url, { decode: !checked })
-		);
 	};
 
 	const handleProtocolChange = (value: string) => {

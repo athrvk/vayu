@@ -1199,7 +1199,7 @@
                   }
                 ],
                 "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
-                "url": "https://api.example.com/plain?q=a%7Cb"
+                "url": "https://api.example.com/plain?q=a|b"
               }
             ],
             "variables": {}
@@ -1307,7 +1307,7 @@
             ],
             "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
             "tempId": "r2",
-            "url": "https://api.example.com/plain?q=a%7Cb"
+            "url": "https://api.example.com/plain?q=a|b"
           }
         ],
         "specs": []

@@ -99,8 +99,9 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
  * the resolver below re-checks a row that was hand-edited around the route.
  * Deliberately permissive about the shapes curl itself accepts - a bare
  * `host:port` is valid and means `http://host:port` - and strict about the
- * shapes that are always a mistake: empty, whitespace-bearing, no host, or a
- * scheme libcurl has no proxy support for.
+ * shapes that are always a mistake: empty, whitespace-bearing, no host, a
+ * scheme libcurl has no proxy support for, or a non-ASCII host with no ASCII
+ * name (`unsendable_host`; one that has one is dialled by it).
  */
 std::optional<std::string> proxy_url_rejection (std::string_view url);
 
@@ -176,7 +177,8 @@ struct ClientCertRule {
      * The host this certificate answers for, lower-cased, with no scheme, port
      * or path - the same spelling `parse_authority` produces, so a match is a
      * string compare rather than a second URL parser. An IPv6 literal is stored
-     * without its brackets, again because that is the form the parser yields.
+     * without its brackets, again because that is the form the parser yields,
+     * and a non-ASCII name in its punycode form, for the same reason.
      *
      * **Or one wildcard** (issue #803), written `*.example.com` and read as a
      * label suffix: it answers for `api.example.com` and `a.b.example.com`,
@@ -268,7 +270,9 @@ struct TransportPolicy {
 
     /**
      * Hosts that skip the proxy, comma-separated, passed to `CURLOPT_NOPROXY`
-     * verbatim. curl's matching rules (leading-dot suffix match, `*` for
+     * verbatim but for a non-ASCII entry, which is written in the punycode
+     * form libcurl matches the dialled name on (`ascii_host`). curl's
+     * matching rules (leading-dot suffix match, `*` for
      * everything) are documented rather than re-implemented here: a second
      * implementation of host matching is a second set of bugs, and the one
      * that ships in libcurl is the one the user's other tools already obey.

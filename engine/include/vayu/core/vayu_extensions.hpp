@@ -102,7 +102,8 @@ void redact_postman_auth (Json& source, int& omitted);
 /**
  * Params rows: @ref rows_of plus a row's `in` (`"path"` marks a `:name` path
  * variable, issue #1764) and the `type` a Postman path variable carries, so
- * an `x-vayu-request` re-import keeps a path row a path row.
+ * an `x-vayu-request` re-import keeps a path row a path row, and a query
+ * row's `valueless: true`, which writes it as a bare `key`.
  */
 [[nodiscard]] std::optional<Json> param_rows_of (const Json& value);
 

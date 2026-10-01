@@ -159,10 +159,12 @@ int64_t now_seconds);
  * empty `path` becomes RFC 6265 §5.1.4's default-path - the URL's path with
  * its last segment removed. Explicit fields are kept as given; a leading dot
  * on the domain is libcurl's spelling of "subdomains too" and sets the
- * tailmatch flag.
+ * tailmatch flag. A non-ASCII domain, given or derived, is stored in its
+ * punycode form (`ascii_host`), the one libcurl matches cookies on.
  *
  * `nullopt` when the result could not be stored honestly: an unparseable URL,
- * an empty name, or a field carrying a tab or newline - the separators of the
+ * a non-ASCII domain with no ASCII name, an empty name, or a field carrying a
+ * tab or newline - the separators of the
  * very format this is about to be written in, which would silently corrupt the
  * line and make the cookie vanish on the next read.
  */

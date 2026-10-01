@@ -4,6 +4,7 @@
   "homepage": "https://github.com/vayu/vayu",
   "license": "AGPL-3.0-only",
   "dependencies": [
+    "ada-url",
     {
       "name": "curl",
       "default-features": false,

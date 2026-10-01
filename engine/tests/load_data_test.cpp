@@ -39,6 +39,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -444,6 +445,31 @@ TEST_F (LoadDataTest, AnAbsentColumnErrorsTheSubmissionInsteadOfSendingIt) {
     // submission counts on both sides or the run leaks a slot for good.
     EXPECT_EQ (context_->requests_sent.load (), context_->total_requests ())
     << "a bind failure left the run believing a request was still in flight";
+}
+
+// Issue #1773: a column bound into the query is written as Postman writes a
+// substituted value, per submission: URL text whose `=` and `&` split pairs and
+// whose QUERY_ENCODE_SET bytes are encoded; under `disableUrlEncoding` it goes
+// out as the cell wrote it.
+TEST_F (LoadDataTest, AColumnBoundIntoTheQueryIsEncodedByItsPosition) {
+    vayu::tests::EchoServer echo;
+    json payload = iterations_payload (echo.url () + "?q={{data.term}}&{{data.k}}=1", 1);
+    payload["data"] = json::array ({ json{ { "term", "a b\"c" }, { "k", "x=y" } } });
+
+    run (payload);
+
+    EXPECT_EQ (echo.target (), "/echo?q=a%20b%22c&x=y=1");
+}
+
+TEST_F (LoadDataTest, AColumnBoundIntoTheQueryIsSentAsTypedWhenUrlEncodingIsOff) {
+    vayu::tests::EchoServer echo;
+    json payload    = iterations_payload (echo.url () + "?q={{data.term}}", 1);
+    payload["data"] = json::array ({ json{ { "term", "a\"b" } } });
+    payload["disableUrlEncoding"] = true;
+
+    run (payload);
+
+    EXPECT_EQ (echo.target (), "/echo?q=a\"b");
 }
 
 // The credentials half: a basic-auth username bound per submission, read off
