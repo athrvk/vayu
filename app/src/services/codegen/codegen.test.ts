@@ -1178,6 +1178,14 @@ describe("a binary body", () => {
 		}
 	});
 
+	it("curl's command parses back into the same file body", () => {
+		const { code } = generateCurl(upload);
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.method).toBe("PUT");
+		expect(reparsed?.bodyMode).toBe("binary");
+		expect(reparsed?.binaryFile.src).toBe("/data/it's a.bin");
+	});
+
 	it("emits no body and no Content-Type when no file is chosen", () => {
 		const { code } = generateCurl(withFile({ src: "" }));
 		expect(code).not.toContain("--data-binary");
