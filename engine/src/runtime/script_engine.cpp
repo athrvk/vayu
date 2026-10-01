@@ -4641,6 +4641,19 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
 }
 
 /**
+ * The name a binary body's file goes by in a script: its declared `fileName`,
+ * else the last segment of its path - the rule `declared_file_name` applies to
+ * a form-data file part. Never the path itself, which is one machine's
+ * filesystem and can carry a user name (issue #411).
+ */
+std::string body_file_name (const FileRef& file) {
+    FormField part;
+    part.src       = file.src;
+    part.file_name = file.file_name;
+    return vayu::http::declared_file_name (part);
+}
+
+/**
  * The string `pm.request.body` shows, and the yardstick the write-back measures
  * an edit against - one function so the two cannot disagree about what a body
  * looks like as a string.
@@ -4658,10 +4671,17 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
  * form-data names its file parts (`key=@filename`) because encoding one as a
  * pair loses it (issue #411). A file part is only ever valid under form-data,
  * so this split costs the urlencoded body nothing.
+ *
+ * A `binary` body reads as `@<fileName>`, the spelling a form-data file part
+ * already uses: its bytes are a file the script never sees, and its path is
+ * never disclosed (see `body_file_name`).
  */
 std::string script_body_view (const Body& body) {
     if (body.mode == BodyMode::FormData) {
         return vayu::http::render_form_data_parts (body.fields);
+    }
+    if (body.mode == BodyMode::Binary) {
+        return "@" + body_file_name (body.file);
     }
     return body.mode == BodyMode::Form ? vayu::http::encode_urlencoded (body.fields) :
                                          body.content;
@@ -5465,16 +5485,17 @@ enum BodyMember : std::uint8_t {
     BODY_URLENCODED,
     BODY_FORMDATA,
     BODY_GRAPHQL,
+    BODY_FILE,
     BODY_LENGTH
 };
 
 /**
  * @brief The Postman mode name this body reads as.
  *
- * Four names, because those are the four shapes a script can *act* on: a string
- * it can parse, a pair list, a multipart part list, and a GraphQL operation.
- * Vayu's other content modes - `json`, `text`, `xml`, `binary`, `jsonrpc` -
- * each carry their body as one string, which is what `raw` means, so a lifted
+ * Five names, because those are the five shapes a script can *act* on: a string
+ * it can parse, a pair list, a multipart part list, a GraphQL operation and a
+ * file. Vayu's other content modes - `json`, `text`, `xml`, `jsonrpc` - each
+ * carry their body as one string, which is what `raw` means, so a lifted
  * `body.mode === 'raw'` guard answers true for every one of them.
  *
  * `graphql` was the third name for the whole of #1003, because Postman's mode
@@ -5485,21 +5506,18 @@ enum BodyMember : std::uint8_t {
  * - so the member has something to fill it from after all. See
  * `body_graphql_view`.
  *
- * The one Postman mode still not answered is `file`, which promises `file.src`,
- * a path. A `BodyMode::Binary` body carries *bytes* in `Body::content`; the only
- * path in this model belongs to a form-data file part, is a different mode, and
- * is deliberately never disclosed to a script (issue #411, `declared_file_name`).
- * Answering the mode without the member it exists for would be a silent wrong
- * answer, which is the class this program closes rather than adds to, so
- * `binary` reads `raw` and `docs/app/pm-api-compatibility.md` records it as a
- * stated divergence. Reporting a path would be a *storage* change, not a
- * scripting one, and wants its own issue if it is ever wanted.
+ * A `binary` body is Postman's fifth mode, `file`: one file sent as the whole
+ * body. Postman's `file` member promises `src`, the path, which this one never
+ * answers - a path is one machine's filesystem, and a form-data file part is
+ * held to the same rule (issue #411, `declared_file_name`). It answers
+ * `{name, size?}` instead (`body_file_view`).
  */
 const char* postman_body_mode (BodyMode mode) {
     switch (mode) {
     case BodyMode::Form: return "urlencoded";
     case BodyMode::FormData: return "formdata";
     case BodyMode::GraphQL: return "graphql";
+    case BodyMode::Binary: return "file";
     // `None` never reaches here: a bodyless request defines no `body` property
     // at all, so no object is built for it. See setup_pm_request.
     default: return "raw";
@@ -5514,6 +5532,7 @@ const char* body_member_name (int magic) {
     case BODY_URLENCODED: return "urlencoded";
     case BODY_FORMDATA: return "formdata";
     case BODY_GRAPHQL: return "graphql";
+    case BODY_FILE: return "file";
     default: return "length";
     }
 }
@@ -5666,6 +5685,25 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
 }
 
 /**
+ * @brief `.file` - a binary body's file as a script may see it: `{name}`, plus
+ * `size` once the send has measured the file (`FileRef::sha256` is set by the
+ * same step). Never `src`: see `postman_body_mode`. Frozen, like every other
+ * descriptive member.
+ */
+JSValue body_file_view (JSContext* ctx, const FileRef& file) {
+    JSValue view           = JS_NewObject (ctx);
+    const std::string name = body_file_name (file);
+    JS_DefinePropertyValueStr (ctx, view, "name",
+    JS_NewStringLen (ctx, name.data (), name.size ()), JS_PROP_ENUMERABLE);
+    if (!file.sha256.empty ()) {
+        JS_DefinePropertyValueStr (ctx, view, "size",
+        JS_NewInt64 (ctx, static_cast<int64_t> (file.size)), JS_PROP_ENUMERABLE);
+    }
+    (void)JS_PreventExtensions (ctx, view);
+    return view;
+}
+
+/**
  * The body as a string, and the single answer behind every string context.
  *
  * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
@@ -5720,6 +5758,10 @@ JSValue* func_data) {
     case BODY_GRAPHQL:
         return state->body.mode == BodyMode::GraphQL ?
         body_graphql_view (ctx, state->text) :
+        JS_UNDEFINED;
+    case BODY_FILE:
+        return state->body.mode == BodyMode::Binary ?
+        body_file_view (ctx, state->body.file) :
         JS_UNDEFINED;
     // Defined rather than left to the prototype, for the reason #991 gives
     // about the URL's: `String.prototype` is a String object holding `""`, so
@@ -5823,6 +5865,7 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     define_accessor ("urlencoded", BODY_URLENCODED);
     define_accessor ("formdata", BODY_FORMDATA);
     define_accessor ("graphql", BODY_GRAPHQL);
+    define_accessor ("file", BODY_FILE);
     define_accessor ("length", BODY_LENGTH);
     return object;
 }
@@ -6158,16 +6201,24 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
             // content mode; for a form mode this is what keeps a read-only
             // script from rewriting the body it only looked at.
         } else if (staged.body.mode == BodyMode::FormData) {
-            // The only mode whose string view is not what goes on the wire, so
-            // it is the only one that cannot take a string back. Parsing one
-            // into text parts would also be the wrong shape the moment a part
-            // can be a file (issue #393): a script appending a field would
-            // silently drop the upload. Refused rather than applied to a body
-            // the transfer layer would then ignore.
+            // One of the two modes whose string view is not what goes on the
+            // wire (binary is the other), so it cannot take a string back.
+            // Parsing one into text parts would also be the wrong shape the
+            // moment a part can be a file (issue #393): a script appending a
+            // field would silently drop the upload. Refused rather than applied
+            // to a body the transfer layer would then ignore.
             return std::string (
             "pm.request.body cannot be assigned on a form-data request: its "
             "parts are multipart, not a string - edit the request's form "
             "fields, or delete pm.request.body to send no body");
+        } else if (staged.body.mode == BodyMode::Binary) {
+            // The body is a file, and a script never chooses which: the string
+            // view names it, and a string written back would be sent as
+            // nothing at all, since this mode sends `file` and not `content`.
+            return std::string (
+            "pm.request.body cannot be assigned on a binary request: its body "
+            "is a file, not a string - choose the file in the request, or "
+            "delete pm.request.body to send no body");
         } else if (staged.body.mode == BodyMode::Form) {
             // The string view is the wire body here, so it parses straight back
             // into the fields the transfer layer reads. `content` is cleared to
