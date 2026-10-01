@@ -719,7 +719,8 @@ logged as a warning: it means a client skipped composition.
   where each driver decides whether one rides it (`execute_exchange`, the
   streaming branch of `execution.cpp`, `scenario_load.cpp`'s `submit_one`),
   the header names union into `suppressed_default_headers`, and the flag
-  reaches `substitute_path_variables`' `encode` and `append_query_param`. The
+  reaches `substitute_path_variables`' `encode`, `append_query_param` and the
+  import's query join (`QueryEncoding::AsTyped`). The
   imported object itself is `requests.postman_protocol_behavior`, read only by
   the Postman export.
 - **What Vayu adds to a request nobody wrote it into is the engine's, and one
@@ -859,7 +860,11 @@ waits in the payload's `params` / `vayu::Request::path_variables` until the bind
 or the residual pass answers it, `core::settle_path_variables`; the app's copy
 of the segment rule and substitution is pinned by
 `tests/fixtures/path-variable-conformance.json`),
-which is the only place a Params row reaches the wire. Compose is pure (sends nothing, no run row) and is the one place a
+which is the only place a Params row reaches the wire. A query pair the engine
+writes (an api key or OAuth 2.0 token in the query, a Postman import's query
+join) goes through `core::encode_query_component` (`core/query_encoding.hpp`,
+#1771, Postman's query rule; a stored URL is never re-encoded), whose app copy
+is pinned by `tests/fixtures/query-encoding-conformance.json`. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
 and an inline `request` plus `collectionId` scope (the renderer, because Send

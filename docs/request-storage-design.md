@@ -58,6 +58,42 @@ row (invisible in the query by design) survives, and a key removed from the URL
 is removed from `params[]` too, rather than left behind as a row the URL no
 longer carries (`mergeParamsFromUrl`, issue #1482).
 
+**Query rows hold the query as the URL spells it** (issue #1771), which is
+Postman's own row model: `?q=a%20b` is the row `a%20b`, never decoded, in
+either encoding mode. Decoding is not reversible - `%2B` would come back as a
+`+` a server reads as a space, and `%2541` as `%41` - and because the query
+encoding never encodes `%`, a raw row written back is the pair it came from.
+
+A row is written into `url` with Postman's query rule (`postman-url-encoder`'s
+`QUERY_ENCODE_SET` plus `unparseSingle`'s additions): space, `"`, `#`, `'`,
+`<`, `>`, controls and non-ASCII (per UTF-8 byte) become `%XX`, `&` does in
+both key and value, and `=` only in a key. Everything else, `+`, `|`, `%` and
+`%XX` included, goes out as typed, and a whole `{{variable}}` token is kept.
+`disableUrlEncoding` writes rows as typed. The app's
+`encodeQueryComponent` (`modules/request-builder/utils/query-encoding.ts`) and
+the engine's `encode_query_component` are pinned to one another by
+`engine/tests/fixtures/query-encoding-conformance.json`. A row with an empty
+value is written as `key=`, and one with `valueless: true` (Postman's
+`"value": null`, a URL's `?flag`) as a bare `key` (issue #1772). A pair a
+script's `query.add` writes is a row and takes the same rule. The value a
+stored `{{variable}}` token resolves to at send time is URL text instead, as
+Postman re-parses the substituted URL: its `&`, `=`, `?` and `#` are structure
+and only `QUERY_ENCODE_SET` is encoded where it lands in the query (issue
+#1773).
+
+**A Params table edit rewrites only the pairs it touches.** Each enabled row
+takes the first unused pair of the current `url` with the same key and value
+as written, and keeps that pair's bytes; then a row carried over unchanged from
+before the edit (same id, key and value) may take a pair that percent-decodes
+to it, which is the case an older version's decoded row needs. An edited or new
+row is never matched decoded - `+` typed over `%2B` is written `+` - and a row
+with no pair is encoded. The query ends at the fragment, which is put back
+after the rebuilt query. So a pair written by another rule - a row an
+older version stored decoded (`+05:00` for `%2B05%3A00`), an Insomnia, JMeter
+or OpenAPI import's `encodeURIComponent` join, a Postman `key=` - survives an
+edit of another row. Nothing re-encodes a stored `url`: it is sent verbatim,
+and an import writes it once.
+
 **Path variables are the one kind of row the engine reads** (issue #1764). A
 row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`
 without the colon), and never reaches the query: the query builders skip it,

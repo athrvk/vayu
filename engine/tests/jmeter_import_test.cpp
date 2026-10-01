@@ -382,6 +382,36 @@ TEST (JmeterImport, FollowRedirectsIsRead) {
     .get<bool> ());
 }
 
+/// A sampler's query arguments keep `encodeURIComponent` on the join (issue
+/// #1771), not Postman's set: JMeter's own URL encoding is not Postman's.
+TEST (JmeterImport, JoinsQueryArgumentsWithEncodeUriComponent) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Search">
+      <stringProp name="HTTPSampler.domain">example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol">https</stringProp>
+      <stringProp name="HTTPSampler.path">/search</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="q" elementType="HTTPArgument">
+            <stringProp name="Argument.name">q</stringProp>
+            <stringProp name="Argument.value">a|b</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (first_request (parsed.result.at ("collections").at (0)).at ("url"),
+    "https://example.com/search?q=a%7Cb");
+}
+
 /**
  * `Assertion.test_field` values with no `assert.contains` field to land on
  * (Request Data, Request Headers, Response Message, Document) are refused

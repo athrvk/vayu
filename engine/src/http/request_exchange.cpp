@@ -545,9 +545,14 @@ const vayu::http::VariableValues& vars) {
     }
 
     for (std::string* text : targets) {
-        if (holds_a_token (*text)) {
-            *text = vayu::http::resolve_template (*text, vars);
+        if (!holds_a_token (*text)) {
+            continue;
         }
+        // The URL by its own rule: a value landing in the query is encoded
+        // the way composition encodes one (issue #1773).
+        *text = text == &request.url ?
+        vayu::http::resolve_url_template (*text, vars, !request.disable_url_encoding) :
+        vayu::http::resolve_template (*text, vars);
     }
     // Last: it rebuilds the map the values `targets` points at live in. The
     // refusal already carries the pre-send gate's shape, because this is a

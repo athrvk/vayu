@@ -194,15 +194,6 @@ export interface SkippedItem {
 		 */
 		| "url_without_raw"
 		/**
-		 * A Postman query key or value where `safeDecode` gave back the original
-		 * text unchanged because one of its `%` escapes was invalid (`%ZZ`,
-		 * issue #1460). The parsed value keeps that literal text - `%ZZ` stays
-		 * `%ZZ` in the params table - but rejoining it into the request's `url`
-		 * percent-encodes the literal `%`, so the stored URL reads `%25ZZ`
-		 * where the source wrote `%ZZ`. Counted rather than silently changed.
-		 */
-		| "invalid_percent_encoding"
-		/**
 		 * A Postman collection or environment variable whose `description` or
 		 * non-`secret` `type` was read and discarded (issue #1443): Vayu's
 		 * variable record has no field for either, unlike the value and the

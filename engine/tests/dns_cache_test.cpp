@@ -24,6 +24,16 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#endif
+
+using vayu::http::detail::curl_address_list;
 using vayu::http::detail::dns_entry_is_fresh;
 using vayu::http::detail::DnsCache;
 
@@ -172,4 +182,47 @@ TEST (DnsCacheTest, ClearDropsEverything) {
     EXPECT_EQ (cache.size (), 0u);
     (void)cache.resolve ("example.com", 300);
     EXPECT_EQ (resolver.calls (), 2);
+}
+
+// ============================================================================
+// curl_address_list - every address pinned, not only the first
+// ============================================================================
+
+// nss-myhostname answers `*.localhost` with ::1 first and 127.0.0.1 second; a
+// pin holding only ::1 refused a listener bound to 127.0.0.1.
+TEST (CurlAddressList, KeepsEveryAddressInOrderOnceEach) {
+    sockaddr_in6 v6{};
+    v6.sin6_family = AF_INET6;
+    ASSERT_EQ (inet_pton (AF_INET6, "::1", &v6.sin6_addr), 1);
+    sockaddr_in v4{};
+    v4.sin_family = AF_INET;
+    ASSERT_EQ (inet_pton (AF_INET, "127.0.0.1", &v4.sin_addr), 1);
+
+    addrinfo v4_repeat{};
+    v4_repeat.ai_family = AF_INET;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    v4_repeat.ai_addr = reinterpret_cast<sockaddr*> (&v4);
+    addrinfo v4_first{};
+    v4_first.ai_family = AF_INET;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    v4_first.ai_addr = reinterpret_cast<sockaddr*> (&v4);
+    v4_first.ai_next = &v4_repeat;
+    addrinfo v6_first{};
+    v6_first.ai_family = AF_INET6;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    v6_first.ai_addr = reinterpret_cast<sockaddr*> (&v6);
+    v6_first.ai_next = &v4_first;
+
+    EXPECT_EQ (curl_address_list (&v6_first), "[::1],127.0.0.1");
+    EXPECT_EQ (curl_address_list (nullptr), "");
+}
+
+TEST (DnsCacheTest, ResolveListPinsEveryAddress) {
+    CountingResolver resolver ("[::1],127.0.0.1");
+    DnsCache cache (resolver);
+
+    struct curl_slist* list = cache.get_resolve_list ("api.localhost", 8080, 300);
+    ASSERT_NE (list, nullptr);
+    EXPECT_STREQ (list->data, "api.localhost:8080:[::1],127.0.0.1");
+    curl_slist_free_all (list);
 }

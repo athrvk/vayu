@@ -353,7 +353,19 @@ std::optional<Json> file_body_of (const Json& value) {
 } // namespace
 
 std::optional<Json> param_rows_of (const Json& value) {
-    return rows_with (value, PARAM_ROW_KEYS);
+    std::optional<Json> rows = rows_with (value, PARAM_ROW_KEYS);
+    if (!rows) {
+        return rows;
+    }
+    // A query row's `valueless` is the one boolean a Params row adds: it is
+    // what writes the row as a bare `key` rather than `key=`.
+    for (size_t at = 0; at < rows->size (); ++at) {
+        const auto flag = value[at].find ("valueless");
+        if (flag != value[at].end () && flag->is_boolean () && flag->get<bool> ()) {
+            (*rows)[at]["valueless"] = true;
+        }
+    }
+    return rows;
 }
 
 std::optional<Json> body_of (const Json& value) {

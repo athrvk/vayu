@@ -27,6 +27,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "echo_server.hpp"
 #include "task_queue.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -1026,6 +1027,79 @@ TEST_F (SendRequestTest, TheIdentityReachesTheWireAsTheRequestBesideItCarriesIt)
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (globals["seen"].value, "/echo?vu=4&iteration=6|vu 4");
+}
+
+// ============================================================================
+// The URL on the wire: encoded as Postman's `toNodeUrl` writes it, after the
+// call's variables resolve (`core::encode_url_as_postman`)
+// ============================================================================
+
+class SendRequestUrlTest : public SendRequestTest {
+    protected:
+    /// Sends @p argument (JS source for sendRequest's first argument) and
+    /// answers the target the server read, or `""` when the call failed.
+    std::string sent_target (const std::string& argument) {
+        auto result = run ("var failed = null; pm.sendRequest(" + argument +
+        ", function (err, res) { failed = err && err.message; }); "
+        "pm.test('sent', function () { pm.expect(failed).to.equal(null); });");
+        EXPECT_TRUE (result.success) << result.error_message;
+        if (result.tests.size () != 1U || !result.tests[0].passed) {
+            ADD_FAILURE ()
+            << (result.tests.empty () ? "no test ran" : result.tests[0].error_message);
+            return {};
+        }
+        return server.target ();
+    }
+
+    vayu::tests::EchoServer server;
+};
+
+// Raw, libcurl refuses the space, and the quote would go out as typed.
+TEST_F (SendRequestUrlTest, TheStringFormReachesTheWireAsPostmanSendsIt) {
+    EXPECT_EQ (sent_target ("'" + server.url () + "/a b?q=c d&r=\"x\"'"),
+    "/echo/a%20b?q=c%20d&r=%22x%22");
+}
+
+TEST_F (SendRequestUrlTest, TheOptionsFormIsEncodedAlike) {
+    EXPECT_EQ (sent_target ("{ url: '" + server.url () + "/café/日本?q=café&k=<日本>', method: 'POST' }"),
+    "/echo/caf%C3%A9/"
+    "%E6%97%A5%E6%9C%AC?q=caf%C3%A9&k=%3C%E6%97%A5%E6%9C%AC%3E");
+}
+
+TEST_F (SendRequestUrlTest, AnEscapePassesAndQuerySeparatorsStayStructure) {
+    EXPECT_EQ (sent_target ("'" + server.url () + "/%41%20b?q=%26x%3D&a=1&&b=2=3&c#f g'"),
+    "/echo/%41%20b?q=%26x%3D&a=1&&b=2=3&c");
+}
+
+// Postman resolves the call's variables and then encodes the URL, so a value
+// brings its bytes into the component it lands in.
+TEST_F (SendRequestUrlTest, AResolvedValueIsEncodedWhereItLands) {
+    env["base"].value = server.url ();
+    env["seg"].value  = "a b";
+    env["term"].value = "c\"d";
+    EXPECT_EQ (sent_target ("'{{base}}/{{seg}}?q={{term}}'"), "/echo/a%20b?q=c%22d");
+}
+
+// Postman builds the call's Item with a `protocolProfileBehavior` of its own
+// and no parent, so the enclosing request's `disableUrlEncoding` is not read.
+TEST_F (SendRequestUrlTest, TheEnclosingRequestsDisableUrlEncodingDoesNotApply) {
+    request.url                  = server.url () + "/a b?q=\"x\"";
+    request.disable_url_encoding = true;
+    EXPECT_EQ (sent_target ("pm.request.url"), "/echo/a%20b?q=%22x%22");
+    EXPECT_EQ (sent_target ("{ url: pm.request.url, method: 'POST' }"), "/echo/a%20b?q=%22x%22");
+}
+
+// Postman dials an internationalized host by its punycode name
+// (`url.domainToASCII`). `*.localhost` is resolved to loopback by libcurl
+// itself, so the Host header is the name the call dialled.
+TEST_F (SendRequestUrlTest, ANonAsciiHostIsDialledByItsPunycodeName) {
+    const std::string url = server.url ();
+    const std::string port =
+    url.substr (url.rfind (':'), url.find ('/', url.rfind (':')) - url.rfind (':'));
+    std::string idn_url = url;
+    idn_url.replace (idn_url.find ("127.0.0.1"), 9, "BÜCHER.localhost");
+    EXPECT_EQ (sent_target ("'" + idn_url + "/x'"), "/echo/x");
+    EXPECT_EQ (server.header ("Host"), "xn--bcher-kva.localhost" + port);
 }
 
 } // namespace

@@ -1,0 +1,519 @@
+{
+  "$comment": "Cross-language conformance fixture for how a query row is written into a URL (issue #1771). Read by BOTH the engine gtest suite (engine/tests/query_encoding_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/query-encoding.conformance.test.ts). The rule is Postman's own, checked against postman-url-encoder 3.0.8 `toNodeUrl` (index.js:204-215) over postman-collection 5.3.1's `Url`: the query string is `QueryParam.unparse` (query-param.js:268-287), whose `normalizeParam` (:57-96) encodes `&` and `#` in a value and `&`, `#` and `=` in a key, skipping every whole `{{...}}` token (/{{[^{}]*}}/); then `encodeQueryParam` (encoder/index.js:203-210) applies QUERY_ENCODE_SET (encoder/encode-set.js:30, 111-115, 183-191): the C0 controls, DEL, every byte above `~` (each UTF-8 byte, `%XX` uppercase), space, `\"`, `#`, `'`, `<`, `>`. Nothing else is encoded: `%` passes as written, so an escape is never encoded twice, and `+`, `|`, `/`, `?`, `[`, `]`, `{`, `}` and the rest go out as typed. `components`: `text` encoded as a key (`key`) and as a value (`value`). `queries`: a request's query rows (`rows`), joined into `https://x/` with the rule above, or as typed when `encode` is false (Postman's `disableUrlEncoding`); `query` is what follows the `?`, empty meaning no `?` at all. An empty value writes `key=` and a row with `valueless: true` (Postman's `\"value\": null`, `?flag` in a URL) a bare `key`, as `unparseSingle` writes a string and a null. One Vayu rule differs from Postman and is pinned here as it stands: a row whose key is empty or whitespace is skipped (Postman writes `=value`).",
+  "components": [
+    {
+      "name": "unreserved characters pass",
+      "text": "abcXYZ019-_.~",
+      "key": "abcXYZ019-_.~",
+      "value": "abcXYZ019-_.~"
+    },
+    {
+      "name": "a pipe passes (the issue's case)",
+      "text": "a|b",
+      "key": "a|b",
+      "value": "a|b"
+    },
+    {
+      "name": "a space is %20",
+      "text": "c d",
+      "key": "c%20d",
+      "value": "c%20d"
+    },
+    {
+      "name": "double quote, single quote and angle brackets are encoded",
+      "text": "\"'<>",
+      "key": "%22%27%3C%3E",
+      "value": "%22%27%3C%3E"
+    },
+    {
+      "name": "a hash is %23",
+      "text": "#",
+      "key": "%23",
+      "value": "%23"
+    },
+    {
+      "name": "an ampersand is %26 in both parts",
+      "text": "&",
+      "key": "%26",
+      "value": "%26"
+    },
+    {
+      "name": "an equals sign is %3D in a key and passes in a value",
+      "text": "=",
+      "key": "%3D",
+      "value": "="
+    },
+    {
+      "name": "a plus passes as a literal plus",
+      "text": "+",
+      "key": "+",
+      "value": "+"
+    },
+    {
+      "name": "the rest of the reserved and sub-delimiter set passes",
+      "text": "!$()*,;:@/?[]{}|\\^`",
+      "key": "!$()*,;:@/?[]{}|\\^`",
+      "value": "!$()*,;:@/?[]{}|\\^`"
+    },
+    {
+      "name": "a valid escape passes",
+      "text": "%7C",
+      "key": "%7C",
+      "value": "%7C"
+    },
+    {
+      "name": "an invalid escape passes",
+      "text": "%zz",
+      "key": "%zz",
+      "value": "%zz"
+    },
+    {
+      "name": "a lone trailing percent passes",
+      "text": "50%",
+      "key": "50%",
+      "value": "50%"
+    },
+    {
+      "name": "an escaped percent is not encoded again",
+      "text": "%25",
+      "key": "%25",
+      "value": "%25"
+    },
+    {
+      "name": "a two-byte UTF-8 character is encoded per byte",
+      "text": "é",
+      "key": "%C3%A9",
+      "value": "%C3%A9"
+    },
+    {
+      "name": "three-byte UTF-8 characters are encoded per byte",
+      "text": "日本",
+      "key": "%E6%97%A5%E6%9C%AC",
+      "value": "%E6%97%A5%E6%9C%AC"
+    },
+    {
+      "name": "a four-byte UTF-8 character is encoded per byte",
+      "text": "😀",
+      "key": "%F0%9F%98%80",
+      "value": "%F0%9F%98%80"
+    },
+    {
+      "name": "C0 controls and DEL are encoded",
+      "text": "\u0001\u001f\t\n",
+      "key": "%01%1F%7F%09%0A",
+      "value": "%01%1F%7F%09%0A"
+    },
+    {
+      "name": "a whole token passes",
+      "text": "{{token}}",
+      "key": "{{token}}",
+      "value": "{{token}}"
+    },
+    {
+      "name": "a token is never encoded inside",
+      "text": "{{a b}}",
+      "key": "{{a b}}",
+      "value": "{{a b}}"
+    },
+    {
+      "name": "text after a token is still encoded",
+      "text": "{{x}}&y",
+      "key": "{{x}}%26y",
+      "value": "{{x}}%26y"
+    },
+    {
+      "name": "text around a token is encoded and the token is not",
+      "text": "pre {{t}} post",
+      "key": "pre%20{{t}}%20post",
+      "value": "pre%20{{t}}%20post"
+    },
+    {
+      "name": "an equals sign inside a token passes even in a key",
+      "text": "{{k=v}}",
+      "key": "{{k=v}}",
+      "value": "{{k=v}}"
+    },
+    {
+      "name": "unclosed braces are not a token",
+      "text": "{{x y",
+      "key": "{{x%20y",
+      "value": "{{x%20y"
+    },
+    {
+      "name": "a brace inside the braces means no token",
+      "text": "{{a {b}}",
+      "key": "{{a%20{b}}",
+      "value": "{{a%20{b}}"
+    },
+    {
+      "name": "the empty string stays empty",
+      "text": "",
+      "key": "",
+      "value": ""
+    }
+  ],
+  "queries": [
+    {
+      "name": "the issue's case: a pipe passes and a space is %20",
+      "rows": [
+        {
+          "key": "q",
+          "value": "a|b",
+          "enabled": true
+        },
+        {
+          "key": "r",
+          "value": "c d",
+          "enabled": true
+        }
+      ],
+      "query": "q=a|b&r=c%20d"
+    },
+    {
+      "name": "a disabled row is skipped",
+      "rows": [
+        {
+          "key": "a",
+          "value": "1",
+          "enabled": true
+        },
+        {
+          "key": "b",
+          "value": "2",
+          "enabled": false
+        },
+        {
+          "key": "c",
+          "value": "3",
+          "enabled": true
+        }
+      ],
+      "query": "a=1&c=3"
+    },
+    {
+      "name": "only disabled rows give no query and no question mark",
+      "rows": [
+        {
+          "key": "a",
+          "value": "1",
+          "enabled": false
+        },
+        {
+          "key": "b",
+          "value": "2",
+          "enabled": false
+        }
+      ],
+      "query": ""
+    },
+    {
+      "name": "an empty value writes key=",
+      "rows": [
+        {
+          "key": "flag",
+          "value": "",
+          "enabled": true
+        },
+        {
+          "key": "x",
+          "value": "1",
+          "enabled": true
+        }
+      ],
+      "query": "flag=&x=1"
+    },
+    {
+      "name": "a valueless row writes a bare key",
+      "rows": [
+        {
+          "key": "flag",
+          "value": "",
+          "valueless": true,
+          "enabled": true
+        },
+        {
+          "key": "x",
+          "value": "1",
+          "enabled": true
+        }
+      ],
+      "query": "flag&x=1"
+    },
+    {
+      "name": "a valueless row writes a bare key as typed too",
+      "rows": [
+        {
+          "key": "a b",
+          "value": "",
+          "valueless": true,
+          "enabled": true
+        },
+        {
+          "key": "c d",
+          "value": "",
+          "enabled": true
+        }
+      ],
+      "encode": false,
+      "query": "a b&c d="
+    },
+    {
+      "name": "an empty or whitespace-only key is skipped",
+      "rows": [
+        {
+          "key": "",
+          "value": "v",
+          "enabled": true
+        },
+        {
+          "key": "  ",
+          "value": "w",
+          "enabled": true
+        },
+        {
+          "key": "k",
+          "value": "1",
+          "enabled": true
+        }
+      ],
+      "query": "k=1"
+    },
+    {
+      "name": "an equals sign is encoded in a key and passes in a value",
+      "rows": [
+        {
+          "key": "k=x",
+          "value": "v=w",
+          "enabled": true
+        }
+      ],
+      "query": "k%3Dx=v=w"
+    },
+    {
+      "name": "an ampersand is encoded in both parts",
+      "rows": [
+        {
+          "key": "a&b",
+          "value": "c&d",
+          "enabled": true
+        }
+      ],
+      "query": "a%26b=c%26d"
+    },
+    {
+      "name": "a pre-encoded value is not encoded twice",
+      "rows": [
+        {
+          "key": "q",
+          "value": "a%20b",
+          "enabled": true
+        }
+      ],
+      "query": "q=a%20b"
+    },
+    {
+      "name": "a whole-token value passes",
+      "rows": [
+        {
+          "key": "id",
+          "value": "{{userId}}",
+          "enabled": true
+        }
+      ],
+      "query": "id={{userId}}"
+    },
+    {
+      "name": "a value's text after a token is still encoded",
+      "rows": [
+        {
+          "key": "v",
+          "value": "{{x}}&y",
+          "enabled": true
+        }
+      ],
+      "query": "v={{x}}%26y"
+    },
+    {
+      "name": "duplicate keys keep their order",
+      "rows": [
+        {
+          "key": "a",
+          "value": "1",
+          "enabled": true
+        },
+        {
+          "key": "a",
+          "value": "2",
+          "enabled": true
+        }
+      ],
+      "query": "a=1&a=2"
+    },
+    {
+      "name": "encode false writes the rows as typed",
+      "rows": [
+        {
+          "key": "q",
+          "value": "a|b",
+          "enabled": true
+        },
+        {
+          "key": "r",
+          "value": "c d",
+          "enabled": true
+        }
+      ],
+      "encode": false,
+      "query": "q=a|b&r=c d"
+    },
+    {
+      "name": "encode false leaves an ampersand in a value as typed",
+      "rows": [
+        {
+          "key": "k",
+          "value": "a&b",
+          "enabled": true
+        }
+      ],
+      "encode": false,
+      "query": "k=a&b"
+    }
+  ],
+  "substitutions": {
+    "$comment": "Issue #1773: a `{{var}}` in a request's URL substituted at send time. Postman (postman-runtime 7.56.1 runner/util.js `resolveUrl`) substitutes the variables into the URL string, parses that string again (`new sdk.Url`) and encodes it with `toNodeUrl`, so a substituted value is URL text, not a row: a `?` it carries in the head opens the query, a `#` opens the fragment, and its `&` and `=` split pairs. Inside the query only QUERY_ENCODE_SET is encoded (the C0 controls, DEL, every byte above `~`, space, `\"`, `'`, `<`, `>`; its `#` is structure here), the same set for a key and a value; `normalizeParam` (`&`/`#` in a value, `=` in a key) applies only to rows and never to substituted text. The head and the fragment take a value as it stands. Which part a value lands in is read left to right from the text written so far, substituted values included: the first `?` in the head opens the query, `#` opens the fragment, and a whole `{{...}}` token is skipped and kept. A layered value is resolved whole and then encoded once. The expected outputs are the ones postman-runtime produces. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
+    "cases": [
+      {
+        "name": "a value in the query is encoded, and its # opens the fragment (the issue's case)",
+        "url": "https://x/?q={{term}}",
+        "variables": {
+          "term": "a b#c"
+        },
+        "sent": "https://x/?q=a%20b#c"
+      },
+      {
+        "name": "a key token's = and & split pairs",
+        "url": "https://x/?{{k}}=1",
+        "variables": {
+          "k": "a=b&c d"
+        },
+        "sent": "https://x/?a=b&c%20d=1"
+      },
+      {
+        "name": "a value's = and & are written as structure",
+        "url": "https://x/?q={{v}}",
+        "variables": {
+          "v": "a=b&c"
+        },
+        "sent": "https://x/?q=a=b&c"
+      },
+      {
+        "name": "a = a key token brings in splits the pair",
+        "url": "https://x/?a{{k}}b=1",
+        "variables": {
+          "k": "="
+        },
+        "sent": "https://x/?a=b=1"
+      },
+      {
+        "name": "an escape in a value passes, so nothing is encoded twice",
+        "url": "https://x/?q={{v}}",
+        "variables": {
+          "v": "%41 b"
+        },
+        "sent": "https://x/?q=%41%20b"
+      },
+      {
+        "name": "the host and the path take a value as it stands",
+        "url": "https://{{host}}/{{p}}?q=1",
+        "variables": {
+          "host": "h.test",
+          "p": "a&b"
+        },
+        "sent": "https://h.test/a&b?q=1"
+      },
+      {
+        "name": "a fragment takes a value as it stands",
+        "url": "https://x/?q=1#{{f}}",
+        "variables": {
+          "f": "a b"
+        },
+        "sent": "https://x/?q=1#a b"
+      },
+      {
+        "name": "a layered value is resolved whole, then encoded once",
+        "url": "https://x/?q={{outer}}",
+        "variables": {
+          "outer": "{{inner}} x",
+          "inner": "a&b"
+        },
+        "sent": "https://x/?q=a&b%20x"
+      },
+      {
+        "name": "a token nothing answers is kept",
+        "url": "https://x/?q={{missing}}",
+        "variables": {},
+        "sent": "https://x/?q={{missing}}"
+      },
+      {
+        "name": "a ? a head value brings in opens the query for the tokens after it",
+        "url": "{{base}}&q={{v}}",
+        "variables": {
+          "base": "https://x/?a=1",
+          "v": "b c"
+        },
+        "sent": "https://x/?a=1&q=b%20c"
+      },
+      {
+        "name": "a ? in a path value opens the query, and the rest of the value is encoded",
+        "url": "http://x/p{{p}}?q=1",
+        "variables": {
+          "p": "/y?z=a b"
+        },
+        "sent": "http://x/p/y?z=a%20b?q=1"
+      },
+      {
+        "name": "a whole query string in one token is split and encoded as a query",
+        "url": "https://x/?{{qs}}",
+        "variables": {
+          "qs": "a=1&b=2 c"
+        },
+        "sent": "https://x/?a=1&b=2%20c"
+      },
+      {
+        "name": "a base URL holding a query has its query part encoded",
+        "url": "{{base}}&r=1",
+        "variables": {
+          "base": "https://x/p?k=a b"
+        },
+        "sent": "https://x/p?k=a%20b&r=1"
+      },
+      {
+        "name": "a token after a bare key is written by the same rule",
+        "url": "https://x/?flag&q={{v}}&{{k}}",
+        "variables": {
+          "v": "a b",
+          "k": "c=d"
+        },
+        "sent": "https://x/?flag&q=a%20b&c=d"
+      },
+      {
+        "name": "a separator inside a kept token's name moves nothing",
+        "url": "https://x/?{{un=known}}{{k}}=1",
+        "variables": {
+          "k": "a=b"
+        },
+        "sent": "https://x/?{{un=known}}a=b=1"
+      },
+      {
+        "name": "disableUrlEncoding writes every value as it stands",
+        "url": "https://x/?{{k}}={{term}}",
+        "variables": {
+          "k": "a=b",
+          "term": "a b#c"
+        },
+        "encode": false,
+        "sent": "https://x/?a=b=a b#c"
+      }
+    ]
+  }
+}

@@ -36,6 +36,8 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
@@ -4852,11 +4854,39 @@ RequestUrlState* url_state_of_query (JSContext* ctx, JSValue* func_data, const c
     return state;
 }
 
+/// Whether the request a script runs against sends its query encoded, which
+/// is when `add` and `upsert` store a row's key and value as the wire has them.
+bool script_query_is_encoded (JSContext* ctx) {
+    const auto* data = get_context_data (ctx);
+    return data == nullptr || data->request == nullptr || !data->request->disable_url_encoding;
+}
+
+/// A name a script looks a param up by. A row `add` wrote holds its key as
+/// sent (`a%20b`), and Postman's row holds it as typed, so a name matches a
+/// key written either way: `get('a b')` after `add({key: 'a b'})` finds it.
+class QueryParamName {
+    public:
+    QueryParamName (JSContext* ctx, std::string typed)
+    : typed_ (std::move (typed)),
+      encoded_ (script_query_is_encoded (ctx) ?
+      vayu::core::encode_query_component (typed_, vayu::core::QueryPart::Key) :
+      typed_) {
+    }
+
+    [[nodiscard]] bool matches (const std::string& key) const {
+        return key == typed_ || key == encoded_;
+    }
+
+    private:
+    std::string typed_;
+    std::string encoded_;
+};
+
 /// The value of the first param named @p name, or nullptr when there is none.
 const std::optional<std::string>*
-find_query_param (const RequestUrlState& state, const std::string& name) {
+find_query_param (const RequestUrlState& state, const QueryParamName& name) {
     for (const auto& param : state.parts.query_params) {
-        if (param.key == name) {
+        if (name.matches (param.key)) {
             return &param.value;
         }
     }
@@ -4888,8 +4918,8 @@ JSValue* func_data) {
         "pm.request.url.query.%s needs a name string, got %s", magic == 0 ? "get" : "has",
         argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
     }
-    const std::string name = js_to_string (ctx, argv[0]);
-    const auto* found      = find_query_param (*state, name);
+    const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+    const auto* found = find_query_param (*state, name);
     if (magic != 0) {
         return JS_NewBool (ctx, found != nullptr ? 1 : 0);
     }
@@ -5069,10 +5099,22 @@ JSValue* func_data) {
     if (!read_query_param_arg (ctx, argv[0], member, param)) {
         return JS_EXCEPTION;
     }
+    // Encoded here, as the send would write it (issue #1773): the rows hold
+    // wire bytes, so `all` and `getQueryString()` read what goes out. Postman
+    // adds a row and `normalizeParam` writes it, so the per-row rule applies.
+    const QueryParamName name (ctx, param.key);
+    if (script_query_is_encoded (ctx)) {
+        param.key =
+        vayu::core::encode_query_component (param.key, vayu::core::QueryPart::Key);
+        if (param.value) {
+            param.value = vayu::core::encode_query_component (
+            *param.value, vayu::core::QueryPart::Value);
+        }
+    }
     auto& params = state->parts.query_params;
     if (magic == QUERY_UPSERT) {
         for (auto& existing : params) {
-            if (existing.key == param.key) {
+            if (name.matches (existing.key)) {
                 existing.value = std::move (param.value);
                 mark_url_edited (*state);
                 return JS_UNDEFINED;
@@ -5103,11 +5145,11 @@ JSValue* func_data) {
         return JS_ThrowTypeError (ctx, "pm.request.url.query.remove needs a name string, got %s",
         argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
     }
-    const std::string name = js_to_string (ctx, argv[0]);
-    auto& params           = state->parts.query_params;
-    const size_t before    = params.size ();
+    const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+    auto& params        = state->parts.query_params;
+    const size_t before = params.size ();
     std::erase_if (params,
-    [&name] (const vayu::http::UrlQueryParam& p) { return p.key == name; });
+    [&name] (const vayu::http::UrlQueryParam& p) { return name.matches (p.key); });
     // Removing a name that is not there is a no-op rather than an error, the
     // same rule `pm.request.headers.remove` follows.
     if (params.size () != before) {
@@ -7409,6 +7451,11 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (auto reason = interpolate_send_request (ctx, request, auth)) {
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
     }
+    // Postman builds this call's Item with `protocolProfileBehavior` of its
+    // own (`disableBodyPruning` alone, `event.command.js`) and no parent, so
+    // neither the enclosing request's `disableUrlEncoding` nor anything the
+    // script passes turns this off.
+    request.url = vayu::core::encode_url_as_postman (request.url);
     // The engine's own composition rather than a second copy of it: a header
     // the script set still wins, and an api key sent as a query parameter is
     // percent-encoded onto the URL exactly as every other send does it. `db` is

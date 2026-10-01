@@ -174,7 +174,9 @@ namespace vayu::http {
  *
  * `wire_url` is the fourth question, and it is only ever asked here: it is the
  * URL a request is sent to, which is `request.url` for everything except the
- * GET transport, where the document rides in the query string.
+ * GET transport, where the document rides in the query string - and with a
+ * non-ASCII host as its punycode name (`to_ascii_host`), because libcurl has no
+ * IDN support and this is the one URL every driver hands it.
  */
 [[nodiscard]] bool has_wire_body (const Request& request);
 

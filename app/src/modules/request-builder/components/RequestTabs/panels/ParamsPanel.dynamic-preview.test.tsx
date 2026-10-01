@@ -27,10 +27,11 @@
  *
  * Both cases are pinned by counting calls to a stub resolver per exact input
  * text, since a real render's own timing can't otherwise be asserted against.
- * Calls with other input text (the key/value table's own blank placeholder row
- * resolves its empty strings through the same `resolveString`) are ignored by
- * filtering on the URL text itself - this pins the preview line, not the whole
- * panel's call volume.
+ * The line resolves the URL one token at a time (issue #1773), so the count is
+ * of calls with the URL's one token as their input. Calls with other input
+ * text (the key/value table's own blank placeholder row resolves its empty
+ * strings through the same `resolveString`) are ignored - this pins the
+ * preview line, not the whole panel's call volume.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -42,7 +43,8 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 
 const { default: ParamsPanel } = await import("./ParamsPanel");
 
-const URL = "https://api.example.test/todos/{{$randomInt}}";
+const TOKEN = "{{$randomInt}}";
+const URL = `https://api.example.test/todos/${TOKEN}`;
 
 function contextValue(resolveString: (input: string) => string, url: string, id: string) {
 	const request: RequestState = {
@@ -106,14 +108,14 @@ describe("the resolved-URL preview", () => {
 		const resolveString = makeResolver();
 
 		const { rerender } = render(panel(contextValue(resolveString, URL, "req_rerender")));
-		expect(callsFor(resolveString, URL)).toBe(1);
+		expect(callsFor(resolveString, TOKEN)).toBe(1);
 
 		// A re-render triggered by something unrelated to this URL - another
 		// field changing, a store update elsewhere - must not resolve it again.
 		// `resolveDynamicVariable` would hand back a different value on a second
 		// call, which is exactly what must not happen here.
 		rerender(panel(contextValue(resolveString, URL, "req_rerender")));
-		expect(callsFor(resolveString, URL)).toBe(1);
+		expect(callsFor(resolveString, TOKEN)).toBe(1);
 	});
 
 	it("keeps the same resolved URL across the unmount a tab switch causes", () => {
@@ -138,10 +140,10 @@ describe("the resolved-URL preview", () => {
 		const edited = `${URL}/edited`;
 
 		const { rerender } = render(panel(contextValue(resolveString, URL, "req_edit")));
-		expect(callsFor(resolveString, URL)).toBe(1);
+		expect(callsFor(resolveString, TOKEN)).toBe(1);
 
 		rerender(panel(contextValue(resolveString, edited, "req_edit")));
-		expect(callsFor(resolveString, edited)).toBe(1);
+		expect(callsFor(resolveString, TOKEN)).toBe(2);
 	});
 
 	it("gives two requests their own value rather than one keyed by URL text", () => {

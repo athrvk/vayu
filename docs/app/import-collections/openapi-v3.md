@@ -192,7 +192,7 @@ Value precedence is the parameter's own `example`, then the first entry of its `
 
 A Parameter Object declares exactly one of `schema` or `content` (the latter for a value that needs a media type to be parsed at all, e.g. a JSON object serialized into a query string) - when `schema` is absent, `declared_param_value_v3` reads `content`'s one media type entry through the same {`example`, `examples`, `schema.example`/`schema.default`} precedence a `schema`-based parameter gets, rather than importing value-less.
 
-Only scalars become a value. An array or object is serialized by the parameter's `style`/`explode`, which this parser does not read, and one row holds one string - so such a parameter imports value-less, like one declaring nothing. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
+Only scalars become a value. An array or object is serialized by the parameter's `style`/`explode`, which this parser does not read, and one row holds one string - so such a parameter imports value-less, like one declaring nothing. A declared `""` is value-less too: the import joins an empty value as a bare key (`?q`), not `?q=`.
 
 Why optional value-less parameters import **disabled** (issues #622, #658): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, a query row joined the stored URL as `?verbose`, which some APIs read as `verbose=true`, and a header row claimed an `X-Request-Id:` with nothing in it - both a wire change nobody chose. Disabled, the row is still listed in its table one click from use.
 

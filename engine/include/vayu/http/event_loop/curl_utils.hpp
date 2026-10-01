@@ -78,7 +78,8 @@ const char* status_text (int code);
  */
 struct UrlAuthority {
     /// Hostname, or the address of an IP-literal URL with its brackets removed.
-    /// Empty when the URL names no authority.
+    /// Empty when the URL names no authority. A non-ASCII name is in its
+    /// punycode form, the one the transfer dials (`ascii_host`).
     std::string host;
     /// Explicit port, or the scheme default when the URL names none.
     int port = 0;
@@ -115,13 +116,14 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Both clients call this before configuring a handle. Three such requests:
+ * Both clients call this before configuring a handle. Four such requests:
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
  * drops the body, so honouring both is impossible), a binary body whose file
  * no plan checked (`vayu::http::FilePlan` - the file rule runs once per send or
  * run, before this, and a body that skipped it is refused rather than read),
- * and header text carrying a byte no header line can hold - see
- * `vayu::http::unsendable_header_text`. In each case the caller is told rather
+ * header text carrying a byte no header line can hold - see
+ * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
+ * name (`vayu::http::unsendable_host`). In each case the caller is told rather
  * than having half its request silently discarded.
  *
  * Being the one gate every driver passes through *before* configuring anything

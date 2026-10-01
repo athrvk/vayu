@@ -41,57 +41,55 @@ DnsCache& EventLoopWorker::dns_cache () {
     return cache;
 }
 
-namespace {
-
-/// Blocking system lookup. Returns an empty string when the host has no address.
-std::string system_resolve (const std::string& hostname) {
-    // Use AF_UNSPEC to allow both IPv4 and IPv6 - this matches curl's default behavior
-    // and is critical for localhost which often resolves to ::1 (IPv6) on modern systems
-    struct addrinfo hints = {};
-    hints.ai_family       = AF_UNSPEC; // Allow both IPv4 and IPv6
-    hints.ai_socktype     = SOCK_STREAM;
-
-    struct addrinfo* result = nullptr;
-    int status = getaddrinfo (hostname.c_str (), nullptr, &hints, &result);
-
-    std::string ip;
-    if (status == 0 && result) {
-        // Iterate through results, preferring IPv6 for localhost (matches curl
-        // behavior) For other hosts, take the first result
-        struct addrinfo* best = result;
-
-        // For localhost, prefer IPv6 if available (curl tries IPv6 first)
-        if (hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1") {
-            for (struct addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
-                if (rp->ai_family == AF_INET6) {
-                    best = rp;
-                    break;
-                }
-            }
-        }
-
+std::string curl_address_list (const ::addrinfo* addresses) {
+    std::string list;
+    for (const ::addrinfo* rp = addresses; rp != nullptr; rp = rp->ai_next) {
         // The two casts below are the sockets API's own idiom, not a defect:
         // `ai_addr` is a `sockaddr*` precisely so one field can carry either
         // family, and `ai_family` - tested first, on the same record - is what
         // says which one it is. There is no narrower spelling; POSIX defines
         // the family structs to be reinterpretable through `sockaddr`.
-        if (best->ai_family == AF_INET6) {
+        std::string address;
+        if (rp->ai_family == AF_INET6) {
             std::array<char, INET6_ADDRSTRLEN> ip_str{};
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-            auto* addr6 = reinterpret_cast<sockaddr_in6*> (best->ai_addr);
+            const auto* addr6 = reinterpret_cast<const sockaddr_in6*> (rp->ai_addr);
             inet_ntop (AF_INET6, &(addr6->sin6_addr), ip_str.data (), ip_str.size ());
-            ip = ip_str.data ();
-        } else if (best->ai_family == AF_INET) {
+            address = "[" + std::string (ip_str.data ()) + "]";
+        } else if (rp->ai_family == AF_INET) {
             std::array<char, INET_ADDRSTRLEN> ip_str{};
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-            auto* addr = reinterpret_cast<sockaddr_in*> (best->ai_addr);
+            const auto* addr = reinterpret_cast<const sockaddr_in*> (rp->ai_addr);
             inet_ntop (AF_INET, &(addr->sin_addr), ip_str.data (), ip_str.size ());
-            ip = ip_str.data ();
+            address = ip_str.data ();
+        } else {
+            continue;
         }
-        freeaddrinfo (result);
+        // getaddrinfo repeats an address once per socket type it could serve.
+        const std::string padded = "," + list + ",";
+        if (padded.find ("," + address + ",") != std::string::npos) {
+            continue;
+        }
+        list += list.empty () ? address : "," + address;
     }
+    return list;
+}
 
-    return ip;
+namespace {
+
+/// Blocking system lookup, every address it returns (see curl_address_list).
+std::string system_resolve (const std::string& hostname) {
+    struct addrinfo hints = {};
+    hints.ai_family       = AF_UNSPEC;
+    hints.ai_socktype     = SOCK_STREAM;
+
+    struct addrinfo* result = nullptr;
+    if (getaddrinfo (hostname.c_str (), nullptr, &hints, &result) != 0 || !result) {
+        return {};
+    }
+    std::string addresses = curl_address_list (result);
+    freeaddrinfo (result);
+    return addresses;
 }
 
 /// Deliver a terminal result to whichever consumer a transfer has. Every path

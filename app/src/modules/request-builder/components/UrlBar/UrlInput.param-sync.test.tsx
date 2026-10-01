@@ -129,20 +129,23 @@ describe("UrlInput param sync", () => {
 		]);
 	});
 
-	it("keeps the query as written for a request sent without encoding (#1765)", () => {
-		// Mutation check: passing `decode: true` (or nothing) here stores
-		// `a b`, which the Params table then joins raw into a malformed URL.
-		const { updateField } = renderUrlInput("https://x/y", [], true);
+	it.each([false, true])(
+		"keeps the query as written, disableUrlEncoding %s (#1765, #1771)",
+		(disableUrlEncoding) => {
+			// Mutation check: decoding in `parseQueryParams` stores `a b` and
+			// `x&y`, which rejoined raw split into another pair.
+			const { updateField } = renderUrlInput("https://x/y", [], disableUrlEncoding);
 
-		fireEvent.change(screen.getByLabelText("Request URL"), {
-			target: { value: "https://x/y?q=a%20b&r=x%26y" },
-		});
+			fireEvent.change(screen.getByLabelText("Request URL"), {
+				target: { value: "https://x/y?q=a%20b&r=x%26y" },
+			});
 
-		const paramsCall = updateField.mock.calls.find(([field]) => field === "params");
-		const merged = paramsCall![1] as KeyValueItem[];
-		expect(merged.map(({ key, value }) => [key, value])).toEqual([
-			["q", "a%20b"],
-			["r", "x%26y"],
-		]);
-	});
+			const paramsCall = updateField.mock.calls.find(([field]) => field === "params");
+			const merged = paramsCall![1] as KeyValueItem[];
+			expect(merged.map(({ key, value }) => [key, value])).toEqual([
+				["q", "a%20b"],
+				["r", "x%26y"],
+			]);
+		}
+	);
 });

@@ -1101,7 +1101,7 @@ pm.request.url.query.remove('page');                    // every match, not the 
 pm.request.url.query.clear();                           // and the '?' with them
 ```
 
-Four rules behind those, each the reason for a decision you might otherwise
+Five rules behind those, each the reason for a decision you might otherwise
 undo:
 
 - **A URL nobody edited is sent exactly as it arrived.** The parts are
@@ -1113,6 +1113,17 @@ undo:
   query.
 - **`remove(name)` takes every match.** Removing `page` from `?page=1&page=2`
   and getting one back has removed nothing the caller can observe.
+- **`add` and `upsert` encode what they are given**, by the rule the send
+  writes a query with ([Query encoding](api-reference.md#query-encoding)):
+  `add({ key: 'k', value: 'a b' })` sends `k=a%20b`, and `get('k')`, `all()`
+  and `getQueryString()` then read `a%20b`, because the query is the wire bytes.
+  `%` is never encoded, so a value already encoded passes as it is; under
+  `disableUrlEncoding` the pair is written as typed. Postman keeps the text as
+  given and encodes it when it sends, so its `getQueryString()` answers
+  `k=a b` here - Vayu answers what goes out. A name is still looked up as the
+  script typed it: after `add({ key: 'a b', value: '1' })`, `get('a b')`,
+  `has('a b')`, `remove('a b')` and `upsert({ key: 'a b', ... })` all find
+  the stored `a%20b`, as they do in Postman.
 - **An edit that cannot reach the wire is an error, never a no-op.** A URL the
   parser could not read has no parts to edit, so a write is refused rather than
   composing `://` out of empty pieces, and a path segment that is not a string
@@ -1593,6 +1604,23 @@ token-refresh script work. It is not a second pass over the composed request:
 that payload was resolved before the script ran and nothing here revisits it.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
+
+**The URL goes out encoded as Postman sends it.** Once its variables resolve,
+the URL is percent-encoded component by component as `postman-url-encoder`'s
+`toNodeUrl` writes it (`core::encode_url_as_postman`): the path by Postman's
+path set and the query by its query set (both listed under
+[Query encoding](api-reference.md#query-encoding)), user info by its user-info
+set, the host lowercased. So `pm.sendRequest("https://x/a b?q=c d&r=\"x\"", cb)`
+sends `/a%20b?q=c%20d&r=%22x%22`, where before the space made libcurl refuse
+the URL. `&` and `=` in the query stay separators, and `%` is never encoded, so
+an escape already written (or a URL composition already encoded, such as
+`pm.request.url`) is sent unchanged. There is no way to turn this off: Postman
+builds the call with a `protocolProfileBehavior` of its own, so neither the
+enclosing request's `disableUrlEncoding` nor anything in the options reaches
+it. A `{{name}}` nothing answered goes out as written, where Postman would
+encode its braces in the path. A non-ASCII host is dialled by its punycode
+name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
+path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two

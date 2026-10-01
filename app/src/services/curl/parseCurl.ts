@@ -680,9 +680,9 @@ function looksLikeFormData(data: string): boolean {
  *
  * curl sends `-d`'s bytes on the wire exactly as written, so a `%20` in one is
  * already the wire's own percent-escape of the logical value - decoded here
- * with the same `safeDecode` query params use, so the stored value matches
- * what every other urlencoded row in the app holds (decoded; re-encoded once,
- * at send or codegen time). Decoding twice (once here, again at generation)
+ * with `safeDecode`, so the stored value matches what every other urlencoded
+ * body row in the app holds (decoded; re-encoded once, at send or codegen
+ * time). Query params are the exception: they are kept raw (issue #1771). Decoding twice (once here, again at generation)
  * is issue #1445's `-d 'b=x%20y'` bug: without this, the stored `x%20y` came
  * back out through `--data-urlencode` re-encoded to `x%2520y`.
  */

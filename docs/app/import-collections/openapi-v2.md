@@ -198,7 +198,7 @@ A spec's `parameters` list declares what an operation **accepts**, not what ever
 | `required: true`, no `default` | `""` | `true` - a query row joins as a bare key (`?tenant`), a header row is listed with an empty value; either is the cue to fill it in |
 | nothing, and not required | `""` | **`false`** |
 
-`default` is the only value keyword read: Swagger 2.0 has no `example` for a non-body parameter (the Example Object arrived with v3), and `enum` lists what is allowed rather than what to send. Only scalars become a value - an array or object `default` is serialized by `collectionFormat`, which this parser does not read (below), so such a parameter imports value-less. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
+`default` is the only value keyword read: Swagger 2.0 has no `example` for a non-body parameter (the Example Object arrived with v3), and `enum` lists what is allowed rather than what to send. Only scalars become a value - an array or object `default` is serialized by `collectionFormat`, which this parser does not read (below), so such a parameter imports value-less. A declared `""` is value-less too: the import joins an empty value as a bare key (`?q`), not `?q=`.
 
 Why optional value-less parameters import **disabled** (issues #622, #658): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, a query row joined the stored URL as `?verbose`, which some APIs read as `verbose=true`, and a header row claimed an `X-Request-Id:` with nothing in it - both a wire change nobody chose. Disabled, the row is still listed in its table one click from use.
 

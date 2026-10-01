@@ -180,10 +180,16 @@ OpenAPI parsers synthesize params for a URL that never had a query - so an
 imported request used to go on the wire with its query missing, silently, until
 the user happened to edit the Params table once (issue #590).
 
-`parseImport` closes that with one pass over every request draft,
-`appendParamsToUrl(r.url, r.params)`
-(`modules/request-builder/utils/url.ts`, shared with the Params table rather than
-copied). It **appends**, so a URL that arrived with a query of its own keeps it -
+`parse_import` closes that with one pass over every request draft,
+`join_params_into_urls` (`engine/src/core/import_document.cpp`). Each format
+joins with its own rule (issue #1771): a Postman collection with Postman's query
+rule, the one the Params table writes (`core::encode_query_component`, see
+[URL handling](./postman.md#url-handling)); Insomnia and JMeter with
+`encodeURIComponent`, because neither uses Postman's set and a raw `+` would
+read as a space; a request with `disableUrlEncoding` as written. The OpenAPI
+parsers join their own drafts, also with `encodeURIComponent`, because the
+spec sync diff compares stored URLs against that form. It **appends**, so a URL
+that arrived with a query of its own keeps it -
 which is what Insomnia's own send does with its two sources. Each parser's
 mapping stays as documented: `params[]` is still exactly what the source
 declared, and only the enabled rows reach `url`.
@@ -191,8 +197,10 @@ declared, and only the enabled rows reach `url`.
 Two consequences worth expecting:
 
 - A row disabled in the source stays in the table and out of the URL.
-- A row with a key and no value joins as a **bare key** (`?verbose`), which is
-  what the Params table writes for the same row. The OpenAPI parsers import an
+- An Insomnia, JMeter or OpenAPI row with a key and an empty value joins as a
+  **bare key** (`?verbose`), as Insomnia's own join writes it; a Postman row
+  joins as `verbose=`, and only a `"value": null` row as `verbose` (see
+  [URL handling](./postman.md#url-handling)). The OpenAPI parsers import an
   optional value-less parameter **disabled** so this does not happen for a
   parameter the spec merely documents - only a `required` one, or one carrying a
   declared value, reaches the URL. Declared **header** parameters follow the same

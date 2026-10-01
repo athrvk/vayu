@@ -29,6 +29,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -120,60 +121,31 @@ UrlAuthority parse_authority (const std::string& url) {
     UrlAuthority authority;
     authority.port = scheme_default_port (url);
 
-    std::string_view rest (url);
-
-    // Strip the scheme, but only when its "://" precedes any path separator -
-    // otherwise a path that contains "://" would be mistaken for one.
-    const auto scheme_end  = rest.find ("://");
-    const auto first_slash = rest.find ('/');
-    if (scheme_end != std::string_view::npos &&
-    (first_slash == std::string_view::npos || scheme_end < first_slash)) {
-        rest.remove_prefix (scheme_end + 3);
+    const auto span = vayu::http::url_host_span (url);
+    if (!span) {
+        return authority; // An unclosed IPv6 literal - no host we could trust.
     }
-
-    // Everything from the first path/query/fragment delimiter is not authority.
-    const auto authority_end = rest.find_first_of ("/?#");
-    if (authority_end != std::string_view::npos) {
-        rest = rest.substr (0, authority_end);
+    const std::string_view whole (url);
+    std::string_view host      = whole.substr (span->begin, span->size);
+    const std::size_t host_end = span->begin + span->size;
+    const std::string_view after = whole.substr (host_end, span->authority_end - host_end);
+    if (!after.empty () && after.front () != ':') {
+        return authority; // Junk after an IPv6 literal - malformed.
     }
+    const std::string_view port_digits = after.empty () ? after : after.substr (1);
 
-    // userinfo ("user:pass@") - its colon is not a port separator. Take the
-    // last '@' so a userinfo containing one still leaves the host intact.
-    const auto at = rest.rfind ('@');
-    if (at != std::string_view::npos) {
-        rest.remove_prefix (at + 1);
-    }
-
-    std::string_view host;
-    std::string_view port_digits;
-
-    if (!rest.empty () && rest.front () == '[') {
-        // IPv6 literal: the colons inside the brackets belong to the address.
-        const auto close = rest.find (']');
-        if (close == std::string_view::npos) {
-            return authority; // Malformed - no host we could trust.
-        }
-        host                    = rest.substr (1, close - 1);
+    if (span->bracketed) {
+        host                    = host.substr (1, host.size () - 2);
         authority.is_ip_literal = true;
-        const auto after        = rest.substr (close + 1);
-        if (!after.empty ()) {
-            if (after.front () != ':') {
-                return authority; // Junk after the literal - malformed.
-            }
-            port_digits = after.substr (1);
-        }
+        authority.host          = std::string (host);
     } else {
-        const auto colon = rest.find (':');
-        if (colon == std::string_view::npos) {
-            host = rest;
-        } else {
-            host        = rest.substr (0, colon);
-            port_digits = rest.substr (colon + 1);
-        }
         authority.is_ip_literal = looks_like_ipv4_literal (host);
+        // The name the transfer dials (`wire_url`), which for a non-ASCII host
+        // is its punycode: a DNS-cache pin or a client-certificate match keyed
+        // on the Unicode spelling would never meet the transfer it was for. A
+        // host with no ASCII name is kept as typed; that send is refused.
+        authority.host = vayu::http::ascii_host (host).value_or (std::string (host));
     }
-
-    authority.host = std::string (host);
     if (!port_digits.empty ()) {
         if (const auto port = parse_port (port_digits)) {
             authority.port = *port;
@@ -219,6 +191,11 @@ std::optional<Error> validate_transferable (const Request& request) {
     // for why the rule is a refusal and where its other layers live.
     if (auto problem = vayu::http::unsendable_header_text (request)) {
         return Error{ ErrorCode::InternalError, std::move (*problem) };
+    }
+    // `wire_url` sends a non-ASCII host by its punycode name, and one with no
+    // such name has nothing to send to.
+    if (auto problem = vayu::http::unsendable_host (request.url)) {
+        return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
     }
     return std::nullopt;
 }

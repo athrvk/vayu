@@ -211,9 +211,9 @@ struct FileRoot {
  * than carrying bytes in `value`: libcurl reads the file at transfer time, so
  * nothing here holds the contents. `file_name` and `content_type` override what
  * the part declares about itself; empty means "let libcurl derive it" (the
- * basename, and `application/octet-stream`). A file part whose `src` is empty
- * or unreadable is refused before the transfer starts - see
- * `vayu::http::unsendable_file_part`.
+ * basename, and `application/octet-stream`). A file part whose `src` is empty,
+ * unreadable or untrusted is refused before the transfer starts - see
+ * `vayu::http::unsendable_file_ref`.
  */
 struct FormField {
     FormField () = default;

@@ -370,6 +370,26 @@ TEST (InsomniaImport, LeavesAColonInAQueryValueUntouched) {
 }
 
 /**
+ * Insomnia's rows keep `encodeURIComponent` on the join (issue #1771): Postman's
+ * set would send a literal `+` raw, which a server reads as a space. Mutation
+ * check: pass `QueryEncoding::Postman` for Insomnia and the `|` goes out raw.
+ * An empty value joins as a bare `name`, as Insomnia's own strict join writes
+ * it; mutation check: drop the `UriComponent` term from `query_string`'s
+ * `bare` and `e` goes out as `e=`.
+ */
+TEST (InsomniaImport, JoinsItsParametersWithEncodeUriComponent) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/search",
+            "parameters":[{"name":"q","value":"a|b"},{"name":"p","value":"1+2"},{"name":"e","value":""}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=a%7Cb&p=1%2B2&e");
+}
+
+/**
  * Insomnia's explicit "No Auth" (`type: "none"`) must terminate inheritance
  * the same way Postman's `noauth` already does - falling through to
  * `inherit` would send a folder's credentials to a request the user
@@ -1568,7 +1588,7 @@ TEST (PostmanImport, StoresNoRowForAnUndeclaredPathVariable) {
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& requests = parsed.result.at ("collections")[0].at ("requests");
-    EXPECT_EQ (requests[0].at ("url"), "https://api.example.com/:a/:a/:b?t=1%3A2");
+    EXPECT_EQ (requests[0].at ("url"), "https://api.example.com/:a/:a/:b?t=1:2");
     EXPECT_EQ (requests[0].at ("params"), json::parse (R"([
         {"key":"t","value":"1:2","enabled":true}])"));
     EXPECT_EQ (requests[1].at ("params"), json::parse (R"([
@@ -1727,7 +1747,10 @@ TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_dropped_field"));
 }
 
-TEST (PostmanImport, CountsAnInvalidPercentEscapeThatChangesOnRejoin) {
+// Issue #1771: a query row holds raw query text, as Postman's
+// `QueryParam.parse` reads it, and `%` is never encoded on the join, so an
+// invalid escape is kept byte for byte and nothing is counted.
+TEST (PostmanImport, KeepsAnInvalidPercentEscapeAsWritten) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
     R"("},"item":[{"name":"R","request":{"method":"GET",
@@ -1735,14 +1758,26 @@ TEST (PostmanImport, CountsAnInvalidPercentEscapeThatChangesOnRejoin) {
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
-    // The params table keeps exactly what the source wrote - `safeDecode`
-    // gives back an invalid escape unchanged rather than raising.
     EXPECT_EQ (request.at ("params")[0].at ("value"), "%ZZ");
-    // Rejoining it into the URL still percent-encodes the literal `%`
-    // (the residual defect issue #1460 leaves counted rather than fixed).
-    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=%25ZZ");
-    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("invalid_percent_encoding"),
-    1);
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=%ZZ");
+    EXPECT_TRUE (parsed.result.at ("meta").at ("skipped").empty ());
+}
+
+// Issue #1771: a string URL's query is split, never decoded. Decoding would
+// turn `%2B` into a `+` a server reads as a space. Mutation check: decode the
+// key and value in `query_entries` and the row reads `a+b`.
+TEST (PostmanImport, ReadsAStringUrlsQueryRawAndEncodesOnlyPostmansSet) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[{"name":"R","request":{"method":"GET",
+        "url":"https://api.example.com/search?q=a%2Bb&r=c d"}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    ASSERT_EQ (request.at ("params").size (), 2U);
+    EXPECT_EQ (request.at ("params")[0].at ("value"), "a%2Bb");
+    EXPECT_EQ (request.at ("params")[1].at ("value"), "c d");
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=a%2Bb&r=c%20d");
 }
 
 /**
@@ -1814,9 +1849,9 @@ TEST (PostmanImport, KeepsAHeaderRowsTypeAndAQueryRowsEquals) {
     EXPECT_FALSE (request.at ("headers")[1].contains ("type"));
     EXPECT_EQ (request.at ("body").at ("fields")[0].at ("type"), "default");
     EXPECT_EQ (request.at ("params")[0].at ("equals"), true);
-    // Carried beside the row, never onto the wire: the URL is joined exactly
-    // as before (an empty value still joins as a bare key).
-    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand");
+    // Carried beside the row, never onto the wire: the empty string is what
+    // joins it as `expand=`.
+    EXPECT_EQ (request.at ("url"), "https://x.com/a?expand=");
 }
 
 TEST (PostmanImport, ReadsAnItemLevelDescriptionWhenTheRequestHasNone) {

@@ -1519,8 +1519,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   nothing on the wire.
 - `disableUrlEncoding` writes a path variable's value and an api-key (or
   OAuth 2.0 query-placed) credential into the URL as typed rather than
-  percent-encoded: a path value skips Postman's path encode set entirely
-  (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
+  percent-encoded: a path value skips Postman's path encode set and a
+  credential skips its query rule ([Query encoding](#query-encoding))
+  entirely (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
   `toNodeUrl (url, disableEncoding)` sends it.
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
@@ -4881,6 +4882,91 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
   erroring - composition works with no collection or environment at all.
 
+#### Query encoding
+
+A stored URL's query is sent exactly as stored: nothing re-encodes it, and the
+send hands `url` to libcurl untouched. Where the engine itself writes a query
+pair into a URL, it uses Postman's rule (issue #1771,
+`core::encode_query_component` in `core/query_encoding.hpp`, pinned to the
+app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`),
+read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
+`QueryParam.unparse`:
+
+- Encoded as `%XX` (uppercase hex): Postman's `QUERY_ENCODE_SET` - the C0
+  controls, DEL, every byte above `~` (each UTF-8 byte), space, `"`, `#`, `'`,
+  `<` and `>` - plus `&` in a key or a value and `=` in a key only (a value
+  cannot split a pair, because a parser splits on the first `=`).
+- Everything else goes out as typed: `+`, `|`, `/`, `?`, `:`, `@`, `[`, `]`,
+  `{`, `}` and `%`, so an escape already in the text is never encoded twice. A
+  whole `{{token}}` is kept verbatim, with the text around it encoded.
+- The writers are an `apikey` auth with `in: "query"` and an OAuth 2.0 token
+  with `tokenPlacement: "query"` (a value `a|b+c=d` goes out as
+  `?k=a|b+c=d`; `key=` is written even for an empty value), and the join of a
+  Postman import's query rows into the stored URL
+  ([POST /import/parse](#post-importparse)), which writes a row with an
+  empty value as `key=` and a `valueless: true` row (Postman's
+  `"value": null`) as a bare `key`. A
+  request with `disableUrlEncoding` writes the pair as typed.
+- A value known only at send time is URL text, not a row: a `{{variable}}`
+  substituted into the URL (by composition, a data row's bind, or the residual
+  pass after the pre-request script). Postman substitutes into the URL string,
+  parses it again and then encodes it, so a value's `&` and `=` split pairs as
+  they would typed, a `?` it brings into the head opens the query, and a `#`
+  opens the fragment. In the query only `QUERY_ENCODE_SET` above is encoded,
+  alike in a key and a value; the `&`/`=` step of a row never applies.
+  `GET {{base}}/?q={{term}}` with `term = "a b#c"` sends `/?q=a%20b`, with
+  `#c` as the fragment (which is not sent), and `?{{qs}}` with
+  `qs = "a=1&b=2 c"` sends `?a=1&b=2%20c`. Where a value lands is read left
+  to right from the URL written so far, substituted values included: the
+  first `?` in the head opens the query, `#` opens the fragment. A layered
+  value is resolved whole and encoded once. The head and the fragment take a
+  value as it stands, so a `{{base}}` holding `https://x/p?k=a b` has only its
+  query part encoded, and `disableUrlEncoding` writes every value as typed.
+- A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
+  and is written by the row rule above
+  ([scripting](scripting.md#writing)).
+- A `pm.sendRequest` URL is encoded whole after its variables resolve, as
+  Postman's `toNodeUrl` writes it (`core::encode_url_as_postman` in
+  `core/url_encoding.hpp`): its query text by the set above with `&` and `=`
+  left as separators, its path by the path set under
+  [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
+  ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+- OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
+  the OpenAPI sync diff compares stored URLs against that form, and neither
+  other source uses Postman's set.
+
+#### Non-ASCII hosts
+
+A host written with non-ASCII characters is dialled by its ASCII (punycode)
+name, on every send path: Send, a load or collection run, History replay, MCP,
+`pm.sendRequest`, an OAuth 2.0 token request and GraphQL introspection.
+`https://bücher.example/` goes to `xn--bcher-kva.example`, which is the name
+DNS resolves, the `Host` header and TLS SNI carry and the server certificate is
+checked against. It is the name Postman sends to (`url.domainToASCII`, UTS #46
+nontransitional processing): uppercase and full-width letters are mapped
+(`BÜCHER`, `ＡＢＣ`), and `ß` is kept, so `faß.de` is `xn--fa-hia.de`, not
+`fass.de`. The stored URL and `pm.request.url` keep the spelling that was
+typed.
+
+The conversion is ada's, the WHATWG URL library Node's `domainToASCII` is
+built on, applied to the one URL every driver hands libcurl (which is built
+without IDN support), so it matches Postman case for case, the IDNA hyphen
+rules included: Node does not enforce them, so `bücher-.example` and
+`ab--cd.bücher.example` convert. Only the host is rewritten; userinfo, port,
+path, query and fragment keep their bytes, and an ASCII host, an unresolved
+`{{host}}` included, is not touched. The raw request a response carries shows
+the punycode name, because that is what was sent. Everything that compares a
+host beside the transfer uses the same name - the cookie jar, the DNS cache,
+the client-certificate registry, the proxy bypass list and a proxy URL - so a
+cookie, certificate or bypass entry written with either spelling applies to
+both.
+
+A host with no ASCII name at all, such as `xn--iñvalid.com` (a punycode label
+that does not decode) or one holding a space, is refused before anything is
+sent: status `0`, error code `INVALID_URL`, and a message naming the host.
+Postman sends such a host as typed and the lookup fails; libcurl without IDN
+would refuse it as "IDN support not present", which names the wrong cause.
+
 #### Path variables
 
 A `:name` segment of the URL is answered by the request's own `in: "path"`
@@ -5269,8 +5355,8 @@ Refused with a **400**, before any run row exists and with nothing sent:
 **Credentials bind here too** (issue #642). A `{{data.user}}` in a basic-auth
 username, a bearer token or an api key is substituted from the row like any
 other field, and it is bound **before** the credentials are encoded - so basic
-auth base64s the row's values, and an api key in the query is percent-encoded
-after the substitution rather than before. This is the same deferral a
+auth base64s the row's values, and an api key in the query is encoded by the
+[query rule](#query-encoding) after the substitution rather than before. This is the same deferral a
 collection run performs per iteration (issue #591): the credentials are parsed
 and kept typed, the request is built without resolving them, and the auth is
 applied once the row has reached it.

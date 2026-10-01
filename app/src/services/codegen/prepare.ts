@@ -27,6 +27,7 @@ import {
 	type SnippetRequest,
 } from "./types";
 import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
+import { encodeQueryComponent } from "@/modules/request-builder/utils/query-encoding";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -105,12 +106,13 @@ function maskerFor(secrets: string[] | undefined, mask: boolean | undefined) {
 
 /**
  * Append a query parameter to a URL that may or may not already have some -
- * encoded unless the request sends its URL as written (issue #1765), as the
- * engine's `append_query_param` does.
+ * encoded with Postman's query rule (issue #1771) unless the request sends its
+ * URL as written (issue #1765), as the engine's `append_query_param` does.
  */
 function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
-	const enc = encode ? encodeURIComponent : (text: string) => text;
-	const encoded = `${enc(key)}=${enc(value)}`;
+	const encoded = encode
+		? `${encodeQueryComponent(key, "key")}=${encodeQueryComponent(value, "value")}`
+		: `${key}=${value}`;
 	// Split the fragment off first: a parameter appended after `#` lands in the
 	// fragment and is never sent.
 	const hash = url.indexOf("#");

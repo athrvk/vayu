@@ -286,6 +286,18 @@ describe("auth is applied, because the engine applies it at send time", () => {
 		expect(query.code).toContain("?page=2&api%20key=a%20b#frag");
 	});
 
+	it("encodes a query api key with Postman's query rule, as the engine sends it (#1771)", () => {
+		// `|` and `+` go out raw, `=` only in the key is `%3D`, space and `&`
+		// are encoded. Mutation check: `encodeURIComponent` in `appendQueryParam`
+		// writes `k%3D1=a%7Cb%2Bc%3Dd%20%26` here.
+		const { code } = generateCurl({
+			...GET,
+			url: "https://x/y",
+			auth: { mode: "apikey", key: "k=1", value: "a|b+c=d &", in: "query" },
+		});
+		expect(code).toContain("'https://x/y?k%3D1=a|b+c=d%20%26'");
+	});
+
 	it("says so when the mode cannot be reproduced statically", () => {
 		const { code, notes } = generateCurl({
 			...GET,

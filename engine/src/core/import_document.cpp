@@ -141,9 +141,10 @@ namespace {
 
 using json = nlohmann::ordered_json;
 
-// The JavaScript the renderer's parsers are written in - `prop`, truthiness,
-// `JSON.stringify`, `encodeURIComponent`, `appendParamsToUrl`. Shared with the
-// draft builder (`openapi_drafts.cpp`) rather than copied.
+// The JavaScript semantics the format readers are written in - `prop`,
+// truthiness, `JSON.stringify`, `encodeURIComponent` - and the query join
+// `append_params`. Shared with the draft builder (`openapi_drafts.cpp`) rather
+// than copied.
 using namespace js;
 
 /**
@@ -195,7 +196,9 @@ std::string normalize_vars (const std::string& text) {
  * that Vayu keeps for the export to write back - nothing reads either at send
  * time. `Typed` is a header or urlencoded row's `type` other than `"text"`
  * (Postman's default, and what the exporter writes for a row with none);
- * `Query` is a query row's boolean `equals`; `Path` is a `url.variable[]`
+ * `Query` is a query row's boolean `equals`, and `valueless: true` for a row
+ * whose `value` is null or absent (Postman writes that row as a bare `key`,
+ * and an empty string as `key=`); `Path` is a `url.variable[]`
  * entry's `type` whatever it says (Postman writes `"string"` or `"any"` there
  * and has no default to leave out).
  */
@@ -230,6 +233,10 @@ json map_key_values (const json* rows, RowExtras extras = RowExtras::None) {
         if (const json* equals = prop (record, "equals");
         extras == RowExtras::Query && equals != nullptr && equals->is_boolean ()) {
             entry["equals"] = *equals;
+        }
+        if (const json* value = prop (record, "value");
+        extras == RowExtras::Query && (value == nullptr || value->is_null ())) {
+            entry["valueless"] = true;
         }
         out.push_back (std::move (entry));
     }
@@ -925,11 +932,6 @@ struct PostmanCounts {
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
     // see `map_postman_oauth2` (issue #1460).
     int oauth2_dropped_field = 0;
-    // A query key or value where `safeDecode` gave back the original text
-    // because one of its `%` escapes was invalid - re-encoding that text on
-    // rejoin (`joinParamsIntoUrls`) percent-encodes the literal `%` too,
-    // changing the stored URL from what the source wrote (issue #1460).
-    int invalid_percent_encoding = 0;
     // `client_certificates` registry candidates built from a request's own
     // `certificate` (issue #1656), one per distinct (host, port) this import
     // resolved a usable candidate for - see `pm_certificate`. Deduped by
@@ -1080,75 +1082,13 @@ json pm_body (const json* body, PostmanCounts& counts) {
     return json{ { "mode", "none" } };
 }
 
-/// Whether @p text is valid UTF-8, which is the half of `decodeURIComponent`
-/// that is not about escapes: a percent sequence decoding to a broken sequence
-/// is a `URIError` there.
-bool is_valid_utf8 (const std::string& text) {
-    for (size_t at = 0; at < text.size ();) {
-        const auto lead = static_cast<unsigned char> (text[at]);
-        size_t extra    = 0;
-        if (lead < 0x80U) {
-            extra = 0;
-        } else if ((lead & 0xE0U) == 0xC0U) {
-            extra = 1;
-        } else if ((lead & 0xF0U) == 0xE0U) {
-            extra = 2;
-        } else if ((lead & 0xF8U) == 0xF0U) {
-            extra = 3;
-        } else {
-            return false;
-        }
-        if (at + extra >= text.size ()) {
-            return false;
-        }
-        for (size_t step = 1; step <= extra; ++step) {
-            if ((static_cast<unsigned char> (text[at + step]) & 0xC0U) != 0x80U) {
-                return false;
-            }
-        }
-        at += extra + 1;
-    }
-    return true;
-}
-
-/**
- * `safeDecode(text)`: `decodeURIComponent` that degrades instead of throwing.
- *
- * A `%` not followed by two hex digits (`?discount=50%`, a LIKE pattern) is a
- * `URIError`, and Postman does not percent-validate a typed URL - so one such
- * character used to abort the whole file with "URI malformed" and no pointer to
- * the offending request. The still-encoded text is imported instead:
- * unreadable is recoverable, absent is not.
- */
-std::string safe_decode (const std::string& text) {
-    std::string out;
-    out.reserve (text.size ());
-    for (size_t at = 0; at < text.size (); ++at) {
-        if (text[at] != '%') {
-            out += text[at];
-            continue;
-        }
-        if (at + 2 >= text.size () ||
-        std::isxdigit (static_cast<unsigned char> (text[at + 1])) == 0 ||
-        std::isxdigit (static_cast<unsigned char> (text[at + 2])) == 0) {
-            return text;
-        }
-        out += static_cast<char> (std::stoi (text.substr (at + 1, 2), nullptr, 16));
-        at += 2;
-    }
-    return is_valid_utf8 (out) ? out : text;
-}
-
-/// A `safeDecode` result that gave back its input unchanged because one of
-/// its `%` escapes was invalid, rather than because the input held no escape
-/// at all - the case `joinParamsIntoUrls` later re-encodes into a different
-/// value (issue #1460).
-bool decode_kept_raw (const std::string& original, const std::string& decoded) {
-    return original.find ('%') != std::string::npos && original == decoded;
-}
-
-/// `queryEntries(query)`: a `k=v&k2=v2` string as rows, decoded and normalized.
-json query_entries (const std::string& query, PostmanCounts& counts) {
+/// `queryEntries(query)`: a `k=v&k2=v2` string as rows, split on `&` and the
+/// first `=` and never decoded, as Postman's `QueryParam.parse` reads it
+/// (issue #1771): a pair with no `=` is `valueless`, one ending in `=` holds
+/// an empty value. A row holds raw query text, so the join writes it back
+/// byte for byte; decoding first would turn `%2B` into a `+` a server reads
+/// as a space, and `%2541` into `%41`.
+json query_entries (const std::string& query) {
     json out     = json::array ();
     size_t start = 0;
     while (start <= query.size ()) {
@@ -1164,13 +1104,12 @@ json query_entries (const std::string& query, PostmanCounts& counts) {
         equals == std::string::npos ? pair : pair.substr (0, equals);
         const std::string value =
         equals == std::string::npos ? std::string () : pair.substr (equals + 1);
-        const std::string decoded_key   = safe_decode (key);
-        const std::string decoded_value = safe_decode (value);
-        if (decode_kept_raw (key, decoded_key) || decode_kept_raw (value, decoded_value)) {
-            counts.invalid_percent_encoding += 1;
+        json row = { { "key", key }, { "value", normalize_vars (value) },
+            { "enabled", true } };
+        if (equals == std::string::npos) {
+            row["valueless"] = true;
         }
-        out.push_back ({ { "key", decoded_key },
-        { "value", normalize_vars (decoded_value) }, { "enabled", true } });
+        out.push_back (std::move (row));
     }
     return out;
 }
@@ -1294,7 +1233,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
         question == std::string::npos ? text : text.substr (0, question));
         json params = question == std::string::npos ?
         json::array () :
-        query_entries (text.substr (question + 1), counts);
+        query_entries (text.substr (question + 1));
         // A string URL has no `url.variable[]`, so it declares no path row.
         return { base, std::move (params) };
     }
@@ -1316,7 +1255,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     // hand-written or script-generated collections that populate only `raw`.
     json params = (!structured.empty () || question == std::string::npos) ?
     std::move (structured) :
-    query_entries (raw.substr (question + 1), counts);
+    query_entries (raw.substr (question + 1));
     for (json& row : path_variable_rows (postman_path_variables (prop (url, "variable")))) {
         params.push_back (std::move (row));
     }
@@ -1662,7 +1601,6 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "unsupported_auth", &PostmanCounts::skipped_unsupported_auth },
 { "oauth2_dropped_field", &PostmanCounts::oauth2_dropped_field },
 { "url_without_raw", &PostmanCounts::skipped_url_without_raw },
-{ "invalid_percent_encoding", &PostmanCounts::invalid_percent_encoding },
 { "disabled_body", &PostmanCounts::disabled_body },
 { "certificate", &PostmanCounts::skipped_certificate },
 { "proxy_config", &PostmanCounts::skipped_proxy },
@@ -1856,7 +1794,6 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
     tally.add ("oauth2_dropped_field", counts.oauth2_dropped_field);
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
-    tally.add ("invalid_percent_encoding", counts.invalid_percent_encoding);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
     tally.add ("disabled_body", counts.disabled_body);
     tally.add ("certificate", counts.skipped_certificate);
@@ -3789,6 +3726,14 @@ bool is_insomnia_v4 (const json& parsed) {
     format->is_number () && format->get<double> () == 4.0;
 }
 
+/// One params row as `js::query_string` joins it.
+struct JoinedRow {
+    std::string key;
+    std::string value;
+    bool enabled   = true;
+    bool valueless = false;
+};
+
 /**
  * `joinParamsIntoUrls(result)`: restore the app's url/params invariant on every
  * request a parser produced.
@@ -3804,31 +3749,34 @@ bool is_insomnia_v4 (const json& parsed) {
  * promises a URL with its query joined in, because that is the URL the sync
  * diff compares a stored request against. Running this over one would append
  * the same rows twice.
+ *
+ * @p encoding is the source format's rule (issue #1771): `Postman` for a
+ * Postman collection, `UriComponent` for Insomnia and JMeter.
  */
-void join_params_into_urls (json& collections) {
+void join_params_into_urls (json& collections, QueryEncoding encoding) {
     for (json& collection : collections) {
         for (json& request : collection.at ("requests")) {
-            std::vector<DraftField> rows;
+            std::vector<JoinedRow> rows;
             for (const json& row : request.at ("params")) {
                 // A path row is sent in its `:name` segment, never the query.
                 if (vayu::core::is_path_variable_row (row)) {
                     continue;
                 }
-                DraftField field;
-                field.key     = row.at ("key").get<std::string> ();
-                field.value   = row.at ("value").get<std::string> ();
-                field.enabled = row.at ("enabled").get<bool> ();
-                rows.push_back (std::move (field));
+                const json* valueless = prop (&row, "valueless");
+                rows.push_back ({ row.at ("key").get<std::string> (),
+                row.at ("value").get<std::string> (), row.at ("enabled").get<bool> (),
+                valueless != nullptr && valueless->is_boolean () &&
+                valueless->get<bool> () });
             }
             // A request whose item says `disableUrlEncoding` joins its rows as
             // written (issue #1765), as the app's Params table does for it.
             const json* raw = prop (&request, "disableUrlEncoding");
             const bool as_typed =
             raw != nullptr && raw->is_boolean () && raw->get<bool> ();
-            request["url"] =
-            append_params (request.at ("url").get<std::string> (), rows, !as_typed);
+            request["url"] = append_params (request.at ("url").get<std::string> (),
+            rows, as_typed ? QueryEncoding::AsTyped : encoding);
         }
-        join_params_into_urls (collection.at ("children"));
+        join_params_into_urls (collection.at ("children"), encoding);
     }
 }
 
@@ -4016,13 +3964,13 @@ const ImportOptions& options,
 const ImportSource& source) {
     ImportParse parsed;
 
-    // Whether the parse already wrote each request's enabled query into its
-    // `url`. Only the OpenAPI path does - `SpecRequestDraft` promises a joined
-    // URL, because that is what the sync diff compares a stored request against
-    // - and running the join over one would append the same rows twice. Stated
-    // rather than derived from the format name, which would make a renamed
-    // dialect a silently doubled query.
-    bool query_joined = false;
+    // How the parse's query rows join into each request's `url`, or nothing
+    // when the parse already wrote them. Only the OpenAPI path does -
+    // `SpecRequestDraft` promises a joined URL, because that is what the sync
+    // diff compares a stored request against - and running the join over one
+    // would append the same rows twice. Stated rather than derived from the
+    // format name, which would make a renamed dialect a silently doubled query.
+    std::optional<QueryEncoding> join_encoding = QueryEncoding::UriComponent;
 
     // A `.jmx` test plan is XML, and would only fail both of `read_document`'s
     // readers (JSON then YAML) the same way genuinely unrecognised bytes do -
@@ -4039,7 +3987,7 @@ const ImportSource& source) {
         if (!source.file_name.empty ()) {
             parsed.result["meta"]["fileName"] = source.file_name;
         }
-        join_params_into_urls (parsed.result.at ("collections"));
+        join_params_into_urls (parsed.result.at ("collections"), QueryEncoding::UriComponent);
         return parsed;
     }
 
@@ -4058,8 +4006,10 @@ const ImportSource& source) {
         // both sides.
         if (is_postman_v21 (document)) {
             parsed.result = parse_postman (document, options, "Postman Collection v2.1");
+            join_encoding = QueryEncoding::Postman;
         } else if (is_postman_v20 (document)) {
             parsed.result = parse_postman (document, options, "Postman Collection v2.0");
+            join_encoding = QueryEncoding::Postman;
         } else if (const std::optional<bool> globals = postman_variable_scope (document)) {
             parsed.result = parse_postman_variables (document, options, *globals);
         } else if (is_insomnia_v4 (document)) {
@@ -4067,7 +4017,7 @@ const ImportSource& source) {
         } else if (const walk::Dialect dialect = walk::spec_dialect (document);
         dialect != walk::Dialect::None) {
             parsed.result = parse_openapi (document, text, source, dialect);
-            query_joined  = true;
+            join_encoding.reset ();
         } else {
             parsed.error        = "Unrecognised format";
             parsed.unrecognised = true;
@@ -4078,8 +4028,8 @@ const ImportSource& source) {
         return parsed;
     }
 
-    if (!query_joined) {
-        join_params_into_urls (parsed.result.at ("collections"));
+    if (join_encoding) {
+        join_params_into_urls (parsed.result.at ("collections"), *join_encoding);
     }
 
     // The three facts the caller knows and no parser can read out of the bytes.

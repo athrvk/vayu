@@ -102,7 +102,7 @@ std::string render_form_data_parts (const std::vector<FormField>& fields) {
             // Unescaped, so it cannot be produced by a text part's value.
             // A part with no file selected renders a bare `@`, which is still
             // distinct from an empty text value - it is refused before the
-            // transfer (`unsendable_file_part`), but a pre-request script runs
+            // transfer (`unsendable_file_ref`), but a pre-request script runs
             // first and reads the body as it stands.
             out += '@';
             out += percent_encode (declared_file_name (field));
@@ -256,10 +256,14 @@ std::string implied_content_type (const Request& request) {
 }
 
 std::string wire_url (const Request& request) {
-    if (const auto parameters = graphql_url_transport (request)) {
-        return url_with_query (request.url, *parameters);
-    }
-    return request.url;
+    const auto parameters = graphql_url_transport (request);
+    std::string url =
+    parameters ? url_with_query (request.url, *parameters) : request.url;
+    // A host with no ASCII name is refused by `validate_transferable` before
+    // any driver asks for this URL; a caller that did not ask that gate (the
+    // raw-request view of a refused send) is shown the host as typed.
+    (void)to_ascii_host (url);
+    return url;
 }
 
 bool content_type_is_engine_owned (const Body& body) {

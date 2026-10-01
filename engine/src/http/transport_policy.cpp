@@ -29,6 +29,7 @@
 #include <curl/curl.h>
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -80,6 +81,40 @@ bool is_address_literal (std::string_view host) {
     return !host.empty () &&
     std::all_of (host.begin (), host.end (),
     [] (unsigned char c) { return std::isdigit (c) != 0 || c == '.'; });
+}
+
+/// A host pattern (a registry host, a bypass entry) in the punycode form the
+/// transfer dials (`ascii_host`), keeping a leading `.` or `*.`; as written
+/// when it is ASCII already or has no ASCII name.
+std::string ascii_host_pattern (std::string_view pattern) {
+    std::size_t prefix = 0;
+    if (pattern.starts_with ("*.")) {
+        prefix = 2;
+    } else if (pattern.starts_with (".")) {
+        prefix = 1;
+    }
+    const auto ascii = vayu::http::ascii_host (pattern.substr (prefix));
+    return ascii ? std::string (pattern.substr (0, prefix)) + *ascii :
+                   std::string (pattern);
+}
+
+/// `proxyBypass` with each entry through `ascii_host_pattern`: libcurl matches
+/// the list against the punycode name it dials, so a Unicode entry would
+/// exempt nothing. Separators, and every ASCII entry, are kept byte for byte.
+std::string ascii_bypass_list (std::string_view list) {
+    std::string out;
+    std::size_t begin = 0;
+    for (std::size_t at = 0; at <= list.size (); ++at) {
+        if (at < list.size () && list[at] != ',' && list[at] != ' ' && list[at] != '\t') {
+            continue;
+        }
+        out += ascii_host_pattern (list.substr (begin, at - begin));
+        if (at < list.size ()) {
+            out += list[at];
+        }
+        begin = at + 1;
+    }
+    return out;
 }
 
 /// The PEM markers a certificate is wrapped in. Only the certificate label is
@@ -346,6 +381,9 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
     const auto host = authority.substr (0, authority.find ('/'));
     if (host.empty () || host.front () == ':') {
         return std::string ("proxy URL names no host");
+    }
+    if (auto problem = vayu::http::unsendable_host (url)) {
+        return problem;
     }
     return std::nullopt;
 }
@@ -705,7 +743,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         }
         ClientCertRule rule;
         rule.id         = row.id;
-        rule.host       = row.host;
+        rule.host       = ascii_host_pattern (row.host);
         rule.port       = row.port;
         rule.cert_path  = row.cert_path;
         rule.key_path   = row.key_path;
@@ -745,7 +783,8 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         "'; using '" + to_string (policy.proxy_mode) + "'");
     }
 
-    policy.proxy_bypass = db.get_config_string ("proxyBypass", "");
+    policy.proxy_bypass =
+    ascii_bypass_list (db.get_config_string ("proxyBypass", ""));
 
     if (policy.proxy_mode == ProxyMode::System) {
         // What the app resolved from the operating system (issue #708). Empty
@@ -767,6 +806,9 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             return policy;
         }
         policy.proxy_url = resolved;
+        // libcurl has no IDN support, so a non-ASCII proxy host is dialled by
+        // the punycode name `proxy_url_rejection` has already proved exists.
+        (void)vayu::http::to_ascii_host (policy.proxy_url);
         return policy;
     }
 
@@ -792,6 +834,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     }
 
     policy.proxy_url = url;
+    (void)vayu::http::to_ascii_host (policy.proxy_url);
     return policy;
 }
 
