@@ -2214,7 +2214,8 @@ therefore read the payload as a raw query string and destroyed it.
 Two buckets, not eight: `json`, `text`, `jsonrpc` and `xml` are one raw string
 differing only in highlighting, so text carries between them deliberately;
 `graphql` is an envelope this side parses into two panes and keeps its own; the
-two form modes use `formData` / `urlEncoded` and never touch `body`. `jsonrpc`
+two form modes use `formData` / `urlEncoded` and `binary` uses `binaryFile`, and
+none of the three touches `body`. `jsonrpc`
 and `xml` sit in the raw bucket because nothing here reads their text as a
 structure - JSON-RPC's frame is completed engine-side at wire time and an XML
 document is sent byte for byte, so each pane holds one plain document. The rule lives in
@@ -2582,9 +2583,9 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
 - **`fieldConflicts`** and **`takeExternalField(field)`** are on
   `RequestBuilderContextValue`. `ExternalChangeNotice`
   (`request-builder/components/`) renders one `ExternalChangeCallout` per
-  logical group - the four fields the editor splits a request's body across
-  (`bodyMode`/`body`/`formData`/`urlEncoded`) count as one "body" group, so a
-  body conflict does not paint four callouts - and its "Take theirs" resolves
+  logical group - the five fields the editor splits a request's body across
+  (`bodyMode`/`body`/`formData`/`urlEncoded`/`binaryFile`) count as one "body"
+  group, so a body conflict does not paint five callouts - and its "Take theirs" resolves
   every field in the group.
 - **`collectionId`** is not a mergeable field: a `collectionId`-only change
   with the same id (the `move_item` case) updates just that field in place,

@@ -122,9 +122,22 @@ untransformed. The mode strings are a contract: the engine matches
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
 engine writes the Content-Type each form mode implies. A `form-data` row may be
-a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
-sends the path the user picked - never the bytes - and the engine opens the file
-at send time. See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
+a **file part** (`{type: "file", src, fileName?, contentType?, unresolved?}`): the
+renderer sends the path the user picked - never the bytes - and the engine opens
+the file at send time. A **`binary`** body is one file as the whole body,
+`{mode: "binary", file: {src, fileName?, contentType?, unresolved?}}`, built from
+`RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
+refuse it as "no file selected" rather than send a bodiless request.
+
+`unresolved` travels on both, and is the engine's trust input rather than an
+editor note: a file reference is sent only when someone chose it in the editor
+(the flag is absent) or it lies under a folder allowed in Settings > Files
+([allowed folders](#allowed-folders)). The editor clears it on a pick, a drop or a
+typed path; an import, a curl paste and an MCP agent set it; and composition sets
+it whenever `src` held a `{{variable}}`. A refused file comes back as a send
+failure (status 0, the engine's message naming the field or "Body file", the path
+and what to do), which the response pane's `ClientErrorView` prints as-is under
+"Couldn't send the request". See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
 for the full contract.
 
 ### API Methods
