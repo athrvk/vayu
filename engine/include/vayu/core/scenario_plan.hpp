@@ -38,6 +38,7 @@
  */
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -52,6 +53,7 @@
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -300,6 +302,13 @@ struct ScenarioExecution {
      * of one resolution, and only the second needs the index.
      */
     SpecBinding spec;
+    /**
+     * Every file the plan's steps can name, checked once when the plan
+     * resolved (`http/file_ref.hpp`): each step's own, and each distinct path a
+     * data row binds into one. Null for a plan that names no file. Both
+     * executors `fill` a bound step from it; neither re-checks a path.
+     */
+    std::shared_ptr<vayu::http::FilePlan> files;
 };
 
 /** Bounds a plan must respect, read from config by the caller. */
@@ -345,7 +354,36 @@ struct ScenarioResolution {
     /// Read straight into `build_scenario_manifest`, which is the only thing
     /// that needs it - nothing about *executing* the plan depends on it.
     SpecBinding spec;
+    /// For `ScenarioExecution::files`.
+    std::shared_ptr<vayu::http::FilePlan> files;
 };
+
+/**
+ * @brief Check every file @p request can send, once, at plan time.
+ *
+ * A request whose file paths hold no token is checked as it stands, and a
+ * binary body's bytes are read into @p request itself, so every copy a run
+ * makes shares them. One whose path a data row binds is bound against each of
+ * @p rows through @p bind and each distinct result checked; the refusal names
+ * the row (`data row N`). A path a row cannot bind is left to the run's own
+ * bind, which refuses that row when it is reached.
+ */
+[[nodiscard]] std::optional<std::string> plan_request_files (vayu::http::FilePlan& files,
+vayu::Request& request,
+const std::vector<nlohmann::json>& rows,
+const std::function<DataBindResult (vayu::Request&, size_t row)>& bind);
+
+/**
+ * @brief The per-iteration half of `plan_request_files`: fill a bound copy of
+ * @p tmpl from what the plan already checked.
+ *
+ * A no-op unless @p tmpl's file path is one a row binds - every other request
+ * was filled at plan time and its copies share that. A path the plan never saw
+ * (one a per-iteration value produced) is refused, never read on the hot path.
+ */
+[[nodiscard]] DataBindResult fill_bound_files (const vayu::http::FilePlan* files,
+const vayu::Request& tmpl,
+vayu::Request& request);
 
 /**
  * Validate a run's `data` rows against @p limits and copy them into

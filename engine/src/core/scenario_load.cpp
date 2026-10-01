@@ -771,8 +771,13 @@ class ScenarioLoadDriver {
             // also drives (issues #993, #994), so a request binds identically
             // whether it is repeated on its own or walked as a step - including
             // the credentials-after-fields order the encoding depends on.
-            const auto bound = bind_step_iteration (request, step,
+            auto bound = bind_step_iteration (request, step,
             execution_.data_rows, row, IterationIdentity{ vu_index, iteration });
+            // A path a row bound is filled from what the plan checked; the
+            // transfer never opens a small file and never re-checks one.
+            if (bound.ok) {
+                bound = fill_bound_files (execution_.files.get (), step.request, request);
+            }
             if (!bound.ok) {
                 // Nothing goes on the wire, so nothing will ever complete for
                 // this step: this path owns the whole accounting a completion

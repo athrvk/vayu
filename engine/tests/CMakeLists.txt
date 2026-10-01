@@ -89,6 +89,7 @@ add_executable(vayu_tests
     set_cookie_test.cpp
     cookie_jar_test.cpp
     form_body_test.cpp
+    file_body_test.cpp
     graphql_body_test.cpp
     jsonrpc_body_test.cpp
     url_parts_test.cpp
@@ -333,6 +334,7 @@ set(vayu_scratch_database_suites
     AuthRefreshTuningTest
     ClientCertificateDbTest
     CollectMetrics
+    BinaryBodyLoadRun
     ColumnTextFixture
     CollectionsRouteTest
     ConfigRouteTest
@@ -342,6 +344,7 @@ set(vayu_scratch_database_suites
     DefaultHeaderConfigTest
     DatabaseTest
     DbRecoveryTest
+    FileRootsRouteTest
     DeleteRunTest
     ElementsControllersTest
     ElementsControllersLoadTest

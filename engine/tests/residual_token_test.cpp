@@ -92,7 +92,12 @@ TEST (ResidualTokens, ResolvesEveryFieldCompositionResolves) {
     EXPECT_EQ (request.headers["X-Tenant"], "on");
 }
 
-TEST (ResidualTokens, ResolvesEveryStringAFormFieldCarries) {
+// Every string but the path: a script can never choose which file is sent, so
+// a `{{token}}` left in `src` after composition stays there and the file rule
+// refuses it as an unresolved variable. Mutation check: put `&field.src` /
+// `&request.body.file.src` back into `resolvable_strings` and the path
+// assertions here go red.
+TEST (ResidualTokens, ResolvesEveryStringAFormFieldCarriesButItsPath) {
     vayu::Request request;
     request.url       = "https://example.test/upload";
     request.body.mode = vayu::BodyMode::FormData;
@@ -117,9 +122,28 @@ TEST (ResidualTokens, ResolvesEveryStringAFormFieldCarries) {
     const auto& resolved = request.body.fields.front ();
     EXPECT_EQ (resolved.key, "avatar");
     EXPECT_EQ (resolved.value, "ada");
-    EXPECT_EQ (resolved.src, "/tmp/fixtures/photo.png");
+    EXPECT_EQ (resolved.src, "{{fixtures}}/photo.png");
     EXPECT_EQ (resolved.file_name, "ada.png");
     EXPECT_EQ (resolved.content_type, "image/png");
+}
+
+TEST (ResidualTokens, LeavesABinaryBodysPathAlone) {
+    vayu::Request request;
+    request.url                    = "https://example.test/upload";
+    request.body.mode              = vayu::BodyMode::Binary;
+    request.body.file.src          = "{{fixtures}}/a.bin";
+    request.body.file.file_name    = "{{name}}.bin";
+    request.body.file.content_type = "application/{{format}}";
+
+    ScriptVariableScopes scopes;
+    scopes.environment["fixtures"] = value_of ("/etc");
+    scopes.environment["name"]     = value_of ("ada");
+    scopes.environment["format"]   = value_of ("zip");
+
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+    EXPECT_EQ (request.body.file.src, "{{fixtures}}/a.bin");
+    EXPECT_EQ (request.body.file.file_name, "ada.bin");
+    EXPECT_EQ (request.body.file.content_type, "application/zip");
 }
 
 /// Composition's own precedence, because it is composition's own resolver: a

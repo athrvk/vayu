@@ -22,6 +22,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
 
 namespace vayu::core {
 
@@ -610,6 +611,71 @@ std::vector<nlohmann::json>& rows_out) {
     return std::nullopt;
 }
 
+std::optional<std::string> plan_request_files (vayu::http::FilePlan& files,
+vayu::Request& request,
+const std::vector<nlohmann::json>& rows,
+const std::function<DataBindResult (vayu::Request&, size_t row)>& bind) {
+    if (!vayu::http::has_file_refs (request.body)) {
+        return std::nullopt;
+    }
+    if (rows.empty () || !vayu::http::has_templated_file_path (request.body)) {
+        return files.prepare (request);
+    }
+    for (size_t row = 0; row < rows.size (); ++row) {
+        vayu::Request bound = request;
+        if (!bind (bound, row).ok) {
+            continue;
+        }
+        if (auto refusal = files.prepare (bound)) {
+            return "data row " + std::to_string (row) + ": " + *refusal;
+        }
+    }
+    return std::nullopt;
+}
+
+DataBindResult fill_bound_files (const vayu::http::FilePlan* files,
+const vayu::Request& tmpl,
+vayu::Request& request) {
+    if (files == nullptr || !vayu::http::has_templated_file_path (tmpl.body)) {
+        return DataBindResult{ true, {} };
+    }
+    if (auto refusal = files->fill (request)) {
+        return DataBindResult{ false, std::move (*refusal) };
+    }
+    return DataBindResult{ true, {} };
+}
+
+namespace {
+
+/// Every step's files, through one plan over the stored allowed folders.
+std::optional<std::string>
+plan_step_files (vayu::db::Database& db, ScenarioResolution& resolution) {
+    const bool names_a_file = std::any_of (resolution.plan.steps.begin (),
+    resolution.plan.steps.end (), [] (const ScenarioStep& step) {
+        return vayu::http::has_file_refs (step.request.body);
+    });
+    if (!names_a_file) {
+        return std::nullopt;
+    }
+    auto files = std::make_shared<vayu::http::FilePlan> (
+    vayu::http::FileAccessPolicy::from_database (db));
+    for (auto& step : resolution.plan.steps) {
+        auto refusal = plan_request_files (*files, step.request,
+        resolution.data_rows, [&] (vayu::Request& bound, size_t row) {
+            return bind_step_iteration (
+            bound, step, resolution.data_rows, row, IterationIdentity{});
+        });
+        if (refusal) {
+            return "Step " + std::to_string (step.index + 1) + " ('" +
+            step.name + "'): " + *refusal;
+        }
+    }
+    resolution.files = std::move (files);
+    return std::nullopt;
+}
+
+} // namespace
+
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
 const ScenarioResolveOptions& options) {
@@ -666,6 +732,10 @@ const ScenarioResolveOptions& options) {
         vayu::core::compile_elements (raw_elements[index]));
     }
 
+    if (auto reason = plan_step_files (db, resolution)) {
+        return invalid (*reason);
+    }
+
     resolution.ok = true;
     return resolution;
 }
@@ -703,9 +773,18 @@ const ScenarioPlan& plan,
 const SpecBinding& spec) {
     nlohmann::json steps = nlohmann::json::array ();
     for (const auto& step : plan.steps) {
-        steps.push_back ({ { "index", step.index }, { "requestId", step.request_id },
-        { "name", step.name }, { "method", to_string (step.request.method) },
-        { "url", step.stored_url } });
+        nlohmann::json entry{ { "index", step.index }, { "requestId", step.request_id },
+            { "name", step.name }, { "method", to_string (step.request.method) },
+            { "url", step.stored_url } };
+        // The file a binary step sends, as checked when the plan resolved:
+        // name, size and digest, never the bytes or the path. A path a data
+        // row binds names a different file per row, so it has no one entry.
+        if (!vayu::http::has_templated_file_path (step.request.body)) {
+            if (auto file = vayu::http::routes::body_file_node (step.request)) {
+                entry["bodyFile"] = std::move (*file);
+            }
+        }
+        steps.push_back (std::move (entry));
     }
 
     nlohmann::json manifest{ { "source", request.source },

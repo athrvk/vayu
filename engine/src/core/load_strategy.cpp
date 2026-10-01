@@ -27,6 +27,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -501,6 +502,21 @@ const nlohmann::json& config) {
     return std::nullopt;
 }
 
+std::optional<std::string> plan_load_files (vayu::http::FilePlan& files,
+vayu::Request& request,
+const LoadDataSet* data) {
+    if (data == nullptr) {
+        return plan_request_files (files, request, {}, nullptr);
+    }
+    const StepDataTemplate fields = tokenize_bindable_fields (request, data->bound_columns);
+    return plan_request_files (
+    files, request, data->rows, [&] (vayu::Request& bound, size_t row) {
+        const IterationBinding binding{ &data->rows.at (row), row,
+            IterationIdentity{ SOLE_VIRTUAL_USER, 0 } };
+        return apply_iteration_template (bound, fields, binding);
+    });
+}
+
 namespace {
 
 // Update the in-flight high-water mark (single writer: the strategy thread).
@@ -871,8 +887,13 @@ SubmissionRequest& live) {
     // step's request is copied per iteration: the shared one has to stay the
     // template every later row is bound against.
     vayu::Request request = live.current ();
-    if (auto bound = bind_submission (request, *context, data, annotations);
-    !bound.ok) {
+    auto bound = bind_submission (request, *context, data, annotations);
+    // A path a row bound is filled from what the plan checked; the transfer
+    // never opens a small file and never re-checks one.
+    if (bound.ok) {
+        bound = fill_bound_files (context->file_plan.get (), live.current (), request);
+    }
+    if (!bound.ok) {
         // Nothing goes on the wire, so nothing will ever complete for this
         // submission: this path owns the whole accounting a completion would
         // have done. `requests_sent` is incremented beside the error record so

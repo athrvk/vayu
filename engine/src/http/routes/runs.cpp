@@ -1113,6 +1113,13 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
         if (config.contains ("method")) {
             metadata["requestMethod"] = config["method"];
         }
+        // The file a single-request run's binary body sent, as the plan
+        // checked it (`{fileName, size, sha256}`); a scenario's steps carry
+        // theirs on `scenario.steps[].bodyFile` in the snapshot instead.
+        if (auto file = config.find ("bodyFile");
+        file != config.end () && file->is_object ()) {
+            metadata["bodyFile"] = *file;
+        }
 
         // Eleven keys, built by build_run_report_config above - the seven
         // load-test tuning knobs, httpVersion/followRedirects/maxRedirects, and

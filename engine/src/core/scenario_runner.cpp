@@ -624,6 +624,9 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.default_headers        = ctx.default_headers;
     inputs.max_response_bytes     = ctx.max_response_bytes;
     inputs.max_element_body_bytes = ctx.max_element_body_bytes;
+    // The files the plan already checked (`ScenarioExecution::files`); a step
+    // re-checks nothing it saw at plan time.
+    inputs.files = ctx.execution->files.get ();
     // The one caller that sets it: `pm.execution` throws
     // everywhere else, because nowhere else has a sequence to
     // redirect (issue #355).
