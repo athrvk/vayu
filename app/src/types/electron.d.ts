@@ -318,6 +318,22 @@ interface ElectronAPI {
 	getFilePath: (file: File) => string;
 
 	/**
+	 * Open the system folder picker; resolves to the chosen folder's absolute
+	 * path, or null when the user cancelled. Used to add an allowed folder
+	 * (Settings > Files, the body editor's "Allow folder..."). Absent outside
+	 * Electron.
+	 */
+	selectDirectory: (options?: { defaultPath?: string; title?: string }) => Promise<string | null>;
+
+	/**
+	 * Size and modification time of the regular file at an absolute path, for
+	 * the binary body editor's file line - never its contents. Null for a
+	 * relative or templated path, a missing file, or a directory/device.
+	 * Absent outside Electron.
+	 */
+	statFile: (path: string) => Promise<{ size: number; mtimeMs: number } | null>;
+
+	/**
 	 * Re-read a collection's declared data file by path (issue #599). Rejects
 	 * with a message the dialog can show as-is when the extension is not one
 	 * Vayu opens, the file has moved, or it is over the engine's

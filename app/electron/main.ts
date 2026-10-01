@@ -81,6 +81,7 @@ import {
 	applyFloorFromEngine,
 } from "./app-log.js";
 import { registerLogIpc } from "./log-ipc.js";
+import { registerFileIpc } from "./file-ipc.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
@@ -1415,6 +1416,16 @@ function setupIpcHandlers() {
 		rendererLog: rendererLogger(),
 		appLog: appLogger(),
 		logsPath: appLogsPath,
+	});
+
+	// The folder picker behind Settings > Files and the body editor's "Allow
+	// folder...", and the size-only stat behind its file line. Neither reads a
+	// file's contents; see file-ipc.ts.
+	registerFileIpc(ipcMain, {
+		showOpenDialog: (options) => {
+			const win = liveWindow();
+			return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
+		},
 	});
 }
 
