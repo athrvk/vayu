@@ -6,14 +6,32 @@ Please report security issues privately via [GitHub Security Advisories](https:/
 rather than opening a public issue. We aim to acknowledge reports within a few
 days.
 
-## Scope notes
+## What Vayu defends and what it does not
 
-Vayu runs a local C++ engine daemon and an Electron UI on `127.0.0.1`. It stores
-data (including variables that may hold secrets) in a local SQLite database. It
-is a desktop tool, not a multi-tenant service; the threat model is primarily
-about local processes and, for the MCP server, other local applications.
+Vayu runs a local C++ engine daemon and an Electron UI on `127.0.0.1`. It is a
+desktop tool, not a multi-tenant service.
 
-## MCP server threat model
+Vayu does not defend the engine against other programs running under your
+account: they can already read the database. A web page open in your browser is
+different - it has your network position and none of your file rights - so
+what a page can reach is in scope, and reports about it are welcome.
+
+## Data at rest
+
+Secrets, including variables you mark secret, are stored in plaintext in the
+SQLite database in your profile directory, protected by your operating-system
+account and nothing else. Vayu does not encrypt them at rest; anyone who can
+read that file can read every value in it.
+
+## Agents (MCP)
+
+Tools an MCP client calls receive the same data the UI shows, including the
+values of variables marked secret and the auth blocks of saved requests. An
+agent backed by a hosted model forwards what it reads to that model's provider.
+Treat connecting an agent as granting it read access to your workspace, and
+keep the server off until you want that.
+
+### MCP server threat model
 
 Vayu can expose its capabilities to AI agents (Claude Code, Codex, Cursor, …)
 via a Model Context Protocol (MCP) server hosted in the Electron main process
@@ -69,6 +87,25 @@ test.
 lets an agent target any resolvable host, so the per-host safety check no longer
 applies - the load caps and confirmation gate still do. Turn it on only when you
 trust the connected agent and understand it can reach arbitrary endpoints.
+
+## Network behaviour
+
+Vayu runs entirely on your machine. There is no account, no cloud and no
+telemetry, and nothing leaves your computer unless you send it: a request to a
+host you chose, an export you saved, or a reply to an MCP agent you connected.
+
+On a cross-host redirect the engine drops `Authorization` and `Cookie`, as curl
+does; every other header you set, including API-key headers, follows the
+redirect, and a configured client certificate stays attached. The MCP host
+allowlist is checked against the URL you send, not against where it redirects.
+
+## Releases
+
+Releases are built in public on GitHub Actions from tagged source and ship with
+checksums. They are not yet code-signed, so macOS and Windows will warn on first
+launch, and `install.sh` strips the macOS quarantine attribute for that reason.
+If you find a way to break any statement in this document, report it privately
+through GitHub Security Advisories.
 
 ## Supported versions
 

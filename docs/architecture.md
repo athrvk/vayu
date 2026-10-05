@@ -553,7 +553,7 @@ Variables are resolved with priority: **Environment > Collection > Global**
 
 ## Security
 
-- **Script Sandboxing**: QuickJS contexts are isolated with no filesystem or network access
+- **Script Sandboxing**: QuickJS contexts are isolated with no filesystem access; scripts can make HTTP requests through `pm.sendRequest`, subject to the same scheme allowlist as the request itself
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
 - **No response caching**: every engine response carries `Cache-Control: no-store`
   and the renderer's fetch client asks for `cache: "no-store"` as well (#1507).
@@ -571,7 +571,9 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
   SQLite, the same way every other stored credential is. libcurl derives the
   `Proxy-Authorization` header from the URL, and that header is on the
-  redaction list, so credentials never reach a stored trace or a debug log.
+  redaction list, so credentials do not reach a stored trace. The engine's
+  startup log is the exception today: it can print a scheme-less proxy URL
+  with its password (#1781).
 - **Client-certificate keys**: never stored. The `client_certificates` table
   holds the *paths* of the certificate and key files - one path where the
   certificate is a PKCS#12 bundle carrying both - and the engine opens them

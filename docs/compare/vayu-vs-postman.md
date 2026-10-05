@@ -20,6 +20,7 @@ native C++ load engine in the same app.
 | **API client + load test** | Both, one app | Client only |
 | **Load test throughput** | Tens of thousands of req/s | Requires a separate tool |
 | **Privacy / offline** | 100% local, no account | Cloud-heavy (optional local) |
+| **Telemetry / signing** | None; releases ship with checksums, not yet code-signed | Cloud account, usage analytics |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript |
 | **MCP / agent control** | Built in, local, drives the load engine | Yes, via the cloud workspace |
 | **SSE streaming** | Live Events view, scriptable, load-tested | Client-side inspection |

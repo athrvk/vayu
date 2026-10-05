@@ -19,6 +19,7 @@ the request comes back green.
 | **API client + load test** | Both, one app | Client only |
 | **Load test throughput** | Tens of thousands of req/s | Limited by the JS runtime |
 | **Privacy / offline** | 100% local, no account | 100% local |
+| **Telemetry / signing** | None; releases ship with checksums, not yet code-signed | Anonymous usage analytics, can be disabled |
 | **Storage** | Local SQLite database | Plain-text `.bru` files in your repo |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) |
 | **MCP / agent control** | Built in, local, drives the load engine | Official server, wraps the CLI |
