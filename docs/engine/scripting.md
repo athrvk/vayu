@@ -2025,8 +2025,10 @@ and "this run is not data-driven" is a fact a script may legitimately branch on:
 const user = pm.iterationData ? pm.iterationData.get('username') : 'default-user';
 ```
 
-A stashed reference (`globalThis.saved = pm.iterationData`) read from a later
-script throws rather than answering with the finished run's row.
+A stashed reference (`globalThis.saved = pm.iterationData`) does not reach a
+later script at all: every script runs in a context built for it (see
+[Isolation between scripts](#isolation-between-scripts)), so `globalThis.saved`
+is `undefined` there.
 
 **To put the row into the request itself, use `{{data.column}}` - or, while a
 row is bound, the bare column name - instead.** A script reads
@@ -2359,6 +2361,17 @@ pm.test('server echoed our nonce', function () {
   pm.expect(pm.response.headers['x-nonce']).to.equal(pm.environment.get('lastNonce'));
 });
 ```
+
+### Isolation between scripts
+
+Every script runs in a QuickJS context built for it and discarded after it.
+Globals it leaves behind (`globalThis.x = 1`, an implicit `x = 1`), a replaced
+`pm`, `pm.test` or `console.log`, and patches to `String.prototype`,
+`Array.prototype` or `Object.prototype` are gone before the next script on the
+thread starts, including one from another collection. Only the QuickJS runtime
+(memory limit, deadline, class registrations) is reused. State that should
+carry from one script to the next belongs in a variable scope
+(`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
 ### What a script can compute
 
