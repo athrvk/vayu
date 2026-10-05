@@ -92,7 +92,7 @@ describe("describeInstant", () => {
 			{ timeZone: "UTC", locale: "en-US", now },
 			{ text: "1791201600", hasZone: true }
 		);
-		expect(rows.at(-1)).toEqual({ label: "Original", value: "1791201600" });
+		expect(rows[rows.length - 1]).toEqual({ label: "Original", value: "1791201600" });
 	});
 
 	it("shows a zoneless value as written and says why", () => {
