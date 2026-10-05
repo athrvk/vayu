@@ -58,6 +58,13 @@ export interface McpSafetyConfig {
 	 */
 	allowWrites: boolean;
 	/**
+	 * When false (default), read tools and resources withhold what the user
+	 * treats as a secret: a variable flagged `secret`, an auth credential, a
+	 * cookie value, the credentials in a proxy URL (#1805, `withhold.ts`). On, an
+	 * agent reads them in full, the way the app's own screens show them.
+	 */
+	revealSecretsToAgents: boolean;
+	/**
 	 * Tool names the user has switched off. A disabled tool is omitted from
 	 * `tools/list` and rejected by `tools/call`. Empty by default (all on).
 	 */
@@ -80,6 +87,7 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	// "unlimited" does not.
 	maxIterations: 10000,
 	allowWrites: false,
+	revealSecretsToAgents: false,
 	disabledTools: [],
 };
 
@@ -160,6 +168,15 @@ const MCP_CAP_KEYS: readonly McpCapKey[] = [
 	"maxIterations",
 ];
 
+/** The opt-in switches, each off by default and kept only when it is a boolean. */
+type McpSwitchKey = "allowAll" | "allowWrites" | "revealSecretsToAgents";
+
+const MCP_SWITCH_KEYS: readonly McpSwitchKey[] = [
+	"allowAll",
+	"allowWrites",
+	"revealSecretsToAgents",
+];
+
 /**
  * The highest value each cap may hold - the maxima of the renderer's
  * `LOAD_TEST_CEILING_BOUNDS`, which are the engine's own guards where the engine
@@ -217,11 +234,8 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 		const cap = clampCap(key, input[key]);
 		if (cap !== undefined) out[key] = cap;
 	}
-	if (typeof input.allowAll === "boolean") {
-		out.allowAll = input.allowAll;
-	}
-	if (typeof input.allowWrites === "boolean") {
-		out.allowWrites = input.allowWrites;
+	for (const key of MCP_SWITCH_KEYS) {
+		if (typeof input[key] === "boolean") out[key] = input[key];
 	}
 	if (Array.isArray(input.disabledTools)) {
 		const names = input.disabledTools
@@ -246,6 +260,7 @@ const SAFETY_ENV_VARS = {
 	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
 	maxIterations: "VAYU_MCP_MAX_ITERATIONS",
 	allowWrites: "VAYU_MCP_ALLOW_WRITES",
+	revealSecretsToAgents: "VAYU_MCP_REVEAL_SECRETS",
 	disabledTools: "VAYU_MCP_DISABLED_TOOLS",
 } as const satisfies Record<keyof McpSafetyConfig, string>;
 
@@ -298,8 +313,10 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
 	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
 	if (env.VAYU_MCP_MAX_ITERATIONS) cfg.maxIterations = Number(env.VAYU_MCP_MAX_ITERATIONS);
-	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
-	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
+	// Only the exact string "true" opts in; anything else leaves the default off.
+	for (const key of MCP_SWITCH_KEYS) {
+		if (env[SAFETY_ENV_VARS[key]] === "true") cfg[key] = true;
+	}
 	if (env.VAYU_MCP_DISABLED_TOOLS) {
 		cfg.disabledTools = env.VAYU_MCP_DISABLED_TOOLS.split(",")
 			.map((t) => t.trim())

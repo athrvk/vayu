@@ -142,6 +142,16 @@ describe("sanitizeSafetyInput", () => {
 		).toBeUndefined();
 	});
 
+	it("keeps revealSecretsToAgents only when it is a boolean", () => {
+		expect(sanitizeSafetyInput({ revealSecretsToAgents: true }).revealSecretsToAgents).toBe(
+			true
+		);
+		expect(
+			sanitizeSafetyInput({ revealSecretsToAgents: "yes" as unknown as boolean })
+				.revealSecretsToAgents
+		).toBeUndefined();
+	});
+
 	it("keeps allowAll only when it is a boolean", () => {
 		expect(sanitizeSafetyInput({ allowAll: true }).allowAll).toBe(true);
 		expect(
@@ -324,6 +334,7 @@ describe("buildSafetyConfigFromEnv", () => {
 			VAYU_MCP_MAX_ITERATIONS: "500",
 			VAYU_MCP_ALLOW_ALL: "true",
 			VAYU_MCP_ALLOW_WRITES: "true",
+			VAYU_MCP_REVEAL_SECRETS: "true",
 			VAYU_MCP_DISABLED_TOOLS: "run_request, stop_run",
 		});
 
@@ -340,6 +351,7 @@ describe("buildSafetyConfigFromEnv", () => {
 			maxDurationSeconds: 30,
 			maxIterations: 500,
 			allowWrites: true,
+			revealSecretsToAgents: true,
 			disabledTools: ["run_request", "stop_run"],
 		});
 	});
@@ -356,10 +368,12 @@ describe("buildSafetyConfigFromEnv", () => {
 		const { config } = buildSafetyConfigFromEnv({
 			VAYU_MCP_ALLOW_ALL: "1",
 			VAYU_MCP_ALLOW_WRITES: "yes",
+			VAYU_MCP_REVEAL_SECRETS: "TRUE",
 		});
 
 		expect(config.allowAll).toBe(false);
 		expect(config.allowWrites).toBe(false);
+		expect(config.revealSecretsToAgents).toBe(false);
 	});
 });
 

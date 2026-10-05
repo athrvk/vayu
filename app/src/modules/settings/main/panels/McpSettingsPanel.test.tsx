@@ -46,6 +46,7 @@ const SAVED: McpSafetyConfig = {
 	maxDurationSeconds: 300,
 	maxIterations: 10000,
 	allowWrites: false,
+	revealSecretsToAgents: false,
 	disabledTools: [],
 };
 
@@ -371,6 +372,38 @@ describe("McpSettingsPanel write-switch cross-references", () => {
 		expect(
 			screen.getByText(/turning it on grants no tool you switched off in tools/i)
 		).toBeInTheDocument();
+	});
+});
+
+/*
+ * The opt-in gates (#1805). Each is a whole-field persist from one switch, so
+ * the test is the round trip: off as saved, and a click sends exactly that one
+ * field to the main process, which sanitizes and applies it.
+ */
+describe("McpSettingsPanel secret and network gates", () => {
+	it.each([{ name: /reveal secrets to agents/i, field: "revealSecretsToAgents" }])(
+		"$field shows off as saved and persists a flip",
+		async ({ name, field }) => {
+			await renderPanel();
+			const toggle = screen.getByRole("switch", { name });
+			expect(toggle).not.toBeChecked();
+
+			updateMcpSafety.mockResolvedValue({ ...SAVED, [field]: true });
+			await act(async () => {
+				fireEvent.click(toggle);
+			});
+
+			expect(updateMcpSafety).toHaveBeenCalledWith({ [field]: true });
+			await waitFor(() => expect(screen.getByRole("switch", { name })).toBeChecked());
+		}
+	);
+
+	it("tells the user what an agent still gets with secrets withheld", async () => {
+		await renderPanel();
+		expandCardDescription("Reveal secrets to agents");
+
+		expect(screen.getByText(/requests an agent sends still use them/i)).toBeInTheDocument();
+		expect(screen.getByText(/can still unmark a secret and then read it/i)).toBeInTheDocument();
 	});
 });
 

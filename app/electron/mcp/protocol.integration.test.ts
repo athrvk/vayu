@@ -287,6 +287,21 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await on.server.close();
 	});
 
+	it("says read tools withhold secrets, and names the setting only while it is off", async () => {
+		const off = await connectClient();
+		const offInstructions = off.client.getInstructions() ?? "";
+		expect(offInstructions).not.toMatch(/always safe/i);
+		expect(offInstructions).toMatch(/secret values withheld unless the user enables reveal/i);
+		expect(offInstructions).toMatch(
+			/secret values are withheld in this session[\s\S]*Reveal secrets to agents in Vayu Settings → MCP/i
+		);
+		await off.server.close();
+
+		const on = await connectClient({ safety: { revealSecretsToAgents: true } });
+		expect(on.client.getInstructions() ?? "").not.toMatch(/withheld in this session/i);
+		await on.server.close();
+	});
+
 	it("exposes tool annotations (read-only / destructive hints + title)", async () => {
 		const { client, server } = await connectClient();
 		const { tools } = await client.listTools();
@@ -447,6 +462,55 @@ describe("resources", () => {
 		expect(res.contents[0].mimeType).toBe("application/json");
 		expect(String((res.contents[0] as { text?: string }).text)).toContain("run_1");
 		await server.close();
+	});
+
+	/*
+	 * The resources are a second read path to the same rows, so they withhold
+	 * what the tools withhold (#1805) - otherwise `vayu://environments` is the
+	 * bypass around `list_environments`.
+	 */
+	it.each([
+		{
+			uri: "vayu://environments",
+			secret: "sk-live-123",
+			overrides: {
+				listEnvironments: async () => [
+					{ id: "e", variables: { k: { value: "sk-live-123", secret: true } } },
+				],
+			},
+		},
+		{
+			uri: "vayu://collections",
+			secret: "hunter2",
+			overrides: {
+				listCollections: async () => [
+					{ id: "c", auth: { mode: "basic", username: "me", password: "hunter2" } },
+				],
+			},
+		},
+		{
+			uri: "vayu://config",
+			secret: "alice:pw",
+			overrides: {
+				getConfig: async () => ({
+					entries: [{ key: "proxyUrl", value: "http://alice:pw@proxy.corp:8080" }],
+				}),
+			},
+		},
+	])("$uri withholds a secret unless revealed", async ({ uri, secret, overrides }) => {
+		const text = async (safety?: Partial<McpSafetyConfig>) => {
+			const { client, server } = await connectClient({
+				safety,
+				client: fakeClient(overrides),
+			});
+			const res = await client.readResource({ uri });
+			await server.close();
+			return String((res.contents[0] as { text?: string }).text);
+		};
+		const withheld = await text();
+		expect(withheld).toMatch(/Withheld/);
+		expect(withheld).not.toContain(secret);
+		expect(await text({ revealSecretsToAgents: true })).toContain(secret);
 	});
 
 	it("exposes the run-report template and enumerates concrete runs", async () => {

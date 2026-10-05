@@ -46,11 +46,18 @@ read that file can read every value in it.
 
 ## Agents (MCP)
 
-Tools an MCP client calls receive the same data the UI shows, including the
-values of variables marked secret and the auth blocks of saved requests. An
-agent backed by a hosted model forwards what it reads to that model's provider.
-Treat connecting an agent as granting it read access to your workspace, and
-keep the server off until you want that.
+Tools an MCP client calls receive the same data the UI shows, except your
+secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
+by default), the values of variables marked secret, the credentials in auth
+blocks, cookie values and the password in a proxy URL are withheld from every
+read, each marked as withheld. Requests an agent sends still use them; the
+engine fills them in. An agent backed by a hosted model forwards what it reads
+to that model's provider. Treat connecting an agent as granting it read access
+to the rest of your workspace, and keep the server off until you want that.
+
+Withholding is a read rule, not a boundary against an agent with write access:
+a write tool echoes the row it changed, and an agent can clear a variable's
+secret flag and then read it. Keep write access off where that matters.
 
 ### MCP server threat model
 
@@ -87,6 +94,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   enables write access in Settings. Traffic-sending tools (`run_request`,
   `run_collection_smoke`, `run_collection`) and load runs are not affected by
   this toggle - they are governed by the allowlist and caps.
+- **Secrets withheld by default.** Read tools and resources return secret
+  variables as `valueWithheld: true`, auth credentials as
+  `<member>Withheld: true`, cookie values as `valueWithheld: true` and proxy URL
+  credentials stripped, unless the user enables reveal in Settings.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.

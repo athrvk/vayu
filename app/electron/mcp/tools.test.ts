@@ -9333,6 +9333,263 @@ describe("resolve_variables", () => {
 });
 
 /**
+ * What a read hands an agent in place of a secret (#1805). Every case runs
+ * twice: on the default config, where the value must not appear anywhere in
+ * the answer, and with `revealSecretsToAgents`, where it must arrive untouched.
+ * A read that forgot its projection passes the second and fails the first; a
+ * projection that ignores the setting fails the second.
+ */
+describe("secret withholding", () => {
+	const REVEAL = { revealSecretsToAgents: true };
+
+	const read = async (
+		tool: string,
+		client: EngineClient,
+		safety?: Partial<McpSafetyConfig>,
+		args: Record<string, unknown> = {}
+	) => {
+		const res = await dispatchTool(tool, args, ctxWith(client, safety));
+		expect(res.isError).toBeFalsy();
+		return { text: firstText(res), body: JSON.parse(firstText(res)) };
+	};
+
+	const ENVIRONMENTS = [
+		{
+			id: "env_1",
+			name: "Staging",
+			isActive: true,
+			variables: {
+				apiKey: { value: "sk-live-123", secret: true, enabled: true },
+				baseUrl: { value: "https://staging.test", enabled: true },
+				// Only `secret: true` is a secret, the way buildVariableOrigins reads it.
+				loose: { value: "not-a-secret", secret: "true", enabled: true },
+			},
+		},
+	];
+
+	test("list_environments withholds a secret value by default", async () => {
+		const client = fakeClient({ listEnvironments: vi.fn().mockResolvedValue(ENVIRONMENTS) });
+		const { text, body } = await read("list_environments", client);
+		expect(text).not.toContain("sk-live-123");
+		expect(body[0].variables.apiKey).toEqual({
+			secret: true,
+			enabled: true,
+			valueWithheld: true,
+		});
+		expect(body[0].variables.baseUrl.value).toBe("https://staging.test");
+		expect(body[0].variables.loose.value).toBe("not-a-secret");
+		expect(body[0].isActive).toBe(true);
+	});
+
+	test("list_environments returns the secret value with reveal on", async () => {
+		const client = fakeClient({ listEnvironments: vi.fn().mockResolvedValue(ENVIRONMENTS) });
+		const { body } = await read("list_environments", client, REVEAL);
+		expect(body).toEqual(ENVIRONMENTS);
+	});
+
+	test("get_globals withholds a secret value unless revealed", async () => {
+		const globals = {
+			id: "globals",
+			variables: { token: { value: "g-secret", secret: true, enabled: true } },
+		};
+		const client = fakeClient({ getGlobals: vi.fn().mockResolvedValue(globals) });
+		const withheld = await read("get_globals", client);
+		expect(withheld.text).not.toContain("g-secret");
+		expect(withheld.body.variables.token.valueWithheld).toBe(true);
+		expect((await read("get_globals", client, REVEAL)).body).toEqual(globals);
+	});
+
+	const REQUESTS = [
+		{
+			id: "req_1",
+			name: "Me",
+			auth: { mode: "bearer", token: "eyJ.live.token" },
+		},
+		{
+			id: "req_2",
+			name: "Referenced",
+			auth: { mode: "bearer", token: "{{apiToken}}" },
+		},
+		{
+			id: "req_3",
+			name: "Machine",
+			auth: {
+				mode: "oauth2",
+				config: {
+					grantType: "client_credentials",
+					accessTokenUrl: "https://auth.test/token",
+					clientId: "app",
+					clientSecret: "cs-123",
+				},
+			},
+		},
+		{
+			id: "req_4",
+			name: "Key",
+			auth: { mode: "apikey", key: "X-Api-Key", value: "k-456", in: "header" },
+		},
+	];
+
+	test("list_requests withholds auth credentials and keeps what describes them", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) });
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of ["eyJ.live.token", "cs-123", "k-456"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth).toEqual({ mode: "bearer", tokenWithheld: true });
+		// A reference names where the secret lives without being it.
+		expect(body[1].auth).toEqual({ mode: "bearer", token: "{{apiToken}}" });
+		expect(body[2].auth.config).toEqual({
+			grantType: "client_credentials",
+			accessTokenUrl: "https://auth.test/token",
+			clientId: "app",
+			clientSecretWithheld: true,
+		});
+		expect(body[3].auth).toEqual({
+			mode: "apikey",
+			key: "X-Api-Key",
+			valueWithheld: true,
+			in: "header",
+		});
+	});
+
+	test("list_requests returns auth whole with reveal on", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) });
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual(REQUESTS);
+	});
+
+	test("list_collections withholds a collection's secret variables and auth", async () => {
+		const collections = [
+			{
+				id: "c1",
+				name: "API",
+				variables: { pass: { value: "p@ss", secret: true } },
+				auth: { mode: "basic", username: "me", password: "hunter2" },
+			},
+		];
+		const client = fakeClient({ listCollections: vi.fn().mockResolvedValue(collections) });
+		const withheld = await read("list_collections", client);
+		expect(withheld.text).not.toContain("p@ss");
+		expect(withheld.text).not.toContain("hunter2");
+		expect(withheld.body[0].auth).toEqual({
+			mode: "basic",
+			username: "me",
+			passwordWithheld: true,
+		});
+		const revealed = await read("list_collections", client, REVEAL);
+		expect(revealed.body[0].auth.password).toBe("hunter2");
+		expect(revealed.body[0].variables.pass.value).toBe("p@ss");
+	});
+
+	test("get_cookies withholds every cookie value unless revealed", async () => {
+		const jars = {
+			scopes: [
+				{
+					environmentId: null,
+					cookies: [{ name: "session", value: "abc123", domain: "x.test", path: "/" }],
+				},
+			],
+		};
+		const client = fakeClient({ getCookies: vi.fn().mockResolvedValue(jars) });
+		const withheld = await read("get_cookies", client);
+		expect(withheld.text).not.toContain("abc123");
+		expect(withheld.body.scopes[0].cookies[0]).toEqual({
+			name: "session",
+			domain: "x.test",
+			path: "/",
+			valueWithheld: true,
+		});
+		expect((await read("get_cookies", client, REVEAL)).body).toEqual(jars);
+	});
+
+	const CONFIG = {
+		entries: [
+			{ key: "proxyMode", value: "manual" },
+			{ key: "proxyUrl", value: "http://alice:pa@ss/w0rd@proxy.corp:8080" },
+			{ key: "proxySystemUrl", value: "socks5h://bob:pw@sys.proxy:1080" },
+			{ key: "proxyBypass", value: ".internal.test" },
+			{ key: "workers", value: "8" },
+		],
+	};
+
+	test("get_engine_config strips proxy URL credentials and keeps the host", async () => {
+		const client = fakeClient({ getConfig: vi.fn().mockResolvedValue(CONFIG) });
+		const { text, body } = await read("get_engine_config", client);
+		for (const secret of ["alice", "pa@ss", "w0rd", "bob", ":pw"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body.entries[1]).toEqual({
+			key: "proxyUrl",
+			value: "http://proxy.corp:8080",
+			credentialsWithheld: true,
+		});
+		expect(body.entries[2].value).toBe("socks5h://sys.proxy:1080");
+		expect(body.entries[0]).toEqual(CONFIG.entries[0]);
+		expect(body.entries[3]).toEqual(CONFIG.entries[3]);
+		expect(body.entries[4]).toEqual(CONFIG.entries[4]);
+	});
+
+	test("get_engine_config returns proxy credentials with reveal on", async () => {
+		const client = fakeClient({ getConfig: vi.fn().mockResolvedValue(CONFIG) });
+		expect((await read("get_engine_config", client, REVEAL)).body).toEqual(CONFIG);
+	});
+
+	test("update_engine_config's echo of the config table withholds the same credentials", async () => {
+		const client = fakeClient({
+			updateConfig: vi.fn().mockResolvedValue({ ...CONFIG, success: true }),
+		});
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { workers: "8" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(JSON.stringify(res)).not.toContain("alice");
+		const out = res.structuredContent as { updated: typeof CONFIG };
+		expect(out.updated.entries[1].value).toBe("http://proxy.corp:8080");
+	});
+
+	test("resolve_variables reports a secret's value with reveal on", async () => {
+		const client = fakeClient({
+			getGlobals: vi.fn().mockResolvedValue({
+				variables: { token: { value: "s3cret", enabled: true, secret: true } },
+			}),
+		});
+		const { body } = await read("resolve_variables", client, REVEAL);
+		const token = body.variables.find((v: { name: string }) => v.name === "token");
+		expect(token.value).toBe("s3cret");
+		expect(token).not.toHaveProperty("valueWithheld");
+	});
+
+	test("an auth block read with its credentials withheld is refused as an argument", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", auth: { mode: "bearer", tokenWithheld: true } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("tokenWithheld");
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("so is one whose withheld credential sat under config", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_collection",
+			{ name: "API", auth: { mode: "oauth2", config: { clientSecretWithheld: true } } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("clientSecretWithheld");
+		expect(client.createCollection).not.toHaveBeenCalled();
+	});
+});
+
+/**
  * A `binary` body names a file on the user's machine. An agent may store one,
  * but never as a file the user chose: every MCP-written file reference is
  * `unresolved`, so the engine sends it only once a person picks it in the

@@ -158,7 +158,9 @@ validated by the SDK). A few declare an `outputSchema` and return validated
 `structuredContent` alongside the text rendering.
 
 The four categories partition tools by what they can do - and thus which gate
-applies: **read** (inspection, always safe), **execute** (has an effect outside
+applies: **read** (inspection; returns workspace data, with secret values
+withheld unless the user enables reveal - see [Secret values](#secret-values)),
+**execute** (has an effect outside
 this process without touching saved data - allowlist when it sends real traffic
 to a target, none when the effect is a loopback service the engine hosts, as for
 the mock issuer), **write** (mutates saved data or engine config - write
@@ -167,15 +169,15 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
-| `list_collections`     | read     | `GET /collections`                           | - (a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
-| `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
-| `list_environments`    | read     | `GET /environments`                          | -                          |
+| `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
+| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials withheld unless revealed) |
+| `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
-| `get_engine_config`    | read     | `GET /config`                                | -                          |
+| `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
@@ -211,10 +213,10 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
-| `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404) |
-| `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (secret values withheld from the report) |
+| `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
+| `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (secret values withheld unless revealed) |
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge |
-| `get_cookies`          | read     | `GET /cookies`                               | - (values included, as the Settings card shows them) |
+| `get_cookies`          | read     | `GET /cookies`                               | - (values withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
@@ -651,9 +653,9 @@ Notes:
   success. `removeVariables` is the delete a blank value cannot express - `""`
   leaves the name resolving to an empty string - and a name that was not there
   comes back as a note on the result rather than an error, so a retried call
-  does not fail on its own success. `secret` is app-side masking only: MCP reads
-  (`list_environments`, `vayu://environments`) still return every value in full,
-  which is a recorded pre-1.0 security item, not something these tools changed.
+  does not fail on its own success. `secret` masks the value in the app and
+  withholds it from every MCP read unless the user enables reveal (see
+  [Secret values](#secret-values)).
 - **Activation is one write, and `"none"` is the other direction.**
   `activate_environment` sends `isActive: true` and nothing else: the DB layer
   clears the previously active row in the same transaction
@@ -1298,11 +1300,8 @@ string: the tool reports `resolved: false` with no value, because a
 present-and-empty answer would read as a different fact.
 
 Secret values are withheld from `resolve_variables`'s report
-(`valueWithheld: true`) to match the app's variable popover. That withholding
-is consistency with the app, not a security boundary: `list_environments`,
-`get_globals` and `vayu://environments` still return every value in full -
-the same recorded pre-1.0 item the app-side-masking note above (under
-`update_environment`) already names.
+(`valueWithheld: true`) the way every other read withholds them, unless the
+user enables reveal (see [Secret values](#secret-values)).
 
 **The model is duplicated on purpose, and pinned so the copies cannot drift.**
 Neither process can import the other's resolver: the main process emits with
@@ -1355,10 +1354,10 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
-| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`). |
-| `vayu://environments`       | All environments.                |
+| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`; secrets withheld the same way). |
+| `vayu://environments`       | All environments, secret values withheld as `list_environments` withholds them. |
 | `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
-| `vayu://config`             | Engine configuration entries.    |
+| `vayu://config`             | Engine configuration entries, a URL entry's credentials withheld as `get_engine_config` withholds them. |
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
 | `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
@@ -1578,6 +1577,10 @@ configurable in **Settings → MCP** and persisted.
   `clear_cookies` and `restore_trash_entry` take the toggle without a
   confirmation, for opposite reasons: one ends a session rather than anything
   saved, the other puts a row back rather than destroying one.
+- **Reveal secrets** (`revealSecretsToAgents`, default off) - while it is off,
+  every read withholds secret variables, auth credentials, cookie values and
+  proxy URL credentials, and the server instructions say so; see
+  [Secret values](#secret-values).
 - **Loopback services carry no gate of their own** - `start_mock_issuer`,
   `stop_mock_issuer`, `update_mock_issuer`, `start_mock_server`,
   `stop_mock_server`, `start_webhook_inbox`, `stop_webhook_inbox` and
@@ -1620,6 +1623,38 @@ engine's REST API on `:9876`; the MCP endpoint proxies the same capability behin
 _more_ guards and adds DNS-rebinding protection. It grants no capability a local
 process did not already have.
 
+### Secret values
+
+What the user treats as a secret is withheld from every MCP read unless they
+turn on **Reveal secrets to agents** (`revealSecretsToAgents`, default off) in
+Settings → MCP (#1805). Withheld is stated, never a silent omission, so an agent
+cannot read a missing value as an empty one:
+
+| What | Withheld as | Read by |
+| ---- | ----------- | ------- |
+| A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
+| An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
+| A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
+| The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
+
+The credential list is the engine's own `SECRET_AUTH_KEYS`
+(`core/vayu_extensions.cpp`), the set a collection export blanks. An auth
+member holding one `{{variable}}` reference and nothing else is shown as
+written, the way the export keeps it: it names where the secret lives without
+being it, and the variable it names is withheld on its own terms. An auth block
+carrying a `<member>Withheld` marker is refused as `auth` by every tool that
+takes one (`readAuthArg`): stored, it would replace the user's credential with
+nothing, and sent, it would authenticate with nothing. A request that
+*references* a secret still sends with it, because the engine resolves it. The
+server instructions state the withholding in every session where reveal is
+off, beside the write gate's sentence and for the same reason. The projection
+lives in `withhold.ts`.
+
+Withholding covers what an agent *reads*. It is not a boundary against an agent
+with write access: a write tool's answer echoes the stored row it changed, and
+`update_environment` can clear a variable's `secret` flag, after which it reads
+in full. Keep write access off where that matters.
+
 ### Safety config
 
 `McpSafetyConfig` (defaults in parentheses):
@@ -1633,6 +1668,7 @@ process did not already have.
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
+| `revealSecretsToAgents` | `false` | -        | Let reads return secret values in full ([Secret values](#secret-values)). |
 | `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
 The renderer never sets these directly: `main.ts` sanitizes every change
@@ -1806,6 +1842,7 @@ from environment variables:
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
+| `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lets reads return secret values. |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 | `VAYU_LOG_DIR`                  | (unset)                 | Also write `mcp_<stamp>.log` there (#1558). |
 

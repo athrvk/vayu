@@ -369,6 +369,14 @@ export const APP_SETTINGS = [
 		searchText: "Whether agents may change saved requests, environments and engine config.",
 		keywords: ["read-only", "safety", "permission"],
 	},
+	{
+		anchor: "mcp-reveal-secrets",
+		panel: "mcp",
+		label: "Reveal secrets to agents",
+		searchText:
+			"Whether agents read secret variables, auth credentials, cookie values and proxy passwords.",
+		keywords: ["secret", "password", "token", "mask", "withheld", "privacy"],
+	},
 	// Files
 	{
 		anchor: "allowed-folders",
