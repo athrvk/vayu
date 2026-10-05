@@ -96,6 +96,9 @@ concurrency:
   group: cache-warm-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   # A warming job whose cache key does not match the key of the job it is
   # warming is dead weight that still costs runner minutes, and nothing would
@@ -106,7 +109,7 @@ jobs:
     name: Cache key agreement
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Assert every workflow shares one vcpkg cache key
         shell: bash
@@ -353,7 +356,7 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -386,7 +389,7 @@ jobs:
           done
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -395,7 +398,7 @@ jobs:
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
@@ -406,7 +409,7 @@ jobs:
       # through it and its entries land in the master GHA scope, so a tag build -
       # and the first push of every pull request - reads them back.
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Configure sccache compiler launcher
         shell: bash
@@ -421,7 +424,7 @@ jobs:
       # files a release compiles are the ones warmed here - the guard asserts the
       # preset set matches release.yml's.
       - name: Warm vcpkg archives and the engine sccache scope
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
@@ -434,7 +437,7 @@ jobs:
       # long pole.
       - name: Warm vcpkg archives and the engine sccache scope (macOS x64)
         if: runner.os == 'macOS'
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
@@ -509,7 +512,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # pnpm first, then setup-node: setup-node shells out to pnpm to locate the
       # store it is going to cache, so the order is load-bearing. This mirrors
@@ -519,12 +522,12 @@ jobs:
       # what makes the entry this job writes the same one they read. The guard
       # job asserts the dependency path has not drifted apart.
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: 'pnpm'
