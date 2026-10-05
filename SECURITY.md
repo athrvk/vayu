@@ -15,9 +15,15 @@ Vayu does not defend the engine against other programs running under your
 account: they can already read the database. A web page open in your browser is
 different - it has your network position and none of your file rights - so
 what a page can reach is in scope, and reports about it are welcome. The engine
-refuses every request that carries a browser `Origin` and every `Host` that is
-not a loopback name for its own port, so neither a page's cross-origin request
-nor a DNS-rebinding one reaches a route.
+sends no CORS header and refuses every request that carries a browser `Origin`
+and every `Host` that is not a loopback name for its own port, so a page can
+neither read anything from it nor change anything in it: a cross-origin `fetch`
+or a form post carries an `Origin`, and a DNS-rebinding page names a host the
+engine does not answer to. What a page can still do is a scriptless `GET` - an
+`<img>`, `<script>` or `<link>`, a `no-cors` `fetch`, a top-level navigation -
+which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
+The page gets an opaque response it cannot read, and no `GET` route changes
+anything.
 
 ## Data at rest
 

@@ -1774,6 +1774,13 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 ### CORS Errors
 
-Should not occur (same-origin: localhost), but if they do:
-- Verify engine CORS settings
-- Check if request is going to correct origin
+The engine sends no CORS header and refuses any request carrying `Origin`; the
+renderer gets through only because the Electron shell's bridge
+(`app/electron/engine-origin.ts`) strips `Origin` and `Referer` from requests
+to exactly `ENGINE_BASE_URL` and adds the CORS response headers. A CORS error
+or a `403` naming browser origins therefore means:
+- The request did not go through `ENGINE_BASE_URL` (`src/config/network.ts`) -
+  the same engine spelled `localhost:9876` is outside the bridge's filter
+- The page is not running in the app's own window session (plain Chromium,
+  or a window the bridge was never installed on); see "Driving the renderer
+  without Electron" in `app/CLAUDE.md` for the bridge a test browser needs

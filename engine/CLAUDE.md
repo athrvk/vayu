@@ -344,7 +344,19 @@ The daemon listens on `http://127.0.0.1:9876` and serves no browser: it sends
 no CORS header, and the request gate in `server.cpp` refuses any `Origin` and
 any `Host` that is not a loopback name for its own port, before routing
 (`docs/engine/api-reference.md`, "Who may call the API"). The Electron shell
-strips the renderer's `Origin` and supplies its CORS headers. Key endpoints:
+strips the renderer's `Origin` and supplies its CORS headers.
+
+**A `GET` route must never have a side effect, because any web page can make
+the engine run one.** A scriptless `GET` (`<img>`, a `no-cors` `fetch`, a
+top-level navigation) carries a loopback `Host` and no `Origin`, so the gate
+admits it; what keeps it harmless is that the page cannot read the opaque
+answer and that the route changes nothing. Anything that writes, starts,
+stops, deletes or sends is a `POST`, `PUT` or `DELETE`, which a page can only
+send with an `Origin`. An SSE route's single-reader claim (`/runs/:id/events`,
+`/inbox/:id/live`) lasts as long as the connection reading it and needs an id
+a page cannot know. The gate is deliberately not widened to `Sec-Fetch-Mode`.
+
+Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|

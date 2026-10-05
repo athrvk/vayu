@@ -65,7 +65,15 @@ leaks nothing. Local tools (the CLI, curl, the MCP server's fetch) send no
 `Origin` and are unaffected. The Electron shell is the one browser-context
 client: it strips `Origin` from the renderer's requests and supplies the CORS
 response headers the renderer needs itself (`app/electron/engine-origin.ts`).
-A standalone engine run by hand therefore refuses every browser page.
+
+What a browser page can still send is a request with no `Origin`: a scriptless
+`GET` (`<img>`, `<script>`, `<link>`, a `no-cors` `fetch`, a top-level
+navigation) to the loopback name it dialled. That passes the gate and reaches
+a `GET` route. It is harmless because two things hold together: the response
+is opaque to the page (no CORS header, and the browser's CORB/ORB keeps a JSON
+body out of a `<script>`), and **no `GET` route has a side effect**. A page
+can therefore neither read the engine nor change it, though it can make the
+engine run any `GET` handler.
 
 ## Removed route aliases
 

@@ -180,7 +180,8 @@ CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-th
 are different reasons:
 
 - The **management API** has no route authentication - its Host and Origin checks keep browser
-  pages out, and a program on another host can send any `Host` it likes - so anything that can
+  pages from reading or changing anything (a scriptless `GET` still reaches a `GET` route, which
+  is why none has a side effect), and a program on another host can send any `Host` it likes - so anything that can
   reach it can read every stored request, every credential the database holds, and start runs
   against arbitrary targets.
 - A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization

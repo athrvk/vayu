@@ -565,8 +565,10 @@ Variables are resolved with priority: **Environment > Collection > Global**
   `localhost:<port>` or `[::1]:<port>` (DNS rebinding) and any request carrying
   an `Origin` header; an `OPTIONS` passing the Host check is answered `204`
   with nothing else. A web page in the user's browser can neither read the
-  engine nor drive it; local tools (the MCP server, `curl`, a script) send no
-  `Origin` and are unaffected
+  engine nor change it: a scriptless `GET` (an `<img>`, a navigation) still
+  reaches a `GET` route, gets an opaque answer, and no `GET` route has a side
+  effect. Local tools (the MCP server, `curl`, a script) send no `Origin` and
+  are unaffected
   ([Who may call the API](engine/api-reference.md#who-may-call-the-api)).
 - **The shell carries the renderer past that gate**: the renderer is a browser
   context too. The Electron shell (`app/electron/engine-origin.ts`), on the

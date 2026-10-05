@@ -14,14 +14,18 @@
  * it must run before routing on every route, and a route-core test cannot
  * see a pre-routing handler. The `Host` the client sends is set by hand where
  * a test needs a name other than the one `httplib::Client` writes itself
- * (`127.0.0.1:<port>`).
+ * (`127.0.0.1:<port>`); a request with no `Host` or with two is written to a
+ * socket byte for byte (`raw_status`), because the client never sends one.
  */
 
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -56,6 +60,45 @@ bool has_cors_header (const httplib::Response& response) {
         }
     }
     return false;
+}
+
+/// The status code the listener on @p port answers to @p request, written to
+/// the socket as given; 0 when the exchange fails. Through httplib's own
+/// socket helpers, which already hold every platform's spelling of a socket.
+int raw_status (int port, const std::string& request) {
+    auto error        = httplib::Error::Success;
+    const auto socket = httplib::detail::create_client_socket ("127.0.0.1", "",
+    port, AF_INET, true, false, nullptr, 5, 0, 5, 0, 5, 0, "", error);
+    if (socket == INVALID_SOCKET) {
+        return 0;
+    }
+    std::size_t sent = 0;
+    while (sent < request.size ()) {
+        const std::string_view rest = std::string_view (request).substr (sent);
+        const auto n =
+        httplib::detail::send_socket (socket, rest.data (), rest.size (), 0);
+        if (n <= 0) {
+            break;
+        }
+        sent += static_cast<std::size_t> (n);
+    }
+    std::string answer;
+    std::array<char, 512> buffer{};
+    while (answer.find ("\r\n") == std::string::npos) {
+        const auto n =
+        httplib::detail::read_socket (socket, buffer.data (), buffer.size (), 0);
+        if (n <= 0) {
+            break;
+        }
+        answer.append (buffer.data (), static_cast<std::size_t> (n));
+    }
+    httplib::detail::close_socket (socket);
+    // "HTTP/1.1 403 Forbidden": the code is the second word.
+    const auto space = answer.find (' ');
+    if (sent != request.size () || space == std::string::npos || answer.size () < space + 4) {
+        return 0;
+    }
+    return std::stoi (answer.substr (space + 1, 3));
 }
 
 /// One member (`code`, `message`) of the engine's one error shape, or "" when
@@ -144,6 +187,25 @@ TEST_F (ServerGateTest, AForeignHostIsRefusedEvenWithoutAnOrigin) {
     EXPECT_EQ (response->status, 403);
     EXPECT_NE (error_member (*response, "message").find ("Host check"), std::string::npos)
     << response->body;
+}
+
+// `httplib::Client` always writes exactly one `Host`, so these two go to the
+// socket by hand. Mutation check: drop the count clause in
+// `names_this_listener` and the duplicated pair, whose first value is this
+// listener, is served.
+TEST_F (ServerGateTest, ARequestWithNoHostIsRefused) {
+    EXPECT_EQ (raw_status (port_, "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n"), 403);
+}
+
+TEST_F (ServerGateTest, ARequestWithTwoHostsIsRefused) {
+    const std::string request = "GET /health HTTP/1.1\r\nHost: " + with_port ("127.0.0.1") +
+    "\r\nHost: " + with_port ("evil.example") + "\r\nConnection: close\r\n\r\n";
+    EXPECT_EQ (raw_status (port_, request), 403);
+    // The same exchange with one Host is served, so the 403 above is the
+    // duplicate's and not the hand-written request's.
+    EXPECT_EQ (raw_status (port_,
+               "GET /health HTTP/1.1\r\nHost: " + with_port ("127.0.0.1") + "\r\nConnection: close\r\n\r\n"),
+    200);
 }
 
 TEST_F (ServerGateTest, ALoopbackNameOnAnotherPortIsRefused) {

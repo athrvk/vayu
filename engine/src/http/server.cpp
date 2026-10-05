@@ -67,6 +67,12 @@ bool names_this_listener (const httplib::Request& req, int port) {
  * header: a preflight that says nothing grants nothing, and answering it
  * keeps the shell's own preflight working whether or not Chromium lets the
  * shell rewrite a preflight's headers.
+ *
+ * The invariant this gate leans on: **a GET route must never have a side
+ * effect, because any web page can make the engine run one.** A scriptless
+ * GET (`<img>`, a `no-cors` fetch, a navigation) carries a loopback `Host` and
+ * no `Origin`, so it passes here; it is harmless only because the page cannot
+ * read the answer (no CORS header) and the route changes nothing.
  */
 httplib::Server::HandlerResponse
 admit_management_request (const httplib::Request& req, httplib::Response& res, int port) {
