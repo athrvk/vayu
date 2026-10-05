@@ -161,8 +161,8 @@ void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
 enum class AbsentFileTrust : std::uint8_t {
     /// A payload: nobody said a person chose the path, so nobody did.
     Unresolved,
-    /// A `requests.body` row written before every write stated the key - see
-    /// `stored_body` in `request_composer.cpp`.
+    /// A body stored before every write stated the key: the editor wrote it.
+    /// Read only by the schema-version-4 migration (`db_maintenance.cpp`).
     Chosen,
 };
 
@@ -172,9 +172,10 @@ enum class AbsentFileTrust : std::uint8_t {
  * of `fields`.
  *
  * A boolean already there is kept, an absent key becomes what @p absent says,
- * and any other value becomes `true`. A stored body leaves through this on
- * every write (`apply_request_fields`), so a row written since always states
- * its trust and an absent key on a row means the row predates the rule.
+ * and any other value becomes `true`. Every stored body goes through this on
+ * write (`apply_request_fields`), and the schema-version-4 migration ran every
+ * body stored before through it, so no row lacks the key and an absent one
+ * means unresolved everywhere.
  */
 void state_file_trust (Json& body, AbsentFileTrust absent);
 

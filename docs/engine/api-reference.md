@@ -514,10 +514,11 @@ script resolves a reference's `fileName` and `contentType` but never `src`.
 
 **A stored request states it.** `POST`/`PUT /requests` and `POST /import/apply`
 store every file reference of a body they write with an explicit `unresolved`,
-absent read as `true`. A saved request's body composed by id (`POST /compose`
-with `requestId`, and every collection run) comes back with the key stated
-too; a row with no key there was written by the editor before the key was
-always stored, and composes as `false`.
+absent read as `true`, and the
+[schema version 4 migration](db-schema.md#the-file-trust-restatement-schema-version-4)
+stated it on every body stored before. So a saved request composed by id
+(`POST /compose` with `requestId`, and every collection run) carries the key
+as stored, and an absent key means `true` there as everywhere else.
 
 Every enabled reference is checked, in this order, and the first failure
 refuses the send:

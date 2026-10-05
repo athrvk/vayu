@@ -141,9 +141,9 @@ relink. `unresolved: true` is stored for a path no person chose in the editor
 (an import, a curl paste, an MCP agent); such a path is sent only from under an
 allowed folder (`file_roots`, Settings > Files), and choosing or typing the path
 in the editor writes `unresolved: false`. The flag fails closed: the engine
-stores a reference whose write omitted it as `true`, and reads an absent one on
-any payload the same way; only a row stored before the key was always written
-reads back as `false`. Composition marks a path a `{{variable}}` filled as
+stores a reference whose write omitted it as `true`, reads an absent one the
+same way everywhere, and its schema-version-4 migration wrote the key, as
+`false`, on every row the editor stored before it was always written. Composition marks a path a `{{variable}}` filled as
 `unresolved` too, on the payload rather than the row.
 A send's history record keeps `request.bodyFile {fileName, size, sha256}` for a
 binary body - never the bytes or the path; see

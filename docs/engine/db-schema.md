@@ -259,7 +259,8 @@ row this migration folds is not just storage-compatible but immediately runnable
 The file-body trust flag fails closed: an absent `unresolved` on a file reference means nobody
 chose the path. Rows written before that rule may lack the key, and the writer that left it out
 was the editor (importers, curl paste and MCP always wrote `true` on a path they carried), so the
-same `migrate_before_sync` transaction, for any database below version `4`, after the fold:
+same `migrate_before_sync` transaction, for any database below version `4`, after the fold (after
+it, no stored body lacks the key and nothing reads one as chosen):
 
 - **States the key on every stored body.** `requests.body` (trash included) and the top-level
   `body` of `runs.config_snapshot` (the payload a history entry is re-opened from): a binary
@@ -513,9 +514,8 @@ a curl paste, an MCP agent - so it is sent only from under an allowed folder,
 see [`file_roots`](#file_roots)). Every write states it (`apply_request_fields`,
 absent in the payload stored as `true`), and the
 [schema version 4 migration](#the-file-trust-restatement-schema-version-4)
-stated it on every row written before, absent as `false`; a row without it
-predates that, was written by the editor, and is read back as `false`
-(`stored_body`). A text part may also carry
+stated it on every row written before, absent as `false`. No row lacks it, so
+an absent key is read as `true` like any payload's. A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:

@@ -1063,13 +1063,6 @@ FlatHeaders flatten_stored_headers (const std::string& blob) {
 }
 
 // The stored body blob as an /execute body, or null for "no body".
-//
-// Every file reference leaves with an explicit `unresolved`, because the
-// execute parse reads an absent one as unresolved. Here, and only here, absent
-// means chosen: every write has stated the key since the trust flag began to
-// fail closed (`apply_request_fields`), so a row without it was written before
-// that, by the editor - the writers that are not a person (importers, curl
-// paste, MCP) marked every path they carried `true`.
 nlohmann::json stored_body (const std::string& blob) {
     if (blob.empty ()) {
         return nlohmann::json ();
@@ -1082,7 +1075,6 @@ nlohmann::json stored_body (const std::string& blob) {
     if (mode == body.end () || !mode->is_string () || mode->get<std::string> () == "none") {
         return nlohmann::json ();
     }
-    vayu::json::state_file_trust (body, vayu::json::AbsentFileTrust::Chosen);
     return body;
 }
 
