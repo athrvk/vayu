@@ -32,6 +32,15 @@ function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
 	};
 }
 
+describe("importNotices - a branch past the depth bound", () => {
+	it("says how many branches were left out, as something to finish", () => {
+		const notices = importNotices(meta({ skipped: [{ kind: "nesting_too_deep", count: 2 }] }));
+		expect(notices).toEqual([
+			{ tier: "action", text: "2 branches nested too deeply (over 100 levels) and left out" },
+		]);
+	});
+});
+
 describe("importNotices", () => {
 	it("names up to three requests, then says how many more", () => {
 		const [notice] = importNotices(

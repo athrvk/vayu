@@ -233,6 +233,11 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 hand-edited Vayu detail ignored (invalid)",
 		many: "{n} hand-edited Vayu details ignored (invalid)",
 	},
+	nesting_too_deep: {
+		tier: "action",
+		one: "1 branch nested too deeply (over 100 levels) and left out",
+		many: "{n} branches nested too deeply (over 100 levels) and left out",
+	},
 	"HTTPsampler.Files": {
 		tier: "action",
 		one: "1 file upload without a field name skipped",

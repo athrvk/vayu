@@ -23,6 +23,7 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
+
 /**
  * Something the parser could not import. Mostly a resource or body Vayu can't
  * represent (file/binary, ws, grpc). Three are not about representability:
@@ -262,6 +263,11 @@ export interface SkippedItem {
 		 * said, rather than a malformed piece reaching a write route.
 		 */
 		| "vayu_extension_invalid"
+		/**
+		 * A branch of a `.jmx` plan nested past the engine's `MAX_READ_DEPTH`
+		 * (#1782): left out and counted, the rest of the file imports.
+		 */
+		| "nesting_too_deep"
 		/**
 		 * A `.jmx` test plan's own class name, for one this parser has no mapping
 		 * for at all (issue #1518) - JMeter's own class list is open-ended (every

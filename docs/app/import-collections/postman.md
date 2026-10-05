@@ -57,7 +57,7 @@ The match is a substring check (`schema.includes(...)`), so the full schema URL 
 - **Not an object at all** (`null`, a string, a number) → skipped, counting toward `ctx.skippedMalformed`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; dereferencing the entry used to throw a bare `TypeError: Cannot read properties of null` that failed the whole import naming neither the format nor an item. `event[]` entries are filtered the same way (`pmEvents`).
 - Anything else (an object with no `item[]` and no `request`) is silently ignored.
 
-Folder vs request discrimination is purely structural: **presence of an `item` array makes a node a folder**, otherwise presence of a `request` makes it a request. Nesting is unbounded (direct recursion).
+Folder vs request discrimination is purely structural: **presence of an `item` array makes a node a folder**, otherwise presence of a `request` makes it a request. Nesting is bounded by the engine's reader, not by the walk: `read_document` refuses a document nested past `MAX_READ_DEPTH` (100 levels, about 50 folders) before `pm_folder` runs, so a hostile file fails with a "nests deeper" error rather than overflowing the stack.
 
 The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth`, the two scripts, and its `children`/`requests`. The root and every folder are built by the same function - the root is simply the outermost `pmFolder` result and becomes `collections[0]` (the only root; `parentId = null`).
 

@@ -708,3 +708,39 @@ TEST (JmeterImport, RefusesXmlThatIsNotAJmeterPlan) {
     },
     vayu::core::MalformedJmeter);
 }
+
+namespace {
+
+/// A plan whose single request sits under @p levels nested LoopControllers.
+std::string plan_nested_under (size_t levels) {
+    std::string open;
+    std::string close;
+    for (size_t i = 0; i < levels; ++i) {
+        open += "<LoopController testname=\"L\"/><hashTree>";
+        close += "</hashTree>";
+    }
+    return std::string (R"(<?xml version="1.0"?><jmeterTestPlan jmeter="5.6.3"><hashTree>)") +
+    "<TestPlan testname=\"P\"/><hashTree>" + open +
+    R"(<HTTPSamplerProxy testname="Deep"><stringProp name="HTTPSampler.domain">example.com</stringProp>)"
+    R"(<stringProp name="HTTPSampler.path">/deep</stringProp></HTTPSamplerProxy><hashTree/>)" +
+    close + "</hashTree></hashTree></jmeterTestPlan>";
+}
+
+} // namespace
+
+TEST (JmeterImport, ANestPastTheDepthBoundIsTalliedAndTheFileStillImports) {
+    // Far past the bound: an unbounded walk would overflow the stack here.
+    const ImportParse parsed = parse_import (plan_nested_under (10000), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_TRUE (has_skipped_kind (meta, "nesting_too_deep"));
+    EXPECT_EQ (meta.at ("requestCount"), 0);
+}
+
+TEST (JmeterImport, ANestWithinTheDepthBoundImportsWithoutATally) {
+    const ImportParse parsed = parse_import (plan_nested_under (10), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_FALSE (has_skipped_kind (meta, "nesting_too_deep"));
+    EXPECT_EQ (meta.at ("requestCount"), 1);
+}
