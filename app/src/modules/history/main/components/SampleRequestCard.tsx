@@ -32,6 +32,7 @@ import {
 	CapturedResponseNotice,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
+import { TimeValue } from "@/components/shared/TimeValue";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
 
@@ -53,8 +54,6 @@ export default function SampleRequestCard({
 }: SampleRequestCardProps) {
 	// A stored sample is dating a run, not placing a moment inside one, so this
 	// side wants the day where the dashboard's live row wants milliseconds.
-	const timestamp = new Date(sample.timestamp).toLocaleString();
-
 	// Gating on the phases themselves, not on `sample.trace`. The two used to be
 	// decided separately - the wrapper rendered whenever a trace existed, while
 	// the breakdown inside it returned null unless DNS, connect or TLS was
@@ -68,7 +67,7 @@ export default function SampleRequestCard({
 			label={index + 1}
 			statusCode={sample.statusCode}
 			latencyMs={sample.latencyMs}
-			timestamp={timestamp}
+			timestamp={<TimeValue value={sample.timestamp} />}
 			error={sample.error}
 			phases={phases}
 			isExpanded={isExpanded}

@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { CollectionLastRunSection } from "./CollectionLastRunSection";
 import { scenarioSizeLabel } from "./collection-last-run";
 import { useTabsStore } from "@/stores";

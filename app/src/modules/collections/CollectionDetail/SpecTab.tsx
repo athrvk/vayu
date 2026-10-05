@@ -94,8 +94,7 @@ import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import ExportPostmanDialog from "@/modules/collections/ExportPostmanDialog";
 import { hasSpecBinding, type Collection } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
-import { formatRelative } from "./format";
-import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
+import { InfoBanner, RelativeTime, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
 
 interface SpecTabProps {
@@ -677,13 +676,15 @@ function BoundSpec({
 									className="h-3 w-[5rem]"
 								/>
 							) : (
-								formatRelative(epochToIso(fetchedAt))
+								<RelativeTime value={fetchedAt} />
 							)}
 						</dd>
 					</div>
 					<div className="flex gap-1.5">
 						<dt>Bound</dt>
-						<dd className="text-foreground">{formatRelative(epochToIso(syncedAt))}</dd>
+						<dd className="text-foreground">
+							<RelativeTime value={syncedAt} />
+						</dd>
 					</div>
 					<div className="flex gap-1.5">
 						<dt>Size</dt>
@@ -781,8 +782,4 @@ function formatDocumentSize(bytes: number | undefined): string {
 function shortHash(hash: string | undefined): string {
 	if (!hash) return "-";
 	return hash.length > 12 ? hash.slice(0, 12) : hash;
-}
-
-function epochToIso(epochMs: number | undefined): string | undefined {
-	return epochMs === undefined ? undefined : new Date(epochMs).toISOString();
 }

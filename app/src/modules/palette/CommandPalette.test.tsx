@@ -27,7 +27,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
+import { screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CommandPalette } from "./CommandPalette";
@@ -36,7 +37,7 @@ import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
 import { chordKeys, isMac } from "@/lib/platform";
-import { formatRelativeTime } from "@/lib/format-time";
+import { formatInstant } from "@/lib/time-value";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { RECENT_LIMIT } from "./ranking";
 
@@ -526,7 +527,7 @@ describe("the launcher sections", () => {
 		open();
 
 		const row = screen.getByText("Refund").closest("[cmdk-item]")!;
-		expect(row.textContent).toContain(formatRelativeTime(fiveMinutesAgo));
+		expect(row.textContent).toContain(formatInstant(fiveMinutesAgo, "relative"));
 	});
 
 	it("offers the verbs on an empty query and ranks them as Commands on a typed one", () => {
@@ -594,9 +595,9 @@ describe("the launcher sections", () => {
 		expect(caps).toEqual(chordKeys(CLOSE_TAB_CHORD));
 		// Drop the `!item.shortcut` guard in `PaletteRow` and this is the line
 		// that reds: both slots draw, each with its own `ml-auto`, so the age
-		// no longer pushes right and the row reads `⌘W  5m ago` with the
+		// no longer pushes right and the row reads `⌘W  5 minutes ago` with the
 		// spacing of neither.
-		expect(row.textContent).not.toContain(formatRelativeTime(fiveMinutesAgo));
+		expect(row.textContent).not.toContain(formatInstant(fiveMinutesAgo, "relative"));
 	});
 
 	it("puts the keyboard hints outside the band that scrolls", () => {

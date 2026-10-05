@@ -18,7 +18,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { screen, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { RunCoverage, RunReport } from "@/types/domain";
 
 const lastRun = vi.fn();

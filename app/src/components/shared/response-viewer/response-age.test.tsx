@@ -20,17 +20,28 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { formatInstant, resolveTimeZone } from "@/lib/time-value";
 import { ResponseStatusBar } from "./ResponseStatusBar";
 
 const HOUR_MS = 60 * 60 * 1000;
+
+/** The age the chip prints, in whatever language the platform answers in. */
+const relative = (at: string) => formatInstant(at, "relative");
+
+/** Open the chip's card the way a keyboard user does, by focusing the time. */
+async function openCard(container: HTMLElement) {
+	fireEvent.focus(container.querySelector("time") as HTMLElement);
+	return screen.findByTestId("time-hover-card");
+}
 
 describe("the response age chip", () => {
 	it("says how old the run is", () => {
 		const at = new Date(Date.now() - 2 * HOUR_MS).toISOString();
 		render(<ResponseStatusBar status={200} statusText="OK" restoredFrom={{ at }} />);
 
-		expect(screen.getByText(/from run - 2h ago/i)).toBeTruthy();
+		expect(screen.getByText(/from run -/i).textContent).toBe(`from run - ${relative(at)}`);
 	});
 
 	it("is absent for a response that was just sent", () => {
@@ -39,22 +50,26 @@ describe("the response age chip", () => {
 		expect(screen.queryByText(/from run/i)).toBeNull();
 	});
 
-	it("carries the exact time and the run id in its tooltip", () => {
+	it("opens the time card with the zone, UTC and the run id", async () => {
 		const at = new Date(Date.now() - 2 * HOUR_MS).toISOString();
 		const { container } = render(
 			<ResponseStatusBar status={200} restoredFrom={{ at, runId: "run-abc" }} />
 		);
 
-		const chip = container.querySelector("[title]") as HTMLElement;
-		expect(chip.title).toContain(new Date(at).toLocaleString());
-		expect(chip.title).toContain("run-abc");
+		const card = await openCard(container);
+		expect(card.textContent).toContain(resolveTimeZone());
+		expect(card.textContent).toContain("UTC");
+		expect(card.textContent).toContain("Restored from a stored run");
+		expect(card.textContent).toContain("run-abc");
 	});
 
-	it("still renders without a run id", () => {
+	it("still opens the card without a run id, and names no run", async () => {
 		const at = new Date(Date.now() - 2 * HOUR_MS).toISOString();
 		const { container } = render(<ResponseStatusBar status={200} restoredFrom={{ at }} />);
 
-		expect((container.querySelector("[title]") as HTMLElement).title).not.toContain("Run ");
+		const card = await openCard(container);
+		expect(card.textContent).toContain("Restored from a stored run");
+		expect(card.textContent).not.toContain("Run");
 	});
 
 	it("paints no background, so it is not a Badge needing variant=chip", () => {
@@ -64,7 +79,8 @@ describe("the response age chip", () => {
 		const at = new Date().toISOString();
 		const { container } = render(<ResponseStatusBar status={200} restoredFrom={{ at }} />);
 
-		expect((container.querySelector("[title]") as HTMLElement).className).not.toMatch(/\bbg-/);
+		const chip = container.querySelector("time")?.closest("div") as HTMLElement;
+		expect(chip.className).not.toMatch(/\bbg-/);
 	});
 });
 
@@ -84,7 +100,7 @@ describe("a live response's age", () => {
 	it("shows how long ago it arrived", () => {
 		const at = new Date(Date.now() - 4 * 60 * 1000).toISOString();
 		render(<ResponseStatusBar status={200} statusText="OK" time={12} receivedAt={at} />);
-		expect(screen.getByText(/4m ago/i)).toBeInTheDocument();
+		expect(screen.getByText(relative(at))).toBeInTheDocument();
 	});
 
 	it("does not label it as coming from a run", () => {

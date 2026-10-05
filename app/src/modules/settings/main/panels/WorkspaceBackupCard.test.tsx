@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 
 import { ApiError } from "@/services/http-client";
 import { WorkspaceBackupCard } from "./WorkspaceBackupCard";

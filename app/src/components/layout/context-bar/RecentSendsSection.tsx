@@ -31,7 +31,8 @@ import { Button } from "@/components/ui";
 import { useRecentDesignRunsQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
 import { StatusCodeBadge, formatResponseTime } from "@/components/shared";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
+import { formatInstant } from "@/lib/time-value";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 import type { Run } from "@/types";
@@ -80,7 +81,7 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 							onClick={() => openTab({ type: "run", entityId: run.id })}
 							aria-label={`Open send${
 								outcome ? `, status ${outcome.statusCode}` : ""
-							}, ${formatRelativeTime(run.startTime)}`}
+							}, ${formatInstant(run.startTime, "relative")}`}
 							className="gap-2 px-1 py-1 hover:bg-accent"
 						>
 							{outcome ? (
@@ -96,9 +97,11 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 							<span className="flex-1 text-xs font-mono tabular-nums text-foreground truncate">
 								{outcome ? formatResponseTime(outcome.latencyMs) : ""}
 							</span>
-							<span className="text-label font-mono tabular-nums text-muted-foreground shrink-0">
-								{formatRelativeTime(run.startTime)}
-							</span>
+							<TimeValue
+								value={run.startTime}
+								style="relative"
+								className="text-label font-mono text-muted-foreground shrink-0"
+							/>
 						</Button>
 					</li>
 				);

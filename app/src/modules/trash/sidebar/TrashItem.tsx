@@ -9,7 +9,7 @@ import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { TrashEntry } from "@/types";
 
@@ -96,7 +96,7 @@ export default function TrashItem({
 					 */}
 					<p className="text-xs text-muted-foreground">
 						{entry.kind === "collection" ? "Collection" : "Request"} · Deleted{" "}
-						{formatRelativeTime(new Date(entry.deletedAt).toISOString())}
+						<TimeValue value={entry.deletedAt} style="relative" />
 						{cascade ? `, ${cascade}` : ""}
 					</p>
 				</div>

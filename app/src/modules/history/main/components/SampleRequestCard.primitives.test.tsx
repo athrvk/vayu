@@ -27,7 +27,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import SampleRequestCard from "./SampleRequestCard";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";

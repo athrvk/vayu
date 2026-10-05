@@ -24,6 +24,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { formatInstant } from "@/lib/time-value";
 import TrashList from "./TrashList";
 import type { TrashEntry } from "@/types";
 
@@ -136,7 +137,10 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(screen.getByText("Billing")).toBeInTheDocument();
-		expect(screen.getByText(/Deleted 1m ago/)).toBeInTheDocument();
+		// The phrase is the platform's, so the expectation asks it rather than spelling it.
+		const age = formatInstant(state.items[0].deletedAt, "relative");
+		expect(screen.getByText(age)).toBeInTheDocument();
+		expect(screen.getByText(/Deleted/)).toBeInTheDocument();
 	});
 
 	it("writes the kind out, rather than leaving it to a decorative icon", () => {

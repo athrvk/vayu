@@ -20,8 +20,9 @@
  * row count would snap back to its first slice on every batch that landed, and
  * an unmemoized row would re-render the whole visible list for one arrival.
  *
- * Row renders are counted through `toLocaleTimeString`, which each row calls
- * once for its timestamp and nothing else in this component calls at all.
+ * Row renders are counted through `formatInstant`, which each row's time calls
+ * once for its text and nothing else in this component calls at all - the
+ * card's own formatting waits for the tooltip to open.
  *
  * jsdom has no `IntersectionObserver` and `useGrowingWindow` degrades to
  * showing everything there, so these stub one that only intersects when a case
@@ -30,10 +31,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { GROWING_WINDOW_STEP } from "@/hooks/useGrowingWindow";
 import type { StreamEvent } from "@/types";
+import { formatInstant } from "@/lib/time-value";
 import ResponseEvents from "./ResponseEvents";
+
+vi.mock("@/lib/time-value", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/time-value")>();
+	return { ...actual, formatInstant: vi.fn(actual.formatInstant) };
+});
 
 /** The observer the list attaches to its sentinel, held so a case can fire it. */
 let intersect: (() => void) | null = null;
@@ -138,7 +146,8 @@ describe("ResponseEvents render window", () => {
 
 	it("re-renders only the rows a batch actually added", () => {
 		const events = stream(40);
-		const clock = vi.spyOn(Date.prototype, "toLocaleTimeString");
+		const clock = vi.mocked(formatInstant);
+		clock.mockClear();
 
 		const { rerender } = render(
 			<ResponseEvents events={events} isStream isStreaming listKey="run_1" />

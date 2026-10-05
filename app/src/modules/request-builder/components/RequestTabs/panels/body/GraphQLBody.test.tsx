@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { formatInstant } from "@/lib/time-value";
 import { buildSchema } from "graphql";
 import { useSchemaCache, schemaCacheKey, type SchemaTarget } from "@/lib/graphql/schema-cache";
 
@@ -117,10 +118,11 @@ describe("the schema badge", () => {
 	});
 
 	it("shows how old the schema is once one has loaded", () => {
-		seed({ status: "ready", schema, fetchedAt: Date.now() - 5 * 60 * 1000 });
+		const fetchedAt = Date.now() - 5 * 60 * 1000;
+		seed({ status: "ready", schema, fetchedAt });
 		renderBody();
 		expect(schemaWord()).toBe("Schema");
-		expect(schemaTitle()).toMatch(/5m ago/);
+		expect(schemaTitle()).toContain(formatInstant(fetchedAt, "relative"));
 	});
 
 	/*
@@ -129,17 +131,18 @@ describe("the schema badge", () => {
 	 * there tells the user their completions are gone when they are not.
 	 */
 	it("reads as stale, not absent, when a refresh failed over a loaded schema", () => {
+		const fetchedAt = Date.now() - 60 * 1000;
 		seed({
 			status: "error",
 			schema,
 			error: { kind: "network", message: "unreachable" },
-			fetchedAt: Date.now() - 60 * 1000,
+			fetchedAt,
 		});
 		renderBody();
 
 		expect(schemaWord()).toBe("Schema stale");
 		expect(schemaTitle()).toMatch(/couldn.t reach the endpoint/i);
-		expect(schemaTitle()).toMatch(/1m ago/);
+		expect(schemaTitle()).toContain(formatInstant(fetchedAt, "relative"));
 	});
 
 	it("claims nothing before an endpoint has been introspected, but still opens", () => {

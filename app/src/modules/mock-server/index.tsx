@@ -39,7 +39,7 @@ import {
 } from "@/queries";
 import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
-import { formatTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -240,7 +240,7 @@ export default function MockServerView() {
 										{entry.status}
 									</Badge>
 									<span className="shrink-0 text-label text-muted-foreground tabular-nums">
-										{formatTime(entry.at)}
+										<TimeValue value={entry.at} style="time" />
 									</span>
 								</li>
 							))}

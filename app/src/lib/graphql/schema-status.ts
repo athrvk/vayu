@@ -18,7 +18,7 @@
  */
 
 import type { SchemaEntry, SchemaFailure } from "./schema-cache";
-import { formatRelativeTime } from "@/lib/format-time";
+import { formatInstant } from "@/lib/time-value";
 
 /**
  * What the badge says about a failure, per kind.
@@ -42,7 +42,9 @@ export const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
 };
 
 export function schemaStatusTitle(entry: SchemaEntry | null): string {
-	const age = entry?.fetchedAt ? `Schema loaded ${formatRelativeTime(entry.fetchedAt)}.` : null;
+	const age = entry?.fetchedAt
+		? `Schema loaded ${formatInstant(entry.fetchedAt, "relative")}.`
+		: null;
 	const status = entry?.status ?? "idle";
 
 	if (status === "idle") return "The schema has not been loaded yet.";

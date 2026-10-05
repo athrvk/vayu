@@ -3092,6 +3092,21 @@ A copy is acknowledged one of two ways, and which one is decided by the control,
 
 **A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
 
+### Times
+
+Wherever Vayu shows a time, the user's own zone, UTC and how long ago are one hover away (issue #1786). The rule is every surface, not a list of them.
+
+- **The visible text keeps its shape.** A run's start reads as a date and time, an inbox row as a wall clock, a list row as "2 hours ago"; an API value in a header or a body stays exactly the machine string it arrived as. The card adds to the text and never replaces it.
+- **The card has a zone row, a UTC row and a relative row**, plus the original text when it differs from what is shown. The zone row is labelled with the IANA zone the OS resolves, so a screenshot says which zone it was taken in. A value that names no zone (`2026-10-05`, `2026-10-05T08:10:00`) is shown as written with a line saying so, because converting it would invent an instant.
+- **The relative phrase comes from the platform** (`Intl.RelativeTimeFormat`), so it reads in the user's language and pluralises as that language does. Nothing hand-wraps it: no `"5m ago"` ladder, and copy never builds a phrase around a count of minutes.
+- **`TimeValue` is the only renderer.** It takes an instant or the raw text and a style (`datetime`, `date`, `time`, `time-ms`, `relative`, or `raw` to keep the string as it came), renders a `<time>` and carries the card through the `Tooltip` primitive. The card's rows are built when it opens, so a list of hundreds of rows pays for the text only. A value that is not a time renders as plain text with no card.
+- **A string that cannot hold an element** - an `aria-label`, a native `title`, a palette subtitle - calls `formatInstant` from `lib/time-value.ts`, the same formatter `TimeValue` uses. That is the only other place a time may be formatted.
+- **No setting.** The OS locale and zone decide, as they always did.
+- **A test that renders a time needs a `TooltipProvider`** above it: `@/test/render-with-tooltips` is Testing Library's `render` inside one.
+- Monaco editors underline a time by the same parser and draw the same rows; see `docs/app/COMPONENTS.md`.
+
+→ `time-surfaces.test.ts` reads every source file under `app/src` and fails on `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` on a Date, `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` outside `lib/time-value.ts` and `components/shared/TimeValue/`, and on any `CodeEditor` that opts out of the time matcher. `Number#toLocaleString` for counts is untouched.
+
 ### A disabled control says why: `DisabledHint`
 
 A gated control that gives no reason reads as a broken one, and the obvious fix
@@ -3773,4 +3788,6 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
+| `app/src/lib/time-value.ts` | The one place text becomes a time: `parseTimeValue`, `describeInstant`, `formatInstant`, `formatRelative`, `formatDayHeading` |
+| `app/src/components/shared/TimeValue/TimeValue.tsx` | The one renderer of a time: visible text plus the hover card |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

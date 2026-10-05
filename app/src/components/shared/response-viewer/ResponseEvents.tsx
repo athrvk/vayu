@@ -44,6 +44,7 @@ import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Radio } from "lucide-react";
 import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
@@ -131,12 +132,6 @@ function formatEventData(data: string): string {
 	}
 }
 
-/** `receivedAt` as a wall clock, or empty when the event carried none. */
-function formatReceivedAt(receivedAt: number | undefined): string {
-	if (typeof receivedAt !== "number") return "";
-	return new Date(receivedAt).toLocaleTimeString();
-}
-
 /**
  * One event: a summary row that expands to the full payload.
  *
@@ -151,7 +146,6 @@ function formatReceivedAt(receivedAt: number | undefined): string {
 const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; index: number }) {
 	const [expanded, setExpanded] = useState(false);
 	const Chevron = expanded ? ChevronDown : ChevronRight;
-	const at = formatReceivedAt(event.receivedAt);
 
 	return (
 		<div className="border-b border-rule last:border-b-0">
@@ -203,10 +197,12 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 							truncated
 						</Badge>
 					)}
-					{at && (
-						<span className="shrink-0 font-mono text-label text-muted-foreground">
-							{at}
-						</span>
+					{typeof event.receivedAt === "number" && (
+						<TimeValue
+							value={event.receivedAt}
+							style="time"
+							className="shrink-0 font-mono text-label text-muted-foreground"
+						/>
 					)}
 				</Button>
 				<CollapsibleContent>

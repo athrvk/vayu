@@ -12,6 +12,7 @@ import {
 	formatInstant,
 	parseTimeValue,
 	type DescribeOptions,
+	type TimeRow,
 	type TimeStyle,
 } from "@/lib/time-value";
 import { TimeHoverCard } from "./TimeHoverCard";
@@ -25,6 +26,8 @@ export interface TimeValueProps extends DescribeOptions {
 	 */
 	style?: TimeStyle | "raw";
 	className?: string;
+	/** Surface facts that follow the time rows, such as the run a response came from. */
+	extraRows?: TimeRow[];
 }
 
 /** The instant and the zone fact behind @p value, or null when it is no time. */
@@ -42,6 +45,24 @@ function resolve(value: TimeValueProps["value"]) {
 }
 
 /**
+ * A component of its own so the rows are built when the tooltip opens, not on
+ * every render of every list row that holds a time.
+ */
+function TimeCard({
+	instant,
+	original,
+	options,
+	extraRows,
+}: {
+	instant: Date;
+	original: { text: string; hasZone: boolean } | undefined;
+	options: DescribeOptions;
+	extraRows: TimeRow[];
+}) {
+	return <TimeHoverCard rows={[...describeInstant(instant, options, original), ...extraRows]} />;
+}
+
+/**
  * The one component that renders a time outside Monaco (issue #1786): visible
  * text the surface chooses, and the card - the user's zone, UTC, how long ago -
  * one hover away. A value that is not a time renders as plain text with no
@@ -54,6 +75,7 @@ export function TimeValue({
 	value,
 	style = "datetime",
 	className,
+	extraRows = [],
 	timeZone,
 	locale,
 	now,
@@ -66,11 +88,6 @@ export function TimeValue({
 		style === "raw" && raw !== undefined
 			? raw
 			: formatInstant(resolved.instant, style === "raw" ? "datetime" : style, options);
-	const rows = describeInstant(
-		resolved.instant,
-		options,
-		raw === undefined ? undefined : { text: raw, hasZone: resolved.hasZone }
-	);
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -82,7 +99,14 @@ export function TimeValue({
 				</time>
 			</TooltipTrigger>
 			<TooltipContent>
-				<TimeHoverCard rows={rows} />
+				<TimeCard
+					instant={resolved.instant}
+					original={
+						raw === undefined ? undefined : { text: raw, hasZone: resolved.hasZone }
+					}
+					options={options}
+					extraRows={extraRows}
+				/>
 			</TooltipContent>
 		</Tooltip>
 	);

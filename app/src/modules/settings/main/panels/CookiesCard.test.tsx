@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { CookiesCard } from "./CookiesCard";
 
 const mutateAsync = vi.fn(() => Promise.resolve({ cleared: 1 }));
@@ -98,6 +99,20 @@ describe("CookiesCard", () => {
 		// expires: 0 is the engine's session sentinel, not the epoch - rendering
 		// it as a date would claim the cookie expired in 1970.
 		expect(screen.getByText("Session")).toBeInTheDocument();
+	});
+
+	it("opens the time card on an expiry, and none on a session cookie", async () => {
+		const { container } = render(<CookiesCard />);
+
+		// `expires` is epoch seconds, so 4102444800 is 2100-01-01T00:00:00Z.
+		const expiry = container.querySelector("time") as HTMLElement;
+		expect(container.querySelectorAll("time")).toHaveLength(1);
+		expect(expiry.getAttribute("datetime")).toBe("2100-01-01T00:00:00.000Z");
+
+		fireEvent.focus(expiry);
+		const card = await screen.findByTestId("time-hover-card");
+		expect(card.textContent).toContain("2100");
+		expect(card.textContent).toContain("UTC");
 	});
 
 	it("clears one environment's jar by id, not everything", async () => {

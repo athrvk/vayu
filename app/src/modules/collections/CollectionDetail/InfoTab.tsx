@@ -29,8 +29,7 @@ import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { Field, SaveFailed, Stat } from "./shared";
-import { formatRelative } from "./format";
+import { Field, RelativeTime, SaveFailed, Stat } from "./shared";
 
 interface InfoTabProps {
 	collection: Collection;
@@ -201,8 +200,8 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 
 			<div className="grid grid-cols-3 gap-2.5">
 				<Stat label="Requests" value={String(requestCount)} />
-				<Stat label="Created" value={formatRelative(collection.createdAt)} />
-				<Stat label="Updated" value={formatRelative(collection.updatedAt)} />
+				<Stat label="Created" value={<RelativeTime value={collection.createdAt} />} />
+				<Stat label="Updated" value={<RelativeTime value={collection.updatedAt} />} />
 			</div>
 
 			<SaveFailed mutation={updateCollection} what="this collection" />

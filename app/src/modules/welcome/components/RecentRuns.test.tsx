@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { RecentRuns } from "./RecentRuns";
 import { useTabsStore } from "@/stores";
 import type { Run } from "@/types";

@@ -18,7 +18,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import SamplesTab from "./SamplesTab";
 import { withQueryClient } from "@/test/query-wrapper";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";

@@ -55,7 +55,7 @@ import {
 	type TreeLocation,
 } from "@/lib/graphql/schema-tree";
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 
 /** How many rows to render before the window grows. */
@@ -305,8 +305,6 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 		[roving]
 	);
 
-	const age = fetchedAt ? `Schema from ${formatRelativeTime(fetchedAt)}` : null;
-
 	return (
 		<div className="flex flex-col h-full min-h-0 bg-panel" data-testid="graphql-explorer">
 			{/*
@@ -360,7 +358,14 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			{schema && status === "error" && (
 				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-micro text-warning-text border-b border-border shrink-0">
 					<AlertCircle className="size-icon-sm shrink-0" />
-					{age ? `${age}. Couldn't refresh it.` : "Couldn't refresh the schema."}
+					{fetchedAt ? (
+						<span>
+							Schema from <TimeValue value={fetchedAt} style="relative" />.
+							Couldn&apos;t refresh it.
+						</span>
+					) : (
+						"Couldn't refresh the schema."
+					)}
 				</p>
 			)}
 

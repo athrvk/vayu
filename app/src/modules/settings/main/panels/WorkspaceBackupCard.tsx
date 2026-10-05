@@ -32,6 +32,7 @@ import { useState } from "react";
 import { HardDriveDownload, Loader2 } from "lucide-react";
 
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { apiService } from "@/services";
 import { ApiError } from "@/services/http-client";
@@ -131,7 +132,7 @@ export function WorkspaceBackupCard() {
 					<div className="enter-fade surface-sunken rounded-md border border-rule p-3 space-y-1">
 						<p className="text-xs text-muted-foreground">
 							Saved {formatSize(result.sizeBytes)} at{" "}
-							{new Date(result.createdAt).toLocaleString()}
+							<TimeValue value={result.createdAt} />
 							{result.pruned > 0 &&
 								` - removed ${result.pruned} older ${pluralize(result.pruned, "snapshot")}`}
 						</p>

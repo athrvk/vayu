@@ -12,6 +12,7 @@ import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
+import { formatInstant } from "@/lib/time-value";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
@@ -45,7 +46,7 @@ import {
  * it alone - the redundancy rule in `docs/design-system.md` (Status Badges).
  *
  * The word and the left-edge bar this row used to carry are still gone, and for
- * the reason they went: `formatTime`'s per-row "8h ago" and a status word cost
+ * the reason they went: a per-row "8h ago" and a status word cost
  * roughly two lines of dead space per row for what a day-group header
  * (`HistoryList.tsx`'s `groupRunsByDay`) or a hover carries instead. The full
  * word and the exact timestamp are in the row's `title`, and the row's
@@ -228,7 +229,7 @@ export default function RunItem({
 	// permanent line.
 	const rowTitle = [
 		`${STATUS_LABEL[run.status]} · ${
-			run.startTime ? new Date(run.startTime).toLocaleString() : "Unknown time"
+			run.startTime ? formatInstant(run.startTime) : "Unknown time"
 		}`,
 		run.summary?.comment && `"${run.summary.comment}"`,
 	]

@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
 	parseTimeValue,
 	describeInstant,
+	formatDayHeading,
 	formatInstant,
 	formatRelative,
 	resolveTimeZone,
@@ -136,6 +137,12 @@ describe("formatInstant", () => {
 			"10/5/26, 12:00:00 PM"
 		);
 	});
+	it("keeps milliseconds on a time-ms row, in 24-hour form", () => {
+		const ms = new Date("2026-10-05T12:00:00.045Z");
+		expect(formatInstant(ms, "time-ms", { timeZone: "Asia/Kolkata", locale: "en-US" })).toBe(
+			"17:30:00.045"
+		);
+	});
 	it("returns empty text for an invalid date rather than throwing", () => {
 		expect(formatInstant("nope")).toBe("");
 	});
@@ -144,5 +151,24 @@ describe("formatInstant", () => {
 describe("resolveTimeZone", () => {
 	it("echoes an explicit zone", () => {
 		expect(resolveTimeZone({ timeZone: "Asia/Kolkata" })).toBe("Asia/Kolkata");
+	});
+});
+
+describe("formatDayHeading", () => {
+	const now = new Date("2026-10-05T12:00:00.000Z");
+	const options = { timeZone: "UTC", locale: "en-US" };
+	it("drops the year inside the current one and keeps it outside", () => {
+		expect(formatDayHeading(new Date("2026-09-05T12:00:00Z"), now, options)).toBe("Sep 5");
+		expect(formatDayHeading(new Date("2025-12-31T12:00:00Z"), now, options)).toBe(
+			"Dec 31, 2025"
+		);
+	});
+	it("reads the year in the heading's own zone", () => {
+		const newYear = new Date("2025-12-31T20:00:00Z");
+		const sameYearNow = new Date("2026-01-02T12:00:00Z");
+		expect(
+			formatDayHeading(newYear, sameYearNow, { ...options, timeZone: "Asia/Kolkata" })
+		).toBe("Jan 1");
+		expect(formatDayHeading(newYear, sameYearNow, options)).toBe("Dec 31, 2025");
 	});
 });

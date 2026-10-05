@@ -39,7 +39,7 @@ import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import { formatRelativeTime } from "@/lib/format-time";
+import { formatInstant } from "@/lib/time-value";
 import type { Collection, Run } from "@/types";
 import { type PaletteItem } from "../types";
 
@@ -100,7 +100,7 @@ export function useRunItems(query: string): PaletteItem[] {
 			// prints - see `PaletteItem.preMatched`.
 			preMatched: true,
 			title: runTitle(run, collectionsById),
-			subtitle: `${RUN_KIND_LABEL[run.type]} · ${run.status} · ${formatRelativeTime(run.startTime)}`,
+			subtitle: `${RUN_KIND_LABEL[run.type]} · ${run.status} · ${formatInstant(run.startTime, "relative")}`,
 			// The query itself used to be first in this list, so cmdk's second
 			// filter could not drop a row the engine had matched on snapshot
 			// text no row prints. That is `ranking.ts`'s job now, and carrying

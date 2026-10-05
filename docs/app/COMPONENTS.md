@@ -2176,6 +2176,29 @@ whose language has a time matcher, the read-only response viewers included.
 `CodeEditor` draws the card itself (`TimeTokenCard`, from the hook's
 `timeHover`), because most of those editors have no provider above them.
 
+**Outside Monaco, a time is `TimeValue`** (issue #1786,
+`components/shared/TimeValue/`). It takes an instant (`Date`, epoch
+milliseconds) or the raw text an API sent, and a `style`: `datetime`, `date`,
+`time`, `time-ms` (a live row that needs milliseconds), `relative`, or `raw` to
+keep a string as it arrived. It renders a `<time>` whose tooltip is
+`TimeHoverCard`: one `dt`/`dd` row per `describeInstant` row (the zone the OS
+resolves, UTC, how long ago, and the original text when it differs), plus any
+`extraRows` the surface adds, such as the run a restored response came from.
+The card builds its rows when it opens, so a virtualised list pays for the
+text only. A value that is not a time renders as plain text with no card, so a
+surface can hand it whatever it holds. A string that cannot hold an element
+(an `aria-label`, a native `title`, a palette subtitle) uses `formatInstant`
+from `lib/time-value.ts` with the same style names; `formatDayHeading` writes
+the history sidebar's day headings. **`time-surfaces.test.ts` is the guard**:
+it reads every non-test source file under `app/src`, asserts the scan is
+non-empty, and fails on `toLocaleDateString`, `toLocaleTimeString`,
+`toLocaleString` on a Date, `Intl.DateTimeFormat`, `Intl.RelativeTimeFormat` or
+an import of the retired `lib/format-time` anywhere but `lib/time-value.ts` and
+`components/shared/TimeValue/`, and on a `CodeEditor` that gains a prop to opt
+out of the time matcher. `Number#toLocaleString` for counts stays. A test that
+renders a `TimeValue` needs a `TooltipProvider`; `test/render-with-tooltips.tsx`
+supplies one.
+
 **Script (`javascript`) editors are decorated too, on three different
 readings** (issue #1220 script support - `lib/script-variable-tokens.ts`,
 gated per language by `VARIABLE_TOKEN_MATCHERS` in `monaco-variable-tokens.ts`,

@@ -30,7 +30,7 @@
 import { useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { getMethodColor } from "@/lib/method-display";
 import { chordKeys } from "@/lib/platform";
 import type { CommandContext } from "@/lib/commands";
@@ -193,8 +193,7 @@ function PaletteRow({
 	// Only where the section asked for it *and* the row knows one: a row with no
 	// recency in Recents cannot happen (that is what put it there), and the
 	// check is what keeps it from printing an epoch date if it ever did.
-	const recency =
-		showRecency && item.recencyAt !== undefined && formatRelativeTime(item.recencyAt);
+	const recencyAt = showRecency ? item.recencyAt : undefined;
 	return (
 		<CommandItem
 			// cmdk no longer matches on these - `ranking.ts` does, against the
@@ -245,10 +244,12 @@ function PaletteRow({
 					))}
 				</span>
 			)}
-			{recency && !item.shortcut && (
-				<span className="ml-auto shrink-0 pl-3 text-xs text-muted-foreground">
-					{recency}
-				</span>
+			{recencyAt !== undefined && !item.shortcut && (
+				<TimeValue
+					value={recencyAt}
+					style="relative"
+					className="ml-auto shrink-0 pl-3 text-xs text-muted-foreground"
+				/>
 			)}
 		</CommandItem>
 	);

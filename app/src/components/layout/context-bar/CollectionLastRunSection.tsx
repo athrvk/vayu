@@ -26,7 +26,8 @@
 import { Button } from "@/components/ui";
 import { useLastCollectionRunQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
+import { formatInstant } from "@/lib/time-value";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { RUN_STATUS_TONE, scenarioSizeLabel } from "./collection-last-run";
 import type { ContextBarSectionProps } from "./types";
@@ -50,8 +51,9 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 			type="button"
 			variant="listRow"
 			onClick={() => openTab({ type: "run", entityId: run.id })}
-			aria-label={`Open collection run, ${tone.label.toLowerCase()}, ${formatRelativeTime(
-				run.startTime
+			aria-label={`Open collection run, ${tone.label.toLowerCase()}, ${formatInstant(
+				run.startTime,
+				"relative"
 			)}`}
 			className="gap-2 px-1 py-1 hover:bg-accent"
 		>
@@ -59,9 +61,11 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 			<span className="flex-1 text-xs font-mono tabular-nums text-muted-foreground truncate">
 				{size ?? ""}
 			</span>
-			<span className="text-label font-mono tabular-nums text-muted-foreground shrink-0">
-				{formatRelativeTime(run.startTime)}
-			</span>
+			<TimeValue
+				value={run.startTime}
+				style="relative"
+				className="text-label font-mono text-muted-foreground shrink-0"
+			/>
 		</Button>
 	);
 }

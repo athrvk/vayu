@@ -287,6 +287,8 @@ export type TimeStyle =
 	| "date"
 	/** Wall-clock only - a list row where the day is the section heading. */
 	| "time"
+	/** Wall-clock with milliseconds - a live row that tells apart sends in one second. */
+	| "time-ms"
 	| "relative";
 
 /**
@@ -313,6 +315,18 @@ export function formatInstant(
 				timeStyle: "medium",
 				timeZone: options.timeZone,
 			}).format(date);
+		case "time-ms": {
+			// `fractionalSecondDigits` is not in the DOM lib's typings, and a zone
+			// never shifts milliseconds, so they are appended to the formatted time.
+			const wall = new Intl.DateTimeFormat(options.locale, {
+				hour: "2-digit",
+				minute: "2-digit",
+				second: "2-digit",
+				hour12: false,
+				timeZone: options.timeZone,
+			}).format(date);
+			return `${wall}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;
+		}
 		case "datetime":
 			return new Intl.DateTimeFormat(options.locale, {
 				dateStyle: "short",
@@ -320,4 +334,23 @@ export function formatInstant(
 				timeZone: options.timeZone,
 			}).format(date);
 	}
+}
+
+/**
+ * A calendar-day heading such as "Sep 5", with the year only when @p instant
+ * falls outside @p now's year. Day groups are headings over rows that each carry
+ * their own `TimeValue`, so the heading is plain text rather than an instant.
+ */
+export function formatDayHeading(instant: Date, now: Date, options: FormatOptions = {}): string {
+	const yearOf = (date: Date) =>
+		new Intl.DateTimeFormat(options.locale, {
+			year: "numeric",
+			timeZone: options.timeZone,
+		}).format(date);
+	return new Intl.DateTimeFormat(options.locale, {
+		month: "short",
+		day: "numeric",
+		year: yearOf(instant) === yearOf(now) ? undefined : "numeric",
+		timeZone: options.timeZone,
+	}).format(instant);
 }

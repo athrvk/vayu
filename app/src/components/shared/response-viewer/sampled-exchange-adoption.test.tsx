@@ -26,8 +26,10 @@
  * is only half of it: the live/stored difference has to stay in the caller.
  */
 
+import type { ReactNode } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 
 import type { RunReport } from "@/types";
 import { withQueryClient } from "@/test/query-wrapper";
@@ -38,9 +40,10 @@ vi.mock("@/components/shared/response-viewer/SampledExchange", () => ({
 			data-testid="sampled-exchange"
 			data-status={String(props.statusCode)}
 			data-label={String(props.label)}
-			data-timestamp={String(props.timestamp)}
 			data-phases={String((props.phases as unknown[] | undefined)?.length ?? 0)}
-		/>
+		>
+			{props.timestamp as ReactNode}
+		</div>
 	),
 }));
 
@@ -91,7 +94,7 @@ describe("both sampled views render through SampledExchange (#76)", () => {
 		// A live row places a sample inside a run that is seconds old, so it
 		// keeps milliseconds. Losing that to the history card's locale date is
 		// exactly the drift a shared shell could otherwise introduce.
-		expect(row.getAttribute("data-timestamp")).toMatch(/\d{2}:\d{2}:\d{2}\.345/);
+		expect(row.textContent).toMatch(/\d{2}:\d{2}:\d{2}\.345/);
 	});
 
 	it("the history detail's stored sample card", async () => {
@@ -121,6 +124,6 @@ describe("both sampled views render through SampledExchange (#76)", () => {
 		expect(row).toHaveAttribute("data-label", "7");
 		expect(row).toHaveAttribute("data-phases", "5");
 		// A stored row dates a run rather than placing a moment inside one.
-		expect(row.getAttribute("data-timestamp")).not.toMatch(/\.345/);
+		expect(row.textContent).not.toMatch(/\.345/);
 	});
 });
