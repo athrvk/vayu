@@ -76,12 +76,24 @@ installer() {
 
 # --- build a release to install ----------------------------------------------
 
+# A .sha256 beside every asset, as release.yml publishes: install.sh refuses a
+# current release that has none.
+write_sidecar() {
+	local asset="$1"
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$asset" | awk '{print $1}' >"$asset.sha256"
+	else
+		shasum -a 256 "$asset" | awk '{print $1}' >"$asset.sha256"
+	fi
+}
+
 make_linux_release() {
 	local version="$1" dir
 	dir="$RELEASES/v$version"
 	mkdir -p "$dir"
 	# A stand-in for the 160MB AppImage. The installer never looks inside it.
 	printf '#!/bin/sh\necho "Vayu %s"\n' "$version" >"$dir/Vayu-$version-x86_64.AppImage"
+	write_sidecar "$dir/Vayu-$version-x86_64.AppImage"
 }
 
 make_macos_release() {
@@ -110,6 +122,7 @@ PLIST
 	# ditto -c -k is how the release zip is built, so the test archive is the
 	# same shape the installer will meet in production.
 	(cd "$staging" && ditto -c -k --keepParent "Vayu.app" "$dir/Vayu-$version-universal.zip")
+	write_sidecar "$dir/Vayu-$version-universal.zip"
 }
 
 installed_binary() {
