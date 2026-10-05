@@ -22,7 +22,7 @@
  * is now `BulkEditor`; only the format differs, and that is what this passes.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRequestBuilderContext } from "../../../context";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
@@ -105,14 +105,32 @@ export default function ParamsPanel() {
 	// opening a request does not mark it edited.
 	const pathParams = displayPathRows(pathRowsOf(request.params), request.url);
 
+	// The editor's callbacks read the latest request through a ref, so their
+	// identity survives the keystroke that rewrites `request.params`: listing it
+	// in their deps handed `KeyValueEditor` a new `onChange` per character and
+	// re-rendered every row (issue #1716).
+	const latest = useRef({
+		params: request.params,
+		url: request.url,
+		disableUrlEncoding: request.disableUrlEncoding,
+	});
+	useEffect(() => {
+		latest.current = {
+			params: request.params,
+			url: request.url,
+			disableUrlEncoding: request.disableUrlEncoding,
+		};
+	}, [request.params, request.url, request.disableUrlEncoding]);
+
 	// The query table's rows, written back beside the path rows it never shows,
 	// and the URL's query rebuilt from them. `buildUrlWithParams` skips path
 	// rows itself, so the `:name` segments are left as they are.
 	const handleParamsChange = useCallback(
 		(newParams: KeyValueItem[]) => {
 			// Filter out any system headers that shouldn't be in params (separation of concerns)
+			const { params: before, url, disableUrlEncoding } = latest.current;
 			const queryParams = newParams.filter((param) => !param.system && !isPathRow(param));
-			const params = [...queryParams, ...pathRowsOf(request.params)];
+			const params = [...queryParams, ...pathRowsOf(before)];
 
 			updateField("params", params);
 			// A request sent unencoded (issue #1765) keeps its rows as typed in
@@ -122,15 +140,10 @@ export default function ParamsPanel() {
 			// matches decoded.
 			updateField(
 				"url",
-				buildUrlWithParams(
-					request.url,
-					params,
-					{ encode: !request.disableUrlEncoding },
-					request.params
-				)
+				buildUrlWithParams(url, params, { encode: !disableUrlEncoding }, before)
 			);
 		},
-		[request.url, request.params, request.disableUrlEncoding, updateField]
+		[updateField]
 	);
 
 	// Values only: the URL does not change, because a path row's value goes into
@@ -139,11 +152,11 @@ export default function ParamsPanel() {
 	const handlePathParamsChange = useCallback(
 		(newPathParams: KeyValueItem[]) => {
 			updateField("params", [
-				...queryRowsOf(request.params),
+				...queryRowsOf(latest.current.params),
 				...newPathParams.filter(isPathRow),
 			]);
 		},
-		[request.params, updateField]
+		[updateField]
 	);
 
 	// Not called inline: a dynamic variable like `{{$randomInt}}` generates a
