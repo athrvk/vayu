@@ -30,10 +30,11 @@ namespace vayu::db {
  * The schema version this engine understands, stamped into `PRAGMA
  * user_version` by `migrate_before_sync` (issues #1492, #1514).
  *
- * Bumped by the commit that changes `make_vayu_storage`'s mapping, and never
- * otherwise: `sync_schema ()` runs without `preserve`, so an older engine
- * opening a database with a column it does not map would rebuild the table
- * without it. A database stamped newer than this is refused at startup. The
+ * Bumped by the commit that changes `make_vayu_storage`'s mapping:
+ * `sync_schema ()` runs without `preserve`, so an older engine opening a
+ * database with a column it does not map would rebuild the table without it.
+ * Also bumped by a migration step that must run once and that an older engine
+ * must not read past (4). A database stamped newer than this is refused at startup. The
  * history is in `docs/engine/db-schema.md` (Schema versions):
  * 1 - scripts folded into `elements` (#1514);
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
@@ -42,9 +43,13 @@ namespace vayu::db {
  *     version);
  * 3 - `file_roots`, the folders request-body files may be read from without
  *     being chosen in the editor. Also the fence that keeps an older engine,
- *     which would send a `binary` body bodiless, off a workspace holding one.
+ *     which would send a `binary` body bodiless, off a workspace holding one;
+ * 4 - no mapping change: every stored body's file references state
+ *     `unresolved`, and the allowed folders the root rule refuses are gone.
+ *     Bumped because the version is the migration's done-marker, and so an
+ *     engine that reads an absent key as chosen never opens the workspace.
  */
-inline constexpr int SCHEMA_VERSION = 3;
+inline constexpr int SCHEMA_VERSION = 4;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.

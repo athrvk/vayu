@@ -22,6 +22,8 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::db {
@@ -2266,7 +2268,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 3);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 4);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
@@ -2327,10 +2329,10 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseWithoutTheProtocolSettingColumnsGetsThe
 }
 
 // Schema version 3 is the `file_roots` table (the folders request-body files
-// may be read from) and nothing to move: a version-2 database is stamped 3 and
-// gains the table, and its rows round-trip. Mutation check: skip the stamp on
-// `migrate_before_sync`'s no-fold path and the version stays 2.
-TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedThreeAndGainsTheFileRootsTable) {
+// may be read from) and nothing to move: a version-2 database is stamped
+// current and gains the table, and its rows round-trip. Mutation check: skip
+// the stamp on `migrate_before_sync`'s no-fold path and the version stays 2.
+TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedCurrentAndGainsTheFileRootsTable) {
     {
         Database db (TEST_DB_PATH);
         db.init ();
@@ -2349,7 +2351,7 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedThreeAndGainsTheFileRootsTable
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    EXPECT_EQ (read_user_version (TEST_DB_PATH), 3);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "file_roots", "path"));
 
     Database reopened (TEST_DB_PATH);
@@ -2366,6 +2368,188 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedThreeAndGainsTheFileRootsTable
     ASSERT_HAS_VALUE (reopened.get_file_root ("froot_1"));
     reopened.delete_file_root ("froot_1");
     EXPECT_TRUE (reopened.get_file_roots ().empty ());
+}
+
+// ---------------------------------------------------------------------------
+// Schema version 4: every stored body states `unresolved`, and the allowed
+// folders the root rule refuses are gone.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// One column of one row, read raw: no reader in `Database` filters it.
+std::string read_stored (const std::string& path,
+const char* table,
+const char* column,
+const std::string& id) {
+    sqlite3* handle = nullptr;
+    std::string out;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        return out;
+    }
+    const std::string sql =
+    std::string ("SELECT ") + column + " FROM " + table + " WHERE id = ?1";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text (stmt, 1, id.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* text = vayu::db::column_text (stmt, 0);
+            out              = text != nullptr ? text : "";
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return out;
+}
+
+constexpr const char* kBrokenBody = R"({"mode":"binary","file":{"src":"/abs/x.bin")";
+
+/// The user's home folder as the migration compares it.
+std::string canonical_home () {
+    const std::string home      = vayu::platform::home_directory ();
+    const std::string canonical = vayu::http::canonical_root_path (home);
+    return canonical.empty () ? home : canonical;
+}
+
+/// A version-3 database as an engine before the trust flag failed closed left
+/// it: file references without the key (one in the trash, one in a run's
+/// snapshot), one already stated, one body that is not JSON, and allowed
+/// folders at `/`, at the home folder and inside it.
+void seed_version_three_workspace (const std::string& path) {
+    // Now, not a fixed instant: the startup trash and run retention would
+    // purge an old trashed request or run before the migration test reads it.
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    {
+        Database db (path);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        const auto save = [&] (const char* id, const std::string& body, bool trashed) {
+            Request r;
+            r.id            = id;
+            r.collection_id = "col_1";
+            r.name          = id;
+            r.method        = vayu::HttpMethod::POST;
+            r.url           = "https://example.test";
+            r.body          = body;
+            r.order         = 0;
+            r.created_at    = 1;
+            r.updated_at    = 1;
+            if (trashed) {
+                r.deleted_at = now;
+            }
+            db.save_request (r);
+        };
+        save ("req_bin", R"({"file":{"src":"/abs/a.bin"},"mode":"binary"})", false);
+        save ("req_form", R"({"fields":[{"key":"f","src":"/abs/p.png","type":"file"},{"key":"t","value":"v"}],"mode":"form-data"})",
+        false);
+        save ("req_stated",
+        R"({"file":{"src":"/abs/b.bin","unresolved":true},"mode":"binary"})", false);
+        save ("req_trash", R"({"file":{"src":"/abs/t.bin"},"mode":"binary"})", true);
+        save ("req_broken", kBrokenBody, false);
+
+        vayu::db::Run run;
+        run.id         = "run_1";
+        run.type       = vayu::RunType::Design;
+        run.status     = vayu::RunStatus::Completed;
+        run.start_time = now;
+        run.config_snapshot =
+        R"({"body":{"file":{"src":"/abs/c.bin"},"mode":"binary"},"method":"POST","url":"https://example.test"})";
+        db.create_run (run);
+
+        const auto allow = [&] (const char* id, const std::string& folder) {
+            vayu::FileRoot root;
+            root.id         = id;
+            root.path       = folder;
+            root.created_at = 1;
+            db.save_file_root (root);
+        };
+        allow ("froot_root", "/");
+        allow ("froot_home", canonical_home ());
+        allow ("froot_inside",
+        (std::filesystem::path (canonical_home ()) / "fixtures").string ());
+    }
+    set_user_version (path, 3);
+}
+
+/// The file reference of a stored binary body.
+nlohmann::json stored_file (const std::string& path, const std::string& id) {
+    return nlohmann::json::parse (read_stored (path, "requests", "body", id))["file"];
+}
+
+} // namespace
+
+// Mutation checks: drop the `apply_file_trust_plan` rewrites (or the
+// `plan_body_restatement` calls) and the bodies keep no key; drop the
+// `plan_refused_roots` call and `/` and the home folder are still allowed.
+TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots) {
+    ASSERT_FALSE (vayu::platform::home_directory ().empty ())
+    << "this platform reported no home folder to seed";
+    seed_version_three_workspace (TEST_DB_PATH);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+
+    // Rows that existed before the key was always written were the editor's.
+    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_bin")["unresolved"], false);
+    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_trash")["unresolved"], false)
+    << "a request in the trash is restated too";
+    auto form = nlohmann::json::parse (
+    read_stored (TEST_DB_PATH, "requests", "body", "req_form"));
+    EXPECT_EQ (form["fields"][0]["unresolved"], false) << form.dump ();
+    EXPECT_FALSE (form["fields"][1].contains ("unresolved"))
+    << "a text part carries no trust";
+    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_stated")["unresolved"], true);
+    EXPECT_EQ (read_stored (TEST_DB_PATH, "requests", "body", "req_broken"), kBrokenBody)
+    << "a body that is not JSON is left byte-identical";
+
+    auto snapshot = nlohmann::json::parse (
+    read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
+    EXPECT_EQ (snapshot["body"]["file"]["unresolved"], false) << snapshot.dump ();
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    std::vector<std::string> ids;
+    for (const auto& row : db.get_file_roots ()) {
+        ids.push_back (row.id);
+    }
+    EXPECT_EQ (ids, std::vector<std::string>{ "froot_inside" })
+    << "a filesystem root and the home folder are no longer allowed";
+    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+}
+
+TEST_F (DatabaseTest, TheVersionFourMigrationIsIdempotent) {
+    seed_version_three_workspace (TEST_DB_PATH);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    std::vector<std::string> first;
+    for (const char* id : { "req_bin", "req_form", "req_stated", "req_trash", "req_broken" }) {
+        first.push_back (read_stored (TEST_DB_PATH, "requests", "body", id));
+    }
+    first.push_back (read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
+
+    set_user_version (TEST_DB_PATH, 3);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        EXPECT_EQ (db.get_file_roots ().size (), 1u);
+    }
+    std::vector<std::string> second;
+    for (const char* id : { "req_bin", "req_form", "req_stated", "req_trash", "req_broken" }) {
+        second.push_back (read_stored (TEST_DB_PATH, "requests", "body", id));
+    }
+    second.push_back (read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
+    EXPECT_EQ (first, second);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
 }
 
 // A database stamped by the next schema is refused before anything writes to

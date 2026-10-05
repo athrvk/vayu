@@ -214,8 +214,10 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   a table without the column it does not map. The bump is one-way - an older
   engine refuses the stamped workspace - so it gets a row in
   `docs/engine/db-schema.md#schema-versions` and a line in the next release's
-  notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
-  literal; a step with nothing to move (version 2's
+  notes. A migration step that rewrites stored data once and that an older
+  engine must not read past bumps it too, with no mapping change (version 4,
+  the file-trust restatement). `migrate_before_sync` stamps through
+  `stamp_schema_version`, never a literal; a step with nothing to move (version 2's
   `request_examples.postman_response` and #1765's four `requests` protocol
   columns) only stamps. A column may join a version no released build has
   stamped (#1765 joined 2) because `sync_schema ()` adds it on every start
