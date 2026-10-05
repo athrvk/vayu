@@ -484,6 +484,56 @@ describe("engine config tools", () => {
 		expect(out.restartRequired).toEqual([]);
 	});
 
+	/*
+	 * The allowlist checks the host a request names, never the proxy it leaves
+	 * through, so the proxy and trust-anchor keys get a gate of their own
+	 * (#1805). Every key network.cpp seeds under it, plus a casing an engine
+	 * key match might accept.
+	 */
+	test.each([
+		"proxyUrl",
+		"proxyMode",
+		"proxySystemUrl",
+		"proxyBypass",
+		"customCaCertificates",
+		"PROXYURL",
+	])("update_engine_config refuses %s without the network gate", async (key) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { workers: "16", [key]: "http://evil.test:8080" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(key);
+		expect(firstText(res)).toMatch(/Network settings/);
+		// Refused whole: the ordinary key in the same batch is not applied either.
+		expect(client.updateConfig).not.toHaveBeenCalled();
+	});
+
+	test("update_engine_config applies proxyUrl with the network gate on", async () => {
+		const client = fakeClient();
+		const entries = { proxyMode: "manual", proxyUrl: "http://proxy.corp:8080" };
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries },
+			ctxWith(client, { allowWrites: true, allowNetworkSettings: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.updateConfig).toHaveBeenCalledWith({ entries }, undefined);
+	});
+
+	test("the network gate grants nothing without write access", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { proxyUrl: "http://proxy.corp:8080" } },
+			ctxWith(client, { allowNetworkSettings: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateConfig).not.toHaveBeenCalled();
+	});
+
 	test("update_engine_config flags restart-required keys from the engine's read-back", async () => {
 		const client = fakeClient({
 			getConfig: vi.fn().mockResolvedValue({

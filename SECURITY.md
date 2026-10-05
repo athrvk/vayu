@@ -94,6 +94,12 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   enables write access in Settings. Traffic-sending tools (`run_request`,
   `run_collection_smoke`, `run_collection`) and load runs are not affected by
   this toggle - they are governed by the allowlist and caps.
+- **Network settings gated separately.** Even with writes on,
+  `update_engine_config` refuses the proxy keys (`proxy*`) and
+  `customCaCertificates` unless the user also enables network settings in
+  Settings. The allowlist checks the host a request names, not the proxy it
+  passes through, so an agent that could repoint the proxy or add a trusted CA
+  could route and read every request.
 - **Secrets withheld by default.** Read tools and resources return secret
   variables as `valueWithheld: true`, auth credentials as
   `<member>Withheld: true`, cookie values as `valueWithheld: true` and proxy URL

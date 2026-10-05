@@ -51,12 +51,21 @@ export interface McpSafetyConfig {
 	 * Gates every tool in the `write` category - the collection and saved-request
 	 * CRUD verbs, `update_environment` and `update_engine_config`. When false
 	 * (default), those tools refuse; the two deletes additionally require
-	 * confirmation even with it on. It does **not** gate traffic-sending tools
+	 * confirmation even with it on, and the network keys of
+	 * `update_engine_config` additionally require `allowNetworkSettings`. It does **not** gate traffic-sending tools
 	 * (`run_request`, `run_collection_smoke`, `run_collection`) or load runs -
 	 * those are governed by the allowlist, the hard caps, and the load-run
 	 * confirmation gate independently.
 	 */
 	allowWrites: boolean;
+	/**
+	 * The second key `update_engine_config` needs for the entries that decide
+	 * where traffic goes and whom it trusts: every `proxy*` key and
+	 * `customCaCertificates` (#1805). Off by default, because the allowlist
+	 * gates the host a request names, not the proxy every request passes
+	 * through, and a trusted CA is what lets that proxy read TLS.
+	 */
+	allowNetworkSettings: boolean;
 	/**
 	 * When false (default), read tools and resources withhold what the user
 	 * treats as a secret: a variable flagged `secret`, an auth credential, a
@@ -87,6 +96,7 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	// "unlimited" does not.
 	maxIterations: 10000,
 	allowWrites: false,
+	allowNetworkSettings: false,
 	revealSecretsToAgents: false,
 	disabledTools: [],
 };
@@ -169,11 +179,12 @@ const MCP_CAP_KEYS: readonly McpCapKey[] = [
 ];
 
 /** The opt-in switches, each off by default and kept only when it is a boolean. */
-type McpSwitchKey = "allowAll" | "allowWrites" | "revealSecretsToAgents";
+type McpSwitchKey = "allowAll" | "allowWrites" | "allowNetworkSettings" | "revealSecretsToAgents";
 
 const MCP_SWITCH_KEYS: readonly McpSwitchKey[] = [
 	"allowAll",
 	"allowWrites",
+	"allowNetworkSettings",
 	"revealSecretsToAgents",
 ];
 
@@ -260,6 +271,7 @@ const SAFETY_ENV_VARS = {
 	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
 	maxIterations: "VAYU_MCP_MAX_ITERATIONS",
 	allowWrites: "VAYU_MCP_ALLOW_WRITES",
+	allowNetworkSettings: "VAYU_MCP_ALLOW_NETWORK_SETTINGS",
 	revealSecretsToAgents: "VAYU_MCP_REVEAL_SECRETS",
 	disabledTools: "VAYU_MCP_DISABLED_TOOLS",
 } as const satisfies Record<keyof McpSafetyConfig, string>;

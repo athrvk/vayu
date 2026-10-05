@@ -46,6 +46,7 @@ const SAVED: McpSafetyConfig = {
 	maxDurationSeconds: 300,
 	maxIterations: 10000,
 	allowWrites: false,
+	allowNetworkSettings: false,
 	revealSecretsToAgents: false,
 	disabledTools: [],
 };
@@ -381,22 +382,29 @@ describe("McpSettingsPanel write-switch cross-references", () => {
  * field to the main process, which sanitizes and applies it.
  */
 describe("McpSettingsPanel secret and network gates", () => {
-	it.each([{ name: /reveal secrets to agents/i, field: "revealSecretsToAgents" }])(
-		"$field shows off as saved and persists a flip",
-		async ({ name, field }) => {
-			await renderPanel();
-			const toggle = screen.getByRole("switch", { name });
-			expect(toggle).not.toBeChecked();
+	it.each([
+		{ name: /allow network settings changes/i, field: "allowNetworkSettings" },
+		{ name: /reveal secrets to agents/i, field: "revealSecretsToAgents" },
+	])("$field shows off as saved and persists a flip", async ({ name, field }) => {
+		await renderPanel();
+		const toggle = screen.getByRole("switch", { name });
+		expect(toggle).not.toBeChecked();
 
-			updateMcpSafety.mockResolvedValue({ ...SAVED, [field]: true });
-			await act(async () => {
-				fireEvent.click(toggle);
-			});
+		updateMcpSafety.mockResolvedValue({ ...SAVED, [field]: true });
+		await act(async () => {
+			fireEvent.click(toggle);
+		});
 
-			expect(updateMcpSafety).toHaveBeenCalledWith({ [field]: true });
-			await waitFor(() => expect(screen.getByRole("switch", { name })).toBeChecked());
-		}
-	);
+		expect(updateMcpSafety).toHaveBeenCalledWith({ [field]: true });
+		await waitFor(() => expect(screen.getByRole("switch", { name })).toBeChecked());
+	});
+
+	it("tells the Network settings card that it needs Write access too", async () => {
+		await renderPanel();
+		expandCardDescription("Network settings");
+
+		expect(screen.getByText(/needs write access on as well/i)).toBeInTheDocument();
+	});
 
 	it("tells the user what an agent still gets with secrets withheld", async () => {
 		await renderPanel();

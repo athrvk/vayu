@@ -370,6 +370,14 @@ export const APP_SETTINGS = [
 		keywords: ["read-only", "safety", "permission"],
 	},
 	{
+		anchor: "mcp-network-settings",
+		panel: "mcp",
+		label: "Network settings",
+		searchText:
+			"Whether agents may change the proxy and the certificate authorities Vayu trusts.",
+		keywords: ["proxy", "certificate", "ca", "tls", "safety", "permission"],
+	},
+	{
 		anchor: "mcp-reveal-secrets",
 		panel: "mcp",
 		label: "Reveal secrets to agents",

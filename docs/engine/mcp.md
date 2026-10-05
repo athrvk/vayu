@@ -220,7 +220,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
-| `update_engine_config` | write    | `POST /config`                               | write toggle               |
+| `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
@@ -1577,6 +1577,16 @@ configurable in **Settings → MCP** and persisted.
   `clear_cookies` and `restore_trash_entry` take the toggle without a
   confirmation, for opposite reasons: one ends a session rather than anything
   saved, the other puts a row back rather than destroying one.
+- **Network gate** (`allowNetworkSettings`, default off) - the second key
+  `update_engine_config` needs for the entries that decide where every request
+  goes and whom it trusts: every `proxy*` key (`proxyMode`, `proxyUrl`,
+  `proxySystemUrl`, `proxyBypass`, matched by prefix and case-insensitively, so
+  a proxy key added later is gated the day it ships) and `customCaCertificates`
+  (#1805). A batch naming any of them without the gate is refused whole, before
+  the engine sees it. The allowlist cannot stand in for it: it checks the host a
+  request names, never the proxy the request leaves through, and a trusted CA is
+  what lets that proxy read TLS. On its own it grants nothing; the write toggle
+  still decides whether `update_engine_config` is offered at all.
 - **Reveal secrets** (`revealSecretsToAgents`, default off) - while it is off,
   every read withholds secret variables, auth credentials, cookie values and
   proxy URL credentials, and the server instructions say so; see
@@ -1668,6 +1678,7 @@ in full. Keep write access off where that matters.
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
+| `allowNetworkSettings` | `false` | -         | Let `update_engine_config` change the proxy and trust-anchor keys. |
 | `revealSecretsToAgents` | `false` | -        | Let reads return secret values in full ([Secret values](#secret-values)). |
 | `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
@@ -1842,6 +1853,7 @@ from environment variables:
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
+| `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | `false`               | `true` opens the proxy and CA config keys to writes. |
 | `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lets reads return secret values. |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 | `VAYU_LOG_DIR`                  | (unset)                 | Also write `mcp_<stamp>.log` there (#1558). |

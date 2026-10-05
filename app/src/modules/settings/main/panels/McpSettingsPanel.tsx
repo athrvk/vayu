@@ -42,6 +42,7 @@ import {
 	CircleCheck,
 	CircleSlash,
 	KeyRound,
+	Network,
 } from "lucide-react";
 import {
 	Button,
@@ -82,6 +83,7 @@ const TOOLS = appSetting("mcp-tools");
 const ALLOWLIST = appSetting("mcp-allowlist");
 const CAPS = appSetting("mcp-caps");
 const WRITES = appSetting("mcp-writes");
+const NETWORK = appSetting("mcp-network-settings");
 const REVEAL = appSetting("mcp-reveal-secrets");
 
 /**
@@ -924,6 +926,34 @@ export default function McpSettingsPanel() {
 						/>
 						<Label className="text-sm text-muted-foreground">
 							{config?.allowWrites ? "Writes enabled" : "Read-only"}
+						</Label>
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Network settings */}
+			<Card data-setting-anchor={NETWORK.anchor}>
+				<CardHeader className="pb-3">
+					<div className="flex items-center gap-2">
+						<Network className="w-5 h-5 text-muted-foreground" />
+						<CardTitle>{NETWORK.label}</CardTitle>
+					</div>
+					<CardDescription>
+						<CollapsibleText text="When off (default), an agent with write access still can't change the proxy settings or the certificate authorities Vayu trusts - the engine config entries that decide where every request goes and whom it trusts. The allowlist checks the host a request names, not the proxy it passes through, and a trusted authority is what lets that proxy read encrypted traffic. Needs Write access on as well; on its own it grants nothing." />
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="flex items-center gap-3">
+						<Switch
+							checked={config?.allowNetworkSettings ?? false}
+							onCheckedChange={(checked) =>
+								void persist({ allowNetworkSettings: checked })
+							}
+							disabled={!config}
+							aria-label="Allow network settings changes"
+						/>
+						<Label className="text-sm text-muted-foreground">
+							{config?.allowNetworkSettings ? "Agents may change" : "Locked"}
 						</Label>
 					</div>
 				</CardContent>

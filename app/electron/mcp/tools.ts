@@ -2790,6 +2790,18 @@ const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();
 
+/**
+ * The engine config keys behind `allowNetworkSettings`: the proxy entries
+ * (`proxyMode`, `proxyUrl`, `proxySystemUrl`, `proxyBypass`) and the extra
+ * trust anchors (`engine/src/db/config_seeds/network.cpp`). By prefix rather
+ * than by list, so a proxy key the engine adds later is gated the day it ships;
+ * case-insensitive so the gate never rests on how the engine matches a key.
+ */
+function isNetworkConfigKey(key: string): boolean {
+	const lowered = key.toLowerCase();
+	return lowered.startsWith("proxy") || lowered === "customcacertificates";
+}
+
 /** Whether a `GET /health` body can be returned as `structuredContent` as-is. */
 function isEngineHealthShape(value: unknown): value is Record<string, unknown> {
 	return engineHealthSchema.safeParse(value).success;
@@ -5026,7 +5038,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["config"],
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
+			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings, and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings to be enabled there; a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
 		annotations: {
 			title: "Update engine config",
 			readOnlyHint: false,
@@ -5049,6 +5061,12 @@ export const TOOLS: McpTool[] = [
 			const entries = args.entries;
 			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
 				return errorResult('"entries" must be an object mapping config keys to values.');
+			}
+			const network = Object.keys(entries).filter(isNetworkConfigKey);
+			if (network.length > 0 && !ctx.config.allowNetworkSettings) {
+				return errorResult(
+					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on in Vayu Settings → MCP as well as write access. Nothing was changed.`
+				);
 			}
 			try {
 				const updated = await ctx.client.updateConfig({ entries }, signal);
