@@ -2491,7 +2491,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ### `dialog-cancel-button`
 
@@ -2505,6 +2505,21 @@ no `variant` prop: a call site that can choose is a call site that can drift.
 forms outside a `DialogFooter` (the new-collection row, the client-certificate
 form) that draw the same button in a denser row.
 `dialog-cancel.test.ts` bans the label anywhere else.
+
+### `disabled-hint`
+
+`DisabledHint` says why a control is off (issue #1690). `Button`'s baseline is
+`disabled:pointer-events-none` and a disabled button is not focusable, so a
+`Tooltip` around it never fires; `DisabledHint` instead wraps the control in a
+`span` that keeps its own `pointer-events-auto` and its own tab stop and holds
+the tooltip, so the reason shows on hover and on Tab. `reason` is both the text
+and the switch: falsy renders the children alone, so a caller passes one
+expression (`<DisabledHint reason={empty && "No captures to clear"}>`) rather
+than two copies of the control. The gate stays the child's `disabled` prop.
+Crossing the gate swaps the child's DOM node, so a test must re-query it. A
+disabled menu item is the exception: `RowAction`'s `disabledReason` draws the
+reason on the item (see Row and tab actions menu above). The rule and the
+wording guidance are in [design-system.md](../design-system.md).
 
 ### `dialog`
 
