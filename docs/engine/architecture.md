@@ -1299,6 +1299,12 @@ record shape, the category list, the redaction rule and the file layout
   request carrying `Origin` and a `Host` that is not a loopback name for its own port, which is
   what keeps a DNS-rebinding page out ([Listeners](#listeners)).
 - **Script sandboxing**: QuickJS contexts have no filesystem/network access
+- **Only `http` and `https` leave the engine.** libcurl speaks other
+  protocols, `file` among them, so the send gate (`validate_transferable`)
+  refuses any other scheme on the URL every driver is about to hand a handle -
+  after variables, the pre-request script and the residual pass. One rule for
+  Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
+  [api-reference.md](api-reference.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a
   `form-data` file part - and sends one only when *a person chose it in the

@@ -163,6 +163,12 @@ int extract_port (const std::string& url) {
 }
 
 std::optional<Error> validate_transferable (const Request& request) {
+    // First, because nothing else about a request matters if it is not HTTP.
+    // Read off the URL as it stands here - composed, bound and residual-resolved
+    // - which is the URL the handle is given.
+    if (auto problem = vayu::http::unsendable_scheme (request.url)) {
+        return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
+    }
     // The body-level answer on purpose: this gate is about a body existing at
     // all, and a `graphql` body on a HEAD is still one to refuse - the GET
     // transport that moves it into the URL is GET's alone (issue #1228).

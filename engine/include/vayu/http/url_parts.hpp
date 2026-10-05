@@ -161,6 +161,38 @@ struct UrlHostSpan {
 [[nodiscard]] std::optional<std::string> unsendable_host (std::string_view url);
 
 /**
+ * @brief The schemes a transfer may carry, in `CURLOPT_PROTOCOLS_STR`'s
+ *        spelling: what @ref unsendable_scheme allows.
+ */
+inline constexpr const char* SENDABLE_PROTOCOLS = "http,https";
+
+/**
+ * @brief The scheme libcurl's easy interface reads off @p url, spelled as
+ *        written; empty when it reads none.
+ *
+ * libcurl's own rule (`Curl_is_absolute_url` in guessing mode, which is how
+ * every transfer handle parses its URL): a letter, then letters, digits, `+`,
+ * `-` or `.`, then `:/`. Without the slash the colon is read as a port
+ * separator, so `localhost:8080/x` and `data:text/plain,x` name no scheme and
+ * libcurl guesses one from the host (`http`, or `ftp` for an `ftp.` host and
+ * the like).
+ */
+[[nodiscard]] std::string_view url_scheme (std::string_view url);
+
+/**
+ * @brief Why @p url cannot be sent, as a lowercase clause naming its scheme,
+ *        when that scheme is anything but `http` or `https` (compared
+ *        case-insensitively); `nullopt` for those two and for a URL that names
+ *        no scheme (@ref url_scheme).
+ *
+ * `validate_transferable` asks this of every request before any driver
+ * configures a handle, so it is the one rule `POST /execute`, a run, a
+ * `pm.sendRequest`, an import fetch and an OAuth token request all meet, after
+ * every `{{variable}}` in the URL has been resolved.
+ */
+[[nodiscard]] std::optional<std::string> unsendable_scheme (std::string_view url);
+
+/**
  * @brief Split a raw query string (no leading `?`) on `&`, in wire order.
  *
  * Empty runs between separators are dropped (`a=1&&b=2` is two params), which

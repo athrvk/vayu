@@ -116,7 +116,9 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Both clients call this before configuring a handle. Four such requests:
+ * Both clients call this before configuring a handle. Five such requests:
+ * a URL whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
+ * libcurl is built with other protocols and would read a `file://` URL), a
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
  * drops the body, so honouring both is impossible), a binary body whose file
  * no plan checked (`vayu::http::FilePlan` - the file rule runs once per send or

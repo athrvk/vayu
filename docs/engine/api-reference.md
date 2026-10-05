@@ -3081,7 +3081,8 @@ via libcurl and returns the raw body and content type.
 { "url": "https://example.com/collection.json", "maxBytes": 10485760 }
 ```
 
-The `url` must be a string starting with `http://` or `https://`.
+The `url` must be a string whose scheme is `http` or `https`, in any case
+(see [URL schemes](#url-schemes)).
 
 **`maxBytes` is the caller's bound on the response, and the caller states it**
 because this route is one proxy for *every* import format - a Postman or
@@ -3131,8 +3132,9 @@ never turn into a `500`.
 
 **Errors:**
 - `400` `Invalid JSON body` - the request body did not parse.
-- `400` `Invalid URL` - `url` is missing, not a string, or does
-  not start with `http://` / `https://`.
+- `400` `Invalid URL` - `url` is missing, not a string, or names no scheme.
+- `400` `Invalid URL: scheme '<scheme>' is not supported - only http and
+  https URLs can be sent` - `url` names any other scheme (`ftp`, `file`, ...).
 - `400` `Invalid 'maxBytes': must be a positive integer`.
 - `413` `Refused to fetch: <detail>` - the response was over the bound in force.
   The detail names the bound that was applied (the clamped one, not the one
@@ -4966,6 +4968,25 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
+
+#### URL schemes
+
+Only `http` and `https` URLs are sent, on every send path: Send, a load or
+collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an
+OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
+The scheme is read case-insensitively from the URL as it stands just before
+the transfer - after composition, a data row's bind, the pre-request script
+and the residual pass - so a `{{baseUrl}}` that resolves to `file:///etc` is
+refused like a typed one. A refused send never reaches the network: status
+`0`, error code `INVALID_URL`, and the message
+`Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent`,
+naming the scheme as written. A `pm.sendRequest` gets the same code and
+message as its callback's `err`.
+
+A scheme is what libcurl reads as one: letters, digits, `+`, `-` and `.`
+after a leading letter, followed by `:/`. A URL with no scheme is sent as
+before, with the scheme libcurl guesses from the host - `http` for
+`localhost:8080/x` or `example.com/x`.
 
 #### Non-ASCII hosts
 

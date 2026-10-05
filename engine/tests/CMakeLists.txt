@@ -159,6 +159,7 @@ add_executable(vayu_tests
     query_encoding_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
+    url_scheme_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
     jmeter_import_test.cpp
@@ -417,6 +418,7 @@ set(vayu_scratch_database_suites
     TransportPolicyDbTest
     TrashTest
     TreeOrderTest
+    UrlSchemeExecuteTest
     WorkspaceBackupTest
 )
 
