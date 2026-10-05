@@ -2670,8 +2670,9 @@ animation frame, and commits to the store it persists to exactly once, on
 `pointerup`. A `pointercancel` (a touch interruption, an OS overlay) reverts
 the live value to where the drag started and commits nothing. A discrete
 keyboard press or the double-click reset still commit immediately; only a
-held key's own repeats coalesce to one commit per animation frame, the same
-way a drag's paint does, so holding a key does not flood `localStorage` with
+held key's own repeats are throttled to one commit per 200 ms (flushed on
+keyup and blur; OS key repeat is slower than a frame, so per-frame coalescing
+would not help), so holding a key does not flood `localStorage` with
 one write per repeat. Both handles share this one hook rather than each
 carrying its own copy, after the two independently-written copies this
 started from had already drifted (only one handled keyboard Page/Home/End

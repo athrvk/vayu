@@ -334,32 +334,28 @@ describe("the resize handle", () => {
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
 	});
 
-	// Holding an arrow key auto-repeats about as fast as a drag fires
-	// `pointermove` (#1738) - a naive per-repeat commit is the same
-	// `JSON.stringify` + `localStorage.setItem` flood the drag path was fixed
-	// for. A single press still commits immediately (the test above); only a
-	// held key's repeats coalesce.
-	it("coalesces a held key's repeats into one commit, flushed on release", () => {
+	// Holding an arrow key auto-repeats every 30-100 ms (#1738) - slower than
+	// a frame, so a per-frame coalesce still writes once per repeat. A single
+	// press still commits immediately (the test above); a held key's repeats
+	// are throttled on time and flushed on release.
+	it("throttles a held key's repeats on time, flushed on release", () => {
 		vi.useFakeTimers();
-		vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-			return setTimeout(() => cb(0), 0) as unknown as number;
-		});
-		vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
 		renderForm();
 		const handle = heightHandle();
 
 		fireEvent.keyDown(handle, { key: "ArrowDown", repeat: true });
+		vi.advanceTimersByTime(40);
 		fireEvent.keyDown(handle, { key: "ArrowDown", repeat: true });
-		// Nothing committed yet - both repeats coalesced into one pending frame.
+		vi.advanceTimersByTime(40);
+		// Nothing committed yet - both repeats landed inside one interval.
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
 
-		vi.runAllTimers();
+		fireEvent.keyUp(handle, { key: "ArrowDown" });
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + SCRIPT_EDITOR_HEIGHT_STEP * 2
 		);
 
 		vi.useRealTimers();
-		vi.unstubAllGlobals();
 	});
 });
 

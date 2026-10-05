@@ -1853,9 +1853,10 @@ issue #1738), the rAF-coalesced-write, one-commit-on-release mechanism
 those copies had already drifted (this row's keyboard handling covered only
 Arrow keys, and neither handled `pointercancel`). Arrow keys, Page keys,
 Home/End and a reset (Enter/Space, to `DEFAULT_SCRIPT_EDITOR_HEIGHT`) all
-commit immediately on a discrete press; a held key's repeats coalesce to one
-commit per animation frame, the same way the drag's paint does, so holding a
-key does not flood `localStorage` with one write per repeat. A `pointercancel`
+commit immediately on a discrete press; a held key's repeats are throttled to
+one commit per 200 ms (`KEY_COMMIT_INTERVAL_MS`, flushed on keyup and blur;
+OS key repeat is slower than a frame, so per-frame coalescing would not help),
+so holding a key does not flood `localStorage` with one write per repeat. A `pointercancel`
 mid-drag (a touch interruption, an OS overlay) reverts the box to the height
 the drag started from and writes nothing.
 
