@@ -24,6 +24,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -171,8 +172,66 @@ TEST_F (ServerBindTest, AFreePortStartsAndServesWithNoRecordedError) {
 }
 
 /// The management server buffers a body before any route sees it, so an
-/// import is bounded at the transport from `Content-Length` (#1782).
+/// import is bounded from `Content-Length` before the body is read (#1782).
+/// The guard is driven directly: over a socket the server answers without
+/// reading the upload, and whether the client sees the 413 or a reset depends
+/// on the platform's socket buffers.
+namespace {
+
+httplib::Server::HandlerResponse guard_outcome (vayu::db::Database& db,
+const std::string& path,
+const std::string& length,
+httplib::Response& res) {
+    httplib::Request req;
+    req.method = "POST";
+    req.path   = path;
+    req.set_header ("Content-Length", length);
+    return vayu::http::routes::reject_oversized_import (db, req, res);
+}
+
+} // namespace
+
 TEST_F (ServerBindTest, AnOversizedImportBodyIsRefusedWith413BeforeItIsRead) {
+    httplib::Response res;
+    // The default cap is 10 MiB, so the limit is 16 MiB: 20 MiB is refused.
+    EXPECT_EQ (
+    guard_outcome (*db_, "/import/parse", std::to_string (20U * 1024U * 1024U), res),
+    httplib::Server::HandlerResponse::Handled);
+    EXPECT_EQ (res.status, 413);
+    const auto parsed = nlohmann::json::parse (res.body);
+    EXPECT_NE (parsed.at ("error").at ("message").get<std::string> ().find (
+               "maxSpecDocumentBytes"),
+    std::string::npos);
+}
+
+TEST_F (ServerBindTest, TheImportBodyLimitFollowsTheLiveSetting) {
+    auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
+    ASSERT_HAS_VALUE (entry);
+    entry->value = "104857600";
+    db_->save_config_entry (*entry);
+
+    httplib::Response raised;
+    EXPECT_EQ (guard_outcome (*db_, "/import", std::to_string (20U * 1024U * 1024U), raised),
+    httplib::Server::HandlerResponse::Unhandled);
+
+    entry->value = "1024";
+    db_->save_config_entry (*entry);
+    httplib::Response lowered;
+    EXPECT_EQ (guard_outcome (*db_, "/import/document",
+               std::to_string (2U * 1024U * 1024U), lowered),
+    httplib::Server::HandlerResponse::Handled);
+    EXPECT_EQ (lowered.status, 413);
+}
+
+TEST_F (ServerBindTest, TheImportBodyGuardLeavesOtherRoutesAndSmallBodiesAlone) {
+    httplib::Response res;
+    EXPECT_EQ (guard_outcome (*db_, "/import/parse", "2", res),
+    httplib::Server::HandlerResponse::Unhandled);
+    EXPECT_EQ (guard_outcome (*db_, "/specs", std::to_string (20U * 1024U * 1024U), res),
+    httplib::Server::HandlerResponse::Unhandled);
+}
+
+TEST_F (ServerBindTest, AnImportBodyOverTheLimitNeverReachesTheRouteOverASocket) {
     int port = 0;
     {
         PortHolder holder;
@@ -183,26 +242,21 @@ TEST_F (ServerBindTest, AnOversizedImportBodyIsRefusedWith413BeforeItIsRead) {
     vayu::http::Server server (*db_, run_manager_, port);
     ASSERT_TRUE (server.start ());
 
-    // A small live cap keeps the refused body small enough for the kernel to
-    // buffer, so the client reads the 413 instead of a reset: the guard answers
-    // without reading the body, which a larger upload can race.
-    auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_HAS_VALUE (entry);
-    entry->value = "1024";
-    db_->save_config_entry (*entry);
-
     httplib::Client client ("127.0.0.1", port);
-    const std::string body ((2U * 1024U * 1024U) + (512U * 1024U), 'x');
+    const std::string body (size_t{ 20 } * 1024 * 1024, 'x');
     auto response = client.Post ("/import/parse", body, "application/json");
-    ASSERT_TRUE (response);
-    EXPECT_EQ (response->status, 413);
-    const auto parsed = nlohmann::json::parse (response->body);
-    EXPECT_NE (parsed.at ("error").at ("message").get<std::string> ().find (
-               "maxSpecDocumentBytes"),
-    std::string::npos);
+    // Either the 413 or a closed connection, depending on the platform's socket
+    // buffers; never the route's own 400 for a body that is not JSON.
+    if (response) {
+        EXPECT_EQ (response->status, 413);
+    }
 
     // A body inside the limit still reaches the route (400: not a JSON object).
     auto small = client.Post ("/import/parse", "[]", "application/json");
+    if (!small) {
+        httplib::Client fresh ("127.0.0.1", port);
+        small = fresh.Post ("/import/parse", "[]", "application/json");
+    }
     ASSERT_TRUE (small);
     EXPECT_EQ (small->status, 400);
 
