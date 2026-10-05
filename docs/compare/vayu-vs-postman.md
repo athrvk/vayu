@@ -126,7 +126,7 @@ winget install athrvk.Vayu
 macOS and Linux:
 
 ```sh
-bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
+bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
 [Full install detail](../index.md#install){ .md-button .md-button--primary }

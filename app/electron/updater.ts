@@ -41,7 +41,7 @@ function releaseUrl(version: string): string {
  * its path.
  */
 function macInstallCommand(): string {
-	return `bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"`;
+	return `bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"`;
 }
 
 export interface UpdateAvailablePayload {

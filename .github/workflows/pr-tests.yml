@@ -77,7 +77,7 @@ jobs:
       # unions and need the default. Both are API calls, so the second costs no
       # runner time.
       - name: Check whether anything outside docs changed
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: code
         with:
           # `every`, not the default `some`. The default means "include the file
@@ -144,7 +144,7 @@ jobs:
       # files or extension globs that no `.md` can match. Add a `**` glob to one
       # of them and it needs these two lines too.
       - name: Route to the trees the change can affect
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: area
         with:
           predicate-quantifier: some-with-excludes
@@ -365,6 +365,10 @@ jobs:
               # would catch it.
               - 'app/electron/constants.ts'
               - '.github/workflows/pr-tests.yml'
+              # Inputs to the action-pin check below: a `uses:` ref added to
+              # any workflow or composite action has to reach it.
+              - '.github/workflows/**'
+              - '.github/actions/**'
             # The first-party JavaScript outside `app/` (#1166) - the perf
             # harnesses under `scripts/perf/` today. ESLint is configured a
             # directory away and reached none of it, prettier's domain is
@@ -437,17 +441,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -558,17 +562,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -625,7 +629,7 @@ jobs:
 
       - name: Upload this shard's manifest
         if: matrix.shard
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ steps.manifest.outputs.artifact }}
           path: |
@@ -690,7 +694,7 @@ jobs:
       # briefly full history, for a commit walk that read the pull request's own
       # commits; that walk is gone (#940) and so is its clone cost.
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
 
@@ -725,7 +729,7 @@ jobs:
           done
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -734,7 +738,7 @@ jobs:
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
@@ -758,7 +762,7 @@ jobs:
       # build - CMake passes no /Zi, so there is no separate PDB for sccache to
       # choke on. Check that again before enabling it for windows-dev (Debug).
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Configure sccache compiler launcher
         shell: bash
@@ -767,7 +771,7 @@ jobs:
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
       - name: Build engine
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
@@ -1103,7 +1107,7 @@ jobs:
       # not a default: `Run engine tests` above already fails the job on a red
       # suite, and turning this on would make one failing test fail two steps.
       - name: Publish C++ test results
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
         if: always()
         with:
           report_paths: 'engine/test-results.xml'
@@ -1139,7 +1143,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -1211,7 +1215,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -1273,7 +1277,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -1308,7 +1312,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -1332,6 +1336,28 @@ jobs:
           curl -fsSL "$url" | tar -xJ
           sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
+
+      # A tag is a pointer its owner can move, and a release job that runs
+      # whatever the tag points at today hands that owner the release (#1779).
+      # Every `uses:` of a third-party action is therefore a 40-character
+      # commit SHA, with the tag it was resolved from in a trailing comment
+      # for Dependabot and for readers. `./` local actions are in-tree and
+      # exempt. Zero `uses:` lines found fails: a scan of nothing proves nothing.
+      - name: Every action is pinned to a commit SHA
+        shell: bash
+        run: |
+          mapfile -t refs < <(grep -rEn '^[[:space:]]*(- )?uses:[[:space:]]' .github/workflows .github/actions | grep -vE 'uses:[[:space:]]+\./')
+          if [[ ${#refs[@]} -eq 0 ]]; then
+            echo "::error::No 'uses:' lines found - the scan is broken, not the tree"
+            exit 1
+          fi
+          bad=$(printf '%s\n' "${refs[@]}" | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]' || true)
+          if [[ -n "$bad" ]]; then
+            echo "::error::Actions must be pinned to a full commit SHA with a '# vX.Y.Z' comment:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          echo "${#refs[@]} action reference(s), all pinned"
 
       # `scripts/pre-commit` is named on its own because it carries no
       # extension; `engine/vendor/` is dropped because upstream's scripts are
@@ -1430,7 +1456,7 @@ jobs:
       # job is green - which is exactly the shape of the failure it guards.
       - name: Collect the app shard manifests
         if: needs.app.result == 'success'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: vitest-shard-manifest-*
           merge-multiple: true

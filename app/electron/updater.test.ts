@@ -497,7 +497,9 @@ describe("the macOS update instruction", () => {
 	// that no `raw.githubusercontent.com/athrvk` grep can see.
 	const [readmePath] = ROOT_READING_GUARDS.macUpdateCommand.paths.map(fromRepoRoot);
 	const readme = readFileSync(readmePath, "utf8");
-	const documented = readme.match(/^bash -c "\$\(curl -fsSL \S+install\.sh\)"$/m)?.[0];
+	const documented = readme.match(
+		/^bash -c "\$\(curl --proto '=https' --tlsv1.2 -fsSL \S+install\.sh\)"$/m
+	)?.[0];
 
 	it("finds a command in the README to compare against", () => {
 		// Without this the assertion below passes vacuously if the README's

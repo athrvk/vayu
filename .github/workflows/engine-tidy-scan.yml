@@ -128,7 +128,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -147,7 +147,7 @@ jobs:
             libtool
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -156,14 +156,14 @@ jobs:
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Configure sccache compiler launcher
         shell: bash
@@ -175,7 +175,7 @@ jobs:
       # and a compilation database whose inputs do not exist yet lints as a wall
       # of missing-include errors rather than as the tree.
       - name: Build engine
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ runner.os == 'Windows' && 'windows-prod' || 'linux-prod' }}
@@ -283,7 +283,7 @@ jobs:
 
       - name: Upload the scan
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: engine-tidy-scan-${{ matrix.os }}
           path: |
@@ -318,7 +318,7 @@ jobs:
       # table, which is the whole of what a reader needs.
       - name: File or update the tidy-scan-failure issue
         if: ${{ failure() && github.event_name != 'pull_request' }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           RUNNER_PICKED: ${{ matrix.os }}
         with:

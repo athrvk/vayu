@@ -51,9 +51,10 @@ jobs:
       # The preflight has to come after the checkout, because the action it uses
       # lives in this repository.
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Preflight and sync the fork
         uses: ./.github/actions/winget-preflight
@@ -117,7 +118,7 @@ jobs:
       # beside the input it applies to - so neither path prunes now, and this
       # workflow is no longer the exception to a rule.
       - name: Submit manifest to winget-pkgs
-        uses: vedantmgoyal9/winget-releaser@v2
+        uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
           identifier: athrvk.Vayu
           version: ${{ steps.resolve.outputs.version }}
