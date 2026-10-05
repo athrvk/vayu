@@ -106,7 +106,9 @@ describe("ResponseEvents render window", () => {
 		expect(screen.queryByText(/scroll for more/)).not.toBeInTheDocument();
 	});
 
-	it("keeps the window where the reader left it when a batch lands", () => {
+	// Two windows of rows, each with its time's tooltip root: about 1.5s here, and
+	// over the 5s default on the Windows runner, which runs these 3-4x slower.
+	it("keeps the window where the reader left it when a batch lands", { timeout: 15_000 }, () => {
 		const events = stream(500);
 		const { rerender } = render(
 			<ResponseEvents events={events} isStream isStreaming listKey="run_1" />
@@ -130,7 +132,9 @@ describe("ResponseEvents render window", () => {
 		expect(rows()).toHaveLength(GROWING_WINDOW_STEP * 2);
 	});
 
-	it("starts a different list at the top", () => {
+	// Two windows of rows, each with its time's tooltip root: about 1.5s here, and
+	// over the 5s default on the Windows runner, which runs these 3-4x slower.
+	it("starts a different list at the top", { timeout: 15_000 }, () => {
 		const { rerender } = render(
 			<ResponseEvents events={stream(500)} isStream isStreaming listKey="run_1" />
 		);
