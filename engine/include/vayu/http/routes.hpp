@@ -751,6 +751,18 @@ std::string spec_content_hash (const std::string& content);
 size_t spec_size_cap (vayu::db::Database& db);
 
 /**
+ * Pre-routing guard for the three import routes that carry a whole document in
+ * their body (`POST /import`, `/import/parse`, `/import/document`): answers 413
+ * from the `Content-Length` header, before cpp-httplib buffers the body, when it
+ * exceeds the live `maxSpecDocumentBytes` plus JSON-escaping headroom. The
+ * route's own exact check on the document still runs after the parse (#1782).
+ * Defined in import.cpp.
+ */
+httplib::Server::HandlerResponse reject_oversized_import (vayu::db::Database& db,
+const httplib::Request& req,
+httplib::Response& res);
+
+/**
  * Puts a spec write's two indexes onto @p spec - `operations` (issue #629) and
  * `responseSchemas` (issue #628) - **both derived here from `spec.content`**
  * (issues #853 and #860), returning the caller-facing error when the document

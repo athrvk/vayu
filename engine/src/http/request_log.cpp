@@ -51,9 +51,13 @@ void log_request (const RequestLogLine& line) {
     }
 }
 
-void install_request_logger (httplib::Server& server) {
-    server.set_pre_routing_handler ([] (const httplib::Request&, httplib::Response& res) {
+void install_request_logger (httplib::Server& server, AdmitHandler admit) {
+    server.set_pre_routing_handler (
+    [admit = std::move (admit)] (const httplib::Request& req, httplib::Response& res) {
         res.user_data.set (kStartTimeKey, std::chrono::steady_clock::now ());
+        if (admit) {
+            return admit (req, res);
+        }
         return httplib::Server::HandlerResponse::Unhandled;
     });
 

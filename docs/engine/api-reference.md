@@ -3303,6 +3303,17 @@ the reason `x-vayu-elements` is not.
   `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 
+**Body cap (`POST /import`, `/import/parse`, `/import/document`).** The management
+API buffers a request body before a route sees it, so these three routes are
+bounded from the `Content-Length` header, before the body is read: a body over
+`maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string
+escaping of the document) answers `413` `Request body is N bytes, over the limit of
+M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`. A
+chunked body carries no length and is read to cpp-httplib's own 100 MB default.
+The exact check on the `content` string described below still runs after the
+parse. A client that streams a very large body may see the connection closed
+rather than the `413`, since the body is not read.
+
 ### POST /import
 
 Parse a document **and persist it**, in one call - `POST /import/parse`, the

@@ -10,6 +10,7 @@
 #include <httplib.h>
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 /**
@@ -59,6 +60,12 @@ void log_request (const RequestLogLine& line);
 /// to serve an arbitrarily long mocked path) - that handler's return value
 /// decides whether cpp-httplib routes the request at all, and this one must
 /// not replace it.
-void install_request_logger (httplib::Server& server);
+///
+/// A server has one pre-routing slot, so a check that must run there - before
+/// cpp-httplib reads the body - rides in as @p admit, called after the
+/// timestamp is stamped; `Handled` means it filled in the response itself.
+using AdmitHandler =
+std::function<httplib::Server::HandlerResponse (const httplib::Request&, httplib::Response&)>;
+void install_request_logger (httplib::Server& server, AdmitHandler admit = {});
 
 } // namespace vayu::http

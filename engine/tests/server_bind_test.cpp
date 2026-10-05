@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <filesystem>
@@ -26,6 +27,7 @@
 #include "vayu/http/server.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 
 namespace {
@@ -164,6 +166,45 @@ TEST_F (ServerBindTest, AFreePortStartsAndServesWithNoRecordedError) {
     auto response = client.Get ("/health");
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 200);
+
+    server.stop ();
+}
+
+/// The management server buffers a body before any route sees it, so an
+/// import is bounded at the transport from `Content-Length` (#1782).
+TEST_F (ServerBindTest, AnOversizedImportBodyIsRefusedWith413BeforeItIsRead) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    // A small live cap keeps the refused body small enough for the kernel to
+    // buffer, so the client reads the 413 instead of a reset: the guard answers
+    // without reading the body, which a larger upload can race.
+    auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
+    ASSERT_HAS_VALUE (entry);
+    entry->value = "1024";
+    db_->save_config_entry (*entry);
+
+    httplib::Client client ("127.0.0.1", port);
+    const std::string body ((2U * 1024U * 1024U) + (512U * 1024U), 'x');
+    auto response = client.Post ("/import/parse", body, "application/json");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 413);
+    const auto parsed = nlohmann::json::parse (response->body);
+    EXPECT_NE (parsed.at ("error").at ("message").get<std::string> ().find (
+               "maxSpecDocumentBytes"),
+    std::string::npos);
+
+    // A body inside the limit still reaches the route (400: not a JSON object).
+    auto small = client.Post ("/import/parse", "[]", "application/json");
+    ASSERT_TRUE (small);
+    EXPECT_EQ (small->status, 400);
 
     server.stop ();
 }

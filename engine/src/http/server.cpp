@@ -156,7 +156,10 @@ void Server::setup_routes () {
     // One request line per call (issue #1510), before anything else touches
     // server_: a route registered below that never logged its own entry now
     // always does, at the level its status calls for.
-    install_request_logger (server_);
+    install_request_logger (
+    server_, [this] (const httplib::Request& req, httplib::Response& res) {
+        return routes::reject_oversized_import (db_, req, res);
+    });
 
     // ==========================================
     // CORS Configuration
