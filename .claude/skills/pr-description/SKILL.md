@@ -102,6 +102,17 @@ part of the change:
    commit didn't make it to GitHub before being dropped, or the SHA in the
    URL isn't the one that was actually pushed.
 
+**Unattended runs use the no-rewrite variant.** A routine or a subagent has
+no human to confirm step 5's force-push, so instead of dropping the
+screenshot commit it adds a second commit that deletes the files and pushes
+again (`.pr-assets/<issue>/` is the conventional path). The blob stays
+retrievable from the introducing commit's SHA exactly as above, the branch
+tip is code-only, and no pushed history is rewritten - at the cost of two
+scaffolding commits in the PR's history instead of none. Either way the
+image must be embedded as `![what it shows](URL)`; a bare raw URL on its
+own line renders as a hyperlink, not an image, because GitHub auto-embeds
+only its own upload domains.
+
 This relies on retention behavior GitHub doesn't document or guarantee, not
 on a stable API. If a screenshot in some old, already-merged PR ever turns up
 broken, that's why - and the fix is to re-do the upload for whatever PR is
