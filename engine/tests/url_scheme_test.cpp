@@ -38,6 +38,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -60,6 +61,7 @@
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 namespace {
 
@@ -125,6 +127,22 @@ TEST (UrlScheme, TheRefusalNamesTheSchemeAndTheTwoThatAreAllowed) {
     ASSERT_HAS_VALUE (problem);
     EXPECT_NE (problem->find ("'FILE'"), std::string::npos) << *problem;
     EXPECT_NE (problem->find ("only http and https"), std::string::npos) << *problem;
+}
+
+// The library underneath agrees: vcpkg builds libcurl without its `non-http`
+// feature, which compiles every other protocol out (`HTTP_ONLY`), so a scheme
+// the two layers below missed would still have nothing to run on. A feature
+// added to `engine/vcpkg.json` that brings one back fails here.
+TEST (UrlScheme, TheLinkedLibcurlSpeaksOnlyHttpAndHttps) {
+    const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+    ASSERT_NE (info, nullptr);
+    ASSERT_NE (info->protocols, nullptr);
+    std::set<std::string> protocols;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): libcurl's list is null-terminated; the terminator is its only length
+    for (const char* const* name = info->protocols; *name != nullptr; ++name) {
+        protocols.insert (vayu::utils::ascii_lower (*name));
+    }
+    EXPECT_EQ (protocols, (std::set<std::string>{ "http", "https" }));
 }
 
 // ============================================================================
