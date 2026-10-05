@@ -33,19 +33,22 @@
  * started from and the store is never touched, because the drag did not
  * happen.
  *
- * A held key (OS auto-repeat) is the same flood by another name - holding an
- * arrow fires `keydown` about as often as a drag fires `pointermove`. A
- * single press (`e.repeat === false`) still commits immediately, matching
- * the double-click / Enter-reset contract a caller may also expose; a
- * repeat's commit coalesces to once per animation frame the same way a
- * drag's paint does, and `flushKey` (wired to `onKeyUp` and `onBlur`)
- * commits whatever the last frame never got to, so releasing the key never
- * drops the final position. The handle's own `aria-valuenow` still updates
- * on every keystroke regardless of repeat, so the announced value never
- * lags behind what a screen reader user just pressed.
+ * A held key (OS auto-repeat) is a flood of its own, but a slower one: key
+ * repeat arrives every 30-100 ms, longer than a ~16 ms frame, so coalescing
+ * per frame would still commit once per repeat. Repeats are throttled on
+ * time instead (`KEY_COMMIT_INTERVAL_MS`). A single press (`e.repeat ===
+ * false`) still commits immediately, matching the double-click / Enter-reset
+ * contract a caller may also expose; `flushKey` (wired to `onKeyUp` and
+ * `onBlur`) commits whatever the throttle has not yet written, so releasing
+ * the key never drops the final position. The handle's own `aria-valuenow`
+ * still updates on every keystroke regardless of repeat, so the announced
+ * value never lags behind what a screen reader user just pressed.
  */
 
 import { useCallback, useRef } from "react";
+
+/** At most one `commit` per this many ms while a key is held: ~5 persist writes a second instead of one per repeat. */
+export const KEY_COMMIT_INTERVAL_MS = 200;
 
 export interface ResizeGestureOptions {
 	min: number;
@@ -88,14 +91,16 @@ export function useResizeGesture({
 }: ResizeGestureOptions): ResizeGesture {
 	const clamp = useCallback((value: number) => Math.max(min, Math.min(max, value)), [min, max]);
 
-	// Coalescing state shared by the drag and the keyboard-repeat paths - only
-	// one of the two is ever active at once, so one rAF id and one pending
-	// value cover both.
+	// The drag's per-frame paint coalescing.
 	const rafIdRef = useRef<number | null>(null);
-	const pendingRef = useRef<number | null>(null);
+	const pendingPaintRef = useRef<number | null>(null);
+	// The keyboard hold's throttle: the not-yet-committed value and the timer
+	// that will commit it.
+	const keyPendingRef = useRef<number | null>(null);
+	const keyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// The in-flight value during a keyboard hold, so the next repeat nudges
 	// from where the last one left off rather than from the store, which a
-	// coalesced repeat has not written to yet.
+	// throttled repeat has not written to yet.
 	const liveKeyRef = useRef<number | null>(null);
 
 	const cancelFrame = useCallback(() => {
@@ -106,15 +111,29 @@ export function useResizeGesture({
 	}, []);
 
 	const scheduleFrame = useCallback((value: number, run: (value: number) => void) => {
-		pendingRef.current = value;
+		pendingPaintRef.current = value;
 		if (rafIdRef.current !== null) return;
 		rafIdRef.current = requestAnimationFrame(() => {
 			rafIdRef.current = null;
-			const scheduled = pendingRef.current;
-			pendingRef.current = null;
+			const scheduled = pendingPaintRef.current;
+			pendingPaintRef.current = null;
 			if (scheduled !== null) run(scheduled);
 		});
 	}, []);
+
+	const clearKeyTimer = useCallback(() => {
+		if (keyTimerRef.current !== null) {
+			clearTimeout(keyTimerRef.current);
+			keyTimerRef.current = null;
+		}
+	}, []);
+
+	const commitPendingKey = useCallback(() => {
+		clearKeyTimer();
+		const pending = keyPendingRef.current;
+		keyPendingRef.current = null;
+		if (pending !== null) commit(pending);
+	}, [clearKeyTimer, commit]);
 
 	const startDrag = useCallback(
 		(e: React.PointerEvent<HTMLElement>, axis: "x" | "y", sign: 1 | -1 = 1) => {
@@ -165,29 +184,28 @@ export function useResizeGesture({
 			liveKeyRef.current = clamped;
 			e.currentTarget.setAttribute("aria-valuenow", String(Math.round(clamped)));
 			if (e.repeat) {
-				scheduleFrame(clamped, commit);
-			} else {
-				cancelFrame();
-				pendingRef.current = null;
-				commit(clamped);
-				// `liveKeyRef` is left set until `flushKey` (`onKeyUp`/`onBlur`)
-				// clears it - a repeat immediately following this same press
-				// continues nudging from here, not from `getValue()`, which the
-				// caller has not necessarily re-rendered with the just-committed
-				// value yet.
+				keyPendingRef.current = clamped;
+				if (keyTimerRef.current === null) {
+					keyTimerRef.current = setTimeout(commitPendingKey, KEY_COMMIT_INTERVAL_MS);
+				}
+				return;
 			}
+			clearKeyTimer();
+			keyPendingRef.current = null;
+			commit(clamped);
+			// `liveKeyRef` is left set until `flushKey` (`onKeyUp`/`onBlur`)
+			// clears it - a repeat immediately following this same press
+			// continues nudging from here, not from `getValue()`, which the
+			// caller has not necessarily re-rendered with the just-committed
+			// value yet.
 		},
-		[clamp, commit, scheduleFrame, cancelFrame]
+		[clamp, commit, clearKeyTimer, commitPendingKey]
 	);
 
 	const flushKey = useCallback(() => {
-		cancelFrame();
-		if (pendingRef.current !== null) {
-			commit(pendingRef.current);
-			pendingRef.current = null;
-		}
+		commitPendingKey();
 		liveKeyRef.current = null;
-	}, [cancelFrame, commit]);
+	}, [commitPendingKey]);
 
 	return { startDrag, applyKey, currentValue, flushKey };
 }
