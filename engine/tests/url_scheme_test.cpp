@@ -29,6 +29,16 @@
  * cannot pass.
  */
 
+// Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
+// `max` macros break the `std::numeric_limits<...>::max ()` in
+// `load_pacing.hpp` that `vayu/core/run_manager.hpp` pulls in below. `NOMINMAX`
+// is PRIVATE to `vayu_core` (`engine/CMakeLists.txt`), so this target never
+// gets it; `transport_policy_test.cpp` carries the same guard for the same
+// reason.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <gtest/gtest.h>
 
 #include <curl/curl.h>
