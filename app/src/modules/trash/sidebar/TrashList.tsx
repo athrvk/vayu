@@ -201,7 +201,7 @@ export default function TrashList() {
 						ref={listRef}
 						data-trash-list
 						tabIndex={-1}
-						className="h-full space-y-2 overflow-y-auto pr-1"
+						className="h-full space-y-2 overflow-y-auto"
 					>
 						{isLoading && <ListSkeleton rows={4} leading />}
 

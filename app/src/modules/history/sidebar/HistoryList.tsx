@@ -362,7 +362,7 @@ export default function HistoryList() {
 						aria-label="Run history"
 						onKeyDown={onListKeyDown}
 						onFocus={onListFocus}
-						className="h-full space-y-1 overflow-y-auto pr-1"
+						className="h-full space-y-1 overflow-y-auto"
 					>
 						{isLoading && (
 							<ListSkeleton rows={4} leading badge className="enter-fade" />
