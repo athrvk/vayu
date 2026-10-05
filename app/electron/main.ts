@@ -51,6 +51,7 @@ import {
 	registerRunningServicesIpc,
 } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
+import { installEngineOriginBridge } from "./engine-origin.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
 	createContextTargetStore,
@@ -1522,6 +1523,10 @@ app.whenReady().then(async () => {
 	// the session already exists here because `app.whenReady` has resolved.
 	void clearResponseCacheOnUpgrade(session.defaultSession, app.getVersion());
 
+	// The engine refuses any request that carries an Origin, and the renderer is a
+	// browser context that sends one. The bridge is the renderer's CORS, so it is
+	// on the main window's session before that window exists. See engine-origin.ts.
+	installEngineOriginBridge(session.defaultSession);
 	denyDevicePermissions(session.defaultSession);
 
 	// Populate the native About panel (used by Help → About Vayu on

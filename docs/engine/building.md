@@ -451,7 +451,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 
 | Library | Purpose |
 |---------|---------|
-| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`, `non-http`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858) |
+| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858). `non-http`, a default feature, is deliberately left off: without it the port builds libcurl `HTTP_ONLY`, so `file`, `ftp(s)`, `gopher(s)`, `dict`, `imap(s)`, `pop3(s)`, `smtp(s)`, `telnet`, `tftp`, `rtsp` and `mqtt(s)` - all of which the build carried before - are not compiled in at all, which backs the engine's http/https scheme rule ([URL schemes](api-reference.md#url-schemes)). `UrlScheme.TheLinkedLibcurlSpeaksOnlyHttpAndHttps` fails if a feature brings one back; WebSocket support would be the port's `websockets` feature, which itself depends on `non-http` |
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
@@ -1564,8 +1564,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[core,http2,non-http,openssl] libsodium nlohmann-json ryml valijson ada-url cpp-httplib[core,openssl] sqlite3 sqlite-orm gtest`
-  (the leading `core` is what `default-features: false` spells on the command line, and it is load-bearing on Windows - see the dependency table above. `http2` is required, without it libcurl is built without nghttp2 and the HTTP/2 support test fails; `non-http` is a default feature the engine relies on and has to be named once the defaults are off; cpp-httplib's `openssl` is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile; its `core` keeps the default `brotli` off, see the table)
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[core,http2,openssl] libsodium nlohmann-json ryml valijson ada-url cpp-httplib[core,openssl] sqlite3 sqlite-orm gtest`
+  (the leading `core` is what `default-features: false` spells on the command line, and it is load-bearing on Windows - see the dependency table above. `http2` is required, without it libcurl is built without nghttp2 and the HTTP/2 support test fails; cpp-httplib's `openssl` is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile; its `core` keeps the default `brotli` off, see the table; curl's default `non-http` is left off on purpose, see the same table)
 - On Windows, ensure Visual Studio C++ tools are installed
 
 ### Build Script Issues

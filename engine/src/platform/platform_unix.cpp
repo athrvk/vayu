@@ -15,6 +15,7 @@
 #if !VAYU_PLATFORM_WINDOWS
 
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -38,6 +39,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "vayu/utils/reentrant.hpp"
 
@@ -235,6 +237,18 @@ std::string path_join (const std::string& base, const std::string& component) {
 
 std::string default_data_dir () {
     return path_join (".", "data");
+}
+
+std::string home_directory () {
+    const long suggested = sysconf (_SC_GETPW_R_SIZE_MAX);
+    std::vector<char> buffer (suggested > 0 ? static_cast<std::size_t> (suggested) : 16384);
+    passwd entry{};
+    passwd* found = nullptr;
+    if (getpwuid_r (getuid (), &entry, buffer.data (), buffer.size (), &found) != 0 ||
+    found == nullptr || found->pw_dir == nullptr) {
+        return {};
+    }
+    return found->pw_dir;
 }
 
 // ============================================================================

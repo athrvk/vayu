@@ -58,12 +58,14 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
 
 namespace vayu::http::routes {
 // Defined in file_roots.cpp; each is the testable core of one route.
-std::pair<int, nlohmann::json>
-create_file_root_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> create_file_root_response (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::string& home);
 nlohmann::json list_file_roots_response (vayu::db::Database& db);
 std::pair<int, nlohmann::json>
 delete_file_root_response (vayu::db::Database& db, const std::string& id);
@@ -138,14 +140,17 @@ std::string sha256_hex (std::string_view bytes) {
     return vayu::utils::hex_encode (vayu::utils::byte_view (digest));
 }
 
+/// A binary request whose file a person chose in the editor, so the trust
+/// half of the rule stays out of the way of a test about the wire.
 Request binary_request (const std::string& url,
 const std::string& src,
 HttpMethod method = HttpMethod::POST) {
     Request request;
-    request.method        = method;
-    request.url           = url;
-    request.body.mode     = BodyMode::Binary;
-    request.body.file.src = src;
+    request.method               = method;
+    request.url                  = url;
+    request.body.mode            = BodyMode::Binary;
+    request.body.file.src        = src;
+    request.body.file.unresolved = false;
     return request;
 }
 
@@ -278,6 +283,58 @@ TEST (FileRule, APathNobodyChoseIsSentOnlyFromUnderAnAllowedFolder) {
 
     // A path a person chose is sent from anywhere.
     EXPECT_FALSE (unsendable_file_ref (ref (outside, false), "Body file", policy));
+}
+
+// The trust flag fails closed: only `"unresolved": false` in so many words says
+// a person chose the path. An absent key, `null` or a string is a path nobody
+// chose, refused outside an allowed folder before the file is opened.
+// Mutation check: make `reads_as_unresolved` answer `false` for an absent key
+// and the first payload is read and planned.
+TEST (FileRule, APayloadThatDoesNotSayAPersonChoseThePathIsUnresolved) {
+    ScratchDir scratch;
+    const std::string outside = scratch.write ("elsewhere/a.bin", "secret");
+    const json bare           = { { "src", outside } };
+
+    for (const json& file : { bare, json{ { "src", outside }, { "unresolved", nullptr } },
+         json{ { "src", outside }, { "unresolved", "false" } } }) {
+        const json payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+            { "body", { { "mode", "binary" }, { "file", file } } } };
+        auto parsed = vayu::json::deserialize_request (payload);
+        ASSERT_TRUE (parsed.is_ok ()) << file.dump ();
+        Request request = std::move (parsed).value ();
+        EXPECT_TRUE (request.body.file.unresolved) << file.dump ();
+
+        FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
+        const auto opens   = body_file_opens ();
+        const auto refusal = plan.prepare (request);
+        ASSERT_HAS_VALUE (refusal) << file.dump ();
+        EXPECT_NE (refusal->find ("was not chosen in the editor"), std::string::npos)
+        << *refusal;
+        EXPECT_EQ (body_file_opens (), opens) << "the file was opened";
+        EXPECT_EQ (request.body.file.inline_bytes, nullptr);
+    }
+
+    const json part_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "f" }, { "type", "file" }, { "src", outside } } }) } } } };
+    auto part = vayu::json::deserialize_request (part_payload);
+    ASSERT_TRUE (part.is_ok ());
+    ASSERT_EQ (part.value ().body.fields.size (), 1u);
+    EXPECT_TRUE (part.value ().body.fields[0].unresolved);
+
+    json chosen          = bare;
+    chosen["unresolved"] = false;
+    const json chosen_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+        { "body", { { "mode", "binary" }, { "file", chosen } } } };
+    auto chosen_parsed = vayu::json::deserialize_request (chosen_payload);
+    ASSERT_TRUE (chosen_parsed.is_ok ());
+    Request chosen_request = std::move (chosen_parsed).value ();
+    EXPECT_FALSE (chosen_request.body.file.unresolved);
+    FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
+    EXPECT_FALSE (plan.prepare (chosen_request))
+    << "a path a person chose is sent from anywhere";
 }
 
 TEST (FileRule, AnUnresolvedSymlinkEscapingARootIsRefused) {
@@ -706,7 +763,8 @@ TEST (BinaryBodyLoadRun, ASmallFileIsOpenedOnceForTheWholeRun) {
         constexpr int ITERATIONS = 20;
         const json config{ { "method", "POST" }, { "url", server.url () },
             { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 2 },
-            { "body", { { "mode", "binary" }, { "file", { { "src", src } } } } } };
+            { "body",
+            { { "mode", "binary" }, { "file", { { "src", src }, { "unresolved", false } } } } } };
 
         auto built = build_request (config, &db, 5000, AuthResolution::Apply);
         ASSERT_TRUE (built.ok) << built.error_message;
@@ -792,7 +850,13 @@ class FileRootsRouteTest : public ::testing::Test {
         db_.reset ();
         vayu::tests::remove_database_files (ROOTS_DB_PATH);
     }
+    /// POST /file-roots with the scratch directory's `home` as the home folder.
+    std::pair<int, nlohmann::json> create (const json& body) {
+        return routes::create_file_root_response (*db_, body, home_);
+    }
+
     ScratchDir scratch_;
+    std::string home_ = scratch_.dir ("home");
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -800,14 +864,12 @@ TEST_F (FileRootsRouteTest, CreateListDelete) {
     const std::string b = scratch_.dir ("b");
     const std::string a = scratch_.dir ("a");
 
-    auto [status_b, row_b] =
-    routes::create_file_root_response (*db_, json{ { "path", b + "/" } });
+    auto [status_b, row_b] = create (json{ { "path", b + "/" } });
     ASSERT_EQ (status_b, 201) << row_b.dump ();
     EXPECT_EQ (row_b["path"], b) << "stored canonical, no trailing separator";
     EXPECT_TRUE (row_b["id"].is_string ());
     EXPECT_TRUE (row_b["createdAt"].is_number_integer ());
-    auto [status_a, row_a] =
-    routes::create_file_root_response (*db_, json{ { "path", a } });
+    auto [status_a, row_a] = create (json{ { "path", a } });
     ASSERT_EQ (status_a, 201) << row_a.dump ();
 
     const json listed = routes::list_file_roots_response (*db_);
@@ -833,8 +895,7 @@ TEST_F (FileRootsRouteTest, ABadPathIsA400) {
          json{ { "path", "" } }, json{ { "path", "relative/dir" } },
          json{ { "path", file } }, json{ { "path", scratch_.path ().string () + "/missing" } },
          json{ { "id", "x" }, { "path", scratch_.dir ("d") } } }) {
-        EXPECT_EQ (routes::create_file_root_response (*db_, body).first, 400)
-        << body.dump ();
+        EXPECT_EQ (create (body).first, 400) << body.dump ();
     }
     EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
 }
@@ -843,11 +904,95 @@ TEST_F (FileRootsRouteTest, ABadPathIsA400) {
 // the second spelling answers 201, silently replacing the first row.
 TEST_F (FileRootsRouteTest, ASecondSpellingOfAnAllowedFolderIsA409) {
     const std::string dir = scratch_.dir ("fixtures");
-    ASSERT_EQ (routes::create_file_root_response (*db_, json{ { "path", dir } }).first, 201);
-    const auto [status, body] = routes::create_file_root_response (
-    *db_, json{ { "path", dir + "/../fixtures/" } });
+    ASSERT_EQ (create (json{ { "path", dir } }).first, 201);
+    const auto [status, body] = create (json{ { "path", dir + "/../fixtures/" } });
     EXPECT_EQ (status, 409) << body.dump ();
     EXPECT_EQ (routes::list_file_roots_response (*db_).size (), 1u);
+}
+
+// A root or the home folder itself would allow almost every file a request
+// could name. Pure over both separators, so the Windows spellings run on every
+// host. Mutation check: drop the drive-designator clause in
+// `refused_root_reason` and `C:\` is allowed.
+TEST (FileRootRule, AFilesystemOrDriveRootIsRefused) {
+    for (const char* root : { "/", "//", "\\", "C:\\", "D:\\", "c:/", "Z:" }) {
+        const auto reason = refused_root_reason (root, "");
+        ASSERT_HAS_VALUE (reason) << root;
+        EXPECT_NE (reason->find ("is a filesystem root"), std::string::npos) << *reason;
+    }
+    for (const char* folder : { "/data", "C:\\data", "D:/fixtures", "/C:" }) {
+        EXPECT_FALSE (refused_root_reason (folder, "")) << folder;
+    }
+}
+
+// Mutation check: drop the home comparison in `refused_root_reason` and both
+// spellings of the home folder are allowed.
+TEST (FileRootRule, TheHomeFolderIsRefusedAndAFolderInsideItIsNot) {
+    const auto posix = refused_root_reason ("/home/ada", "/home/ada/");
+    ASSERT_HAS_VALUE (posix);
+    EXPECT_NE (posix->find ("is your home folder"), std::string::npos) << *posix;
+    EXPECT_FALSE (refused_root_reason ("/home/ada/fixtures", "/home/ada"));
+    EXPECT_FALSE (refused_root_reason ("/home/ADA", "/home/ada"))
+    << "a POSIX path compares exactly";
+
+    // A drive-letter path is on a filesystem that folds case.
+    EXPECT_TRUE (refused_root_reason ("C:\\Users\\Ada", "c:\\users\\ada\\"));
+    EXPECT_FALSE (refused_root_reason ("C:\\Users\\Ada\\fixtures", "C:\\Users\\Ada"));
+}
+
+// A folder that contains home allows every file the user owns, the same as
+// home itself. Mutation check: make `is_home_or_above` demand equal lengths
+// (home itself only) and every parent below is allowed.
+TEST (FileRootRule, AFolderContainingTheHomeFolderIsRefused) {
+    for (const auto& [folder, home] :
+    std::vector<std::pair<const char*, const char*>>{ { "/home", "/home/ada" },
+    { "/home/", "/home/ada/" }, { "/Users", "/Users/ada" },
+    { "/var/lib", "/var/lib/svc/home" }, { "C:\\Users", "C:\\Users\\Ada" },
+    { "c:\\users", "C:\\Users\\Ada" }, { "C:/Users", "C:\\Users\\Ada" } }) {
+        const auto reason = refused_root_reason (folder, home);
+        ASSERT_HAS_VALUE (reason) << folder << " above " << home;
+        EXPECT_NE (reason->find ("contains it"), std::string::npos) << *reason;
+    }
+    // Containment is by component, never by a shared prefix of characters.
+    for (const auto& [folder, home] :
+    std::vector<std::pair<const char*, const char*>>{ { "/home/ad", "/home/ada" },
+    { "/hom", "/home/ada" }, { "/Home", "/home/ada" }, { "/home/adamant", "/home/ada" },
+    { "C:\\Users\\Ad", "C:\\Users\\Ada" }, { "D:\\Users", "C:\\Users\\Ada" } }) {
+        EXPECT_FALSE (refused_root_reason (folder, home)) << folder << " beside " << home;
+    }
+}
+
+// The route applies both rules to the canonical path, with the home folder it
+// is handed. The root here is whichever the host's scratch directory is on.
+TEST_F (FileRootsRouteTest, ARootOrTheHomeFolderIsA400AndAFolderInsideHomeIsNot) {
+    const std::string root = scratch_.path ().root_path ().string ();
+    const auto [root_status, root_body] = create (json{ { "path", root } });
+    EXPECT_EQ (root_status, 400) << root_body.dump ();
+    EXPECT_NE (root_body.dump ().find ("is a filesystem root"), std::string::npos)
+    << root_body.dump ();
+
+    const auto [home_status, home_body] = create (json{ { "path", home_ + "/." } });
+    EXPECT_EQ (home_status, 400) << home_body.dump ();
+    EXPECT_NE (home_body.dump ().find ("is your home folder"), std::string::npos)
+    << home_body.dump ();
+    EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
+
+    const std::string inside = scratch_.dir ("home/fixtures");
+    const auto [inside_status, inside_row] = create (json{ { "path", inside } });
+    EXPECT_EQ (inside_status, 201) << inside_row.dump ();
+}
+
+// `/home` to a home at `/home/ada`: the scratch directory holds `home`, so it
+// is that parent here, spelled with a trailing separator and a `..` the
+// canonical form folds away.
+TEST_F (FileRootsRouteTest, AFolderContainingTheHomeFolderIsA400) {
+    for (const std::string& parent :
+    { scratch_.path ().string (), scratch_.path ().string () + "/", home_ + "/.." }) {
+        const auto [status, body] = create (json{ { "path", parent } });
+        EXPECT_EQ (status, 400) << parent << " " << body.dump ();
+        EXPECT_NE (body.dump ().find ("contains it"), std::string::npos) << body.dump ();
+    }
+    EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
 }
 
 } // namespace

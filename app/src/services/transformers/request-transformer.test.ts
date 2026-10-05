@@ -300,3 +300,54 @@ describe("RequestTransformer Postman protocol switches (#1765)", () => {
 		expect(request.disableUrlEncoding).toBe(false);
 	});
 });
+
+/**
+ * The engine reads an absent `unresolved` as `true`, and a row stored before
+ * every writer sent the key comes back without it. The transformer states it,
+ * so a Duplicate or any other forwarder of the row carries the flag the engine
+ * would read, and the editor's warning agrees with the engine's refusal.
+ */
+describe("RequestTransformer file trust flag", () => {
+	it.each([
+		[undefined, true],
+		[true, true],
+		[false, false],
+	])("a binary file stored with %s reads as %s", (stored, read) => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			body: { mode: "binary", file: { src: "/a.bin", unresolved: stored } },
+		});
+		expect(req.body).toEqual({ mode: "binary", file: { src: "/a.bin", unresolved: read } });
+	});
+
+	it.each([
+		[undefined, true],
+		[false, false],
+	])("a form-data file part stored with %s reads as %s", (stored, read) => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "t", value: "x", enabled: true },
+					{
+						key: "f",
+						value: "",
+						enabled: true,
+						type: "file",
+						src: "/a",
+						unresolved: stored,
+					},
+				],
+			},
+		});
+		const body = req.body as unknown as { fields: Record<string, unknown>[] };
+		expect(body.fields[0]).not.toHaveProperty("unresolved");
+		expect(body.fields[1]).toHaveProperty("unresolved", read);
+	});
+
+	it("leaves a body with no file alone", () => {
+		const body = { mode: "json", content: "{}" };
+		expect(RequestTransformer.toFrontend({ ...base, body }).body).toEqual(body);
+	});
+});

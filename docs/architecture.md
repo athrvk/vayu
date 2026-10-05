@@ -553,8 +553,38 @@ Variables are resolved with priority: **Environment > Collection > Global**
 
 ## Security
 
-- **Script Sandboxing**: QuickJS contexts are isolated with no filesystem access; scripts can make HTTP requests through `pm.sendRequest`, subject to the same scheme allowlist as the request itself
+- **Script Sandboxing**: QuickJS contexts are isolated with no filesystem
+  access. Scripts can make HTTP requests through `pm.sendRequest`, subject to
+  the same scheme allowlist as the request itself: only `http` and `https` URLs
+  are sent, checked after variables resolve, and every transfer handle is
+  restricted to those two protocols for redirects too
+  ([URL schemes](engine/api-reference.md#url-schemes)).
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
+- **The engine serves no browser**: it sends no CORS header, and before any
+  route runs it refuses a `Host` that is not `127.0.0.1:<port>`,
+  `localhost:<port>` or `[::1]:<port>` (DNS rebinding) and any request carrying
+  an `Origin` header; an `OPTIONS` passing the Host check is answered `204`
+  with nothing else. A web page in the user's browser can neither read the
+  engine nor change it: a scriptless `GET` (an `<img>`, a navigation) still
+  reaches a `GET` route, gets an opaque answer, and no `GET` route has a side
+  effect. Local tools (the MCP server, `curl`, a script) send no `Origin` and
+  are unaffected
+  ([Who may call the API](engine/api-reference.md#who-may-call-the-api)).
+- **The shell carries the renderer past that gate**: the renderer is a browser
+  context too. The Electron shell (`app/electron/engine-origin.ts`), on the
+  main window's session, strips the renderer's `Origin` and `Referer` from
+  requests to exactly `http://127.0.0.1:9876/*` and supplies the CORS response
+  headers the renderer needs, so the renderer reaches the engine like any
+  local tool. That URL filter is the whole boundary, which is why nothing but
+  the app's own document may load in that session.
+- **HTML Preview runs nothing and fetches nothing**: the response pane renders
+  the server's markup in an iframe with `sandbox=""` (no `allow-scripts`, no
+  `allow-same-origin`), so it runs no script and never shares the renderer's
+  origin or reaches `window.electronAPI`. A Content-Security-Policy injected
+  ahead of the markup blocks every network subresource (only `data:` images,
+  fonts and media and inline styles load), and `<base target="_top">` keeps
+  ordinary links inert because the sandbox refuses top navigation
+  (`app/src/components/shared/response-viewer/preview-document.ts`).
 - **No response caching**: every engine response carries `Cache-Control: no-store`
   and the renderer's fetch client asks for `cache: "no-store"` as well (#1507).
   Nothing the engine answers is valid to replay from a browser's disk cache - it

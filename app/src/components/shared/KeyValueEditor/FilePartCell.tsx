@@ -49,6 +49,9 @@ export default function FilePartCell({
 	const { open, inputProps } = useFilePick(onPick);
 	const name = displayName(fileName, src);
 	const chosen = Boolean(name);
+	// A part that names nothing has no path to doubt - it reads "Choose file",
+	// like a row turned into a file part by hand - whatever its flag says.
+	const unverified = Boolean(unresolved) && chosen;
 
 	const label = chosen ? name : "Choose file";
 	const button = (
@@ -65,7 +68,7 @@ export default function FilePartCell({
 			<span className={cn("truncate text-xs", !chosen && "text-muted-foreground")}>
 				{label}
 			</span>
-			{unresolved && (
+			{unverified && (
 				<TriangleAlert
 					className="ml-auto size-icon-sm shrink-0 text-warning-text"
 					aria-label="File path not verified on this machine"
@@ -83,10 +86,10 @@ export default function FilePartCell({
 					<span className="font-mono break-all">
 						{src?.trim() || "No file chosen - this part can't be sent yet."}
 					</span>
-					{unresolved && (
+					{unverified && (
 						<span className="mt-1 block">
-							This path came from the imported file and has not been verified on this
-							machine. Choose the file to re-point it.
+							This path was not chosen on this machine and has not been verified here.
+							Choose the file to re-point it.
 						</span>
 					)}
 				</TooltipContent>

@@ -214,8 +214,10 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   a table without the column it does not map. The bump is one-way - an older
   engine refuses the stamped workspace - so it gets a row in
   `docs/engine/db-schema.md#schema-versions` and a line in the next release's
-  notes. `migrate_before_sync` stamps through `stamp_schema_version`, never a
-  literal; a step with nothing to move (version 2's
+  notes. A migration step that rewrites stored data once and that an older
+  engine must not read past bumps it too, with no mapping change (version 4,
+  the file-trust restatement). `migrate_before_sync` stamps through
+  `stamp_schema_version`, never a literal; a step with nothing to move (version 2's
   `request_examples.postman_response` and #1765's four `requests` protocol
   columns) only stamps. A column may join a version no released build has
   stamped (#1765 joined 2) because `sync_schema ()` adds it on every start
@@ -338,7 +340,23 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 
 ## HTTP API
 
-The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
+The daemon listens on `http://127.0.0.1:9876` and serves no browser: it sends
+no CORS header, and the request gate in `server.cpp` refuses any `Origin` and
+any `Host` that is not a loopback name for its own port, before routing
+(`docs/engine/api-reference.md`, "Who may call the API"). The Electron shell
+strips the renderer's `Origin` and supplies its CORS headers.
+
+**A `GET` route must never have a side effect, because any web page can make
+the engine run one.** A scriptless `GET` (`<img>`, a `no-cors` `fetch`, a
+top-level navigation) carries a loopback `Host` and no `Origin`, so the gate
+admits it; what keeps it harmless is that the page cannot read the opaque
+answer and that the route changes nothing. Anything that writes, starts,
+stops, deletes or sends is a `POST`, `PUT` or `DELETE`, which a page can only
+send with an `Origin`. An SSE route's single-reader claim (`/runs/:id/events`,
+`/inbox/:id/live`) lasts as long as the connection reading it and needs an id
+a page cannot know. The gate is deliberately not widened to `Sec-Fetch-Mode`.
+
+Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -834,10 +852,17 @@ logged as a warning: it means a client skipped composition.
   (`http/file_ref.hpp`, `http/file_access_policy.hpp`): a `binary` body's
   `file` and a `form-data` file part are sendable iff `!unresolved ||
   allowed(canonical(src))` against the `file_roots` folders (schema version 3,
-  `/file-roots`), compared component-wise on canonical paths so a symlink
-  escaping a root is outside. Every non-editor writer forces `unresolved`, and
+  `/file-roots`, which refuses a filesystem root, the home folder and any
+  folder containing it - `refused_root_reason`), compared component-wise on canonical paths so a
+  symlink escaping a root is outside. Every non-editor writer forces `unresolved`, and
   so does composition (and a data-row bind) whenever `src` held `{{`; the
-  residual pass never resolves `src`, so a script cannot choose a file.
+  residual pass never resolves `src`, so a script cannot choose a file. The
+  flag fails closed: `FileRef`/`FormField` default it to `true`, a payload
+  that omits it parses as `true` (`vayu::json::reads_as_unresolved`), and
+  `apply_request_fields` stores every written body with the key stated
+  (`state_file_trust`); the schema-version-4 migration stated it, as
+  `false`, on every body stored before. An absent key means `true`
+  everywhere, storage included.
   `FilePlan` applies the rule once per design send (`execute_exchange`, the
   stream branch) and once per run at plan time (`plan_load_files`,
   `plan_step_files`), reading a file of at most `INLINE_FILE_LIMIT` once and

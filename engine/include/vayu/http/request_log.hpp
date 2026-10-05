@@ -54,18 +54,21 @@ std::string format_request_log_line (const RequestLogLine& line);
 /// `-v 0`, because an engine failure is not something a quiet run should hide).
 void log_request (const RequestLogLine& line);
 
-/// Installs the pre-routing timestamp and the post-response logger on
-/// @p server. Never call this on a server that already installs its own
-/// `set_pre_routing_handler` for routing (the mock server's listener does,
-/// to serve an arbitrarily long mocked path) - that handler's return value
-/// decides whether cpp-httplib routes the request at all, and this one must
-/// not replace it.
-///
-/// A server has one pre-routing slot, so a check that must run there - before
-/// cpp-httplib reads the body - rides in as @p admit, called after the
-/// timestamp is stamped; `Handled` means it filled in the response itself.
-using AdmitHandler =
+/// Decides, before routing, whether a request reaches a route at all:
+/// `Handled` means it already wrote the whole response, `Unhandled` lets
+/// cpp-httplib route it.
+using RequestGate =
 std::function<httplib::Server::HandlerResponse (const httplib::Request&, httplib::Response&)>;
-void install_request_logger (httplib::Server& server, AdmitHandler admit = {});
+
+/// Installs the pre-routing timestamp and the post-response logger on
+/// @p server, and @p gate (when given) right after the timestamp. cpp-httplib
+/// holds one pre-routing handler per server, so a server that must refuse
+/// requests before routing passes its rule here rather than replacing the
+/// handler, and a refusal still gets its request line. Never call this on a
+/// server that already installs its own `set_pre_routing_handler` for routing
+/// (the mock server's listener does, to serve an arbitrarily long mocked
+/// path) - that handler's return value decides whether cpp-httplib routes the
+/// request at all, and this one must not replace it.
+void install_request_logger (httplib::Server& server, RequestGate gate = {});
 
 } // namespace vayu::http

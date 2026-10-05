@@ -18,6 +18,7 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -127,7 +128,14 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
         return FetchRefusal{ 400, error_body (400, "Invalid URL") };
     }
     const std::string url = req["url"].get<std::string> ();
-    if (url.rfind ("http://", 0) != 0 && url.rfind ("https://", 0) != 0) {
+    // The transfer refuses a non-HTTP scheme too (`validate_transferable`); this
+    // answers it as the caller's 400, in the same words, rather than as a 502.
+    // A URL naming no scheme is refused here alone: a fetch target is typed
+    // whole, so there is no `{{baseUrl}}` to have left one off.
+    if (auto problem = vayu::http::unsendable_scheme (url)) {
+        return FetchRefusal{ 400, error_body (400, "Invalid URL: " + *problem) };
+    }
+    if (vayu::http::url_scheme (url).empty ()) {
         return FetchRefusal{ 400, error_body (400, "Invalid URL") };
     }
 

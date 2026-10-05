@@ -10,14 +10,18 @@
  * @brief The folders a request-body file may be read from without a person
  * choosing it in the editor (`file_roots`, `FileAccessPolicy`).
  *
- * Two rules are held here because only a route can answer with a status code:
- * a row names an existing directory by absolute path, stored canonical (so the
- * policy compares like with like and a symlinked spelling is one folder), and
- * one folder is one row - a second spelling of an allowed folder is a 409.
+ * Three rules are held here because only a route can answer with a status
+ * code: a row names an existing directory by absolute path, stored canonical
+ * (so the policy compares like with like and a symlinked spelling is one
+ * folder), that directory is neither a filesystem root nor the home folder
+ * or a folder containing it (`refused_root_reason`), and one folder is one
+ * row - a second
+ * spelling of an allowed folder is a 409.
  */
 
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -36,7 +40,9 @@ nlohmann::json serialize_file_root (const vayu::FileRoot& root) {
 }
 
 /// The canonical directory @p json names, or the 400 that says why not.
-std::expected<std::string, RouteError> read_root_path (const nlohmann::json& json) {
+/// @p home is the user's home folder, as `home_directory` answers it.
+std::expected<std::string, RouteError>
+read_root_path (const nlohmann::json& json, const std::string& home) {
     const auto path = json.find ("path");
     if (path == json.end () || !path->is_string () || path->get<std::string> ().empty ()) {
         return std::unexpected (RouteError{ 400,
@@ -57,6 +63,13 @@ std::expected<std::string, RouteError> read_root_path (const nlohmann::json& jso
         return std::unexpected (RouteError{ 400,
         error_body (400, "Invalid 'path': '" + written + "' cannot be resolved") });
     }
+    std::string home_folder = vayu::http::canonical_root_path (home);
+    if (home_folder.empty ()) {
+        home_folder = home;
+    }
+    if (auto refusal = vayu::http::refused_root_reason (canonical, home_folder)) {
+        return std::unexpected (RouteError{ 400, error_body (400, *refusal) });
+    }
     return canonical;
 }
 
@@ -65,17 +78,19 @@ std::expected<std::string, RouteError> read_root_path (const nlohmann::json& jso
 /**
  * Testable core of POST /file-roots: create only, the engine owns the id.
  * Read and write under one lock, so two allows of one folder cannot both pass
- * the uniqueness check.
+ * the uniqueness check. @p home is passed in so the home-folder rule is
+ * testable without the test's own home.
  */
-std::pair<int, nlohmann::json>
-create_file_root_response (vayu::db::Database& db, const nlohmann::json& json) {
+std::pair<int, nlohmann::json> create_file_root_response (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::string& home) {
     if (!json.is_object ()) {
         return { 400, error_body (400, "Invalid JSON body: expected an object") };
     }
     if (auto outcome = reject_client_supplied_id (json); !outcome) {
         return as_response (outcome.error ());
     }
-    auto path = read_root_path (json);
+    auto path = read_root_path (json, home);
     if (!path) {
         return as_response (path.error ());
     }
@@ -130,15 +145,18 @@ void register_file_root_routes (RouteContext& ctx) {
 
     /**
      * POST /file-roots
-     * Allows a folder. Body: `{path}` - absolute, an existing directory; stored
-     * canonical. 201 with the row; 400 for a bad path or a body `id`; 409 when
-     * the folder is already allowed.
+     * Allows a folder. Body: `{path}` - absolute, an existing directory, not a
+     * filesystem root, not the home folder or a folder containing it; stored
+     * canonical. 201
+     * with the row; 400 for a bad path or a body `id`; 409 when the folder is
+     * already allowed.
      */
     ctx.server.Post (
     "/file-roots", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
             auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_file_root_response (ctx.db, json);
+            auto [status, body] = create_file_root_response (
+            ctx.db, json, vayu::platform::home_directory ());
             if (status == 201) {
                 vayu::utils::log_info ("http", "Allowed a folder for request-body files",
                 { { "id", body["id"].get<std::string> () } });

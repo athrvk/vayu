@@ -122,19 +122,24 @@ untransformed. The mode strings are a contract: the engine matches
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
 engine writes the Content-Type each form mode implies. A `form-data` row may be
-a **file part** (`{type: "file", src, fileName?, contentType?, unresolved?}`): the
+a **file part** (`{type: "file", src, fileName?, contentType?, unresolved}`): the
 renderer sends the path the user picked - never the bytes - and the engine opens
 the file at send time. A **`binary`** body is one file as the whole body,
-`{mode: "binary", file: {src, fileName?, contentType?, unresolved?}}`, built from
+`{mode: "binary", file: {src, fileName?, contentType?, unresolved}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
 refuse it as "no file selected" rather than send a bodiless request.
 
 `unresolved` travels on both, and is the engine's trust input rather than an
 editor note: a file reference is sent only when someone chose it in the editor
-(the flag is absent) or it lies under a folder allowed in Settings > Files
-([allowed folders](#allowed-folders)). The editor clears it on a pick, a drop or a
-typed path; an import, a curl paste and an MCP agent set it; and composition sets
-it whenever `src` held a `{{variable}}`. A refused file comes back as a send
+(`unresolved: false`) or it lies under a folder allowed in Settings > Files
+([allowed folders](#allowed-folders)). The engine reads an **absent** flag as
+`true`, so every renderer write states it, on the send (`buildExecBody`), the
+save (`toBodyPayload`, and History's Save to request) and a stored row read back
+(`RequestTransformer`, so a Duplicate forwards it): `false` only for a file the
+user picked, dropped or typed in this app, `true` for anything else - an empty
+path, a pick outside Electron that yields no path, a row stored before writers
+sent the key. The rule is `lib/file-trust.ts`. An import, a curl paste and an MCP
+agent set it `true`, and composition does whenever `src` held a `{{variable}}`. A refused file comes back as a send
 failure (status 0, the engine's message naming the field or "Body file", the path
 and what to do), which the response pane's `ClientErrorView` prints as-is under
 "Couldn't send the request". See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
@@ -1769,6 +1774,13 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 ### CORS Errors
 
-Should not occur (same-origin: localhost), but if they do:
-- Verify engine CORS settings
-- Check if request is going to correct origin
+The engine sends no CORS header and refuses any request carrying `Origin`; the
+renderer gets through only because the Electron shell's bridge
+(`app/electron/engine-origin.ts`) strips `Origin` and `Referer` from requests
+to exactly `ENGINE_BASE_URL` and adds the CORS response headers. A CORS error
+or a `403` naming browser origins therefore means:
+- The request did not go through `ENGINE_BASE_URL` (`src/config/network.ts`) -
+  the same engine spelled `localhost:9876` is outside the bridge's filter
+- The page is not running in the app's own window session (plain Chromium,
+  or a window the bridge was never installed on); see "Driving the renderer
+  without Electron" in `app/CLAUDE.md` for the bridge a test browser needs

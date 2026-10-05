@@ -43,7 +43,10 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/db/recovery.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_access_policy.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -483,6 +486,190 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table, s
     return ok;
 }
 
+// ---------------------------------------------------------------------------
+// Schema version 4: the file-body trust flag fails closed
+// ---------------------------------------------------------------------------
+
+/// One stored value the version-4 step replaces.
+struct RowRewrite {
+    const char* table  = "";
+    const char* column = "";
+    std::string id;
+    std::string text;
+};
+
+/// One allowed folder the version-4 step removes, and the rule that refused it.
+struct RefusedRoot {
+    std::string id;
+    std::string path;
+    std::string reason;
+};
+
+/// Everything the version-4 step changes, read before anything is written so
+/// a database with nothing to change is stamped without a backup or a
+/// transaction.
+struct FileTrustPlan {
+    std::vector<RowRewrite> rewrites;
+    std::vector<RefusedRoot> refused_roots;
+
+    [[nodiscard]] bool empty () const {
+        return rewrites.empty () && refused_roots.empty ();
+    }
+};
+
+/**
+ * Plans the rewrite of @p table's @p column: every stored request body there
+ * gets an explicit boolean `unresolved` on its binary `file` and on each
+ * form-data file part, with an absent key written as `false`.
+ *
+ * `false`, because every row that exists when this runs was written before the
+ * key was always serialized, and the writer that left it out was the editor:
+ * importers, curl paste and MCP always wrote `true` on a path they carried.
+ * Once every stored body states the key, an absent one means unresolved
+ * everywhere (`vayu::json::reads_as_unresolved`), with no storage exception.
+ *
+ * @p in_snapshot reads the body at the value's `body` member (a run's
+ * `config_snapshot`, the payload a history entry is re-opened from) rather
+ * than the value itself (`requests.body`). A value that is not JSON is left
+ * byte-identical and logged, never dropped. Only values with `"file"` in their
+ * text are parsed at all.
+ */
+void plan_body_restatement (sqlite3* connection,
+const char* table,
+const char* column,
+bool in_snapshot,
+std::vector<RowRewrite>& out) {
+    if (!has_column (table_columns (connection, table), column)) {
+        return;
+    }
+    const std::string sql = std::string ("SELECT id, ") + column + " FROM " +
+    table + " WHERE " + column + " LIKE '%\"file\"%';";
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement, nullptr) != SQLITE_OK) {
+        return;
+    }
+    while (sqlite3_step (statement) == SQLITE_ROW) {
+        const auto* id   = column_text (statement, 0);
+        const auto* text = column_text (statement, 1);
+        if (id == nullptr || text == nullptr) {
+            continue;
+        }
+        nlohmann::json value =
+        nlohmann::json::parse (text, nullptr, /*allow_exceptions=*/false);
+        if (value.is_discarded ()) {
+            vayu::utils::log_warning ("db", "A stored request body is not JSON; its file references were left as they are",
+            { { "table", table }, { "id", id } });
+            continue;
+        }
+        nlohmann::json* body = &value;
+        if (in_snapshot) {
+            const auto member = value.find ("body");
+            if (!value.is_object () || member == value.end ()) {
+                continue;
+            }
+            body = &*member;
+        }
+        const nlohmann::json before = *body;
+        vayu::json::state_file_trust (*body, vayu::json::AbsentFileTrust::Chosen);
+        if (*body != before) {
+            out.push_back ({ table, column, id, value.dump () });
+        }
+    }
+    sqlite3_finalize (statement);
+}
+
+/**
+ * The allowed folders `refused_root_reason` now refuses: a filesystem or drive
+ * root, the home folder, or a folder containing it. `POST /file-roots`
+ * refuses them from schema version 4 on; this removes the ones stored before,
+ * so `FileAccessPolicy::from_database` reads only rows the route would accept
+ * and carries no second check of its own.
+ */
+void plan_refused_roots (sqlite3* connection, std::vector<RefusedRoot>& out) {
+    if (!has_column (table_columns (connection, "file_roots"), "path")) {
+        return;
+    }
+    const std::string home  = vayu::platform::home_directory ();
+    std::string home_folder = vayu::http::canonical_root_path (home);
+    if (home_folder.empty ()) {
+        home_folder = home;
+    }
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, "SELECT id, path FROM file_roots;", -1,
+        &statement, nullptr) != SQLITE_OK) {
+        return;
+    }
+    while (sqlite3_step (statement) == SQLITE_ROW) {
+        const auto* id   = column_text (statement, 0);
+        const auto* path = column_text (statement, 1);
+        if (id == nullptr || path == nullptr) {
+            continue;
+        }
+        if (auto reason = vayu::http::refused_root_reason (path, home_folder)) {
+            out.push_back ({ id, path, std::move (*reason) });
+        }
+    }
+    sqlite3_finalize (statement);
+}
+
+FileTrustPlan plan_file_trust_migration (sqlite3* connection) {
+    FileTrustPlan plan;
+    plan_body_restatement (
+    connection, "requests", "body", /*in_snapshot=*/false, plan.rewrites);
+    plan_body_restatement (
+    connection, "runs", "config_snapshot", /*in_snapshot=*/true, plan.rewrites);
+    plan_refused_roots (connection, plan.refused_roots);
+    return plan;
+}
+
+/// Runs one prepared statement per row of @p plan inside the caller's
+/// transaction. False on the first SQLite error, message in @p error.
+bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std::string& error) {
+    const auto run = [&] (const std::string& sql, const std::string& first,
+                     const std::string* second) {
+        sqlite3_stmt* statement = nullptr;
+        bool ok = sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement,
+                  nullptr) == SQLITE_OK;
+        if (ok) {
+            sqlite3_bind_text (statement, 1, first.c_str (), -1, SQLITE_TRANSIENT);
+            if (second != nullptr) {
+                sqlite3_bind_text (statement, 2, second->c_str (), -1, SQLITE_TRANSIENT);
+            }
+            ok = sqlite3_step (statement) == SQLITE_DONE;
+        }
+        if (!ok) {
+            error = sqlite3_errmsg (connection);
+        }
+        sqlite3_finalize (statement);
+        return ok;
+    };
+    for (const auto& row : plan.rewrites) {
+        const std::string sql = std::string ("UPDATE ") + row.table + " SET " +
+        row.column + " = ?1 WHERE id = ?2;";
+        if (!run (sql, row.text, &row.id)) {
+            return false;
+        }
+    }
+    for (const auto& root : plan.refused_roots) {
+        if (!run ("DELETE FROM file_roots WHERE id = ?1;", root.id, nullptr)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Says, once the removal has committed, which allowed folders are gone and
+/// why, so a user who finds one missing from Settings > Files can see it.
+void log_refused_roots (const FileTrustPlan& plan) {
+    for (const auto& root : plan.refused_roots) {
+        vayu::utils::log_warning ("db",
+        "Removed an allowed folder for request-body files that is a "
+        "filesystem root, the home folder or a folder containing it; "
+        "allow a folder inside the home folder instead",
+        { { "path", root.path }, { "reason", root.reason } });
+    }
+}
+
 } // namespace
 
 /**
@@ -618,7 +805,9 @@ const std::function<bool (const std::string&)>& probe) {
  * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
  *
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
- * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 and 2 are stamped without a fold; already at
+ * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 and 2 are stamped without a fold; anything
+ * below 4 also gets the version-4 step (`plan_file_trust_migration`) in the
+ * same transaction; already at
  * `SCHEMA_VERSION` is a fast no-op; newer than `SCHEMA_VERSION` refuses to
  * start rather than silently serving - and possibly writing - settings this
  * build does not understand.
@@ -673,10 +862,15 @@ void migrate_before_sync (const std::string& path) {
     const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
     const bool collections_need_fold =
     table_has_script_columns (connection.get (), "collections");
-    if (!requests_need_fold && !collections_need_fold) {
-        // Nothing to fold - a fresh schema with no rows yet, a database some
-        // other path already brought to this shape, or a version-1 or -2
-        // database. Both later steps only stamp: 1 -> 2 is
+    // 3 -> 4 (every earlier version passes through it too): state the trust
+    // flag on every stored body and drop the allowed folders the root rule
+    // refuses - see `plan_body_restatement` and `plan_refused_roots`.
+    const FileTrustPlan trust_plan = plan_file_trust_migration (connection.get ());
+    if (!requests_need_fold && !collections_need_fold && trust_plan.empty ()) {
+        // Nothing to fold or rewrite - a fresh schema with no rows yet, a
+        // database some other path already brought to this shape, or a
+        // version-1 to -3 database with no file reference to state. The
+        // other steps only stamp: 1 -> 2 is
         // `request_examples.postman_response` and the four `requests`
         // protocol-setting columns of #1765, nullable or NOT NULL with a
         // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
@@ -686,8 +880,9 @@ void migrate_before_sync (const std::string& path) {
     }
 
     // Kept until the next successful start (issue #1487's rule) - the one
-    // copy of a pre-cutover row's exact script text if the fold below were
-    // ever found to have gone wrong.
+    // copy of a pre-cutover row's exact script text, and of every body and
+    // allowed folder the version-4 step rewrites, if either were ever found
+    // to have gone wrong.
     const fs::path db_file (path);
     fs::path pre_migration_backup = db_file;
     pre_migration_backup += ".pre-migration.bak";
@@ -703,14 +898,16 @@ void migrate_before_sync (const std::string& path) {
         ok = ok &&
         fold_table_scripts_into_elements (connection.get (), "collections", fold_error);
     }
+    ok = ok && apply_file_trust_plan (connection.get (), trust_plan, fold_error);
     if (ok) {
         stamp_schema_version (connection.get ());
         sqlite3_exec (connection.get (), "COMMIT;", nullptr, nullptr, nullptr);
+        log_refused_roots (trust_plan);
     } else {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
-        throw std::runtime_error (
-        "Vayu could not migrate stored scripts into elements for " + path +
-        ": " + (fold_error.empty () ? "unknown error" : fold_error));
+        throw std::runtime_error ("Vayu could not migrate the database at " +
+        path + " to schema version " + std::to_string (SCHEMA_VERSION) + ": " +
+        (fold_error.empty () ? "unknown error" : fold_error));
     }
 }
 

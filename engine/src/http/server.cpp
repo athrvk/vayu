@@ -18,15 +18,86 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/request_log.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/platform/platform.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
 namespace vayu::http {
+
+namespace {
+
+/// True when @p req names this listener by one of its loopback spellings and
+/// nothing else, exactly once.
+bool names_this_listener (const httplib::Request& req, int port) {
+    if (req.get_header_value_count ("Host") != 1) {
+        return false;
+    }
+    const std::string host   = req.get_header_value ("Host");
+    const std::string suffix = ":" + std::to_string (port);
+    if (!host.ends_with (suffix)) {
+        return false;
+    }
+    const std::string_view name =
+    std::string_view (host).substr (0, host.size () - suffix.size ());
+    return vayu::utils::ascii_lower_equal (name, "127.0.0.1") ||
+    vayu::utils::ascii_lower_equal (name, "localhost") ||
+    vayu::utils::ascii_lower_equal (name, "[::1]");
+}
+
+/**
+ * The management API serves no browser: no CORS header ever leaves this
+ * server, and a request carrying `Origin` is refused. The Electron shell is the
+ * one browser-context client, and it strips `Origin` from the renderer's
+ * requests and supplies the CORS response headers the renderer needs itself
+ * (`app/electron/engine-origin.ts`), so to this server the renderer looks like
+ * curl, the CLI or the MCP server's fetch - none of which sends `Origin`.
+ *
+ * `Host` is checked first and on every request, `OPTIONS` included: DNS
+ * rebinding makes a hostile page same-origin with this listener, and a
+ * same-origin `GET` carries no `Origin`, so only the name the page dialled -
+ * which is never a loopback literal - tells it apart.
+ *
+ * `OPTIONS` is exempt from the `Origin` rule and answered 204 with no CORS
+ * header: a preflight that says nothing grants nothing, and answering it
+ * keeps the shell's own preflight working whether or not Chromium lets the
+ * shell rewrite a preflight's headers.
+ *
+ * The invariant this gate leans on: **a GET route must never have a side
+ * effect, because any web page can make the engine run one.** A scriptless
+ * GET (`<img>`, a `no-cors` fetch, a navigation) carries a loopback `Host` and
+ * no `Origin`, so it passes here; it is harmless only because the page cannot
+ * read the answer (no CORS header) and the route changes nothing.
+ */
+httplib::Server::HandlerResponse
+admit_management_request (const httplib::Request& req, httplib::Response& res, int port) {
+    if (!names_this_listener (req, port)) {
+        routes::send_error (res, 403,
+        "Refused by the Host check: the engine answers only Host 127.0.0.1:" +
+        std::to_string (port) + ", localhost:" + std::to_string (port) +
+        " or [::1]:" + std::to_string (port));
+        return httplib::Server::HandlerResponse::Handled;
+    }
+    if (req.method == "OPTIONS") {
+        res.status = 204;
+        return httplib::Server::HandlerResponse::Handled;
+    }
+    if (req.has_header ("Origin")) {
+        routes::send_error (res, 403,
+        "Refused: the engine does not serve browser origins (the request "
+        "carried "
+        "an Origin header)");
+        return httplib::Server::HandlerResponse::Handled;
+    }
+    return httplib::Server::HandlerResponse::Unhandled;
+}
+
+} // namespace
 
 Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port)
 : db_ (db), run_manager_ (run_manager), port_ (port) {
@@ -155,29 +226,25 @@ void Server::set_shutdown_callback (routes::ShutdownCallback callback) {
 void Server::setup_routes () {
     // One request line per call (issue #1510), before anything else touches
     // server_: a route registered below that never logged its own entry now
-    // always does, at the level its status calls for.
-    install_request_logger (
-    server_, [this] (const httplib::Request& req, httplib::Response& res) {
+    // always does, at the level its status calls for. The gate rides the same
+    // pre-routing handler, so a refused request gets its line too. The Host
+    // and Origin rules run first; the import body cap needs the header only.
+    install_request_logger (server_,
+    [this, port = port_] (const httplib::Request& req, httplib::Response& res) {
+        if (admit_management_request (req, res, port) ==
+        httplib::Server::HandlerResponse::Handled) {
+            return httplib::Server::HandlerResponse::Handled;
+        }
         return routes::reject_oversized_import (db_, req, res);
     });
 
-    // ==========================================
-    // CORS Configuration
-    // ==========================================
-    server_.set_default_headers ({ { "Access-Control-Allow-Origin", "*" },
-    { "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS" },
-    { "Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning" },
     // Every response here is a live read of state that changes under the
     // client (#1507); none of it is valid to replay from a browser's disk
     // cache. The mock server and inbox listeners are separate
     // ManagedListener-owned httplib::Server instances (mock_server.cpp,
-    // routes/inbox.cpp) and never call set_default_headers, so neither this
-    // nor the CORS trio above reaches them; only this management API does.
-    { "Cache-Control", "no-store" } });
-
-    // Handle OPTIONS preflight requests
-    server_.Options (".*",
-    [] (const httplib::Request&, httplib::Response& res) { res.status = 204; });
+    // routes/inbox.cpp) and never call set_default_headers, so this reaches
+    // only the management API.
+    server_.set_default_headers ({ { "Cache-Control", "no-store" } });
 
     // ==========================================
     // Register Modular Routes

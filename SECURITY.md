@@ -14,7 +14,16 @@ desktop tool, not a multi-tenant service.
 Vayu does not defend the engine against other programs running under your
 account: they can already read the database. A web page open in your browser is
 different - it has your network position and none of your file rights - so
-what a page can reach is in scope, and reports about it are welcome.
+what a page can reach is in scope, and reports about it are welcome. The engine
+sends no CORS header and refuses every request that carries a browser `Origin`
+and every `Host` that is not a loopback name for its own port, so a page can
+neither read anything from it nor change anything in it: a cross-origin `fetch`
+or a form post carries an `Origin`, and a DNS-rebinding page names a host the
+engine does not answer to. What a page can still do is a scriptless `GET` - an
+`<img>`, `<script>` or `<link>`, a `no-cors` `fetch`, a top-level navigation -
+which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
+The page gets an opaque response it cannot read, and no `GET` route changes
+anything.
 
 ## Renderer posture
 
@@ -23,8 +32,10 @@ sandbox on, and a preload that exposes named methods only. Behind that: a
 Content-Security-Policy on the app document (no `unsafe-eval`; the renderer may
 connect only to itself and the engine on `127.0.0.1:9876`), all device
 permissions denied for the app and for OAuth sign-in windows, a chart tooltip
-built from text rather than markup, and Electron fuses that disable
-`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on packaged builds.
+built from text rather than markup, an HTML response preview in a `sandbox=""`
+frame that runs no script and loads nothing from the network, and Electron
+fuses that disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on
+packaged builds.
 
 ## Data at rest
 

@@ -12,6 +12,7 @@
  * @brief JSON utilities for request/response serialization
  */
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -144,6 +145,39 @@ const std::vector<vayu::db::Result>& results);
  * (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
+
+/**
+ * @brief True unless @p ref (a `binary` body's `file`, or a form-data file
+ * part) says `"unresolved": false` in so many words.
+ *
+ * The trust flag fails closed: an absent key, `null` or any other non-boolean
+ * reads as a path no person chose, sent only from under an allowed folder
+ * (`vayu/http/file_ref.hpp`). Every parse of a file reference from a payload
+ * goes through this.
+ */
+[[nodiscard]] bool reads_as_unresolved (const Json& ref);
+
+/// What an absent `unresolved` means where `state_file_trust` writes it.
+enum class AbsentFileTrust : std::uint8_t {
+    /// A payload: nobody said a person chose the path, so nobody did.
+    Unresolved,
+    /// A body stored before every write stated the key: the editor wrote it.
+    /// Read only by the schema-version-4 migration (`db_maintenance.cpp`).
+    Chosen,
+};
+
+/**
+ * @brief Give every file reference in the request body @p body an explicit
+ * boolean `unresolved`: a `binary` body's `file` and each `type: "file"` entry
+ * of `fields`.
+ *
+ * A boolean already there is kept, an absent key becomes what @p absent says,
+ * and any other value becomes `true`. Every stored body goes through this on
+ * write (`apply_request_fields`), and the schema-version-4 migration ran every
+ * body stored before through it, so no row lacks the key and an absent one
+ * means unresolved everywhere.
+ */
+void state_file_trust (Json& body, AbsentFileTrust absent);
 
 /**
  * @brief Deserialize a Request from JSON

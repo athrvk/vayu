@@ -394,6 +394,15 @@ TEST (CurlToError, ATargetThatFailedTheExchangeIsNotAnInternalError) {
     }
 }
 
+// A scheme the handle's allowlist refuses - a redirect's, or one libcurl
+// guessed - is the same fault the URL check reports for a typed one, under the
+// same code. Mutation-check: drop the case and this reads INTERNAL_ERROR.
+TEST (CurlToError, AnUnsupportedProtocolIsAnInvalidUrl) {
+    const vayu::http::CurlErrorBuffer errors;
+    EXPECT_EQ (curl_to_error (nullptr, CURLE_UNSUPPORTED_PROTOCOL, errors).code,
+    vayu::ErrorCode::InvalidUrl);
+}
+
 // The fallback is untouched: a code with no meaning of its own is still ours.
 TEST (CurlToError, AnUnclassifiableCodeIsStillAnInternalError) {
     const vayu::http::CurlErrorBuffer errors;

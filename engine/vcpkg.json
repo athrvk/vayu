@@ -10,7 +10,6 @@
       "default-features": false,
       "features": [
         "http2",
-        "non-http",
         "openssl"
       ]
     },

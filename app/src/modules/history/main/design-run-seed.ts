@@ -33,6 +33,7 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
+import { noFile, withFileTrust } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
@@ -128,12 +129,15 @@ export interface DesignRunSeed {
 
 /** A snapshot body's `file` as an editor `FileRef`, or an empty one. */
 function fileRefOf(node: unknown): FileRef {
-	if (!node || typeof node !== "object") return { src: "" };
+	if (!node || typeof node !== "object") return noFile();
 	const raw = node as Record<string, unknown>;
-	const file: FileRef = { src: typeof raw.src === "string" ? raw.src : "" };
+	const file: FileRef = {
+		src: typeof raw.src === "string" ? raw.src : "",
+		// Only a recorded `false` was chosen here; anything else is not.
+		unresolved: raw.unresolved !== false,
+	};
 	if (typeof raw.fileName === "string" && raw.fileName) file.fileName = raw.fileName;
 	if (typeof raw.contentType === "string" && raw.contentType) file.contentType = raw.contentType;
-	if (raw.unresolved === true) file.unresolved = true;
 	return file;
 }
 
@@ -246,11 +250,13 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			headers,
 			bodyMode,
 			body: body?.content ?? "",
-			formData: toKeyValueItems(bodyMode === "form-data" ? (body?.fields ?? []) : []),
+			formData: toKeyValueItems(
+				withFileTrust(bodyMode === "form-data" ? (body?.fields ?? []) : [])
+			),
 			urlEncoded: toKeyValueItems(
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),
-			binaryFile: bodyMode === "binary" ? fileRefOf(body?.file) : { src: "" },
+			binaryFile: bodyMode === "binary" ? fileRefOf(body?.file) : noFile(),
 			auth,
 			elements: [
 				...(ownScript(snapshot.preRequestScripts).trim()

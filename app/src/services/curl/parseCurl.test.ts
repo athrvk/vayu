@@ -388,7 +388,10 @@ describe("parseCommand - curl", () => {
 	});
 
 	test("every paste resets the binary file, so no stale one survives", () => {
-		expect(parseCommand(`curl https://x.com`)?.binaryFile).toEqual({ src: "" });
+		expect(parseCommand(`curl https://x.com`)?.binaryFile).toEqual({
+			src: "",
+			unresolved: true,
+		});
 	});
 
 	test("query string in URL is mirrored to params", () => {

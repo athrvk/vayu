@@ -163,6 +163,14 @@ int extract_port (const std::string& url) {
 }
 
 std::optional<Error> validate_transferable (const Request& request) {
+    // First, because nothing else about a request matters if it is not HTTP.
+    // Read off the URL as it stands here - composed, bound and residual-resolved
+    // - which is the URL the handle is given. `apply_transport_policy`'s
+    // protocol allowlist is the backstop for what this cannot see: a redirect,
+    // and a scheme libcurl guesses for a URL that names none.
+    if (auto problem = vayu::http::unsendable_scheme (request.url)) {
+        return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
+    }
     // The body-level answer on purpose: this gate is about a body existing at
     // all, and a `graphql` body on a HEAD is still one to refuse - the GET
     // transport that moves it into the URL is GET's alone (issue #1228).
@@ -882,7 +890,10 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     case CURLE_PEER_FAILED_VERIFICATION:
         error.code = ErrorCode::SslError;
         break;
-    case CURLE_URL_MALFORMAT: error.code = ErrorCode::InvalidUrl; break;
+    // A URL libcurl cannot parse, or one whose scheme the handle's allowlist
+    // refuses: a redirect's, or one libcurl guessed for a URL naming none.
+    case CURLE_URL_MALFORMAT:
+    case CURLE_UNSUPPORTED_PROTOCOL: error.code = ErrorCode::InvalidUrl; break;
     default:
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::InternalError;
@@ -896,6 +907,8 @@ const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
 bool verify_ssl,
 const std::string& url) {
+    set_opt<CURLOPT_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
+    set_opt<CURLOPT_REDIR_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
 

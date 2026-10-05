@@ -172,6 +172,9 @@ enum class FormFieldType : std::uint8_t { Text, File };
  * or composition filled a `{{variable}}` into it - and such a path is sent only
  * when it resolves under a folder the user allowed (`file_roots`,
  * `vayu::http::FileAccessPolicy`). See `vayu/http/file_ref.hpp` for the rule.
+ * It fails closed: a reference is unresolved unless whoever built it said a
+ * person chose it, so the default here and an absent key in a payload
+ * (`vayu::json::reads_as_unresolved`) both mean `true`.
  *
  * The last three members are filled once per send or run by the plan step, never
  * stored: a file at or under `INLINE_FILE_LIMIT` is read once into
@@ -181,7 +184,7 @@ struct FileRef {
     std::string src;
     std::string file_name;    // declared filename; empty = basename of `src`
     std::string content_type; // empty = derived (see `implied_content_type`)
-    bool unresolved = false;
+    bool unresolved = true;
     std::shared_ptr<const std::string> inline_bytes;
     std::string sha256;
     std::uint64_t size = 0;
@@ -233,7 +236,7 @@ struct FormField {
     std::string src;          // file parts only - a path on this machine
     std::string file_name;    // declared filename; empty = basename of `src`
     std::string content_type; // per-part Content-Type; empty = libcurl's guess
-    bool unresolved = false;  // see `FileRef::unresolved`
+    bool unresolved = true;   // see `FileRef::unresolved`
 };
 
 /**
