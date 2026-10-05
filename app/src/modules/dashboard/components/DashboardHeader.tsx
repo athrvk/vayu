@@ -30,6 +30,9 @@ function formatElapsed(ms: number): string {
 // run (up to 10 Hz), and this header's own props barely ever change. The
 // caller passes a stable onStop (useCallback) and a memoised configuration,
 // so the memo actually holds rather than just decorating the export.
+// `elapsedDuration` is the engine's fractional elapsed and changes on every
+// tick, but the header draws only MM:SS, so the comparator below ignores
+// sub-second movement.
 function DashboardHeader({
 	mode,
 	isStreaming,
@@ -128,4 +131,13 @@ function DashboardHeader({
 	);
 }
 
-export default memo(DashboardHeader);
+function headerPropsEqual(prev: DashboardHeaderProps, next: DashboardHeaderProps): boolean {
+	const { elapsedDuration: prevElapsed = 0, ...prevRest } = prev;
+	const { elapsedDuration: nextElapsed = 0, ...nextRest } = next;
+	if (Math.floor(prevElapsed / 1000) !== Math.floor(nextElapsed / 1000)) return false;
+	return (Object.keys(prevRest) as (keyof typeof prevRest)[]).every((key) =>
+		Object.is(prevRest[key], nextRest[key])
+	);
+}
+
+export default memo(DashboardHeader, headerPropsEqual);
