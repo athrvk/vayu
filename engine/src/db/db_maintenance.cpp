@@ -580,10 +580,10 @@ std::vector<RowRewrite>& out) {
 
 /**
  * The allowed folders `refused_root_reason` now refuses: a filesystem or drive
- * root, or the home folder itself. `POST /file-roots` refuses them from schema
- * version 4 on; this removes the ones stored before, so
- * `FileAccessPolicy::from_database` reads only rows the route would accept and
- * carries no second check of its own.
+ * root, the home folder, or a folder containing it. `POST /file-roots`
+ * refuses them from schema version 4 on; this removes the ones stored before,
+ * so `FileAccessPolicy::from_database` reads only rows the route would accept
+ * and carries no second check of its own.
  */
 void plan_refused_roots (sqlite3* connection, std::vector<RefusedRoot>& out) {
     if (!has_column (table_columns (connection, "file_roots"), "path")) {
@@ -663,9 +663,9 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
 void log_refused_roots (const FileTrustPlan& plan) {
     for (const auto& root : plan.refused_roots) {
         vayu::utils::log_warning ("db",
-        "Removed an allowed folder for request-body files that is a filesystem "
-        "root or "
-        "the home folder; allow a folder inside it instead",
+        "Removed an allowed folder for request-body files that is a "
+        "filesystem root, the home folder or a folder containing it; "
+        "allow a folder inside the home folder instead",
         { { "path", root.path }, { "reason", root.reason } });
     }
 }

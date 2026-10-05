@@ -85,6 +85,31 @@ bool has_drive (std::string_view path) {
     vayu::utils::ascii_lower (path[0]) <= 'z';
 }
 
+bool is_separator (char c) {
+    return c == '/' || c == '\\';
+}
+
+/// @p folder is @p home or one of its ancestors, compared component-wise with
+/// either separator. A drive-letter path is on a Windows filesystem, which
+/// folds case; a POSIX path compares exactly. Both arrive without trailing
+/// separators.
+bool is_home_or_above (std::string_view folder, std::string_view home) {
+    if (home.size () < folder.size ()) {
+        return false;
+    }
+    const bool folds = has_drive (folder);
+    for (std::size_t i = 0; i < folder.size (); ++i) {
+        const char a    = folder[i];
+        const char b    = home[i];
+        const bool same = (is_separator (a) && is_separator (b)) ||
+        (folds ? vayu::utils::ascii_lower (a) == vayu::utils::ascii_lower (b) : a == b);
+        if (!same) {
+            return false;
+        }
+    }
+    return home.size () == folder.size () || is_separator (home[folder.size ()]);
+}
+
 } // namespace
 
 std::optional<std::string>
@@ -99,14 +124,10 @@ refused_root_reason (std::string_view canonical, std::string_view home) {
     if (home_folder.empty ()) {
         return std::nullopt;
     }
-    // A drive-letter path is on a Windows filesystem, which folds case.
-    const bool same = has_drive (folder) ?
-    vayu::utils::ascii_lower_equal (folder, home_folder) :
-    folder == home_folder;
-    if (same) {
+    if (is_home_or_above (folder, home_folder)) {
         return "Invalid 'path': '" + std::string (canonical) +
-        "' is your home folder, which would allow every file you own - allow a "
-        "folder inside it instead";
+        "' is your home folder or contains it, which would allow every "
+        "file you own - allow a folder inside your home folder instead";
     }
     return std::nullopt;
 }

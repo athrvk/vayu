@@ -932,14 +932,34 @@ TEST (FileRootRule, TheHomeFolderIsRefusedAndAFolderInsideItIsNot) {
     ASSERT_HAS_VALUE (posix);
     EXPECT_NE (posix->find ("is your home folder"), std::string::npos) << *posix;
     EXPECT_FALSE (refused_root_reason ("/home/ada/fixtures", "/home/ada"));
-    EXPECT_FALSE (refused_root_reason ("/home", "/home/ada"))
-    << "a parent of home is neither rule's to refuse";
     EXPECT_FALSE (refused_root_reason ("/home/ADA", "/home/ada"))
     << "a POSIX path compares exactly";
 
     // A drive-letter path is on a filesystem that folds case.
     EXPECT_TRUE (refused_root_reason ("C:\\Users\\Ada", "c:\\users\\ada\\"));
     EXPECT_FALSE (refused_root_reason ("C:\\Users\\Ada\\fixtures", "C:\\Users\\Ada"));
+}
+
+// A folder that contains home allows every file the user owns, the same as
+// home itself. Mutation check: make `is_home_or_above` demand equal lengths
+// (home itself only) and every parent below is allowed.
+TEST (FileRootRule, AFolderContainingTheHomeFolderIsRefused) {
+    for (const auto& [folder, home] :
+    std::vector<std::pair<const char*, const char*>>{ { "/home", "/home/ada" },
+    { "/home/", "/home/ada/" }, { "/Users", "/Users/ada" },
+    { "/var/lib", "/var/lib/svc/home" }, { "C:\\Users", "C:\\Users\\Ada" },
+    { "c:\\users", "C:\\Users\\Ada" }, { "C:/Users", "C:\\Users\\Ada" } }) {
+        const auto reason = refused_root_reason (folder, home);
+        ASSERT_HAS_VALUE (reason) << folder << " above " << home;
+        EXPECT_NE (reason->find ("contains it"), std::string::npos) << *reason;
+    }
+    // Containment is by component, never by a shared prefix of characters.
+    for (const auto& [folder, home] :
+    std::vector<std::pair<const char*, const char*>>{ { "/home/ad", "/home/ada" },
+    { "/hom", "/home/ada" }, { "/Home", "/home/ada" }, { "/home/adamant", "/home/ada" },
+    { "C:\\Users\\Ad", "C:\\Users\\Ada" }, { "D:\\Users", "C:\\Users\\Ada" } }) {
+        EXPECT_FALSE (refused_root_reason (folder, home)) << folder << " beside " << home;
+    }
 }
 
 // The route applies both rules to the canonical path, with the home folder it
@@ -960,6 +980,19 @@ TEST_F (FileRootsRouteTest, ARootOrTheHomeFolderIsA400AndAFolderInsideHomeIsNot)
     const std::string inside = scratch_.dir ("home/fixtures");
     const auto [inside_status, inside_row] = create (json{ { "path", inside } });
     EXPECT_EQ (inside_status, 201) << inside_row.dump ();
+}
+
+// `/home` to a home at `/home/ada`: the scratch directory holds `home`, so it
+// is that parent here, spelled with a trailing separator and a `..` the
+// canonical form folds away.
+TEST_F (FileRootsRouteTest, AFolderContainingTheHomeFolderIsA400) {
+    for (const std::string& parent :
+    { scratch_.path ().string (), scratch_.path ().string () + "/", home_ + "/.." }) {
+        const auto [status, body] = create (json{ { "path", parent } });
+        EXPECT_EQ (status, 400) << parent << " " << body.dump ();
+        EXPECT_NE (body.dump ().find ("contains it"), std::string::npos) << body.dump ();
+    }
+    EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
 }
 
 } // namespace

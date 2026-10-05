@@ -2414,7 +2414,7 @@ std::string canonical_home () {
 /// A version-3 database as an engine before the trust flag failed closed left
 /// it: file references without the key (one in the trash, one in a run's
 /// snapshot), one already stated, one body that is not JSON, and allowed
-/// folders at `/`, at the home folder and inside it.
+/// folders at `/`, at the home folder, at its parent and inside it.
 void seed_version_three_workspace (const std::string& path) {
     // Now, not a fixed instant: the startup trash and run retention would
     // purge an old trashed request or run before the migration test reads it.
@@ -2471,6 +2471,13 @@ void seed_version_three_workspace (const std::string& path) {
         };
         allow ("froot_root", "/");
         allow ("froot_home", canonical_home ());
+        // A home directly under `/` (root's `/root`) has `/` as its parent,
+        // already seeded above and one folder per row.
+        const std::string parent =
+        std::filesystem::path (canonical_home ()).parent_path ().string ();
+        if (parent != "/") {
+            allow ("froot_parent", parent);
+        }
         allow ("froot_inside",
         (std::filesystem::path (canonical_home ()) / "fixtures").string ());
     }
@@ -2486,7 +2493,8 @@ nlohmann::json stored_file (const std::string& path, const std::string& id) {
 
 // Mutation checks: drop the `apply_file_trust_plan` rewrites (or the
 // `plan_body_restatement` calls) and the bodies keep no key; drop the
-// `plan_refused_roots` call and `/` and the home folder are still allowed.
+// `plan_refused_roots` call and `/`, the home folder and its parent are still
+// allowed.
 TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots) {
     ASSERT_FALSE (vayu::platform::home_directory ().empty ())
     << "this platform reported no home folder to seed";
@@ -2521,7 +2529,7 @@ TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots
         ids.push_back (row.id);
     }
     EXPECT_EQ (ids, std::vector<std::string>{ "froot_inside" })
-    << "a filesystem root and the home folder are no longer allowed";
+    << "a filesystem root, home and its parent are no longer allowed";
     EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
 }
 

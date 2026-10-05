@@ -840,8 +840,8 @@ logged as a warning: it means a client skipped composition.
   (`http/file_ref.hpp`, `http/file_access_policy.hpp`): a `binary` body's
   `file` and a `form-data` file part are sendable iff `!unresolved ||
   allowed(canonical(src))` against the `file_roots` folders (schema version 3,
-  `/file-roots`, which refuses a filesystem root and the home folder itself -
-  `refused_root_reason`), compared component-wise on canonical paths so a
+  `/file-roots`, which refuses a filesystem root, the home folder and any
+  folder containing it - `refused_root_reason`), compared component-wise on canonical paths so a
   symlink escaping a root is outside. Every non-editor writer forces `unresolved`, and
   so does composition (and a data-row bind) whenever `src` held `{{`; the
   residual pass never resolves `src`, so a script cannot choose a file. The

@@ -269,7 +269,7 @@ it, no stored body lacks the key and nothing reads one as chosen):
   `"file"` are parsed; one that is not JSON is left byte-identical and logged at warning level,
   never dropped. `request_examples`, `collections` and the other tables store no request body.
 - **Removes the allowed folders the root rule refuses.** A [`file_roots`](#file_roots) row whose
-  path `refused_root_reason` rejects - a filesystem or drive root, or the home folder itself - is
+  path `refused_root_reason` rejects - a filesystem or drive root, the home folder, or a folder containing it - is
   deleted and logged at warning level with the reason, so a user can see why Settings > Files no
   longer lists it. `FileAccessPolicy::from_database` therefore reads only rows the route would
   accept, and carries no second check.
@@ -294,7 +294,7 @@ release that carries a bump says so in its notes.
 | `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
 | `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
 | `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
-| `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders a filesystem root or the home folder are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
+| `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased

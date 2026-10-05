@@ -4127,10 +4127,11 @@ the id, so a body `id` is a `400`.
   `..` folded, no trailing separator).
 - `400` when `path` is missing, not a string, not absolute, or not an existing
   directory.
-- `400` when the canonical path is a filesystem or drive root (`/`, `C:\`) or
-  the user's home folder itself, the message naming which: either would allow
-  nearly every file a request could name. A folder inside the home folder is
-  fine.
+- `400` when the canonical path is a filesystem or drive root (`/`, `C:\`),
+  the user's home folder, or a folder that contains it (`/home`, `/Users`,
+  `C:\Users`), the message naming which: each would allow nearly every file a
+  request could name. Containment is by path component, case-folded on a drive
+  letter. A folder inside the home folder is fine.
 - `409` when the canonical path is already allowed, naming the existing row's id.
 
 ### DELETE /file-roots/:id

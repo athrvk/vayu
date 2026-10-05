@@ -14,7 +14,8 @@
  * code: a row names an existing directory by absolute path, stored canonical
  * (so the policy compares like with like and a symlinked spelling is one
  * folder), that directory is neither a filesystem root nor the home folder
- * itself (`refused_root_reason`), and one folder is one row - a second
+ * or a folder containing it (`refused_root_reason`), and one folder is one
+ * row - a second
  * spelling of an allowed folder is a 409.
  */
 
@@ -145,7 +146,8 @@ void register_file_root_routes (RouteContext& ctx) {
     /**
      * POST /file-roots
      * Allows a folder. Body: `{path}` - absolute, an existing directory, not a
-     * filesystem root and not the home folder itself; stored canonical. 201
+     * filesystem root, not the home folder or a folder containing it; stored
+     * canonical. 201
      * with the row; 400 for a bad path or a body `id`; 409 when the folder is
      * already allowed.
      */
