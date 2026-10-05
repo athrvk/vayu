@@ -611,10 +611,6 @@ Variables are resolved with priority: **Environment > Collection > Global**
   - Windows: `%APPDATA%/Vayu/`
   - Linux: `~/.config/Vayu/`
 
-  Releases up to 0.36 used `vayu-client` (the npm package's name) instead;
-  `app/electron/user-data-dir.ts` renames that directory on the first launch
-  that finds it.
-
 ---
 
 *See: [Engine Architecture](engine/architecture.md) | [App Architecture](app/architecture.md) | [Engine API Reference](engine/api-reference.md)*

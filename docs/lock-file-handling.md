@@ -17,9 +17,7 @@ The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from 
 
 The directory is `app.getPath("userData")`, which `main.ts` sets to
 `USER_DATA_DIR_NAME` (`app/electron/constants.ts`) before anything opens a file
-there. Releases up to 0.36 used `vayu-client`; the first launch of a later
-release renames that directory, lock file included, and the uninstallers clean
-up both names. `engineDataDirectory()`
+there. `engineDataDirectory()`
 (`app/electron/sidecar.ts`) is the one place that resolves it; anything else
 naming a directory is a copy that can drift.
 
