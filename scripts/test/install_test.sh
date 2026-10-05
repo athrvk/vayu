@@ -467,6 +467,26 @@ version_at_least 0.32.1 0.33.0 && fail "0.32.1 is below 0.33.0"
 version_at_least 0.9.0 0.40.0 && fail "0.9.0 is below 0.40.0 (numeric, not lexical)"
 version_at_least 0.40.0-rc1 0.40.0 || fail "a pre-release suffix is dropped, not ranked"
 
+# Attestation is pinned to the release workflow's identity, and a failed
+# verification aborts. `gh` is stubbed as a function (command -v sees it).
+gh() {
+	[ "$1" = auth ] && return 0
+	printf '%s\n' "$*" >"$TMPROOT/gh-args"
+	return "${GH_VERIFY_RC:-0}"
+}
+GH_VERIFY_RC=0
+(verify_attestation "$payload" "$FIRST_ATTESTED_VERSION") >/dev/null 2>&1 \
+	|| fail "a passing attestation should verify"
+grep -q -- "--signer-workflow athrvk/vayu/.github/workflows/release.yml" "$TMPROOT/gh-args" \
+	|| fail "attestation must be pinned to the release workflow signer"
+GH_VERIFY_RC=1
+if (verify_attestation "$payload" "$FIRST_ATTESTED_VERSION") >/dev/null 2>&1; then
+	fail "a failed attestation must abort the install"
+fi
+(verify_attestation "$payload" "0.39.0") >/dev/null 2>&1 \
+	|| fail "a release before the first attested one is not checked"
+unset -f gh
+
 printf 'PASS: download integrity\n'
 
 # --- version resolution ------------------------------------------------------

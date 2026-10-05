@@ -757,7 +757,11 @@ verify_attestation() {
 		log 'No authenticated gh CLI - build provenance not checked (checksum only).'
 		return 0
 	fi
-	if ! gh attestation verify "$file" --repo "$REPO" >/dev/null 2>&1; then
+	# --signer-workflow, not just --repo: any other workflow in the repository
+	# granted `attestations: write` could otherwise mint a statement this
+	# accepts. Only release.yml's publish job is trusted.
+	if ! gh attestation verify "$file" --repo "$REPO" \
+		--signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null 2>&1; then
 		die 'Build provenance verification failed - aborting.'
 	fi
 	log 'Build provenance verified.'
