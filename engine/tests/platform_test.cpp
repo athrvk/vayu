@@ -32,6 +32,7 @@
 
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace vayu::platform {
@@ -156,7 +157,11 @@ class PrivateDirectoryTest : public ::testing::Test {
     protected:
     void SetUp () override {
         saved_umask_ = umask (022);
-        root_        = fs::temp_directory_path () / "vayu-private-dir-test";
+        // Per test and per process: ctest runs these in parallel, and a shared
+        // directory lets one test's TearDown delete another's files.
+        root_ = fs::temp_directory_path () /
+        ("vayu-private-dir-" + std::to_string (getpid ()) + "-" +
+        ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
         fs::remove_all (root_);
         fs::create_directories (root_);
     }
