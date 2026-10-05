@@ -259,21 +259,13 @@ export function describeInstant(
 			{ label: "Zone", value: "the value names no zone, so it is shown as written" },
 		];
 	}
+	const format = (timeZone: string | undefined) =>
+		new Intl.DateTimeFormat(options.locale, { ...CARD_FORMAT, timeZone }).format(instant);
+	// A user already in UTC gets one row, not two rows both labelled "UTC".
+	const inUtc = zone === "UTC" || zone === "Etc/UTC";
 	const rows: TimeRow[] = [
-		{
-			label: zone,
-			value: new Intl.DateTimeFormat(options.locale, {
-				...CARD_FORMAT,
-				timeZone: options.timeZone,
-			}).format(instant),
-		},
-		{
-			label: "UTC",
-			value: new Intl.DateTimeFormat(options.locale, {
-				...CARD_FORMAT,
-				timeZone: "UTC",
-			}).format(instant),
-		},
+		{ label: zone, value: format(options.timeZone) },
+		...(inUtc ? [] : [{ label: "UTC", value: format("UTC") }]),
 		{ label: "Relative", value: formatRelative(instant, options) },
 	];
 	if (original) rows.push({ label: "Original", value: original.text });

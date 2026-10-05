@@ -25,8 +25,8 @@ export function TimeHoverCard({ rows }: { rows: TimeRow[] }) {
 			data-testid="time-hover-card"
 			className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-0.5"
 		>
-			{rows.map((row) => (
-				<div key={row.label} className="contents">
+			{rows.map((row, index) => (
+				<div key={`${index}-${row.label}`} className="contents">
 					<dt>
 						<TooltipHint>{row.label}</TooltipHint>
 					</dt>

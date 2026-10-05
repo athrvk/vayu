@@ -76,6 +76,11 @@ describe("describeInstant", () => {
 		expect(rows[2].value).toBe("2 hours ago");
 	});
 
+	it("shows one row, not two UTC rows, when the user's zone is UTC", () => {
+		const rows = describeInstant(instant, { timeZone: "UTC", locale: "en-US", now });
+		expect(rows.map((r) => r.label)).toEqual(["UTC", "Relative"]);
+	});
+
 	it("converts to a second zone, so no case reads the host zone", () => {
 		const rows = describeInstant(instant, {
 			timeZone: "America/New_York",
