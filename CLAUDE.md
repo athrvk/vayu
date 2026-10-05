@@ -289,3 +289,4 @@ when the task comes up, or on request by name.
 | `releasing` skill | Version bump, release notes, tagging, `install.sh`, winget publishing |
 | `docs-site` skill | MkDocs publishing rules, nav, anchors, analytics, local preview |
 | `pr-description` skill | Writing this repo's PR titles/descriptions - lead with why, scale to diff size, flag risk vs. safe-to-skip, the screenshot-commit-then-drop workflow for visual changes |
+| `.claude/agents/` | Role subagents a session or routine dispatches - `vayu-reviewer` (Fable, read-only, files issues), `vayu-researcher`, `vayu-implementer`, `vayu-visual-verifier` - and the thin orchestrator prompts that drive them (`.claude/agents/README.md`) |
