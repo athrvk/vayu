@@ -110,6 +110,18 @@ scattered strings land the same way.
   participle plus ellipsis means "in progress" and nothing else uses that
   form.
 
+- **A time is never written by hand.** Copy that says when something
+  happened puts a `TimeValue` in the sentence ("Deleted 2 hours ago",
+  "Recorded 5 minutes ago") rather than building the phrase from a number and
+  a unit: the relative phrase comes from the platform (`Intl.RelativeTimeFormat`),
+  so it is in the user's language and pluralises correctly, and the hover card
+  gives the zone and UTC. Never `5m ago`, `2h ago` or `just now`; under a
+  minute the platform's own "now" is the word. Where the sentence is a plain
+  string (an `aria-label`, a native `title`), it calls `formatInstant` from
+  `lib/time-value.ts` instead. An absolute time keeps its machine value
+  visible and the card adds the zone. `time-surfaces.test.ts` fails on a
+  hand-written formatter.
+
 ## Calibration examples
 
 | Before | After |

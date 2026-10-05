@@ -32,7 +32,9 @@ import {
 	SecretInput,
 	TooltipIconButton,
 } from "@/components/ui";
+import { TimeMarker } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
+import { parseTimeValue } from "@/lib/time-value";
 import type { VariableType } from "@/lib/variable-cast";
 import type { VariableRowData } from "./VariableTableEditor";
 
@@ -69,6 +71,12 @@ function VariableRow({
 	 * password field you just created only hides your own keystrokes.
 	 */
 	const isSecretField = variable.secret && !variable.isNew;
+	/*
+	 * A secret never reaches the time card (#1786), masked or not: an unsaved
+	 * secret row shows its value plainly while it is typed, but the card is a
+	 * tooltip a screen share or a screenshot can catch.
+	 */
+	const showsTime = !variable.secret && parseTimeValue(variable.value) !== null;
 
 	return (
 		/*
@@ -139,20 +147,32 @@ function VariableRow({
 						className={cn("h-8", !variable.enabled && "text-muted-foreground bg-muted")}
 					/>
 				) : (
-					<Input
-						type="text"
-						value={variable.value}
-						onChange={(e) => onUpdate(variable.id, "value", e.target.value)}
-						onBlur={onBlur}
-						placeholder="value"
-						className={cn(
-							"h-8",
-							!variable.enabled &&
-								!variable.isNew &&
-								"text-muted-foreground bg-muted",
-							variable.secret && "font-mono"
+					// The time marker sits inside the field the way `SecretInput`'s eye
+					// does, so a value turning into a time moves no column.
+					<div className="relative">
+						<Input
+							type="text"
+							value={variable.value}
+							onChange={(e) => onUpdate(variable.id, "value", e.target.value)}
+							onBlur={onBlur}
+							placeholder="value"
+							className={cn(
+								"h-8",
+								!variable.enabled &&
+									!variable.isNew &&
+									"text-muted-foreground bg-muted",
+								variable.secret && "font-mono",
+								showsTime && "pr-9"
+							)}
+						/>
+						{showsTime && (
+							<TimeMarker
+								value={variable.value}
+								label={variable.key || "This value"}
+								className="absolute right-0 top-0 h-full w-9"
+							/>
 						)}
-					/>
+					</div>
 				)}
 			</td>
 			<td className="py-1 px-2">

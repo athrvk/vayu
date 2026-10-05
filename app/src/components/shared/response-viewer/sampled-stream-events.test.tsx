@@ -30,7 +30,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { screen, cleanup, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import UnifiedResponseViewer from "./UnifiedResponseViewer";
 import SampleRequestCard from "@/modules/history/main/components/SampleRequestCard";
 import type { RunSample } from "@/types/domain";

@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatDayHeading } from "@/lib/time-value";
 import type { Run } from "@/types";
 
 export interface RunDayGroup {
@@ -31,11 +32,7 @@ function dayLabel(ms: number, now: Date): string {
 	const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
 	if (diffDays === 0) return "Today";
 	if (diffDays === 1) return "Yesterday";
-	return date.toLocaleDateString(undefined, {
-		month: "short",
-		day: "numeric",
-		year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
-	});
+	return formatDayHeading(date, now);
 }
 
 /**

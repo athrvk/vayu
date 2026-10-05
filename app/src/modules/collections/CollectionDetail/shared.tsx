@@ -9,8 +9,10 @@
  * Shared building blocks for CollectionDetail tabs.
  */
 
+import type { ReactNode } from "react";
 import { Info } from "lucide-react";
 import { Callout } from "@/components/shared";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
@@ -83,7 +85,13 @@ export function InfoBanner({ children }: { children: React.ReactNode }) {
 	);
 }
 
-export function Stat({ label, value }: { label: string; value: string }) {
+/** How long ago, with the card one hover away; a dash where the engine holds no time. */
+export function RelativeTime({ value }: { value: number | string | undefined }) {
+	if (value === undefined || value === "") return <>-</>;
+	return <TimeValue value={value} style="relative" />;
+}
+
+export function Stat({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<div className="bg-card border border-border rounded-md px-3.5 py-2.5">
 			<Eyebrow size="xs" className="mb-1">

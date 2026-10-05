@@ -35,6 +35,7 @@ import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { isBlankRow } from "./key-value";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
+import { TimeMarker } from "../TimeValue";
 import FilePartCell from "./FilePartCell";
 import type { PickedFile } from "../file-pick";
 
@@ -289,12 +290,24 @@ function KeyValueRow({
 				</div>
 			)}
 
-			{/* Empty on an ordinary row; the column keeps the grid aligned. */}
+			{/*
+			 * Empty on an ordinary row; the column keeps the grid aligned. A row
+			 * with something to resolve gets the resolved peek; a literal value
+			 * that is a time (`If-Modified-Since`, an `expires` param) gets the
+			 * time card's marker (#1786). A literal time holds no `{{`, so the two
+			 * only meet on a row whose key is a variable, and the peek wins.
+			 */}
 			<div className="flex items-center justify-center">
-				{showResolved && item.enabled && hasVariables && !isFileRow && (
+				{isFileRow ? null : showResolved && item.enabled && hasVariables ? (
 					<ResolvedPeek
 						label={item.key || "this row"}
 						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}
+					/>
+				) : (
+					<TimeMarker
+						value={item.value}
+						label={item.key || "This value"}
+						className="h-8 w-5"
 					/>
 				)}
 			</div>

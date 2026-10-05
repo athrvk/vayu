@@ -19,7 +19,8 @@
  * and that a selection from it reaches the handler with no event to stop.
  */
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import type { Run } from "@/types";

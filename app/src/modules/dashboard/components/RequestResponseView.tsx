@@ -13,6 +13,7 @@
 
 import { memo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
@@ -39,20 +40,6 @@ import {
 } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
-
-// Helper to format timestamp
-function formatTime(timestamp: number): string {
-	const date = new Date(timestamp);
-	const timeStr = date.toLocaleTimeString("en-US", {
-		hour12: false,
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-	});
-	// Add milliseconds manually
-	const ms = String(date.getMilliseconds()).padStart(3, "0");
-	return `${timeStr}.${ms}`;
-}
 
 // memo'd (#1714): `report` is a stable reference from the dashboard store
 // (`finalReport`, unchanged until a new run completes), so during a run's up
@@ -294,7 +281,12 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 											statusCode={result.statusCode}
 											statusText={result.statusText}
 											latencyMs={result.latencyMs}
-											timestamp={formatTime(result.timestamp)}
+											timestamp={
+												<TimeValue
+													value={result.timestamp}
+													style="time-ms"
+												/>
+											}
 											error={result.error}
 											isSlow={trace?.isSlow}
 											phases={phases}

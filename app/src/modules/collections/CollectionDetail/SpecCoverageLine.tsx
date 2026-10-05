@@ -27,7 +27,8 @@
 
 import { useLastCollectionRunQuery, useRunReportQuery } from "@/queries/runs";
 import { useTabsStore } from "@/stores";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
+import { formatInstant } from "@/lib/time-value";
 
 interface SpecCoverageLineProps {
 	collectionId: string;
@@ -55,9 +56,10 @@ export default function SpecCoverageLine({ collectionId }: SpecCoverageLineProps
 			<button
 				type="button"
 				className="underline underline-offset-2 hover:text-foreground"
+				aria-label={`Open the last run, ${formatInstant(lastRun.startTime, "relative")}`}
 				onClick={() => openTab({ type: "run", entityId: lastRun.id })}
 			>
-				{formatRelativeTime(lastRun.startTime)}
+				<TimeValue value={lastRun.startTime} style="relative" />
 			</button>
 			.
 		</p>

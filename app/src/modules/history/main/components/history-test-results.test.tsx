@@ -27,7 +27,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import OverviewTab from "./OverviewTab";
 import SamplesTab from "./SamplesTab";
 import { TooltipProvider } from "@/components/ui";

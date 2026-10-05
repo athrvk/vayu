@@ -29,7 +29,7 @@
  * `RequestBuilderProvider` above it is exactly what kept this provider
  * unusable outside the request builder. Everything an editor needs to paint
  * or open a token arrives through the context; an editor with no provider
- * above it paints nothing.
+ * above it paints no variables (its times are `CodeEditor`'s own, #1786).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

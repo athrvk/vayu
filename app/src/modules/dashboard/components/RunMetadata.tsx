@@ -17,6 +17,7 @@ import { formatDuration, pluralize } from "../utils/format";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { LoadTestConfig } from "@/types";
 import { MethodBadge } from "@/components/shared";
+import { TimeValue } from "@/components/shared/TimeValue";
 
 export default function RunMetadata({
 	requestUrl,
@@ -104,9 +105,7 @@ export default function RunMetadata({
 					<div className="flex items-center gap-2">
 						<Calendar className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Started:</span>
-						<span className="text-foreground">
-							{new Date(startTime).toLocaleString()}
-						</span>
+						<TimeValue value={startTime} className="text-foreground" />
 					</div>
 				)}
 
@@ -115,9 +114,7 @@ export default function RunMetadata({
 					<div className="flex items-center gap-2">
 						<Clock className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Completed:</span>
-						<span className="text-foreground">
-							{new Date(endTime).toLocaleString()}
-						</span>
+						<TimeValue value={endTime} className="text-foreground" />
 					</div>
 				)}
 

@@ -32,6 +32,7 @@ import {
 	Pin,
 } from "lucide-react";
 import { Badge } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { compareReports, deltaVerdict, type MetricDelta } from "@/lib/run-compare";
@@ -176,7 +177,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-micro font-semibold"
 				>
 					<Pin className="w-2.5 h-2.5" />
-					{new Date(baselineRun!.startTime).toLocaleString()}
+					<TimeValue value={baselineRun!.startTime} />
 				</Badge>
 			</div>
 			<div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -29,7 +29,7 @@ import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
 import { MethodBadge, TruncatedText } from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;
@@ -121,9 +121,11 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 									</span>
 								)}
 								{run.startTime > 0 && (
-									<span className="text-xs font-mono tabular-nums text-muted-foreground">
-										{formatRelativeTime(run.startTime)}
-									</span>
+									<TimeValue
+										value={run.startTime}
+										style="relative"
+										className="text-xs font-mono text-muted-foreground"
+									/>
 								)}
 								<ChevronRight className="size-icon text-muted-foreground transition-colors group-hover:text-foreground" />
 							</span>

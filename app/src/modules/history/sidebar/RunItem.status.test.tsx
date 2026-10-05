@@ -24,7 +24,8 @@
  * `STATUS_GLYPH` and the first case fails while the colours still differ.
  */
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import type { Run } from "@/types";
 

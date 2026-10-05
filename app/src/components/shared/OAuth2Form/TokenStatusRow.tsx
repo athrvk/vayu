@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { ApiError } from "@/services/http-client";
 import {
 	useOAuth2TokenStatusQuery,
@@ -40,15 +41,20 @@ function listPhrase(items: string[]): string {
 	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-function humanizeExpiry(expiresAt: number | null): string {
-	if (expiresAt === null) return "does not expire";
-	const ms = expiresAt - Date.now();
-	if (ms <= 0) return "expired";
-	const mins = Math.round(ms / 60_000);
-	if (mins < 60) return `expires in ${mins}m`;
-	const hours = Math.round(mins / 60);
-	if (hours < 48) return `expires in ${hours}h`;
-	return `expires in ${Math.round(hours / 24)}d`;
+/** The engine's `expired` flag, or the local clock if it has not caught up yet. */
+function hasLapsed(expiresAt: number, expired: boolean): boolean {
+	return expired || expiresAt <= Date.now();
+}
+
+function TokenExpiry({ expiresAt, expired }: { expiresAt: number | null; expired: boolean }) {
+	if (expiresAt === null) return <>{expired ? "expired" : "does not expire"}</>;
+	const lapsed = hasLapsed(expiresAt, expired);
+	return (
+		<>
+			{lapsed ? "expired " : "expires "}
+			<TimeValue value={expiresAt} style="relative" />
+		</>
+	);
 }
 
 export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) {
@@ -168,7 +174,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 						<span className="text-xs text-muted-foreground">
 							<code className="text-foreground">{maskToken(token.accessToken)}</code>
 							{" · "}
-							{expired ? "expired" : humanizeExpiry(token.expiresAt)}
+							<TokenExpiry expiresAt={token.expiresAt} expired={expired} />
 						</span>
 					) : incomplete ? (
 						<span className="text-xs text-muted-foreground">

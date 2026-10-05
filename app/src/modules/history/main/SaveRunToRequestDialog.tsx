@@ -38,8 +38,8 @@ import {
 	DialogCancelButton,
 	DisabledHint,
 } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/format-time";
 import { useUpdateRequestMutation } from "@/queries";
 import { useToastStore } from "@/stores";
 import type { Request, Run } from "@/types";
@@ -262,8 +262,8 @@ export default function SaveRunToRequestDialog({
 				<DialogHeader>
 					<DialogTitle>Save run to {liveRequest.name || "the request"}</DialogTitle>
 					<DialogDescription>
-						Recorded {formatRelativeTime(new Date(run.startTime).toISOString())}. This
-						replaces the request's current values.
+						Recorded <TimeValue value={run.startTime} style="relative" />. This replaces
+						the request's current values.
 					</DialogDescription>
 				</DialogHeader>
 

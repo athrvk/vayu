@@ -49,7 +49,7 @@ import { useRequestQuery } from "@/queries";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
 import { useRevealStore } from "@/lib/graphql/reveal-store";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import { SectionEmpty, SectionLoading } from "./Section";
@@ -77,7 +77,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 	const operations = documentOutline(parseGraphQLBody(content).query);
 
 	const status = entry?.status ?? "idle";
-	const age = entry?.fetchedAt ? formatRelativeTime(entry.fetchedAt) : null;
+	const fetchedAt = entry?.fetchedAt;
 
 	return (
 		<div className="space-y-2">
@@ -108,7 +108,11 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 			 * not "no schema" - the editors still complete against it, and the age
 			 * is the only thing that says how much to trust it.
 			 */}
-			{age && <p className="text-label text-muted-foreground m-0">Fetched {age}</p>}
+			{fetchedAt && (
+				<p className="text-label text-muted-foreground m-0">
+					Fetched <TimeValue value={fetchedAt} style="relative" />
+				</p>
+			)}
 			{status === "error" && entry?.error && (
 				<p className="text-label text-warning-text m-0">{entry.error.message}</p>
 			)}

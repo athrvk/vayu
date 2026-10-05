@@ -33,6 +33,7 @@ import {
 	CardTitle,
 	DeleteConfirmDialog,
 } from "@/components/ui";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useCookiesQuery, useClearCookiesMutation, useEnvironmentsQuery } from "@/queries";
 import { useToastStore } from "@/stores";
@@ -60,9 +61,9 @@ function scopeLabel(
  * sentinel - it dies with the engine process, which is a materially different
  * promise from a date and reads as one here.
  */
-function expiryLabel(expires: number): string {
-	if (expires === 0) return "Session";
-	return new Date(expires * 1000).toLocaleString();
+function Expiry({ expires }: { expires: number }) {
+	if (expires === 0) return <>Session</>;
+	return <TimeValue value={expires * 1000} />;
 }
 
 export function CookiesCard() {
@@ -192,7 +193,7 @@ export function CookiesCard() {
 											</Badge>
 										)}
 										<span className="ml-auto text-muted-foreground whitespace-nowrap">
-											{expiryLabel(cookie.expires)}
+											<Expiry expires={cookie.expires} />
 										</span>
 									</div>
 								))}

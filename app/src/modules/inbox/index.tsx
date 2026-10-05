@@ -53,7 +53,7 @@ import {
 } from "@/queries";
 import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
-import { formatTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -125,7 +125,7 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 				<span className="font-mono text-xs font-semibold">{capture.method}</span>
 				<span className="truncate font-mono text-xs">{capture.path}</span>
 				<span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-					{formatTime(capture.receivedAt)}
+					<TimeValue value={capture.receivedAt} style="time" />
 				</span>
 			</span>
 			{/* The truncation marker belongs here as well as in the detail pane:

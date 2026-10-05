@@ -23,7 +23,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RequestResponseView from "./RequestResponseView";
 import { withQueryClient } from "@/test/query-wrapper";
 import type { RunReport, RunResultTrace } from "@/types";

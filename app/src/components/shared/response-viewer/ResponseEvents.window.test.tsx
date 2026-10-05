@@ -20,8 +20,9 @@
  * row count would snap back to its first slice on every batch that landed, and
  * an unmemoized row would re-render the whole visible list for one arrival.
  *
- * Row renders are counted through `toLocaleTimeString`, which each row calls
- * once for its timestamp and nothing else in this component calls at all.
+ * Row renders are counted through `formatInstant`, which each row's time calls
+ * once for its text and nothing else in this component calls at all - the
+ * card's own formatting waits for the tooltip to open.
  *
  * jsdom has no `IntersectionObserver` and `useGrowingWindow` degrades to
  * showing everything there, so these stub one that only intersects when a case
@@ -30,10 +31,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { GROWING_WINDOW_STEP } from "@/hooks/useGrowingWindow";
 import type { StreamEvent } from "@/types";
+import { formatInstant } from "@/lib/time-value";
 import ResponseEvents from "./ResponseEvents";
+
+vi.mock("@/lib/time-value", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/time-value")>();
+	return { ...actual, formatInstant: vi.fn(actual.formatInstant) };
+});
 
 /** The observer the list attaches to its sentinel, held so a case can fire it. */
 let intersect: (() => void) | null = null;
@@ -98,7 +106,9 @@ describe("ResponseEvents render window", () => {
 		expect(screen.queryByText(/scroll for more/)).not.toBeInTheDocument();
 	});
 
-	it("keeps the window where the reader left it when a batch lands", () => {
+	// Two windows of rows, each with its time's tooltip root: about 1.5s here, and
+	// over the 5s default on the Windows runner, which runs these 3-4x slower.
+	it("keeps the window where the reader left it when a batch lands", { timeout: 15_000 }, () => {
 		const events = stream(500);
 		const { rerender } = render(
 			<ResponseEvents events={events} isStream isStreaming listKey="run_1" />
@@ -122,7 +132,9 @@ describe("ResponseEvents render window", () => {
 		expect(rows()).toHaveLength(GROWING_WINDOW_STEP * 2);
 	});
 
-	it("starts a different list at the top", () => {
+	// Two windows of rows, each with its time's tooltip root: about 1.5s here, and
+	// over the 5s default on the Windows runner, which runs these 3-4x slower.
+	it("starts a different list at the top", { timeout: 15_000 }, () => {
 		const { rerender } = render(
 			<ResponseEvents events={stream(500)} isStream isStreaming listKey="run_1" />
 		);
@@ -138,7 +150,8 @@ describe("ResponseEvents render window", () => {
 
 	it("re-renders only the rows a batch actually added", () => {
 		const events = stream(40);
-		const clock = vi.spyOn(Date.prototype, "toLocaleTimeString");
+		const clock = vi.mocked(formatInstant);
+		clock.mockClear();
 
 		const { rerender } = render(
 			<ResponseEvents events={events} isStream isStreaming listKey="run_1" />

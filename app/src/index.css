@@ -2794,6 +2794,14 @@
 	.monaco-editor .vayu-variable-token-warning {
 		@apply text-[hsl(var(--warning-text))];
 	}
+	/*
+	 * A time (issue #1786): an underline, not a colour, so the token colour
+	 * the language gave it - a JSON string, a number - still reads. Dotted and
+	 * muted: it marks a hover, not a link.
+	 */
+	.monaco-editor .vayu-time-token {
+		@apply underline decoration-dotted decoration-[hsl(var(--muted-foreground))] underline-offset-[3px];
+	}
 }
 
 /*

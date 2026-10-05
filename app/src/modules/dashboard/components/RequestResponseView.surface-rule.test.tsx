@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
 import RequestResponseView from "./RequestResponseView";
 import type { RunReport } from "@/types";

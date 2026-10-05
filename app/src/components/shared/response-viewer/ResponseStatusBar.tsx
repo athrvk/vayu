@@ -24,7 +24,8 @@ import { AlertTriangle, Clock, FileText, History, ShieldCheck } from "lucide-rea
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
-import { formatRelativeTime } from "@/lib/format-time";
+import { TimeValue } from "@/components/shared/TimeValue";
+import type { TimeRow } from "@/lib/time-value";
 import { formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
@@ -108,9 +109,9 @@ export function ResponseStatusBar({
 }: ResponseStatusBarProps) {
 	/*
 	 * A relative time has to be recomputed to stay true. Nothing else in the app
-	 * does this - every other `formatRelativeTime` caller renders once and then
-	 * says "just now" for as long as it stays mounted - and the restored-response
-	 * chip here had the same rot. The response pane is where it matters most,
+	 * does this - every other relative `TimeValue` renders once and then says
+	 * "now" for as long as it stays mounted - and the restored-response chip here
+	 * had the same rot. The response pane is where it matters most,
 	 * because the pane sits open while you keep editing the request beside it.
 	 */
 	const [, tick] = useState(0);
@@ -121,16 +122,13 @@ export function ResponseStatusBar({
 		return () => clearInterval(id);
 	}, [at]);
 
-	const age = at
-		? {
-				at,
-				fromRun: !!restoredFrom,
-				title: restoredFrom
-					? `Restored from a stored run - ${new Date(restoredFrom.at).toLocaleString()}` +
-						(restoredFrom.runId ? `\nRun ${restoredFrom.runId}` : "")
-					: `Received ${new Date(at).toLocaleString()}`,
-			}
-		: null;
+	const age = at ? { at, fromRun: !!restoredFrom } : null;
+	const restoredRows: TimeRow[] = restoredFrom
+		? [
+				{ label: "Source", value: "Restored from a stored run" },
+				...(restoredFrom.runId ? [{ label: "Run", value: restoredFrom.runId }] : []),
+			]
+		: [];
 
 	return (
 		/*
@@ -273,10 +271,7 @@ export function ResponseStatusBar({
 			 * than among status/time/size, which describe the exchange itself.
 			 */}
 			{age && (
-				<div
-					className="ml-auto flex items-center gap-1.5 text-label text-muted-foreground"
-					title={age.title}
-				>
+				<div className="ml-auto flex items-center gap-1.5 text-label text-muted-foreground">
 					{age.fromRun ? (
 						<History className="size-icon-sm" />
 					) : (
@@ -284,7 +279,7 @@ export function ResponseStatusBar({
 					)}
 					<span>
 						{age.fromRun ? "from run - " : ""}
-						{formatRelativeTime(age.at)}
+						<TimeValue value={age.at} style="relative" extraRows={restoredRows} />
 					</span>
 				</div>
 			)}

@@ -15,7 +15,8 @@
  * negotiated one.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import type { Run } from "@/types";
 import type { HttpVersion } from "@/constants/request";
