@@ -50,6 +50,22 @@ const monaco = {
 /** Options the wrapper handed Monaco on the last render. */
 let lastOptions: Record<string, unknown> = {};
 
+const listener = () => ({ dispose: () => {} });
+
+/**
+ * What the token layer installs on every editor whose language has a time
+ * matcher, provider or not (#1786) - inert here, with no model to scan.
+ */
+const tokenLayerSurface = {
+	createDecorationsCollection: () => ({ set: () => {}, clear: () => {} }),
+	getModel: () => null,
+	onDidChangeModelContent: listener,
+	onDidChangeModel: listener,
+	onMouseMove: listener,
+	onMouseLeave: listener,
+	onDidScrollChange: listener,
+};
+
 vi.mock("@monaco-editor/react", () => ({
 	Editor: ({
 		onMount,
@@ -59,7 +75,7 @@ vi.mock("@monaco-editor/react", () => ({
 		options?: Record<string, unknown>;
 	}) => {
 		lastOptions = options ?? {};
-		onMount?.({ addCommand, getContainerDomNode }, monaco);
+		onMount?.({ addCommand, getContainerDomNode, ...tokenLayerSurface }, monaco);
 		return <div data-testid="editor" />;
 	},
 }));

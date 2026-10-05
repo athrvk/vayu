@@ -1627,7 +1627,10 @@ global classes its decorations can name - `vayu-variable-token-*`, under a
 `.monaco-editor` prefix so they outrank the theme rules Monaco injects at
 runtime. They are the one place a global class is the right answer rather than
 a utility string, for the same reason the scrollbar block is: no component
-stylesheet reaches what Monaco renders. → `variable-token-classes.test.ts`
+stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
+the sixth, `vayu-time-token`: a dotted underline in `--muted-foreground`
+rather than a colour, so the language's own token colour still reads under it.
+→ `variable-token-classes.test.ts`
 
 ---
 

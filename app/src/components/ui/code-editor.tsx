@@ -32,6 +32,7 @@ import { useMonacoTheme } from "@/hooks/useMonacoTheme";
 // provider, which reaches into the request builder for its writer, and a
 // `components/ui` primitive must not drag a module tree in behind it.
 import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
+import { TimeTokenCard } from "@/components/shared/EditorVariableTokens/TimeTokenCard";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
 import { chordKeys } from "@/lib/platform";
@@ -184,12 +185,15 @@ export function CodeEditor({
 	const [loadFailed, setLoadFailed] = useState(false);
 	const [hasFocus, setHasFocus] = useState(false);
 	/*
-	 * `{{variable}}` colouring, ⌘-click and the edit chord (#1220). Inert unless
-	 * a provider is above this editor and the language is one variables are
-	 * interpolated in - see the hook, which takes the instance at mount and
-	 * keeps no state of its own.
+	 * `{{variable}}` colouring, hover and the edit chord (#1220), inert unless a
+	 * provider is above an editable editor; and the time underline (#1786), in
+	 * every editor whose language has a time matcher. The time card is drawn
+	 * here, below, because most read-only editors have no provider to draw it.
 	 */
-	const mountVariableTokens = useEditorVariableTokens({ language, readOnly });
+	const { onMount: mountEditorTokens, timeHover } = useEditorVariableTokens({
+		language,
+		readOnly,
+	});
 
 	useEffect(() => {
 		let active = true;
@@ -213,10 +217,10 @@ export function CodeEditor({
 	const handleMount = useCallback<OnMount>(
 		(instance, monaco) => {
 			registerEditorChords(instance, monaco);
-			mountVariableTokens(instance, monaco);
+			mountEditorTokens(instance, monaco);
 			onMount?.(instance, monaco);
 		},
-		[onMount, mountVariableTokens]
+		[onMount, mountEditorTokens]
 	);
 
 	// User editor preferences override the shared defaults; an explicit
@@ -305,6 +309,7 @@ export function CodeEditor({
 				}}
 			/>
 			{!readOnly && hasFocus && <LeaveEditorHint />}
+			{timeHover && <TimeTokenCard request={timeHover} />}
 		</div>
 	);
 }

@@ -24,16 +24,11 @@
  * there is room to strike them through.
  */
 
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipHint,
-	TooltipTrigger,
-	TooltipValue,
-} from "@/components/ui";
+import { TooltipHint, TooltipValue } from "@/components/ui";
 import type { VariableTokenKind } from "@/lib/variable-token-kind";
 import type { VariableOrigin } from "@/types";
 import type { TokenHoverRequest } from "./context";
+import { EditorTokenTooltip } from "./EditorTokenTooltip";
 
 /**
  * The value line and the hint under it, for a classified token.
@@ -92,59 +87,23 @@ export function TokenHoverCard({
 	editable: boolean;
 }) {
 	return (
-		<div
-			// Fixed and inert, for the same reason the popover's anchor is: the
-			// rectangle came from `getBoundingClientRect` on the editor, and a box
-			// over Monaco's canvas that took the pointer would end the hover it was
-			// drawn for - and swallow the click that opens the popover.
-			style={{
-				position: "fixed",
-				left: request.rect.left,
-				top: request.rect.top,
-				width: request.rect.width,
-				height: request.rect.height,
-				pointerEvents: "none",
-			}}
-		>
-			{/*
-			 * Open because it is mounted: the editor owns the timing (it holds the
-			 * pointer), so this component exists only while the tooltip should be
-			 * up. Radix's own open delay would run a second timer after that one.
-			 */}
-			<Tooltip open>
-				<TooltipTrigger asChild>
-					{/*
-					 * Never a Tab stop - the keyboard reads a token by opening its
-					 * popover (⇧⌘D), which says everything this card does and more.
-					 * It still carries the token's text, so the tooltip Radix points
-					 * at it with `aria-describedby` describes something named.
-					 */}
-					<span className="block h-full w-full" tabIndex={-1}>
-						<span className="sr-only">{`{{${request.name}}}`}</span>
-					</span>
-				</TooltipTrigger>
-				<TooltipContent side="bottom" className="max-w-xs">
-					<span className="flex flex-col gap-1">
-						<HoverAnswer kind={kind} origins={origins} />
-						{/*
-						 * What a click does, for the one class of token that has
-						 * anything behind it to open. A field's token is a real
-						 * element and looks pressable; this one is painted text on a
-						 * canvas, and the affordance used to be spelled out by the
-						 * Monaco hover ("⌘-click or ⇧⌘D to edit") this card replaced.
-						 * A generator has no stored variable behind it, so it says
-						 * nothing; a token whose scope is not currently writable still
-						 * opens the popover, for the origins list, but never promises
-						 * a save it cannot do.
-						 */}
-						{kind.state !== "runtime" && (
-							<TooltipHint>
-								{editable ? "Click to edit" : "Click for details"}
-							</TooltipHint>
-						)}
-					</span>
-				</TooltipContent>
-			</Tooltip>
-		</div>
+		<EditorTokenTooltip rect={request.rect} label={`{{${request.name}}}`}>
+			<span className="flex flex-col gap-1">
+				<HoverAnswer kind={kind} origins={origins} />
+				{/*
+				 * What a click does, for the one class of token that has anything
+				 * behind it to open. A field's token is a real element and looks
+				 * pressable; this one is painted text on a canvas, and the
+				 * affordance used to be spelled out by the Monaco hover ("⌘-click
+				 * or ⇧⌘D to edit") this card replaced. A generator has no stored
+				 * variable behind it, so it says nothing; a token whose scope is
+				 * not currently writable still opens the popover, for the origins
+				 * list, but never promises a save it cannot do.
+				 */}
+				{kind.state !== "runtime" && (
+					<TooltipHint>{editable ? "Click to edit" : "Click for details"}</TooltipHint>
+				)}
+			</span>
+		</EditorTokenTooltip>
 	);
 }

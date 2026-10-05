@@ -10,8 +10,9 @@
  *
  * A context rather than a hook the editor calls for itself: `CodeEditor` is a
  * `components/ui` primitive mounted in a dozen places, and an editor with no
- * provider above it simply paints nothing - the settings preview and the
- * response viewers, which have no variable scope at all.
+ * provider above it simply paints no variables - the settings preview and the
+ * response viewers, which have no variable scope at all. (Times are painted
+ * there regardless, and need nothing from this context - issue #1786.)
  *
  * `EditorVariableTokensProvider` takes a `VariableSupport` as a prop rather
  * than reaching for one itself, so the write path is whatever the mounting

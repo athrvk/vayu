@@ -33,14 +33,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, render, screen } from "@testing-library/react";
 import type * as Monaco from "monaco-editor";
 import type { MonacoApi } from "@/lib/monaco-api";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 import { classifyScriptToken } from "@/lib/variable-token-kind";
 import { TIMING } from "@/config/timing";
 import { EditorVariableTokensContext, type EditorVariableTokensValue } from "./context";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEditorVariableTokens } from "./useEditorVariableTokens";
+import { TimeTokenCard } from "./TimeTokenCard";
 
 const variables: Record<string, ResolvedVariable> = {};
 let origins: VariableOrigin[] = [];
@@ -149,8 +151,17 @@ function mount(
 		}
 	);
 	// What `CodeEditor` does from `onMount`.
-	act(() => rendered.result.current(stub.editor, monacoStub));
+	act(() => rendered.result.current.onMount(stub.editor, monacoStub));
 	return rendered;
+}
+
+/** Every class any paint so far put on the model, in order. */
+function paintedClasses(stub: ReturnType<typeof stubEditor>): string[] {
+	return stub.decorations.set.mock.calls.flatMap((call) =>
+		(call[0] as Array<{ options: { inlineClassName: string } }>).map(
+			(d) => d.options.inlineClassName
+		)
+	);
 }
 
 /** The pointer resting on `column` of the first line, past the hover delay. */
@@ -194,11 +205,11 @@ describe("useEditorVariableTokens", () => {
 		expect(painted[0].range.startColumn).toBe(5);
 	});
 
-	it("leaves a read-only editor alone - a response body's `{{x}}` is data", () => {
+	it("leaves a read-only editor's variables alone - a response body's `{{x}}` is data", () => {
 		const stub = stubEditor(["{{baseUrl}}"]);
 		mount(stub, { readOnly: true });
-		// Mutation check: drop `!readOnly` from `enabled` and this fails.
-		expect(stub.decorations.set).not.toHaveBeenCalled();
+		// Mutation check: drop `!readOnly` from `variableMatcher` and this fails.
+		expect(paintedClasses(stub)).toEqual([]);
 		expect(stub.handlers.commands).toHaveLength(0);
 	});
 
@@ -478,8 +489,6 @@ describe("useEditorVariableTokens", () => {
 		it("never shows one in a read-only editor - a response body's `{{x}}` is data", () => {
 			const stub = stubEditor(["{{baseUrl}}"]);
 			mount(stub, { readOnly: true });
-			// The hook installs nothing there, so there is no handler to fire.
-			expect(stub.handlers.move).toBeUndefined();
 			hoverAt(stub, 4);
 			expect(setHoveredToken).not.toHaveBeenCalled();
 		});
@@ -592,10 +601,10 @@ describe("useEditorVariableTokens", () => {
 		});
 	});
 
-	it("does nothing with no provider above it", () => {
+	it("paints no variable with no provider above it", () => {
 		const stub = stubEditor(["{{baseUrl}}"]);
 		mount(stub, { withProvider: false });
-		expect(stub.decorations.set).not.toHaveBeenCalled();
+		expect(paintedClasses(stub)).toEqual([]);
 		expect(stub.handlers.commands).toHaveLength(0);
 	});
 
@@ -636,5 +645,127 @@ describe("useEditorVariableTokens", () => {
 		stub.handlers.commands[0].run();
 		openTokenEditor.mock.calls[0][0].onClose();
 		expect(stub.editor.focus).toHaveBeenCalled();
+	});
+
+	/**
+	 * Times are gated apart from variables (issue #1786): underlined and carded
+	 * in every editor whose language has a time matcher, read-only and
+	 * provider-less included, and never an edit affordance. The card's rows
+	 * come from `describeInstant`; what they say per zone is pinned in
+	 * `time-value.test.ts`, so these assert only the zone-independent rows.
+	 */
+	describe("times", () => {
+		const ISO_LINE = '{"at": "2026-10-05T07:23:00Z", "u": "{{baseUrl}}"}';
+
+		it("underlines a time in a read-only editor and shows its card, with no edit affordance", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor([ISO_LINE]);
+			const rendered = mount(stub, { readOnly: true });
+
+			// Mutation check: gate the time matcher on `!readOnly` again and the
+			// read-only editor paints, and shows, nothing.
+			const painted = stub.decorations.set.mock.calls[0][0] as Array<{
+				range: { startColumn: number; endColumn: number };
+				options: { inlineClassName: string };
+			}>;
+			expect(painted).toEqual([
+				{
+					range: { startLineNumber: 1, startColumn: 9, endLineNumber: 1, endColumn: 29 },
+					options: { inlineClassName: "vayu-time-token" },
+				},
+			]);
+
+			hoverAt(stub, 12);
+			const card = rendered.result.current.timeHover;
+			expect(card).toMatchObject({
+				text: "2026-10-05T07:23:00Z",
+				rect: { left: 10 + 9 * 8, top: 24, height: 18 },
+			});
+			expect(card?.rows.map((row) => row.label)).toContain("UTC");
+			expect(card?.rows).toContainEqual({ label: "Original", value: "2026-10-05T07:23:00Z" });
+			expect(openTokenEditor).not.toHaveBeenCalled();
+			expect(stub.handlers.commands).toHaveLength(0);
+		});
+
+		it("draws the card's rows through the shared tooltip shell", async () => {
+			const stub = stubEditor([ISO_LINE]);
+			const rendered = mount(stub, { readOnly: true });
+			hoverAt(stub, 12);
+			const request = rendered.result.current.timeHover;
+			expect(request).not.toBeNull();
+			if (!request) return;
+
+			vi.useRealTimers();
+			render(
+				<TooltipProvider>
+					<TimeTokenCard request={request} />
+				</TooltipProvider>
+			);
+			const shown = await screen.findByTestId("time-hover-card");
+			expect(shown.textContent).toContain("Original");
+			expect(shown.textContent).toContain("2026-10-05T07:23:00Z");
+		});
+
+		it("works with no provider above the editor at all", () => {
+			const stub = stubEditor(["expires: 1759648980"]);
+			const rendered = mount(stub, { language: "yaml", readOnly: true, withProvider: false });
+
+			expect(paintedClasses(stub)).toEqual(["vayu-time-token"]);
+			hoverAt(stub, 12);
+			expect(rendered.result.current.timeHover?.text).toBe("1759648980");
+		});
+
+		it("never paints or opens a variable in the same read-only model", () => {
+			variables.baseUrl = { value: "https://x", scope: "environment" };
+			const stub = stubEditor([ISO_LINE]);
+			const rendered = mount(stub, { readOnly: true });
+
+			expect(paintedClasses(stub)).toEqual(["vayu-time-token"]);
+			// Column 40 is inside `{{baseUrl}}`.
+			hoverAt(stub, 40);
+			expect(openTokenEditor).not.toHaveBeenCalled();
+			expect(setHoveredToken).not.toHaveBeenCalled();
+			expect(rendered.result.current.timeHover).toBeNull();
+		});
+
+		it("paints both in an editable script, and only the variable opens the popover", () => {
+			origins = [{ scope: "environment", value: "https://x", enabled: true, winner: true }];
+			const stub = stubEditor(['pm.environment.get("baseUrl"); const at = "2026-10-05";']);
+			const rendered = mount(stub, { language: "javascript" });
+
+			expect(paintedClasses(stub)).toEqual([
+				"vayu-variable-token-resolved",
+				"vayu-time-token",
+			]);
+
+			// The time - column 45 is inside "2026-10-05".
+			hoverAt(stub, 45);
+			expect(rendered.result.current.timeHover?.text).toBe("2026-10-05");
+			expect(openTokenEditor).not.toHaveBeenCalled();
+			// A zoneless value is shown as written rather than converted.
+			expect(rendered.result.current.timeHover?.rows[0]).toEqual({
+				label: "As written",
+				value: "2026-10-05",
+			});
+
+			// The variable: the popover opens and the time card comes down.
+			hoverAt(stub, 22);
+			expect(openTokenEditor).toHaveBeenCalledTimes(1);
+			expect(rendered.result.current.timeHover).toBeNull();
+		});
+
+		it("takes the card down when the pointer leaves the time, and never opens it via the chord", () => {
+			const stub = stubEditor(['x "2026-10-05T07:23:00Z"']);
+			const rendered = mount(stub, { language: "javascript" });
+
+			stub.moveCaretTo(8);
+			stub.handlers.commands[0].run();
+			expect(openTokenEditor).not.toHaveBeenCalled();
+
+			hoverAt(stub, 8);
+			expect(rendered.result.current.timeHover).not.toBeNull();
+			hoverAt(stub, 1);
+			expect(rendered.result.current.timeHover).toBeNull();
+		});
 	});
 });
