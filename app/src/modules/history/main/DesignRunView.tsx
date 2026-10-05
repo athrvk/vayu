@@ -103,9 +103,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 	/*
 	 * The live request, when it still exists. It is the only source of
-	 * credentials - `sanitize_config_snapshot` strips auth down to its mode
-	 * before storing a run - so the seed needs it to decide where headers and
-	 * auth come from.
+	 * credentials - `sanitize_config_snapshot` strips auth down to its mode and
+	 * replaces a credential header's value with `<redacted>` before storing a
+	 * run - so the seed needs it to decide where headers and auth come from.
 	 *
 	 * Three outcomes, and all three have to be kept apart, because `seedFromRun`
 	 * treats a falsy `liveRequest` as "the request was deleted" - it seeds the
