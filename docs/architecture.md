@@ -555,6 +555,17 @@ Variables are resolved with priority: **Environment > Collection > Global**
 
 - **Script Sandboxing**: QuickJS contexts are isolated with no filesystem access; scripts can make HTTP requests through `pm.sendRequest`, subject to the same scheme allowlist as the request itself
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
+- **The engine serves no browser**: the control API emits no CORS header, and
+  refuses any request whose `Host` is not its own loopback address and any
+  request other than an `OPTIONS` preflight that carries an `Origin`, so a web
+  page in the user's browser can neither read it nor drive it. Local tools (the
+  MCP server, `curl`, a script) send no `Origin` and are unaffected. The app's
+  renderer is a browser context too, and its CORS is done by the shell:
+  `app/electron/engine-origin.ts`, on the main window's session, removes
+  `Origin` and `Referer` from requests to exactly `http://127.0.0.1:9876/*` and
+  adds the CORS response headers the renderer's own check needs. That URL filter
+  is the whole boundary, which is why nothing but the app's own document may
+  load in that session.
 - **No response caching**: every engine response carries `Cache-Control: no-store`
   and the renderer's fetch client asks for `cache: "no-store"` as well (#1507).
   Nothing the engine answers is valid to replay from a browser's disk cache - it

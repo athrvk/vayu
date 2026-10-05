@@ -63,6 +63,13 @@ everything.
   nothing else** (`electron/packaged-dependencies.test.ts`). electron-builder
   packs it, and only it, into the asar; every package Vite bundles for the
   renderer is a devDependency. See `docs/app/building.md#dependencies`.
+- **The renderer reaches the engine only through `ENGINE_BASE_URL`**
+  (`src/config/network.ts`). The engine refuses any request that carries an
+  `Origin`, and the renderer's get through only because
+  `electron/engine-origin.ts` strips it for exactly that URL; the same engine
+  spelled `localhost:9876` is outside the filter and is refused. That module is
+  also the one place a `webRequest` listener may be registered, because Electron
+  keeps one per event per session (`engine-origin.test.ts`).
 - State: Zustand for UI state, TanStack Query for server state.
 - **A save that fails is retried, and the failure stays on screen until it
   lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,
