@@ -175,6 +175,8 @@ function fileRefOf(node: unknown): FileRef {
  * request's own row of that name stands in for it when `liveHeaders` has one,
  * the same way the live auth stands in for the recorded auth, so a header the
  * user typed still goes out and "Save to request" finds nothing to change.
+ * The row is taken whole, disabled or not: a disabled one stays disabled in
+ * the copy instead of being replayed or dropped from the saved request.
  */
 function toHeaderItems(
 	headers: Record<string, string> | undefined,
@@ -185,18 +187,14 @@ function toHeaderItems(
 	// replay tells the engine the same thing the recorded Send did: these are
 	// the body mode's own, which a `content-type` opt-out removes.
 	const marked = new Set(Array.isArray(bodyMode) ? bodyMode : []);
-	const own = new Map(
-		liveHeaders.filter((h) => h.enabled !== false).map((h) => [h.key.toLowerCase(), h])
-	);
+	const own = new Map(liveHeaders.map((h) => [h.key.toLowerCase(), h]));
 	return toKeyValueItems(
 		Object.entries(headers ?? {})
 			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
 			.flatMap(([key, value]) => {
 				if (isWithheld(value)) {
 					const live = own.get(key.toLowerCase());
-					return live && !isWithheld(live.value)
-						? [{ key: live.key, value: live.value, enabled: true }]
-						: [];
+					return live && !isWithheld(live.value) ? [live] : [];
 				}
 				return [
 					{

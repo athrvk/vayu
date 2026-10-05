@@ -366,7 +366,7 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("environment_id", &Run::environment_id),
     make_column ("type", &Run::type),     // "design", "load" or "scenario"
     make_column ("status", &Run::status), // pending/running/completed/failed
-    make_column ("config_snapshot", &Run::config_snapshot), // JSON: full request copy
+    make_column ("config_snapshot", &Run::config_snapshot), // JSON: composed request, credentials withheld
     make_column ("start_time", &Run::start_time), make_column ("end_time", &Run::end_time),
     // Whole-run results written once at terminal status. NOT NULL, so the
     // default_value is what lets sync_schema ALTER TABLE ADD COLUMN it onto an

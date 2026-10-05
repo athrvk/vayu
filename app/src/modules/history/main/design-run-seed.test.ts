@@ -279,21 +279,36 @@ describe("seedFromRun", () => {
 		it("puts the request's own header in the withheld one's place, by case-insensitive name", () => {
 			const live = {
 				...liveRequest,
-				headers: [
-					{ key: "authorization", value: "Bearer {{token}}", enabled: true },
-					{ key: "X-Off", value: "x", enabled: false },
-				],
+				headers: [{ key: "authorization", value: "Bearer {{token}}", enabled: true }],
 			} as unknown as Request;
 			const seed = seedFromRun(
-				withheldRun({
-					headers: { Authorization: "<redacted>", "X-Off": "<redacted>" },
-				}),
+				withheldRun({ headers: { Authorization: "<redacted>" } }),
 				live
 			);
 
 			expect(
 				seed.request.headers?.filter((h) => h.key).map(({ key, value }) => ({ key, value }))
 			).toEqual([{ key: "authorization", value: "Bearer {{token}}" }]);
+		});
+
+		it("keeps a stand-in's enabled state, so a disabled header is not replayed or dropped", () => {
+			const live = {
+				...liveRequest,
+				headers: [
+					{
+						key: "X-Off",
+						value: "x",
+						enabled: false,
+						description: "kept",
+						source: "user",
+					},
+				],
+			} as unknown as Request;
+			const seed = seedFromRun(withheldRun({ headers: { "X-Off": "<redacted>" } }), live);
+
+			expect(seed.request.headers?.filter((h) => h.key)).toMatchObject([
+				{ key: "X-Off", value: "x", enabled: false, description: "kept", source: "user" },
+			]);
 		});
 
 		it("does not stand in a live header that itself holds the marker", () => {

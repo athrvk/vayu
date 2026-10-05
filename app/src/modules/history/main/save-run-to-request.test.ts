@@ -251,6 +251,16 @@ describe("applyRunToRequest", () => {
 			expect(kept!.note).toMatch(/withhold/i);
 		});
 
+		it("writes a disabled header back disabled rather than dropping it", () => {
+			const off = { key: "Authorization", value: "Bearer {{token}}", enabled: false };
+			const live = liveRequest({ headers: [off] });
+			const r = withheldRun({ headers: { Authorization: "<redacted>" } });
+			const seed = seedFromRun(r, live);
+
+			expect(applyRunToRequest(seed, live).headers).toEqual([off]);
+			expect(buildChangeset(seed, live).find((i) => i.field === "Headers")).toBeUndefined();
+		});
+
 		it("leaves a withheld url and its params off the patch, with kept rows saying why", () => {
 			const live = liveRequest({
 				url: "https://api.example.test/users?key={{apiKey}}",

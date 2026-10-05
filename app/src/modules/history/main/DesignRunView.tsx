@@ -66,6 +66,7 @@ import { ApiError } from "@/services";
 import { seedFromRun, scriptPartToElement } from "./design-run-seed";
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
+import { WithheldValuesNotice } from "./components/WithheldValuesNotice";
 import type { Run, ScriptPart, ResolvedElement } from "@/types";
 
 interface DesignRunViewProps {
@@ -457,6 +458,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				</div>
 			</div>
 
+			{/* The seed carries the marker in a url, params or body the engine
+			    withheld a secret from; sending the copy sends it literally. */}
+			<WithheldValuesNotice withheld={seed.withheld} className="mx-4 mt-2 shrink-0" />
 			<div className="flex-1 min-h-0">
 				<RequestBuilderProvider
 					initialRequest={seed.request}

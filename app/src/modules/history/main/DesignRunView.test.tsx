@@ -248,6 +248,52 @@ describe("DesignRunView - the copy shows the stored exchange", () => {
 	});
 });
 
+describe("DesignRunView - values the engine withheld from the snapshot (#1803)", () => {
+	const withheldRun = (snapshot: Record<string, unknown>) => {
+		const base = designRun();
+		return designRun({
+			configSnapshot: { ...base.configSnapshot, ...snapshot },
+		} as Partial<Run>);
+	};
+	const notice = () => screen.queryByText("Withheld values");
+
+	it.each([
+		["url", { url: "https://api.example.test/users?key=<redacted>" }, /URL/],
+		[
+			"params",
+			{
+				url: "https://api.example.test/users/:id",
+				params: [{ key: "id", value: "<redacted>", enabled: true, in: "path" }],
+			},
+			/params/,
+		],
+		["body", { body: { mode: "json", content: '{"k":"<redacted>"}' } }, /body/],
+	])(
+		"warns that sending the copy sends the marker when the %s holds it",
+		(_name, snapshot, part) => {
+			renderView(withheldRun(snapshot));
+
+			expect(notice()).toBeTruthy();
+			const text = notice()!.parentElement!.textContent ?? "";
+			expect(text).toMatch(part);
+			expect(text).toContain("<redacted>");
+			expect(text).toMatch(/literally/);
+		}
+	);
+
+	it("says nothing for a run that withheld nothing from its url, params or body", () => {
+		renderView(designRun());
+
+		expect(notice()).toBeNull();
+	});
+
+	it("says nothing when only a header was withheld, which is never seeded", () => {
+		renderView(withheldRun({ headers: { Authorization: "<redacted>" } }));
+
+		expect(notice()).toBeNull();
+	});
+});
+
 describe("DesignRunView - a run that failed", () => {
 	it("shows the error view and its hint rather than an empty pane", () => {
 		const failed = designRun({
