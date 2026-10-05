@@ -682,7 +682,7 @@ describe("useEditorVariableTokens", () => {
 				rect: { left: 10 + 9 * 8, top: 24, height: 18 },
 			});
 			expect(card?.rows.map((row) => row.label)).toContain("UTC");
-			expect(card?.rows).toContainEqual({ label: "Original", value: "2026-10-05T07:23:00Z" });
+			expect(card?.rows.map((row) => row.label)).not.toContain("Original");
 			expect(openTokenEditor).not.toHaveBeenCalled();
 			expect(stub.handlers.commands).toHaveLength(0);
 		});
@@ -702,8 +702,8 @@ describe("useEditorVariableTokens", () => {
 				</TooltipProvider>
 			);
 			const shown = await screen.findByTestId("time-hover-card");
-			expect(shown.textContent).toContain("Original");
-			expect(shown.textContent).toContain("2026-10-05T07:23:00Z");
+			expect(shown.textContent).not.toContain("Original");
+			expect(shown.textContent).toContain("UTC");
 		});
 
 		it("works with no provider above the editor at all", () => {

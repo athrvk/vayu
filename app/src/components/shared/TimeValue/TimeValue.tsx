@@ -87,6 +87,7 @@ function CardTooltip({
 	timeZone,
 	locale,
 	now,
+	omitRelative,
 }: CardTooltipProps) {
 	return (
 		<Tooltip>
@@ -99,7 +100,7 @@ function CardTooltip({
 							? { text: value, hasZone: resolved.hasZone }
 							: undefined
 					}
-					options={{ timeZone, locale, now }}
+					options={{ timeZone, locale, now, omitRelative }}
 					extraRows={extraRows}
 				/>
 			</TooltipContent>
@@ -154,7 +155,13 @@ export function TimeValue({
 			? raw
 			: formatInstant(resolved.instant, style === "raw" ? "datetime" : style, options);
 	return (
-		<CardTooltip value={value} resolved={resolved} extraRows={extraRows} {...options}>
+		<CardTooltip
+			value={value}
+			resolved={resolved}
+			extraRows={extraRows}
+			omitRelative={style === "relative"}
+			{...options}
+		>
 			<time
 				dateTime={resolved.hasZone ? resolved.instant.toISOString() : undefined}
 				className={cn("tabular-nums", className)}

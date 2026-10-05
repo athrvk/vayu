@@ -52,7 +52,7 @@ describe("HeadersViewer: times in header values", () => {
 		expect(time.tagName).toBe("TIME");
 		const card = await openCard(time);
 		expect(card.textContent).toContain("UTC");
-		expect(card.textContent).toContain(`Original${DATE}`);
+		expect(card.textContent).not.toContain("Original");
 	});
 
 	it("gives a Content-Type value no card", () => {

@@ -78,6 +78,16 @@ describe("describeInstant", () => {
 		expect(rows[2].value).toBe("2 hours ago");
 	});
 
+	it("leaves the relative row out when the surface already shows it", () => {
+		const rows = describeInstant(instant, {
+			timeZone: "UTC",
+			locale: "en-US",
+			now,
+			omitRelative: true,
+		});
+		expect(rows.map((r) => r.label)).toEqual(["UTC"]);
+	});
+
 	it("shows one row, not two UTC rows, when the user's zone is UTC", () => {
 		const rows = describeInstant(instant, { timeZone: "UTC", locale: "en-US", now });
 		expect(rows.map((r) => r.label)).toEqual(["UTC", "Relative"]);
@@ -94,13 +104,13 @@ describe("describeInstant", () => {
 		expect(rows[0].value).toContain("EDT");
 	});
 
-	it("appends the original text when one is given", () => {
+	it("does not repeat the original text the reader already hovered", () => {
 		const rows = describeInstant(
 			instant,
 			{ timeZone: "UTC", locale: "en-US", now },
 			{ text: "1791201600", hasZone: true }
 		);
-		expect(rows[rows.length - 1]).toEqual({ label: "Original", value: "1791201600" });
+		expect(rows.map((r) => r.label)).toEqual(["UTC", "Relative"]);
 	});
 
 	it("shows a zoneless value as written and says why", () => {

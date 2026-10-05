@@ -264,7 +264,7 @@ describe("a value that is a time (#1786)", () => {
 		fireEvent.focus(button!);
 		const card = await screen.findByTestId("time-hover-card");
 		expect(card.textContent).toContain("UTC");
-		expect(card.textContent).toContain(`Original${DATE}`);
+		expect(card.textContent).not.toContain("Original");
 		// The field itself is untouched: still the editable input, as typed.
 		const value = container.querySelectorAll<HTMLInputElement>('input[type="text"]')[1];
 		expect(value.value).toBe(DATE);

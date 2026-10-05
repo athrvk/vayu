@@ -61,7 +61,7 @@ describe("VariableRow: a value that is a time", () => {
 		fireEvent.focus(button!);
 		const card = await screen.findByTestId("time-hover-card");
 		expect(card.textContent).toContain("UTC");
-		expect(card.textContent).toContain(`Original${ISO}`);
+		expect(card.textContent).not.toContain("Original");
 		expect(screen.getByDisplayValue(ISO).tagName).toBe("INPUT");
 	});
 

@@ -193,6 +193,8 @@ export interface FormatOptions {
 export interface DescribeOptions extends FormatOptions {
 	/** The reference for the relative phrase; the clock when omitted. */
 	now?: Date;
+	/** Leave the relative row out, for a surface whose visible text already says it. */
+	omitRelative?: boolean;
 }
 
 export interface TimeRow {
@@ -271,9 +273,10 @@ export function describeInstant(
 	const rows: TimeRow[] = [
 		{ label: zone, value: format(options.timeZone) },
 		...(inUtc ? [] : [{ label: "UTC", value: format("UTC") }]),
-		{ label: "Relative", value: formatRelative(instant, options) },
+		...(options.omitRelative
+			? []
+			: [{ label: "Relative", value: formatRelative(instant, options) }]),
 	];
-	if (original) rows.push({ label: "Original", value: original.text });
 	return rows;
 }
 
