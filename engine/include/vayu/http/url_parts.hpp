@@ -162,7 +162,8 @@ struct UrlHostSpan {
 
 /**
  * @brief The schemes a transfer may carry, in `CURLOPT_PROTOCOLS_STR`'s
- *        spelling: what @ref unsendable_scheme allows.
+ *        spelling: what @ref unsendable_scheme allows and what
+ *        `apply_transport_policy` holds every handle to.
  */
 inline constexpr const char* SENDABLE_PROTOCOLS = "http,https";
 
@@ -175,7 +176,7 @@ inline constexpr const char* SENDABLE_PROTOCOLS = "http,https";
  * `-` or `.`, then `:/`. Without the slash the colon is read as a port
  * separator, so `localhost:8080/x` and `data:text/plain,x` name no scheme and
  * libcurl guesses one from the host (`http`, or `ftp` for an `ftp.` host and
- * the like).
+ * the like) - which is the transfer handle's protocol allowlist's to refuse.
  */
 [[nodiscard]] std::string_view url_scheme (std::string_view url);
 

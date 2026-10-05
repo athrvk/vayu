@@ -10,13 +10,19 @@
  * @brief Only `http` and `https` leave the engine.
  *
  * libcurl is a multi-protocol library, so a handle given a `file://` URL reads
- * the file and hands it back as a body. `unsendable_scheme`, asked by
- * `validate_transferable` of the URL every driver is about to hand a handle -
- * after composition, the data-row bind, the pre-request script and the
- * residual pass have all had their say - keeps every transfer to the two
- * schemes this product sends. Its refusal is the ordinary status-0 response,
- * so `POST /execute`, a run, `pm.sendRequest`, an import fetch and an OAuth
- * token request all report it the same way.
+ * the file and hands it back as a body. Two layers keep every transfer to the
+ * two schemes this product sends:
+ *
+ * 1. `unsendable_scheme`, asked by `validate_transferable` of the URL every
+ *    driver is about to hand a handle - after composition, the data-row bind,
+ *    the pre-request script and the residual pass have all had their say. Its
+ *    refusal is the ordinary status-0 response, so `POST /execute`, a run,
+ *    `pm.sendRequest`, an import fetch and an OAuth token request all report it
+ *    the same way.
+ * 2. `CURLOPT_PROTOCOLS_STR` / `CURLOPT_REDIR_PROTOCOLS_STR`, set on every
+ *    handle by `apply_transport_policy`, for the URLs layer 1 never sees: a
+ *    redirect's `Location`, and the scheme libcurl guesses for a URL that names
+ *    none.
  *
  * Each transfer case reads a file whose contents it then asserts never came
  * back, so a refusal that names the right scheme but still read the file
@@ -24,6 +30,8 @@
  */
 
 #include <gtest/gtest.h>
+
+#include <curl/curl.h>
 
 #include <array>
 #include <filesystem>
@@ -42,11 +50,14 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
 
@@ -90,7 +101,9 @@ constexpr auto SCHEME_CASES = std::to_array<SchemeCase> ({
 { "data:/plain,hello", "data", false },
 { "data:text/plain,hello", "", true },
 // No scheme is today's behaviour, unchanged: libcurl guesses one from the
-// host (`http`, or `ftp` for an `ftp.` host and the like).
+// host (`http`, or `ftp` for an `ftp.` host and the like), and the handle's
+// protocol allowlist refuses a guess outside the two - see
+// `AGuessedSchemeIsHeldToTheHandlesAllowlist` below.
 { "example.com/path", "", true },
 { "localhost:8080/path", "", true },
 { "ftp.example.com/pub/x", "", true },
@@ -199,6 +212,86 @@ TEST (UrlSchemeTransfer, AStreamRefusesAFileUrl) {
     const auto response = vayu::http::consume_sse_stream (spec, context);
     expect_scheme_refusal (response, "file");
     EXPECT_EQ (context.end_reason (), vayu::http::SseEndReason::Error);
+}
+
+// ---------------------------------------------------------------------------
+// The handle's own allowlist: what the URL check never sees
+// ---------------------------------------------------------------------------
+
+/// A redirect is followed inside libcurl, so its `Location` reaches no check
+/// of ours. `CURLOPT_REDIR_PROTOCOLS_STR` refuses it there, as the protocol
+/// error it is - never as a successful read of the target.
+void expect_protocol_refusal (const vayu::Response& response) {
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
+    EXPECT_EQ (response.body.find (SECRET), std::string::npos)
+    << "the file was read";
+}
+
+TEST (UrlSchemeRedirect, ARedirectToAFileUrlIsAProtocolErrorNotARead) {
+    const SecretFile secret;
+    const vayu::tests::EchoServer server;
+    auto request             = get (server.redirect_to (secret.url ()));
+    request.follow_redirects = true;
+    vayu::http::Client client;
+    const auto result = client.send (request);
+    ASSERT_TRUE (result.is_ok ());
+    expect_protocol_refusal (result.value ());
+}
+
+// libcurl's own default already keeps a redirect off `file`, but not off FTP:
+// its default redirect allowlist is HTTP, HTTPS, FTP and FTPS. Port 1 refuses
+// the connection, so a handle that followed would report CONNECTION_FAILED.
+TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
+    const vayu::tests::EchoServer server;
+    auto request = get (server.redirect_to ("ftp://127.0.0.1:1/pub/x"));
+    request.follow_redirects = true;
+
+    vayu::http::Client client;
+    const auto sent = client.send (request);
+    ASSERT_TRUE (sent.is_ok ());
+    expect_protocol_refusal (sent.value ());
+
+    vayu::http::EventLoop loop;
+    loop.start ();
+    auto handle       = loop.submit_async (request);
+    const auto looped = handle.future.get ();
+    loop.stop ();
+    ASSERT_TRUE (looped.is_ok ());
+    expect_protocol_refusal (looped.value ());
+}
+
+// A URL naming no scheme passes the URL check (that is today's behaviour), and
+// libcurl guesses one from the host. An `ftp.` host guesses FTP, which the
+// handle's allowlist refuses before anything is resolved.
+TEST (UrlSchemeRedirect, AGuessedSchemeIsHeldToTheHandlesAllowlist) {
+    vayu::http::Client client;
+    const auto result = client.send (get ("ftp.localhost:1/pub/x"));
+    ASSERT_TRUE (result.is_ok ());
+    expect_protocol_refusal (result.value ());
+}
+
+// The applier on a bare handle, with no URL check in front of it: the one
+// place every driver's handle is configured is enough on its own.
+TEST (UrlSchemeRedirect, TheTransportApplierAloneRefusesAFileUrl) {
+    const SecretFile secret;
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    std::string body;
+    const auto url = secret.url ();
+    vayu::http::set_opt<CURLOPT_URL> (curl, url.c_str ());
+    vayu::http::detail::apply_transport_policy (
+    curl, vayu::http::TransportPolicy{}, /*verify_ssl=*/true, url);
+    vayu::http::set_opt<CURLOPT_WRITEFUNCTION> (
+    curl, +[] (char* data, size_t size, size_t count, void* sink) -> size_t {
+        static_cast<std::string*> (sink)->append (data, size * count);
+        return size * count;
+    });
+    vayu::http::set_opt<CURLOPT_WRITEDATA> (curl, &body);
+    const CURLcode code = curl_easy_perform (curl);
+    curl_easy_cleanup (curl);
+    EXPECT_EQ (code, CURLE_UNSUPPORTED_PROTOCOL) << curl_easy_strerror (code);
+    EXPECT_EQ (body.find (SECRET), std::string::npos) << "the file was read";
 }
 
 // ============================================================================

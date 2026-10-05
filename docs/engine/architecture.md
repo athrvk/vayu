@@ -1302,8 +1302,10 @@ record shape, the category list, the redaction rule and the file layout
 - **Only `http` and `https` leave the engine.** libcurl speaks other
   protocols, `file` among them, so the send gate (`validate_transferable`)
   refuses any other scheme on the URL every driver is about to hand a handle -
-  after variables, the pre-request script and the residual pass. One rule for
-  Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
+  after variables, the pre-request script and the residual pass - and
+  `apply_transport_policy` holds every handle to `http,https` for the URLs that
+  gate cannot see (a redirect's `Location`, a scheme libcurl guesses). One
+  rule for Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
   [api-reference.md](api-reference.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a

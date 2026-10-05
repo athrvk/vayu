@@ -40,9 +40,10 @@ class DnsCache;
 Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
 
 /**
- * @brief Put the transport policy on a handle: TLS verification and the proxy.
+ * @brief Put the transport policy on a handle: the protocols it may speak, TLS
+ *        verification and the proxy.
  *
- * The one place any driver configures either. It exists because the three
+ * The one place any driver configures any of them. It exists because the three
  * drivers each grew their own copy of the SSL block and only two of them ever
  * grew a proxy block, so `POST /execute` and a load run honoured
  * `CURLOPT_PROXY` while an SSE stream silently did not (issue #705). A
@@ -52,6 +53,11 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
  * reused (the single-request client keeps one for its lifetime, the event loop
  * recycles them across transfers), so a branch that left the option alone
  * would inherit whatever the previous policy put there.
+ *
+ * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
+ * on every handle: the backstop behind `validate_transferable`'s scheme rule
+ * for the two URLs it never sees - a redirect's `Location`, and the scheme
+ * libcurl guesses for a URL that names none (`ftp.example.com/x` is FTP).
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.

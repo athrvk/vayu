@@ -4986,7 +4986,13 @@ message as its callback's `err`.
 A scheme is what libcurl reads as one: letters, digits, `+`, `-` and `.`
 after a leading letter, followed by `:/`. A URL with no scheme is sent as
 before, with the scheme libcurl guesses from the host - `http` for
-`localhost:8080/x` or `example.com/x`.
+`localhost:8080/x` or `example.com/x`. Every transfer handle is also held to
+`http,https` (`CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR`), which
+covers what the URL check cannot see: a redirect whose `Location` names another
+scheme, and a guessed one (`ftp.example.com/x` would be FTP). Either fails as
+status `0` with error code `INVALID_URL` and libcurl's own message
+(`Protocol "ftp" is disabled`, followed by ` (in redirect)` for a redirect),
+and nothing is read.
 
 #### Non-ASCII hosts
 
