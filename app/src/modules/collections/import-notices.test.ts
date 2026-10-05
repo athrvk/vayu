@@ -32,6 +32,46 @@ function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
 	};
 }
 
+describe("importNotices - a branch past the depth bound", () => {
+	it("says how many branches were left out, as something to finish", () => {
+		const notices = importNotices(meta({ skipped: [{ kind: "nesting_too_deep", count: 2 }] }));
+		expect(notices).toEqual([
+			{ tier: "action", text: "2 branches nested too deeply (over 100 levels) and left out" },
+		]);
+	});
+});
+
+describe("importNotices - what the $ref bundling refused and fetched", () => {
+	it("names each refused reference as an action and lists the fetched hosts as a note", () => {
+		const notices = importNotices(
+			meta({
+				refReport: {
+					fetched: ["https://a.dev/x.json", "https://b.dev/y.json"],
+					refused: [
+						{
+							target: "../../secret.json",
+							reason: "outside the folder that was picked",
+						},
+					],
+				},
+			})
+		);
+		expect(notices).toContainEqual({
+			tier: "action",
+			text: "Reference not followed: ../../secret.json (outside the folder that was picked)",
+		});
+		expect(notices).toContainEqual({
+			tier: "note",
+			text: "Fetched from: https://a.dev/x.json, https://b.dev/y.json",
+		});
+	});
+
+	it("says nothing when nothing was fetched or refused", () => {
+		expect(importNotices(meta({ refReport: { fetched: [], refused: [] } }))).toEqual([]);
+		expect(importNotices(meta())).toEqual([]);
+	});
+});
+
 describe("importNotices", () => {
 	it("names up to three requests, then says how many more", () => {
 		const [notice] = importNotices(

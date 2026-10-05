@@ -27,6 +27,8 @@ import { join, dirname, resolve } from "node:path";
 import {
 	bundleExternalRefs,
 	BUNDLE_KEY,
+	isLocalAddress,
+	RefRefusedError,
 	SpecBundleTooLargeError,
 	type ExternalRefIntake,
 } from "./ref-bundler";
@@ -102,7 +104,13 @@ describe("bundleExternalRefs - a document with nothing external", () => {
 
 	it("hands unparseable text back untouched, for the detector to report", async () => {
 		const result = await bundleExternalRefs("{ not: [json", fileIntake());
-		expect(result).toEqual({ text: "{ not: [json", bundled: 0, unresolvedRefs: 0 });
+		expect(result).toEqual({
+			text: "{ not: [json",
+			bundled: 0,
+			unresolvedRefs: 0,
+			fetched: [],
+			refused: [],
+		});
 	});
 });
 
@@ -127,18 +135,15 @@ describe("bundleExternalRefs - sibling files", () => {
 		expect(resolveRef(doc, schemaRef)).toMatchObject({ type: "object" });
 	});
 
-	it("resolves a ref that climbs out of the spec's own directory", async () => {
-		const { text } = await bundleExternalRefs(entryRaw, fileIntake());
-		// `../shared/error.json` climbs out of `spec/`, and the ref that named it
-		// resolves inside the bundle.
-		const doc = JSON.parse(text) as Record<string, unknown>;
-		const errorRef = (
-			resolveRef(
-				doc,
-				"#/paths/~1pets/post/responses/400/content/application~1json/schema"
-			) as { $ref: string }
-		).$ref;
-		expect(resolveRef(doc, errorRef)).toBeDefined();
+	it("hands a ref that climbs to the intake untouched, which is where it is confined", async () => {
+		// The bundler cannot know the picked folder's root; `batch.ts` and the main
+		// process's `specFile:read` decide whether `../shared/error.json` stays
+		// inside it (#1782), and a refusal comes back as a `RefRefusedError`.
+		const intake = fileIntake();
+		const { bundled } = await bundleExternalRefs(entryRaw, intake);
+		expect(bundled).toBe(2);
+		const reads = (intake.readSibling as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+		expect(reads).toContain("../shared/error.json");
 	});
 
 	it("reads each target once however many refs name it", async () => {
@@ -360,6 +365,8 @@ describe("bundleExternalRefs - the engine's cap", () => {
 			text: collection,
 			bundled: 0,
 			unresolvedRefs: 0,
+			fetched: [],
+			refused: [],
 		});
 	});
 
@@ -394,5 +401,118 @@ describe("bundleExternalRefs - determinism", () => {
 			(await bundleExternalRefs(swapped, fileIntake())).text
 		) as Record<string, Record<string, unknown>>;
 		expect(Object.keys(reordered[BUNDLE_KEY])).toEqual(Object.keys(original[BUNDLE_KEY]));
+	});
+});
+
+describe("bundleExternalRefs - what a spec may make Vayu fetch or read (#1782)", () => {
+	const specReferencing = (target: string) =>
+		JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "T", version: "1" },
+			paths: {
+				"/p": {
+					get: {
+						responses: {
+							"200": {
+								description: "ok",
+								content: {
+									"application/json": { schema: { $ref: `${target}#/Pet` } },
+								},
+							},
+						},
+					},
+				},
+			},
+		});
+
+	it.each([
+		"http://localhost:8080/x.json",
+		"http://127.0.0.1/x.json",
+		"http://127.1.2.3/x.json",
+		"http://169.254.169.254/latest/meta-data.json",
+		"http://[::1]/x.json",
+		"http://[fe80::1]/x.json",
+	])("refuses to fetch %s for a reference, and names it", async (url) => {
+		const fetchUrl = vi.fn(async () => "{}");
+		const result = await bundleExternalRefs(specReferencing(url), {
+			maxBytes: ROOMY,
+			parseDocument,
+			fetchUrl,
+		});
+		expect(fetchUrl).not.toHaveBeenCalled();
+		expect(result.refused).toHaveLength(1);
+		expect(result.refused[0].target).toContain(new URL(url).hostname.replace(/[[\]]/g, ""));
+		expect(result.unresolvedRefs).toBe(1);
+	});
+
+	it("fetches an ordinary host and lists it as fetched", async () => {
+		const fetchUrl = vi.fn(async () => JSON.stringify({ Pet: { type: "object" } }));
+		const result = await bundleExternalRefs(specReferencing("https://acme.dev/c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			fetchUrl,
+		});
+		expect(result.fetched).toEqual(["https://acme.dev/c.json"]);
+		expect(result.refused).toEqual([]);
+	});
+
+	it("lets a spec served from a local dev server reference its own host", async () => {
+		const fetchUrl = vi.fn(async () => JSON.stringify({ Pet: { type: "object" } }));
+		const result = await bundleExternalRefs(specReferencing("./c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			sourceUrl: "http://localhost:3000/openapi.json",
+			fetchUrl,
+		});
+		expect(fetchUrl).toHaveBeenCalledWith("http://localhost:3000/c.json");
+		expect(result.refused).toEqual([]);
+	});
+
+	it("still refuses a different local host than the one the spec came from", async () => {
+		const fetchUrl = vi.fn(async () => "{}");
+		const result = await bundleExternalRefs(specReferencing("http://localhost:9999/c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			sourceUrl: "http://localhost:3000/openapi.json",
+			fetchUrl,
+		});
+		expect(fetchUrl).not.toHaveBeenCalled();
+		expect(result.refused).toHaveLength(1);
+	});
+
+	it("names a local ref the intake declined on purpose, but not one that was merely missing", async () => {
+		const readSibling = vi.fn(async (key: string) => {
+			if (key === "gone.json") throw new Error("not there");
+			throw new RefRefusedError();
+		});
+		const declined = await bundleExternalRefs(specReferencing("./nope.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			readSibling,
+		});
+		expect(declined.refused).toEqual([
+			{ target: "nope.json", reason: "outside the folder that was picked" },
+		]);
+		const missing = await bundleExternalRefs(specReferencing("./gone.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			readSibling,
+		});
+		expect(missing.refused).toEqual([]);
+		expect(missing.unresolvedRefs).toBe(1);
+	});
+});
+
+describe("isLocalAddress", () => {
+	it("is false for public hosts and near-miss names", () => {
+		for (const url of [
+			"https://example.com/x",
+			"https://localhost.example.com/x",
+			"https://128.0.0.1/x",
+			"https://169.255.0.1/x",
+			"not a url",
+		]) {
+			expect(isLocalAddress(url)).toBe(false);
+		}
 	});
 });

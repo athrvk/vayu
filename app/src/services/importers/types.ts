@@ -23,6 +23,8 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
+import type { RefReport } from "./ref-bundler";
+
 /**
  * Something the parser could not import. Mostly a resource or body Vayu can't
  * represent (file/binary, ws, grpc). Three are not about representability:
@@ -263,6 +265,11 @@ export interface SkippedItem {
 		 */
 		| "vayu_extension_invalid"
 		/**
+		 * A branch of a `.jmx` plan nested past the engine's `MAX_READ_DEPTH`
+		 * (#1782): left out and counted, the rest of the file imports.
+		 */
+		| "nesting_too_deep"
+		/**
 		 * A `.jmx` test plan's own class name, for one this parser has no mapping
 		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
 		 * third-party plugin adds more), so this is not a closed set the way every
@@ -328,6 +335,13 @@ export interface ImportMeta {
 	 * import decided, and nothing for what changes nothing they send.
 	 */
 	skipped: SkippedItem[];
+	/**
+	 * What the `$ref` bundling fetched and refused, by name (#1782). Set renderer
+	 * side by the batch parse, since the engine only receives the count; read by
+	 * `importNotices`. Absent when the document referenced nothing remote and
+	 * nothing was refused.
+	 */
+	refReport?: RefReport;
 	/**
 	 * Requests, and for Postman folders and collections, whose own auth Vayu
 	 * stores but does not execute - the `CONFIG_AUTH_TYPES` modes (aws,

@@ -8563,11 +8563,10 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
 // The row this script is bound to, or null with a TypeError already thrown.
 //
 // `pm.iterationData` is only an object when a row exists, so the ordinary way
-// to reach these functions already implies one. The check is for the way that
-// does not: the global object survives a pooled context, so a script can stash
-// `pm.iterationData` and a later script running in the same context can call
-// what it stashed. That call reads the *current* execution's row - none - and
-// must say so rather than answering about a run that has finished.
+// to reach these functions already implies one. The check is defence in depth:
+// a context is rebuilt after every script (#1782), so a stashed reference no
+// longer reaches a later one, and a call with no row bound must still say so
+// rather than answer about a run that has finished.
 //
 // The message names every surface that binds a row, not just the collection run
 // #356 shipped with: #402 made a send-with-row one and #599 made a scenario load
@@ -8914,14 +8913,9 @@ class ScriptEngine::Impl {
             JS_NewClass (rt, request_body_class_id, &request_body_class);
         }
 
-        JSContext* ctx = JS_NewContext (rt);
-        if (ctx) {
-            if (config.enable_console) {
-                setup_console (ctx);
-            }
-            setup_base64_globals (ctx);
-            setup_pm_object (ctx);
-        } else {
+        JSContext* ctx = build_context (rt);
+        if (!ctx) {
+            delete rt_state;
             JS_FreeRuntime (rt);
             return { nullptr, nullptr };
         }
@@ -8929,16 +8923,46 @@ class ScriptEngine::Impl {
         return { rt, ctx };
     }
 
+    /// A context with the standard intrinsics and the sandbox globals
+    /// (`console`, `btoa`/`atob`, `pm`) and nothing else.
+    JSContext* build_context (JSRuntime* rt) {
+        JSContext* ctx = JS_NewContext (rt);
+        if (!ctx) {
+            return nullptr;
+        }
+        if (config.enable_console) {
+            setup_console (ctx);
+        }
+        setup_base64_globals (ctx);
+        setup_pm_object (ctx);
+        return ctx;
+    }
+
+    /// The pool holds runtimes, not contexts: a script can reassign `pm` or
+    /// `console`, patch `String.prototype` or `Array.prototype`, or leave a
+    /// global behind, and a context that survived it would hand all of that to
+    /// the next script on the thread - possibly another collection's (#1782).
+    /// Freezing and diffing cannot cover every intrinsic a script can reach, so
+    /// the context is rebuilt instead; the runtime (limits, interrupt handler,
+    /// class registrations) is what is worth keeping.
     void release_context (ContextPair pair) {
         if (!pair.first || !pair.second)
             return;
 
+        JS_FreeContext (pair.second);
         // Run garbage collection before returning to pool to free any unreferenced objects
         // This prevents memory buildup from script execution
         JS_RunGC (pair.first);
 
+        JSContext* fresh = build_context (pair.first);
+        if (!fresh) {
+            delete static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
+            JS_FreeRuntime (pair.first);
+            return;
+        }
+
         std::lock_guard<std::mutex> lock (pool_mutex);
-        context_pool.push_back (pair);
+        context_pool.push_back ({ pair.first, fresh });
     }
 
     ScriptResult execute (const std::string& script, const ScriptContext& ctx) {

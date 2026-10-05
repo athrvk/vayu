@@ -13,6 +13,7 @@
 
 #include "vayu/core/jmeter_import.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <pugixml.hpp>
@@ -124,11 +125,17 @@ std::string first_segment (const std::string& list, char separator) {
 // One import context, threaded through the whole walk.
 // ---------------------------------------------------------------------------
 
+/// Tally kind for a branch left out because it nests past `MAX_READ_DEPTH`.
+constexpr const char* NESTING_TOO_DEEP_KIND = "nesting_too_deep";
+
 struct Ctx {
     const ImportOptions& options;
     ImportTally& tally;
     long request_count = 0;
     long folder_count  = 0;
+    /// `<hashTree>` levels the walk is currently inside; bounded by
+    /// `walk_hash_tree` (#1782).
+    size_t depth = 0;
 };
 
 /// Where the walk currently appends - a folder and the root collection share
@@ -927,11 +934,21 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
     ctx.tally.add (std::string (tag));
 }
 
+/// Every recursive edge (controller folder, thread group flatten) re-enters
+/// here, so this one guard bounds the stack. A `.jmx` skips `read_document`
+/// and its `MAX_READ_DEPTH` check, so the same constant is applied here: past
+/// it the branch is counted and left out, and the rest of the file imports.
 void walk_hash_tree (const pugi::xml_node& hash_tree, Sink sink, Ctx& ctx) {
+    if (ctx.depth >= constants::spec_document::MAX_READ_DEPTH) {
+        ctx.tally.add (NESTING_TOO_DEEP_KIND);
+        return;
+    }
+    ++ctx.depth;
     for_each_paired_child (ctx, hash_tree,
     [&] (const pugi::xml_node& el, const pugi::xml_node& own_tree) {
         dispatch_child (ctx, el, own_tree, sink);
     });
+    --ctx.depth;
 }
 
 } // namespace

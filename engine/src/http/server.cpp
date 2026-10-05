@@ -227,10 +227,15 @@ void Server::setup_routes () {
     // One request line per call (issue #1510), before anything else touches
     // server_: a route registered below that never logged its own entry now
     // always does, at the level its status calls for. The gate rides the same
-    // pre-routing handler, so a refused request gets its line too.
+    // pre-routing handler, so a refused request gets its line too. The Host
+    // and Origin rules run first; the import body cap needs the header only.
     install_request_logger (server_,
-    [port = port_] (const httplib::Request& req, httplib::Response& res) {
-        return admit_management_request (req, res, port);
+    [this, port = port_] (const httplib::Request& req, httplib::Response& res) {
+        if (admit_management_request (req, res, port) ==
+        httplib::Server::HandlerResponse::Handled) {
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        return routes::reject_oversized_import (db_, req, res);
     });
 
     // Every response here is a live read of state that changes under the

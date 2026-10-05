@@ -5124,6 +5124,57 @@ TEST_F (ScriptEngineTest, PmInfoDoesNotSurviveIntoTheNextExecution) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// Pooled contexts must not carry one script's mutations into the next, which
+// may belong to another collection (#1782). Each case leaks a different kind of
+// state; the second script asserts all of it is gone.
+TEST_F (ScriptEngineTest, AScriptsGlobalsAndPmOverridesDoNotSurviveIntoTheNextExecution) {
+    auto first        = ScriptContext::for_test (request, response);
+    auto first_result = engine.execute (R"JS(
+        globalThis.leak = 1;
+        implicitLeak = 2;
+        pm.foo = 3;
+        pm.test = function () {};
+        console.log = function () {};
+        String.prototype.leakedMethod = function () {};
+        Array.prototype.leakedMethod = function () {};
+        Object.prototype.leakedProp = 4;
+    )JS",
+    first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second = ScriptContext::for_test (request, response);
+    auto result = engine.execute (R"JS(
+        pm.test("no leak", function() {
+            pm.expect(typeof globalThis.leak).to.equal("undefined");
+            pm.expect(typeof implicitLeak).to.equal("undefined");
+            pm.expect(typeof pm.foo).to.equal("undefined");
+            pm.expect(typeof "".leakedMethod).to.equal("undefined");
+            pm.expect(typeof [].leakedMethod).to.equal("undefined");
+            pm.expect(({}).leakedProp).to.equal(undefined);
+            pm.expect(String(console.log).indexOf("native code") >= 0).to.equal(true);
+        });
+    )JS",
+    second);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1) << "pm.test must be the real one again";
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, AScriptThatReplacesPmDoesNotBreakTheNextExecution) {
+    auto first        = ScriptContext::for_test (request, response);
+    auto first_result = engine.execute ("globalThis.pm = null;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second = ScriptContext::for_test (request, response);
+    auto result = engine.execute (
+    R"JS(pm.test("pm is back", function() { pm.expect(pm.response.code).to.equal(200); });)JS",
+    second);
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
 // What a context that declares neither reports (#353): a bare `for_test` shape,
 // which is what an ordinary `POST /execute` send - one carrying no `data` row -
 // reaches the engine with. Both read undefined, and that is #300's ruling
@@ -5730,10 +5781,9 @@ TEST_F (ScriptEngineTest, IterationDataHasAnswersPresenceIncludingANullColumn) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
-// The same refusal `get` gives, for the same reason: a stashed pm.iterationData
-// called from a later script in a pooled context must not answer about a run
-// that has finished.
-TEST_F (ScriptEngineTest, IterationDataHasThrowsOutsideADataDrivenRun) {
+// A reference stashed on the global is gone with the context (#1782), so a later
+// script can no more call it than read the row it pointed at.
+TEST_F (ScriptEngineTest, AStashedIterationDataDoesNotReachTheNextScript) {
     const nlohmann::json row{ { "username", "ada" } };
     auto first = data_test (request, response, env, row);
     auto first_result =
@@ -5741,14 +5791,13 @@ TEST_F (ScriptEngineTest, IterationDataHasThrowsOutsideADataDrivenRun) {
     ASSERT_TRUE (first_result.success) << first_result.error_message;
 
     auto second_result = engine.execute_test (
-    "globalThis.stashed.has('username');", request, response, env);
+    "pm.test('stash is gone', function() { pm.expect(typeof "
+    "globalThis.stashed).to.equal('undefined'); });",
+    request, response, env);
 
-    EXPECT_FALSE (second_result.success);
-    // Named, so the message points at the call the script actually made.
-    EXPECT_NE (second_result.error_message.find (
-               "pm.iterationData.has is not available here"),
-    std::string::npos)
-    << second_result.error_message;
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+    ASSERT_EQ (second_result.tests.size (), 1u);
+    EXPECT_TRUE (second_result.tests[0].passed) << second_result.tests[0].error_message;
 }
 
 TEST_F (ScriptEngineTest, IterationDataToObjectReturnsTheWholeRow) {
@@ -5841,46 +5890,6 @@ TEST_F (ScriptEngineTest, ARowDoesNotSurviveIntoTheNextExecution) {
     ASSERT_TRUE (second_result.success) << second_result.error_message;
     ASSERT_EQ (second_result.tests.size (), 1u);
     EXPECT_TRUE (second_result.tests[0].passed) << second_result.tests[0].error_message;
-}
-
-// The other half of that leak: a stashed reference outlives the execution it
-// was taken in, and calling it later must say there is no row rather than
-// reading the one this execution does not have.
-TEST_F (ScriptEngineTest, AStashedIterationDataRefusesOnceTheRowIsGone) {
-    const nlohmann::json row{ { "username", "ada" } };
-    auto first = data_test (request, response, env, row);
-    auto first_result =
-    engine.execute ("globalThis.stashed = pm.iterationData;", first);
-    ASSERT_TRUE (first_result.success) << first_result.error_message;
-
-    auto second_result = engine.execute_test (
-    "globalThis.stashed.get('username');", request, response, env);
-
-    EXPECT_FALSE (second_result.success);
-    EXPECT_NE (second_result.error_message.find ("not available here"), std::string::npos)
-    << second_result.error_message;
-}
-
-// A row is bound by three surfaces, and the refusal has to name all three
-// (issue #733). It named only "a collection run with a data set", stale since
-// #402 made send-with-row and #599 made a scenario load run's deferred per-step
-// script first-class row binders - so a user who stashed the object during
-// either of those was told to look for a data set that was never the point.
-TEST_F (ScriptEngineTest, AStashedIterationDataNamesEverySurfaceThatBindsARow) {
-    const nlohmann::json row{ { "username", "ada" } };
-    auto first = data_test (request, response, env, row);
-    auto first_result =
-    engine.execute ("globalThis.stashed = pm.iterationData;", first);
-    ASSERT_TRUE (first_result.success) << first_result.error_message;
-
-    auto second_result =
-    engine.execute_test ("globalThis.stashed.toObject();", request, response, env);
-
-    ASSERT_FALSE (second_result.success);
-    for (const char* surface : { "collection run", "send-with-row", "load run" }) {
-        EXPECT_NE (second_result.error_message.find (surface), std::string::npos)
-        << "message does not name " << surface << ": " << second_result.error_message;
-    }
 }
 
 // ============================================================================

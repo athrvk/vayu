@@ -233,6 +233,11 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 hand-edited Vayu detail ignored (invalid)",
 		many: "{n} hand-edited Vayu details ignored (invalid)",
 	},
+	nesting_too_deep: {
+		tier: "action",
+		one: "1 branch nested too deeply (over 100 levels) and left out",
+		many: "{n} branches nested too deeply (over 100 levels) and left out",
+	},
 	"HTTPsampler.Files": {
 		tier: "action",
 		one: "1 file upload without a field name skipped",
@@ -299,6 +304,23 @@ function skippedNotice(item: SkippedItem): ImportNotice | null {
 }
 
 /**
+ * The `$ref`s the bundling refused, each by name, and the remote documents it
+ * pulled in - a spec from the internet decides what gets inlined, so the user
+ * sees both before applying (#1782).
+ */
+function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
+	if (!report) return [];
+	const notices: ImportNotice[] = report.refused.map(({ target, reason }) => ({
+		tier: "action",
+		text: `Reference not followed: ${target} (${reason})`,
+	}));
+	if (report.fetched.length > 0) {
+		notices.push({ tier: "note", text: `Fetched from: ${report.fetched.join(", ")}` });
+	}
+	return notices;
+}
+
+/**
  * The lines a preview shows for one parsed file, actions first. Shared by the
  * single-file preview and every batch ledger row, so one file is described in
  * the same words wherever it appears.
@@ -309,6 +331,7 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 		const notice = skippedNotice(item);
 		if (notice) notices.push(notice);
 	}
+	notices.push(...refReportNotices(meta.refReport));
 	// An OpenAPI upload imports as a file row with nothing attached (#425).
 	if (meta.unattachedFileParts > 0) {
 		const n = meta.unattachedFileParts;

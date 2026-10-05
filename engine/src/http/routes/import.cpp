@@ -38,6 +38,36 @@
 
 namespace vayu::http::routes {
 
+httplib::Server::HandlerResponse reject_oversized_import (vayu::db::Database& db,
+const httplib::Request& req,
+httplib::Response& res) {
+    if (req.method != "POST" || !req.has_header ("Content-Length")) {
+        return httplib::Server::HandlerResponse::Unhandled;
+    }
+    if (req.path != "/import" && req.path != "/import/parse" && req.path != "/import/document") {
+        return httplib::Server::HandlerResponse::Unhandled;
+    }
+    // The body is the document inside a JSON string, so quotes and newlines
+    // grow it: half the cap again plus a megabyte covers any real document,
+    // and the route's exact check on `content` stays the precise one.
+    constexpr size_t HEADROOM = size_t{ 1 } * 1024 * 1024;
+    const size_t cap          = spec_size_cap (db);
+    const size_t limit        = cap + (cap / 2) + HEADROOM;
+    const size_t length       = req.get_header_value_u64 ("Content-Length");
+    if (length <= limit) {
+        return httplib::Server::HandlerResponse::Unhandled;
+    }
+    res.status = 413;
+    res.set_content (
+    error_body (413,
+    "Request body is " + std::to_string (length) + " bytes, over the limit of " +
+    std::to_string (limit) + " for an import (raise the 'maxSpecDocumentBytes' setting to allow more)")
+    .dump (),
+    "application/json");
+    return httplib::Server::HandlerResponse::Handled;
+}
+
+
 // Defined in client_certificates.cpp; returns {http_status, json_body} - the
 // same pair the HTTP handler writes out.
 std::pair<int, nlohmann::json>

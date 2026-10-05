@@ -24,6 +24,7 @@ import { readSpecFile, SPEC_FILE_EXTENSIONS, type SpecFileSystem } from "./spec-
 const system = (overrides: Partial<SpecFileSystem> = {}): SpecFileSystem => ({
 	stat: vi.fn(async () => ({ size: 10, isFile: () => true })),
 	readFile: vi.fn(async () => Buffer.from('{"Pet":{"type":"object"}}')),
+	realpath: vi.fn(async (filePath: string) => filePath),
 	fetchConfig: vi.fn(async () => ({
 		entries: [{ key: "maxSpecDocumentBytes", value: "1024" }],
 	})),
@@ -41,13 +42,47 @@ describe("readSpecFile - resolving the reference", () => {
 		expect(io.readFile).toHaveBeenCalledWith(path.resolve("/home/u/api/spec/schemas/pet.json"));
 	});
 
-	it("follows a reference that climbs out of that directory", async () => {
-		// `spec/openapi.yaml` -> `../shared/error.yaml` is an ordinary layout, and
-		// the file is named by a document the user chose to import.
+	it("refuses a reference that climbs out of that directory, before touching the disk", async () => {
+		// A spec from the internet can name `../../.config/<tool>/credentials.json`
+		// and the bundle is stored (#1782).
 		const io = system();
-		const result = await readSpecFile(SPEC, "../shared/error.yaml", io);
-		expect(io.readFile).toHaveBeenCalledWith(path.resolve("/home/u/api/shared/error.yaml"));
-		expect(result.fileName).toBe("error.yaml");
+		await expect(readSpecFile(SPEC, "../../secret.json", io)).rejects.toThrow(
+			/outside the folder/
+		);
+		await expect(readSpecFile(SPEC, "../shared/error.yaml", io)).rejects.toThrow(
+			/outside the folder/
+		);
+		await expect(readSpecFile(SPEC, "schemas/../../x.json", io)).rejects.toThrow(
+			/outside the folder/
+		);
+		expect(io.stat).not.toHaveBeenCalled();
+		expect(io.readFile).not.toHaveBeenCalled();
+	});
+
+	it("accepts a reference that wanders but stays inside, and one into a subfolder", async () => {
+		const io = system();
+		await readSpecFile(SPEC, "./schemas/x.json", io);
+		await readSpecFile(SPEC, "schemas/../other/y.json", io);
+		expect(io.readFile).toHaveBeenCalledWith(path.resolve("/home/u/api/spec/other/y.json"));
+	});
+
+	it("refuses a sibling directory whose name merely starts with the spec's own", async () => {
+		// Component-wise, not a string prefix: `spec-private` is not under `spec`.
+		const io = system();
+		await expect(readSpecFile(SPEC, "../spec-private/x.json", io)).rejects.toThrow(
+			/outside the folder/
+		);
+	});
+
+	it("refuses a symlink inside the folder that resolves outside it", async () => {
+		const real = path.resolve("/home/u/.config/tool/credentials.json");
+		const io = system({
+			realpath: vi.fn(async (filePath: string) =>
+				filePath.endsWith("link.json") ? real : filePath
+			),
+		});
+		await expect(readSpecFile(SPEC, "./link.json", io)).rejects.toThrow(/outside the folder/);
+		expect(io.readFile).not.toHaveBeenCalled();
 	});
 
 	it("refuses an absolute reference, which describes one machine's disk", async () => {
@@ -78,7 +113,7 @@ describe("readSpecFile - the extension allowlist", () => {
 
 	it("refuses anything else without touching the disk", async () => {
 		const io = system();
-		for (const ref of ["../../.ssh/id_rsa", "./vayu.db", "./secrets.env", "./notes"]) {
+		for (const ref of ["./.ssh/id_rsa", "./vayu.db", "./secrets.env", "./notes"]) {
 			await expect(readSpecFile(SPEC, ref, io)).rejects.toThrow(/only opens spec files/);
 		}
 		expect(io.readFile).not.toHaveBeenCalled();

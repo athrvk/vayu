@@ -1202,6 +1202,23 @@ TEST (PostmanImport, CountsAnUnsupportedMethodAndFallsBackToGet) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_method"), 1);
 }
 
+/// `pm_folder` recurses per nested `item`, bounded only because `read_document`
+/// refuses a document past `MAX_READ_DEPTH` first (#1782): pin that the bound
+/// holds for the folder shape, so the recursion cannot be reached unbounded.
+TEST (PostmanImport, AFolderNestedFarPastTheDepthBoundIsRefusedNotWalked) {
+    std::string open;
+    std::string close;
+    for (int i = 0; i < 10000; ++i) {
+        open += R"({"name":"F","item":[)";
+        close += "]}";
+    }
+    const ImportParse parsed = parse_import (R"({"info":{"schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"item":[)" + open + close + "]}",
+    {}, {});
+    EXPECT_FALSE (parsed.ok ());
+    EXPECT_NE (parsed.error.find ("nests deeper"), std::string::npos) << parsed.error;
+}
+
 /// A body's own `disabled: true` ("prevent request body from being sent")
 /// must not still be sent - counted rather than silently ignored (issue
 /// #1444).

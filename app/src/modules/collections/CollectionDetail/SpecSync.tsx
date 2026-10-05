@@ -64,6 +64,7 @@ import {
 	type SpecApplySelection,
 } from "@/services/openapi/spec-apply";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
+import type { RefReport } from "@/services/importers/ref-bundler";
 import type { SpecFileLocation } from "@/stores";
 import type { Collection, SpecDiffChanged, SpecDiffResponse, SpecField } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
@@ -94,6 +95,7 @@ type CheckState =
 			phase: "diff";
 			diff: SpecDiffResponse;
 			unresolvedRefs: number;
+			refReport: RefReport;
 			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
 			content: string;
 			/**
@@ -129,7 +131,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 			 */
 			const meta = await readSpecMeta(specId);
 
-			const { text, unresolvedRefs } = await refetchSpec(
+			const { text, unresolvedRefs, fetched, refused } = await refetchSpec(
 				{
 					sourceUrl: meta.sourceUrl,
 					...(specFile ? { file: specFile } : {}),
@@ -161,6 +163,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				phase: "diff",
 				diff,
 				unresolvedRefs,
+				refReport: { fetched, refused },
 				content: text,
 				sourceUrl: meta.sourceUrl,
 				selection: defaultSelection(diff),
@@ -269,6 +272,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 						<DiffReport
 							diff={state.diff}
 							unresolvedRefs={state.unresolvedRefs}
+							refReport={state.refReport}
 							selection={state.selection}
 							onChange={setSelection}
 						/>
@@ -359,9 +363,10 @@ interface SelectionProps {
 function DiffReport({
 	diff,
 	unresolvedRefs,
+	refReport,
 	selection,
 	onChange,
-}: { diff: SpecDiffResponse; unresolvedRefs: number } & SelectionProps) {
+}: { diff: SpecDiffResponse; unresolvedRefs: number; refReport: RefReport } & SelectionProps) {
 	const toggleAdded = (key: string, on: boolean) => {
 		const added = new Set(selection.added);
 		if (on) added.add(key);
@@ -413,7 +418,17 @@ function DiffReport({
 					{unresolvedRefs} reference{unresolvedRefs === 1 ? "" : "s"} to another file
 					couldn&apos;t be followed, so whatever they describe is missing from this
 					comparison.
+					{refReport.refused.map(({ target, reason }) => (
+						<span key={target} className="block">
+							Not followed: {target} ({reason})
+						</span>
+					))}
 				</Callout>
+			)}
+			{refReport.fetched.length > 0 && (
+				<p className="text-label text-muted-foreground">
+					Fetched from: {refReport.fetched.join(", ")}
+				</p>
 			)}
 
 			{diff.added.length > 0 && (
