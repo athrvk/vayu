@@ -274,8 +274,6 @@ there. Pass `-jN` to override. See
 
 The directory name is `USER_DATA_DIR_NAME` in `app/electron/constants.ts`, set
 on `app.getPath("userData")` by `main.ts` before anything opens a file there.
-Releases up to 0.36 used `vayu-client`; the first launch of a later release
-renames that directory (`app/electron/user-data-dir.ts`).
 
 ## Troubleshooting
 

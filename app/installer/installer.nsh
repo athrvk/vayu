@@ -5,14 +5,9 @@
 ; executable is Vayu.exe. That name applies to the *process* and nothing else.
 ;
 ; Data directory: the app names it explicitly - `USER_DATA_DIR_NAME` in
-; app/electron/constants.ts, the product name - and moves an older install's
-; directory there on its first launch. Every release up to 0.36 kept it under
-; the npm package's name, which Electron derived because nothing named one, so
-; an install that has not launched since the upgrade still has only that one:
-; APP_DATA_DIR_LEGACY. Both are cleaned up here, and they are the only places
-; either name appears; app/electron/installer-nsh-paths.test.ts fails if they
-; ever disagree with constants.ts. The legacy half goes with the migration
-; (#1758).
+; app/electron/constants.ts, the product name. APP_DATA_DIR is the only place
+; the name appears here; app/electron/installer-nsh-paths.test.ts fails if it
+; ever disagrees with constants.ts.
 ;
 ; Everything the app owns lives under that one directory: the engine's database
 ; and logs, the renderer's settings, and Chromium's caches. Nothing of the
@@ -25,7 +20,6 @@
 ;   - Also handled automatically in app startup (sidecar.ts)
 
 !define APP_DATA_DIR "Vayu"
-!define APP_DATA_DIR_LEGACY "vayu-client"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -101,10 +95,8 @@
     !insertmacro useUserShellContext
     ; Clean up any stale lock files from previous installations or crashes
     ; For simplicity, just remove stale lock files during install - the engine
-    ; creates a new one when it starts. Both directories: an install upgraded
-    ; from 0.36 or earlier has its lock in the legacy one until its first launch.
+    ; creates a new one when it starts.
     Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
-    Delete "$APPDATA\${APP_DATA_DIR_LEGACY}\vayu.lock"
     !insertmacro restoreShellContext
 !macroend
 
@@ -149,7 +141,6 @@
     ; Still remove the lock file to prevent issues on reinstall
     ; (the lock sits beside the db directory, not inside it)
     Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
-    Delete "$APPDATA\${APP_DATA_DIR_LEGACY}\vayu.lock"
     Goto cleanupDone
 
   removeData:
@@ -160,18 +151,12 @@
     ; silent in both directions: it removes nothing when the name is wrong, and
     ; removes someone else's data if it is wrong the other way. If the
     ; directory is not there, say so in the log and leave the disk alone.
-    ; Both directories: an install that has not launched since upgrading from
-    ; 0.36 or earlier still keeps everything in the legacy one.
     IfFileExists "$APPDATA\${APP_DATA_DIR}\*.*" 0 dataDirMissing
       RMDir /r "$APPDATA\${APP_DATA_DIR}"
-      Goto legacyDataDir
+      Goto cleanupDone
 
   dataDirMissing:
     DetailPrint "No Vayu data directory at $APPDATA\${APP_DATA_DIR} - nothing to delete."
-
-  legacyDataDir:
-    IfFileExists "$APPDATA\${APP_DATA_DIR_LEGACY}\*.*" 0 cleanupDone
-      RMDir /r "$APPDATA\${APP_DATA_DIR_LEGACY}"
 
   cleanupDone:
     !insertmacro restoreShellContext

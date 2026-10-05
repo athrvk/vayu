@@ -13,19 +13,17 @@
  * survived an uninstall the user was told erased it. A wrong `RMDir /r` reports
  * nothing either way, which is why the defect stood.
  *
- * The app names its directory itself now (`USER_DATA_DIR_NAME`), and older
- * releases wrote another (`LEGACY_USER_DATA_DIR_NAME`) that an install keeps
- * until its first launch after the upgrade. NSIS cannot read `constants.ts`,
- * so both names are spelled in both files and the duplication is guarded
- * rather than trusted: the defines drifting from the names, a raw path
- * bypassing the defines, and either directory left out of the delete.
+ * The app names its directory itself (`USER_DATA_DIR_NAME`). NSIS cannot read
+ * `constants.ts`, so the name is spelled in both files and the duplication is
+ * guarded rather than trusted: the define drifting from the name, a raw path
+ * bypassing the define, and the directory left out of the delete.
  */
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LEGACY_USER_DATA_DIR_NAME, USER_DATA_DIR_NAME } from "./constants.js";
+import { USER_DATA_DIR_NAME } from "./constants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = readFileSync(join(here, "..", "installer", "installer.nsh"), "utf8");
@@ -49,33 +47,23 @@ function macros(): [string, string][] {
 }
 
 describe("the Windows installer's data directory", () => {
-	it("is the directory the app names, and the one older releases wrote", () => {
+	it("is the directory the app names", () => {
 		const define = /^!define APP_DATA_DIR "([^"]*)"$/m.exec(script);
 		expect(define, "installer.nsh no longer defines APP_DATA_DIR").not.toBeNull();
 		expect(define?.[1]).toBe(USER_DATA_DIR_NAME);
-		// An install upgraded from 0.36 or earlier that has not launched since
-		// still keeps everything here; "Delete everything" must reach it too.
-		const legacy = /^!define APP_DATA_DIR_LEGACY "([^"]*)"$/m.exec(script);
-		expect(legacy, "installer.nsh no longer defines APP_DATA_DIR_LEGACY").not.toBeNull();
-		expect(legacy?.[1]).toBe(LEGACY_USER_DATA_DIR_NAME);
 	});
 
-	it("is reached only through those defines, never a spelled-out path", () => {
+	it("is reached only through that define, never a spelled-out path", () => {
 		const segments = appDataSegments();
 		expect(segments.length).toBeGreaterThan(0);
 		for (const segment of segments) {
-			expect(["${APP_DATA_DIR}", "${APP_DATA_DIR_LEGACY}"]).toContain(segment);
+			expect(segment).toBe("${APP_DATA_DIR}");
 		}
 	});
 
-	/**
-	 * "Delete everything" removing only the new directory would leave an
-	 * un-migrated install's whole workspace behind, silently - the same
-	 * wrong-`RMDir` shape as #1393. Mutation check: drop the legacy `RMDir`.
-	 */
-	it("deletes both directories when the user asks for everything gone", () => {
+	/** A wrong-`RMDir` shape is silent, as in #1393. Mutation check: drop the `RMDir`. */
+	it("deletes the directory when the user asks for everything gone", () => {
 		expect(script).toMatch(/RMDir \/r "\$APPDATA\\\$\{APP_DATA_DIR\}"/);
-		expect(script).toMatch(/RMDir \/r "\$APPDATA\\\$\{APP_DATA_DIR_LEGACY\}"/);
 	});
 
 	/**

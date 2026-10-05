@@ -69,7 +69,6 @@ import {
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
-import { resolveUserDataDirectory } from "./user-data-dir.js";
 import { clearResponseCacheOnUpgrade } from "./response-cache-clear.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
 import { revealWhenReady } from "./window-reveal.js";
@@ -135,6 +134,7 @@ import {
 	MCP_ENDPOINT_URL,
 	APP_USER_MODEL_ID,
 	APP_NAME,
+	USER_DATA_DIR_NAME,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -162,13 +162,8 @@ app.setAppUserModelId(APP_USER_MODEL_ID);
 // `app.name` on the first read, so the directory used to depend on whether
 // anything happened to read it before the rename below. Set before anything
 // opens a file there - Chromium's profile, the single-instance lock further
-// down, the settings stores, the engine - which is also what makes moving an
-// older install's directory here safe (see `user-data-dir.ts`).
-const userDataResolution = resolveUserDataDirectory(app.getPath("appData"));
-app.setPath("userData", userDataResolution.path);
-if (userDataResolution.outcome === "migrated" || userDataResolution.outcome === "kept-legacy") {
-	appLogger().info("main", "Resolved the data directory", { ...userDataResolution });
-}
+// down, the settings stores, the engine.
+app.setPath("userData", path.join(app.getPath("appData"), USER_DATA_DIR_NAME));
 
 // `app.getName()` otherwise answers the npm package's name, "vayu-client",
 // which is what macOS titles the app menu and its "About"/"Quit" roles from -

@@ -220,13 +220,9 @@ printf 'PASS: a failed download leaves the install intact\n'
 
 # --- uninstall ---------------------------------------------------------------
 
-# Both data directories: the one the app names (Vayu) and the one releases up
-# to 0.36 wrote (vayu-client), which an install keeps until its first launch
-# after upgrading. A purge that knew only one would leave the other's whole
-# workspace behind.
-for dir in Vayu vayu-client; do
-	mkdir -p "$ROOT/.config/$dir" "$ROOT/Library/Application Support/$dir"
-done
+# The data directory the app names (Vayu).
+dir=Vayu
+mkdir -p "$ROOT/.config/$dir" "$ROOT/Library/Application Support/$dir"
 out="$(installer --uninstall 2>&1)" || fail "uninstall failed: $out"
 [ -e "$target" ] && fail "uninstall left the app at $target"
 
@@ -237,14 +233,10 @@ case "$OS" in
 		data_root="$ROOT/.config"
 		;;
 esac
-for dir in Vayu vayu-client; do
-	[ -d "$data_root/$dir" ] || fail "a plain uninstall must keep user data ($dir)"
-done
+[ -d "$data_root/$dir" ] || fail "a plain uninstall must keep user data ($dir)"
 
 out="$(installer --uninstall --purge 2>&1)" || fail "purge failed: $out"
-for dir in Vayu vayu-client; do
-	[ -d "$data_root/$dir" ] && fail "purge should remove user data ($dir)"
-done
+[ -d "$data_root/$dir" ] && fail "purge should remove user data ($dir)"
 
 printf 'PASS: real uninstall\n'
 

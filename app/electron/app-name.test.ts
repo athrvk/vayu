@@ -22,13 +22,20 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { APP_NAME } from "./constants.js";
+import { APP_NAME, USER_DATA_DIR_NAME } from "./constants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const main = readFileSync(join(here, "main.ts"), "utf8");
 const builder = JSON.parse(readFileSync(join(here, "..", "electron-builder.json"), "utf8")) as {
 	productName?: string;
 };
+
+describe("the app's data directory name", () => {
+	it("is the product name", () => {
+		expect(USER_DATA_DIR_NAME).toBe(APP_NAME);
+		expect(USER_DATA_DIR_NAME).toBe("Vayu");
+	});
+});
 
 describe("the app's display name", () => {
 	it("is the productName the installers ship under", () => {
@@ -58,13 +65,11 @@ describe("the app's display name", () => {
 	 * reddens.
 	 */
 	it("names userData explicitly, before the rename and before the instance lock", () => {
-		const setAt = main.indexOf('app.setPath("userData", userDataResolution.path);');
-		const resolveAt = main.indexOf('resolveUserDataDirectory(app.getPath("appData"))');
+		const setAt = main.indexOf('app.setPath("userData", path.join(app.getPath("appData")');
 		const nameAt = main.indexOf("app.setName(APP_NAME);");
 		const lockAt = main.indexOf("app.requestSingleInstanceLock()");
 
-		expect(resolveAt).toBeGreaterThan(-1);
-		expect(setAt).toBeGreaterThan(resolveAt);
+		expect(setAt).toBeGreaterThan(-1);
 		expect(setAt).toBeLessThan(nameAt);
 		expect(setAt).toBeLessThan(lockAt);
 		// Nothing above it may read the path: that read would be the one

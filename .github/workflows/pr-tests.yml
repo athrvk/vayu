@@ -1351,11 +1351,9 @@ jobs:
       # wrong, and silently: the deb hooks removed in #1356 cleaned a lock at
       # `~/.config/vayu/` for as long as they existed, while the app wrote
       # `~/.config/vayu-client/`. `main.ts` names the directory itself, from
-      # `USER_DATA_DIR_NAME` (`APP_NAME`) in `app/electron/constants.ts`, and
-      # moves the one every release up to 0.36 used,
-      # `LEGACY_USER_DATA_DIR_NAME`, on first launch. Those two are the values a
-      # script may name - taken from the file rather than repeated here, or
-      # this check becomes the next stale copy.
+      # `USER_DATA_DIR_NAME` (`APP_NAME`) in `app/electron/constants.ts`. That is
+      # the one value a script may name - taken from the file rather than
+      # repeated here, or this check becomes the next stale copy.
       - name: Shell scripts name the app's real data directory
         shell: bash
         run: |
@@ -1369,17 +1367,16 @@ jobs:
           # both are `export const X = "...";` string literals.
           constants=app/electron/constants.ts
           expected=$(sed -n 's/^export const APP_NAME = "\([^"]*\)";.*/\1/p' "$constants" | head -1)
-          legacy=$(sed -n 's/^export const LEGACY_USER_DATA_DIR_NAME = "\([^"]*\)";.*/\1/p' "$constants" | head -1)
-          if [[ -z "$expected" || -z "$legacy" ]]; then
-            echo "::error::Could not read APP_NAME and LEGACY_USER_DATA_DIR_NAME from $constants - the check has no truth to compare against"
+          if [[ -z "$expected" ]]; then
+            echo "::error::Could not read APP_NAME from $constants - the check has no truth to compare against"
             exit 1
           fi
           status=0
           while IFS= read -r hit; do
             [[ -z "$hit" ]] && continue
             dir=${hit##*.config/}
-            [[ "$dir" == "$expected" || "$dir" == "$legacy" ]] && continue
-            echo "::error::${hit%:*} names ~/.config/${dir}; the app's data directory is ~/.config/${expected} (~/.config/${legacy} before the migration)"
+            [[ "$dir" == "$expected" ]] && continue
+            echo "::error::${hit%:*} names ~/.config/${dir}; the app's data directory is ~/.config/${expected}"
             status=1
           done < <(grep -HnoE '\.config/[A-Za-z0-9._-]+' "${files[@]}" || true)
           exit "$status"
