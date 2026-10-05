@@ -30,9 +30,8 @@ import {
 	ENGINE_PORT_RELEASE_DELAY_MS,
 	ENGINE_STDERR_TAIL_LINES,
 } from "./constants.js";
+import { isDevelopmentBuild } from "./dev-mode.js";
 import { appLogger } from "./app-log.js";
-
-const isDev = process.env.NODE_ENV === "development";
 
 /**
  * The directory the engine keeps its state in - logs, database and lock file.
@@ -49,7 +48,7 @@ const isDev = process.env.NODE_ENV === "development";
  * change here silently showed the user the old directory.
  */
 export function engineDataDirectory(): string {
-	if (isDev) {
+	if (isDevelopmentBuild()) {
 		// In development, use a local directory in the engine folder
 		return path.join(app.getAppPath(), "..", "engine", "data");
 	}
@@ -436,7 +435,7 @@ export class EngineSidecar {
 		const isWindows = process.platform === "win32";
 		const binaryName = isWindows ? "vayu-engine.exe" : "vayu-engine";
 
-		if (isDev) {
+		if (isDevelopmentBuild()) {
 			// Every dev preset now uses the Ninja generator, which is single-config
 			// and writes straight into build/. Older Windows trees configured with
 			// the Visual Studio generator nest the binary under build/Debug/, so
@@ -616,7 +615,7 @@ export class EngineSidecar {
 			"--data-dir",
 			this.dataDir,
 			"--verbose",
-			`${isDev ? "2" : "0"}`,
+			`${isDevelopmentBuild() ? "2" : "0"}`,
 		]);
 		this.ownership = { kind: "spawned" };
 

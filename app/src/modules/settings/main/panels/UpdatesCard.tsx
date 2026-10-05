@@ -107,7 +107,7 @@ export function UpdatesCard() {
 				return <FieldError>Couldn&apos;t check for updates. {result.message}</FieldError>;
 			case "available": {
 				// Bound here so the optional survives narrowing into the handler.
-				const { version, strategy, releaseUrl, installCommand } = result;
+				const { version, strategy, installCommand } = result;
 				return (
 					<div className="space-y-2">
 						<p className="text-sm text-foreground">
@@ -119,7 +119,7 @@ export function UpdatesCard() {
 							<Button
 								variant="outline"
 								size="sm"
-								onClick={() => void api.openReleasePage(releaseUrl)}
+								onClick={() => void api.openReleasePage()}
 							>
 								<ExternalLink className="size-icon mr-1.5" />
 								Release notes

@@ -246,7 +246,7 @@ interface ElectronAPI {
 	onDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 	restartToInstallUpdate: () => Promise<void>;
 	checkForUpdates: () => Promise<UpdateCheckResult>;
-	openReleasePage: (url: string) => Promise<void>;
+	openReleasePage: () => Promise<void>;
 	/** macOS notify path: quit so the pasted installer command can replace the app. */
 	quitForUpdate: () => Promise<void>;
 

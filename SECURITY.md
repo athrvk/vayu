@@ -16,6 +16,16 @@ account: they can already read the database. A web page open in your browser is
 different - it has your network position and none of your file rights - so
 what a page can reach is in scope, and reports about it are welcome.
 
+## Renderer posture
+
+The UI window runs with `nodeIntegration` off, `contextIsolation` and the
+sandbox on, and a preload that exposes named methods only. Behind that: a
+Content-Security-Policy on the app document (no `unsafe-eval`; the renderer may
+connect only to itself and the engine on `127.0.0.1:9876`), all device
+permissions denied for the app and for OAuth sign-in windows, a chart tooltip
+built from text rather than markup, and Electron fuses that disable
+`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on packaged builds.
+
 ## Data at rest
 
 Secrets, including variables you mark secret, are stored in plaintext in the
