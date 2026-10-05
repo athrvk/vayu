@@ -18,8 +18,8 @@
  * Driven against a Monaco stub rather than a real editor - the API surface used
  * here is six methods, and jsdom has no layout for the real one to measure. The
  * three "does nothing" cases are the load-bearing ones: a response viewer, a
- * language with no matcher (`RawRequestResponse`'s `http`, standing in for
- * anything `VARIABLE_TOKEN_MATCHERS` has not been taught) and an editor with
+ * language with no matcher (`shell`, standing in for anything neither matcher
+ * map has been taught) and an editor with
  * no provider above it must come out of this hook exactly as they went in.
  *
  * Since issue #1220's script support, `javascript` is no longer one of those
@@ -431,9 +431,9 @@ describe("useEditorVariableTokens", () => {
 
 			hoverAt(stub, 8);
 			// A body mode that left the languages with a matcher, with the popover
-			// still up - "http", `RawRequestResponse`'s own language, which (like
-			// every language absent from `VARIABLE_TOKEN_MATCHERS`) paints nothing.
-			act(() => rendered.rerender({ language: "http", readOnly: false }));
+			// still up - "shell", which (like every language absent from both
+			// matcher maps) paints nothing.
+			act(() => rendered.rerender({ language: "shell", readOnly: false }));
 			expect(closeTokenEditor).toHaveBeenCalledTimes(1);
 		});
 
@@ -509,10 +509,10 @@ describe("useEditorVariableTokens", () => {
 	});
 
 	it("leaves an editor with no matcher for its language alone", () => {
-		// "http" - `RawRequestResponse`'s own language - has no entry in
-		// `VARIABLE_TOKEN_MATCHERS`, the same as every response-viewer language.
+		// "shell" has no entry in either matcher map. Not "http": the Raw
+		// tab's language has a time matcher (#1786).
 		const stub = stubEditor(["GET {{baseUrl}}"]);
-		mount(stub, { language: "http" });
+		mount(stub, { language: "shell" });
 		expect(stub.decorations.set).not.toHaveBeenCalled();
 	});
 

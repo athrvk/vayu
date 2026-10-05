@@ -499,7 +499,7 @@ after the frame left the run's retained ring.
 
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
-**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips). Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360.
+**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - status glyph, method badge, request name or URL, load-test chips; the start time, the status word and the run's comment are the row's time card, on its stretched activator). Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360.
 
 The filter row also carries a **Pinned** toggle, and it is the only filter that changes what is *fetched* rather than what is shown: it drives `GET /runs?baseline=true` (see `useRunsQuery`), so a pin old enough to sit past the loaded pages is still findable - which is the whole point of a filter for pins. It is applied a second time client-side, because unpinning patches the loaded pages in place instead of refetching them; without that pass the row just unpinned would linger in the pinned-only list until the next poll.
 
@@ -2164,8 +2164,9 @@ body's `{{x}}` is data someone was sent, not a token the app owns.
 every span `parseTimeValue` accepts - ISO 8601, the three HTTP date forms,
 epoch seconds and milliseconds - in `json`, `javascript` and `graphql` as a
 string literal whose whole content is a time or a bare 10- or 13-digit
-number, and in `plaintext`, `yaml`, `xml` and `html` as a time-shaped run
-anywhere, quoted or not. The range is the time itself, never its quotes; near
+number, and in `plaintext`, `yaml`, `xml`, `html` and `http` (the Raw tab, so
+a `Date:` header and a `Set-Cookie`'s `Expires=` are marked) as a time-shaped
+run anywhere, quoted or not. The range is the time itself, never its quotes; near
 misses (`2026.10.05`, `20261005`, sixteen digits) find nothing. A time gets a
 faint dotted underline (`vayu-time-token`) and, on hover, the same rows
 `TimeValue` shows (`TimeHoverCard`, from `describeInstant`) in the tooltip
@@ -2189,7 +2190,18 @@ text only. A value that is not a time renders as plain text with no card, so a
 surface can hand it whatever it holds. A string that cannot hold an element
 (an `aria-label`, a native `title`, a palette subtitle) uses `formatInstant`
 from `lib/time-value.ts` with the same style names; `formatDayHeading` writes
-the history sidebar's day headings. **`time-surfaces.test.ts` is the guard**:
+the history sidebar's day headings. `TimeTooltip` is the card on a trigger the
+surface draws itself: the history row hangs it off its stretched activator,
+with the status and the run's comment as `extraRows`. API data in a table is
+decided by `parseTimeValue` alone, never `new Date()`: `HeadersViewer` wraps
+each time run of a header value (`proseTimeRuns`, the Raw tab's own reading)
+in a `TimeValue` and leaves the rest of the text as received, and an editable
+value - `KeyValueRow`'s headers and params, the variables table's value cell -
+gets a `TimeMarker`, a clock button carrying the card, because an `<input>`
+cannot hold an element and a tooltip on the field would open on every focus.
+`KeyValueRow` puts it in the resolved peek's column (the peek wins on a row
+with a variable); `VariableRow` puts it inside the field and never on a
+secret. **`time-surfaces.test.ts` is the guard**:
 it reads every non-test source file under `app/src`, asserts the scan is
 non-empty, and fails on `toLocaleDateString`, `toLocaleTimeString`,
 `toLocaleString` on a Date, `Intl.DateTimeFormat`, `Intl.RelativeTimeFormat` or

@@ -31,7 +31,7 @@
  * lighter lands back at invisible.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
 	Badge,
@@ -47,8 +47,30 @@ import {
 	TableRow,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
+import { TimeValue } from "../TimeValue";
 import type { HeadersViewerProps } from "./types";
+
+/**
+ * A header value with each time in it carrying the time card (#1786), the text
+ * otherwise exactly as received. Runs rather than the whole value, because a
+ * `Set-Cookie` holds its `Expires=` date among other attributes; they are the
+ * Raw tab's own runs (`proseTimeRuns`), so the table and the raw exchange mark
+ * the same times.
+ */
+function HeaderValue({ value }: { value: string }) {
+	const parts: ReactNode[] = [];
+	let cursor = 0;
+	for (const run of proseTimeRuns(value)) {
+		const start = run.startColumn - 1;
+		parts.push(value.slice(cursor, start));
+		parts.push(<TimeValue key={start} value={run.text} style="raw" />);
+		cursor = run.endColumn - 1;
+	}
+	parts.push(value.slice(cursor));
+	return <>{parts}</>;
+}
 
 export default function HeadersViewer({
 	headers,
@@ -119,7 +141,7 @@ export default function HeadersViewer({
 									{name}
 								</TableCell>
 								<TableCell className="font-mono break-all text-foreground">
-									{value}
+									<HeaderValue value={value} />
 								</TableCell>
 							</TableRow>
 						))}
@@ -164,7 +186,9 @@ export function CompactHeadersViewer({
 						<span className="text-xs font-medium text-muted-foreground shrink-0">
 							{key}:
 						</span>
-						<span className="text-xs text-foreground break-all">{value}</span>
+						<span className="text-xs text-foreground break-all">
+							<HeaderValue value={value} />
+						</span>
 					</div>
 				))}
 			</div>

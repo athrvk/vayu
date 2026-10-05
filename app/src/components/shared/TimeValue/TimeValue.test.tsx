@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TimeHoverCard } from "./TimeHoverCard";
-import { TimeValue } from "./TimeValue";
+import { TimeTooltip, TimeValue } from "./TimeValue";
 
 const NOW = new Date("2026-10-05T14:00:00.000Z");
 
@@ -70,6 +70,40 @@ describe("TimeValue", () => {
 	it("renders text that is not a time as plain text with no card", async () => {
 		renderValue({ value: "not a time", style: "raw" });
 		fireEvent.focus(screen.getByText("not a time"));
+		expect(screen.queryByTestId("time-hover-card")).toBeNull();
+	});
+});
+
+describe("TimeTooltip", () => {
+	it("puts the card, and the surface's own rows after it, on a trigger the surface draws", async () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<TimeTooltip
+					value={NOW.getTime()}
+					timeZone="UTC"
+					now={NOW}
+					extraRows={[{ label: "Status", value: "Completed" }]}
+				>
+					<button type="button">row</button>
+				</TimeTooltip>
+			</TooltipProvider>
+		);
+		fireEvent.focus(screen.getByRole("button", { name: "row" }));
+		const card = await screen.findByTestId("time-hover-card");
+		expect(card.textContent).toMatch(/UTC.*Relative.*StatusCompleted$/);
+	});
+
+	it("leaves the trigger bare when the value is no time", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<TimeTooltip value="not a time">
+					<button type="button">row</button>
+				</TimeTooltip>
+			</TooltipProvider>
+		);
+		const button = screen.getByRole("button", { name: "row" });
+		fireEvent.focus(button);
+		expect(button.hasAttribute("data-state")).toBe(false);
 		expect(screen.queryByTestId("time-hover-card")).toBeNull();
 	});
 });

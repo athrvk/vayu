@@ -20,7 +20,8 @@
  * case fails - the two rows come out with the same visible text.
  */
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import type { Run } from "@/types";
 

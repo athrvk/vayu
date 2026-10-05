@@ -3101,9 +3101,11 @@ Wherever Vayu shows a time, the user's own zone, UTC and how long ago are one ho
 - **The relative phrase comes from the platform** (`Intl.RelativeTimeFormat`), so it reads in the user's language and pluralises as that language does. Nothing hand-wraps it: no `"5m ago"` ladder, and copy never builds a phrase around a count of minutes.
 - **`TimeValue` is the only renderer.** It takes an instant or the raw text and a style (`datetime`, `date`, `time`, `time-ms`, `relative`, or `raw` to keep the string as it came), renders a `<time>` and carries the card through the `Tooltip` primitive. The card's rows are built when it opens, so a list of hundreds of rows pays for the text only. A value that is not a time renders as plain text with no card.
 - **A string that cannot hold an element** - an `aria-label`, a native `title`, a palette subtitle - calls `formatInstant` from `lib/time-value.ts`, the same formatter `TimeValue` uses. That is the only other place a time may be formatted.
+- **API data in a table is decided by `parseTimeValue`, never `new Date()`**, so `1` or `2026` in a field is not a time. A header value wraps each time run it holds in a `TimeValue` and leaves the rest as received: a `Date` value is one run, a `Set-Cookie` has its `Expires=` date marked among its other attributes, `Content-Type` has none. An editable field (a request header or param, a variable) cannot hold an element, so the card hangs off a `TimeMarker` beside it - a clock button in the key-value table's marker column, inside the field in the variables table - rather than off the field, which would open on every focus and cover the autocomplete. **A secret variable never gets one**, saved or not: the card is a tooltip a screen share catches.
+- **A surface with no visible time** puts the card on a trigger of its own with `TimeTooltip`: a history row hangs it off the row's stretched activator, with the status and the run's comment as extra rows, in place of the native `title` that used to say the same in one unnamed zone.
 - **No setting.** The OS locale and zone decide, as they always did.
 - **A test that renders a time needs a `TooltipProvider`** above it: `@/test/render-with-tooltips` is Testing Library's `render` inside one.
-- Monaco editors underline a time by the same parser and draw the same rows; see `docs/app/COMPONENTS.md`.
+- Monaco editors underline a time by the same parser and draw the same rows, the Raw tab's `http` language included; see `docs/app/COMPONENTS.md`.
 
 → `time-surfaces.test.ts` reads every source file under `app/src` and fails on `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` on a Date, `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` outside `lib/time-value.ts` and `components/shared/TimeValue/`, and on any `CodeEditor` that opts out of the time matcher. `Number#toLocaleString` for counts is untouched.
 
@@ -3789,5 +3791,6 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/lib/time-value.ts` | The one place text becomes a time: `parseTimeValue`, `describeInstant`, `formatInstant`, `formatRelative`, `formatDayHeading` |
-| `app/src/components/shared/TimeValue/TimeValue.tsx` | The one renderer of a time: visible text plus the hover card |
+| `app/src/components/shared/TimeValue/TimeValue.tsx` | The one renderer of a time: visible text plus the hover card, and `TimeTooltip` for a trigger the surface draws |
+| `app/src/components/shared/TimeValue/TimeMarker.tsx` | The time card's marker beside an editable field that holds a time |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

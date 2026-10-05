@@ -34,7 +34,7 @@ function spans(ranges: TimeTokenRange[]) {
 describe("TIME_TOKEN_MATCHERS", () => {
 	it("covers every language CodeEditor is handed a body or a script in", () => {
 		expect(Object.keys(TIME_TOKEN_MATCHERS).sort()).toEqual(
-			["graphql", "html", "javascript", "json", "plaintext", "xml", "yaml"].sort()
+			["graphql", "html", "http", "javascript", "json", "plaintext", "xml", "yaml"].sort()
 		);
 	});
 
@@ -42,7 +42,7 @@ describe("TIME_TOKEN_MATCHERS", () => {
 		expect(TIME_TOKEN_MATCHERS[language]).toBe(codeTimeTokenRanges);
 	});
 
-	it.each(["plaintext", "yaml", "xml", "html"])("reads %s as prose", (language) => {
+	it.each(["plaintext", "yaml", "xml", "html", "http"])("reads %s as prose", (language) => {
 		expect(TIME_TOKEN_MATCHERS[language]).toBe(proseTimeTokenRanges);
 	});
 });
@@ -126,6 +126,17 @@ describe("proseTimeTokenRanges", () => {
 				model("it's 2026-10-05T08:00:00Z, don't. Date: Sun, 05 Oct 2026 07:23:00 GMT")
 			).map((r) => r.text)
 		).toEqual(["2026-10-05T08:00:00Z", "Sun, 05 Oct 2026 07:23:00 GMT"]);
+	});
+
+	it("finds the dates in a Raw tab's response head", () => {
+		expect(
+			proseTimeTokenRanges(
+				model(
+					"< Date: Sun, 05 Oct 2026 07:23:00 GMT",
+					"< Set-Cookie: id=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT; Path=/"
+				)
+			).map((r) => r.text)
+		).toEqual(["Sun, 05 Oct 2026 07:23:00 GMT", "Wed, 21 Oct 2026 07:28:00 GMT"]);
 	});
 
 	it("tells a time apart from a near miss", () => {

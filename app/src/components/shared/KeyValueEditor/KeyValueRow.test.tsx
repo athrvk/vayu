@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { variableSupportStub } from "@/test/variable-support";
 import KeyValueRow from "./KeyValueRow";
@@ -235,5 +235,58 @@ describe("the trailing spare row", () => {
 	it("offers it as soon as the row holds a key", () => {
 		const typed = row({ item: { id: "r0", key: "page", value: "", enabled: true } });
 		expect(typed.querySelector('input[type="checkbox"]')).toBeTruthy();
+	});
+});
+
+describe("a value that is a time (#1786)", () => {
+	/*
+	 * The value is an `<input>`, so the card hangs off a marker in the same
+	 * column the resolved peek uses rather than off the field, which would open
+	 * on every focus while the user types. Assertions read labels and the value
+	 * as typed, never the local row, so no case depends on the host zone.
+	 *
+	 * Mutation checks: hand `<TimeMarker>` an empty value and the first case
+	 * fails; decide in `TimeMarker` with `new Date()` instead of
+	 * `parseTimeValue` and the "2026" case fails.
+	 */
+	const DATE = "Sun, 05 Oct 2026 07:23:00 GMT";
+	const marker = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>('[aria-label$="in your time zone and UTC"]');
+
+	it("carries the card on an If-Modified-Since value", async () => {
+		const container = row({
+			item: { id: "r1", key: "If-Modified-Since", value: DATE, enabled: true },
+		});
+		const button = marker(container);
+		expect(button?.getAttribute("aria-label")).toBe(
+			"If-Modified-Since in your time zone and UTC"
+		);
+		fireEvent.focus(button!);
+		const card = await screen.findByTestId("time-hover-card");
+		expect(card.textContent).toContain("UTC");
+		expect(card.textContent).toContain(`Original${DATE}`);
+		// The field itself is untouched: still the editable input, as typed.
+		const value = container.querySelectorAll<HTMLInputElement>('input[type="text"]')[1];
+		expect(value.value).toBe(DATE);
+		expect(value.disabled).toBe(false);
+	});
+
+	it("leaves a Content-Type value without one", () => {
+		const container = row({
+			item: { id: "r1", key: "Content-Type", value: "application/json", enabled: true },
+		});
+		expect(marker(container)).toBeNull();
+	});
+
+	it("leaves a number the parser does not call a time without one", () => {
+		// `new Date("2026")` is a valid date; `parseTimeValue` decides, and says no.
+		const container = row({ item: { id: "r1", key: "page", value: "2026", enabled: true } });
+		expect(marker(container)).toBeNull();
+	});
+
+	it("keeps the column for the resolved peek on a row with a variable", () => {
+		const container = row();
+		expect(marker(container)).toBeNull();
+		expect(container.querySelector('[aria-label^="Resolved value of"]')).not.toBeNull();
 	});
 });

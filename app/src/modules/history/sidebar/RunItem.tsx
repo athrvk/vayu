@@ -12,8 +12,9 @@ import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
-import { formatInstant } from "@/lib/time-value";
+import type { TimeRow } from "@/lib/time-value";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
+import { TimeTooltip } from "@/components/shared/TimeValue";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import {
@@ -49,7 +50,7 @@ import {
  * the reason they went: a per-row "8h ago" and a status word cost
  * roughly two lines of dead space per row for what a day-group header
  * (`HistoryList.tsx`'s `groupRunsByDay`) or a hover carries instead. The full
- * word and the exact timestamp are in the row's `title`, and the row's
+ * word and the start time are in the row's time card, and the row's
  * accessible name (the stretched activator below) states the status outright -
  * so the glyph is decorative to a screen reader and `aria-hidden`.
  *
@@ -221,20 +222,14 @@ export default function RunItem({
 		},
 	];
 
-	// The status word and the exact timestamp - said once, in the tooltip,
-	// rather than on every row (the day-group header above the row already
-	// says which day; a relative "8h ago" repeated down the whole list said
-	// nothing a hover can't say instead). The comment joins it here too: it's
-	// occasional, not the row's identity, so it earns a hover rather than a
-	// permanent line.
-	const rowTitle = [
-		`${STATUS_LABEL[run.status]} · ${
-			run.startTime ? formatInstant(run.startTime) : "Unknown time"
-		}`,
-		run.summary?.comment && `"${run.summary.comment}"`,
-	]
-		.filter(Boolean)
-		.join(" - ");
+	// The status word and the start time - said once, in the row's time card
+	// (#1786), rather than on every row (the day-group header above the row
+	// already says which day; a relative "8h ago" repeated down the whole list
+	// said nothing a hover can't say instead). The comment joins it there too:
+	// it's occasional, not the row's identity, so it earns a hover rather than
+	// a permanent line.
+	const cardRows: TimeRow[] = [{ label: "Status", value: STATUS_LABEL[run.status] }];
+	if (run.summary?.comment) cardRows.push({ label: "Comment", value: run.summary.comment });
 
 	// A bare fallback identity for the rare row with neither a url nor a
 	// scenario descriptor (a run recorded before either existed, or one still
@@ -291,7 +286,6 @@ export default function RunItem({
 						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
 						: "hover:bg-accent"
 				)}
-				title={rowTitle}
 			>
 				{/* Identity line - one row: status dot, method (or a folder icon for
 				    a run whose work is a sequence), path or collection name, then
@@ -493,27 +487,34 @@ export default function RunItem({
 				 * real button. It is last in the DOM and absolutely positioned so it
 				 * covers the content without disturbing layout; the actions group above
 				 * carries z-10 to stay on top of it.
+				 *
+				 * The time card hangs off this button rather than the row: it covers
+				 * the same area the row's hover did, it is a sibling of the action
+				 * buttons rather than their ancestor, so their own hovers never sit
+				 * under it, and `RowContextMenu`'s trigger stays the row.
 				 */}
-				<button
-					type="button"
-					onClick={() => onSelect(run.id)}
-					// Named by what it is. A collection run announced as a "request run"
-					// with no url after it was a row a screen-reader user could not tell
-					// apart from any other row in the list.
-					aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
-						identitySuffix ? `, ${identitySuffix}` : ""
-					}`}
-					className="absolute inset-0 z-0 cursor-pointer"
-					// Marks this button as one stop of `useHistoryListFocus`'s roving
-					// tabindex - one Tab stop for the whole list, Up/Down/Home/End move
-					// it. Starts at -1; the hook promotes exactly one to 0, the same
-					// shape `useRovingTreeFocus` uses for the collection tree. A real
-					// `<button>` already activates on Enter/Space with no handler of
-					// the hook's own, unlike a tree row (a div wrapping its own
-					// activate button), so nothing else here has to change.
-					data-history-activate
-					tabIndex={-1}
-				/>
+				<TimeTooltip value={run.startTime} extraRows={cardRows} side="right">
+					<button
+						type="button"
+						onClick={() => onSelect(run.id)}
+						// Named by what it is. A collection run announced as a "request run"
+						// with no url after it was a row a screen-reader user could not tell
+						// apart from any other row in the list.
+						aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
+							identitySuffix ? `, ${identitySuffix}` : ""
+						}`}
+						className="absolute inset-0 z-0 cursor-pointer"
+						// Marks this button as one stop of `useHistoryListFocus`'s roving
+						// tabindex - one Tab stop for the whole list, Up/Down/Home/End move
+						// it. Starts at -1; the hook promotes exactly one to 0, the same
+						// shape `useRovingTreeFocus` uses for the collection tree. A real
+						// `<button>` already activates on Enter/Space with no handler of
+						// the hook's own, unlike a tree row (a div wrapping its own
+						// activate button), so nothing else here has to change.
+						data-history-activate
+						tabIndex={-1}
+					/>
+				</TimeTooltip>
 			</div>
 		</RowContextMenu>
 	);

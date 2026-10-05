@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import type { ComponentProps, ReactElement } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
@@ -17,9 +18,16 @@ import {
 } from "@/lib/time-value";
 import { TimeHoverCard } from "./TimeHoverCard";
 
+type TimeInput = Date | number | string;
+
+interface ResolvedTime {
+	instant: Date;
+	hasZone: boolean;
+}
+
 export interface TimeValueProps extends DescribeOptions {
 	/** An instant (`Date`, epoch milliseconds) or the raw text an API sent. */
-	value: Date | number | string;
+	value: TimeInput;
 	/**
 	 * The visible text: a `TimeStyle`, or `"raw"` to show a string exactly as it
 	 * arrived (a header or a variable, where the machine value stays visible).
@@ -31,7 +39,7 @@ export interface TimeValueProps extends DescribeOptions {
 }
 
 /** The instant and the zone fact behind @p value, or null when it is no time. */
-function resolve(value: TimeValueProps["value"]) {
+function resolve(value: TimeInput): ResolvedTime | null {
 	if (typeof value !== "string") {
 		const date = new Date(value);
 		return Number.isNaN(date.getTime()) ? null : { instant: date, hasZone: true };
@@ -62,6 +70,63 @@ function TimeCard({
 	return <TimeHoverCard rows={[...describeInstant(instant, options, original), ...extraRows]} />;
 }
 
+interface CardTooltipProps extends DescribeOptions {
+	value: TimeInput;
+	resolved: ResolvedTime;
+	extraRows: TimeRow[];
+	side?: ComponentProps<typeof TooltipContent>["side"];
+	children: ReactElement;
+}
+
+function CardTooltip({
+	value,
+	resolved,
+	extraRows,
+	side,
+	children,
+	timeZone,
+	locale,
+	now,
+}: CardTooltipProps) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{children}</TooltipTrigger>
+			<TooltipContent side={side}>
+				<TimeCard
+					instant={resolved.instant}
+					original={
+						typeof value === "string"
+							? { text: value, hasZone: resolved.hasZone }
+							: undefined
+					}
+					options={{ timeZone, locale, now }}
+					extraRows={extraRows}
+				/>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+export interface TimeTooltipProps extends DescribeOptions {
+	value: TimeInput;
+	extraRows?: TimeRow[];
+	side?: ComponentProps<typeof TooltipContent>["side"];
+	/** The trigger: one element that takes a ref, as every `TooltipTrigger asChild` child must. */
+	children: ReactElement;
+}
+
+/**
+ * The time card on a trigger the surface draws itself, for a time that has no
+ * visible text of its own to wrap: a history row whose time lives only in its
+ * hover, a marker beside an editable field. A @p value that is not a time
+ * leaves @p children bare.
+ */
+export function TimeTooltip({ value, extraRows = [], ...rest }: TimeTooltipProps) {
+	const resolved = resolve(value);
+	if (!resolved) return rest.children;
+	return <CardTooltip value={value} resolved={resolved} extraRows={extraRows} {...rest} />;
+}
+
 /**
  * The one component that renders a time outside Monaco (issue #1786): visible
  * text the surface chooses, and the card - the user's zone, UTC, how long ago -
@@ -89,25 +154,13 @@ export function TimeValue({
 			? raw
 			: formatInstant(resolved.instant, style === "raw" ? "datetime" : style, options);
 	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<time
-					dateTime={resolved.hasZone ? resolved.instant.toISOString() : undefined}
-					className={cn("tabular-nums", className)}
-				>
-					{text}
-				</time>
-			</TooltipTrigger>
-			<TooltipContent>
-				<TimeCard
-					instant={resolved.instant}
-					original={
-						raw === undefined ? undefined : { text: raw, hasZone: resolved.hasZone }
-					}
-					options={options}
-					extraRows={extraRows}
-				/>
-			</TooltipContent>
-		</Tooltip>
+		<CardTooltip value={value} resolved={resolved} extraRows={extraRows} {...options}>
+			<time
+				dateTime={resolved.hasZone ? resolved.instant.toISOString() : undefined}
+				className={cn("tabular-nums", className)}
+			>
+				{text}
+			</time>
+		</CardTooltip>
 	);
 }

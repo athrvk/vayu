@@ -19,7 +19,8 @@
  * it), or still the default name every new request starts with.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import type { Run } from "@/types";

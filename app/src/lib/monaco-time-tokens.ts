@@ -18,14 +18,16 @@
  *  - **Code** (`json`, `javascript`, `graphql`): a string literal whose whole
  *    content is a time, or a bare epoch number. `"deadline 2026-10-05"` is a
  *    sentence that mentions a date, not a time value, and stays plain.
- *  - **Prose** (`plaintext`, `yaml`, `xml`, `html`): a time-shaped run
- *    anywhere, quoted or not - a YAML scalar, an element's text, a log line.
+ *  - **Prose** (`plaintext`, `yaml`, `xml`, `html`, `http`): a time-shaped
+ *    run anywhere, quoted or not - a YAML scalar, an element's text, a log
+ *    line, a `Date:` or `Set-Cookie: ...; Expires=` header in the Raw tab.
  *    Quotes are not paired here: an apostrophe in prose (`it's`) would pair
  *    with the next one and swallow the time between them, and a time inside
  *    quotes is found by the same run anyway.
  */
 
 import { parseTimeValue, type ParsedTime } from "./time-value";
+import { HTTP_LANGUAGE_ID } from "./http-language";
 import type { ScannableModel } from "./monaco-variable-tokens";
 
 /** One time found in a model, in Monaco's 1-based line/column space. */
@@ -119,6 +121,15 @@ export const codeTimeTokenRanges = timeTokenScanner(CODE_PATTERN);
 export const proseTimeTokenRanges = timeTokenScanner(PROSE_PATTERN);
 
 /**
+ * The times in one line of text by the prose reading, for a surface outside
+ * Monaco that shows what the Raw tab shows (a header value), so the two find
+ * the same runs. Columns are 1-based, as in a model.
+ */
+export function proseTimeRuns(text: string): TimeTokenRange[] {
+	return timesInLine(text, 1, PROSE_PATTERN);
+}
+
+/**
  * Which languages are scanned for times, and how. A language absent here is
  * not scanned at all. Unlike `VARIABLE_TOKEN_MATCHERS`, this map is not gated
  * on the editor being editable: a response body is exactly where a time is
@@ -132,4 +143,5 @@ export const TIME_TOKEN_MATCHERS: Record<string, TimeTokenMatcher> = {
 	yaml: proseTimeTokenRanges,
 	xml: proseTimeTokenRanges,
 	html: proseTimeTokenRanges,
+	[HTTP_LANGUAGE_ID]: proseTimeTokenRanges,
 };

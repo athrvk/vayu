@@ -18,7 +18,8 @@
  * and a pinned row says so without being hovered.
  */
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import type { Run } from "@/types";
 

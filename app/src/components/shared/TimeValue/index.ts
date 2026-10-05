@@ -5,5 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-export { TimeValue, type TimeValueProps } from "./TimeValue";
+export { TimeValue, TimeTooltip, type TimeValueProps, type TimeTooltipProps } from "./TimeValue";
+export { TimeMarker } from "./TimeMarker";
 export { TimeHoverCard } from "./TimeHoverCard";
