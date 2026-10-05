@@ -11,7 +11,7 @@
 // outgoing/incoming header line ("> Name: value" / "< Name: value"); without
 // this, a verbose run would print Authorization (bearer/basic/oauth2 tokens),
 // cookies, etc. to the debug log. Values of well-known sensitive headers are
-// replaced with "<redacted>". Request/response bodies are never logged by the
+// replaced with `kRedactedMarker`. Request/response bodies are never logged by the
 // callbacks, so token POST bodies and token responses are unaffected.
 
 #include <algorithm>
@@ -44,26 +44,19 @@ const std::vector<std::string>& extra_secret_headers = {}) {
         return line;
     }
 
-    // Extract and normalize the header name (trim + lowercase).
+    // The header name, trimmed; the comparison below folds case itself.
     std::string name = line.substr (0, colon);
     const auto first = name.find_first_not_of (" \t");
     const auto last  = name.find_last_not_of (" \t");
     if (first == std::string::npos) {
         return line;
     }
-    name = vayu::utils::ascii_lower (name.substr (first, last - first + 1));
+    name = name.substr (first, last - first + 1);
 
-    // The shared field list (`log_redact.hpp`) plus the header the request's
-    // own API-key auth names, which no static list can know.
-    const bool sensitive = vayu::utils::is_secret_field_name (name) ||
-    std::any_of (extra_secret_headers.begin (), extra_secret_headers.end (),
-    [&name] (
-    const std::string& s) { return vayu::utils::ascii_lower_equal (name, s); });
-
-    if (!sensitive) {
+    if (!vayu::utils::is_secret_header_name (name, extra_secret_headers)) {
         return line;
     }
-    return line.substr (0, colon) + ": <redacted>";
+    return line.substr (0, colon) + ": " + std::string (vayu::utils::kRedactedMarker);
 }
 
 /**

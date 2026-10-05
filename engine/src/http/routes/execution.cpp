@@ -191,8 +191,8 @@ RouteResult normalize_run_http_version (nlohmann::json& json) {
 /**
  * @brief Replace a scenario run's raw `scenario` block with its step manifest.
  *
- * `sanitize_config_snapshot` strips credentials out of `auth` and keeps
- * everything else, which is not enough here: the block as sent carries the
+ * `sanitize_config_snapshot` keeps the composed request with its credentials
+ * withheld, which is not enough here: the block as sent carries the
  * `data` rows, which are user data of unknown sensitivity and are deliberately
  * never snapshotted (only their count survives, on the manifest). The manifest
  * also records the **stored** URL per step rather than the composed one, so a
@@ -496,8 +496,8 @@ bool is_scenario) {
  * @brief Replace a single-request run's `data` rows with their count in the
  *        stored snapshot (issue #993).
  *
- * `sanitize_config_snapshot` strips credentials out of `auth` and keeps
- * everything else, which is not enough here for the reason `scenario_snapshot`
+ * `sanitize_config_snapshot` keeps the composed request with its credentials
+ * withheld, which is not enough here for the reason `scenario_snapshot`
  * exists: the rows are user data of unknown sensitivity and are deliberately
  * never snapshotted. `dataRowCount` is what survives, exactly as it does on a
  * scenario manifest, so a stored run still says it was data-driven and how
@@ -603,8 +603,10 @@ bool is_scenario,
 const nlohmann::json& scenario_manifest,
 const vayu::core::LoadDataSet* data,
 const vayu::http::DefaultHeaderPolicy& header_policy,
-size_t max_body_bytes) {
-    std::string sanitized = vayu::json::sanitize_config_snapshot (body, max_body_bytes);
+size_t max_body_bytes,
+const std::vector<std::string>& secret_values) {
+    std::string sanitized =
+    vayu::json::sanitize_config_snapshot (body, max_body_bytes, secret_values);
     std::string shaped = sanitized;
     if (is_scenario) {
         shaped = scenario_snapshot (sanitized, scenario_manifest);
@@ -614,6 +616,25 @@ size_t max_body_bytes) {
         shaped = load_data_snapshot (sanitized, data->rows.size ());
     }
     return with_default_headers_snapshot (shaped, header_policy);
+}
+
+/**
+ * @brief The secret-flagged variable values a `POST /runs` snapshot is masked
+ *        against (#1803): globals, the run's environment, and the collection
+ *        chain of the scenario's collection or of the request the run links.
+ *
+ * Composition resolves an inline payload through a `collectionId` it does not
+ * forward, so a run with no `requestId` and no scenario reads no collection
+ * scope here.
+ */
+std::vector<std::string> run_snapshot_secrets (vayu::db::Database& db,
+const vayu::db::Run& run,
+const vayu::core::ScenarioExecution* scenario) {
+    if (scenario != nullptr) {
+        return secret_variable_values (load_script_variable_scopes (
+        db, run.environment_id, scenario->request.collection_id));
+    }
+    return secret_variable_values (load_script_variable_scopes (db, run));
 }
 
 /**
@@ -1318,7 +1339,8 @@ DesignSend& send) {
         static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         send.run.config_snapshot =
-        vayu::json::sanitize_config_snapshot (req.body, max_snapshot_body_bytes);
+        vayu::json::sanitize_config_snapshot (req.body, max_snapshot_body_bytes,
+        secret_variable_values (load_script_variable_scopes (ctx.db, send.run)));
         send.run_id = send.run.id;
     }
 
@@ -1965,8 +1987,8 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // Validate/normalize the body's httpVersion, beside the config check
     // above and for the same reason: both run before run.config_snapshot is
     // built, so a rejected request leaves no row behind, and the snapshot
-    // still reflects the raw client body (sanitize_config_snapshot reads
-    // req.body directly, not this normalized `json`).
+    // still reflects the client's composed body, credentials withheld
+    // (sanitize_config_snapshot reads req.body, not this normalized `json`).
     if (auto outcome = normalize_run_http_version (json); !outcome) {
         vayu::utils::log_warning ("http",
         "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
@@ -2269,6 +2291,13 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
+    // Ahead of the snapshot, which reads the scopes these two name.
+    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
+        run.request_id = json["requestId"].get<std::string> ();
+    }
+    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
+        run.environment_id = json["environmentId"].get<std::string> ();
+    }
     const auto max_snapshot_body_bytes =
     static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
     static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
@@ -2276,18 +2305,12 @@ httplib::Response& res) {
     const auto header_policy = vayu::http::resolve_default_header_policy (
     ctx.db, compression_scope_of (run.type));
     run.config_snapshot = run_config_snapshot (req.body, is_scenario,
-    scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes);
+    scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes,
+    run_snapshot_secrets (ctx.db, run, scenario_execution.get ()));
     // The file a single-request run sends, as the plan checked it: name, size
     // and digest for the report (`metadata.bodyFile`), never the bytes.
     run.config_snapshot = with_body_file (std::move (run.config_snapshot), load_body_file);
     seed_run_times (run, now_ms ());
-
-    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
-        run.request_id = json["requestId"].get<std::string> ();
-    }
-    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
-        run.environment_id = json["environmentId"].get<std::string> ();
-    }
 
     log_started_run (json, run, run_id, scenario_execution.get ());
 

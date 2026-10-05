@@ -1468,7 +1468,7 @@ struct Run {
     std::optional<std::string> environment_id; // Environment used
     RunType type = RunType::Design;            // "design", "load" or "scenario"
     RunStatus status = RunStatus::Pending; // "pending", "running", "completed", "failed"
-    std::string config_snapshot; // JSON string (Full copy of request/env)
+    std::string config_snapshot; // JSON: the request as composed, credentials withheld
     int64_t start_time = 0;
     // 0 means "no end recorded"; readers guard on `> 0` (the report route
     // substitutes now_ms(), the app's dashboard falls back to its own clock).

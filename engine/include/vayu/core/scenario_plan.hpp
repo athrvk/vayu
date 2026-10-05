@@ -476,9 +476,10 @@ IterationIdentity identity);
  * **`url` is the stored, uncomposed one and the composed plan is never
  * persisted.** The plan carries resolved `Authorization` headers, and an
  * `apikey` auth with `in: "query"` puts a live key in the composed URL;
- * `sanitize_config_snapshot` (`utils/json.cpp`) exists to keep exactly that out
- * of the run store, and persisting a composed plan would route around its
- * allowlist. The full plan lives in memory for the run's life and nowhere else.
+ * `sanitize_config_snapshot` (`utils/json.cpp`) withholds credentials from the
+ * one composed request a snapshot holds, and reads neither a plan's steps nor
+ * their built auth. The full plan lives in memory for the run's life and
+ * nowhere else.
  *
  * A spec-bound collection also stamps `openapi: {specId, specHash}` here
  * (issue #637), which `GET /runs/:id/report` echoes under `metadata` and #629's

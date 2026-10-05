@@ -12,14 +12,19 @@
 
 #include "vayu/utils/json.hpp"
 
+#include <algorithm>
 #include <ostream>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/utils/encoding.hpp"
+#include "vayu/utils/log_redact.hpp"
 
 namespace vayu::json {
 
@@ -1592,27 +1597,128 @@ void cap_snapshot_body (nlohmann::json& parsed, size_t max_body_bytes) {
     }
 }
 
+// A secret value shorter than this is not masked. Two or three characters
+// ("v1", "dev", "42") recur in ordinary URL and body text, so masking every
+// occurrence would shred the snapshot while withholding nothing a guess could
+// not recover.
+constexpr size_t kMinMaskedSecretLength = 4;
+
+// Each secret value as the snapshot can hold it: raw, RFC 3986's strict form
+// (`url_encode`, what a client escaping a component writes) and Postman's
+// query form (what composition writes, `encode_query_component`). Longest
+// first, so a secret that contains another is masked whole rather than around
+// the shorter one.
+std::vector<std::string> masked_secret_forms (const std::vector<std::string>& values) {
+    std::vector<std::string> forms;
+    for (const auto& value : values) {
+        if (value.size () < kMinMaskedSecretLength) {
+            continue;
+        }
+        forms.push_back (value);
+        forms.push_back (vayu::utils::url_encode (value));
+        forms.push_back (
+        vayu::core::encode_query_component (value, vayu::core::QueryPart::Value));
+    }
+    std::sort (forms.begin (), forms.end (), [] (const std::string& a, const std::string& b) {
+        return a.size () != b.size () ? a.size () > b.size () : a < b;
+    });
+    forms.erase (std::unique (forms.begin (), forms.end ()), forms.end ());
+    return forms;
+}
+
+// Every string leaf under @p node with each of @p forms replaced by the marker.
+// Object keys are left alone: a header or field *name* is not a value.
+void mask_secret_values (Json& node, const std::vector<std::string>& forms) {
+    if (node.is_string ()) {
+        auto& text = node.get_ref<std::string&> ();
+        for (const auto& form : forms) {
+            for (auto pos = text.find (form); pos != std::string::npos;
+            pos = text.find (form, pos + vayu::utils::kRedactedMarker.size ())) {
+                text.replace (pos, form.size (), vayu::utils::kRedactedMarker);
+            }
+        }
+        return;
+    }
+    if (node.is_structured ()) {
+        for (auto& child : node) {
+            mask_secret_values (child, forms);
+        }
+    }
+}
+
+// The members of a composed payload a resolved `{{variable}}` can land in.
+void mask_snapshot_secrets (Json& parsed, const std::vector<std::string>& forms) {
+    for (const char* key : { "url", "params", "headers" }) {
+        if (auto it = parsed.find (key); it != parsed.end ()) {
+            mask_secret_values (*it, forms);
+        }
+    }
+    auto body_it = parsed.find ("body");
+    if (body_it == parsed.end () || !body_it->is_object ()) {
+        return;
+    }
+    for (const char* key : { "content", "fields" }) {
+        if (auto it = body_it->find (key); it != body_it->end ()) {
+            mask_secret_values (*it, forms);
+        }
+    }
+}
+
+// The header an `apikey` auth names, read before `auth` is collapsed to its
+// mode, or nothing.
+std::vector<std::string> api_key_header_names (const Json& parsed) {
+    const auto auth = parsed.find ("auth");
+    if (auth == parsed.end () || !auth->is_object () || auth->value ("mode", "") != "apikey") {
+        return {};
+    }
+    const auto key = auth->find ("key");
+    if (key == auth->end () || !key->is_string () ||
+    key->get_ref<const std::string&> ().empty ()) {
+        return {};
+    }
+    return { key->get<std::string> () };
+}
+
+void withhold_credential_headers (Json& parsed, const std::vector<std::string>& extra_names) {
+    auto headers = parsed.find ("headers");
+    if (headers == parsed.end () || !headers->is_object ()) {
+        return;
+    }
+    for (auto& [name, value] : headers->items ()) {
+        if (vayu::utils::is_secret_header_name (name, extra_names)) {
+            value = std::string (vayu::utils::kRedactedMarker);
+        }
+    }
+}
+
 } // namespace
 
-std::string sanitize_config_snapshot (const std::string& body, size_t max_body_bytes) {
+std::string sanitize_config_snapshot (const std::string& body,
+size_t max_body_bytes,
+const std::vector<std::string>& secret_values) {
     Json parsed;
     try {
         parsed = Json::parse (body);
     } catch (const std::exception&) {
         return body; // not JSON; store as-is
     }
-
-    if (parsed.is_object ()) {
-        // Allowlist within the auth subtree: keep only the mode, drop every
-        // credential field. Because we keep a fixed key rather than blocking
-        // known secret names, no future auth field (client secrets, tokens,
-        // private keys) can leak into the persisted snapshot.
-        if (auto it = parsed.find ("auth"); it != parsed.end () && it->is_object ()) {
-            const std::string mode = it->value ("mode", std::string{ "none" });
-            *it                    = Json::object ({ { "mode", mode } });
-        }
-        cap_snapshot_body (parsed, max_body_bytes);
+    if (!parsed.is_object ()) {
+        return parsed.dump ();
     }
+
+    withhold_credential_headers (parsed, api_key_header_names (parsed));
+    // Allowlist within the auth subtree: keep only the mode, drop every
+    // credential field. Because we keep a fixed key rather than blocking
+    // known secret names, no future auth field (client secrets, tokens,
+    // private keys) can leak into the persisted snapshot.
+    if (auto it = parsed.find ("auth"); it != parsed.end () && it->is_object ()) {
+        const std::string mode = it->value ("mode", std::string{ "none" });
+        *it                    = Json::object ({ { "mode", mode } });
+    }
+    // Masked before the cap, which could otherwise cut a secret in two and
+    // leave its prefix behind unrecognised.
+    mask_snapshot_secrets (parsed, masked_secret_forms (secret_values));
+    cap_snapshot_body (parsed, max_body_bytes);
     return parsed.dump ();
 }
 
