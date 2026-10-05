@@ -42,12 +42,15 @@ const EPOCH_MAX_SECONDS = 4_102_444_800;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 const ISO_PATTERN =
-	/^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?\s*(Z|z|[+-]\d{2}(?::?\d{2})?)?$/;
+	/^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?\s*(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/;
 
 /** `Sun, 05 Oct 2026 07:23:00 GMT` - IMF-fixdate, the form RFC 7231 requires. */
 const IMF_FIXDATE = /^[A-Za-z]{3}, (\d{2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/;
-/** `Sunday, 05-Oct-26 07:23:00 GMT` - the obsolete RFC 850 form. */
-const RFC_850 = /^[A-Za-z]{6,9}, (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/;
+/**
+ * `Sunday, 05-Oct-26 07:23:00 GMT` - the obsolete RFC 850 form, and the
+ * four-digit-year variant servers send in `Set-Cookie` (`Wed, 21-Oct-2026 ...`).
+ */
+const RFC_850 = /^[A-Za-z]{3,9}, (\d{2})-([A-Za-z]{3})-(\d{2}|\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/;
 /** `Sun Oct  5 07:23:00 2026` - asctime(), always UTC in HTTP. */
 const ASCTIME = /^[A-Za-z]{3} ([A-Za-z]{3}) ([ \d]\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/;
 
@@ -62,7 +65,9 @@ function utcInstant(
 	millisecond = 0
 ): Date | null {
 	if (hour > 23 || minute > 59 || second > 60) return null;
-	const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+	const date = new Date(Date.UTC(2000, month - 1, day, hour, minute, second, millisecond));
+	// `Date.UTC` maps years 0-99 to 19xx; setting the year afterwards keeps `0050`.
+	date.setUTCFullYear(year);
 	// `Date.UTC` rolls 31 February into March; a roundtrip that moved the day
 	// means the text was not a date.
 	if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
@@ -130,7 +135,7 @@ function parseHttpDate(text: string): ParsedTime | null {
 		// of now reads as the past century. Fixed pivot of 70 is what every
 		// engine does in practice and keeps the parse independent of the clock.
 		const short = +rfc850[3];
-		const year = short >= 70 ? 1900 + short : 2000 + short;
+		const year = rfc850[3].length === 4 ? short : short >= 70 ? 1900 + short : 2000 + short;
 		return httpDate(utcInstant(year, month, +rfc850[1], +rfc850[4], +rfc850[5], +rfc850[6]));
 	}
 	const asctime = ASCTIME.exec(text);
@@ -314,7 +319,7 @@ export function formatInstant(
 				hour: "2-digit",
 				minute: "2-digit",
 				second: "2-digit",
-				hour12: false,
+				hourCycle: "h23",
 				timeZone: options.timeZone,
 			}).format(date);
 			return `${wall}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;

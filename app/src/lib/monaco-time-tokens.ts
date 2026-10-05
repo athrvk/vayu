@@ -111,7 +111,13 @@ function timeTokenScanner(pattern: RegExp, maxLines = 5000): TimeTokenMatcher {
 		const ranges: TimeTokenRange[] = [];
 		const lineCount = Math.min(model.getLineCount(), maxLines);
 		for (let lineNumber = 1; lineNumber <= lineCount; lineNumber++) {
-			ranges.push(...timesInLine(model.getLineContent(lineNumber), lineNumber, pattern));
+			for (const range of timesInLine(
+				model.getLineContent(lineNumber),
+				lineNumber,
+				pattern
+			)) {
+				ranges.push(range);
+			}
 		}
 		return ranges;
 	};

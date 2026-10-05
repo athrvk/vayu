@@ -28,6 +28,7 @@ describe("parseTimeValue", () => {
 		["Sun, 05 Oct 2026 12:00:00 GMT", NOON, "http-date", true],
 		["Sunday, 05-Oct-26 12:00:00 GMT", NOON, "http-date", true],
 		["Sun Oct  5 12:00:00 2026", NOON, "http-date", true],
+		["Mon, 05-Oct-2026 12:00:00 GMT", NOON, "http-date", true],
 		["1791201600", NOON, "epoch-seconds", true],
 		["1791201600000", NOON, "epoch-milliseconds", true],
 	];
@@ -43,6 +44,7 @@ describe("parseTimeValue", () => {
 		"20261005",
 		"1791201600000000",
 		"2026-02-31",
+		"2026-10-05-10",
 		"2026-13-01",
 		"2026-10-05T25:00:00Z",
 		"999999999",
