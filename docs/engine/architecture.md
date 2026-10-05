@@ -405,7 +405,9 @@ JavaScript execution engine for pre-request and test scripts:
   Synchronous, because the sandbox has no event loop to settle a Promise on
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
-- **Sandboxed**: No filesystem or network access
+- **Sandboxed**: No filesystem access; the one way out to the network is
+  `pm.sendRequest`, held to the same `http`/`https` scheme rule as a request
+  ([Security](#security))
 
 **Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
 maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
@@ -1296,9 +1298,11 @@ record shape, the category list, the redaction rule and the file layout
   [webhook inbox](#listeners) is the single listener that may bind wider, and only when the
   caller confirms it explicitly; it serves no engine route.
 - **No browser**: the management API sends no CORS header and refuses, before any route, a
-  request carrying `Origin` and a `Host` that is not a loopback name for its own port, which is
-  what keeps a DNS-rebinding page out ([Listeners](#listeners)).
-- **Script sandboxing**: QuickJS contexts have no filesystem/network access
+  request carrying `Origin` and one whose `Host` is not a loopback name for its own port, which
+  is what keeps a DNS-rebinding page out ([Listeners](#listeners)).
+- **Script sandboxing**: QuickJS contexts have no filesystem access. Their one
+  network path is `pm.sendRequest`, which goes through the same send gate and
+  scheme rule as a request (next bullet)
 - **Only `http` and `https` leave the engine.** libcurl speaks other
   protocols, `file` among them, so the send gate (`validate_transferable`)
   refuses any other scheme on the URL every driver is about to hand a handle -

@@ -271,6 +271,21 @@ background default, so a hidden window measures the paused case; an idle
 figure needs the window visible and untouched, and the health log's 30 s
 cadence is the proxy that proves it was.
 
+**Plain Chromium needs the shell's bridge, or the engine refuses it.** It
+sends `Origin: http://localhost:<port>` on every engine call and has no
+`electron/engine-origin.ts`, so the gated engine answers `403` and the renderer
+reads it as a CORS failure. Give the page the same bridge over a CDP session
+(`context.newCDPSession(page)`): `Fetch.enable` on the engine URL at both the
+`Request` and the `Response` stage; a paused request continues
+(`Fetch.continueRequest`) without `Origin` and `Referer`; a paused response
+continues (`Fetch.continueResponse`) with `Access-Control-Allow-Origin: *`
+added and, on an `OPTIONS`, the preflight's `Access-Control-Request-Method` /
+`-Headers` echoed as `Access-Control-Allow-Methods` / `-Headers`. The body
+streams through untouched, so the renderer's `EventSource`s (run events, the
+inbox live view) work. `context.route` cannot do this: `route.continue`
+cannot add a response header, and `route.fetch` reads the whole body before
+`route.fulfill` answers, so a stream never opens.
+
 ## Docs to keep in step
 
 | Doc                                 | Update it when you change…                                                        |
