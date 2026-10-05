@@ -483,9 +483,11 @@ query row's boolean `equals`.
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
 same file members a binary body's `file` does: `src` (an absolute path, stored
 as written), `fileName` and `contentType` (both optional, omitted when empty) and
-`unresolved` (written only when `true`: no person chose the path in the editor -
-an import, a curl paste, an MCP agent - so it is sent only from under an
-allowed folder, see [`file_roots`](#file_roots)). A text part may also carry
+`unresolved` (`true` when no person chose the path in the editor - an import,
+a curl paste, an MCP agent - so it is sent only from under an allowed folder,
+see [`file_roots`](#file_roots)). Every write states it (`apply_request_fields`,
+absent in the payload stored as `true`); a row without it predates that, was
+written by the editor, and is read back as `false` (`stored_body`). A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:

@@ -841,7 +841,12 @@ logged as a warning: it means a client skipped composition.
   `/file-roots`), compared component-wise on canonical paths so a symlink
   escaping a root is outside. Every non-editor writer forces `unresolved`, and
   so does composition (and a data-row bind) whenever `src` held `{{`; the
-  residual pass never resolves `src`, so a script cannot choose a file.
+  residual pass never resolves `src`, so a script cannot choose a file. The
+  flag fails closed: `FileRef`/`FormField` default it to `true`, a payload
+  that omits it parses as `true` (`vayu::json::reads_as_unresolved`), and
+  `apply_request_fields` stores every written body with the key stated
+  (`state_file_trust`). The one place absent means chosen is `stored_body`
+  (by-id composition), for rows the editor wrote before that.
   `FilePlan` applies the rule once per design send (`execute_exchange`, the
   stream branch) and once per run at plan time (`plan_load_files`,
   `plan_step_files`), reading a file of at most `INLINE_FILE_LIMIT` once and

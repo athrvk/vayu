@@ -486,7 +486,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
 | `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
-| `unresolved` | `true` when no person chose `src` in the editor. Optional, default `false`. |
+| `unresolved` | `false` only when a person chose `src` in the editor. Fails closed: absent, `null` or any non-boolean is `true`, so a caller that means "chosen" says `false`. |
 
 Shape refusals (`400`):
 
@@ -505,12 +505,19 @@ containment is decided on canonical paths, component by component, so a
 symlink inside an allowed folder that points outside it is outside, and
 `/data/fixtures-old` is not under `/data/fixtures`. Every writer that is not a
 person in the editor writes `unresolved: true` - importers, curl paste, MCP -
-and **composition sets it too** whenever `src` held a `{{` before resolution
+and so does every payload that omits the key; **composition sets it too** whenever `src` held a `{{` before resolution
 (`POST /compose`, and a data row bound into the path by a run), so a path a
 variable or a data set chose is sent only from under an allowed folder. The
 flag rides the wire, which is how it survives compose -> app -> execute.
 **Scripts can never choose a path**: the residual pass after the pre-request
 script resolves a reference's `fileName` and `contentType` but never `src`.
+
+**A stored request states it.** `POST`/`PUT /requests` and `POST /import/apply`
+store every file reference of a body they write with an explicit `unresolved`,
+absent read as `true`. A saved request's body composed by id (`POST /compose`
+with `requestId`, and every collection run) comes back with the key stated
+too; a row with no key there was written by the editor before the key was
+always stored, and composes as `false`.
 
 Every enabled reference is checked, in this order, and the first failure
 refuses the send:

@@ -461,6 +461,14 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
+    // Every file reference a written body carries is stored with its trust
+    // stated, absent read as unresolved. Only a body this write carries: one
+    // it leaves alone may be a row that predates the rule (`stored_body`).
+    if (const auto body = json.find ("body"); body != json.end () && body->is_object ()) {
+        nlohmann::json stated = *body;
+        vayu::json::state_file_trust (stated, vayu::json::AbsentFileTrust::Unresolved);
+        r.body = stated.dump ();
+    }
     apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     // A request's auth may be 'inherit' - that is its default, and the app
     // resolves the collection chain before the request is executed.

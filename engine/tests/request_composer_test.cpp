@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/header_text.hpp"
@@ -44,6 +45,15 @@
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
+
+namespace vayu::http::routes {
+// Defined in requests.cpp; each is the testable core of one route.
+std::pair<int, nlohmann::json>
+create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+} // namespace vayu::http::routes
 
 namespace {
 
@@ -760,15 +770,125 @@ TEST_F (RequestComposerTest, AFilePathAVariableFilledIsMarkedUnresolved) {
         { "body",
         { { "mode", "form-data" },
         { "fields",
-        json::array ({ { { "key", "a" }, { "type", "file" }, { "src", "{{fixtures}}/p.png" } },
-        { { "key", "b" }, { "type", "file" }, { "src", "/abs/q.png" } } }) } } } };
+        json::array ({ { { "key", "a" }, { "type", "file" },
+                       { "src", "{{fixtures}}/p.png" }, { "unresolved", false } },
+        { { "key", "b" }, { "type", "file" }, { "src", "/abs/q.png" },
+        { "unresolved", false } } }) } } } };
     auto [part_status, parts] = vayu::http::compose_request_core (
     *db_, json{ { "request", part }, { "collectionId", "col" } });
     ASSERT_EQ (part_status, 200) << parts.dump ();
     EXPECT_EQ (parts["body"]["fields"][0]["src"], "/data/fx/p.png");
     EXPECT_EQ (parts["body"]["fields"][0]["unresolved"], true);
-    EXPECT_FALSE (parts["body"]["fields"][1].contains ("unresolved"))
+    EXPECT_EQ (parts["body"]["fields"][1]["unresolved"], false)
     << "a literal path a person typed stays trusted";
+}
+
+// ---------------------------------------------------------------------------
+// The trust flag through storage. A payload's absent `unresolved` means a
+// path nobody chose; a stored row's absent key means a row the editor wrote
+// before every write stated the key, whose files must keep sending.
+// ---------------------------------------------------------------------------
+
+constexpr const char* kTrustBinary = R"({"mode":"binary","file":{"src":"/abs/a.bin"}})";
+constexpr const char* kTrustForm =
+R"({"mode":"form-data","fields":[{"key":"f","type":"file","src":"/abs/p.png"},{"key":"t","value":"v"}]})";
+
+// Mutation check: drop the `state_file_trust` call in `stored_body` and both
+// legacy references compose without the key, which the send reads as
+// unresolved - every file picked before the upgrade stops sending.
+TEST_F (RequestComposerTest, AStoredFileReferenceWithoutTheKeyComposesAsChosen) {
+    seed_collection ("col", "");
+    auto binary = make_request ("req_bin", "col");
+    binary.body = kTrustBinary;
+    db_->save_request (binary);
+    auto form = make_request ("req_form", "col");
+    form.body = kTrustForm;
+    db_->save_request (form);
+    auto planted = make_request ("req_planted", "col");
+    planted.body = R"({"mode":"binary","file":{"src":"/abs/a.bin","unresolved":"no"}})";
+    db_->save_request (planted);
+
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_bin" } });
+    ASSERT_EQ (status, 200) << composed.dump ();
+    EXPECT_EQ (composed["body"]["file"]["unresolved"], false) << composed.dump ();
+
+    auto [form_status, form_composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_form" } });
+    ASSERT_EQ (form_status, 200) << form_composed.dump ();
+    EXPECT_EQ (form_composed["body"]["fields"][0]["unresolved"], false);
+    EXPECT_FALSE (form_composed["body"]["fields"][1].contains ("unresolved"))
+    << "a text part carries no trust";
+
+    auto [planted_status, planted_composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_planted" } });
+    ASSERT_EQ (planted_status, 200);
+    EXPECT_EQ (planted_composed["body"]["file"]["unresolved"], true)
+    << "only an absent key is the legacy spelling";
+}
+
+// Mutation check: drop the `state_file_trust` call in `apply_request_fields`
+// and the bare reference is stored without the key, so it composes back as
+// chosen - a payload that never said a person chose the path, trusted.
+TEST_F (RequestComposerTest, AWrittenBodyIsStoredWithItsTrustStated) {
+    seed_collection ("col", "");
+    const json base = { { "collectionId", "col" }, { "name", "r" },
+        { "method", "POST" }, { "url", "https://example.test" } };
+
+    json bare    = base;
+    bare["body"] = json::parse (kTrustBinary);
+    auto [created, row] = vayu::http::routes::create_request_response (*db_, bare);
+    ASSERT_EQ (created, 200) << row.dump ();
+    const std::string id = row["id"].get<std::string> ();
+    auto stored          = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->body)["file"]["unresolved"], true) << stored->body;
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", id } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (composed["body"]["file"]["unresolved"], true);
+
+    json chosen_form                               = base;
+    chosen_form["body"]                            = json::parse (kTrustForm);
+    chosen_form["body"]["fields"][0]["unresolved"] = false;
+    auto [form_created, form_row] =
+    vayu::http::routes::create_request_response (*db_, chosen_form);
+    ASSERT_EQ (form_created, 200) << form_row.dump ();
+    auto form_stored = db_->get_request (form_row["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (form_stored);
+    const json form_body = json::parse (form_stored->body);
+    EXPECT_EQ (form_body["fields"][0]["unresolved"], false) << form_stored->body;
+    EXPECT_FALSE (form_body["fields"][1].contains ("unresolved")) << form_stored->body;
+
+    // A PUT that rewrites the body states it too.
+    json put = { { "body", json::parse (kTrustForm) } };
+    ASSERT_EQ (vayu::http::routes::update_request_response (*db_, id, put).first, 200);
+    auto updated = db_->get_request (id);
+    ASSERT_HAS_VALUE (updated);
+    EXPECT_EQ (json::parse (updated->body)["fields"][0]["unresolved"], true)
+    << updated->body;
+}
+
+// A PUT that does not carry the body leaves a legacy row legacy: stating the
+// key there would read the editor's old pick as unresolved.
+TEST_F (RequestComposerTest, APutWithoutABodyLeavesALegacyRowsTrustAlone) {
+    seed_collection ("col", "");
+    auto legacy = make_request ("req_legacy", "col");
+    legacy.body = kTrustBinary;
+    db_->save_request (legacy);
+
+    ASSERT_EQ (vayu::http::routes::update_request_response (
+               *db_, "req_legacy", json{ { "name", "renamed" } })
+               .first,
+    200);
+    auto stored = db_->get_request ("req_legacy");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_FALSE (json::parse (stored->body)["file"].contains ("unresolved"))
+    << stored->body;
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_legacy" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (composed["body"]["file"]["unresolved"], false);
 }
 
 // The composed payload names the Content-Type the send will use, so a reader of

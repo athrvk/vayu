@@ -58,6 +58,7 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
 
 namespace vayu::http::routes {
@@ -138,14 +139,17 @@ std::string sha256_hex (std::string_view bytes) {
     return vayu::utils::hex_encode (vayu::utils::byte_view (digest));
 }
 
+/// A binary request whose file a person chose in the editor, so the trust
+/// half of the rule stays out of the way of a test about the wire.
 Request binary_request (const std::string& url,
 const std::string& src,
 HttpMethod method = HttpMethod::POST) {
     Request request;
-    request.method        = method;
-    request.url           = url;
-    request.body.mode     = BodyMode::Binary;
-    request.body.file.src = src;
+    request.method               = method;
+    request.url                  = url;
+    request.body.mode            = BodyMode::Binary;
+    request.body.file.src        = src;
+    request.body.file.unresolved = false;
     return request;
 }
 
@@ -278,6 +282,58 @@ TEST (FileRule, APathNobodyChoseIsSentOnlyFromUnderAnAllowedFolder) {
 
     // A path a person chose is sent from anywhere.
     EXPECT_FALSE (unsendable_file_ref (ref (outside, false), "Body file", policy));
+}
+
+// The trust flag fails closed: only `"unresolved": false` in so many words says
+// a person chose the path. An absent key, `null` or a string is a path nobody
+// chose, refused outside an allowed folder before the file is opened.
+// Mutation check: make `reads_as_unresolved` answer `false` for an absent key
+// and the first payload is read and planned.
+TEST (FileRule, APayloadThatDoesNotSayAPersonChoseThePathIsUnresolved) {
+    ScratchDir scratch;
+    const std::string outside = scratch.write ("elsewhere/a.bin", "secret");
+    const json bare           = { { "src", outside } };
+
+    for (const json& file : { bare, json{ { "src", outside }, { "unresolved", nullptr } },
+         json{ { "src", outside }, { "unresolved", "false" } } }) {
+        const json payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+            { "body", { { "mode", "binary" }, { "file", file } } } };
+        auto parsed = vayu::json::deserialize_request (payload);
+        ASSERT_TRUE (parsed.is_ok ()) << file.dump ();
+        Request request = std::move (parsed).value ();
+        EXPECT_TRUE (request.body.file.unresolved) << file.dump ();
+
+        FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
+        const auto opens   = body_file_opens ();
+        const auto refusal = plan.prepare (request);
+        ASSERT_HAS_VALUE (refusal) << file.dump ();
+        EXPECT_NE (refusal->find ("was not chosen in the editor"), std::string::npos)
+        << *refusal;
+        EXPECT_EQ (body_file_opens (), opens) << "the file was opened";
+        EXPECT_EQ (request.body.file.inline_bytes, nullptr);
+    }
+
+    const json part_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "f" }, { "type", "file" }, { "src", outside } } }) } } } };
+    auto part = vayu::json::deserialize_request (part_payload);
+    ASSERT_TRUE (part.is_ok ());
+    ASSERT_EQ (part.value ().body.fields.size (), 1u);
+    EXPECT_TRUE (part.value ().body.fields[0].unresolved);
+
+    json chosen          = bare;
+    chosen["unresolved"] = false;
+    const json chosen_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+        { "body", { { "mode", "binary" }, { "file", chosen } } } };
+    auto chosen_parsed = vayu::json::deserialize_request (chosen_payload);
+    ASSERT_TRUE (chosen_parsed.is_ok ());
+    Request chosen_request = std::move (chosen_parsed).value ();
+    EXPECT_FALSE (chosen_request.body.file.unresolved);
+    FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
+    EXPECT_FALSE (plan.prepare (chosen_request))
+    << "a path a person chose is sent from anywhere";
 }
 
 TEST (FileRule, AnUnresolvedSymlinkEscapingARootIsRefused) {
@@ -706,7 +762,8 @@ TEST (BinaryBodyLoadRun, ASmallFileIsOpenedOnceForTheWholeRun) {
         constexpr int ITERATIONS = 20;
         const json config{ { "method", "POST" }, { "url", server.url () },
             { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 2 },
-            { "body", { { "mode", "binary" }, { "file", { { "src", src } } } } } };
+            { "body",
+            { { "mode", "binary" }, { "file", { { "src", src }, { "unresolved", false } } } } } };
 
         auto built = build_request (config, &db, 5000, AuthResolution::Apply);
         ASSERT_TRUE (built.ok) << built.error_message;

@@ -1308,7 +1308,8 @@ record shape, the category list, the redaction rule and the file layout
   so a symlink escaping an allowed folder is outside it. `unresolved` is forced
   by every writer that is not a person in the editor (importers, curl paste,
   MCP) and by composition whenever `src` held a `{{` - a path a variable or a
-  data row chose. Scripts can never set a path: the residual pass does not
+  data row chose - and it fails closed: a payload that omits it is unresolved
+  (`vayu::json::reads_as_unresolved`), and every stored write states it. Scripts can never set a path: the residual pass does not
   resolve `src`. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
   `http/file_access_policy.hpp`, runs once per design send after the residual
   pass and once per run at plan time (every distinct data-bound path
