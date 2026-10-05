@@ -9,6 +9,8 @@
 
 #include <system_error>
 
+#include "vayu/utils/ascii_case.hpp"
+
 #include "vayu/db/database.hpp"
 
 namespace vayu::http {
@@ -64,6 +66,49 @@ bool FileAccessPolicy::contains (const fs::path& root, const fs::path& candidate
         }
     }
     return true;
+}
+
+namespace {
+
+/// @p path without the separators it ends in, either spelling.
+std::string_view without_trailing_separators (std::string_view path) {
+    while (!path.empty () && (path.back () == '/' || path.back () == '\\')) {
+        path.remove_suffix (1);
+    }
+    return path;
+}
+
+/// A drive designator (`C:`) leads @p path.
+bool has_drive (std::string_view path) {
+    return path.size () >= 2 && path[1] == ':' &&
+    vayu::utils::ascii_lower (path[0]) >= 'a' &&
+    vayu::utils::ascii_lower (path[0]) <= 'z';
+}
+
+} // namespace
+
+std::optional<std::string>
+refused_root_reason (std::string_view canonical, std::string_view home) {
+    const std::string_view folder = without_trailing_separators (canonical);
+    if (folder.empty () || (has_drive (folder) && folder.size () == 2)) {
+        return "Invalid 'path': '" + std::string (canonical) +
+        "' is a filesystem root, which would allow every file on it - allow a "
+        "folder inside it instead";
+    }
+    const std::string_view home_folder = without_trailing_separators (home);
+    if (home_folder.empty ()) {
+        return std::nullopt;
+    }
+    // A drive-letter path is on a Windows filesystem, which folds case.
+    const bool same = has_drive (folder) ?
+    vayu::utils::ascii_lower_equal (folder, home_folder) :
+    folder == home_folder;
+    if (same) {
+        return "Invalid 'path': '" + std::string (canonical) +
+        "' is your home folder, which would allow every file you own - allow a "
+        "folder inside it instead";
+    }
+    return std::nullopt;
 }
 
 bool FileAccessPolicy::allows (const std::string& path) const {

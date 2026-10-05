@@ -63,8 +63,9 @@
 
 namespace vayu::http::routes {
 // Defined in file_roots.cpp; each is the testable core of one route.
-std::pair<int, nlohmann::json>
-create_file_root_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> create_file_root_response (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::string& home);
 nlohmann::json list_file_roots_response (vayu::db::Database& db);
 std::pair<int, nlohmann::json>
 delete_file_root_response (vayu::db::Database& db, const std::string& id);
@@ -849,7 +850,13 @@ class FileRootsRouteTest : public ::testing::Test {
         db_.reset ();
         vayu::tests::remove_database_files (ROOTS_DB_PATH);
     }
+    /// POST /file-roots with the scratch directory's `home` as the home folder.
+    std::pair<int, nlohmann::json> create (const json& body) {
+        return routes::create_file_root_response (*db_, body, home_);
+    }
+
     ScratchDir scratch_;
+    std::string home_ = scratch_.dir ("home");
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -857,14 +864,12 @@ TEST_F (FileRootsRouteTest, CreateListDelete) {
     const std::string b = scratch_.dir ("b");
     const std::string a = scratch_.dir ("a");
 
-    auto [status_b, row_b] =
-    routes::create_file_root_response (*db_, json{ { "path", b + "/" } });
+    auto [status_b, row_b] = create (json{ { "path", b + "/" } });
     ASSERT_EQ (status_b, 201) << row_b.dump ();
     EXPECT_EQ (row_b["path"], b) << "stored canonical, no trailing separator";
     EXPECT_TRUE (row_b["id"].is_string ());
     EXPECT_TRUE (row_b["createdAt"].is_number_integer ());
-    auto [status_a, row_a] =
-    routes::create_file_root_response (*db_, json{ { "path", a } });
+    auto [status_a, row_a] = create (json{ { "path", a } });
     ASSERT_EQ (status_a, 201) << row_a.dump ();
 
     const json listed = routes::list_file_roots_response (*db_);
@@ -890,8 +895,7 @@ TEST_F (FileRootsRouteTest, ABadPathIsA400) {
          json{ { "path", "" } }, json{ { "path", "relative/dir" } },
          json{ { "path", file } }, json{ { "path", scratch_.path ().string () + "/missing" } },
          json{ { "id", "x" }, { "path", scratch_.dir ("d") } } }) {
-        EXPECT_EQ (routes::create_file_root_response (*db_, body).first, 400)
-        << body.dump ();
+        EXPECT_EQ (create (body).first, 400) << body.dump ();
     }
     EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
 }
@@ -900,11 +904,62 @@ TEST_F (FileRootsRouteTest, ABadPathIsA400) {
 // the second spelling answers 201, silently replacing the first row.
 TEST_F (FileRootsRouteTest, ASecondSpellingOfAnAllowedFolderIsA409) {
     const std::string dir = scratch_.dir ("fixtures");
-    ASSERT_EQ (routes::create_file_root_response (*db_, json{ { "path", dir } }).first, 201);
-    const auto [status, body] = routes::create_file_root_response (
-    *db_, json{ { "path", dir + "/../fixtures/" } });
+    ASSERT_EQ (create (json{ { "path", dir } }).first, 201);
+    const auto [status, body] = create (json{ { "path", dir + "/../fixtures/" } });
     EXPECT_EQ (status, 409) << body.dump ();
     EXPECT_EQ (routes::list_file_roots_response (*db_).size (), 1u);
+}
+
+// A root or the home folder itself would allow almost every file a request
+// could name. Pure over both separators, so the Windows spellings run on every
+// host. Mutation check: drop the drive-designator clause in
+// `refused_root_reason` and `C:\` is allowed.
+TEST (FileRootRule, AFilesystemOrDriveRootIsRefused) {
+    for (const char* root : { "/", "//", "\\", "C:\\", "D:\\", "c:/", "Z:" }) {
+        const auto reason = refused_root_reason (root, "");
+        ASSERT_HAS_VALUE (reason) << root;
+        EXPECT_NE (reason->find ("is a filesystem root"), std::string::npos) << *reason;
+    }
+    for (const char* folder : { "/data", "C:\\data", "D:/fixtures", "/C:" }) {
+        EXPECT_FALSE (refused_root_reason (folder, "")) << folder;
+    }
+}
+
+// Mutation check: drop the home comparison in `refused_root_reason` and both
+// spellings of the home folder are allowed.
+TEST (FileRootRule, TheHomeFolderIsRefusedAndAFolderInsideItIsNot) {
+    const auto posix = refused_root_reason ("/home/ada", "/home/ada/");
+    ASSERT_HAS_VALUE (posix);
+    EXPECT_NE (posix->find ("is your home folder"), std::string::npos) << *posix;
+    EXPECT_FALSE (refused_root_reason ("/home/ada/fixtures", "/home/ada"));
+    EXPECT_FALSE (refused_root_reason ("/home", "/home/ada"))
+    << "a parent of home is neither rule's to refuse";
+    EXPECT_FALSE (refused_root_reason ("/home/ADA", "/home/ada"))
+    << "a POSIX path compares exactly";
+
+    // A drive-letter path is on a filesystem that folds case.
+    EXPECT_TRUE (refused_root_reason ("C:\\Users\\Ada", "c:\\users\\ada\\"));
+    EXPECT_FALSE (refused_root_reason ("C:\\Users\\Ada\\fixtures", "C:\\Users\\Ada"));
+}
+
+// The route applies both rules to the canonical path, with the home folder it
+// is handed. The root here is whichever the host's scratch directory is on.
+TEST_F (FileRootsRouteTest, ARootOrTheHomeFolderIsA400AndAFolderInsideHomeIsNot) {
+    const std::string root = scratch_.path ().root_path ().string ();
+    const auto [root_status, root_body] = create (json{ { "path", root } });
+    EXPECT_EQ (root_status, 400) << root_body.dump ();
+    EXPECT_NE (root_body.dump ().find ("is a filesystem root"), std::string::npos)
+    << root_body.dump ();
+
+    const auto [home_status, home_body] = create (json{ { "path", home_ + "/." } });
+    EXPECT_EQ (home_status, 400) << home_body.dump ();
+    EXPECT_NE (home_body.dump ().find ("is your home folder"), std::string::npos)
+    << home_body.dump ();
+    EXPECT_TRUE (routes::list_file_roots_response (*db_).empty ());
+
+    const std::string inside = scratch_.dir ("home/fixtures");
+    const auto [inside_status, inside_row] = create (json{ { "path", inside } });
+    EXPECT_EQ (inside_status, 201) << inside_row.dump ();
 }
 
 } // namespace

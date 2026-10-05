@@ -30,11 +30,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
+#include <vector>
 
 namespace vayu::platform {
 
@@ -249,6 +252,27 @@ std::string path_join (const std::string& base, const std::string& component) {
 
 std::string default_data_dir () {
     return path_join (".", "data");
+}
+
+std::string home_directory () {
+    const DWORD needed = GetEnvironmentVariableW (L"USERPROFILE", nullptr, 0);
+    if (needed == 0) {
+        return {};
+    }
+    std::vector<wchar_t> buffer (needed);
+    const DWORD written = GetEnvironmentVariableW (L"USERPROFILE", buffer.data (), needed);
+    if (written == 0 || written >= needed) {
+        return {};
+    }
+    // The narrow spelling every other path in the engine is held in, so
+    // `canonical_root_path` compares this with a stored root like for like. A
+    // profile path that spelling cannot hold is answered as unknown: no root
+    // under it could be stored in that spelling either.
+    try {
+        return std::filesystem::path (std::wstring (buffer.data (), written)).string ();
+    } catch (const std::system_error&) {
+        return {};
+    }
 }
 
 // The 1 ms timer request used to live here, held for the process' whole life.
