@@ -22,7 +22,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { render } from "@testing-library/react";
 import { buildPreviewDocument, PREVIEW_CSP } from "./preview-document";
 
@@ -114,9 +114,11 @@ describe("buildPreviewDocument", () => {
 
 describe("every frame in src", () => {
 	const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-	const files = globSync("**/*.tsx", { cwd: srcRoot }).filter(
-		(file) => !file.includes(".test.") && !file.includes(".testkit.")
-	);
+	// globSync returns platform separators; the assertions below name files
+	// with forward slashes, so the scan is normalised before anything reads it.
+	const files = globSync("**/*.tsx", { cwd: srcRoot })
+		.map((file) => file.split(sep).join("/"))
+		.filter((file) => !file.includes(".test.") && !file.includes(".testkit."));
 	const frames = files.flatMap((file) => {
 		const text = readFileSync(join(srcRoot, file), "utf8");
 		return Array.from(text.matchAll(/<iframe\b[^>]*>/g), (m) => ({ file, tag: m[0] }));
