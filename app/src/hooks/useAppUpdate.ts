@@ -102,7 +102,7 @@ export function useAppUpdate(): AppUpdateState {
 		void window.electronAPI?.restartToInstallUpdate();
 	}, []);
 	const openReleasePage = useCallback(() => {
-		if (update) void window.electronAPI?.openReleasePage(update.releaseUrl);
+		if (update) void window.electronAPI?.openReleasePage();
 	}, [update]);
 	const quitForUpdate = useCallback(() => {
 		void window.electronAPI?.quitForUpdate();

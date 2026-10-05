@@ -37,6 +37,12 @@ import {
 } from "./utils";
 import type { ResponseBodyProps, ViewMode } from "./types";
 
+/**
+ * The preview iframe shows an API's own response, untrusted by definition, so it
+ * carries an embedded policy that is enforced on top of the document's (#1780).
+ */
+const PREVIEW_IFRAME_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+
 interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	/** Default view mode */
 	defaultMode?: ViewMode;
@@ -336,6 +342,8 @@ export default function ResponseBody({
 						srcDoc={previewHtml}
 						className="w-full h-full bg-white"
 						sandbox="allow-scripts allow-same-origin"
+						// `csp` is not in React's iframe typings yet; the attribute works.
+						{...{ csp: PREVIEW_IFRAME_CSP }}
 						title="HTML preview"
 					/>
 				) : (

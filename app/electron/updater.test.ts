@@ -236,6 +236,26 @@ describe("checkForUpdatesNow", () => {
 	});
 });
 
+describe("update:openReleasePage", () => {
+	it("opens the release page the updater offered and ignores the renderer's argument", async () => {
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		listeners.get("update-available")?.({ version: "1.2.3" });
+		await ipcHandlers.get("update:openReleasePage")?.(null, "file:///etc/passwd");
+		expect(openExternal).toHaveBeenCalledTimes(1);
+		expect(openExternal).toHaveBeenCalledWith(
+			expect.stringMatching(/\/releases\/tag\/v1\.2\.3$/)
+		);
+	});
+
+	it("opens nothing when no release has been offered", async () => {
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		await ipcHandlers.get("update:openReleasePage")?.(null, "https://evil.test");
+		expect(openExternal).not.toHaveBeenCalled();
+	});
+});
+
 describe("when the session's first check runs", () => {
 	// On Windows and the Linux AppImage a check that finds a release downloads it
 	// on the spot, and `initAutoUpdater` is called moments after the window is

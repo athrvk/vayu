@@ -562,6 +562,18 @@ Variables are resolved with priority: **Environment > Collection > Global**
   the client, and TanStack Query, not the HTTP cache, already holds whatever the
   renderer keeps between polls.
 - **Context Isolation**: Electron renderer runs in isolated context (no Node.js access)
+- **Second layer behind it (#1780)**: the built `index.html` carries a
+  Content-Security-Policy `<meta>` (stamped by `vite-plugins/csp-meta.ts` from
+  `electron/renderer-csp.ts`, hashing the one inline pre-paint script, no
+  `unsafe-eval`, `connect-src` limited to the app and the engine origin);
+  a packaged `file://` load has no response header to carry it, and the dev
+  server is exempt because its React-refresh preamble is inline. Device
+  permissions (camera, microphone, geolocation, notifications) are denied on
+  the default session and on every OAuth partition (`electron/permissions.ts`).
+  `update:openReleasePage` takes no argument and opens only the release page
+  the updater offered. Electron fuses turn off `ELECTRON_RUN_AS_NODE`,
+  `NODE_OPTIONS`, `--inspect` and non-ASAR loads in a packaged build, and
+  `isDevelopmentBuild()` (`electron/dev-mode.ts`) requires `!app.isPackaged`.
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks

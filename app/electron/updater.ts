@@ -12,6 +12,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 import electronUpdater from "electron-updater";
 import { resolveUpdateStrategy, type UpdateStrategy } from "./updater-strategy.js";
 import { appLogger } from "./app-log.js";
+import { isDevelopmentBuild } from "./dev-mode.js";
 import {
 	REPO,
 	UPDATE_CHECK_INTERVAL_MS as CHECK_INTERVAL_MS,
@@ -19,6 +20,9 @@ import {
 } from "./constants.js";
 
 const { autoUpdater } = electronUpdater;
+
+/** The release page of the version the updater last reported as available. */
+let offeredReleaseUrl: string | null = null;
 
 function releaseUrl(version: string): string {
 	return `https://github.com/${REPO}/releases/tag/v${version}`;
@@ -285,7 +289,7 @@ function handleCheckFailure(err: unknown): void {
  *   - disabled (development): no-op.
  */
 export function initAutoUpdater(getWindow: WindowAccessor): void {
-	const isDev = process.env.NODE_ENV === "development";
+	const isDev = isDevelopmentBuild();
 	const isAppImage = Boolean(process.env.APPIMAGE);
 	const strategy = resolveUpdateStrategy({
 		platform: process.platform,
@@ -304,8 +308,11 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 		if (updaterReady) autoUpdater.quitAndInstall();
 	});
 
-	ipcMain.handle("update:openReleasePage", (_event, url: string) => {
-		return shell.openExternal(url);
+	// Takes no argument: the renderer is not trusted to name the URL, and the
+	// release page for the version on offer is the only one this opens.
+	ipcMain.handle("update:openReleasePage", () => {
+		if (!offeredReleaseUrl) return;
+		return shell.openExternal(offeredReleaseUrl);
 	});
 
 	ipcMain.handle("update:check", () => checkForUpdatesNow("renderer"));
@@ -338,6 +345,7 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	};
 
 	autoUpdater.on("update-available", (info) => {
+		offeredReleaseUrl = releaseUrl(info.version);
 		const payload: UpdateAvailablePayload = {
 			version: info.version,
 			strategy,
@@ -419,7 +427,7 @@ function showUpdateDialog(
  * banner in. The release-notes button is the only action the notify path has -
  * the update itself happens out-of-band there.
  */
-function showAvailableDialog(version: string, url: string): void {
+function showAvailableDialog(version: string): void {
 	void showUpdateDialog({
 		type: "info",
 		message: `Vayu ${version} is available`,
@@ -428,7 +436,7 @@ function showAvailableDialog(version: string, url: string): void {
 		defaultId: 0,
 		cancelId: 0,
 	}).then(({ response }) => {
-		if (response === 1) void shell.openExternal(url);
+		if (response === 1) void shell.openExternal(releaseUrl(version));
 	});
 }
 
@@ -476,7 +484,7 @@ function settleCheck(result: UpdateCheckResult): void {
 			// otherwise find an update and say nothing at all. On macOS a
 			// window-less app is the ordinary state, and the menu is still
 			// there to click.
-			showAvailableDialog(result.version, result.releaseUrl);
+			showAvailableDialog(result.version);
 		}
 	}
 

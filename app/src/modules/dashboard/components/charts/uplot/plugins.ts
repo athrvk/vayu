@@ -166,6 +166,23 @@ export function annotationsPlugin(
 
 export type ValueFormatter = (v: number | null | undefined) => string;
 
+/** One legend row of the hover tooltip: swatch and label on the left, value on the right. */
+function tooltipRow(label: string, value: string, stroke: string): HTMLElement {
+	const row = document.createElement("div");
+	row.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:space-between";
+	const key = document.createElement("span");
+	key.style.cssText = "display:inline-flex;align-items:center;gap:5px";
+	const swatch = document.createElement("span");
+	swatch.style.cssText = "width:8px;height:2px;display:inline-block";
+	swatch.style.background = stroke;
+	key.append(swatch, label);
+	const val = document.createElement("span");
+	val.style.fontWeight = "600";
+	val.textContent = value;
+	row.append(key, val);
+	return row;
+}
+
 /**
  * Cursor tooltip - a positioned DOM overlay showing every series' value at the
  * hovered instant. The core "understand the service" affordance: at t=42.1s you
@@ -217,9 +234,10 @@ export function tooltipPlugin(opts: {
 					return;
 				}
 				const xVal = u.data[0][idx];
-				const rows: string[] = [
-					`<div style="opacity:.7;margin-bottom:2px">${xLabel(xVal as number)}</div>`,
-				];
+				const header = document.createElement("div");
+				header.style.cssText = "opacity:.7;margin-bottom:2px";
+				header.textContent = xLabel(xVal as number);
+				const rows: HTMLElement[] = [header];
 				for (let s = 1; s < u.series.length; s++) {
 					if (skip.has(s)) continue;
 					const series = u.series[s];
@@ -230,15 +248,11 @@ export function tooltipPlugin(opts: {
 					);
 					const stroke =
 						typeof series.stroke === "function" ? series.stroke(u, s) : series.stroke;
-					rows.push(
-						`<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">` +
-							`<span style="display:inline-flex;align-items:center;gap:5px">` +
-							`<span style="width:8px;height:2px;background:${String(stroke)};display:inline-block"></span>` +
-							`${series.label ?? ""}</span>` +
-							`<span style="font-weight:600">${formatted}</span></div>`
-					);
+					rows.push(tooltipRow(String(series.label ?? ""), formatted, String(stroke)));
 				}
-				tip.innerHTML = rows.join("");
+				// Built from text, never markup: series labels include script-defined
+				// custom-metric names, which an imported collection can fill with HTML.
+				tip.replaceChildren(...rows);
 				tip.style.left = `${left}px`;
 				tip.style.top = `${top}px`;
 				tip.style.opacity = "1";
