@@ -170,8 +170,8 @@ export interface RequestState {
 	 * The file a `binary` body sends - a path, never bytes; the engine opens
 	 * it at send time. Kept beside the other modes' state like `formData`, so a
 	 * mode switch and back does not lose the pick. `unresolved` is the trust
-	 * flag (`FileRef`): the editor clears it on a pick or a typed path, and
-	 * every other writer (import, curl paste, an agent) sets it.
+	 * flag (`FileRef`): the editor sets it `false` on a pick or a typed path,
+	 * and every other writer (import, curl paste, an agent) sets it `true`.
 	 */
 	binaryFile: FileRef;
 

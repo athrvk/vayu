@@ -131,10 +131,10 @@ export default function KeyValueEditor({
 	 * A pick writes the whole file part at once.
 	 *
 	 * Four `handleUpdate` calls would each rebuild the list from a stale
-	 * `items`, so only the last would survive - and it also has to *clear*
-	 * `unresolved`, since choosing the file here is the one event that proves
-	 * the path exists on this machine. Outside Electron there is no path to
-	 * take (`src: ""`), and that row stays unresolved: the filename alone is
+	 * `items`, so only the last would survive - and it also has to set
+	 * `unresolved: false`, since choosing the file here is the one event that
+	 * proves the path exists on this machine. Outside Electron there is no path
+	 * to take (`src: ""`), and that row stays unresolved: the filename alone is
 	 * not something the engine can open, and it says so rather than pretending.
 	 */
 	const handlePickFile = useCallback(
@@ -153,7 +153,7 @@ export default function KeyValueEditor({
 									src: file.src,
 									fileName: file.fileName,
 									contentType: file.contentType || undefined,
-									unresolved: file.src ? undefined : true,
+									unresolved: !file.src,
 								}
 							: item
 					)

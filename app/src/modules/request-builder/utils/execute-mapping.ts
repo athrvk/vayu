@@ -33,6 +33,7 @@ import type {
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
+import { isUnresolved, noFile, withFileTrust } from "@/lib/file-trust";
 
 /** The body shape `POST /request` and `POST /run` accept. */
 export interface ExecBody {
@@ -66,18 +67,20 @@ export interface ExecField {
 
 /**
  * A binary body's file as the stored and the wire shape both take it: empty
- * optional members left out, and `unresolved` only when it is true, so a file
- * chosen in the editor reads the same as one stored before the flag existed.
+ * optional members left out, and `unresolved` always stated
+ * (`lib/file-trust.ts`).
  */
 export function toFileRef(
 	file: FileRef | undefined,
 	resolveString: (input: string) => string = (s) => s
 ): FileRef {
-	if (!file) return { src: "" };
-	const ref: FileRef = { src: resolveString(file.src ?? "") };
+	if (!file) return noFile();
+	const ref: FileRef = {
+		src: resolveString(file.src ?? ""),
+		unresolved: isUnresolved(file.unresolved),
+	};
 	if (file.fileName) ref.fileName = resolveString(file.fileName);
 	if (file.contentType) ref.contentType = resolveString(file.contentType);
-	if (file.unresolved) ref.unresolved = true;
 	return ref;
 }
 
@@ -89,7 +92,7 @@ export function toFileRef(
  */
 export function toBodyPayload(request: RequestState): RequestBody {
 	if (request.bodyMode === "form-data") {
-		return { mode: "form-data", fields: toKeyValueEntries(request.formData) };
+		return { mode: "form-data", fields: withFileTrust(toKeyValueEntries(request.formData)) };
 	}
 	if (request.bodyMode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
@@ -155,7 +158,7 @@ export function buildExecBody(
 				field.src = resolveString(e.src ?? "");
 				if (e.fileName) field.fileName = resolveString(e.fileName);
 				if (e.contentType) field.contentType = resolveString(e.contentType);
-				if (e.unresolved) field.unresolved = true;
+				field.unresolved = isUnresolved(e.unresolved);
 				return field;
 			}),
 		};

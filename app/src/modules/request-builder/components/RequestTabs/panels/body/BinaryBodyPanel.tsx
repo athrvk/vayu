@@ -17,13 +17,13 @@
  *
  * **Who chose the path decides whether it is sent.** The rule, in the words
  * Settings uses: Vayu sends a file you chose in the editor, or any file under
- * a folder you allowed. Picking, dropping and typing here all clear
- * `unresolved`; an import, a curl paste or an agent sets it. A path with a
- * `{{variable}}` in it is treated as unresolved by the engine's composition
- * whatever this flag says, because the variable could point anywhere. So the
- * banner below appears for both, offers the two ways out - Relink (pick the
- * file here) and Allow folder - and goes quiet when the path already sits
- * under an allowed folder. That check is the text comparison in
+ * a folder you allowed. Picking, dropping and typing here all set
+ * `unresolved: false`; an import, a curl paste or an agent sets it `true`. A
+ * path with a `{{variable}}` in it is treated as unresolved by the engine's
+ * composition whatever this flag says, because the variable could point
+ * anywhere. So the banner below appears for both, offers the two ways out -
+ * Relink (pick the file here) and Allow folder - and goes quiet when the path
+ * already sits under an allowed folder. That check is the text comparison in
  * `lib/file-path.ts`, a display answer; the engine's own check is on
  * canonical paths and is the one that decides.
  *
@@ -41,6 +41,7 @@ import VariableInput from "@/components/shared/VariableInput";
 import { useFilePick, pickedFileOf, type PickedFile } from "@/components/shared/file-pick";
 import { containsVariableToken } from "@/constants/variables";
 import { fileBaseName, isUnderFolder, parentFolder } from "@/lib/file-path";
+import { noFile } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
 import { formatSize } from "@/components/shared/response-viewer/utils";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
@@ -87,7 +88,7 @@ function useFileSize(path: string): StatState {
 export default function BinaryBodyPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
 	const variables = useVariableSupport();
-	const file: FileRef = request.binaryFile ?? { src: "" };
+	const file: FileRef = request.binaryFile ?? noFile();
 	const { data: roots = [] } = useFileRootsQuery();
 	const { allow, chooseAndAllow, isPending: allowing } = useAllowFolder();
 	const [dragging, setDragging] = useState(false);
@@ -96,18 +97,21 @@ export default function BinaryBodyPanel() {
 
 	/*
 	 * A pick or a drop is the one event that proves the path exists here, so
-	 * it clears `unresolved`. The Content-Type the user set is kept - a
+	 * it sets `unresolved: false`. The Content-Type the user set is kept - a
 	 * different file is not a reason to forget it - and the browser's own
 	 * guess at a type is not written: the engine's extension table decides
 	 * when the user did not, and it is the one that reaches the wire.
 	 */
 	const onPick = useCallback(
 		(picked: PickedFile) => {
-			const next: FileRef = { src: picked.src, fileName: picked.fileName };
-			if (file.contentType) next.contentType = file.contentType;
 			// Outside Electron there is no path, and a name alone is nothing
 			// the engine can open - so that pick stays unresolved.
-			if (!picked.src) next.unresolved = true;
+			const next: FileRef = {
+				src: picked.src,
+				fileName: picked.fileName,
+				unresolved: !picked.src,
+			};
+			if (file.contentType) next.contentType = file.contentType;
 			setFile(next);
 		},
 		[file.contentType, setFile]
@@ -124,7 +128,7 @@ export default function BinaryBodyPanel() {
 	// Typing is choosing too: the user wrote this path here, by hand. The
 	// declared name belonged to the previous path, so it goes with it.
 	const onTypePath = (src: string) => {
-		const next: FileRef = { src };
+		const next: FileRef = { src, unresolved: !src.trim() };
 		if (file.contentType) next.contentType = file.contentType;
 		setFile(next);
 	};

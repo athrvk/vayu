@@ -57,6 +57,7 @@ import type {
 import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
+import { noFile } from "@/lib/file-trust";
 import { composePathParams } from "./utils/path-variables";
 import { bodyModeHeaders, toFlatHeaders } from "./utils/key-value";
 import { elementsParts, scriptTextFor } from "./utils/elements-parts";
@@ -354,7 +355,7 @@ export default function RequestBuilder() {
 			body: rawBody,
 			formData: toKeyValueItems(formFields),
 			urlEncoded: toKeyValueItems(urlEncodedFields),
-			binaryFile: body.mode === "binary" && body.file ? body.file : { src: "" },
+			binaryFile: body.mode === "binary" && body.file ? body.file : noFile(),
 			auth: fetchedRequest.auth,
 			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,

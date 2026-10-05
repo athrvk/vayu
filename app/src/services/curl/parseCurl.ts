@@ -29,6 +29,7 @@ import type { BodyMode, FileRef, KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
+import { noFile } from "@/lib/file-trust";
 import { paramsFromUrl, safeDecode } from "@/modules/request-builder/utils/url";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
 import { ACCEPT_HEADER, DEFAULT_MAX_REDIRECTS, SSE_ACCEPT } from "@/constants/request";
@@ -596,7 +597,7 @@ function resolve(b: Builder): CommandImport {
 	let body = "";
 	let formData: KeyValueItem[] = [];
 	let urlEncoded: KeyValueItem[] = [];
-	let binaryFile: FileRef = { src: "" };
+	let binaryFile: FileRef = noFile();
 
 	const contentType = (b.jsonShortcut ? "application/json" : findHeader(b, "content-type")) ?? "";
 

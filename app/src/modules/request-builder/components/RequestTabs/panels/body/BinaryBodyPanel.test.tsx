@@ -12,9 +12,10 @@
  * The binary body editor, by what it writes.
  *
  * The trust rule hangs on one flag: the engine sends a file nobody chose in
- * the editor only from an allowed folder. So what is pinned here is who clears
- * `unresolved` (a pick, a drop, a typed path - all of them the user, here) and
- * who does not (a pick outside Electron, which yields a name and no path), and
+ * the editor only from an allowed folder, and reads an absent flag as not
+ * chosen. So what is pinned here is that every write states it: `false` for a
+ * pick, a drop or a typed path - all of them the user, here - and `true` for a
+ * pick outside Electron (a name and no path) or an emptied path, and
  * that the banner offering the two ways out appears exactly when the engine
  * would refuse.
  */
@@ -94,7 +95,7 @@ afterEach(() => {
 });
 
 describe("choosing the file", () => {
-	it("a pick in Electron writes the path and clears unresolved", () => {
+	it("a pick in Electron writes the path and unresolved false", () => {
 		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/me/a.bin" });
 		const { container } = renderPanel({
 			src: "/elsewhere/a.bin",
@@ -109,12 +110,13 @@ describe("choosing the file", () => {
 			src: "/home/me/a.bin",
 			fileName: "a.bin",
 			contentType: "image/png",
+			unresolved: false,
 		});
 	});
 
 	it("a pick with no path to take stays unresolved", () => {
 		vi.stubGlobal("electronAPI", undefined);
-		const { container } = renderPanel({ src: "" });
+		const { container } = renderPanel({ src: "", unresolved: true });
 
 		pickThroughInput(container, new File(["x"], "a.bin"));
 
@@ -129,7 +131,11 @@ describe("choosing the file", () => {
 			dataTransfer: { files: [new File(["x"], "drop.bin")] },
 		});
 
-		expect(written()).toEqual({ src: "/home/me/drop.bin", fileName: "drop.bin" });
+		expect(written()).toEqual({
+			src: "/home/me/drop.bin",
+			fileName: "drop.bin",
+			unresolved: false,
+		});
 	});
 
 	it("a typed path is the user's choice too", () => {
@@ -139,15 +145,23 @@ describe("choosing the file", () => {
 			target: { value: "/mine/b.bin" },
 		});
 
-		expect(written()).toEqual({ src: "/mine/b.bin" });
+		expect(written()).toEqual({ src: "/mine/b.bin", unresolved: false });
+	});
+
+	it("an emptied path is no choice at all", () => {
+		renderPanel({ src: "/mine/a.bin", unresolved: false });
+
+		fireEvent.change(screen.getByLabelText("File path"), { target: { value: "" } });
+
+		expect(written()).toEqual({ src: "", unresolved: true });
 	});
 
 	it("a Content-Type typed here is written, and clearing it removes it", () => {
-		renderPanel({ src: "/a.bin" });
+		renderPanel({ src: "/a.bin", unresolved: false });
 		const field = screen.getByLabelText("Content-Type");
 
 		fireEvent.change(field, { target: { value: "image/png" } });
-		expect(written()).toEqual({ src: "/a.bin", contentType: "image/png" });
+		expect(written()).toEqual({ src: "/a.bin", contentType: "image/png", unresolved: false });
 	});
 });
 
@@ -161,14 +175,14 @@ describe("the unresolved banner", () => {
 	});
 
 	it("is absent for a path chosen here", () => {
-		renderPanel({ src: "/home/me/a.bin" });
+		renderPanel({ src: "/home/me/a.bin", unresolved: false });
 
 		expect(screen.queryByText("Not chosen on this machine")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Relink" })).toBeNull();
 	});
 
 	it("appears for a path with a variable even when chosen here", () => {
-		renderPanel({ src: "{{dir}}/a.bin" });
+		renderPanel({ src: "{{dir}}/a.bin", unresolved: false });
 
 		expect(screen.getByText("Path has a variable")).toBeInTheDocument();
 		// Nothing to relink: the user wrote this path on purpose.
@@ -177,7 +191,7 @@ describe("the unresolved banner", () => {
 
 	it("says the file is covered once its folder is allowed", () => {
 		roots.push({ id: "r1", path: "/fixtures", createdAt: 1 });
-		renderPanel({ src: "{{dir}}/deep/a.bin" });
+		renderPanel({ src: "{{dir}}/deep/a.bin", unresolved: false });
 
 		expect(screen.queryByText("Path has a variable")).toBeNull();
 		expect(screen.getByText(/this file is sent without picking it again/)).toBeInTheDocument();
@@ -213,7 +227,7 @@ describe("what the panel says about the file", () => {
 	it("shows the size the main process reports", async () => {
 		const statFile = vi.fn(async () => ({ size: 2048, mtimeMs: 1 }));
 		vi.stubGlobal("electronAPI", { statFile });
-		renderPanel({ src: "/home/me/a.bin" });
+		renderPanel({ src: "/home/me/a.bin", unresolved: false });
 
 		expect(await screen.findByText("2.0 KB")).toBeInTheDocument();
 		expect(statFile).toHaveBeenCalledWith("/home/me/a.bin");
@@ -222,14 +236,14 @@ describe("what the panel says about the file", () => {
 	it("stats the resolved path of a templated one", async () => {
 		const statFile = vi.fn(async () => null);
 		vi.stubGlobal("electronAPI", { statFile });
-		renderPanel({ src: "{{dir}}/a.bin" });
+		renderPanel({ src: "{{dir}}/a.bin", unresolved: false });
 
 		expect(await screen.findByText("Not found on this machine")).toBeInTheDocument();
 		expect(statFile).toHaveBeenCalledWith("/fixtures/a.bin");
 	});
 
 	it("names the Content-Type header when one is set, since it wins", async () => {
-		renderPanel({ src: "/a.png", contentType: "image/png" }, [
+		renderPanel({ src: "/a.png", contentType: "image/png", unresolved: false }, [
 			{ id: "h", key: "Content-Type", value: "application/x-custom", enabled: true },
 		]);
 		await act(async () => {});
@@ -241,7 +255,7 @@ describe("what the panel says about the file", () => {
 	});
 
 	it("says the extension decides when nothing else does", () => {
-		renderPanel({ src: "/a.png" });
+		renderPanel({ src: "/a.png", unresolved: false });
 
 		expect(screen.getByText(/the type comes from the file extension/)).toBeInTheDocument();
 	});

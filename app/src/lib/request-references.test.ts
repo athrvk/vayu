@@ -163,7 +163,12 @@ describe("bindableStrings - the binder-versus-composer field set", () => {
 	it("puts a binary body's file on the same side of the line", () => {
 		const binary: RequestBody = {
 			mode: "binary",
-			file: { src: "{{fixturesDir}}/a.bin", fileName: "{{fname}}", contentType: "{{fct}}" },
+			file: {
+				src: "{{fixturesDir}}/a.bin",
+				fileName: "{{fname}}",
+				contentType: "{{fct}}",
+				unresolved: false,
+			},
 		};
 		expect(bindableStrings(source({ body: binary }))).not.toContain("{{fixturesDir}}/a.bin");
 		const strings = bindableStrings(source({ body: binary }), { includeFileFields: true });
