@@ -167,6 +167,18 @@ export function annotationsPlugin(
 export type ValueFormatter = (v: number | null | undefined) => string;
 
 /**
+ * One tooltip node, its text set as text. A series label is whatever a script
+ * named its custom metric (an imported collection's included), so nothing
+ * here is ever parsed as markup.
+ */
+function tooltipElement(tag: "div" | "span", style: string, text?: string): HTMLElement {
+	const element = document.createElement(tag);
+	element.style.cssText = style;
+	if (text !== undefined) element.textContent = text;
+	return element;
+}
+
+/**
  * Cursor tooltip - a positioned DOM overlay showing every series' value at the
  * hovered instant. The core "understand the service" affordance: at t=42.1s you
  * see RPS, p50/p95/p99, error-rate and concurrency together, so a p99 spike is
@@ -217,8 +229,8 @@ export function tooltipPlugin(opts: {
 					return;
 				}
 				const xVal = u.data[0][idx];
-				const rows: string[] = [
-					`<div style="opacity:.7;margin-bottom:2px">${xLabel(xVal as number)}</div>`,
+				const rows: HTMLElement[] = [
+					tooltipElement("div", "opacity:.7;margin-bottom:2px", xLabel(xVal as number)),
 				];
 				for (let s = 1; s < u.series.length; s++) {
 					if (skip.has(s)) continue;
@@ -230,15 +242,24 @@ export function tooltipPlugin(opts: {
 					);
 					const stroke =
 						typeof series.stroke === "function" ? series.stroke(u, s) : series.stroke;
-					rows.push(
-						`<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">` +
-							`<span style="display:inline-flex;align-items:center;gap:5px">` +
-							`<span style="width:8px;height:2px;background:${String(stroke)};display:inline-block"></span>` +
-							`${series.label ?? ""}</span>` +
-							`<span style="font-weight:600">${formatted}</span></div>`
+					const swatch = tooltipElement(
+						"span",
+						"width:8px;height:2px;display:inline-block"
 					);
+					swatch.style.background = String(stroke);
+					const name = tooltipElement(
+						"span",
+						"display:inline-flex;align-items:center;gap:5px"
+					);
+					name.append(swatch, series.label ?? "");
+					const row = tooltipElement(
+						"div",
+						"display:flex;gap:8px;align-items:center;justify-content:space-between"
+					);
+					row.append(name, tooltipElement("span", "font-weight:600", formatted));
+					rows.push(row);
 				}
-				tip.innerHTML = rows.join("");
+				tip.replaceChildren(...rows);
 				tip.style.left = `${left}px`;
 				tip.style.top = `${top}px`;
 				tip.style.opacity = "1";
