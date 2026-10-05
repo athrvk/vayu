@@ -9,6 +9,8 @@
 
 #include <system_error>
 
+#include "vayu/utils/ascii_case.hpp"
+
 #include "vayu/db/database.hpp"
 
 namespace vayu::http {
@@ -64,6 +66,70 @@ bool FileAccessPolicy::contains (const fs::path& root, const fs::path& candidate
         }
     }
     return true;
+}
+
+namespace {
+
+/// @p path without the separators it ends in, either spelling.
+std::string_view without_trailing_separators (std::string_view path) {
+    while (!path.empty () && (path.back () == '/' || path.back () == '\\')) {
+        path.remove_suffix (1);
+    }
+    return path;
+}
+
+/// A drive designator (`C:`) leads @p path.
+bool has_drive (std::string_view path) {
+    return path.size () >= 2 && path[1] == ':' &&
+    vayu::utils::ascii_lower (path[0]) >= 'a' &&
+    vayu::utils::ascii_lower (path[0]) <= 'z';
+}
+
+bool is_separator (char c) {
+    return c == '/' || c == '\\';
+}
+
+/// @p folder is @p home or one of its ancestors, compared component-wise with
+/// either separator. A drive-letter path is on a Windows filesystem, which
+/// folds case; a POSIX path compares exactly. Both arrive without trailing
+/// separators.
+bool is_home_or_above (std::string_view folder, std::string_view home) {
+    if (home.size () < folder.size ()) {
+        return false;
+    }
+    const bool folds = has_drive (folder);
+    for (std::size_t i = 0; i < folder.size (); ++i) {
+        const char a    = folder[i];
+        const char b    = home[i];
+        const bool same = (is_separator (a) && is_separator (b)) ||
+        (folds ? vayu::utils::ascii_lower (a) == vayu::utils::ascii_lower (b) : a == b);
+        if (!same) {
+            return false;
+        }
+    }
+    return home.size () == folder.size () || is_separator (home[folder.size ()]);
+}
+
+} // namespace
+
+std::optional<std::string>
+refused_root_reason (std::string_view canonical, std::string_view home) {
+    const std::string_view folder = without_trailing_separators (canonical);
+    if (folder.empty () || (has_drive (folder) && folder.size () == 2)) {
+        return "Invalid 'path': '" + std::string (canonical) +
+        "' is a filesystem root, which would allow every file on it - allow a "
+        "folder inside it instead";
+    }
+    const std::string_view home_folder = without_trailing_separators (home);
+    if (home_folder.empty ()) {
+        return std::nullopt;
+    }
+    if (is_home_or_above (folder, home_folder)) {
+        return "Invalid 'path': '" + std::string (canonical) +
+        "' is your home folder or contains it, which would allow every "
+        "file you own - allow a folder inside your home folder instead";
+    }
+    return std::nullopt;
 }
 
 bool FileAccessPolicy::allows (const std::string& path) const {

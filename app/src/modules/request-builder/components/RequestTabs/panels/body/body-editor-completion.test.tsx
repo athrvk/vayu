@@ -186,7 +186,7 @@ describe("the modes with no code editor", () => {
 
 	it("binary writes its path in a variable field, so {{fixturesDir}} completes", async () => {
 		await renderMode("binary", {
-			binaryFile: { src: "{{fixturesDir}}/a.bin", contentType: "{{ct}}" },
+			binaryFile: { src: "{{fixturesDir}}/a.bin", contentType: "{{ct}}", unresolved: false },
 		});
 
 		expect(mounted).toHaveLength(0);

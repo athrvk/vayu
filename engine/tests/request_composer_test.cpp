@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/header_text.hpp"
@@ -44,6 +45,15 @@
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
+
+namespace vayu::http::routes {
+// Defined in requests.cpp; each is the testable core of one route.
+std::pair<int, nlohmann::json>
+create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+} // namespace vayu::http::routes
 
 namespace {
 
@@ -760,15 +770,102 @@ TEST_F (RequestComposerTest, AFilePathAVariableFilledIsMarkedUnresolved) {
         { "body",
         { { "mode", "form-data" },
         { "fields",
-        json::array ({ { { "key", "a" }, { "type", "file" }, { "src", "{{fixtures}}/p.png" } },
-        { { "key", "b" }, { "type", "file" }, { "src", "/abs/q.png" } } }) } } } };
+        json::array ({ { { "key", "a" }, { "type", "file" },
+                       { "src", "{{fixtures}}/p.png" }, { "unresolved", false } },
+        { { "key", "b" }, { "type", "file" }, { "src", "/abs/q.png" },
+        { "unresolved", false } } }) } } } };
     auto [part_status, parts] = vayu::http::compose_request_core (
     *db_, json{ { "request", part }, { "collectionId", "col" } });
     ASSERT_EQ (part_status, 200) << parts.dump ();
     EXPECT_EQ (parts["body"]["fields"][0]["src"], "/data/fx/p.png");
     EXPECT_EQ (parts["body"]["fields"][0]["unresolved"], true);
-    EXPECT_FALSE (parts["body"]["fields"][1].contains ("unresolved"))
+    EXPECT_EQ (parts["body"]["fields"][1]["unresolved"], false)
     << "a literal path a person typed stays trusted";
+}
+
+// ---------------------------------------------------------------------------
+// The trust flag through storage. An absent `unresolved` means a path nobody
+// chose, on a stored row as on any payload: every write states the key, and
+// the schema-version-4 migration stated it on every row stored before.
+// ---------------------------------------------------------------------------
+
+constexpr const char* kTrustBinary = R"({"mode":"binary","file":{"src":"/abs/a.bin"}})";
+constexpr const char* kTrustForm =
+R"({"mode":"form-data","fields":[{"key":"f","type":"file","src":"/abs/p.png"},{"key":"t","value":"v"}]})";
+
+// Mutation check: state an absent key as `false` in `stored_body` (the special
+// case this replaced) and both bare references compose as chosen.
+TEST_F (RequestComposerTest, AStoredFileReferenceWithoutTheKeyComposesAsUnresolved) {
+    seed_collection ("col", "");
+    auto binary = make_request ("req_bin", "col");
+    binary.body = kTrustBinary;
+    db_->save_request (binary);
+    auto form = make_request ("req_form", "col");
+    form.body = kTrustForm;
+    db_->save_request (form);
+    auto chosen = make_request ("req_chosen", "col");
+    chosen.body = R"({"mode":"binary","file":{"src":"/abs/a.bin","unresolved":false}})";
+    db_->save_request (chosen);
+
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_bin" } });
+    ASSERT_EQ (status, 200) << composed.dump ();
+    EXPECT_TRUE (vayu::json::reads_as_unresolved (composed["body"]["file"]))
+    << composed.dump ();
+
+    auto [form_status, form_composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_form" } });
+    ASSERT_EQ (form_status, 200) << form_composed.dump ();
+    EXPECT_TRUE (
+    vayu::json::reads_as_unresolved (form_composed["body"]["fields"][0]))
+    << form_composed.dump ();
+
+    auto [chosen_status, chosen_composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_chosen" } });
+    ASSERT_EQ (chosen_status, 200);
+    EXPECT_EQ (chosen_composed["body"]["file"]["unresolved"], false)
+    << "a stored `false` is a person's choice and composes as one";
+}
+
+// Mutation check: drop the `state_file_trust` call in `apply_request_fields`
+// and the bare reference is stored without the key.
+TEST_F (RequestComposerTest, AWrittenBodyIsStoredWithItsTrustStated) {
+    seed_collection ("col", "");
+    const json base = { { "collectionId", "col" }, { "name", "r" },
+        { "method", "POST" }, { "url", "https://example.test" } };
+
+    json bare    = base;
+    bare["body"] = json::parse (kTrustBinary);
+    auto [created, row] = vayu::http::routes::create_request_response (*db_, bare);
+    ASSERT_EQ (created, 200) << row.dump ();
+    const std::string id = row["id"].get<std::string> ();
+    auto stored          = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->body)["file"]["unresolved"], true) << stored->body;
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", id } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (composed["body"]["file"]["unresolved"], true);
+
+    json chosen_form                               = base;
+    chosen_form["body"]                            = json::parse (kTrustForm);
+    chosen_form["body"]["fields"][0]["unresolved"] = false;
+    auto [form_created, form_row] =
+    vayu::http::routes::create_request_response (*db_, chosen_form);
+    ASSERT_EQ (form_created, 200) << form_row.dump ();
+    auto form_stored = db_->get_request (form_row["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (form_stored);
+    const json form_body = json::parse (form_stored->body);
+    EXPECT_EQ (form_body["fields"][0]["unresolved"], false) << form_stored->body;
+    EXPECT_FALSE (form_body["fields"][1].contains ("unresolved")) << form_stored->body;
+
+    // A PUT that rewrites the body states it too.
+    json put = { { "body", json::parse (kTrustForm) } };
+    ASSERT_EQ (vayu::http::routes::update_request_response (*db_, id, put).first, 200);
+    auto updated = db_->get_request (id);
+    ASSERT_HAS_VALUE (updated);
+    EXPECT_EQ (json::parse (updated->body)["fields"][0]["unresolved"], true)
+    << updated->body;
 }
 
 // The composed payload names the Content-Type the send will use, so a reader of

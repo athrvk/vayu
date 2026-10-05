@@ -1531,7 +1531,11 @@ a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
 script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
 A response over the byte bound below is the network's answer too, not a
-mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`.
+mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`. So does a URL
+whose scheme is not `http` or `https` once its variables resolve
+(`file:///...`, `ftp://...`): `err.code` is `INVALID_URL`, the message names
+the scheme, and nothing is read - the same refusal a Send of that URL gets
+([URL schemes](api-reference.md#url-schemes)).
 
 `res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/

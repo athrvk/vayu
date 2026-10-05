@@ -140,9 +140,31 @@ TEST (ImportFetch, RejectsInvalidJson) {
 }
 
 TEST (ImportFetch, RejectsNonHttpUrl) {
+    for (const char* url : { "ftp://x/y", "file:///etc/passwd", "FILE:///etc/passwd" }) {
+        auto [status, body] = vayu::http::routes::import_fetch (
+        fetch_body (url), vayu::http::TransportPolicy{});
+        EXPECT_EQ (status, 400) << url;
+        const auto message = body["error"]["message"].get<std::string> ();
+        // The words the transfer's own refusal uses, naming what was typed.
+        EXPECT_EQ (message.rfind ("Invalid URL: scheme '", 0), 0u) << message;
+        EXPECT_NE (message.find ("only http and https"), std::string::npos) << message;
+    }
+}
+
+// A fetch target is typed whole, so one with no scheme is refused rather than
+// guessed at; and a scheme is case-insensitive, so `HTTP://` is fetched.
+TEST (ImportFetch, RefusesAUrlWithNoSchemeAndReadsTheSchemeCaseInsensitively) {
     auto [status, body] = vayu::http::routes::import_fetch (
-    R"({"url":"ftp://x/y"})", vayu::http::TransportPolicy{});
+    fetch_body ("localhost:8080/spec.json"), vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["message"].get<std::string> (), "Invalid URL");
+
+    MockSpecServer mock;
+    std::string url = mock.url ("/spec.json");
+    url.replace (0, 4, "HTTP");
+    auto [fetched, json] = vayu::http::routes::import_fetch (
+    fetch_body (url), vayu::http::TransportPolicy{});
+    EXPECT_EQ (fetched, 200) << json.dump ();
 }
 
 TEST (ImportFetch, ProxiesSuccessfully) {
@@ -440,7 +462,9 @@ TEST (ImportFetchStream, RefusesAnInvalidRequestBeforeEmittingAnything) {
     // Nothing has been written yet, so this is still a status the client reads
     // the same way it reads the buffered route's.
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"]["message"].get<std::string> (), "Invalid URL");
+    EXPECT_EQ (body["error"]["message"].get<std::string> (),
+    "Invalid URL: scheme 'ftp' is not supported - only http and https URLs can "
+    "be sent");
     EXPECT_TRUE (recorder.events.empty ());
 }
 

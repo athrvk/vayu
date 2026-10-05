@@ -12,6 +12,8 @@
 #include <ada.h>
 #include <curl/curl.h>
 
+#include "vayu/utils/ascii_case.hpp"
+
 namespace vayu::http {
 
 namespace {
@@ -350,6 +352,46 @@ std::optional<std::string> unsendable_host (std::string_view url) {
     return "host '" + std::string (host) +
     "' has no ASCII (IDNA) name to look up; check it for a stray character, "
     "or an 'xn--' label that is not valid punycode";
+}
+
+namespace {
+
+/// RFC 3986's `scheme` characters after the first, which must be a letter.
+constexpr std::string_view SCHEME_CHARS =
+"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-.";
+
+} // namespace
+
+std::string_view url_scheme (std::string_view url) {
+    if (url.empty ()) {
+        return {};
+    }
+    const char first = vayu::utils::ascii_lower (url.front ());
+    if (first < 'a' || first > 'z') {
+        return {};
+    }
+    const std::size_t length =
+    std::min (url.find_first_not_of (SCHEME_CHARS, 1), url.size ());
+    if (!url.substr (length).starts_with (":/")) {
+        return {};
+    }
+    return url.substr (0, length);
+}
+
+std::optional<std::string> unsendable_scheme (std::string_view url) {
+    const std::string_view scheme = url_scheme (url);
+    if (scheme.empty ()) {
+        return std::nullopt;
+    }
+    for (std::string_view rest = SENDABLE_PROTOCOLS; !rest.empty ();) {
+        const std::size_t comma = std::min (rest.find (','), rest.size ());
+        if (vayu::utils::ascii_lower_equal (scheme, rest.substr (0, comma))) {
+            return std::nullopt;
+        }
+        rest.remove_prefix (std::min (comma + 1, rest.size ()));
+    }
+    return "scheme '" + std::string (scheme) +
+    "' is not supported - only http and https URLs can be sent";
 }
 
 } // namespace vayu::http

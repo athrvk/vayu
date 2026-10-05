@@ -168,14 +168,22 @@ four more are opened on demand, and the rule that separates them is where each m
 Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
 route answers a live read of state that changes under the client, so nothing here is valid to replay
 from a browser's disk cache. The mock server and inbox listeners are separate `ManagedListener`-owned
-servers of their own (see the table above) and set neither this nor the CORS headers below.
+servers of their own (see the table above) and do not set it.
+
+**The management API serves no browser** (`admit_management_request`, `server.cpp`): it sends no
+CORS header, refuses a `Host` that is not a loopback spelling of its own port (DNS rebinding), and
+refuses any request carrying `Origin`; an `OPTIONS` that passes the Host check is answered `204`
+with nothing else. The Electron shell strips the renderer's `Origin` and supplies the renderer's
+CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-the-api).
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
 
-- The **management API** has no route authentication and answers `Access-Control-Allow-Origin: *`
-  (`server.cpp`), so anything that can reach it can read every stored request, every credential the
-  database holds, and start runs against arbitrary targets.
+- The **management API** has no route authentication - its Host and Origin checks keep browser
+  pages from reading or changing anything (a scriptless `GET` still reaches a `GET` route, which
+  is why none has a side effect), and a program on another host can send any `Host` it likes - so anything that can
+  reach it can read every stored request, every credential the database holds, and start runs
+  against arbitrary targets.
 - A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization
   code; publishing either would publish a credential.
 - An **inbox** serves none of that - it accepts a request, stores it, and replies with what the user
@@ -398,7 +406,9 @@ JavaScript execution engine for pre-request and test scripts:
   Synchronous, because the sandbox has no event loop to settle a Promise on
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
-- **Sandboxed**: No filesystem or network access
+- **Sandboxed**: No filesystem access; the one way out to the network is
+  `pm.sendRequest`, held to the same `http`/`https` scheme rule as a request
+  ([Security](#security))
 
 **Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
 maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
@@ -1288,7 +1298,20 @@ record shape, the category list, the redaction rule and the file layout
 - **Local-only binding**: the management API only listens on `127.0.0.1`. A
   [webhook inbox](#listeners) is the single listener that may bind wider, and only when the
   caller confirms it explicitly; it serves no engine route.
-- **Script sandboxing**: QuickJS contexts have no filesystem/network access
+- **No browser**: the management API sends no CORS header and refuses, before any route, a
+  request carrying `Origin` and one whose `Host` is not a loopback name for its own port, which
+  is what keeps a DNS-rebinding page out ([Listeners](#listeners)).
+- **Script sandboxing**: QuickJS contexts have no filesystem access. Their one
+  network path is `pm.sendRequest`, which goes through the same send gate and
+  scheme rule as a request (next bullet)
+- **Only `http` and `https` leave the engine.** libcurl speaks other
+  protocols, `file` among them, so the send gate (`validate_transferable`)
+  refuses any other scheme on the URL every driver is about to hand a handle -
+  after variables, the pre-request script and the residual pass - and
+  `apply_transport_policy` holds every handle to `http,https` for the URLs that
+  gate cannot see (a redirect's `Location`, a scheme libcurl guesses). One
+  rule for Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
+  [api-reference.md](api-reference.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a
   `form-data` file part - and sends one only when *a person chose it in the
@@ -1298,7 +1321,8 @@ record shape, the category list, the redaction rule and the file layout
   so a symlink escaping an allowed folder is outside it. `unresolved` is forced
   by every writer that is not a person in the editor (importers, curl paste,
   MCP) and by composition whenever `src` held a `{{` - a path a variable or a
-  data row chose. Scripts can never set a path: the residual pass does not
+  data row chose - and it fails closed: a payload that omits it is unresolved
+  (`vayu::json::reads_as_unresolved`), and every stored write states it. Scripts can never set a path: the residual pass does not
   resolve `src`. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
   `http/file_access_policy.hpp`, runs once per design send after the residual
   pass and once per run at plan time (every distinct data-bound path

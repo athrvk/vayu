@@ -35,13 +35,8 @@ import {
 	formatSize,
 	LARGE_BODY_BYTES,
 } from "./utils";
+import { buildPreviewDocument } from "./preview-document";
 import type { ResponseBodyProps, ViewMode } from "./types";
-
-/**
- * The preview iframe shows an API's own response, untrusted by definition, so it
- * carries an embedded policy that is enforced on top of the document's (#1780).
- */
-const PREVIEW_IFRAME_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
 
 interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	/** Default view mode */
@@ -120,46 +115,14 @@ export default function ResponseBody({
 	// Get Monaco language
 	const language = useMemo(() => getMonacoLanguage(detectedType), [detectedType]);
 
-	// Prepare HTML for preview with disabled links and base styles
-	// Use bodyRaw for preview to show actual server response
-	const previewHtml = useMemo(() => {
-		const htmlContent = bodyRaw || body;
-		if (detectedType !== "html") return htmlContent;
-		// Unreachable above the gate - the toggle that selects Preview is hidden -
-		// and the injection below is another whole-string scan and copy.
-		if (isLargeBody) return htmlContent;
-
-		// Inject script to disable link navigation and add base styling
-		const disableLinkScript = `
-            <script>
-                document.addEventListener('DOMContentLoaded', function() {
-                    // Add tooltip to all links
-                    document.querySelectorAll('a').forEach(function(link) {
-                        link.setAttribute('title', 'Links are disabled in preview mode for security');
-                    });
-                });
-                document.addEventListener('click', function(e) {
-                    if (e.target.tagName === 'A' || e.target.closest('a')) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                }, true);
-            </script>
-            <style>
-                a { cursor: not-allowed !important; }
-                a:hover { text-decoration: none !important; opacity: 0.7; }
-            </style>
-        `;
-
-		// Insert before </head> or </body> or at the end
-		if (htmlContent.includes("</head>")) {
-			return htmlContent.replace("</head>", disableLinkScript + "</head>");
-		} else if (htmlContent.includes("</body>")) {
-			return htmlContent.replace("</body>", disableLinkScript + "</body>");
-		} else {
-			return htmlContent + disableLinkScript;
-		}
-	}, [body, bodyRaw, detectedType, isLargeBody]);
+	// Raw rather than formatted, so the preview is the document the server sent.
+	// Never built above the gate: the toggle that selects Preview is hidden
+	// there, and the build is another whole-string copy.
+	const previewHtml = useMemo(
+		() =>
+			detectedType === "html" && !isLargeBody ? buildPreviewDocument(bodyRaw || body) : "",
+		[body, bodyRaw, detectedType, isLargeBody]
+	);
 
 	// Handle image types - use bodyRaw for actual image data
 	if (detectedType === "image") {
@@ -338,12 +301,15 @@ export default function ResponseBody({
 			{/* Content */}
 			<div className="flex-1 min-h-0">
 				{!isLargeBody && viewMode === "preview" && detectedType === "html" ? (
+					// The markup is the server's, so the frame takes no sandbox token:
+					// `allow-same-origin` with `allow-scripts` hands it the renderer's
+					// origin and `window.parent.electronAPI`, and `allow-scripts` alone
+					// still runs whatever it ships. The policy and inert links come from
+					// `buildPreviewDocument`. `preview-sandbox.test.tsx` holds the string.
 					<iframe
 						srcDoc={previewHtml}
 						className="w-full h-full bg-white"
-						sandbox="allow-scripts allow-same-origin"
-						// `csp` is not in React's iframe typings yet; the attribute works.
-						{...{ csp: PREVIEW_IFRAME_CSP }}
+						sandbox=""
 						title="HTML preview"
 					/>
 				) : (

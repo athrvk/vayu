@@ -221,7 +221,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `3`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `4`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path rather than being read
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
@@ -254,12 +254,37 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `GET /elements/kinds`'s `script.pre` / `script.post` entries gained `apply` in the same issue, so a
 row this migration folds is not just storage-compatible but immediately runnable.
 
+### The file-trust restatement (schema version 4)
+
+The file-body trust flag fails closed: an absent `unresolved` on a file reference means nobody
+chose the path. Rows written before that rule may lack the key, and the writer that left it out
+was the editor (importers, curl paste and MCP always wrote `true` on a path they carried), so the
+same `migrate_before_sync` transaction, for any database below version `4`, after the fold (after
+it, no stored body lacks the key and nothing reads one as chosen):
+
+- **States the key on every stored body.** `requests.body` (trash included) and the top-level
+  `body` of `runs.config_snapshot` (the payload a history entry is re-opened from): a binary
+  `file` and every `type: "file"` form part gets an explicit boolean, absent written as `false`
+  and a non-boolean as `true` (`vayu::json::state_file_trust`). Only values whose text contains
+  `"file"` are parsed; one that is not JSON is left byte-identical and logged at warning level,
+  never dropped. `request_examples`, `collections` and the other tables store no request body.
+- **Removes the allowed folders the root rule refuses.** A [`file_roots`](#file_roots) row whose
+  path `refused_root_reason` rejects - a filesystem or drive root, the home folder, or a folder containing it - is
+  deleted and logged at warning level with the reason, so a user can see why Settings > Files no
+  longer lists it. `FileAccessPolicy::from_database` therefore reads only rows the route would
+  accept, and carries no second check.
+
+Both are planned before anything is written, so a database with nothing to change is only
+stamped; otherwise `<db>.pre-migration.bak` is written first, as for the fold. A second run finds
+nothing to change.
+
 ### Schema versions
 
 `SCHEMA_VERSION` lives in `engine/include/vayu/db/database.hpp`. It is bumped by the commit that
-changes `make_vayu_storage`'s mapping - an added column included - and never otherwise, because
-`sync_schema ()` runs without `preserve`: an older engine opening a database with a column it does
-not map would rebuild that table without it. **A bump is one-way.** Once a newer engine has opened a
+changes `make_vayu_storage`'s mapping - an added column included - because `sync_schema ()` runs
+without `preserve`: an older engine opening a database with a column it does not map would rebuild
+that table without it. It is also bumped by a migration step that must run exactly once and that an
+older engine must not read past (version `4`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
 workspace, every engine built before the bump refuses it at startup (the refusal above), so the
 release that carries a bump says so in its notes.
 
@@ -269,6 +294,7 @@ release that carries a bump says so in its notes.
 | `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
 | `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
 | `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
+| `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -483,9 +509,13 @@ query row's boolean `equals`.
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
 same file members a binary body's `file` does: `src` (an absolute path, stored
 as written), `fileName` and `contentType` (both optional, omitted when empty) and
-`unresolved` (written only when `true`: no person chose the path in the editor -
-an import, a curl paste, an MCP agent - so it is sent only from under an
-allowed folder, see [`file_roots`](#file_roots)). A text part may also carry
+`unresolved` (`true` when no person chose the path in the editor - an import,
+a curl paste, an MCP agent - so it is sent only from under an allowed folder,
+see [`file_roots`](#file_roots)). Every write states it (`apply_request_fields`,
+absent in the payload stored as `true`), and the
+[schema version 4 migration](#the-file-trust-restatement-schema-version-4)
+stated it on every row written before, absent as `false`. No row lacks it, so
+an absent key is read as `true` like any payload's. A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:
@@ -1016,7 +1046,10 @@ one of these; read once per design send and once per run. See
 
 `path` is canonical when written (symlinks resolved, `.` and `..` folded), so
 two spellings of one folder are one row, and the `409` the route answers for a
-second is backed by the constraint.
+second is backed by the constraint. A filesystem or drive root and the home
+folder itself are never stored: the route refuses them, and the
+[schema version 4 migration](#the-file-trust-restatement-schema-version-4)
+removed any stored before.
 
 ---
 

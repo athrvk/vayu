@@ -73,6 +73,10 @@ const ErrorHints: Record<string, string> = {
  * `ENGINE_ERROR` is Vayu's own failure, not the network's, so it names the
  * engine rather than borrowing the network template (docs/ux-writing.md,
  * "Errors have three sources").
+ *
+ * `INVALID_URL` covers a URL that does not parse and one that parses but names
+ * a scheme other than http or https, so its heading claims neither cause; the
+ * engine's message under it says which.
  */
 const ErrorTitles: Record<string, string> = {
 	TIMEOUT: "No response before the timeout",
@@ -80,7 +84,7 @@ const ErrorTitles: Record<string, string> = {
 	DNS_ERROR: "Couldn't resolve the host name",
 	PROXY_ERROR: "Couldn't reach the proxy",
 	SSL_ERROR: "Couldn't establish a secure connection",
-	INVALID_URL: "Couldn't parse the URL",
+	INVALID_URL: "Couldn't send to this URL",
 	ENGINE_ERROR: "Vayu's engine didn't respond",
 	INTERNAL_ERROR: "Couldn't send the request",
 	AUTH_FAILED: "Couldn't get an OAuth 2.0 token",

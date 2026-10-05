@@ -25,6 +25,7 @@ import type {
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
 import { toElements } from "./elements-transformer";
+import { withBodyFileTrust } from "@/lib/file-trust";
 import {
 	DEFAULT_DISABLE_COOKIES,
 	DEFAULT_DISABLE_URL_ENCODING,
@@ -152,7 +153,9 @@ export class RequestTransformer {
 		// Body: discriminated union (new) or legacy string
 		let body: RequestBody = { mode: "none" };
 		const rawBody = asRecord(raw.body);
-		if (rawBody?.mode) body = rawBody as RequestBody;
+		// A file body's trust flag is stated here, as the engine reads an absent
+		// one, so every forwarder of this row carries it (`lib/file-trust.ts`).
+		if (rawBody?.mode) body = withBodyFileTrust(rawBody as RequestBody);
 
 		// Auth: RequestAuth (new) or legacy object
 		let auth: RequestAuth = { mode: "inherit" };

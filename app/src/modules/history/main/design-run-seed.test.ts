@@ -491,7 +491,52 @@ describe("seedFromRun, binary bodies", () => {
 	it("seeds an empty pick when the snapshot holds no file object", () => {
 		const { request } = seedFromRun(binaryRun("not-an-object"), liveRequest);
 
-		expect(request.binaryFile).toEqual({ src: "" });
+		expect(request.binaryFile).toEqual({ src: "", unresolved: true });
+	});
+
+	it.each([
+		[false, false],
+		[true, true],
+		[undefined, true],
+		["yes", true],
+	])("seeds a recorded unresolved %s as %s", (recorded, seeded) => {
+		const { request } = seedFromRun(
+			binaryRun({ src: "/data/a.bin", unresolved: recorded }),
+			liveRequest
+		);
+
+		expect(request.binaryFile?.unresolved).toBe(seeded);
+	});
+
+	it.each([
+		[false, false],
+		[true, true],
+		[undefined, true],
+	])("seeds a form-data file part recorded with %s as %s", (recorded, seeded) => {
+		const base = run();
+		const { request } = seedFromRun(
+			run({
+				configSnapshot: {
+					...base.configSnapshot,
+					body: {
+						mode: "form-data",
+						fields: [
+							{
+								key: "f",
+								value: "",
+								enabled: true,
+								type: "file",
+								src: "/a",
+								unresolved: recorded,
+							},
+						],
+					},
+				},
+			} as Partial<Run>),
+			liveRequest
+		);
+
+		expect(request.formData?.[0]).toHaveProperty("unresolved", seeded);
 	});
 
 	it("reads what was sent off the trace's request node", () => {

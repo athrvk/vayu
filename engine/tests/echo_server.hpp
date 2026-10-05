@@ -80,6 +80,11 @@ class EchoServer {
         svr_.Post ("/echo.*", record);
         svr_.Put ("/echo.*", record);
         svr_.Patch ("/echo.*", record);
+        // A 302 to whatever `to` names, scheme included - the one way to hand
+        // a transfer a URL it was never given directly (see `redirect_to`).
+        svr_.Get ("/redirect", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_redirect (req.get_param_value ("to"), 302);
+        });
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -99,6 +104,12 @@ class EchoServer {
 
     std::string url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/echo";
+    }
+
+    /// A URL this server answers with a redirect to @p location, which is
+    /// passed as written: a test's targets carry no `&`, `#` or space.
+    std::string redirect_to (const std::string& location) const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/redirect?to=" + location;
     }
 
     std::string body () const {

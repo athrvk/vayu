@@ -26,7 +26,9 @@
  */
 
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vayu::db {
@@ -74,5 +76,19 @@ class FileAccessPolicy {
  * cannot be resolved at all.
  */
 [[nodiscard]] std::string canonical_root_path (const std::string& path);
+
+/**
+ * @brief Why the canonical folder @p canonical may not be allowed, or nothing.
+ *
+ * A filesystem or drive root (`/`, `C:\`), the home folder @p home and any
+ * folder that contains it (`/home`, `C:\Users`) would each allow nearly every
+ * file a request could name, which undoes the per-file choice the trust rule
+ * exists to keep; a folder inside the home folder is fine. An empty @p home
+ * skips that half. Pure string work over both
+ * separators, so every platform's spellings are testable on any host:
+ * `std::filesystem` reads `C:\` as a relative name off Windows.
+ */
+[[nodiscard]] std::optional<std::string>
+refused_root_reason (std::string_view canonical, std::string_view home);
 
 } // namespace vayu::http

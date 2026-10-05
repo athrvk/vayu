@@ -55,6 +55,7 @@ import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-he
 import { isPathRow } from "@/modules/request-builder/utils/path-variables";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { toFileRef } from "@/modules/request-builder/utils/execute-mapping";
+import { withFileTrust } from "@/lib/file-trust";
 import type { DesignRunSeed } from "./design-run-seed";
 
 /** How one key/value entry differs between the request and the run. */
@@ -219,7 +220,7 @@ function items(value: KeyValueItem[] | undefined): FormFieldEntry[] {
 function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 	const mode = request.bodyMode ?? "none";
 	if (mode === "form-data") {
-		return { mode: "form-data", fields: items(request.formData) };
+		return { mode: "form-data", fields: withFileTrust(items(request.formData)) };
 	}
 	if (mode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: items(request.urlEncoded) };

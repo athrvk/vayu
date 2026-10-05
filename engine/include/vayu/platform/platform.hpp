@@ -196,6 +196,18 @@ std::string path_join (const std::string& base, const std::string& component);
  */
 std::string default_data_dir ();
 
+/**
+ * @brief The current user's home folder, or empty when the platform says
+ *        nothing.
+ *
+ * The account database's entry (`getpwuid_r`) on Linux and macOS, never
+ * `HOME`: the engine reads no environment variable but the one
+ * `transport_policy.cpp` exempts. `USERPROFILE` through
+ * `GetEnvironmentVariableW` on Windows, which reads the process environment
+ * block under its own lock rather than the CRT's shared copy.
+ */
+std::string home_directory ();
+
 // ============================================================================
 // High-Resolution Timer
 // ============================================================================

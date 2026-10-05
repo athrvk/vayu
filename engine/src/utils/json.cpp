@@ -58,7 +58,8 @@ namespace {
 
 // A text field serializes exactly as it always did - the file members are
 // emitted only for a file part, so a stored body that has none round-trips
-// byte-identically through this.
+// byte-identically through this. A file part always states `unresolved`,
+// because reading it back treats an absent key as unresolved.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
@@ -73,9 +74,7 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.content_type.empty ()) {
                 entry["contentType"] = field.content_type;
             }
-            if (field.unresolved) {
-                entry["unresolved"] = true;
-            }
+            entry["unresolved"] = field.unresolved;
         }
         out.push_back (std::move (entry));
     }
@@ -83,7 +82,8 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
 }
 
 // A binary body's file reference. The plan-time members (`inline_bytes`,
-// `sha256`, `size`) are engine-internal and never leave it.
+// `sha256`, `size`) are engine-internal and never leave it. `unresolved` is
+// always stated, for the reason `serialize_form_fields` gives.
 Json serialize_file_ref (const FileRef& file) {
     Json out{ { "src", file.src } };
     if (!file.file_name.empty ()) {
@@ -92,9 +92,7 @@ Json serialize_file_ref (const FileRef& file) {
     if (!file.content_type.empty ()) {
         out["contentType"] = file.content_type;
     }
-    if (file.unresolved) {
-        out["unresolved"] = true;
-    }
+    out["unresolved"] = file.unresolved;
     return out;
 }
 
@@ -844,10 +842,7 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
         }
         *target = member->get<std::string> ();
     }
-    if (const auto unresolved = item.find ("unresolved");
-    unresolved != item.end () && unresolved->is_boolean ()) {
-        field.unresolved = unresolved->get<bool> ();
-    }
+    field.unresolved = reads_as_unresolved (item);
     // A text part carrying a file's source is ambiguous in the one direction
     // that matters: the caller pointed at a file and nothing would send it.
     if (field.type == FormFieldType::Text && !field.src.empty ()) {
@@ -930,10 +925,7 @@ Result<FileRef> parse_file_ref (const Json& body_json) {
         }
         *target = member->get<std::string> ();
     }
-    if (const auto unresolved = entry->find ("unresolved");
-    unresolved != entry->end () && unresolved->is_boolean ()) {
-        file.unresolved = unresolved->get<bool> ();
-    }
+    file.unresolved = reads_as_unresolved (*entry);
     return file;
 }
 
@@ -1172,6 +1164,54 @@ void read_request_options (const Json& json, Request& request) {
 }
 
 } // namespace
+
+bool reads_as_unresolved (const Json& ref) {
+    const auto found = ref.find ("unresolved");
+    return found == ref.end () || !found->is_boolean () || found->get<bool> ();
+}
+
+namespace {
+
+void state_ref_trust (Json& ref, AbsentFileTrust absent) {
+    if (!ref.is_object ()) {
+        return;
+    }
+    const auto found = ref.find ("unresolved");
+    if (found == ref.end ()) {
+        ref["unresolved"] = absent == AbsentFileTrust::Unresolved;
+    } else if (!found->is_boolean ()) {
+        *found = true;
+    }
+}
+
+bool is_file_part (const Json& field) {
+    if (!field.is_object ()) {
+        return false;
+    }
+    const auto type = field.find ("type");
+    return type != field.end () && type->is_string () &&
+    type->get_ref<const std::string&> () == "file";
+}
+
+} // namespace
+
+void state_file_trust (Json& body, AbsentFileTrust absent) {
+    if (!body.is_object ()) {
+        return;
+    }
+    if (const auto file = body.find ("file"); file != body.end ()) {
+        state_ref_trust (*file, absent);
+    }
+    const auto fields = body.find ("fields");
+    if (fields == body.end () || !fields->is_array ()) {
+        return;
+    }
+    for (Json& field : *fields) {
+        if (is_file_part (field)) {
+            state_ref_trust (field, absent);
+        }
+    }
+}
 
 Result<Request> deserialize_request (const Json& json) {
     try {

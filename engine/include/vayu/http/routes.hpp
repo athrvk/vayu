@@ -227,7 +227,7 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 /**
  * @brief CORS headers for a listener a browser page may call directly - a
  *        mock server or a webhook inbox, never the management API, which
- *        sets its own fixed trio in `server.cpp`.
+ *        serves no browser and sends no CORS header (`server.cpp`).
  *
  * Reflects the request's own asks (origin, requested method/headers) rather
  * than a fixed list, since a mock or inbox stands in for an arbitrary real

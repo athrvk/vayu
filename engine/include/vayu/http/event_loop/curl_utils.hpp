@@ -40,9 +40,10 @@ class DnsCache;
 Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
 
 /**
- * @brief Put the transport policy on a handle: TLS verification and the proxy.
+ * @brief Put the transport policy on a handle: the protocols it may speak, TLS
+ *        verification and the proxy.
  *
- * The one place any driver configures either. It exists because the three
+ * The one place any driver configures any of them. It exists because the three
  * drivers each grew their own copy of the SSL block and only two of them ever
  * grew a proxy block, so `POST /execute` and a load run honoured
  * `CURLOPT_PROXY` while an SSE stream silently did not (issue #705). A
@@ -52,6 +53,11 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
  * reused (the single-request client keeps one for its lifetime, the event loop
  * recycles them across transfers), so a branch that left the option alone
  * would inherit whatever the previous policy put there.
+ *
+ * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
+ * on every handle: the backstop behind `validate_transferable`'s scheme rule
+ * for the two URLs it never sees - a redirect's `Location`, and the scheme
+ * libcurl guesses for a URL that names none (`ftp.example.com/x` is FTP).
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
@@ -116,7 +122,9 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Both clients call this before configuring a handle. Four such requests:
+ * Both clients call this before configuring a handle. Five such requests:
+ * a URL whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
+ * libcurl is built with other protocols and would read a `file://` URL), a
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
  * drops the body, so honouring both is impossible), a binary body whose file
  * no plan checked (`vayu::http::FilePlan` - the file rule runs once per send or

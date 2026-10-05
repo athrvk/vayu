@@ -47,6 +47,34 @@ http-client could not read - every validation message surfaced as a bare
 `HTTP 400` (issue #173). The client still accepts the flat shape so a newer app
 can read an older engine, but the engine no longer produces it.
 
+## Who may call the API
+
+The engine serves no browser. No response carries a CORS header, and the
+request gate in `server.cpp` refuses, before any route runs:
+
+- a request whose `Host` is not exactly `127.0.0.1:<port>`, `localhost:<port>`
+  or `[::1]:<port>` (the port this engine bound) - `403`, message naming the
+  Host check. This is what defeats DNS rebinding, where a page reaches the
+  listener under a name it controls and is same-origin with it;
+- any request carrying an `Origin` header, whatever its value (`null`
+  included) - `403`, message saying the engine does not serve browser origins.
+
+An `OPTIONS` request that passes the Host check is answered `204` with no body
+and no CORS header, whatever its `Origin`: a preflight that grants nothing
+leaks nothing. Local tools (the CLI, curl, the MCP server's fetch) send no
+`Origin` and are unaffected. The Electron shell is the one browser-context
+client: it strips `Origin` from the renderer's requests and supplies the CORS
+response headers the renderer needs itself (`app/electron/engine-origin.ts`).
+
+What a browser page can still send is a request with no `Origin`: a scriptless
+`GET` (`<img>`, `<script>`, `<link>`, a `no-cors` `fetch`, a top-level
+navigation) to the loopback name it dialled. That passes the gate and reaches
+a `GET` route. It is harmless because two things hold together: the response
+is opaque to the page (no CORS header, and the browser's CORB/ORB keeps a JSON
+body out of a `<script>`), and **no `GET` route has a side effect**. A page
+can therefore neither read the engine nor change it, though it can make the
+engine run any `GET` handler.
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,
@@ -466,7 +494,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
 | `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
-| `unresolved` | `true` when no person chose `src` in the editor. Optional, default `false`. |
+| `unresolved` | `false` only when a person chose `src` in the editor. Fails closed: absent, `null` or any non-boolean is `true`, so a caller that means "chosen" says `false`. |
 
 Shape refusals (`400`):
 
@@ -485,12 +513,20 @@ containment is decided on canonical paths, component by component, so a
 symlink inside an allowed folder that points outside it is outside, and
 `/data/fixtures-old` is not under `/data/fixtures`. Every writer that is not a
 person in the editor writes `unresolved: true` - importers, curl paste, MCP -
-and **composition sets it too** whenever `src` held a `{{` before resolution
+and so does every payload that omits the key; **composition sets it too** whenever `src` held a `{{` before resolution
 (`POST /compose`, and a data row bound into the path by a run), so a path a
 variable or a data set chose is sent only from under an allowed folder. The
 flag rides the wire, which is how it survives compose -> app -> execute.
 **Scripts can never choose a path**: the residual pass after the pre-request
 script resolves a reference's `fileName` and `contentType` but never `src`.
+
+**A stored request states it.** `POST`/`PUT /requests` and `POST /import/apply`
+store every file reference of a body they write with an explicit `unresolved`,
+absent read as `true`, and the
+[schema version 4 migration](db-schema.md#the-file-trust-restatement-schema-version-4)
+stated it on every body stored before. So a saved request composed by id
+(`POST /compose` with `requestId`, and every collection run) carries the key
+as stored, and an absent key means `true` there as everywhere else.
 
 Every enabled reference is checked, in this order, and the first failure
 refuses the send:
@@ -3053,7 +3089,8 @@ via libcurl and returns the raw body and content type.
 { "url": "https://example.com/collection.json", "maxBytes": 10485760 }
 ```
 
-The `url` must be a string starting with `http://` or `https://`.
+The `url` must be a string whose scheme is `http` or `https`, in any case
+(see [URL schemes](#url-schemes)).
 
 **`maxBytes` is the caller's bound on the response, and the caller states it**
 because this route is one proxy for *every* import format - a Postman or
@@ -3103,8 +3140,9 @@ never turn into a `500`.
 
 **Errors:**
 - `400` `Invalid JSON body` - the request body did not parse.
-- `400` `Invalid URL` - `url` is missing, not a string, or does
-  not start with `http://` / `https://`.
+- `400` `Invalid URL` - `url` is missing, not a string, or names no scheme.
+- `400` `Invalid URL: scheme '<scheme>' is not supported - only http and
+  https URLs can be sent` - `url` names any other scheme (`ftp`, `file`, ...).
 - `400` `Invalid 'maxBytes': must be a positive integer`.
 - `413` `Refused to fetch: <detail>` - the response was over the bound in force.
   The detail names the bound that was applied (the clamped one, not the one
@@ -4097,6 +4135,11 @@ the id, so a body `id` is a `400`.
   `..` folded, no trailing separator).
 - `400` when `path` is missing, not a string, not absolute, or not an existing
   directory.
+- `400` when the canonical path is a filesystem or drive root (`/`, `C:\`),
+  the user's home folder, or a folder that contains it (`/home`, `/Users`,
+  `C:\Users`), the message naming which: each would allow nearly every file a
+  request could name. Containment is by path component, case-folded on a drive
+  letter. A folder inside the home folder is fine.
 - `409` when the canonical path is already allowed, naming the existing row's id.
 
 ### DELETE /file-roots/:id
@@ -4934,6 +4977,31 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
+
+#### URL schemes
+
+Only `http` and `https` URLs are sent, on every send path: Send, a load or
+collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an
+OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
+The scheme is read case-insensitively from the URL as it stands just before
+the transfer - after composition, a data row's bind, the pre-request script
+and the residual pass - so a `{{baseUrl}}` that resolves to `file:///etc` is
+refused like a typed one. A refused send never reaches the network: status
+`0`, error code `INVALID_URL`, and the message
+`Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent`,
+naming the scheme as written. A `pm.sendRequest` gets the same code and
+message as its callback's `err`.
+
+A scheme is what libcurl reads as one: letters, digits, `+`, `-` and `.`
+after a leading letter, followed by `:/`. A URL with no scheme is sent as
+before, with the scheme libcurl guesses from the host - `http` for
+`localhost:8080/x` or `example.com/x`. Every transfer handle is also held to
+`http,https` (`CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR`), which
+covers what the URL check cannot see: a redirect whose `Location` names another
+scheme, and a guessed one (`ftp.example.com/x` would be FTP). Either fails as
+status `0` with error code `INVALID_URL` and libcurl's own message
+(`Protocol "ftp" is disabled`, followed by ` (in redirect)` for a redirect),
+and nothing is read.
 
 #### Non-ASCII hosts
 

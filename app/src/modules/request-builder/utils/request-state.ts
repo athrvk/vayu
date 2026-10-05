@@ -23,6 +23,7 @@ import {
 	type HttpVersion,
 } from "@/constants/request";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
+import { noFile } from "@/lib/file-trust";
 
 /**
  * Create a default RequestState with empty values.
@@ -55,7 +56,7 @@ export const createDefaultRequestState = (
 		body: "",
 		formData: [createEmptyKeyValue()],
 		urlEncoded: [createEmptyKeyValue()],
-		binaryFile: { src: "" },
+		binaryFile: noFile(),
 		auth: { mode: "none" },
 		elements: [],
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,

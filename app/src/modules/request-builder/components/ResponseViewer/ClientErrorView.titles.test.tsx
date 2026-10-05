@@ -35,3 +35,24 @@ describe("ClientErrorView headings for non-network codes", () => {
 		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
 	});
 });
+
+// The engine answers INVALID_URL both for a URL it cannot parse and for one it
+// parsed and refused by scheme, so the heading has to be true of both.
+// Mutation check: restore "Couldn't parse the URL" and the refused-scheme case
+// reads as a parse failure.
+describe("ClientErrorView heading for INVALID_URL", () => {
+	it.each([
+		["a URL that does not parse", "URL using bad/illegal format or missing URL"],
+		[
+			"a scheme the engine refuses",
+			"Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent",
+		],
+	])("names the send, not a cause, for %s", (_case, message) => {
+		render(<ClientErrorView errorCode="INVALID_URL" errorMessage={message} />);
+
+		expect(screen.getByText("Couldn't send to this URL")).toBeInTheDocument();
+		expect(screen.getByText(message)).toBeInTheDocument();
+		expect(screen.queryByText("Couldn't parse the URL")).not.toBeInTheDocument();
+		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
+	});
+});

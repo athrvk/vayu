@@ -271,6 +271,7 @@ describe("buildExecBody form modes", () => {
 				src: "/data/a.png",
 				fileName: "a.png",
 				contentType: "image/png",
+				unresolved: true,
 			},
 		]);
 	});
@@ -327,7 +328,7 @@ describe("binary bodies", () => {
 		});
 	});
 
-	it("leaves empty members and a false flag off the wire", () => {
+	it("leaves empty members off the wire and states a false flag", () => {
 		const request = binaryState({
 			src: "/fixtures/a.bin",
 			fileName: "",
@@ -337,15 +338,86 @@ describe("binary bodies", () => {
 
 		expect(buildExecBody(request, (s) => s)).toEqual({
 			mode: "binary",
-			file: { src: "/fixtures/a.bin" },
+			file: { src: "/fixtures/a.bin", unresolved: false },
 		});
 	});
 
 	it("sends an empty path rather than no body, so the engine can say why", () => {
-		expect(buildExecBody(binaryState({ src: "" }), (s) => s)).toEqual({
+		expect(buildExecBody(binaryState({ src: "", unresolved: true }), (s) => s)).toEqual({
 			mode: "binary",
-			file: { src: "" },
+			file: { src: "", unresolved: true },
 		});
+	});
+});
+
+/**
+ * The engine reads an absent `unresolved` as `true`, so every write path states
+ * it: `false` only for a file chosen in this app on this machine, `true` for
+ * anything else - a stored row from before writers sent the key included.
+ */
+describe("the file trust flag on every write path", () => {
+	/** What each writer puts on the wire, read through one shape. */
+	type Written = { fields?: Record<string, unknown>[]; file?: Record<string, unknown> };
+	const writers: [string, (r: RequestState) => Written][] = [
+		["the send", (r) => buildExecBody(r, (s) => s) as Written],
+		["the save", (r) => toBodyPayload(r) as Written],
+	];
+
+	function filePart(unresolved: boolean | undefined): KeyValueItem {
+		return {
+			id: "file-row",
+			key: "avatar",
+			value: "",
+			enabled: true,
+			type: "file",
+			src: "/tmp/a.png",
+			unresolved,
+		};
+	}
+
+	function formState(unresolved: boolean | undefined): RequestState {
+		return {
+			...createDefaultRequestState(),
+			bodyMode: "form-data",
+			formData: [filePart(unresolved)],
+		};
+	}
+
+	function binaryState(unresolved: boolean | undefined): RequestState {
+		// A row stored before the key existed reaches the editor without it.
+		const file = { src: "/tmp/a.bin", unresolved } as RequestState["binaryFile"];
+		return { ...createDefaultRequestState(), bodyMode: "binary", binaryFile: file };
+	}
+
+	describe.each(writers)("%s", (_name, write) => {
+		it.each([
+			[false, false],
+			[true, true],
+			[undefined, true],
+		])("a form-data file part with %s sends %s", (given, sent) => {
+			expect(write(formState(given)).fields?.[0]).toHaveProperty("unresolved", sent);
+		});
+
+		it.each([
+			[false, false],
+			[true, true],
+			[undefined, true],
+		])("a binary file with %s sends %s", (given, sent) => {
+			expect(write(binaryState(given)).file).toHaveProperty("unresolved", sent);
+		});
+
+		it("a text part carries no flag at all", () => {
+			const request: RequestState = {
+				...createDefaultRequestState(),
+				bodyMode: "form-data",
+				formData: [{ id: "t", key: "caption", value: "hi", enabled: true }],
+			};
+			expect(write(request).fields?.[0]).not.toHaveProperty("unresolved");
+		});
+	});
+
+	it("a new request's empty binary body is not trusted", () => {
+		expect(createDefaultRequestState().binaryFile).toEqual({ src: "", unresolved: true });
 	});
 });
 

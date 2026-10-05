@@ -10,6 +10,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -51,10 +52,11 @@ void log_request (const RequestLogLine& line) {
     }
 }
 
-void install_request_logger (httplib::Server& server) {
-    server.set_pre_routing_handler ([] (const httplib::Request&, httplib::Response& res) {
+void install_request_logger (httplib::Server& server, RequestGate gate) {
+    server.set_pre_routing_handler (
+    [gate = std::move (gate)] (const httplib::Request& req, httplib::Response& res) {
         res.user_data.set (kStartTimeKey, std::chrono::steady_clock::now ());
-        return httplib::Server::HandlerResponse::Unhandled;
+        return gate ? gate (req, res) : httplib::Server::HandlerResponse::Unhandled;
     });
 
     server.set_logger ([] (const httplib::Request& req, const httplib::Response& res) {

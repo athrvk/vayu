@@ -60,6 +60,7 @@ add_executable(vayu_tests
     load_stream_events_test.cpp
     sse_stream_test.cpp
     server_bind_test.cpp
+    server_gate_test.cpp
     request_log_test.cpp
     log_category_scan_test.cpp
     log_record_schema_test.cpp
@@ -158,6 +159,7 @@ add_executable(vayu_tests
     query_encoding_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
+    url_scheme_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
     jmeter_import_test.cpp
@@ -400,6 +402,7 @@ set(vayu_scratch_database_suites
     ScriptVariableScopesTest
     SendTimeQueryValues
     ServerBindTest
+    ServerGateTest
     SpecBindRouteTest
     SpecExportRouteTest
     SpecMatchRouteTest
@@ -415,6 +418,7 @@ set(vayu_scratch_database_suites
     TransportPolicyDbTest
     TrashTest
     TreeOrderTest
+    UrlSchemeExecuteTest
     WorkspaceBackupTest
 )
 

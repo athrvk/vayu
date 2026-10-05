@@ -63,6 +63,13 @@ everything.
   nothing else** (`electron/packaged-dependencies.test.ts`). electron-builder
   packs it, and only it, into the asar; every package Vite bundles for the
   renderer is a devDependency. See `docs/app/building.md#dependencies`.
+- **The renderer reaches the engine only through `ENGINE_BASE_URL`**
+  (`src/config/network.ts`). The engine refuses any request that carries an
+  `Origin`, and the renderer's get through only because
+  `electron/engine-origin.ts` strips it for exactly that URL; the same engine
+  spelled `localhost:9876` is outside the filter and is refused. That module is
+  also the one place a `webRequest` listener may be registered, because Electron
+  keeps one per event per session (`engine-origin.test.ts`).
 - State: Zustand for UI state, TanStack Query for server state.
 - **A save that fails is retried, and the failure stays on screen until it
   lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,
@@ -263,6 +270,21 @@ what you measure. Every root poll is a TanStack `refetchInterval` with the
 background default, so a hidden window measures the paused case; an idle
 figure needs the window visible and untouched, and the health log's 30 s
 cadence is the proxy that proves it was.
+
+**Plain Chromium needs the shell's bridge, or the engine refuses it.** It
+sends `Origin: http://localhost:<port>` on every engine call and has no
+`electron/engine-origin.ts`, so the gated engine answers `403` and the renderer
+reads it as a CORS failure. Give the page the same bridge over a CDP session
+(`context.newCDPSession(page)`): `Fetch.enable` on the engine URL at both the
+`Request` and the `Response` stage; a paused request continues
+(`Fetch.continueRequest`) without `Origin` and `Referer`; a paused response
+continues (`Fetch.continueResponse`) with `Access-Control-Allow-Origin: *`
+added and, on an `OPTIONS`, the preflight's `Access-Control-Request-Method` /
+`-Headers` echoed as `Access-Control-Allow-Methods` / `-Headers`. The body
+streams through untouched, so the renderer's `EventSource`s (run events, the
+inbox live view) work. `context.route` cannot do this: `route.continue`
+cannot add a response header, and `route.fetch` reads the whole body before
+`route.fulfill` answers, so a stream never opens.
 
 ## Docs to keep in step
 
