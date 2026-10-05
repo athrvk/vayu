@@ -9637,6 +9637,160 @@ describe("secret withholding", () => {
 		expect(firstText(res)).toContain("clientSecretWithheld");
 		expect(client.createCollection).not.toHaveBeenCalled();
 	});
+
+	// A Postman import keeps the auth as Postman wrote it under `postman`, raw
+	// credentials included: the engine's `redact_postman_auth` is the rule.
+	const POSTMAN_REQUESTS = [
+		{
+			id: "req_pm1",
+			name: "Imported bearer",
+			auth: {
+				mode: "bearer",
+				token: "{{tok}}",
+				postman: {
+					type: "bearer",
+					bearer: [{ key: "token", value: "pm-bearer-raw", type: "string" }],
+				},
+			},
+		},
+		{
+			id: "req_pm2",
+			name: "Imported OAuth 2.0",
+			auth: {
+				mode: "oauth2",
+				config: { grantType: "client_credentials", clientId: "app" },
+				postman: {
+					type: "oauth2",
+					oauth2: [
+						{ key: "clientSecret", value: "pm-cs-raw", type: "string" },
+						{ key: "clientId", value: "app", type: "string" },
+						{ key: "accessToken", value: "{{seeded}}", type: "string" },
+						{
+							key: "tokenRequestParams",
+							value: [
+								{ key: "client_secret", value: "pm-param-raw", enabled: true },
+								{ key: "audience", value: "api", enabled: true },
+							],
+							type: "any",
+						},
+					],
+				},
+			},
+		},
+	];
+
+	test("list_requests withholds the credentials in a Postman import's source", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(POSTMAN_REQUESTS) });
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of ["pm-bearer-raw", "pm-cs-raw", "pm-param-raw"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.postman.bearer).toEqual([
+			{ key: "token", type: "string", valueWithheld: true },
+		]);
+		expect(body[1].auth.postman.oauth2).toEqual([
+			{ key: "clientSecret", type: "string", valueWithheld: true },
+			{ key: "clientId", value: "app", type: "string" },
+			{ key: "accessToken", value: "{{seeded}}", type: "string" },
+			{
+				key: "tokenRequestParams",
+				value: [
+					{ key: "client_secret", enabled: true, valueWithheld: true },
+					{ key: "audience", value: "api", enabled: true },
+				],
+				type: "any",
+			},
+		]);
+	});
+
+	test("list_requests returns a Postman import's source whole with reveal on", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(POSTMAN_REQUESTS) });
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual(POSTMAN_REQUESTS);
+	});
+
+	test("list_collections withholds a v2.0 Postman source's credentials unless revealed", async () => {
+		const collections = [
+			{
+				id: "c1",
+				name: "API",
+				auth: {
+					mode: "oauth2",
+					config: { grantType: "client_credentials", clientId: "app" },
+					postman: {
+						type: "oauth2",
+						oauth2: {
+							clientId: "app",
+							clientSecret: "pm-v20-raw",
+							refreshRequestParams: [{ key: "refresh_token", value: "pm-rt-raw" }],
+						},
+					},
+				},
+			},
+		];
+		const client = fakeClient({ listCollections: vi.fn().mockResolvedValue(collections) });
+		const withheld = await read("list_collections", client);
+		expect(withheld.text).not.toContain("pm-v20-raw");
+		expect(withheld.text).not.toContain("pm-rt-raw");
+		expect(withheld.body[0].auth.postman).toEqual({
+			type: "oauth2",
+			oauth2: {
+				clientId: "app",
+				clientSecretWithheld: true,
+				refreshRequestParams: [{ key: "refresh_token", valueWithheld: true }],
+			},
+		});
+		const revealed = await read("list_collections", client, REVEAL);
+		expect(revealed.body[0].auth.postman).toEqual(collections[0].auth.postman);
+	});
+
+	test("an auth argument whose Postman source was read withheld is refused", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{
+				requestId: "req_pm2",
+				auth: {
+					mode: "oauth2",
+					postman: {
+						type: "oauth2",
+						oauth2: [
+							{
+								key: "tokenRequestParams",
+								value: [{ key: "client_secret", valueWithheld: true }],
+							},
+						],
+					},
+				},
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(
+			"postman.oauth2[tokenRequestParams][client_secret].valueWithheld"
+		);
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("so is one whose v2.0 Postman source carries a withheld member", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_collection",
+			{
+				name: "API",
+				auth: {
+					mode: "bearer",
+					postman: { type: "bearer", bearer: { tokenWithheld: true } },
+				},
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("postman.bearer.tokenWithheld");
+		expect(client.createCollection).not.toHaveBeenCalled();
+	});
 });
 
 /**

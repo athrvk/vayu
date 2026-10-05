@@ -15,14 +15,20 @@
  * Withheld is stated, never silent - the `projectOAuth2Token` precedent. An
  * agent that finds no value and is not told why concludes the data is empty or
  * broken, and acts on that. So a withheld variable or cookie carries
- * `valueWithheld: true`, an auth member `<member>Withheld: true`, and a config
- * URL `credentialsWithheld: true`.
+ * `valueWithheld: true`, an auth member `<member>Withheld: true`, a credential
+ * row (a Postman attribute or parameter row) `valueWithheld: true` on the row,
+ * and a config URL `credentialsWithheld: true`.
  *
- * Every read surface goes through here: the read tools, the `vayu://`
- * resources, and `update_engine_config`'s echo of the config table. What it
- * does not cover is said where it matters, in SECURITY.md: with write access
- * on, an agent can clear a variable's `secret` flag and read it back, and a
- * write tool's own answer echoes the stored row.
+ * What goes through here is what is *stored*: environments, globals,
+ * collections and requests as the read tools and the `vayu://` resources answer
+ * them, the cookie jars, and the config table (`update_engine_config`'s echo
+ * included). What a run *recorded* does not: a request that references a
+ * secret still sends it, so the trace of what was sent carries it, and
+ * `rawRequest`, `get_run_report`, `get_run_samples`, `list_runs`,
+ * `vayu://runs`, `vayu://run/*`, the run-report prompts, `get_inbox_captures`
+ * and `list_request_examples` answer it as recorded. SECURITY.md says so, and
+ * says what write access adds: an agent can clear a variable's `secret` flag
+ * and read it back, and a write tool's own answer echoes the stored row.
  */
 
 import type { McpSafetyConfig } from "./config.js";
@@ -42,7 +48,7 @@ const REVEAL_SETTING = "Reveal secrets to agents (Vayu Settings → MCP)";
 export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; a request that references it still sends with it, because the engine resolves it.`;
 
 /** What a read carrying auth blocks says about the credentials in them. */
-export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
+export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value, and a credential row in a Postman import's \`postman\` source as \`valueWithheld: true\` on the row, unless the user has turned on ${REVEAL_SETTING}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
 
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
@@ -106,6 +112,23 @@ const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
 	"code_verifier",
 ]);
 
+/**
+ * The wire names a credential goes by in a Postman OAuth 2.0 block's extra
+ * request parameters (`tokenRequestParams`, `authRequestParams`,
+ * `refreshRequestParams`: `{key, value, ...}` rows), beside the members above.
+ * The engine's `SECRET_PARAM_KEYS`, beside `SECRET_AUTH_KEYS`.
+ */
+const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
+	"client_secret",
+	"client_assertion",
+	"code_verifier",
+	"refresh_token",
+	"access_token",
+	"id_token",
+	"password",
+	"assertion",
+]);
+
 /** The member an auth block carries in place of @p member once it is withheld. */
 function withheldMarker(member: string): string {
 	return `${member}Withheld`;
@@ -138,30 +161,126 @@ function withholdCredentialMembers(block: Record<string, unknown>): Record<strin
 	return out;
 }
 
+function withholdRowValue(row: Record<string, unknown>): Record<string, unknown> {
+	const { value, ...rest } = row;
+	return { ...rest, ...withValue(value, true) };
+}
+
+function namesCredentialParam(key: unknown): boolean {
+	return (
+		typeof key === "string" &&
+		(CREDENTIAL_AUTH_MEMBERS.has(key) || CREDENTIAL_PARAM_KEYS.has(key))
+	);
+}
+
+/** `{key, value}` rows, each whose key names a credential with its value withheld. */
+function withholdParamRows(rows: unknown): unknown {
+	if (!Array.isArray(rows)) return rows;
+	return rows.map((row) =>
+		isRecord(row) && namesCredentialParam(row.key) && holdsCredential(row.value)
+			? withholdRowValue(row)
+			: row
+	);
+}
+
+/** One v2.1 `{key, value, type}` attribute: a credential, or parameter rows to walk. */
+function withholdPostmanAttribute(attribute: unknown): unknown {
+	if (!isRecord(attribute) || typeof attribute.key !== "string") return attribute;
+	if (CREDENTIAL_AUTH_MEMBERS.has(attribute.key)) {
+		return holdsCredential(attribute.value) ? withholdRowValue(attribute) : attribute;
+	}
+	return Array.isArray(attribute.value)
+		? { ...attribute, value: withholdParamRows(attribute.value) }
+		: attribute;
+}
+
+/** One Postman auth type's detail: v2.1's attribute array, or v2.0's `{name: value}` object. */
+function withholdPostmanDetail(detail: unknown): unknown {
+	if (Array.isArray(detail)) return detail.map(withholdPostmanAttribute);
+	if (!isRecord(detail)) return detail;
+	return Object.fromEntries(
+		Object.entries(withholdCredentialMembers(detail)).map(([name, value]) => [
+			name,
+			withholdParamRows(value),
+		])
+	);
+}
+
+/**
+ * A Postman import's `postman` source (`{type, <type>: detail}`), which keeps
+ * the auth as Postman wrote it, raw credentials included. The engine's
+ * `redact_postman_auth`.
+ */
+function withholdPostmanAuth(source: unknown): unknown {
+	if (!isRecord(source)) return source;
+	return Object.fromEntries(
+		Object.entries(source).map(([member, value]) => [
+			member,
+			member === "type" ? value : withholdPostmanDetail(value),
+		])
+	);
+}
+
 /**
  * An auth block with its credentials withheld: the flat modes keep theirs at
  * the top level (`bearer.token`, `basic.password`, `apikey.value`), the rest
- * under `config` (OAuth 2.0's `clientSecret`, AWS's key pair, ...).
+ * under `config` (OAuth 2.0's `clientSecret`, AWS's key pair, ...), and a
+ * Postman import also under `postman`. The engine's `redact_level`.
  */
 function withholdAuth(auth: unknown): unknown {
 	if (!isRecord(auth)) return auth;
 	const outer = withholdCredentialMembers(auth);
-	return isRecord(outer.config)
-		? { ...outer, config: withholdCredentialMembers(outer.config) }
-		: outer;
+	return {
+		...outer,
+		...(isRecord(outer.config) ? { config: withholdCredentialMembers(outer.config) } : {}),
+		...("postman" in outer ? { postman: withholdPostmanAuth(outer.postman) } : {}),
+	};
+}
+
+function memberMarkers(block: Record<string, unknown>): string[] {
+	return [...CREDENTIAL_AUTH_MEMBERS]
+		.map(withheldMarker)
+		.filter((marker) => block[marker] !== undefined);
+}
+
+/** `valueWithheld` rows under @p path, through parameter rows nested in an attribute's value. */
+function rowMarkers(rows: unknown, path: string): string[] {
+	if (!Array.isArray(rows)) return [];
+	return rows.flatMap((row) => {
+		if (!isRecord(row)) return [];
+		const at = `${path}[${String(row.key)}]`;
+		const own = row.valueWithheld === undefined ? [] : [`${at}.valueWithheld`];
+		return [...own, ...rowMarkers(row.value, at)];
+	});
+}
+
+function postmanMarkers(source: unknown): string[] {
+	if (!isRecord(source)) return [];
+	return Object.entries(source).flatMap(([type, detail]) => {
+		if (type === "type") return [];
+		const path = `postman.${type}`;
+		if (!isRecord(detail)) return rowMarkers(detail, path);
+		return [
+			...memberMarkers(detail).map((marker) => `${path}.${marker}`),
+			...Object.entries(detail).flatMap(([name, value]) =>
+				rowMarkers(value, `${path}.${name}`)
+			),
+		];
+	});
 }
 
 /**
- * The withheld markers in an auth block an agent passed back, top level and
- * `config`. A block read with its credentials withheld and written back would
- * store, or send, no credential in their place.
+ * The withheld markers in an auth block an agent passed back: top level,
+ * `config`, and a Postman import's `postman` source. A block read with its
+ * credentials withheld and written back would store, or send, no credential
+ * in their place.
  */
 export function withheldAuthMembers(auth: Record<string, unknown>): string[] {
-	const markers = (block: Record<string, unknown>) =>
-		[...CREDENTIAL_AUTH_MEMBERS]
-			.map(withheldMarker)
-			.filter((marker) => block[marker] !== undefined);
-	return [...markers(auth), ...(isRecord(auth.config) ? markers(auth.config) : [])];
+	return [
+		...memberMarkers(auth),
+		...(isRecord(auth.config) ? memberMarkers(auth.config) : []),
+		...postmanMarkers(auth.postman),
+	];
 }
 
 // --- Rows ---------------------------------------------------------------------

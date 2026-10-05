@@ -49,9 +49,12 @@ read that file can read every value in it.
 Tools an MCP client calls receive the same data the UI shows, except your
 secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
 by default), the values of variables marked secret, the credentials in auth
-blocks, cookie values and the password in a proxy URL are withheld from every
-read, each marked as withheld. Requests an agent sends still use them; the
-engine fills them in. An agent backed by a hosted model forwards what it reads
+blocks, cookie values and the password in a proxy URL are withheld wherever an
+agent reads what you stored, each marked as withheld. Requests an agent sends
+still use them; the engine fills them in. That is also why the record of a
+send is not withheld: a request that references a secret sends it, so its run
+history, trace, saved examples and inbox captures show what went over the
+wire, secret included. An agent backed by a hosted model forwards what it reads
 to that model's provider. Treat connecting an agent as granting it read access
 to the rest of your workspace, and keep the server off until you want that.
 

@@ -1644,26 +1644,36 @@ cannot read a missing value as an empty one:
 | ---- | ----------- | ------- |
 | A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
+| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `list_collections`, `vayu://collections` |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 
-The credential list is the engine's own `SECRET_AUTH_KEYS`
-(`core/vayu_extensions.cpp`), the set a collection export blanks. An auth
-member holding one `{{variable}}` reference and nothing else is shown as
+The credential lists are the engine's own `SECRET_AUTH_KEYS` and
+`SECRET_PARAM_KEYS` (`core/vayu_extensions.cpp`), the sets a collection export
+blanks, and the `postman` walk is its `redact_postman_auth`. An auth
+member or row holding one `{{variable}}` reference and nothing else is shown as
 written, the way the export keeps it: it names where the secret lives without
 being it, and the variable it names is withheld on its own terms. An auth block
-carrying a `<member>Withheld` marker is refused as `auth` by every tool that
-takes one (`readAuthArg`): stored, it would replace the user's credential with
-nothing, and sent, it would authenticate with nothing. A request that
-*references* a secret still sends with it, because the engine resolves it. The
-server instructions state the withholding in every session where reveal is
-off, beside the write gate's sentence and for the same reason. The projection
-lives in `withhold.ts`.
+carrying a withheld marker (a `<member>Withheld` member, top level, under
+`config` or in its `postman` source, or a `valueWithheld` row in that source)
+is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
+would replace the user's credential with nothing, and sent, it would
+authenticate with nothing. The server instructions state the withholding in
+every session where reveal is off, beside the write gate's sentence and for the
+same reason. The projection lives in `withhold.ts`.
 
-Withholding covers what an agent *reads*. It is not a boundary against an agent
-with write access: a write tool's answer echoes the stored row it changed, and
-`update_environment` can clear a variable's `secret` flag, after which it reads
-in full. Keep write access off where that matters.
+Withholding covers what is *stored*, not what a run *recorded*. A request that
+references a secret still sends it, because the engine resolves it, so the
+record of what was sent shows it: a trace's `rawRequest` and headers in
+`get_run_report`, `get_run_samples` and `vayu://run/{runId}/report`, the run
+rows in `list_runs` and `vayu://runs`, the run-report prompts, an inbox
+capture in `get_inbox_captures`, and a saved example in
+`list_request_examples` are answered as recorded, reveal or not.
+
+Nor is it a boundary against an agent with write access: a write tool's answer
+echoes the stored row it changed, and `update_environment` can clear a
+variable's `secret` flag, after which it reads in full. Keep write access off
+where that matters.
 
 ### Safety config
 
