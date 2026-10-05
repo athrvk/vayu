@@ -1092,6 +1092,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         set_opt<CURLOPT_VERBOSE> (curl, 1L);
         set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
         set_opt<CURLOPT_DEBUGDATA> (curl, data);
+        data->secret_header_names = request.secret_header_names;
     }
 
     // Store private data pointer

@@ -1,0 +1,28 @@
+{
+  "$comment": "Cross-language conformance fixture for log redaction (issue #1781). Read by BOTH the engine gtest suite (engine/tests/debug_redact_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/electron/log-redaction.conformance.test.ts). `secretFieldNames` is every name `is_secret_field_name` / `isSecretFieldName` must redact; `notSecretFieldNames` must pass through; `stripUrlSecrets` maps an input to what both `strip_url_secrets` and `stripUrlSecrets` must return.",
+  "secretFieldNames": [
+    "authorization", "Proxy-Authorization", "cookie", "Set-Cookie", "www-authenticate",
+    "proxy-authenticate", "authentication-info", "token", "access_token", "refresh_token",
+    "client_secret", "password", "apikey", "X-API-Key", "x-auth-token", "x-csrf-token",
+    "passphrase", "api_key", "id_token", "code", "code_verifier", "private_key"
+  ],
+  "notSecretFieldNames": ["auth_token", "content-type", "host", "codes"],
+  "stripUrlSecrets": [
+    { "name": "userinfo and query", "in": "https://u:p@host/path?api_key=SECRET", "out": "https://host/path" },
+    { "name": "bare path query", "in": "/p?api_key=SECRET", "out": "/p" },
+    { "name": "request line keeps the protocol suffix", "in": "GET /p?k=v HTTP/1.1", "out": "GET /p HTTP/1.1" },
+    { "name": "nothing to strip", "in": "https://host/path", "out": "https://host/path" },
+    { "name": "bare path", "in": "/path", "out": "/path" },
+    { "name": "scheme-less userinfo", "in": "user:pw@proxy:8080", "out": "proxy:8080" },
+    { "name": "scheme-less userinfo with a path", "in": "user:pw@proxy:8080/x", "out": "proxy:8080/x" },
+    { "name": "password containing an at sign", "in": "http://u:p@ss@h", "out": "http://h" },
+    { "name": "password containing an at sign, with a path", "in": "http://u:p@ss@h:8080/x", "out": "http://h:8080/x" },
+    { "name": "fragment token", "in": "https://h/cb#access_token=SECRET", "out": "https://h/cb" },
+    { "name": "fragment with a query", "in": "https://h/cb?a=1#access_token=SECRET", "out": "https://h/cb" },
+    { "name": "at sign in a query value is not userinfo", "in": "https://h/p?email=a@b.c", "out": "https://h/p" },
+    { "name": "at sign in a path is not userinfo", "in": "https://h/p@q", "out": "https://h/p@q" },
+    { "name": "scheme in a query value is not an authority", "in": "/p?next=http://u:p@h", "out": "/p" },
+    { "name": "host with no credentials and no scheme", "in": "proxy:8080", "out": "proxy:8080" },
+    { "name": "empty", "in": "", "out": "" }
+  ]
+}

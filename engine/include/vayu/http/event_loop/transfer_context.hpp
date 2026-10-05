@@ -95,6 +95,9 @@ struct TransferData {
     /// The redacted, per-line collector for the one `cat=client` record this
     /// transfer emits when verbosity reaches 2 (issue #1557); empty otherwise.
     std::vector<std::string> debug_lines;
+    /// Header names the debug collector redacts beyond the shared list - the
+    /// request's `Request::secret_header_names`.
+    std::vector<std::string> secret_header_names;
 
     CurlErrorBuffer errors;
     struct curl_slist* headers_list = nullptr;

@@ -72,19 +72,30 @@ depth (`vayu::utils::redact_fields`, `utils/log_redact.hpp`):
 
 - A field named `authorization`, `proxy-authorization`, `cookie`,
   `set-cookie`, `www-authenticate`, `proxy-authenticate`,
-  `authentication-info`, `token`, `access_token`, `refresh_token`,
-  `client_secret`, `password`, `apikey` or `x-api-key` (case-insensitive)
-  becomes `"<redacted>"` wholesale.
+  `authentication-info`, `token`, `access_token`, `refresh_token`, `id_token`,
+  `client_secret`, `password`, `passphrase`, `apikey`, `api_key`, `x-api-key`,
+  `x-auth-token`, `x-csrf-token`, `code`, `code_verifier`, `private_key`,
+  `secret_access_key`, `secretaccesskey` or `session_token`
+  (case-insensitive) becomes `"<redacted>"` wholesale.
 - A field whose name ends in `url` or `Url` goes through `strip_url_secrets`:
-  userinfo and the query string removed, scheme/host/path kept
-  (`https://u:p@h/x?y=1` becomes `https://h/x`).
+  userinfo, the query string and the fragment removed, scheme/host/path kept
+  (`https://u:p@h/x?y=1` becomes `https://h/x`). Userinfo is everything before
+  the last `@` of the authority, with or without a scheme, so a scheme-less
+  proxy `user:pw@proxy:8080` and a password containing `@`
+  (`http://u:p@ss@h`) leave nothing behind.
+
+The app's `log.ts` ports both rules, and
+`engine/tests/fixtures/log-redaction-conformance.json` pins the field list and
+the URL cases for the two languages.
 
 A curl verbose exchange (`vayu-engine --verbose 2`, or a run with its own
 `verbose` override) is one `cat=client` record per transfer rather than one
 line per frame: `lines[]` holds each physical line of the outgoing and
 incoming header blocks, each redacted the same way `debug_redact.hpp` always
-has (`Authorization: <redacted>`), plus the request line's query string
-through the same URL rule.
+has (`Authorization: <redacted>`) - the same field list, plus the header the
+request's own API-key auth names - plus the request line's query string
+through the same URL rule. curl's own `*` text lines are scrubbed for every
+URL they quote (`Issue another request to this URL: '...'`).
 
 ## Files, rotation and retention
 

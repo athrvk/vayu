@@ -72,9 +72,20 @@ const SECRET_FIELD_NAMES = new Set([
 	"password",
 	"apikey",
 	"x-api-key",
+	"x-auth-token",
+	"x-csrf-token",
+	"passphrase",
+	"api_key",
+	"id_token",
+	"code",
+	"code_verifier",
+	"private_key",
+	"secret_access_key",
+	"secretaccesskey",
+	"session_token",
 ]);
 
-function isSecretFieldName(name: string): boolean {
+export function isSecretFieldName(name: string): boolean {
 	return SECRET_FIELD_NAMES.has(name.toLowerCase());
 }
 
@@ -85,31 +96,35 @@ function isUrlFieldName(name: string): boolean {
 
 /**
  * Strip a URL (or a bare path-and-query) to scheme, host and path, dropping
- * `user:pass@` and the whole query string. A line-for-line port of
- * `strip_url_secrets` in `log_redact.hpp`: `https://u:p@h/x?y=1` becomes
- * `https://h/x`; `/p?api_key=S HTTP/1.1` becomes `/p HTTP/1.1`.
+ * userinfo, the query string and the fragment. A line-for-line port of
+ * `strip_url_secrets` in `log_redact.hpp`, pinned to it by
+ * `engine/tests/fixtures/log-redaction-conformance.json`: userinfo is
+ * everything before the last `@` of the authority, with or without a scheme.
  */
-function stripUrlSecrets(url: string): string {
+export function stripUrlSecrets(url: string): string {
 	let rest = url;
 	let prefix = "";
 
-	const schemeEnd = rest.indexOf("://");
-	if (schemeEnd !== -1) {
-		const hostStart = schemeEnd + 3;
-		const pathStart = rest.indexOf("/", hostStart);
-		let authority = pathStart === -1 ? rest.slice(hostStart) : rest.slice(hostStart, pathStart);
-		const at = authority.indexOf("@");
-		if (at !== -1) authority = authority.slice(at + 1);
-		prefix = rest.slice(0, schemeEnd + 3) + authority;
-		rest = pathStart === -1 ? "" : rest.slice(pathStart);
+	let schemeEnd = rest.indexOf("://");
+	if (schemeEnd !== -1 && /[/?# \t]/.test(rest.slice(0, schemeEnd))) schemeEnd = -1;
+	const authorityStart = schemeEnd === -1 ? 0 : schemeEnd + 3;
+	const authorityEndMatch = /[/?#]/.exec(rest.slice(authorityStart));
+	const authorityEnd = authorityEndMatch ? authorityStart + authorityEndMatch.index : -1;
+	const authority = rest.slice(authorityStart, authorityEnd === -1 ? undefined : authorityEnd);
+	const isAuthority =
+		schemeEnd !== -1 || (authority !== "" && !/[ \t]/.test(authority) && authorityEnd !== 0);
+	const at = authority.lastIndexOf("@");
+	if (isAuthority && at !== -1) {
+		prefix = rest.slice(0, authorityStart) + authority.slice(at + 1);
+		rest = authorityEnd === -1 ? "" : rest.slice(authorityEnd);
 	}
 
 	let suffix = "";
-	const query = rest.indexOf("?");
-	if (query !== -1) {
-		const afterQuery = rest.indexOf(" ", query);
-		if (afterQuery !== -1) suffix = rest.slice(afterQuery);
-		rest = rest.slice(0, query);
+	const cut = rest.search(/[?#]/);
+	if (cut !== -1) {
+		const after = rest.indexOf(" ", cut);
+		if (after !== -1) suffix = rest.slice(after);
+		rest = rest.slice(0, cut);
 	}
 
 	return prefix + rest + suffix;
