@@ -236,7 +236,10 @@ export function TabStrip() {
 					    this floors the menu wide enough to hold an overflowed tab's
 					    name, not chrome rhythm, and `min-w-56` rode `--spacing`,
 					    narrowing it at the Default density. */}
-					<DropdownMenuContent align="end" className="max-h-80 min-w-3xs overflow-y-auto">
+					<DropdownMenuContent
+						align="end"
+						className="max-h-80 min-w-3xs overflow-y-auto [scrollbar-gutter:auto]"
+					>
 						{overflowed.map((i) => {
 							const d = descriptors[i];
 							const Icon = d.icon;

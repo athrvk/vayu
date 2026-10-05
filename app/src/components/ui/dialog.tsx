@@ -116,7 +116,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// anything that wants more room wants a pane, not a wider modal.
 					// See docs/design-system.md; go wider only with content that
 					// earns it.
-					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto rounded-lg border bg-background p-5 shadow-lg",
+					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto [scrollbar-gutter:auto] rounded-lg border bg-background p-5 shadow-lg",
 					className
 				)}
 				{...props}
@@ -178,7 +178,7 @@ const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement
 	<div
 		data-slot="dialog-body"
 		className={cn(
-			"min-h-0 min-w-0 flex-auto overflow-y-auto -mx-1 px-1 -my-px py-px",
+			"min-h-0 min-w-0 flex-auto overflow-y-auto [scrollbar-gutter:auto] -mx-1 px-1 -my-px py-px",
 			className
 		)}
 		{...props}

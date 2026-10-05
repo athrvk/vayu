@@ -138,6 +138,29 @@ describe("scrollbar width", () => {
 		}
 	});
 
+	it("opts floating menus, dialogs and the markdown editor out of the gutter reserve", () => {
+		const optOut = "[scrollbar-gutter:auto]";
+		const files = [
+			"dropdown-menu.tsx",
+			"select.tsx",
+			"context-menu.tsx",
+			"command.tsx",
+			"dialog.tsx",
+			"markdown-editor.tsx",
+			join("..", "layout", "TabStrip.tsx"),
+		];
+		for (const file of files) {
+			const source = readFileSync(join(here, file), "utf8");
+			expect(source.length, file).toBeGreaterThan(0);
+			expect(source, file).toContain(optOut);
+		}
+		// dialog.tsx: the panel and the body; markdown-editor.tsx: textarea and preview.
+		const count = (file: string) =>
+			readFileSync(join(here, file), "utf8").split(optOut).length - 1;
+		expect(count("dialog.tsx")).toBe(2);
+		expect(count("markdown-editor.tsx")).toBe(2);
+	});
+
 	it("reserves a gutter for scrollbars on scroll containers only, outside the @supports guard", () => {
 		const rules = css.replace(/\/\*[\s\S]*?\*\//g, (c) => " ".repeat(c.length));
 

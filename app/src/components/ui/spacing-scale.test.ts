@@ -51,7 +51,7 @@ describe("spacing scale - DialogContent", () => {
 	it("uses the tightened p-5 gap-3 panel padding, not p-6 gap-4", () => {
 		expect(dialog).not.toMatch(/flex-col gap-4 .*p-6 shadow-lg/);
 		expect(dialog).toContain(
-			"flex-col gap-3 overflow-y-auto rounded-lg border bg-background p-5 shadow-lg"
+			"flex-col gap-3 overflow-y-auto [scrollbar-gutter:auto] rounded-lg border bg-background p-5 shadow-lg"
 		);
 	});
 });

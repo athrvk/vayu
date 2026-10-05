@@ -3534,6 +3534,8 @@ Do not take a content pane below 6px: the thumb stops being a mouse target.
 
 The baseline also reserves a 6px gutter with `scrollbar-gutter: stable` on scroll containers (via Tailwind utility classes), placed outside the `@supports` guard because this property does not trigger the standard-property opt-out that affects width and color. Per CSS Overflow 4, the gutter reserves for `overflow: hidden` too, so it is scoped via CSS class selectors rather than applying globally - `overflow-hidden` is used throughout the app for text truncation and clipping, and deserves no dead 6px strip.
 
+Surfaces where a permanent 6px reserve reads as a dead band opt out with `[scrollbar-gutter:auto]` (arbitrary property, so it beats the zero-specificity baseline): the floating menus (`dropdown-menu`, `select`, `context-menu`, `command` list, the tab overflow menu), the dialog panel and body, and the markdown editor's textarea and preview. They only scroll rarely and would otherwise show an empty strip inside a padded surface; the trade-off is that their content shifts by the scrollbar width on the occasions they do overflow. Sidebar lists (history, trash) keep the reserve and no longer add their own `pr-1`.
+
 ### Tab strips: `scrollbar-strip`
 
 A `TabsList` that scrolls natively (request builder, response viewer,
