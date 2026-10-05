@@ -2268,7 +2268,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 4);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 5);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))

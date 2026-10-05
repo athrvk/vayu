@@ -1756,7 +1756,6 @@ struct OAuthToken {
     std::string scope;
     int64_t expires_in = 0; // seconds; 0 = non-expiring
     int64_t created_at = 0; // ms epoch
-    std::string raw_response; // provider JSON (truncated); debugging only, never logged
 };
 
 /**

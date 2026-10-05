@@ -494,8 +494,7 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("refresh_token", &OAuthToken::refresh_token),
     make_column ("scope", &OAuthToken::scope),
     make_column ("expires_in", &OAuthToken::expires_in),
-    make_column ("created_at", &OAuthToken::created_at),
-    make_column ("raw_response", &OAuthToken::raw_response)),
+    make_column ("created_at", &OAuthToken::created_at)),
 
     // Client certificates: which certificate is presented to which host
     // (issue #707). A new table, so sync_schema() creates it outright and there

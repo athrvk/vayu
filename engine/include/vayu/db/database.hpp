@@ -47,9 +47,11 @@ namespace vayu::db {
  * 4 - no mapping change: every stored body's file references state
  *     `unresolved`, and the allowed folders the root rule refuses are gone.
  *     Bumped because the version is the migration's done-marker, and so an
- *     engine that reads an absent key as chosen never opens the workspace.
+ *     engine that reads an absent key as chosen never opens the workspace;
+ * 5 - `oauth_tokens.raw_response` dropped (#1781): it held the provider's
+ *     response, refresh and id tokens included, and nothing read it.
  */
-inline constexpr int SCHEMA_VERSION = 4;
+inline constexpr int SCHEMA_VERSION = 5;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
