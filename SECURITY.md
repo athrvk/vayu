@@ -14,7 +14,10 @@ desktop tool, not a multi-tenant service.
 Vayu does not defend the engine against other programs running under your
 account: they can already read the database. A web page open in your browser is
 different - it has your network position and none of your file rights - so
-what a page can reach is in scope, and reports about it are welcome.
+what a page can reach is in scope, and reports about it are welcome. The engine
+refuses every request that carries a browser `Origin` and every `Host` that is
+not a loopback name for its own port, so neither a page's cross-origin request
+nor a DNS-rebinding one reaches a route.
 
 ## Data at rest
 

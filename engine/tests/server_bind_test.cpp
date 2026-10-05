@@ -272,4 +272,38 @@ TEST_F (ServerBindTest, EachCallProducesOneCentralRequestLogLine) {
     << written;
 }
 
+// The request gate (`admit_management_request`) answers before routing, on
+// the same pre-routing handler that stamps the start time, so a refused call
+// is still one line - at INFO, where a 4xx belongs.
+TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
+    ScratchLogDir log_dir;
+    vayu::utils::Logger::instance ().init (log_dir.path ().string ());
+    vayu::utils::Logger::instance ().set_file_level (vayu::utils::Logger::Level::DEBUG);
+    vayu::utils::Logger::instance ().set_max_file_bytes (0);
+
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    httplib::Client client ("127.0.0.1", port);
+    auto response =
+    client.Get ("/health", httplib::Headers{ { "Origin", "https://evil.example" } });
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 403);
+
+    server.stop ();
+    vayu::utils::Logger::instance ().flush ();
+
+    const std::string written = newest_log_contents (log_dir.path ());
+    EXPECT_TRUE (std::regex_search (written,
+    std::regex (R"("level":"info".*GET /health 403 \d+(\.\d+)?ms \d+B)")))
+    << written;
+}
+
 } // namespace

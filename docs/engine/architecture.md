@@ -168,14 +168,21 @@ four more are opened on demand, and the rule that separates them is where each m
 Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
 route answers a live read of state that changes under the client, so nothing here is valid to replay
 from a browser's disk cache. The mock server and inbox listeners are separate `ManagedListener`-owned
-servers of their own (see the table above) and set neither this nor the CORS headers below.
+servers of their own (see the table above) and do not set it.
+
+**The management API serves no browser** (`admit_management_request`, `server.cpp`): it sends no
+CORS header, refuses a `Host` that is not a loopback spelling of its own port (DNS rebinding), and
+refuses any request carrying `Origin`; an `OPTIONS` that passes the Host check is answered `204`
+with nothing else. The Electron shell strips the renderer's `Origin` and supplies the renderer's
+CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-the-api).
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
 
-- The **management API** has no route authentication and answers `Access-Control-Allow-Origin: *`
-  (`server.cpp`), so anything that can reach it can read every stored request, every credential the
-  database holds, and start runs against arbitrary targets.
+- The **management API** has no route authentication - its Host and Origin checks keep browser
+  pages out, and a program on another host can send any `Host` it likes - so anything that can
+  reach it can read every stored request, every credential the database holds, and start runs
+  against arbitrary targets.
 - A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization
   code; publishing either would publish a credential.
 - An **inbox** serves none of that - it accepts a request, stores it, and replies with what the user
@@ -1288,6 +1295,9 @@ record shape, the category list, the redaction rule and the file layout
 - **Local-only binding**: the management API only listens on `127.0.0.1`. A
   [webhook inbox](#listeners) is the single listener that may bind wider, and only when the
   caller confirms it explicitly; it serves no engine route.
+- **No browser**: the management API sends no CORS header and refuses, before any route, a
+  request carrying `Origin` and a `Host` that is not a loopback name for its own port, which is
+  what keeps a DNS-rebinding page out ([Listeners](#listeners)).
 - **Script sandboxing**: QuickJS contexts have no filesystem/network access
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a

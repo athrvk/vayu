@@ -60,6 +60,7 @@ add_executable(vayu_tests
     load_stream_events_test.cpp
     sse_stream_test.cpp
     server_bind_test.cpp
+    server_gate_test.cpp
     request_log_test.cpp
     log_category_scan_test.cpp
     log_record_schema_test.cpp
@@ -400,6 +401,7 @@ set(vayu_scratch_database_suites
     ScriptVariableScopesTest
     SendTimeQueryValues
     ServerBindTest
+    ServerGateTest
     SpecBindRouteTest
     SpecExportRouteTest
     SpecMatchRouteTest

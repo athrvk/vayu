@@ -47,6 +47,26 @@ http-client could not read - every validation message surfaced as a bare
 `HTTP 400` (issue #173). The client still accepts the flat shape so a newer app
 can read an older engine, but the engine no longer produces it.
 
+## Who may call the API
+
+The engine serves no browser. No response carries a CORS header, and the
+request gate in `server.cpp` refuses, before any route runs:
+
+- a request whose `Host` is not exactly `127.0.0.1:<port>`, `localhost:<port>`
+  or `[::1]:<port>` (the port this engine bound) - `403`, message naming the
+  Host check. This is what defeats DNS rebinding, where a page reaches the
+  listener under a name it controls and is same-origin with it;
+- any request carrying an `Origin` header, whatever its value (`null`
+  included) - `403`, message saying the engine does not serve browser origins.
+
+An `OPTIONS` request that passes the Host check is answered `204` with no body
+and no CORS header, whatever its `Origin`: a preflight that grants nothing
+leaks nothing. Local tools (the CLI, curl, the MCP server's fetch) send no
+`Origin` and are unaffected. The Electron shell is the one browser-context
+client: it strips `Origin` from the renderer's requests and supplies the CORS
+response headers the renderer needs itself (`app/electron/engine-origin.ts`).
+A standalone engine run by hand therefore refuses every browser page.
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,

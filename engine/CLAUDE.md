@@ -338,7 +338,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 
 ## HTTP API
 
-The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
+The daemon listens on `http://127.0.0.1:9876` and serves no browser: it sends
+no CORS header, and the request gate in `server.cpp` refuses any `Origin` and
+any `Host` that is not a loopback name for its own port, before routing
+(`docs/engine/api-reference.md`, "Who may call the API"). The Electron shell
+strips the renderer's `Origin` and supplies its CORS headers. Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
