@@ -123,7 +123,7 @@ winget install athrvk.Vayu
 **macOS** and **Linux** - the same command on both:
 
 ```sh
-bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
+bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
 Re-run it to update. Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage route, FUSE 2 on Linux - is on the site:

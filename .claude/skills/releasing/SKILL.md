@@ -199,9 +199,22 @@ a refusal "stays" when withholding the tools had taken it off the wire.
 sits while master moves goes stale in content, not only in commits: each
 re-sync of 0.26.0 added entries, and one caught a factual error.
 
+**The release workflow is split build from publish.** The `build` matrix holds
+`contents: read`, checks out with `persist-credentials: false` and uploads
+workflow artifacts; the one `publish` job (`contents: write`, `id-token: write`,
+`attestations: write`; no checkout, no build) downloads them, runs
+`actions/attest-build-provenance` over every installer, zip and blockmap, and
+creates the release. A `workflow_dispatch` run stops after `build`. After the
+release, spot-check one asset:
+`gh attestation verify <asset> --repo athrvk/vayu`. Every `uses:` in
+`.github/` is a 40-character SHA with a `# vX.Y.Z` comment (`Script lint`
+enforces it); Dependabot moves them.
+
 **Release notes are published from a file - no manual paste.** On tag push,
-`.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets
-it as the GitHub Release body via `softprops/action-gh-release`'s `body_path`.
+the `publish` job in `.github/workflows/release.yml` fetches
+`.github/release-notes/<tag>.md` from the tagged commit (there is no checkout),
+appends a one-line "verify with `gh attestation verify`" footer, and sets it as
+the GitHub Release body via `softprops/action-gh-release`'s `body_path`.
 If that file is missing for the tag, the workflow falls back to GitHub's
 automatically generated PR-based notes (`generate_release_notes`) so a release is
 never published empty.
@@ -281,7 +294,10 @@ Things about it that the code cannot tell you:
   terminal, which is where three bugs in a row hid.
 - **Every release installer publishes a `.sha256`** (checksum steps in
   `release.yml`), so the installer's verification is real on all three platforms
-  rather than dead code outside macOS. The `latest*.yml` feeds and the Windows
+  rather than dead code outside macOS. `install.sh` refuses a missing sidecar for
+  any version from `FIRST_CHECKSUMMED_VERSION` (0.33.0) on and warns only for
+  older pinned ones; bump `FIRST_ATTESTED_VERSION` to the first release cut with
+  the attestation step (it gates the `gh attestation verify` call). The `latest*.yml` feeds and the Windows
   `.exe.blockmap` are excluded: they are electron-updater's own metadata, and
   what it assembles from them is verified against the sha512 the feed carries,
   not against a sidecar nothing would fetch.

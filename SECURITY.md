@@ -102,7 +102,13 @@ allowlist is checked against the URL you send, not against where it redirects.
 ## Releases
 
 Releases are built in public on GitHub Actions from tagged source and ship with
-checksums. They are not yet code-signed, so macOS and Windows will warn on first
+checksums and a build-provenance attestation per asset (from the first release
+after #1779). Check a download with
+`gh attestation verify <asset> --repo athrvk/vayu`; `install.sh` does it for
+you when an authenticated `gh` is present and refuses an asset whose checksum
+is missing or wrong. Every third-party action in the release workflow is pinned
+to a commit SHA, and only the final publish job can write to the release. They
+are not yet code-signed, so macOS and Windows will warn on first
 launch, and `install.sh` strips the macOS quarantine attribute for that reason.
 If you find a way to break any statement in this document, report it privately
 through GitHub Security Advisories.

@@ -10,12 +10,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Build legs read, the publish job writes. Install scripts, electron-builder,
+# vcpkg source builds and brew all run in the build legs, so they hold no token
+# that can alter a release; only `publish` has `contents: write`, and it checks
+# out and builds nothing.
+permissions:
+  contents: read
+
 jobs:
-  build-and-publish:
+  build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +64,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -92,19 +101,19 @@ jobs:
           done
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -113,7 +122,7 @@ jobs:
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
@@ -136,7 +145,7 @@ jobs:
       # If a release ever fails in these steps, put `if: runner.os != 'Windows'`
       # back on both. The build is slower without sccache but reliable.
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Configure sccache compiler launcher
         shell: bash
@@ -160,7 +169,7 @@ jobs:
       # action's testPreset.
       - name: Build engine (arm64)
         if: runner.os == 'macOS'
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
@@ -179,7 +188,7 @@ jobs:
         # through Rosetta on M-series runners, but the remaining tests don't
         # assert on tight wall-clock windows tied to a remote endpoint.
         if: runner.os == 'macOS'
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
@@ -216,7 +225,7 @@ jobs:
 
       - name: Build engine (Non-macOS)
         if: runner.os != 'macOS'
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
@@ -473,35 +482,88 @@ jobs:
             Write-Host "  $hash  $($f.Name)"
           }
 
+      - name: Upload build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ runner.os }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with write access. No checkout, no build: it downloads what the
+  # build legs produced, attests each asset to this workflow run and tag, and
+  # creates the release. `id-token` and `attestations` exist for the attestation
+  # alone. A `workflow_dispatch` run stops after `build`, so the pipeline can be
+  # exercised on a branch without publishing anything.
+  #
+  # Verify any download with
+  #   gh attestation verify <asset> --repo athrvk/vayu
+  publish:
+    name: Attest and publish
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Attest build provenance
+        # The .sha256 sidecars and the electron-updater feeds are derived from
+        # the installers; the installers, zips and blockmaps are the assets a
+        # user runs or the updater assembles.
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            artifacts/*
+            !artifacts/*.sha256
+            !artifacts/*.yml
+
       # Prefer the curated, hand-written notes committed at .github/release-notes/<tag>.md
       # (Keep a Changelog format, see CLAUDE.md). If that file is absent for this tag,
       # fall back to GitHub's automatically generated PR-based notes so the release is
-      # never published with an empty body.
+      # never published with an empty body. There is no checkout here, so the
+      # notes file is fetched from the tagged commit through the contents API.
       - name: Resolve release notes
-        if: github.event_name == 'push'
         id: relnotes
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
-          if [ -f "$notes" ]; then
-            echo "Using curated release notes: $notes"
-            echo "path=$notes" >> "$GITHUB_OUTPUT"
+          notes="release-notes.md"
+          if gh api -H 'Accept: application/vnd.github.raw' \
+              "repos/${GITHUB_REPOSITORY}/contents/.github/release-notes/${GITHUB_REF_NAME}.md?ref=${GITHUB_SHA}" \
+              > "$notes" 2>/dev/null; then
+            echo "Using curated release notes for ${GITHUB_REF_NAME}"
+            echo "curated=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No curated notes at $notes - falling back to auto-generated notes."
-            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "No curated notes for ${GITHUB_REF_NAME} - falling back to auto-generated notes."
+            : > "$notes"
+            echo "curated=false" >> "$GITHUB_OUTPUT"
           fi
+          # Either way the body names how to check the download. For the
+          # auto-generated fallback this footer is followed by GitHub's notes.
+          printf '\n\nEvery asset carries a build-provenance attestation: `gh attestation verify <asset> --repo %s`.\n' \
+            "$GITHUB_REPOSITORY" >> "$notes"
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts to release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: |
             artifacts/*
-          fail_on_unmatched_files: false
-          # body_path is ignored by the action when empty; generate_release_notes then
-          # supplies GitHub's auto notes as the fallback.
+          fail_on_unmatched_files: true
+          # With no curated file the body is only the verify footer, and
+          # generate_release_notes appends GitHub's auto notes to it.
           body_path: ${{ steps.relnotes.outputs.path }}
-          generate_release_notes: ${{ steps.relnotes.outputs.path == '' }}
+          generate_release_notes: ${{ steps.relnotes.outputs.curated == 'false' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -524,17 +586,18 @@ jobs:
   # (.github/workflows/winget-publish.yml), which submits an existing release
   # without rebuilding anything.
   #
-  # `needs: build-and-publish` + `success()` means this only runs after the
-  # GitHub Release is fully published: build-and-publish is the job that both
-  # builds all three platforms AND uploads the assets (incl. Vayu-x64.exe) to
-  # the release, and its fail-fast:false matrix reports success only when every
-  # leg passes. Any failed build - even if another leg already created the
-  # release - leaves the release without the installer and skips this job.
+  # `needs: publish` + `success()` means this only runs after the GitHub
+  # Release is fully published: `build` builds all three platforms (its
+  # fail-fast:false matrix reports success only when every leg passes) and
+  # `publish` uploads the assets, incl. Vayu-x64.exe, to the release. Any failed
+  # build leaves `publish` skipped and so skips this job.
   publish-winget:
     name: Publish to winget
-    needs: build-and-publish
+    needs: publish
     if: success() && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
@@ -550,9 +613,10 @@ jobs:
       # can never fail a release tag.
       - name: Checkout
         if: env.WINGET_TOKEN != ''
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Preflight and sync the fork
         if: env.WINGET_TOKEN != ''
@@ -562,7 +626,7 @@ jobs:
 
       - name: Submit manifest to winget-pkgs
         if: env.WINGET_TOKEN != ''
-        uses: vedantmgoyal9/winget-releaser@v2
+        uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
           identifier: athrvk.Vayu
           # `version` is intentionally omitted. The action defaults it to the

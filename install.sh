@@ -722,10 +722,52 @@ sha256_of() {
 	fi
 }
 
-# Fetch the release asset, and verify it when the release publishes a checksum
-# beside it (macOS does; the Linux artifacts do not, so this simply skips).
+# The first release whose workflow wrote a .sha256 beside every installer
+# (0.33.0), and the first one attested with `actions/attest-build-provenance`
+# (the release cut after the attestation step landed). From these on a missing
+# sidecar is a refusal; below them it is the old, checksum-less release it
+# always was and only warns.
+FIRST_CHECKSUMMED_VERSION="0.33.0"
+FIRST_ATTESTED_VERSION="0.40.0"
+
+# True when $1 is the same release as $2 or a later one. Plain numeric
+# major.minor.patch compare in bash: `sort -V` is not on every platform this
+# script supports, and a pre-release suffix (-rc1) is dropped, not ranked.
+version_at_least() {
+	local have="${1%%-*}" want="${2%%-*}" i h w
+	local -a hv wv
+	IFS=. read -r -a hv <<<"$have"
+	IFS=. read -r -a wv <<<"$want"
+	for i in 0 1 2; do
+		h="${hv[$i]:-0}" w="${wv[$i]:-0}"
+		[ "$h" -gt "$w" ] && return 0
+		[ "$h" -lt "$w" ] && return 1
+	done
+	return 0
+}
+
+# Verify the build-provenance attestation when `gh` can. It proves the asset
+# was built by this repository's release workflow for a tag, which the
+# checksum beside it (served from the same release) cannot. Without a usable
+# `gh` the checksum alone stands, and the script says so.
+verify_attestation() {
+	local file="$1" version="$2"
+	version_at_least "$version" "$FIRST_ATTESTED_VERSION" || return 0
+	if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+		log 'No authenticated gh CLI - build provenance not checked (checksum only).'
+		return 0
+	fi
+	if ! gh attestation verify "$file" --repo "$REPO" >/dev/null 2>&1; then
+		die 'Build provenance verification failed - aborting.'
+	fi
+	log 'Build provenance verified.'
+}
+
+# Fetch the release asset for $3 (a version) and verify it against the checksum
+# published beside it. A missing checksum refuses the install for any release
+# that publishes one.
 download_asset() {
-	local url="$1" dest="$2" expected actual
+	local url="$1" dest="$2" version="${3:-}" expected actual
 	printf 'Downloading %s\n' "$url"
 	# The status has to be checked by hand rather than left to `set -e`. This
 	# function is called as `download_asset ... || exit 1`, and bash disables
@@ -745,19 +787,24 @@ download_asset() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	# Every release artifact publishes a .sha256 (see the checksum steps in
-	# .github/workflows/release.yml). A missing one means an old release, or a
-	# fetch that failed - both worth saying, neither worth refusing over, since
-	# the alternative is telling someone their working install cannot proceed
-	# because a 65-byte file did not arrive.
+	# Every release from FIRST_CHECKSUMMED_VERSION on publishes a .sha256 beside
+	# each installer (the checksum steps in .github/workflows/release.yml), so
+	# one that will not download is a failed fetch or a tampered release, and
+	# installing anyway is exactly what the checksum exists to prevent. An
+	# older pinned VAYU_VERSION predates it and only warns; so does a call with
+	# no version at all.
 	if ! curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
-		warn 'No checksum published for this download - skipping verification.'
+		if [ -n "$version" ] && version_at_least "$version" "$FIRST_CHECKSUMMED_VERSION"; then
+			die "No checksum could be fetched for Vayu $version - nothing was installed."
+		fi
+		warn 'No checksum published for this release - skipping verification.'
 		return 0
 	fi
 	expected="$(awk '{print $1}' "$dest.sha256")"
 	actual="$(sha256_of "$dest")"
 	[ "$expected" = "$actual" ] || die 'Checksum mismatch - aborting.'
 	log 'Checksum verified.'
+	[ -z "$version" ] || verify_attestation "$dest" "$version"
 	return 0
 }
 
@@ -1010,7 +1057,7 @@ do_install() {
 		trap 'exit "$EXIT_INTERRUPTED"' INT TERM HUP
 
 		run mkdir -p "$(dirname "$staged")"
-		download_asset "$url" "$staged"
+		download_asset "$url" "$staged" "$version"
 		stage_download "$workdir"
 
 		# The download and staging above take long enough for someone to open
@@ -1163,12 +1210,12 @@ usage() {
 	local url="https://athrvk.github.io/vayu/install.sh"
 	cat <<EOF
 Vayu installer - macOS and Linux (x86_64)
-  install:        bash -c "\$(curl -fsSL $url)"
+  install:        bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)"
   update:         same command - it replaces the app in place and keeps your data
-  pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl -fsSL $url)"
-  reinstall:      bash -c "\$(curl -fsSL $url)" -- --force
-  uninstall:      bash -c "\$(curl -fsSL $url)" -- --uninstall [--purge]
-  this help:      bash -c "\$(curl -fsSL $url)" -- --help
+  pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)"
+  reinstall:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --force
+  uninstall:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --uninstall [--purge]
+  this help:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --help
 
 The \`--\` above is the conventional way to separate bash's arguments from the
 script's, and is what the docs show. Leaving it out works too - the flag lands
