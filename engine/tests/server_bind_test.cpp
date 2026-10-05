@@ -243,7 +243,7 @@ TEST_F (ServerBindTest, AnImportBodyOverTheLimitNeverReachesTheRouteOverASocket)
     ASSERT_TRUE (server.start ());
 
     httplib::Client client ("127.0.0.1", port);
-    const std::string body (size_t{ 20 } * 1024 * 1024, 'x');
+    const std::string body = std::string (size_t{ 20 } * 1024 * 1024, 'x');
     auto response = client.Post ("/import/parse", body, "application/json");
     // Either the 413 or a closed connection, depending on the platform's socket
     // buffers; never the route's own 400 for a body that is not JSON.
