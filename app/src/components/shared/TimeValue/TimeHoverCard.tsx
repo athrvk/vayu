@@ -23,7 +23,7 @@ export function TimeHoverCard({ rows }: { rows: TimeRow[] }) {
 	return (
 		<dl
 			data-testid="time-hover-card"
-			className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-0.5"
+			className="grid grid-cols-[auto_1fr] items-baseline gap-x-2.5 gap-y-0 text-label"
 		>
 			{rows.map((row, index) => (
 				<div key={`${index}-${row.label}`} className="contents">
