@@ -19,13 +19,20 @@
  */
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <thread>
 
 #include <gtest/gtest.h>
 
 #include "vayu/core/worker_count.hpp"
+#include "vayu/db/database.hpp"
 #include "vayu/platform/platform.hpp"
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 namespace vayu::platform {
 namespace {
@@ -127,6 +134,98 @@ TEST (ThreadScheduling, SleepUntilPreciseReturnsImmediatelyForAPastDeadline) {
     const auto elapsed = std::chrono::steady_clock::now () - start;
     EXPECT_LT (elapsed, std::chrono::milliseconds (200));
 }
+
+// ============================================================================
+// Owner-only data directory (#1781)
+//
+// The mode bits are a POSIX concept: the Windows leg applies a DACL instead,
+// which these tests do not read back, so they skip there with a reason.
+// ============================================================================
+
+#ifndef _WIN32
+namespace {
+namespace fs = std::filesystem;
+
+constexpr auto OWNER_ONLY_DIRECTORY = fs::perms::owner_all;
+constexpr auto OWNER_ONLY_FILE = fs::perms::owner_read | fs::perms::owner_write;
+
+/// A scratch directory removed on exit, and the process umask restored on
+/// exit, because `restrict_new_files_to_owner` changes it for the whole test
+/// binary.
+class PrivateDirectoryTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        saved_umask_ = umask (022);
+        root_        = fs::temp_directory_path () / "vayu-private-dir-test";
+        fs::remove_all (root_);
+        fs::create_directories (root_);
+    }
+    void TearDown () override {
+        umask (saved_umask_);
+        fs::remove_all (root_);
+    }
+    [[nodiscard]] static fs::perms permissions_of (const fs::path& path) {
+        return fs::status (path).permissions () & fs::perms::mask;
+    }
+    fs::path root_;
+    mode_t saved_umask_ = 0;
+};
+
+TEST_F (PrivateDirectoryTest, ACreatedDirectoryIsOwnerOnly) {
+    const auto dir = (root_ / "data").string ();
+    ensure_private_directory (dir);
+    EXPECT_EQ (permissions_of (dir), OWNER_ONLY_DIRECTORY);
+}
+
+// An engine before this change made 0755 directories; an upgrade must close
+// them rather than only protect new installs.
+TEST_F (PrivateDirectoryTest, AnExistingOpenDirectoryIsTightened) {
+    const auto dir = root_ / "data";
+    fs::create_directory (dir);
+    fs::permissions (dir, fs::perms::all & ~fs::perms::others_write);
+    ASSERT_NE (permissions_of (dir), OWNER_ONLY_DIRECTORY);
+
+    ensure_private_directory (dir.string ());
+    EXPECT_EQ (permissions_of (dir), OWNER_ONLY_DIRECTORY);
+}
+
+TEST_F (PrivateDirectoryTest, APathThatIsAFileIsRefused) {
+    const auto file = root_ / "not-a-directory";
+    std::ofstream (file) << "x";
+    EXPECT_THROW (ensure_private_directory (file.string ()), std::runtime_error);
+}
+
+TEST_F (PrivateDirectoryTest, FilesCreatedAfterRestrictingAreOwnerOnly) {
+    restrict_new_files_to_owner ();
+    const auto file = root_ / "created.log";
+    std::ofstream (file) << "x";
+    EXPECT_EQ (permissions_of (file), OWNER_ONLY_FILE);
+}
+
+// The acceptance criterion is about the database, not about a bare ofstream:
+// SQLite opens the file itself, so this proves the mask reaches it.
+TEST_F (PrivateDirectoryTest, TheDatabaseFileIsOwnerOnly) {
+    restrict_new_files_to_owner ();
+    const auto db_path = (root_ / "vayu.db").string ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        EXPECT_EQ (permissions_of (db_path), OWNER_ONLY_FILE);
+    }
+}
+
+// Mutation check: without the call the same file is world-readable.
+TEST_F (PrivateDirectoryTest, WithoutRestrictingAFileFollowsTheInheritedUmask) {
+    const auto file = root_ / "created.log";
+    std::ofstream (file) << "x";
+    EXPECT_NE (permissions_of (file), OWNER_ONLY_FILE);
+}
+} // namespace
+#else
+TEST (PrivateDirectory, ModeBitsAreNotReadableOnWindows) {
+    GTEST_SKIP () << "owner-only is a protected DACL on Windows, not mode bits";
+}
+#endif
 
 } // namespace
 } // namespace vayu::platform

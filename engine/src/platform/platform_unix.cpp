@@ -177,6 +177,20 @@ void ensure_directory (const std::string& path) {
     }
 }
 
+void ensure_private_directory (const std::string& path) {
+    ensure_directory (path);
+    // `mkdir`'s mode is masked by the umask and an existing directory keeps
+    // whatever an older engine gave it, so the mode is set explicitly.
+    if (chmod (path.c_str (), 0700) != 0) {
+        throw std::runtime_error ("Failed to restrict directory: " + path +
+        " - " + vayu::utils::errno_message (errno));
+    }
+}
+
+void restrict_new_files_to_owner () {
+    umask (S_IRWXG | S_IRWXO);
+}
+
 // ============================================================================
 // Signal Handling
 // ============================================================================

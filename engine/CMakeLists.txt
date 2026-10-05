@@ -643,7 +643,7 @@ target_compile_definitions(vayu_core PUBLIC SQLITE_ENABLE_JSON1)
 
 # Windows-specific libraries
 if(WIN32)
-    target_link_libraries(vayu_core PUBLIC ws2_32 winmm)
+    target_link_libraries(vayu_core PUBLIC ws2_32 winmm advapi32)
     # MSVC-specific options for vayu_core
     if(MSVC)
         target_compile_definitions(vayu_core PRIVATE

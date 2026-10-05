@@ -44,6 +44,13 @@ SQLite database in your profile directory, protected by your operating-system
 account and nothing else. Vayu does not encrypt them at rest; anyone who can
 read that file can read every value in it.
 
+On Linux and macOS the engine makes the data directory and the `db`, `logs` and
+`backups` folders inside it owner-only (`0700`) and everything it writes there
+(the database and its `-wal` and `-shm` files, backups, logs) `0600`, tightening
+a directory an older version left readable. On Windows the data directory gets
+a protected ACL for your account, SYSTEM and Administrators. A user who can act
+as you, or read your disk offline, still reads everything.
+
 ## Agents (MCP)
 
 Tools an MCP client calls receive the same data the UI shows, including the

@@ -116,9 +116,14 @@ int run_daemon (std::span<char* const> args) {
     const int verbosity        = parsed.verbosity;
     const std::string data_dir = parsed.data_dir;
 
+    // The data directory holds secrets in plaintext, so everything under it is
+    // owner-only (#1781): files take 0600 from here on, directories are
+    // created or tightened to 0700 below.
+    vayu::platform::restrict_new_files_to_owner ();
+
     // Ensure data directory exists
     try {
-        vayu::platform::ensure_directory (data_dir);
+        vayu::platform::ensure_private_directory (data_dir);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what () << "\n";
         return 1;
@@ -128,8 +133,8 @@ int run_daemon (std::span<char* const> args) {
     std::string log_dir = vayu::platform::path_join (data_dir, "logs");
     std::string db_dir  = vayu::platform::path_join (data_dir, "db");
     try {
-        vayu::platform::ensure_directory (log_dir);
-        vayu::platform::ensure_directory (db_dir);
+        vayu::platform::ensure_private_directory (log_dir);
+        vayu::platform::ensure_private_directory (db_dir);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what () << "\n";
         return 1;
