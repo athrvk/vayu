@@ -59,7 +59,7 @@ describe("toast stack position", () => {
 		const declarations = [...css.matchAll(/--dock-height:\s*([^;]+);/g)].map((m) =>
 			m[1].trim()
 		);
-		expect(declarations).toEqual(["2rem"]);
+		expect(declarations).toEqual(["var(--spacing-band)"]);
 	});
 
 	it("declares --titlebar-height for the toasts to subtract", () => {

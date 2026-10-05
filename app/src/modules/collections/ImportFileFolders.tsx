@@ -92,7 +92,7 @@ export function ImportFileFolders({ results }: { results: readonly ImportResult[
 											type="button"
 											variant="ghost"
 											size="sm"
-											className="ml-auto h-6 shrink-0 px-2 text-xs"
+											className="ml-auto h-control-sm shrink-0 px-2 text-xs"
 											disabled={isPending}
 											onClick={() => void allow(folder)}
 											aria-label={`Allow folder ${folder}`}

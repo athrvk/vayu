@@ -297,7 +297,7 @@ function NavigationControls() {
 				tooltipHint={formatChord(GO_BACK_CHORD)}
 				tooltipSide="bottom"
 				icon={<ArrowLeft className="size-icon-sm" />}
-				className="h-7 w-7"
+				className="size-target"
 				disabled={!back}
 				onClick={() => navigateHistory("back", "ui")}
 			/>
@@ -306,7 +306,7 @@ function NavigationControls() {
 				tooltipHint={formatChord(GO_FORWARD_CHORD)}
 				tooltipSide="bottom"
 				icon={<ArrowRight className="size-icon-sm" />}
-				className="h-7 w-7"
+				className="size-target"
 				disabled={!forward}
 				onClick={() => navigateHistory("forward", "ui")}
 			/>

@@ -44,7 +44,7 @@ export function StopRunButton({ onStop, isStopping = false, className }: StopRun
 			onClick={onStop}
 			disabled={isStopping}
 			className={cn(
-				"h-7 px-2.5 text-xs text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0",
+				"h-control-sm px-2.5 text-xs text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0",
 				className
 			)}
 		>

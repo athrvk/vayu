@@ -115,7 +115,7 @@ export default function LoadTestingPanel() {
 							<Button
 								variant="ghost"
 								size="sm"
-								className="shrink-0 text-xs h-7 px-2"
+								className="shrink-0 text-xs h-control-sm px-2"
 								onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
 							>
 								<RotateCcw

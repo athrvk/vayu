@@ -182,7 +182,7 @@ function KeyValueRow({
 				// the checkbox inside it instead of leaving a 24px column around a
 				// 28px control.
 				allowFiles
-					? "grid-cols-[var(--spacing-target)_1fr_1fr_20px_20px_28px]"
+					? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_20px_28px]"
 					: "grid-cols-[var(--spacing-target)_1fr_1fr_20px_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
@@ -271,7 +271,7 @@ function KeyValueRow({
 										? `Send ${item.key || "this part"} as text`
 										: `Send ${item.key || "this part"} as a file`
 								}
-								className="h-6 w-5 rounded-md text-subtle-foreground hover:text-primary-text"
+								className="size-target rounded-md text-subtle-foreground hover:text-primary-text"
 							>
 								<IconSwap
 									state={isFileRow ? "file" : "text"}
@@ -318,12 +318,12 @@ function KeyValueRow({
 					// headers table landed on a fully transparent control - including
 					// its focus ring - once per row, and Enter there silently deleted
 					// the row they could not see they were on.
-					className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+					className="size-target opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
 				>
 					<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
 				</Button>
 			) : (
-				<div className="h-7 w-7" />
+				<div className="size-target" />
 			)}
 		</div>
 	);

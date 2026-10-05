@@ -161,7 +161,7 @@ export default function SettingsCategoryTree() {
 								size="sm"
 								onClick={() => setQuery("")}
 								aria-label="Clear search"
-								className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2 p-0"
+								className="absolute right-0.5 top-1/2 size-target -translate-y-1/2 p-0"
 							>
 								<X className="size-icon-sm" />
 							</Button>
