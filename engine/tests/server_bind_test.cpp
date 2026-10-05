@@ -252,13 +252,13 @@ TEST_F (ServerBindTest, AnImportBodyOverTheLimitNeverReachesTheRouteOverASocket)
     }
 
     // A body inside the limit still reaches the route (400: not a JSON object).
-    auto small = client.Post ("/import/parse", "[]", "application/json");
-    if (!small) {
+    auto within_limit = client.Post ("/import/parse", "[]", "application/json");
+    if (!within_limit) {
         httplib::Client fresh ("127.0.0.1", port);
-        small = fresh.Post ("/import/parse", "[]", "application/json");
+        within_limit = fresh.Post ("/import/parse", "[]", "application/json");
     }
-    ASSERT_TRUE (small);
-    EXPECT_EQ (small->status, 400);
+    ASSERT_TRUE (within_limit);
+    EXPECT_EQ (within_limit->status, 400);
 
     server.stop ();
 }
@@ -318,7 +318,7 @@ TEST_F (ServerBindTest, AResponseIsNeverCompressedForALoopbackClient) {
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 200);
     ASSERT_GT (response->body.size (), 4096u)
-    << "the body is too small to prove anything";
+    << "the body is too within_limit to prove anything";
     EXPECT_FALSE (response->has_header ("Content-Encoding"))
     << "answered with Content-Encoding: "
     << response->get_header_value ("Content-Encoding");
