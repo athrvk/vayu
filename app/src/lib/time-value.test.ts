@@ -72,9 +72,8 @@ describe("describeInstant", () => {
 		const rows = describeInstant(instant, { timeZone: "Asia/Kolkata", locale: "en-US", now });
 		expect(rows.map((r) => r.label)).toEqual(["Asia/Kolkata", "UTC", "Relative"]);
 		expect(rows[0].value).toContain("5:30:00 PM");
-		expect(rows[0].value).toContain("GMT+5:30");
 		expect(rows[1].value).toContain("12:00:00 PM");
-		expect(rows[1].value).toContain("UTC");
+		expect(rows[1].value).not.toContain("UTC");
 		expect(rows[2].value).toBe("2 hours ago");
 	});
 
@@ -101,7 +100,7 @@ describe("describeInstant", () => {
 		});
 		expect(rows[0].label).toBe("America/New_York");
 		expect(rows[0].value).toContain("8:00:00 AM");
-		expect(rows[0].value).toContain("EDT");
+		expect(rows[0].value).not.toContain("EDT");
 	});
 
 	it("does not repeat the original text the reader already hovered", () => {

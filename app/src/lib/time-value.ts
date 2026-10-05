@@ -209,7 +209,6 @@ const CARD_FORMAT: Intl.DateTimeFormatOptions = {
 	hour: "numeric",
 	minute: "2-digit",
 	second: "2-digit",
-	timeZoneName: "short",
 };
 
 /** The zone the platform resolves for @p options - the host's unless one was passed. */

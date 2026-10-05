@@ -57,7 +57,7 @@ describe("TimeValue", () => {
 		fireEvent.focus(screen.getByText("8:00:00 AM"));
 		const card = await screen.findByTestId("time-hover-card");
 		expect(card.textContent).toContain("America/New_York");
-		expect(card.textContent).toContain("EDT");
+		expect(card.textContent).not.toContain("EDT");
 	});
 
 	it("says a zoneless value is shown as written", async () => {
