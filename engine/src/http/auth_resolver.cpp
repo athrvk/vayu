@@ -239,6 +239,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
                 append_query_param (req.url, a.key, a.value, !req.disable_url_encoding);
             } else if (req.headers.count (a.key) == 0) {
                 req.headers[a.key] = a.value;
+                req.secret_header_names.push_back (a.key);
             }
             return {};
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {

@@ -64,6 +64,8 @@ TEST (AuthResolver, ApiKeyInHeader) {
     nullptr);
     EXPECT_TRUE (result.ok);
     EXPECT_EQ (req.headers.at ("X-Api-Key"), "secret");
+    // The transfer log redacts by this name (issue #1781).
+    EXPECT_EQ (req.secret_header_names, std::vector<std::string>{ "X-Api-Key" });
 }
 
 TEST (AuthResolver, ApiKeyInQueryAppendsToUrl) {

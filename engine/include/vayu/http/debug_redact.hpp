@@ -32,15 +32,13 @@ namespace vayu::http::detail {
  *
  * @param line A single header line, e.g. "Authorization: Bearer abc". Any
  *             leading curl prefix ("> " / "< ") should NOT be included.
+ * @param extra_secret_headers Header names sensitive for this request only
+ *             (the API-key auth header).
  * @return The line unchanged, or "<Name>: <redacted>" when the header is
  *         sensitive (matched case-insensitively).
  */
-inline std::string redact_header_line (const std::string& line) {
-    static constexpr std::array<std::string_view, 7> kSensitive = {
-        "authorization", "proxy-authorization", "cookie", "set-cookie",
-        "www-authenticate", "proxy-authenticate", "authentication-info"
-    };
-
+inline std::string redact_header_line (const std::string& line,
+const std::vector<std::string>& extra_secret_headers = {}) {
     const auto colon = line.find (':');
     if (colon == std::string::npos) {
         return line;
@@ -55,8 +53,12 @@ inline std::string redact_header_line (const std::string& line) {
     }
     name = vayu::utils::ascii_lower (name.substr (first, last - first + 1));
 
-    const bool sensitive = std::any_of (kSensitive.begin (), kSensitive.end (),
-    [&name] (std::string_view s) { return name == s; });
+    // The shared field list (`log_redact.hpp`) plus the header the request's
+    // own API-key auth names, which no static list can know.
+    const bool sensitive = vayu::utils::is_secret_field_name (name) ||
+    std::any_of (extra_secret_headers.begin (), extra_secret_headers.end (),
+    [&name] (
+    const std::string& s) { return vayu::utils::ascii_lower_equal (name, s); });
 
     if (!sensitive) {
         return line;
@@ -80,7 +82,8 @@ inline std::string redact_header_line (const std::string& line) {
  */
 inline void collect_debug_frame (std::vector<std::string>& lines,
 curl_infotype type,
-std::string_view raw_text) {
+std::string_view raw_text,
+const std::vector<std::string>& extra_secret_headers = {}) {
     char prefix = '\0';
     switch (type) {
     case CURLINFO_TEXT: prefix = '*'; break;
@@ -100,9 +103,15 @@ std::string_view raw_text) {
             one.remove_suffix (1);
         }
         if (!one.empty ()) {
+            // A CURLINFO_TEXT line is curl's own prose and can quote a URL
+            // ("Issue another request to this URL: '...'"), so it is scrubbed
+            // for URLs as well as header-shaped content.
             std::string processed = (type != CURLINFO_TEXT && first_physical) ?
             vayu::utils::strip_url_secrets (one) :
-            redact_header_line (std::string (one));
+            redact_header_line (std::string (one), extra_secret_headers);
+            if (type == CURLINFO_TEXT) {
+                processed = vayu::utils::strip_urls_in_text (processed);
+            }
             lines.push_back (std::string (1, prefix) + " " + processed);
         }
         first_physical = false;

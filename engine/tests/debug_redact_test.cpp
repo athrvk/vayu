@@ -3,17 +3,73 @@
  * @brief Tests for redacting sensitive header values in curl verbose logs.
  */
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/utils/log_redact.hpp"
 
 using vayu::http::detail::collect_debug_frame;
 using vayu::http::detail::redact_header_line;
+using vayu::utils::is_secret_field_name;
 using vayu::utils::strip_url_secrets;
+using vayu::utils::strip_urls_in_text;
+
+namespace {
+
+// Shared with the app's `log-redaction.conformance.test.ts`: a case added to
+// the fixture fails whichever side answers it differently.
+nlohmann::json load_redaction_fixture () {
+    const auto path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
+    "fixtures" / "log-redaction-conformance.json";
+    std::ifstream in (path);
+    if (!in.good ()) {
+        ADD_FAILURE () << "fixture missing: " << path;
+        return nlohmann::json::object ();
+    }
+    return nlohmann::json::parse (in);
+}
+
+} // namespace
+
+TEST (LogRedactionConformance, SecretFieldNamesAndStripUrlSecretsFollowTheSharedFixture) {
+    const auto fixture = load_redaction_fixture ();
+    ASSERT_FALSE (fixture.at ("secretFieldNames").empty ());
+    ASSERT_FALSE (fixture.at ("stripUrlSecrets").empty ());
+    for (const auto& name : fixture.at ("secretFieldNames")) {
+        EXPECT_TRUE (is_secret_field_name (name.get<std::string> ())) << name;
+    }
+    for (const auto& name : fixture.at ("notSecretFieldNames")) {
+        EXPECT_FALSE (is_secret_field_name (name.get<std::string> ())) << name;
+    }
+    for (const auto& c : fixture.at ("stripUrlSecrets")) {
+        EXPECT_EQ (strip_url_secrets (c.at ("in").get<std::string> ()),
+        c.at ("out").get<std::string> ())
+        << c.at ("name");
+    }
+}
+
+TEST (DebugRedact, RedactsTheHeaderTheRequestsApiKeyAuthNames) {
+    EXPECT_EQ (redact_header_line ("X-Tenant-Key: abc"), "X-Tenant-Key: abc");
+    EXPECT_EQ (redact_header_line ("x-tenant-key: abc", { "X-Tenant-Key" }),
+    "x-tenant-key: <redacted>");
+    EXPECT_EQ (redact_header_line ("X-API-Key: abc"), "X-API-Key: <redacted>");
+}
+
+TEST (StripUrlsInText, ScrubsEveryUrlInCurlProse) {
+    EXPECT_EQ (strip_urls_in_text (
+               "Issue another request to this URL: 'https://u:p@h/x?k=SECRET'"),
+    "Issue another request to this URL: 'https://h/x'");
+    EXPECT_EQ (strip_urls_in_text ("Connected to h (1.2.3.4) port 443"),
+    "Connected to h (1.2.3.4) port 443");
+    EXPECT_EQ (strip_urls_in_text ("a http://u:p@h/x?k=1 b https://v/y?z=2"),
+    "a http://h/x b https://v/y");
+}
 
 TEST (DebugRedact, RedactsAuthorizationValue) {
     EXPECT_EQ (redact_header_line ("Authorization: Bearer secret-token"),
@@ -112,4 +168,20 @@ TEST (CollectDebugFrame, IgnoresDataFrames) {
     collect_debug_frame (lines, CURLINFO_DATA_OUT, "field=value&secret=1");
     EXPECT_TRUE (lines.empty ())
     << "a request or response body must never be collected into the log";
+}
+
+TEST (CollectDebugFrame, ScrubsAUrlQuotedInCurlText) {
+    std::vector<std::string> lines;
+    collect_debug_frame (lines, CURLINFO_TEXT,
+    "Issue another request to this URL: 'https://h/next?token=SECRET'");
+    ASSERT_EQ (lines.size (), 1u);
+    EXPECT_EQ (lines[0], "* Issue another request to this URL: 'https://h/next'");
+}
+
+TEST (CollectDebugFrame, RedactsTheApiKeyHeaderOfTheRequest) {
+    std::vector<std::string> lines;
+    collect_debug_frame (lines, CURLINFO_HEADER_OUT,
+    "GET /p HTTP/1.1\r\nX-Tenant-Key: KEYVALUE\r\n\r\n", { "X-Tenant-Key" });
+    ASSERT_EQ (lines.size (), 2u);
+    EXPECT_EQ (lines[1], "> X-Tenant-Key: <redacted>");
 }

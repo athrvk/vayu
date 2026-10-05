@@ -75,6 +75,8 @@ struct TransferDebug {
     /// The redacted, per-line collector for the one `cat=client` record this
     /// transfer emits (issue #1557) - empty when verbosity never reached 2.
     std::vector<std::string> debug_lines;
+    /// `Request::secret_header_names`, redacted beyond the shared field list.
+    std::vector<std::string> secret_header_names;
 };
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
@@ -93,8 +95,8 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
         return 0;
     }
 
-    vayu::http::detail::collect_debug_frame (
-    debug->debug_lines, type, std::string_view (data, size));
+    vayu::http::detail::collect_debug_frame (debug->debug_lines, type,
+    std::string_view (data, size), debug->secret_header_names);
     return 0;
 }
 
@@ -575,6 +577,7 @@ Result<Response> Client::send (const Request& request) {
     // the frames are also logged is `debug_callback`'s own read of the
     // logger's level - see TransferDebug.
     TransferDebug transfer_debug;
+    transfer_debug.secret_header_names = request.secret_header_names;
     set_opt<CURLOPT_VERBOSE> (curl, 1L);
     set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
     set_opt<CURLOPT_DEBUGDATA> (curl, &transfer_debug);
@@ -641,8 +644,8 @@ Result<Response> Client::send (const Request& request) {
         // message with a suffix and not two call sites.
         const bool cleartext = request.url.rfind ("http://", 0) == 0;
         vayu::utils::log_warning ("client",
-        "HTTP/2 was requested but the connection negotiated " +
-        response.http_version + " - " + request.url +
+        "HTTP/2 was requested but the connection negotiated " + response.http_version +
+        " - " + vayu::utils::strip_url_secrets (request.url) +
         (cleartext ?
         " (h2 is not offered over cleartext; use https:// or set the "
         "protocol to auto)" :

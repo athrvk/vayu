@@ -353,6 +353,12 @@ struct Request {
      */
     std::vector<PendingPathVariable> path_variables;
     Headers headers;
+    /**
+     * @brief Header names `apply_auth` filled from a credential the request's
+     *        auth block names (API-key auth), redacted from the verbose
+     *        transfer log on top of the shared field list.
+     */
+    std::vector<std::string> secret_header_names;
     Body body;
 
     // Options

@@ -25,7 +25,8 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
     if (transfer_data == nullptr) {
         return 0;
     }
-    collect_debug_frame (transfer_data->debug_lines, type, std::string_view (data, size));
+    collect_debug_frame (transfer_data->debug_lines, type,
+    std::string_view (data, size), transfer_data->secret_header_names);
     return 0;
 }
 
