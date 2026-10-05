@@ -137,8 +137,10 @@ import {
 	APP_NAME,
 	USER_DATA_DIR_NAME,
 } from "./constants.js";
+import { isDevelopmentBuild } from "./dev-mode.js";
+import { denyDevicePermissions } from "./permissions.js";
 
-const isDev = process.env.NODE_ENV === "development";
+const isDev = isDevelopmentBuild();
 
 // Use an in-memory mock keychain for Chromium's OSCrypt instead of the real
 // macOS Keychain. Without this, Chromium stores its cookie/safeStorage
@@ -1221,7 +1223,10 @@ function setupIpcHandlers() {
 		};
 	});
 
-	ipcMain.handle("theme:set", (_event, source: "system" | "light" | "dark") => {
+	ipcMain.handle("theme:set", (_event, source: unknown) => {
+		if (source !== "system" && source !== "light" && source !== "dark") {
+			throw new Error(`Invalid theme source: ${String(source)}`);
+		}
 		nativeTheme.themeSource = source;
 		return {
 			shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
@@ -1285,6 +1290,7 @@ function setupIpcHandlers() {
 	 */
 	ipcMain.on("window:systemMenu", (_event, position?: { x: number; y: number }) => {
 		if (!mainWindow || process.platform !== "win32") return;
+		if (position && !(Number.isFinite(position.x) && Number.isFinite(position.y))) return;
 		const maximized = mainWindow.isMaximized();
 		const menu = Menu.buildFromTemplate([
 			{
@@ -1521,6 +1527,7 @@ app.whenReady().then(async () => {
 	// browser context that sends one. The bridge is the renderer's CORS, so it is
 	// on the main window's session before that window exists. See engine-origin.ts.
 	installEngineOriginBridge(session.defaultSession);
+	denyDevicePermissions(session.defaultSession);
 
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).

@@ -114,7 +114,7 @@ export function MarkdownEditor({
 						placeholder={placeholder}
 						aria-label={ariaLabel}
 						style={{ minHeight, maxHeight }}
-						className="flex-1 resize-y overflow-y-auto bg-card font-mono text-xs leading-relaxed"
+						className="flex-1 resize-y overflow-y-auto [scrollbar-gutter:auto] bg-card font-mono text-xs leading-relaxed"
 					/>
 				) : (
 					/*
@@ -136,7 +136,7 @@ export function MarkdownEditor({
 						}}
 						style={{ minHeight, maxHeight }}
 						className={cn(
-							"flex-1 cursor-text overflow-y-auto rounded-md border border-transparent px-2 py-1.5 text-left",
+							"flex-1 cursor-text overflow-y-auto [scrollbar-gutter:auto] rounded-md border border-transparent px-2 py-1.5 text-left",
 							"hover:border-rule focus-visible:outline-none focus-visible:border-primary transition-colors"
 						)}
 					>
@@ -166,7 +166,7 @@ export function MarkdownEditor({
 					onClick={() => setPinned(!pinned)}
 					aria-pressed={pinned}
 					className={cn(
-						"h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground",
+						"size-target shrink-0 text-muted-foreground hover:text-foreground",
 						pinned && "text-primary-text"
 					)}
 				/>

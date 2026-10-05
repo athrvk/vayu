@@ -41,10 +41,20 @@ export function ContentTypeNotice({ value, onUndo, onDismiss }: ContentTypeNotic
 				to Headers - removed again when you change body type.
 			</span>
 			<div className="flex shrink-0 items-center gap-1">
-				<Button size="sm" variant="ghost" onClick={onUndo} className="h-6 px-2 text-xs">
+				<Button
+					size="sm"
+					variant="ghost"
+					onClick={onUndo}
+					className="h-control-sm px-2 text-xs"
+				>
 					Undo
 				</Button>
-				<Button size="sm" variant="ghost" onClick={onDismiss} className="h-6 px-2 text-xs">
+				<Button
+					size="sm"
+					variant="ghost"
+					onClick={onDismiss}
+					className="h-control-sm px-2 text-xs"
+				>
 					Dismiss
 				</Button>
 			</div>

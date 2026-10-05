@@ -108,7 +108,7 @@ export default function MockServerView() {
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-7 gap-1.5 px-2 text-xs"
+						className="h-control-sm gap-1.5 px-2 text-xs"
 						onClick={() => openTab({ type: "collection", entityId: mock.collectionId })}
 					>
 						<ExternalLink className="size-icon-sm" aria-hidden="true" />

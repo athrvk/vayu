@@ -447,6 +447,46 @@ if (download_asset "file://$payload" "$dest") >/dev/null 2>&1; then
 fi
 rm -f "$payload.sha256"
 
+# A release that publishes checksums and then serves none is a refusal, not a
+# warning: either the fetch failed or the sidecar was removed, and installing an
+# unverifiable asset is what the sidecar exists to prevent.
+if (download_asset "file://$payload" "$dest" "9.9.9") >/dev/null 2>&1; then
+	fail "a missing checksum for a current version must abort the install"
+fi
+(download_asset "file://$payload" "$dest" "$FIRST_CHECKSUMMED_VERSION") >/dev/null 2>&1 \
+	&& fail "the first checksummed version must also require its sidecar"
+# A release older than the first sidecar only warns, so a pinned old version
+# still installs.
+(download_asset "file://$payload" "$dest" "0.12.0") >/dev/null 2>&1 \
+	|| fail "a pre-checksum version without a sidecar should only warn"
+
+version_at_least 0.40.0 0.33.0 || fail "0.40.0 is at least 0.33.0"
+version_at_least 0.33.0 0.33.0 || fail "0.33.0 is at least 0.33.0"
+version_at_least 1.0.0 0.40.0 || fail "1.0.0 is at least 0.40.0"
+version_at_least 0.32.1 0.33.0 && fail "0.32.1 is below 0.33.0"
+version_at_least 0.9.0 0.40.0 && fail "0.9.0 is below 0.40.0 (numeric, not lexical)"
+version_at_least 0.40.0-rc1 0.40.0 || fail "a pre-release suffix is dropped, not ranked"
+
+# Attestation is pinned to the release workflow's identity, and a failed
+# verification aborts. `gh` is stubbed as a function (command -v sees it).
+gh() {
+	[ "$1" = auth ] && return 0
+	printf '%s\n' "$*" >"$TMPROOT/gh-args"
+	return "${GH_VERIFY_RC:-0}"
+}
+GH_VERIFY_RC=0
+(verify_attestation "$payload" "$FIRST_ATTESTED_VERSION") >/dev/null 2>&1 \
+	|| fail "a passing attestation should verify"
+grep -q -- "--signer-workflow athrvk/vayu/.github/workflows/release.yml" "$TMPROOT/gh-args" \
+	|| fail "attestation must be pinned to the release workflow signer"
+GH_VERIFY_RC=1
+if (verify_attestation "$payload" "$FIRST_ATTESTED_VERSION") >/dev/null 2>&1; then
+	fail "a failed attestation must abort the install"
+fi
+(verify_attestation "$payload" "0.39.0") >/dev/null 2>&1 \
+	|| fail "a release before the first attested one is not checked"
+unset -f gh
+
 printf 'PASS: download integrity\n'
 
 # --- version resolution ------------------------------------------------------

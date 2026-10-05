@@ -31,6 +31,14 @@
 		}
 	],
 	"asar": true,
+	"electronFuses": {
+		"runAsNode": false,
+		"enableNodeOptionsEnvironmentVariable": false,
+		"enableNodeCliInspectArguments": false,
+		"onlyLoadAppFromAsar": true,
+		"enableEmbeddedAsarIntegrityValidation": true,
+		"enableCookieEncryption": false
+	},
 	"artifactName": "${productName}-${arch}.${ext}",
 	"nsis": {
 		"guid": "c6b9dc37-95fd-5c7e-9133-446b81eb3ee5",

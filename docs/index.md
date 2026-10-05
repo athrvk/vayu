@@ -43,7 +43,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
 === "macOS"
 
     ```sh
-    bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
+    bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
     **macOS 13.3 (Ventura) or later.** Electron sets a macOS 13 floor for the
@@ -53,7 +53,11 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
 
     Installs the latest release to `/Applications`, and asks for your password
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
-    quarantine flag - without that, macOS reports it as damaged.
+    quarantine flag - without that, macOS reports it as damaged. Unsigned is
+    not unverifiable: the script checks the download against its published
+    checksum and refuses to install without one, and every asset of a release
+    from 0.40.0 on carries a build-provenance attestation - confirm one by hand
+    with `gh attestation verify <file> --repo athrvk/vayu`.
 
     **Updating is the same command.** It keeps your collections and settings,
     offers to quit Vayu if it is running (and reopens it after), and does
@@ -81,7 +85,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
 === "Linux"
 
     ```sh
-    bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
+    bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
     The same command as macOS. It installs the AppImage under

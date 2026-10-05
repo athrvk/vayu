@@ -166,16 +166,21 @@ export function annotationsPlugin(
 
 export type ValueFormatter = (v: number | null | undefined) => string;
 
-/**
- * One tooltip node, its text set as text. A series label is whatever a script
- * named its custom metric (an imported collection's included), so nothing
- * here is ever parsed as markup.
- */
-function tooltipElement(tag: "div" | "span", style: string, text?: string): HTMLElement {
-	const element = document.createElement(tag);
-	element.style.cssText = style;
-	if (text !== undefined) element.textContent = text;
-	return element;
+/** One legend row of the hover tooltip: swatch and label on the left, value on the right. */
+function tooltipRow(label: string, value: string, stroke: string): HTMLElement {
+	const row = document.createElement("div");
+	row.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:space-between";
+	const key = document.createElement("span");
+	key.style.cssText = "display:inline-flex;align-items:center;gap:5px";
+	const swatch = document.createElement("span");
+	swatch.style.cssText = "width:8px;height:2px;display:inline-block";
+	swatch.style.background = stroke;
+	key.append(swatch, label);
+	const val = document.createElement("span");
+	val.style.fontWeight = "600";
+	val.textContent = value;
+	row.append(key, val);
+	return row;
 }
 
 /**
@@ -229,9 +234,10 @@ export function tooltipPlugin(opts: {
 					return;
 				}
 				const xVal = u.data[0][idx];
-				const rows: HTMLElement[] = [
-					tooltipElement("div", "opacity:.7;margin-bottom:2px", xLabel(xVal as number)),
-				];
+				const header = document.createElement("div");
+				header.style.cssText = "opacity:.7;margin-bottom:2px";
+				header.textContent = xLabel(xVal as number);
+				const rows: HTMLElement[] = [header];
 				for (let s = 1; s < u.series.length; s++) {
 					if (skip.has(s)) continue;
 					const series = u.series[s];
@@ -242,23 +248,10 @@ export function tooltipPlugin(opts: {
 					);
 					const stroke =
 						typeof series.stroke === "function" ? series.stroke(u, s) : series.stroke;
-					const swatch = tooltipElement(
-						"span",
-						"width:8px;height:2px;display:inline-block"
-					);
-					swatch.style.background = String(stroke);
-					const name = tooltipElement(
-						"span",
-						"display:inline-flex;align-items:center;gap:5px"
-					);
-					name.append(swatch, series.label ?? "");
-					const row = tooltipElement(
-						"div",
-						"display:flex;gap:8px;align-items:center;justify-content:space-between"
-					);
-					row.append(name, tooltipElement("span", "font-weight:600", formatted));
-					rows.push(row);
+					rows.push(tooltipRow(String(series.label ?? ""), formatted, String(stroke)));
 				}
+				// Built from text, never markup: series labels include script-defined
+				// custom-metric names, which an imported collection can fill with HTML.
 				tip.replaceChildren(...rows);
 				tip.style.left = `${left}px`;
 				tip.style.top = `${top}px`;

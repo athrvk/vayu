@@ -64,7 +64,7 @@ describe("UpdatesCard", () => {
 		render(<UpdatesCard />);
 		await clickCheck();
 		fireEvent.click(await screen.findByRole("button", { name: /release notes/i }));
-		expect(openReleasePage).toHaveBeenCalledWith("https://example.test/v1.0.0");
+		expect(openReleasePage).toHaveBeenCalledWith();
 	});
 
 	it("offers the install command only when the platform needs one", async () => {

@@ -29,6 +29,9 @@ concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   javascript:
     name: Analyze JavaScript/TypeScript
@@ -38,10 +41,10 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.2
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: javascript-typescript
           # `build-mode: none` is the source-only path - no compilation, which
@@ -73,7 +76,7 @@ jobs:
               - '**/*.test.tsx'
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v4.38.2
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:javascript-typescript
 
@@ -93,7 +96,7 @@ jobs:
       VCPKG_COMMIT: '386d7c478221b7ee0c97bfe6ea61dcf65121d564'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install system dependencies
         run: |
@@ -112,7 +115,7 @@ jobs:
       # engine, so CodeQL does not need to trace their compilation. Only the
       # engine's own object files must compile fresh, which is the point below.
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-Linux-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -121,14 +124,14 @@ jobs:
             vcpkg-Linux-${{ matrix.os || 'ubuntu-latest' }}-
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.2
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: c-cpp
           # Manual, not autobuild: autobuild does not know about the vcpkg
@@ -150,7 +153,7 @@ jobs:
       # job is scheduled rather than per-pull-request. Tests are off: analysing
       # the test suite adds build time and finds nothing that ships.
       - name: Build engine
-        uses: lukka/run-cmake@v10
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: linux-prod
@@ -158,6 +161,6 @@ jobs:
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=OFF']"
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v4.38.2
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:c-cpp

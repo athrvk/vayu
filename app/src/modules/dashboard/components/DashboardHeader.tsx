@@ -86,7 +86,7 @@ function DashboardHeader({
 					label="Back"
 					icon={<ArrowLeft className="size-icon" />}
 					onClick={navigateBack}
-					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+					className="size-target shrink-0 text-muted-foreground hover:text-foreground"
 				/>
 			)}
 

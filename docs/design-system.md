@@ -1249,13 +1249,13 @@ below.
 
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|
-| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton`, the Dock (via `--dock-height`) |
 | `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
 | `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
 | `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
-| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
+| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
 
@@ -1275,7 +1275,12 @@ either density. `density.test.ts` and `chrome-floors.test.ts` guard both
 halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
-`app/src` actually use them.
+`app/src` actually use them. The latter also scans every non-test file for a
+`Button` / `TooltipIconButton` tag carrying `h-N`, `w-N` or `size-N` with N <= 7
+(under 24px at the 3px unit): such an override outranks the size variant in
+emission order. A compact text button states `h-control-sm`, an icon button
+`size-target`. The tree-row controls are 24px at Default inside 24px rows, so
+they carry `size-target` rather than an exemption.
 
 ---
 
@@ -2579,7 +2584,7 @@ rail's own bottom (a bottom cluster is the same Dock problem in miniature).
 `ContextRail` (`ContextRail.tsx`) is the same shape on the right edge: one
 button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
 
-- **`RailButton` (`RailButton.tsx`) is `w-full h-9` with a `w-4 h-4` icon**,
+- **`RailButton` (`RailButton.tsx`) is `w-full h-band` with a `size-icon` icon**,
   icon-only so `aria-label` is the accessible name and the chord (where there
   is one) stays out of it - a tooltip supplies `aria-describedby` while open,
   never a name. Two variants: `"edge-left"`/`"edge-right"` paint a 2px
@@ -2670,8 +2675,9 @@ animation frame, and commits to the store it persists to exactly once, on
 `pointerup`. A `pointercancel` (a touch interruption, an OS overlay) reverts
 the live value to where the drag started and commits nothing. A discrete
 keyboard press or the double-click reset still commit immediately; only a
-held key's own repeats coalesce to one commit per animation frame, the same
-way a drag's paint does, so holding a key does not flood `localStorage` with
+held key's own repeats are throttled to one commit per 200 ms (flushed on
+keyup and blur; OS key repeat is slower than a frame, so per-frame coalescing
+would not help), so holding a key does not flood `localStorage` with
 one write per repeat. Both handles share this one hook rather than each
 carrying its own copy, after the two independently-written copies this
 started from had already drifted (only one handled keyboard Page/Home/End
@@ -3135,9 +3141,9 @@ stop, holding the tooltip, with the inert control inside it:
 <Button
   variant="ghost"
   size="icon"
-  className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
+  className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
 >
-  <Trash2 className="w-3 h-3" />
+  <Trash2 className="size-icon-sm" />
 </Button>
 ```
 
@@ -3533,6 +3539,8 @@ move together or the suite reddens.
 Do not take a content pane below 6px: the thumb stops being a mouse target.
 
 The baseline also reserves a 6px gutter with `scrollbar-gutter: stable` on scroll containers (via Tailwind utility classes), placed outside the `@supports` guard because this property does not trigger the standard-property opt-out that affects width and color. Per CSS Overflow 4, the gutter reserves for `overflow: hidden` too, so it is scoped via CSS class selectors rather than applying globally - `overflow-hidden` is used throughout the app for text truncation and clipping, and deserves no dead 6px strip.
+
+Surfaces where a permanent 6px reserve reads as a dead band opt out with `[scrollbar-gutter:auto]` (arbitrary property, so it beats the zero-specificity baseline): the floating menus (`dropdown-menu`, `select`, `context-menu`, `command` list, the tab overflow menu), the dialog panel and body, and the markdown editor's textarea and preview. They only scroll rarely and would otherwise show an empty strip inside a padded surface; the trade-off is that their content shifts by the scrollbar width on the occasions they do overflow. Sidebar lists (history, trash) keep the reserve and no longer add their own `pr-1`.
 
 ### Tab strips: `scrollbar-strip`
 

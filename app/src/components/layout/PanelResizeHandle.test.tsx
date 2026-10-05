@@ -277,58 +277,45 @@ describe("PanelResizeHandle - drag", () => {
 });
 
 /**
- * A held key auto-repeats roughly as fast as a drag fires `pointermove`
- * (#1738) - `layout-store` persists synchronously, so a naive per-repeat
- * `setWidth` is the same `JSON.stringify` + `localStorage.setItem` flood the
- * drag path was fixed for. A single press still commits immediately (kept
- * identical to the tests above); only a *held* key's repeats coalesce.
+ * A held key auto-repeats every 30-100 ms (#1738) - slower than a frame, so a
+ * per-frame coalesce still commits once per repeat. `layout-store` persists
+ * synchronously, so that is a `JSON.stringify` + `localStorage.setItem` per
+ * repeat. A single press still commits immediately (kept identical to the
+ * tests above); a *held* key's repeats are throttled on time.
  */
 describe("PanelResizeHandle - keyboard repeat", () => {
-	function stubRafAsTimeout() {
-		vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-			return setTimeout(() => cb(0), 0) as unknown as number;
-		});
-		vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-	}
-
 	afterEach(() => {
-		vi.unstubAllGlobals();
+		vi.useRealTimers();
 	});
 
-	it("coalesces a burst of repeats into one commit, landing on the last nudge", () => {
+	it("throttles repeats spaced across frames to one commit per interval", () => {
 		vi.useFakeTimers();
-		stubRafAsTimeout();
 		const { setWidth, handle } = setup("right");
 
-		fireEvent.keyDown(handle, { key: "ArrowRight", repeat: true });
-		fireEvent.keyDown(handle, { key: "ArrowRight", repeat: true });
-		fireEvent.keyDown(handle, { key: "ArrowRight", repeat: true });
-		// Mutation check: remove the `e.repeat` branch in `useResizeGesture` so
-		// every repeat commits straight away, and this fails - `setWidth` would
-		// already have been called three times.
-		expect(setWidth).not.toHaveBeenCalled();
+		// Ten repeats 40 ms apart (a realistic OS repeat rate), each far
+		// longer than a 16 ms frame. Mutation check: coalesce per frame
+		// instead of per interval, or drop the `e.repeat` branch, and this
+		// sees one commit per repeat.
+		for (let i = 0; i < 10; i++) {
+			fireEvent.keyDown(handle, { key: "ArrowRight", repeat: true });
+			vi.advanceTimersByTime(40);
+		}
 
-		vi.runAllTimers();
-
-		expect(setWidth).toHaveBeenCalledTimes(1);
-		expect(setWidth).toHaveBeenCalledWith(348);
-
-		vi.useRealTimers();
+		expect(setWidth).toHaveBeenCalledTimes(2);
+		// The first window's tail: five nudges of 16 from the 300 start.
+		expect(setWidth.mock.calls[0][0]).toBe(380);
 	});
 
 	it("flushes a still-pending repeat on key release rather than dropping it", () => {
 		vi.useFakeTimers();
-		stubRafAsTimeout();
 		const { setWidth, handle } = setup("right");
 
 		fireEvent.keyDown(handle, { key: "ArrowRight", repeat: true });
+		expect(setWidth).not.toHaveBeenCalled();
 		fireEvent.keyUp(handle, { key: "ArrowRight" });
 
-		// Released before the coalesced frame ever fired - the value still
-		// lands, immediately, rather than waiting for a frame that is now
-		// cancelled.
 		expect(setWidth).toHaveBeenCalledWith(316);
-
-		vi.useRealTimers();
+		vi.advanceTimersByTime(1000);
+		expect(setWidth).toHaveBeenCalledTimes(1);
 	});
 });

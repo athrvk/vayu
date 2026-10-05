@@ -36,7 +36,15 @@ import { extendTailwindMerge } from "tailwind-merge";
  * about the merge order is the kind of hand-rolled copy this repo keeps out
  * of components.
  */
-const FLOOR_STEPS = ["band", "banner", "control", "control-sm", "target"] as const;
+const FLOOR_STEPS = [
+	"band",
+	"band-md",
+	"band-lg",
+	"banner",
+	"control",
+	"control-sm",
+	"target",
+] as const;
 const ICON_STEPS = ["target", "icon", "icon-sm"] as const;
 
 const twMerge = extendTailwindMerge({
@@ -44,7 +52,7 @@ const twMerge = extendTailwindMerge({
 		classGroups: {
 			"font-size": [{ text: ["hero", "metric", "label", "micro"] }],
 			h: [{ h: [...FLOOR_STEPS] }],
-			"min-h": [{ "min-h": ["banner"] }],
+			"min-h": [{ "min-h": ["band", "band-md", "band-lg", "banner"] }],
 			w: [{ w: [...FLOOR_STEPS] }],
 			"min-w": [{ "min-w": ["target"] }],
 			size: [{ size: [...ICON_STEPS] }],

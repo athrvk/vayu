@@ -9,6 +9,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { woff2Only } from "./vite-plugins/woff2-only";
+import { cspMeta } from "./vite-plugins/csp-meta";
 import path from "path";
 import { readFileSync } from "fs";
 
@@ -25,7 +26,7 @@ export default defineConfig({
 	// `woff2Only` drops the legacy `.woff` sibling `@fontsource` names next to
 	// every woff2 - 90 files, 1.18MB, that Chromium never asks for. See the
 	// plugin for why it works on the bundle rather than in a transform.
-	plugins: [react(), tailwindcss(), woff2Only()],
+	plugins: [react(), tailwindcss(), woff2Only(), cspMeta()],
 	define: {
 		__VAYU_VERSION__: JSON.stringify(packageJson.version),
 	},

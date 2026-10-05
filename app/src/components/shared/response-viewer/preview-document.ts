@@ -27,6 +27,11 @@
  * Both go first in the document: a `<meta>` policy governs only what parses
  * after it, the first `<base>` with a target wins, and several policies
  * intersect, so markup that follows can tighten neither away.
+ *
+ * This is the preview's one policy (#1780), carried in the document rather
+ * than an iframe `csp` attribute: under `sandbox=""` a `<meta>` policy is
+ * enforced without `allow-same-origin`, and the renderer's own policy, which
+ * a srcdoc frame inherits, intersects with it.
  */
 
 export const PREVIEW_CSP = [

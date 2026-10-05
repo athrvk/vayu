@@ -83,7 +83,7 @@ export function RunSourceSection({ tab }: ContextBarSectionProps) {
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-6 text-xs min-w-0 max-w-full"
+							className="h-control-sm text-xs min-w-0 max-w-full"
 							onClick={() => openTab({ type: "collection", entityId: collectionId })}
 						>
 							<span className="truncate">{collection.name}</span>
@@ -101,7 +101,7 @@ export function RunSourceSection({ tab }: ContextBarSectionProps) {
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-6 text-xs min-w-0 max-w-full"
+							className="h-control-sm text-xs min-w-0 max-w-full"
 							onClick={() => openTab({ type: "request", entityId: run.requestId! })}
 						>
 							<span className="truncate">{request?.name || "Open request"}</span>

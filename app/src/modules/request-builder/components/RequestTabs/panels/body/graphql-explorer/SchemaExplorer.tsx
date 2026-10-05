@@ -346,7 +346,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				<TooltipIconButton
 					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
 					aria-pressed={showDescriptions}
-					className={cn("h-6 w-6 shrink-0", showDescriptions && "text-primary")}
+					className={cn("size-target shrink-0", showDescriptions && "text-primary")}
 					icon={<Text className="size-icon-sm" />}
 					onClick={() => toggleDescriptions(schemaKey)}
 				/>

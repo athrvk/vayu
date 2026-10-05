@@ -2,9 +2,10 @@
 # a bump is a five-minute read; neither can produce the pull-request volume an
 # application dependency tree does.
 #
-# Every action is pinned to a tag and none to a commit SHA, so keeping those
-# tags current is the cheapest supply-chain work available. Actions change
-# rarely, so monthly is quiet.
+# Every action is pinned to a full commit SHA with its tag in a trailing
+# comment (pr-tests.yml's Script lint job fails on any other form), so a moved
+# tag cannot reach a release job. Dependabot rewrites both halves of the pin.
+# Actions change rarely, so monthly is quiet.
 #
 # There is deliberately no `labels:` key on either entry. Dependabot applies
 # `dependencies` plus a per-ecosystem label (`github_actions`, `python`) by
@@ -30,6 +31,11 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # A release published today is not proposed today: a compromised release is
+    # usually yanked within days, and a SHA pin is only as safe as the commit it
+    # was taken from.
+    cooldown:
+      default-days: 7
     # One pull request for all of them rather than one per action.
     groups:
       actions:
