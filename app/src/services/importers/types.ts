@@ -23,6 +23,7 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
+import type { RefReport } from "./ref-bundler";
 
 /**
  * Something the parser could not import. Mostly a resource or body Vayu can't
@@ -334,6 +335,13 @@ export interface ImportMeta {
 	 * import decided, and nothing for what changes nothing they send.
 	 */
 	skipped: SkippedItem[];
+	/**
+	 * What the `$ref` bundling fetched and refused, by name (#1782). Set renderer
+	 * side by the batch parse, since the engine only receives the count; read by
+	 * `importNotices`. Absent when the document referenced nothing remote and
+	 * nothing was refused.
+	 */
+	refReport?: RefReport;
 	/**
 	 * Requests, and for Postman folders and collections, whose own auth Vayu
 	 * stores but does not execute - the `CONFIG_AUTH_TYPES` modes (aws,

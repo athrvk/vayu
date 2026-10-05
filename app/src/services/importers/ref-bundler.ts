@@ -97,7 +97,7 @@ export interface ExternalRefIntake {
 	parseDocument?: (text: string) => Promise<unknown>;
 }
 
-export interface BundleResult {
+export interface BundleResult extends RefReport {
 	/** What to parse, and what to store. Identical to the input when `bundled` is 0. */
 	text: string;
 	/** Distinct external documents inlined. */
@@ -105,6 +105,46 @@ export interface BundleResult {
 	/** External refs left unresolved - reported to the user, never silent. */
 	unresolvedRefs: number;
 }
+
+/**
+ * What the bundling pulled in and what it refused, named - the part of a bundle
+ * the preview and the re-sync card show beside the unresolved count (#1782).
+ */
+export interface RefReport {
+	/**
+	 * Remote documents that were fetched and inlined, so the preview can say what
+	 * the spec pulled in beyond the file the user picked. Sorted.
+	 */
+	fetched: string[];
+	/**
+	 * Targets this import refused to follow on purpose - a local file outside the
+	 * picked folder, a loopback or link-local address - each with the reason. They
+	 * are also counted in `unresolvedRefs`; this is the part that names them.
+	 */
+	refused: RefusedRef[];
+}
+
+export interface RefusedRef {
+	/** The target as the bundler keyed it: a relative path or an absolute URL. */
+	target: string;
+	reason: string;
+}
+
+/**
+ * Thrown by a `readSibling` that declined a local ref on purpose (it leaves the
+ * folder the user picked), as opposed to one that could not find it. The
+ * message is the reason the preview shows, so it is written for a user.
+ */
+export class RefRefusedError extends Error {
+	constructor(message = OUTSIDE_PICKED_FOLDER) {
+		super(message);
+		this.name = "RefRefusedError";
+	}
+}
+
+export const OUTSIDE_PICKED_FOLDER = "outside the folder that was picked";
+
+const EMPTY_REPORT = { fetched: [] as string[], refused: [] as RefusedRef[] };
 
 /**
  * A document that outgrew the engine's cap. Fatal rather than tallied: the
@@ -371,9 +411,10 @@ export async function bundleExternalRefs(
 	} catch {
 		// Not parseable at all - the format detector reports that, with a message
 		// about the file rather than about its refs.
-		return { text: raw, bundled: 0, unresolvedRefs: 0 };
+		return { text: raw, bundled: 0, unresolvedRefs: 0, ...EMPTY_REPORT };
 	}
-	if (!isOpenApiDocument(root)) return { text: raw, bundled: 0, unresolvedRefs: 0 };
+	if (!isOpenApiDocument(root))
+		return { text: raw, bundled: 0, unresolvedRefs: 0, ...EMPTY_REPORT };
 
 	const rootBase: DocumentBase = intake.sourceUrl
 		? { kind: "url", url: intake.sourceUrl }
@@ -384,6 +425,7 @@ export async function bundleExternalRefs(
 	const loaded = new Map<string, BundledDoc>();
 	/** Targets already tried and refused, so a second ref does not retry them. */
 	const failed = new Set<string>();
+	const refused: RefusedRef[] = [];
 	/** Targets seen but not yet loaded, with the base that named them. */
 	const pending: { key: string; base: DocumentBase }[] = [];
 	let bytes = byteLength(raw);
@@ -412,7 +454,9 @@ export async function bundleExternalRefs(
 	// already loaded is never re-enqueued, which is what terminates a cycle.
 	while (pending.length > 0) {
 		const next = pending.shift()!;
-		const text = await loadTarget(next.key, intake);
+		const outcome = await loadTarget(next.key, intake);
+		if (outcome.refusal) refused.push({ target: next.key, reason: outcome.refusal });
+		const text = outcome.text;
 		if (text === undefined) {
 			failed.add(next.key);
 			continue;
@@ -438,7 +482,8 @@ export async function bundleExternalRefs(
 	for (const doc of loaded.values())
 		unresolvedRefs += countUnresolved(doc.value, doc.base, loaded);
 
-	if (loaded.size === 0) return { text: raw, bundled: 0, unresolvedRefs };
+	const fetched = [...loaded.keys()].filter((key) => ABSOLUTE_URL.test(key)).sort();
+	if (loaded.size === 0) return { text: raw, bundled: 0, unresolvedRefs, fetched, refused };
 
 	// Sorted, so the same inputs always serialize to the same bytes - sync
 	// compares hashes of this text.
@@ -452,17 +497,59 @@ export async function bundleExternalRefs(
 	if (byteLength(text) > intake.maxBytes) {
 		throw new SpecBundleTooLargeError(byteLength(text), intake.maxBytes);
 	}
-	return { text, bundled: loaded.size, unresolvedRefs };
+	return { text, bundled: loaded.size, unresolvedRefs, fetched, refused };
 }
 
-/** The text at one target, or `undefined` when this import cannot reach it. */
-async function loadTarget(key: string, intake: ExternalRefIntake): Promise<string | undefined> {
+/**
+ * Whether a URL names this machine or its link-local range: `localhost`, the
+ * `127.0.0.0/8` block, `::1`, `169.254.0.0/16` (cloud metadata lives there) and
+ * `fe80::/10`. Judged from the text; a name that merely resolves to one is the
+ * engine's to refuse, since only it sees the connection.
+ */
+export function isLocalAddress(url: string): boolean {
+	let host: string;
 	try {
-		if (ABSOLUTE_URL.test(key)) return await intake.fetchUrl?.(key);
-		return await intake.readSibling?.(key);
+		host = new URL(url).hostname.toLowerCase();
 	} catch {
+		return false;
+	}
+	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	if (host === "localhost" || host.endsWith(".localhost")) return true;
+	if (/^127\.\d+\.\d+\.\d+$/.test(host) || /^169\.254\.\d+\.\d+$/.test(host)) return true;
+	return host === "::1" || /^fe[89ab][0-9a-f]?:/.test(host);
+}
+
+function isOwnHost(url: string, sourceUrl: string | undefined): boolean {
+	if (!sourceUrl) return false;
+	try {
+		return new URL(sourceUrl).host === new URL(url).host;
+	} catch {
+		return false;
+	}
+}
+
+/** The text at one target, or why none came back when that was on purpose. */
+async function loadTarget(
+	key: string,
+	intake: ExternalRefIntake
+): Promise<{ text?: string; refusal?: string }> {
+	if (ABSOLUTE_URL.test(key)) {
+		// A spec fetched from a local address (a dev server) may reference its
+		// own host; any other local address is a document reaching for the
+		// user's machine or network edge.
+		if (isLocalAddress(key) && !isOwnHost(key, intake.sourceUrl)) {
+			return { refusal: "a loopback or link-local address is not fetched for a reference" };
+		}
+	}
+	try {
+		const text = ABSOLUTE_URL.test(key)
+			? await intake.fetchUrl?.(key)
+			: await intake.readSibling?.(key);
+		return { text };
+	} catch (e) {
+		if (e instanceof RefRefusedError) return { refusal: e.message };
 		// Unreachable, refused by a gate, or over the engine's own cap. The count
 		// is what the user sees; the reason belongs to the channel that refused.
-		return undefined;
+		return {};
 	}
 }

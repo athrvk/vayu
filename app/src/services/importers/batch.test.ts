@@ -269,6 +269,35 @@ describe("detectBatch - siblings come from the batch", () => {
 	});
 });
 
+describe("detectBatch - a ref that leaves the picked folder (#1782)", () => {
+	const topLevel = [
+		{
+			fileName: "openapi.json",
+			relativePath: "openapi.json",
+			specPath: "/home/u/api/openapi.json",
+			text: fixture("openapi-v3-multifile", "spec", "openapi.json"),
+		},
+	];
+
+	it("refuses it before the disk is asked, and names it on the entry's meta", async () => {
+		const readSibling = vi.fn(async () => JSON.stringify({ Error: { type: "object" } }));
+		const entries = await detectBatch(topLevel, OPTS, intake({ readSibling }));
+
+		const asked = readSibling.mock.calls.map((call) => (call as unknown[])[1]);
+		expect(asked).not.toContain("../shared/error.json");
+		expect(entries[0]?.refReport?.refused).toEqual([
+			{ target: "../shared/error.json", reason: "outside the folder that was picked" },
+		]);
+		expect(entries[0]?.result?.meta.refReport?.refused).toHaveLength(1);
+	});
+
+	it("restates the named refusal on a re-parse", async () => {
+		const entries = await detectBatch(topLevel, OPTS, intake());
+		const again = await reparseBatch(entries, OPTS);
+		expect(again[0]?.result?.meta.refReport?.refused).toHaveLength(1);
+	});
+});
+
 describe("reparseBatch", () => {
 	it("re-applies the options to every entry from the text already bundled", async () => {
 		const entries = await detectBatch(

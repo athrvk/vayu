@@ -41,7 +41,13 @@
  * share a failure.
  */
 
-import { bundleExternalRefs, dirOf, joinRelative } from "./ref-bundler";
+import {
+	bundleExternalRefs,
+	dirOf,
+	joinRelative,
+	RefRefusedError,
+	type RefReport,
+} from "./ref-bundler";
 import { parseImport } from "./factory";
 import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
 
@@ -100,6 +106,8 @@ export interface BatchEntry {
 	raw: string;
 	/** External `$ref`s nothing could reach, already stamped into `result.meta`. */
 	unresolvedRefs: number;
+	/** What the bundling fetched and refused, named; carried onto `result.meta.refReport`. */
+	refReport?: RefReport;
 	result: ImportResult | null;
 	/** Why this file cannot be imported, in words. Never set alongside `result`. */
 	error: string | null;
@@ -205,11 +213,18 @@ export function entryLabel(entry: BatchEntry): string {
 	return entry.fileName || entry.sourceUrl || "Pasted document";
 }
 
+const NO_REFS: RefReport = { fetched: [], refused: [] };
+
+function hasRefReport(report: RefReport): boolean {
+	return report.fetched.length > 0 || report.refused.length > 0;
+}
+
 /** A document after bundling, before anything has tried to detect its format. */
 interface BundledDocument {
 	document: BatchDocument;
 	raw: string;
 	unresolvedRefs: number;
+	refReport: RefReport;
 	error?: string;
 }
 
@@ -256,6 +271,9 @@ export async function detectBatch(
 							consumed.set(siblingKey, document.fileName ?? siblingKey);
 							return inBatchText;
 						}
+						if (siblingKey === ".." || siblingKey.startsWith("../")) {
+							throw new RefRefusedError();
+						}
 						if (!specPath || !intake.readSibling) {
 							throw new Error(`No file at ${refPath}`);
 						}
@@ -268,6 +286,7 @@ export async function detectBatch(
 				document,
 				raw: document.text,
 				unresolvedRefs: 0,
+				refReport: NO_REFS,
 				error: document.readError,
 			};
 		}
@@ -278,7 +297,12 @@ export async function detectBatch(
 				fetchUrl: intake.fetchUrl,
 				...(readSibling ? { readSibling } : {}),
 			});
-			return { document, raw: bundle.text, unresolvedRefs: bundle.unresolvedRefs };
+			return {
+				document,
+				raw: bundle.text,
+				unresolvedRefs: bundle.unresolvedRefs,
+				refReport: { fetched: bundle.fetched, refused: bundle.refused },
+			};
 		} catch (e) {
 			// Only the size cap throws; an unreachable ref is counted, not fatal.
 			// It is this file's failure and not the batch's - the other twelve
@@ -287,6 +311,7 @@ export async function detectBatch(
 				document,
 				raw: document.text,
 				unresolvedRefs: 0,
+				refReport: NO_REFS,
 				error: failureMessage(e),
 			};
 		}
@@ -332,6 +357,7 @@ export async function detectBatch(
 			const result = await parseEntry(bundle.raw, opts, {
 				...bundle.document,
 				unresolvedRefs: bundle.unresolvedRefs,
+				refReport: bundle.refReport,
 			});
 			report("parsing", ++parsedSoFar, parseCount);
 			return result;
@@ -350,6 +376,7 @@ export async function detectBatch(
 			sourceUrl: document.sourceUrl ?? "",
 			raw: bundle.raw,
 			unresolvedRefs: bundle.unresolvedRefs,
+			refReport: bundle.refReport,
 		};
 
 		const bundledInto = key ? (consumed.get(key) ?? null) : null;
@@ -384,7 +411,10 @@ export async function detectBatch(
 async function parseEntry(
 	raw: string,
 	opts: ImportOptions,
-	source: Pick<BatchDocument, "fileName" | "sourceUrl"> & { unresolvedRefs?: number }
+	source: Pick<BatchDocument, "fileName" | "sourceUrl"> & {
+		unresolvedRefs?: number;
+		refReport?: RefReport;
+	}
 ): Promise<Pick<BatchEntry, "result" | "error" | "included">> {
 	try {
 		const result = await parseImport(raw, opts, {
@@ -392,6 +422,12 @@ async function parseEntry(
 			...(source.sourceUrl ? { sourceUrl: source.sourceUrl } : {}),
 			...(source.unresolvedRefs ? { unresolvedRefs: source.unresolvedRefs } : {}),
 		});
+		// The engine never saw the bundling, so the named half of it rides on the
+		// meta here, where `importNotices` reads it for every surface that shows
+		// one file's preview.
+		if (source.refReport && hasRefReport(source.refReport)) {
+			result.meta.refReport = source.refReport;
+		}
 		return { result, error: null, included: true };
 	} catch (e) {
 		return { result: null, error: failureMessage(e), included: false };
@@ -426,6 +462,7 @@ export async function reparseBatch(
 				...(entry.fileName ? { fileName: entry.fileName } : {}),
 				...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
 				unresolvedRefs: entry.unresolvedRefs,
+				refReport: entry.refReport,
 			});
 			report("parsing", ++done, reparses);
 			// A file the user had unchecked stays unchecked; a toggle changes what is

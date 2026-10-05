@@ -28,7 +28,11 @@
  * order and the honesty be tested without a network, a disk or Electron.
  */
 
-import { bundleExternalRefs } from "@/services/importers/ref-bundler";
+import {
+	bundleExternalRefs,
+	RefRefusedError,
+	type RefReport,
+} from "@/services/importers/ref-bundler";
 
 /** Where the bound document came from, as the binding recorded it. */
 export interface SpecSource {
@@ -52,7 +56,7 @@ export interface SpecRefetchIo {
 	readSpecFile?: (specPath: string, refPath: string) => Promise<{ bytes: Uint8Array }>;
 }
 
-export interface RefetchedSpec {
+export interface RefetchedSpec extends RefReport {
 	/** The document, bundled - the same text an import would have stored. */
 	text: string;
 	/** Refs the bundler could not reach, for the same disclosure import makes. */
@@ -87,6 +91,9 @@ export async function refetchSpec(source: SpecSource, io: SpecRefetchIo): Promis
 		...(specPath && readSpecFile
 			? {
 					readSibling: async (relativePath) => {
+						if (relativePath === ".." || relativePath.startsWith("../")) {
+							throw new RefRefusedError();
+						}
 						const { bytes } = await readSpecFile(specPath, relativePath);
 						return new TextDecoder("utf-8").decode(bytes);
 					},
@@ -94,7 +101,12 @@ export async function refetchSpec(source: SpecSource, io: SpecRefetchIo): Promis
 			: {}),
 	});
 
-	return { text: bundle.text, unresolvedRefs: bundle.unresolvedRefs };
+	return {
+		text: bundle.text,
+		unresolvedRefs: bundle.unresolvedRefs,
+		fetched: bundle.fetched,
+		refused: bundle.refused,
+	};
 }
 
 async function read(

@@ -6,7 +6,8 @@
  */
 
 /**
- * Reading the files an imported OpenAPI document references (issue #649).
+ * Reading the files an imported OpenAPI document references (issue #649, and
+ * #1782 for the confinement below).
  *
  * A multi-file spec names its siblings by relative path - `./schemas/pet.yaml`,
  * `../shared/error.yaml` - and until those are read, every operation that
@@ -28,12 +29,15 @@
  *     the rule. The bundle has to fit what `POST /specs` will store, and a user
  *     who raises the setting can import the bigger spec the same session.
  *
- * **A ref that climbs out of the spec's directory is allowed**, and that is a
- * decision rather than an oversight: `spec/openapi.yaml` referencing
- * `../shared/error.yaml` is an ordinary layout, and the file is named by a
- * document the user chose to import. A directory jail would refuse real specs
- * while adding nothing the extension allowlist does not already give - the same
- * reasoning that rejected a registry of picked paths for `dataFile:read`.
+ * **A ref may not leave the picked document's directory** (#1782). A spec from
+ * the internet can name `../../.config/<tool>/credentials.json`, and the bundle
+ * is stored: the file would be inlined into the stored document with no one
+ * having chosen it. The extension allowlist keeps keys and databases out but not
+ * a credentials `.json`, so the rule is containment: the ref, resolved, must sit
+ * under `dirname(specPath)`, compared component-wise and again after symlinks
+ * are resolved. Siblings of a picked *folder* are served from the batch itself
+ * (`importers/batch.ts`) before this channel is asked, so `spec/a.yaml` ->
+ * `../shared/b.yaml` still bundles when the folder was picked.
  *
  * Bytes, not text, again matching `dataFile:read`: decoding belongs to one place
  * on the renderer side, so a sibling read here cannot disagree with the picked
@@ -58,12 +62,14 @@ export interface SpecFileReadResult {
 export interface SpecFileSystem {
 	stat: (filePath: string) => Promise<{ size: number; isFile: () => boolean }>;
 	readFile: (filePath: string) => Promise<Buffer>;
+	realpath: (filePath: string) => Promise<string>;
 	fetchConfig: () => Promise<unknown>;
 }
 
 const defaultSystem: SpecFileSystem = {
 	stat: (filePath) => fs.stat(filePath),
 	readFile: (filePath) => fs.readFile(filePath),
+	realpath: (filePath) => fs.realpath(filePath),
 	fetchConfig: async () => {
 		const response = await fetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
@@ -93,6 +99,23 @@ async function maxSpecFileBytes(system: SpecFileSystem): Promise<number> {
 	return SPEC_DOCUMENT_MAX_BYTES_SEED;
 }
 
+/** True when @p target is @p root or sits beneath it, by path component. */
+function isWithin(root: string, target: string): boolean {
+	const relative = path.relative(root, target);
+	return (
+		relative === "" ||
+		(!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+	);
+}
+
+class OutsideFolderError extends Error {
+	constructor(refPath: string) {
+		super(
+			`"${refPath}" points outside the folder of the spec that names it, so Vayu did not read it. Move the file next to the spec, or import a bundled spec.`
+		);
+	}
+}
+
 /**
  * Read one file referenced by an imported spec, or throw a message the import
  * dialog can show as-is.
@@ -119,7 +142,9 @@ export async function readSpecFile(
 		throw new Error(`"${refPath}" is an absolute path, and a spec reference must be relative.`);
 	}
 
-	const resolved = path.resolve(path.dirname(specPath), refPath);
+	const specDir = path.dirname(specPath);
+	const resolved = path.resolve(specDir, refPath);
+	if (!isWithin(specDir, resolved)) throw new OutsideFolderError(refPath);
 	const extension = path.extname(resolved).toLowerCase();
 	if (!SPEC_FILE_EXTENSIONS.includes(extension)) {
 		throw new Error(
@@ -136,6 +161,18 @@ export async function readSpecFile(
 		throw new Error(`The spec references ${refPath}, which is not at ${resolved}.`);
 	}
 
+	// A symlink inside the folder can still point out of it; the lexical check
+	// above cannot see that, so both ends are canonicalised and compared again.
+	let canonical: string;
+	let canonicalDir: string;
+	try {
+		canonical = await system.realpath(resolved);
+		canonicalDir = await system.realpath(specDir);
+	} catch {
+		throw new Error(`The spec references ${refPath}, which is not at ${resolved}.`);
+	}
+	if (!isWithin(canonicalDir, canonical)) throw new OutsideFolderError(refPath);
+
 	const maxBytes = await maxSpecFileBytes(system);
 	if (size > maxBytes) {
 		throw new Error(
@@ -143,7 +180,7 @@ export async function readSpecFile(
 		);
 	}
 
-	const buffer = await system.readFile(resolved);
+	const buffer = await system.readFile(canonical);
 	return {
 		bytes: new Uint8Array(buffer),
 		fileName: path.basename(resolved),

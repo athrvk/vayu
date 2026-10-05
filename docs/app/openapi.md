@@ -110,8 +110,14 @@ Where a referenced file is read from depends on where the spec came from:
 | The spec was… | A relative reference is read… | An absolute `https://` reference |
 |---|---|---|
 | Fetched from a URL | From that URL's directory | Fetched |
-| Picked as a file | From beside the file, on this machine | Fetched |
+| Picked as a file | From beside the file, on this machine, inside the picked folder | Fetched |
 | Pasted as text | Not at all - there is no directory to read from | Fetched |
+
+A reference to a loopback or link-local address (`localhost`, `127.0.0.0/8`,
+`::1`, `169.254.0.0/16`, `fe80::/10`) is never fetched, because a spec from the
+internet should not be able to make Vayu call into your machine or network edge.
+The one exception is a spec that was itself fetched from such a host (a dev
+server), which may reference its own host.
 
 References are followed through the files they lead to, so a file that refers to
 a third is resolved too, and a cycle stops rather than looping. Each file is read
@@ -122,6 +128,16 @@ unreachable, or not valid JSON or YAML leaves its reference exactly as the
 document wrote it, and the import preview counts it - one per reference, because
 each one is an operation that imported without the schema it declared. Before
 this, such a reference simply produced an empty body stub and no message at all.
+
+**A reference cannot leave the folder of the file you picked.** A spec from an
+untrusted source could otherwise name `../../.config/<tool>/credentials.json` and
+have it inlined into the stored document. A relative reference is resolved, and
+refused if the result is outside the picked file's folder (or, when you picked a
+folder, outside that folder), also after symbolic links are followed. Files you
+picked together are read from the pick itself, so `spec/openapi.yaml` referencing
+`../shared/error.yaml` still works when both sit inside the folder you picked.
+The preview names each refused reference, and lists under "Fetched from" every
+remote document the spec pulled in, so nothing is inlined without being shown.
 
 Reading a file beside a picked spec is the only part of this that touches the
 disk. It goes through the same kind of gate the [data
