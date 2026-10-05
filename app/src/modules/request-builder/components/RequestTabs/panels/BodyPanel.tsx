@@ -360,7 +360,7 @@ export default function BodyPanel() {
 							size="sm"
 							variant={showResolved ? "ghost" : "secondary"}
 							onClick={() => setShowResolved(false)}
-							className="h-7 px-2.5 text-xs"
+							className="h-control-sm px-2.5 text-xs"
 						>
 							Source
 						</Button>
@@ -368,7 +368,7 @@ export default function BodyPanel() {
 							size="sm"
 							variant={showResolved ? "secondary" : "ghost"}
 							onClick={() => setShowResolved(true)}
-							className="h-7 px-2.5 text-xs"
+							className="h-control-sm px-2.5 text-xs"
 						>
 							Resolved
 						</Button>

@@ -390,7 +390,12 @@ export function DefaultValueLine({ defaultValue, value, display, onReset }: Defa
 		<div className="flex items-center gap-2">
 			<p className="text-xs text-muted-foreground">Default: {display ?? defaultValue}</p>
 			{onReset && (
-				<Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onReset}>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-control-sm px-2 text-xs"
+					onClick={onReset}
+				>
 					Reset
 				</Button>
 			)}

@@ -73,7 +73,7 @@ export function CookiesSection({ tab }: ContextBarSectionProps) {
 					<Button
 						variant="outline"
 						size="sm"
-						className="h-6 text-xs"
+						className="h-control-sm text-xs"
 						disabled={clearCookies.isPending}
 						onClick={() => clearCookies.mutate({ environmentId: activeEnvironmentId })}
 					>

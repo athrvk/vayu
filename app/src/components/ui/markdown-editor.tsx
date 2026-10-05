@@ -166,7 +166,7 @@ export function MarkdownEditor({
 					onClick={() => setPinned(!pinned)}
 					aria-pressed={pinned}
 					className={cn(
-						"h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground",
+						"size-target shrink-0 text-muted-foreground hover:text-foreground",
 						pinned && "text-primary-text"
 					)}
 				/>

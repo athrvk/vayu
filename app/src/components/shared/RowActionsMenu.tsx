@@ -89,7 +89,7 @@ export function RowActionsMenu({
 					tabIndex={tabIndex}
 					data-tree-menu
 					aria-label={label}
-					className={cn("h-6 w-6 shrink-0", className)}
+					className={cn("size-target shrink-0", className)}
 					onClick={(e) => {
 						e.stopPropagation();
 						// A click with no pointer behind it - `.click()` from the

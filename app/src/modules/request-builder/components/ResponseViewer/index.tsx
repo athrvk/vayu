@@ -576,7 +576,7 @@ export default function ResponseViewer() {
 							size="sm"
 							variant="ghost"
 							onClick={() => setSavingExample(true)}
-							className="h-6 shrink-0 px-2 text-xs"
+							className="h-control-sm shrink-0 px-2 text-xs"
 						>
 							<BookmarkPlus className="size-icon-sm" />
 							Save as example

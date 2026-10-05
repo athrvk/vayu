@@ -269,9 +269,9 @@ export default function CollectionItem({
 							// focus-self: this toggles expansion rather than opening the
 							// collection, so it keeps its own ring instead of lighting
 							// up the whole row.
-							// w-6 h-6 (24px) so the chevron fits the 32px row. Still an
+							// size-target (24px at Default) so the chevron fits the row. Still an
 							// adequate pointer target, and the row itself remains clickable.
-							"focus-self flex items-center justify-center w-6 h-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+							"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
 							isSelected
 								? "text-primary/90 hover:text-primary"
 								: "text-muted-foreground hover:text-foreground"
@@ -418,7 +418,7 @@ export default function CollectionItem({
 								size="sm"
 								onClick={() => onCreateSubfolder(collection.id)}
 								disabled={isCreatingSubfolder}
-								className="h-7 text-xs"
+								className="h-control-sm text-xs"
 							>
 								{isCreatingSubfolder && (
 									<Loader2 className="size-icon-sm animate-spin mr-1" />

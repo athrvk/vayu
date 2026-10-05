@@ -489,7 +489,7 @@
 		 * Dock, "Connected" and the version string included, with nothing in
 		 * either file pointing at the other. Theme-independent, so declared once.
 		 */
-		--dock-height: 2rem;
+		--dock-height: var(--spacing-band);
 
 		/*
 		 * Width of the ActivityRail and the ContextRail, the window-edge navigation

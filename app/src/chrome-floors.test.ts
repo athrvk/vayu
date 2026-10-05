@@ -85,13 +85,13 @@ describe("interactive targets clear the 24x24px floor, not a bare rhythm class",
 		["RunItem pin/delete buttons", "modules/history/sidebar/RunItem.tsx", /\bsize-target\b/, 2],
 		["CommandSearchBar trigger", "components/layout/CommandSearchBar.tsx", /\bh-target\b/, 1],
 		[
-			// 2: the Checkbox itself, and the same-width placeholder `<div>`
-			// standing in for it when `allowDisable` is false - both need to
-			// hold the column's width.
+			// 5: the Checkbox and its same-width placeholder `<div>` (when
+			// `allowDisable` is false), the file/text kind toggle, and the
+			// Remove button with its placeholder - each holds its column's width.
 			"KeyValueRow checkbox",
 			"components/shared/KeyValueEditor/KeyValueRow.tsx",
 			/\bsize-target\b/,
-			2,
+			5,
 		],
 	];
 
@@ -190,6 +190,58 @@ describe("icons use the size-icon / size-icon-sm step, not a --spacing multiple"
 			});
 		}
 
+		expect(offences.join("\n")).toBe("");
+	});
+});
+
+describe("no Button or TooltipIconButton anywhere carries a sub-24px box override", () => {
+	// The enumerated list above guards files someone remembered; this one scans
+	// every non-test file, because a `className="h-7 w-7"` on an icon Button
+	// outranks `size-target` in emission order and nothing else notices (the
+	// gap #1679 was reopened for). At the 3px unit h-N / w-N / size-N is 3N px,
+	// so N <= 7 is under 24px; use `h-control-sm` / `size-target` instead.
+	const OPEN = /<(?:Button|TooltipIconButton)\b/g;
+	const UNDERSIZED = /\b(?:h|w|size)-[1-7]\b(?![./])/;
+
+	/** The opening tag's text: up to the first `>` outside quotes and braces. */
+	function openingTag(code: string, start: number): string {
+		let depth = 0;
+		let quote = "";
+		for (let i = start; i < code.length; i++) {
+			const c = code[i];
+			if (quote) {
+				if (c === quote) quote = "";
+			} else if (c === '"' || c === "'" || c === "`") quote = c;
+			else if (c === "{") depth++;
+			else if (c === "}") depth--;
+			else if (c === ">" && depth === 0) return code.slice(start, i);
+		}
+		return code.slice(start);
+	}
+
+	function files(): string[] {
+		return globSync("**/*.tsx", { cwd: srcRoot })
+			.filter((f) => !f.includes(".test."))
+			.map((f) => join(srcRoot, f));
+	}
+
+	it("scans a non-empty set of files and tags", () => {
+		expect(files().length).toBeGreaterThan(200);
+		const tags = files().flatMap((f) =>
+			[...stripComments(readFileSync(f, "utf8")).matchAll(OPEN)].map((m) => m[0])
+		);
+		expect(tags.length).toBeGreaterThan(100);
+	});
+
+	it("finds no h-N / w-N / size-N (N <= 7) in a Button's own tag", () => {
+		const offences: string[] = [];
+		for (const file of files()) {
+			const code = stripComments(readFileSync(file, "utf8"));
+			for (const m of code.matchAll(OPEN)) {
+				const hit = openingTag(code, m.index).match(UNDERSIZED);
+				if (hit) offences.push(`${relative(srcRoot, file)}: ${hit[0]}`);
+			}
+		}
 		expect(offences.join("\n")).toBe("");
 	});
 });

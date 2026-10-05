@@ -1249,13 +1249,13 @@ below.
 
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|
-| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton`, the Dock (via `--dock-height`) |
 | `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
 | `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
 | `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
-| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
+| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
 
@@ -1275,7 +1275,12 @@ either density. `density.test.ts` and `chrome-floors.test.ts` guard both
 halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
-`app/src` actually use them.
+`app/src` actually use them. The latter also scans every non-test file for a
+`Button` / `TooltipIconButton` tag carrying `h-N`, `w-N` or `size-N` with N <= 7
+(under 24px at the 3px unit): such an override outranks the size variant in
+emission order. A compact text button states `h-control-sm`, an icon button
+`size-target`. The tree-row controls are 24px at Default inside 24px rows, so
+they carry `size-target` rather than an exemption.
 
 ---
 
@@ -2579,7 +2584,7 @@ rail's own bottom (a bottom cluster is the same Dock problem in miniature).
 `ContextRail` (`ContextRail.tsx`) is the same shape on the right edge: one
 button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
 
-- **`RailButton` (`RailButton.tsx`) is `w-full h-9` with a `w-4 h-4` icon**,
+- **`RailButton` (`RailButton.tsx`) is `w-full h-band` with a `size-icon` icon**,
   icon-only so `aria-label` is the accessible name and the chord (where there
   is one) stays out of it - a tooltip supplies `aria-describedby` while open,
   never a name. Two variants: `"edge-left"`/`"edge-right"` paint a 2px
@@ -3135,9 +3140,9 @@ stop, holding the tooltip, with the inert control inside it:
 <Button
   variant="ghost"
   size="icon"
-  className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
+  className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
 >
-  <Trash2 className="w-3 h-3" />
+  <Trash2 className="size-icon-sm" />
 </Button>
 ```
 

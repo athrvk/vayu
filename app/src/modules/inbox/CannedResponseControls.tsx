@@ -266,7 +266,7 @@ export function CannedResponseControls({
 					</div>
 
 					<CollapsibleTrigger asChild>
-						<Button variant="ghost" size="sm" className="h-7">
+						<Button variant="ghost" size="sm">
 							<ChevronDown
 								className={cn(
 									"mr-2 size-icon-sm transition-transform",

@@ -223,7 +223,7 @@ function CopyButton({
 			size="sm"
 			onClick={() => void copy(text, "Value")}
 			disabled={disabled}
-			className={cn("h-7 px-2 text-xs shrink-0", className)}
+			className={cn("h-control-sm px-2 text-xs shrink-0", className)}
 		>
 			<IconSwap
 				className="mr-1"
@@ -540,7 +540,7 @@ export default function McpSettingsPanel() {
 								void load();
 							}}
 							disabled={isLoading}
-							className="h-7 px-2 text-xs shrink-0"
+							className="h-control-sm px-2 text-xs shrink-0"
 						>
 							Retry
 						</Button>
@@ -622,7 +622,7 @@ export default function McpSettingsPanel() {
 									variant="outline"
 									size="sm"
 									onClick={() => void toggleEnabled(true)}
-									className="h-7 px-2 text-xs shrink-0"
+									className="h-control-sm px-2 text-xs shrink-0"
 								>
 									Retry
 								</Button>
@@ -657,7 +657,7 @@ export default function McpSettingsPanel() {
 											disabled={
 												!hasElectron || !enabled || connecting !== null
 											}
-											className="h-7 px-2 text-xs shrink-0"
+											className="h-control-sm px-2 text-xs shrink-0"
 											title={
 												enabled ? undefined : "Enable the MCP server first"
 											}

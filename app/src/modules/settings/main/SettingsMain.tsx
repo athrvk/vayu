@@ -718,7 +718,7 @@ export default function SettingsMain() {
 								variant="ghost"
 								size="sm"
 								onClick={() => handleRevert(entry)}
-								className="text-xs h-7 px-2 shrink-0"
+								className="text-xs h-control-sm px-2 shrink-0"
 								title="Discard this staged change"
 							>
 								Revert
