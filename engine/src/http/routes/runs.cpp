@@ -700,6 +700,7 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
     nlohmann::json (*run.environment_id) :
     nlohmann::json (nullptr);
     row["baseline"]      = run.baseline;
+    row["origin"]        = vayu::json::serialize_run_origin (run);
     row["summary"]       = std::move (summary);
     return row;
 }
@@ -1493,10 +1494,45 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
     return { 200, json_report };
 }
 
+/**
+ * The `GET /runs` filters off the query string. An invalid value for an
+ * enumerated filter (`type`, `status`, `baseline`, `origin`) leaves that filter
+ * unset rather than answering 400, so a client on a newer vocabulary than the
+ * engine gets a wider list, never an error.
+ *
+ * Non-static so runs_route_test.cpp can drive it with a built request.
+ */
+vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
+    vayu::db::RunFilter filter;
+    if (req.has_param ("type"))
+        filter.type = vayu::parse_run_type (req.get_param_value ("type"));
+    if (req.has_param ("status"))
+        filter.status = vayu::parse_run_status (req.get_param_value ("status"));
+    if (req.has_param ("requestId"))
+        filter.request_id = req.get_param_value ("requestId");
+    if (req.has_param ("collectionId"))
+        filter.collection_id = req.get_param_value ("collectionId");
+    if (req.has_param ("q"))
+        filter.q = req.get_param_value ("q");
+    if (req.has_param ("baseline")) {
+        const std::string value = req.get_param_value ("baseline");
+        if (value == "true")
+            filter.baseline = true;
+        else if (value == "false")
+            filter.baseline = false;
+    }
+    if (req.has_param ("origin")) {
+        std::string value = req.get_param_value ("origin");
+        if (is_run_origin_kind (value))
+            filter.origin = std::move (value);
+    }
+    return filter;
+}
+
 namespace {
 
 void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    // Parse + clamp pagination; validate filters (invalid enum -> ignored).
+    // Parse + clamp pagination; the filters are run_filter_from_query's.
     int64_t limit = 50;
     if (req.has_param ("limit")) {
         try {
@@ -1518,32 +1554,10 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
         offset = std::max<int64_t> (offset, 0);
     }
 
-    vayu::db::RunFilter filter;
-    if (req.has_param ("type"))
-        filter.type = vayu::parse_run_type (req.get_param_value ("type"));
-    if (req.has_param ("status"))
-        filter.status = vayu::parse_run_status (req.get_param_value ("status"));
-    if (req.has_param ("requestId"))
-        filter.request_id = req.get_param_value ("requestId");
-    if (req.has_param ("collectionId"))
-        filter.collection_id = req.get_param_value ("collectionId");
-    if (req.has_param ("q"))
-        filter.q = req.get_param_value ("q");
-    // Only the two spellings that mean something are honoured; anything
-    // else leaves the filter unset, matching how an invalid `type` or
-    // `status` is ignored rather than answered with a 400.
-    if (req.has_param ("baseline")) {
-        const std::string value = req.get_param_value ("baseline");
-        if (value == "true")
-            filter.baseline = true;
-        else if (value == "false")
-            filter.baseline = false;
-    }
-
     try {
-        auto [status, body] =
-        get_runs_response (ctx.db, filter, limit, offset, ctx.run_summary_cache);
-        res.status = status;
+        auto [status, body] = get_runs_response (ctx.db,
+        run_filter_from_query (req), limit, offset, ctx.run_summary_cache);
+        res.status          = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "GET /runs - Error: " + std::string (e.what ()));

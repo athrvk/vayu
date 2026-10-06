@@ -5259,6 +5259,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
                                        // settable in the request builder's Settings tab
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
+  "origin": { "kind": "app" },         // Optional, who started the run - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
   "maxStreamEvents": 100000,           // Optional, streaming only - see below
@@ -5397,6 +5398,35 @@ The one caller today is the app's GraphQL schema introspection
 `run_request` deliberately does **not** set it: an agent's runs belong in
 History like anyone else's, and the tool builds its payload from named
 arguments, so an agent cannot supply the flag either.
+
+**`origin` says who started the run** (#1817):
+`{"kind": "app" | "mcp" | "other", "client": "<name>"}`, stored on the run row
+(`runs.origin` / `runs.origin_client`, see
+[the `runs` table](db-schema.md#runs)) and returned on every run shape -
+[`GET /runs`](#get-runs) rows, [`GET /runs/:runId`](#get-runsrunid) and
+[`PUT /runs/:runId/baseline`](#put-runsrunidbaseline) - as
+`origin: {kind, client}`. It is **client-asserted metadata, not identity**: any
+caller can claim any kind and nothing authorises on it; History reads it to
+say which runs an agent started. The app sends `{"kind": "app"}`; the MCP
+server sends `{"kind": "mcp", "client": "<clientInfo.name>"}` with the name its
+client gave in the initialize handshake.
+
+- Absent or `null` stores `other` with no client. `other` is also what every
+  run recorded before the field existed reads as.
+- `client` is kept for `mcp` only and dropped for `app` and `other`. It is
+  trimmed of whitespace and cut to 128 characters (on a character boundary,
+  never inside a UTF-8 sequence); one that is empty after trimming stores no
+  client. Otherwise it is stored exactly as sent: turning an identifier into a
+  product name is the client's job, so a new MCP client needs no engine change.
+- A non-object `origin`, a `kind` outside the three (a missing one included) or
+  a non-string `client` is a **400** naming the field, for example
+  `'origin.kind' must be one of app, mcp, other`, before any run row exists and
+  with nothing sent. A `transient` send reads and validates it the same way and
+  stores nothing.
+- The object is kept out of `config_snapshot`: the row's two columns are its
+  one record.
+
+[`POST /runs`](#post-runs) takes the same field under the same rules.
 
 **`data` binds one row to this send** (issue #601). It is the single-send half
 of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names
@@ -5863,6 +5893,7 @@ Start a load test run (Vayu Mode).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
+  "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
   "data": [],                // Optional data rows, one object per row - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
@@ -5889,6 +5920,13 @@ actually depends on this field to specify a protocol in the first place. An
 explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
+
+**`origin` on `POST /runs`** is the same object, read by the same reader and
+under the same rules as on [`POST /execute`](#post-execute) (#1817): who started
+the run, client-asserted metadata rather than identity, `other` when absent,
+`client` kept for `mcp` only, and a malformed one a `400` naming the field
+before the run row exists. It applies to every run shape this endpoint starts,
+a scenario's included.
 
 #### Streaming under load (`stream`)
 
@@ -7637,6 +7675,13 @@ seconds.
   request's current baseline is `?baseline=true&requestId=<id>&limit=1`, since
   the list is already `start_time DESC` - the lookup both the history view's
   vs-baseline strip and the MCP `compare_runs` tool make.
+- `origin` - `app` | `mcp` | `other`, exact match on the run's stored
+  `origin.kind` (#1817; see [POST /execute](#post-execute)). Like an
+  unrecognised `type`, any other value is ignored rather than refused, so a
+  client on a newer vocabulary than the engine gets a wider list, never an
+  error. A run recorded before the field existed matches `other`. There is no
+  client filter: narrowing to one MCP client is done client-side over the
+  rows this returns.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
@@ -7706,6 +7751,13 @@ its first poll cached. The full `warnings` array itself stays on
 `GET /runs/:runId`, so a client that opened a run directly can draw the pin
 without listing.
 
+**`origin`** is on every row and on `GET /runs/:runId`: `{"kind", "client"}`,
+who started the run as the starting client asserted it (#1817; the rules are on
+[POST /execute](#post-execute)). `client` is the MCP client's name for an `mcp`
+run and `null` otherwise, and on an `mcp` run whose client sent no name. A run
+recorded before the field existed reads `{"kind": "other", "client": null}`.
+Metadata, not identity: nothing authorises on it.
+
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
@@ -7732,6 +7784,7 @@ a server.
       "startTime": 1234567890,
       "endTime": 1234567891,
       "baseline": true,
+      "origin": { "kind": "app", "client": null },
       "summary": {
         "url": "https://api.example.com/users",
         "method": "GET",
@@ -7753,6 +7806,7 @@ a server.
       "startTime": 1234567892,
       "endTime": 1234567893,
       "baseline": false,
+      "origin": { "kind": "mcp", "client": "claude-code" },
       "summary": { "url": "https://api.example.com/users", "method": "GET", "httpVersion": "auto" },
       "resultSummary": { "statusCode": 200, "latencyMs": 34.2 }
     }
@@ -7767,7 +7821,7 @@ Get details for a specific run.
 
 **Response:** The run object shown in `GET /runs` (`id`, `requestId`,
 `environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`,
-`baseline`).
+`baseline`, `origin`).
 
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
@@ -7787,6 +7841,8 @@ step - its steps are read from the report's `results` array instead.
   "configSnapshot": { "...": "the run payload as composed, credentials withheld" },
   "startTime": 1234567890,
   "endTime": 1234567891,
+  "baseline": false,
+  "origin": { "kind": "app", "client": null },
   "result": {
     "timestamp": 1234567891,
     "statusCode": 200,
@@ -8523,8 +8579,8 @@ which run - that selection is the client's, so a pin never unpins anything else.
 ```
 
 **Response `200`:** the updated run row, in the same shape
-[GET /runs](#get-runs) lists (including `summary`), so a client can patch its
-cached row instead of re-listing.
+[GET /runs](#get-runs) lists (including `summary` and `origin`), so a client can
+patch its cached row instead of re-listing.
 
 **`400`** when the body is not JSON, has no `baseline`, or `baseline` is not a
 boolean - including `null`. Unlike the merge-patch resource updates, an

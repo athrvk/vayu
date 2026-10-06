@@ -49,7 +49,9 @@ namespace vayu::db {
  *     Bumped because the version is the migration's done-marker, and so an
  *     engine that reads an absent key as chosen never opens the workspace;
  * 5 - `oauth_tokens.raw_response` dropped (#1781): it held the provider's
- *     response, refresh and id tokens included, and nothing read it.
+ *     response, refresh and id tokens included, and nothing read it;
+ *     `runs.origin` and `runs.origin_client` (#1817, folded into the same
+ *     unreleased version).
  */
 inline constexpr int SCHEMA_VERSION = 5;
 
@@ -100,6 +102,9 @@ struct RunFilter {
     // real questions - "which run is the baseline for this request" is the
     // first, and it is what a client resolves before diffing against it.
     std::optional<bool> baseline;
+    // Exact match on `runs.origin` (#1817). The route sets it only for a kind
+    // `is_run_origin_kind` accepts, so an unknown value is never a filter here.
+    std::optional<std::string> origin;
 };
 
 /**

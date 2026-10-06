@@ -20,6 +20,7 @@
 #include <string>
 #include <utility>
 
+#include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
@@ -27,6 +28,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
@@ -52,6 +54,8 @@ run_report_response (vayu::db::Database& db, const std::string& run_id);
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
 const std::string& body);
+// Defined in runs.cpp; the GET /runs filters off the query string.
+vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
 } // namespace vayu::http::routes
 
 namespace {
@@ -80,6 +84,8 @@ class RunsRouteTest : public ::testing::Test {
         int64_t start_time                    = 0;
         std::optional<std::string> request_id = std::nullopt;
         std::string config_snapshot = R"({"url":"https://x.test/","method":"GET"})";
+        std::string origin                       = "other";
+        std::optional<std::string> origin_client = std::nullopt;
     };
 
     void seed (const RunSpec& s) {
@@ -90,6 +96,8 @@ class RunsRouteTest : public ::testing::Test {
         run.request_id      = s.request_id;
         run.environment_id  = std::nullopt;
         run.config_snapshot = s.config_snapshot;
+        run.origin          = s.origin;
+        run.origin_client   = s.origin_client;
         run.start_time      = s.start_time;
         run.end_time        = s.start_time + 1;
         db_->create_run (run);
@@ -1736,6 +1744,100 @@ TEST_F (RunsRouteTest, SingleRunPayloadCarriesTheBaselineFlag) {
     auto run = db_->get_run ("run_a");
     ASSERT_HAS_VALUE (run);
     EXPECT_TRUE (vayu::json::serialize (*run)["baseline"].get<bool> ());
+}
+
+// ============================================================================
+// origin (#1817): who started the run
+// ============================================================================
+
+TEST_F (RunsRouteTest, ListRowsAndTheSingleRunPayloadCarryTheOrigin) {
+    seed ({ .id = "agent", .start_time = 200, .origin = "mcp", .origin_client = "Claude Code" });
+    seed ({ .id = "plain", .start_time = 100 });
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_EQ (body["data"][0]["origin"],
+    (json{ { "kind", "mcp" }, { "client", "Claude Code" } }));
+    EXPECT_EQ (body["data"][1]["origin"],
+    (json{ { "kind", "other" }, { "client", nullptr } }));
+
+    const auto agent = db_->get_run ("agent");
+    ASSERT_HAS_VALUE (agent);
+    EXPECT_EQ (vayu::json::serialize (*agent)["origin"],
+    (json{ { "kind", "mcp" }, { "client", "Claude Code" } }));
+    const auto plain = db_->get_run ("plain");
+    ASSERT_HAS_VALUE (plain);
+    EXPECT_EQ (vayu::json::serialize (*plain)["origin"],
+    (json{ { "kind", "other" }, { "client", nullptr } }));
+}
+
+// The baseline PUT answers a list row, so the origin travels with it too.
+TEST_F (RunsRouteTest, BaselinePutAnswersTheRowWithItsOrigin) {
+    seed ({ .id = "agent", .start_time = 100, .origin = "mcp", .origin_client = "cursor" });
+
+    auto [status, body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "agent", R"({"baseline":true})");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["origin"], (json{ { "kind", "mcp" }, { "client", "cursor" } }));
+    // The pin is a whole-row write; it must not lose the columns it did not set.
+    const auto stored = db_->get_run ("agent");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->origin, "mcp");
+    ASSERT_HAS_VALUE (stored->origin_client);
+    EXPECT_EQ (*stored->origin_client, "cursor");
+}
+
+TEST_F (RunsRouteTest, FilterByOriginListsOnlyThatKindAndCountsAgree) {
+    seed ({ .id = "mcp_new", .start_time = 400, .origin = "mcp", .origin_client = "cursor" });
+    seed ({ .id = "app_run", .start_time = 300, .origin = "app" });
+    seed ({ .id = "mcp_old", .start_time = 200, .origin = "mcp" });
+    seed ({ .id = "other_run", .start_time = 100 });
+
+    vayu::db::RunFilter agents;
+    agents.origin = "mcp";
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, agents, 1, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "mcp_new");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
+    EXPECT_TRUE (body["pagination"]["hasMore"].get<bool> ());
+
+    auto [next_status, next] =
+    vayu::http::routes::get_runs_response (*db_, agents, 1, 1, summaries_);
+    ASSERT_EQ (next_status, 200);
+    ASSERT_EQ (next["data"].size (), 1u);
+    EXPECT_EQ (next["data"][0]["id"], "mcp_old");
+    EXPECT_FALSE (next["pagination"]["hasMore"].get<bool> ());
+    EXPECT_EQ (db_->count_runs (agents), 2);
+
+    vayu::db::RunFilter others;
+    others.origin         = "other";
+    const auto other_rows = db_->get_runs_paginated (others, 50, 0);
+    ASSERT_EQ (other_rows.size (), 1u);
+    EXPECT_EQ (other_rows[0].id, "other_run");
+}
+
+// Same convention as `type`, `status` and `baseline`: a value the route does
+// not know leaves the filter unset - a wider list, never a 400.
+TEST (RunFilterFromQuery, OriginIsReadOnlyForADeclaredKind) {
+    for (const auto kind : vayu::http::routes::RUN_ORIGIN_KINDS) {
+        httplib::Request req;
+        req.params.emplace ("origin", std::string (kind));
+        const auto filter = vayu::http::routes::run_filter_from_query (req);
+        ASSERT_HAS_VALUE (filter.origin) << kind;
+        EXPECT_EQ (*filter.origin, kind);
+    }
+    for (const char* unknown : { "browser", "MCP", "" }) {
+        httplib::Request req;
+        req.params.emplace ("origin", unknown);
+        EXPECT_FALSE (vayu::http::routes::run_filter_from_query (req).origin.has_value ())
+        << "'" << unknown << "'";
+    }
+    EXPECT_FALSE (
+    vayu::http::routes::run_filter_from_query (httplib::Request{}).origin.has_value ());
 }
 
 } // namespace

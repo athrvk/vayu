@@ -340,6 +340,77 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
     return flag;
 }
 
+namespace {
+
+std::string_view trim_ascii_space (std::string_view text) {
+    constexpr std::string_view SPACE = " \t\n\v\f\r";
+    const auto first                 = text.find_first_not_of (SPACE);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr (first, text.find_last_not_of (SPACE) - first + 1);
+}
+
+/// @p text cut to its first @p max_chars code points. A continuation byte is
+/// never counted, so the cut lands on a sequence boundary.
+std::string_view first_code_points (std::string_view text, std::size_t max_chars) {
+    std::size_t offset = 0;
+    std::size_t seen   = 0;
+    for (const char byte : text) {
+        const bool continuation = (static_cast<unsigned char> (byte) & 0xC0U) == 0x80U;
+        if (!continuation) {
+            if (seen == max_chars) {
+                return text.substr (0, offset);
+            }
+            ++seen;
+        }
+        ++offset;
+    }
+    return text;
+}
+
+/// The stored form of `origin.client`: trimmed, capped, and absent when that
+/// leaves nothing. Trimmed again after the cut so it cannot end in a space.
+std::optional<std::string> stored_origin_client (std::string_view raw) {
+    const auto client = trim_ascii_space (
+    first_code_points (trim_ascii_space (raw), MAX_RUN_ORIGIN_CLIENT_CHARS));
+    if (client.empty ()) {
+        return std::nullopt;
+    }
+    return std::string (client);
+}
+
+} // namespace
+
+std::expected<RunOrigin, std::string> read_run_origin (const nlohmann::json& json) {
+    const auto field = json.find ("origin");
+    if (field == json.end () || field->is_null ()) {
+        return RunOrigin{};
+    }
+    if (!field->is_object ()) {
+        return std::unexpected (
+        std::string ("'origin' must be an object (got ") + field->type_name () + ")");
+    }
+    const auto kind = field->find ("kind");
+    if (kind == field->end () || !kind->is_string () ||
+    !is_run_origin_kind (kind->get_ref<const std::string&> ())) {
+        return std::unexpected (
+        std::string ("'origin.kind' must be one of app, mcp, other"));
+    }
+    const auto client     = field->find ("client");
+    const bool has_client = client != field->end () && !client->is_null ();
+    if (has_client && !client->is_string ()) {
+        return std::unexpected (
+        std::string ("'origin.client' must be a string (got ") + client->type_name () + ")");
+    }
+
+    RunOrigin origin{ .kind = kind->get<std::string> (), .client = std::nullopt };
+    if (has_client && origin.kind == "mcp") {
+        origin.client = stored_origin_client (client->get_ref<const std::string&> ());
+    }
+    return origin;
+}
+
 /**
  * @brief Read `POST /execute`'s `data` row (issue #601).
  *
@@ -1111,6 +1182,7 @@ struct ExecutePayload {
     /// No row is recorded for this execution (issue #382).
     bool transient = false;
     StreamFlag stream;
+    RunOrigin origin;
     /// The row this send binds, if the caller named one (issue #601).
     std::optional<nlohmann::json> data_row;
     SendRowAuth row_auth;
@@ -1177,6 +1249,13 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (!stream.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + stream.error);
         return stream.error;
+    }
+
+    // Recorded on the row, so refused before one exists (#1817).
+    auto origin = read_run_origin (json);
+    if (!origin) {
+        vayu::utils::log_warning ("http", "POST /execute - " + origin.error ());
+        return origin.error ();
     }
 
     // Scripts are elements now (issue #1514's clean cut, no transitional
@@ -1272,6 +1351,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     out.json      = std::move (json);
     out.transient = transient.value;
     out.stream    = std::move (stream);
+    out.origin    = std::move (*origin);
     out.data_row  = std::move (data_row.value);
     out.row_auth  = std::move (row_auth);
     out.built     = std::move (built);
@@ -1318,6 +1398,8 @@ DesignSend& send) {
     if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
         send.run.environment_id = json["environmentId"].get<std::string> ();
     }
+    send.run.origin        = payload.origin.kind;
+    send.run.origin_client = payload.origin.client;
 
     // What the scripts below read as `pm.info.requestName`. Resolved here,
     // with the rest of the payload validation, so a malformed field is a
@@ -1902,10 +1984,14 @@ httplib::Response& res) {
  */
 /**
  * Every refusal `POST /runs` makes on the payload alone, before a run row
- * exists - so a rejected request leaves nothing behind.
+ * exists - so a rejected request leaves nothing behind. @p origin receives the
+ * payload's `origin`, which is read here because reading it is validating it.
  */
-std::optional<RouteError>
-validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario, bool is_scenario_load) {
+std::optional<RouteError> validate_load_request (RouteContext& ctx,
+nlohmann::json& json,
+bool is_scenario,
+bool is_scenario_load,
+RunOrigin& origin) {
     // Refused before the run row exists, and never quietly downgraded to a
     // closed-loop mode: a run that measured something other than what was
     // asked for is worse than no run at all.
@@ -1958,6 +2044,13 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
         vayu::utils::log_warning ("http", "POST /runs - " + *invalid);
         return RouteError{ 400, error_body (400, *invalid) };
     }
+
+    auto read_origin = read_run_origin (json);
+    if (!read_origin) {
+        vayu::utils::log_warning ("http", "POST /runs - " + read_origin.error ());
+        return RouteError{ 400, error_body (400, read_origin.error ()) };
+    }
+    origin = std::move (*read_origin);
 
     // Validate required fields
     if (!is_scenario) {
@@ -2244,7 +2337,9 @@ httplib::Response& res) {
     // absence of `mode` cannot start meaning something new.
     const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
 
-    if (auto rejection = validate_load_request (ctx, json, is_scenario, is_scenario_load)) {
+    RunOrigin origin;
+    if (auto rejection =
+        validate_load_request (ctx, json, is_scenario, is_scenario_load, origin)) {
         res.status = rejection->status;
         res.set_content (rejection->body.dump (), "application/json");
         return;
@@ -2298,6 +2393,8 @@ httplib::Response& res) {
     if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
         run.environment_id = json["environmentId"].get<std::string> ();
     }
+    run.origin        = std::move (origin.kind);
+    run.origin_client = std::move (origin.client);
     const auto max_snapshot_body_bytes =
     static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
     static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));

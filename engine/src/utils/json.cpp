@@ -202,7 +202,13 @@ Json serialize (const vayu::db::Run& run) {
     // Emitted on the single-run payload as well as the list row, so a client
     // that opened a run directly can draw its pin without re-listing.
     json["baseline"] = run.baseline;
+    json["origin"]   = serialize_run_origin (run);
     return json;
+}
+
+Json serialize_run_origin (const vayu::db::Run& run) {
+    return Json{ { "kind", run.origin },
+        { "client", run.origin_client ? Json (*run.origin_client) : Json (nullptr) } };
 }
 
 void attach_design_result (nlohmann::json& json,
@@ -1706,6 +1712,8 @@ const std::vector<std::string>& secret_values) {
         return parsed.dump ();
     }
 
+    // Stored in its own columns (#1817); a second copy here could only disagree.
+    parsed.erase ("origin");
     withhold_credential_headers (parsed, api_key_header_names (parsed));
     // Allowlist within the auth subtree: keep only the mode, drop every
     // credential field. Because we keep a fixed key rather than blocking
