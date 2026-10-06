@@ -51,12 +51,28 @@ export interface McpSafetyConfig {
 	 * Gates every tool in the `write` category - the collection and saved-request
 	 * CRUD verbs, `update_environment` and `update_engine_config`. When false
 	 * (default), those tools refuse; the two deletes additionally require
-	 * confirmation even with it on. It does **not** gate traffic-sending tools
+	 * confirmation even with it on, and the network keys of
+	 * `update_engine_config` additionally require `allowNetworkSettings`. It does **not** gate traffic-sending tools
 	 * (`run_request`, `run_collection_smoke`, `run_collection`) or load runs -
 	 * those are governed by the allowlist, the hard caps, and the load-run
 	 * confirmation gate independently.
 	 */
 	allowWrites: boolean;
+	/**
+	 * The second key `update_engine_config` needs for the entries that decide
+	 * where traffic goes and whom it trusts: every `proxy*` key and
+	 * `customCaCertificates` (#1805). Off by default, because the allowlist
+	 * gates the host a request names, not the proxy every request passes
+	 * through, and a trusted CA is what lets that proxy read TLS.
+	 */
+	allowNetworkSettings: boolean;
+	/**
+	 * When false (default), read tools and resources withhold what the user
+	 * treats as a secret: a variable flagged `secret`, an auth credential, a
+	 * cookie value, the credentials in a proxy URL (#1805, `withhold.ts`). On, an
+	 * agent reads them in full, the way the app's own screens show them.
+	 */
+	revealSecretsToAgents: boolean;
 	/**
 	 * Tool names the user has switched off. A disabled tool is omitted from
 	 * `tools/list` and rejected by `tools/call`. Empty by default (all on).
@@ -80,6 +96,8 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	// "unlimited" does not.
 	maxIterations: 10000,
 	allowWrites: false,
+	allowNetworkSettings: false,
+	revealSecretsToAgents: false,
 	disabledTools: [],
 };
 
@@ -160,6 +178,16 @@ const MCP_CAP_KEYS: readonly McpCapKey[] = [
 	"maxIterations",
 ];
 
+/** The opt-in switches, each off by default and kept only when it is a boolean. */
+type McpSwitchKey = "allowAll" | "allowWrites" | "allowNetworkSettings" | "revealSecretsToAgents";
+
+const MCP_SWITCH_KEYS: readonly McpSwitchKey[] = [
+	"allowAll",
+	"allowWrites",
+	"allowNetworkSettings",
+	"revealSecretsToAgents",
+];
+
 /**
  * The highest value each cap may hold - the maxima of the renderer's
  * `LOAD_TEST_CEILING_BOUNDS`, which are the engine's own guards where the engine
@@ -217,11 +245,8 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 		const cap = clampCap(key, input[key]);
 		if (cap !== undefined) out[key] = cap;
 	}
-	if (typeof input.allowAll === "boolean") {
-		out.allowAll = input.allowAll;
-	}
-	if (typeof input.allowWrites === "boolean") {
-		out.allowWrites = input.allowWrites;
+	for (const key of MCP_SWITCH_KEYS) {
+		if (typeof input[key] === "boolean") out[key] = input[key];
 	}
 	if (Array.isArray(input.disabledTools)) {
 		const names = input.disabledTools
@@ -246,6 +271,8 @@ const SAFETY_ENV_VARS = {
 	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
 	maxIterations: "VAYU_MCP_MAX_ITERATIONS",
 	allowWrites: "VAYU_MCP_ALLOW_WRITES",
+	allowNetworkSettings: "VAYU_MCP_ALLOW_NETWORK_SETTINGS",
+	revealSecretsToAgents: "VAYU_MCP_REVEAL_SECRETS",
 	disabledTools: "VAYU_MCP_DISABLED_TOOLS",
 } as const satisfies Record<keyof McpSafetyConfig, string>;
 
@@ -298,8 +325,10 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
 	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
 	if (env.VAYU_MCP_MAX_ITERATIONS) cfg.maxIterations = Number(env.VAYU_MCP_MAX_ITERATIONS);
-	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
-	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
+	// Only the exact string "true" opts in; anything else leaves the default off.
+	for (const key of MCP_SWITCH_KEYS) {
+		if (env[SAFETY_ENV_VARS[key]] === "true") cfg[key] = true;
+	}
 	if (env.VAYU_MCP_DISABLED_TOOLS) {
 		cfg.disabledTools = env.VAYU_MCP_DISABLED_TOOLS.split(",")
 			.map((t) => t.trim())

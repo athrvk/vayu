@@ -25,6 +25,14 @@
  */
 
 import { DATA_CONTRACT_SENTENCE, presentCollections } from "./collection-shape.js";
+import {
+	secretsShape,
+	withholdConfigCredentials,
+	withholdRowListSecrets,
+	WITHHELD_AUTH_SENTENCE,
+	WITHHELD_CONFIG_SENTENCE,
+	WITHHELD_VARIABLE_SENTENCE,
+} from "./withhold.js";
 import type { ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -71,9 +79,16 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 			"All request collections, each with its own `variables`. A request resolves against the whole chain from the root down, and a nested collection outranks its ancestors. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` Full model: ${VARIABLE_RESOLUTION_URI}. ` +
-			DATA_CONTRACT_SENTENCE,
+			DATA_CONTRACT_SENTENCE +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE,
 		read: async (ctx, signal) =>
-			presentCollections(await ctx.client.listCollections(signal), ctx),
+			secretsShape(
+				ctx,
+				withholdRowListSecrets
+			)(presentCollections(await ctx.client.listCollections(signal), ctx)),
 	},
 	{
 		name: "environments",
@@ -86,8 +101,10 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		description:
 			"All environments (named variable sets). The row with `isActive: true` is the one requests resolve against when a call names no environmentId, and it outranks the collection chain and globals. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
-			` Full model: ${VARIABLE_RESOLUTION_URI}.`,
-		read: (ctx, signal) => ctx.client.listEnvironments(signal),
+			` Full model: ${VARIABLE_RESOLUTION_URI}. ` +
+			WITHHELD_VARIABLE_SENTENCE,
+		read: async (ctx, signal) =>
+			secretsShape(ctx, withholdRowListSecrets)(await ctx.client.listEnvironments(signal)),
 	},
 	{
 		name: "variable-resolution",
@@ -106,8 +123,10 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		uri: "vayu://config",
 		title: "Engine configuration",
 		description:
-			"The engine's tunable configuration entries with values, defaults, and ranges.",
-		read: (ctx, signal) => ctx.client.getConfig(signal),
+			"The engine's tunable configuration entries with values, defaults, and ranges. " +
+			WITHHELD_CONFIG_SENTENCE,
+		read: async (ctx, signal) =>
+			secretsShape(ctx, withholdConfigCredentials)(await ctx.client.getConfig(signal)),
 	},
 	{
 		name: "scripting",

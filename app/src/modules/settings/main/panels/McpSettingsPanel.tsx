@@ -41,6 +41,8 @@ import {
 	Loader2,
 	CircleCheck,
 	CircleSlash,
+	KeyRound,
+	Network,
 } from "lucide-react";
 import {
 	Button,
@@ -81,6 +83,8 @@ const TOOLS = appSetting("mcp-tools");
 const ALLOWLIST = appSetting("mcp-allowlist");
 const CAPS = appSetting("mcp-caps");
 const WRITES = appSetting("mcp-writes");
+const NETWORK = appSetting("mcp-network-settings");
+const REVEAL = appSetting("mcp-reveal-secrets");
 
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
@@ -922,6 +926,64 @@ export default function McpSettingsPanel() {
 						/>
 						<Label className="text-sm text-muted-foreground">
 							{config?.allowWrites ? "Writes enabled" : "Read-only"}
+						</Label>
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Network settings */}
+			<Card data-setting-anchor={NETWORK.anchor}>
+				<CardHeader className="pb-3">
+					<div className="flex items-center gap-2">
+						<Network className="w-5 h-5 text-muted-foreground" />
+						<CardTitle>{NETWORK.label}</CardTitle>
+					</div>
+					<CardDescription>
+						<CollapsibleText text="When off (default), an agent with write access still can't change the proxy settings or the certificate authorities Vayu trusts - the engine config entries that decide where every request goes and whom it trusts. The allowlist checks the host a request names, not the proxy it passes through, and a trusted authority is what lets that proxy read encrypted traffic. Needs Write access on as well; on its own it grants nothing." />
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="flex items-center gap-3">
+						<Switch
+							checked={config?.allowNetworkSettings ?? false}
+							onCheckedChange={(checked) =>
+								void persist({ allowNetworkSettings: checked })
+							}
+							disabled={!config}
+							aria-label="Allow network settings changes"
+						/>
+						<Label className="text-sm text-muted-foreground">
+							{config?.allowNetworkSettings ? "Agents may change" : "Locked"}
+						</Label>
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Reveal secrets */}
+			<Card data-setting-anchor={REVEAL.anchor}>
+				<CardHeader className="pb-3">
+					<div className="flex items-center gap-2">
+						<KeyRound className="w-5 h-5 text-muted-foreground" />
+						<CardTitle>{REVEAL.label}</CardTitle>
+					</div>
+					<CardDescription>
+						<CollapsibleText text="When off (default), what agents read leaves out your secrets: a variable marked secret, the token, password or key in an auth block, every cookie value, and the password in a proxy URL each arrive marked as withheld. Requests an agent sends still use them - Vayu fills them in, the agent never sees them. Turn it on to let agents read them as your own screens show them; an agent backed by a hosted model passes what it reads to that model's provider. With write access on, an agent can still unmark a secret and then read it, so keep both off where that matters." />
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="flex items-center gap-3">
+						<Switch
+							checked={config?.revealSecretsToAgents ?? false}
+							onCheckedChange={(checked) =>
+								void persist({ revealSecretsToAgents: checked })
+							}
+							disabled={!config}
+							aria-label="Reveal secrets to agents"
+						/>
+						<Label className="text-sm text-muted-foreground">
+							{config?.revealSecretsToAgents
+								? "Secrets revealed"
+								: "Secrets withheld"}
 						</Label>
 					</div>
 				</CardContent>

@@ -53,6 +53,18 @@ import {
 	presentCollections,
 } from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
+import {
+	secretsShape,
+	withheldAuthMembers,
+	withholdConfigCredentials,
+	withholdCookieValues,
+	withholdRowListSecrets,
+	withholdRowSecrets,
+	WITHHELD_AUTH_SENTENCE,
+	WITHHELD_CONFIG_SENTENCE,
+	WITHHELD_COOKIE_SENTENCE,
+	WITHHELD_VARIABLE_SENTENCE,
+} from "./withhold.js";
 
 /** An auth block as stored/forwarded (discriminated by `mode`). */
 type AuthRecord = Record<string, unknown> & { mode?: string };
@@ -1286,7 +1298,7 @@ const VARIABLE_INPUT = z.union([
 			.boolean()
 			.optional()
 			.describe(
-				"Mask this variable in the Vayu UI. App-side display only - MCP reads (list_environments, vayu://environments) return every value in full."
+				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP."
 			),
 		type: z
 			.enum(["string", "number", "boolean", "json"])
@@ -1859,10 +1871,23 @@ function readScriptEdits(args: Record<string, unknown>): ["pre" | "post", string
 	return edits;
 }
 
-/** Read an optional agent-supplied `auth` block (a `{ mode, … }` object). */
+/**
+ * Read an optional agent-supplied `auth` block (a `{ mode, … }` object).
+ *
+ * A block copied from a read that withheld its credentials is refused: stored,
+ * it would replace the user's credential with nothing, and sent, it would
+ * authenticate with nothing.
+ */
 function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
 	const a = args.auth;
-	return a && typeof a === "object" && !Array.isArray(a) ? (a as AuthRecord) : undefined;
+	if (!isRecord(a)) return undefined;
+	const withheld = withheldAuthMembers(a);
+	if (withheld.length > 0) {
+		throw new ToolArgError(
+			`"auth" carries ${withheld.join(", ")}: it was read with its credentials withheld, so it holds no credential to store or send. Leave "auth" out to keep what is stored, or pass the block with real values or {{variable}} references.`
+		);
+	}
+	return a as AuthRecord;
 }
 
 /**
@@ -2764,6 +2789,18 @@ const runComparisonSchema = z.object({
 const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();
+
+/**
+ * The engine config keys behind `allowNetworkSettings`: the proxy entries
+ * (`proxyMode`, `proxyUrl`, `proxySystemUrl`, `proxyBypass`) and the extra
+ * trust anchors (`engine/src/db/config_seeds/network.cpp`). By prefix rather
+ * than by list, so a proxy key the engine adds later is gated the day it ships;
+ * case-insensitive so the gate never rests on how the engine matches a key.
+ */
+function isNetworkConfigKey(key: string): boolean {
+	const lowered = key.toLowerCase();
+	return lowered.startsWith("proxy") || lowered === "customcacertificates";
+}
 
 /** Whether a `GET /health` body can be returned as `structuredContent` as-is. */
 function isEngineHealthShape(value: unknown): value is Record<string, unknown> {
@@ -4517,8 +4554,12 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob; a request resolves against the whole chain from the root down, not just its own collection. " +
+			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob and `auth` block; a request resolves against the whole chain from the root down, not just its own collection. " +
 			DATA_CONTRACT_SENTENCE +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE +
 			" " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
@@ -4533,7 +4574,7 @@ export const TOOLS: McpTool[] = [
 		handler: (_args, ctx, signal) =>
 			callEngine(
 				() => ctx.client.listCollections(signal),
-				(rows) => presentCollections(rows, ctx)
+				(rows) => secretsShape(ctx, withholdRowListSecrets)(presentCollections(rows, ctx))
 			),
 	},
 	{
@@ -4541,7 +4582,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small.",
+			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small. " +
+			WITHHELD_AUTH_SENTENCE,
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -4550,7 +4592,10 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: { collectionId: z.string().describe("Collection ID to list.") },
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.listRequests(requireStr(args, "collectionId"), signal)),
+			callEngine(
+				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
+				secretsShape(ctx, withholdRowListSecrets)
+			),
 	},
 	{
 		name: "list_environments",
@@ -4558,6 +4603,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List all environments (named sets of variables like baseUrl, apiKey). The row with `isActive: true` is the one requests resolve against when a call names no environmentId. " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: they shadow every collection and global of the same name."
 			),
@@ -4568,7 +4615,11 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listEnvironments(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.listEnvironments(signal),
+				secretsShape(ctx, withholdRowListSecrets)
+			),
 	},
 	{
 		name: "list_runs",
@@ -4807,7 +4858,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range. Read this before update_engine_config rather than assuming a key exists or what it accepts - the ranges here are what that call validates against. The values are what the engine has saved, which is not always what it is running: a key changed since the last restart reads as its new value here while the running engine still uses the old one.",
+			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range. Read this before update_engine_config rather than assuming a key exists or what it accepts - the ranges here are what that call validates against. The values are what the engine has saved, which is not always what it is running: a key changed since the last restart reads as its new value here while the running engine still uses the old one. " +
+			WITHHELD_CONFIG_SENTENCE,
 		annotations: {
 			title: "Get engine config",
 			readOnlyHint: true,
@@ -4815,7 +4867,11 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getConfig(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.getConfig(signal),
+				secretsShape(ctx, withholdConfigCredentials)
+			),
 	},
 	{
 		name: "run_request",
@@ -4982,7 +5038,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["config"],
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
+			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings, and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings to be enabled there; a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
 		annotations: {
 			title: "Update engine config",
 			readOnlyHint: false,
@@ -5006,6 +5062,12 @@ export const TOOLS: McpTool[] = [
 			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
 				return errorResult('"entries" must be an object mapping config keys to values.');
 			}
+			const network = Object.keys(entries).filter(isNetworkConfigKey);
+			if (network.length > 0 && !ctx.config.allowNetworkSettings) {
+				return errorResult(
+					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on in Vayu Settings → MCP as well as write access. Nothing was changed.`
+				);
+			}
 			try {
 				const updated = await ctx.client.updateConfig({ entries }, signal);
 				const changedKeys = Object.keys(entries as Record<string, unknown>);
@@ -5018,7 +5080,13 @@ export const TOOLS: McpTool[] = [
 				} catch {
 					/* leave restartRequired empty */
 				}
-				const result: Record<string, unknown> = { changedKeys, restartRequired, updated };
+				// The engine answers with the whole config table, so its echo is a
+				// read like get_engine_config and withholds the same credentials.
+				const result: Record<string, unknown> = {
+					changedKeys,
+					restartRequired,
+					updated: secretsShape(ctx, withholdConfigCredentials)(updated),
+				};
 				if (restartRequired.length > 0) {
 					const note =
 						`Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
@@ -6788,6 +6856,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Read the global variables - used by every request whatever environment is active. An engine that has never had any answers an empty set rather than an error. " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
 			precedenceNote(
 				"Globals are the bottom tier, so a value read back here is not necessarily the one a request resolves: use resolve_variables to see which definition actually wins."
 			),
@@ -6798,7 +6868,8 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getGlobals(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(() => ctx.client.getGlobals(signal), secretsShape(ctx, withholdRowSecrets)),
 	},
 	{
 		name: "resolve_variables",
@@ -6809,7 +6880,9 @@ export const TOOLS: McpTool[] = [
 			precedenceNote(
 				"Pass no environmentId to use the active environment, the same default a send takes; pass a collectionId to include its chain."
 			) +
-			" Secret values are withheld here (`valueWithheld: true`) to match the app's popover - note that list_environments, get_globals and vayu://environments still return every value in full, so this is not a security boundary. Reports what is stored: it resolves nothing on the wire and starts no run.",
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" Reports what is stored: it resolves nothing on the wire and starts no run.",
 		annotations: {
 			title: "Resolve variables",
 			readOnlyHint: true,
@@ -6853,7 +6926,11 @@ export const TOOLS: McpTool[] = [
 				return engineErrorResult(err);
 			}
 
-			const variables = resolveVariableReports(scopes, names);
+			const variables = resolveVariableReports(
+				scopes,
+				names,
+				ctx.config.revealSecretsToAgents
+			);
 			return structuredResult({
 				context,
 				variables,
@@ -6923,7 +7000,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment.",
+			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment. " +
+			WITHHELD_COOKIE_SENTENCE,
 		annotations: {
 			title: "Get cookie jars",
 			readOnlyHint: true,
@@ -6931,7 +7009,11 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getCookies(signal)),
+		handler: (_args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.getCookies(signal),
+				secretsShape(ctx, withholdCookieValues)
+			),
 	},
 	{
 		name: "clear_cookies",

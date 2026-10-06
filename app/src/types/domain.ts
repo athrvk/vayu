@@ -2984,6 +2984,16 @@ export interface McpSafetyConfig {
 	maxIterations: number;
 	/** When false (default), collection/environment write tools are disabled. */
 	allowWrites: boolean;
+	/**
+	 * When false (default), `update_engine_config` refuses the `proxy*` keys and
+	 * `customCaCertificates` even with writes on.
+	 */
+	allowNetworkSettings: boolean;
+	/**
+	 * When false (default), MCP reads withhold secret variables, auth
+	 * credentials, cookie values and proxy URL credentials.
+	 */
+	revealSecretsToAgents: boolean;
 	/** Tool names the user has switched off (omitted from tools/list + rejected). */
 	disabledTools: string[];
 }

@@ -254,18 +254,11 @@ export interface ResolvedVariableReport {
 /**
  * A secret's value is withheld rather than silently dropped, the way
  * `projectOAuth2Token` withholds an access token: `valueWithheld` is stated, so
- * an absent `value` is never mistaken for an empty one.
- *
- * This masks what *this tool* reports. `list_environments`, `get_globals` and
- * `vayu://environments` still answer every value in full - a recorded pre-1.0
- * item this issue did not change - so masking here is consistency with the app's
- * popover, not a security boundary. The tool's description says so.
+ * an absent `value` is never mistaken for an empty one. Every MCP read that
+ * carries a variable spells it this way (`withhold.ts`, #1805).
  */
-function withValue(
-	value: string,
-	secret: boolean | undefined
-): { value: string } | { valueWithheld: true } {
-	return secret ? { valueWithheld: true } : { value };
+export function withValue<T>(value: T, withhold: boolean): { value: T } | { valueWithheld: true } {
+	return withhold ? { valueWithheld: true } : { value };
 }
 
 /**
@@ -275,11 +268,16 @@ function withValue(
  * A name whose every definition is disabled reports `resolved: false` with no
  * value - absent, not present-and-empty, because a present-and-empty answer
  * would read as "it resolves to the empty string", which is a different fact.
+ *
+ * A secret's value is withheld unless @p reveal, the user's
+ * `revealSecretsToAgents` setting, says otherwise.
  */
 export function reportForName(
 	name: string,
-	origins: readonly VariableOrigin[]
+	origins: readonly VariableOrigin[],
+	reveal = false
 ): ResolvedVariableReport {
+	const withheld = (o: VariableOrigin) => o.secret === true && !reveal;
 	const winner = origins.find((o) => o.winner);
 	const ranked = [...origins].reverse();
 	const shadowedBy: ShadowedDefinition[] = ranked
@@ -288,7 +286,7 @@ export function reportForName(
 			scope: o.scope,
 			...(o.sourceId !== undefined ? { sourceId: o.sourceId } : {}),
 			...(o.sourceName !== undefined ? { sourceName: o.sourceName } : {}),
-			...withValue(o.value, o.secret),
+			...withValue(o.value, withheld(o)),
 			...(o.secret === true ? { secret: true } : {}),
 			enabled: o.enabled,
 			reason: o.enabled ? ("outranked" as const) : ("disabled" as const),
@@ -299,7 +297,7 @@ export function reportForName(
 	return {
 		name,
 		resolved: true,
-		...withValue(winner.value, winner.secret),
+		...withValue(winner.value, withheld(winner)),
 		scope: winner.scope,
 		...(winner.sourceId !== undefined ? { sourceId: winner.sourceId } : {}),
 		...(winner.sourceName !== undefined ? { sourceName: winner.sourceName } : {}),
@@ -319,11 +317,12 @@ export function reportForName(
  */
 export function resolveVariableReports(
 	scopes: OriginScopes,
-	names?: readonly string[]
+	names?: readonly string[],
+	reveal = false
 ): ResolvedVariableReport[] {
 	const origins = buildVariableOrigins(scopes);
 	const wanted = names && names.length > 0 ? [...new Set(names)] : Object.keys(origins).sort();
-	return wanted.map((name) => reportForName(name, origins[name] ?? []));
+	return wanted.map((name) => reportForName(name, origins[name] ?? [], reveal));
 }
 
 // --- The model, as the MCP surface states it ---------------------------------

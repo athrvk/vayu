@@ -53,11 +53,21 @@ as you, or read your disk offline, still reads everything.
 
 ## Agents (MCP)
 
-Tools an MCP client calls receive the same data the UI shows, including the
-values of variables marked secret and the auth blocks of saved requests. An
-agent backed by a hosted model forwards what it reads to that model's provider.
-Treat connecting an agent as granting it read access to your workspace, and
-keep the server off until you want that.
+Tools an MCP client calls receive the same data the UI shows, except your
+secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
+by default), the values of variables marked secret, the credentials in auth
+blocks, cookie values and the password in a proxy URL are withheld wherever an
+agent reads what you stored, each marked as withheld. Requests an agent sends
+still use them; the engine fills them in. That is also why the record of a
+send is not withheld: a request that references a secret sends it, so its run
+history, trace, saved examples and inbox captures show what went over the
+wire, secret included. An agent backed by a hosted model forwards what it reads
+to that model's provider. Treat connecting an agent as granting it read access
+to the rest of your workspace, and keep the server off until you want that.
+
+Withholding is a read rule, not a boundary against an agent with write access:
+a write tool echoes the row it changed, and an agent can clear a variable's
+secret flag and then read it. Keep write access off where that matters.
 
 ### MCP server threat model
 
@@ -94,6 +104,16 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   enables write access in Settings. Traffic-sending tools (`run_request`,
   `run_collection_smoke`, `run_collection`) and load runs are not affected by
   this toggle - they are governed by the allowlist and caps.
+- **Network settings gated separately.** Even with writes on,
+  `update_engine_config` refuses the proxy keys (`proxy*`) and
+  `customCaCertificates` unless the user also enables network settings in
+  Settings. The allowlist checks the host a request names, not the proxy it
+  passes through, so an agent that could repoint the proxy or add a trusted CA
+  could route and read every request.
+- **Secrets withheld by default.** Read tools and resources return secret
+  variables as `valueWithheld: true`, auth credentials as
+  `<member>Withheld: true`, cookie values as `valueWithheld: true` and proxy URL
+  credentials stripped, unless the user enables reveal in Settings.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.

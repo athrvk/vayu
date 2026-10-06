@@ -60,7 +60,8 @@ const INSTRUCTIONS_HEAD =
 	"tools drive that engine. Start by checking engine health, so a later failure " +
 	"is not mistaken for a bad request. Tools are grouped by capability, named in " +
 	"each tool's own description: read (inspect collections, requests, " +
-	"environments, runs, config and live metrics - always safe), execute (send " +
+	"environments, runs, config and live metrics; it returns workspace data, with " +
+	"secret values withheld unless the user enables reveal), execute (send " +
 	"real traffic to a target), write (mutate saved data or engine config), and " +
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
@@ -95,9 +96,28 @@ const INSTRUCTIONS_TAIL =
 	"the engine's own list of every pm.* name the script sandbox provides, including " +
 	"synchronous pm.crypto hashing and btoa/atob for signing a request.";
 
+/**
+ * The reveal setting, stated the same way and for the same reason as the write
+ * gate: a withheld value is a marker in place of data, and an agent that does
+ * not know why it is there reads it as missing data rather than as a setting a
+ * person can change (#1805).
+ */
+const REVEAL_GATE_SENTENCE =
+	"Secret values are withheld in this session: a secret variable or a cookie reads as " +
+	"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
+	"URL's credentials as `credentialsWithheld: true`. A request that references a " +
+	"secret still sends with it, because the engine resolves it. A task that needs the " +
+	"value itself is blocked on the user turning on Reveal secrets to agents in Vayu " +
+	"Settings → MCP. ";
+
 /** The server instructions for one session, gated on that session's config. */
-function instructionsFor(allowWrites: boolean): string {
-	return INSTRUCTIONS_HEAD + (allowWrites ? "" : WRITE_GATE_SENTENCE) + INSTRUCTIONS_TAIL;
+function instructionsFor(config: ToolContext["config"]): string {
+	return (
+		INSTRUCTIONS_HEAD +
+		(config.allowWrites ? "" : WRITE_GATE_SENTENCE) +
+		(config.revealSecretsToAgents ? "" : REVEAL_GATE_SENTENCE) +
+		INSTRUCTIONS_TAIL
+	);
 }
 
 /**
@@ -122,7 +142,7 @@ export function createMcpServer(
 		},
 		{
 			capabilities: { tools: {} },
-			instructions: instructionsFor(baseCtx.config.allowWrites),
+			instructions: instructionsFor(baseCtx.config),
 		}
 	);
 
