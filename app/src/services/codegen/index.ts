@@ -74,5 +74,5 @@ export { generateHttpie } from "./httpie";
 export { generatePowerShell } from "./powershell";
 export { generatePython } from "./python";
 export { authSecrets, collectSecrets, createSecretMasker } from "./prepare";
-export { SECRET_PLACEHOLDER } from "./types";
+export { SECRET_PLACEHOLDER, SECRET_UI_MASK } from "./types";
 export type { CodegenOptions, GeneratedSnippet, SnippetBody, SnippetRequest } from "./types";

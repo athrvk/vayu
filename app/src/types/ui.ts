@@ -76,6 +76,15 @@ export interface VariableSupport {
 	 * inside a `memo`-wrapped row that must not re-run one per keystroke.
 	 */
 	dataColumns?: DataContractScope;
+	/**
+	 * Hides every secret variable's value in a text a surface displays, so the
+	 * key/value Σ peek can show resolved text without printing a secret. Applied
+	 * to what is drawn, never to what is cached or sent.
+	 *
+	 * Optional: absent means the scope marks nothing secret (every consumer built
+	 * before this member, and surfaces with no scope), and the text is shown as is.
+	 */
+	maskSecrets?: (text: string) => string;
 }
 
 /**

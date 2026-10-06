@@ -22,6 +22,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { DataContractScope } from "@/types";
+import { SECRET_UI_MASK } from "@/services/codegen";
 
 const contract: DataContractScope = {
 	collectionId: "col-checkout",
@@ -34,10 +35,11 @@ const contract: DataContractScope = {
  * memo below can only be measured against a context that does not hand out
  * fresh functions every render.
  */
+let variables: Record<string, { value: string; scope: string; secret?: boolean }> = {};
 const contextValue = {
 	request: { collectionId: "col_leaf" },
 	resolveString: (s: string) => s,
-	getAllVariables: () => ({}),
+	getAllVariables: () => variables,
 	getVariableOrigins: () => [],
 	updateVariable: () => {},
 	writableScopes: [],
@@ -61,5 +63,27 @@ describe("useVariableSupport", () => {
 		const first = result.current;
 		rerender();
 		expect(result.current).toBe(first);
+	});
+
+	describe("maskSecrets (#1810)", () => {
+		it("hides a secret variable's value and leaves a plain one", () => {
+			variables = {
+				token: { value: "hunter2", scope: "environment", secret: true },
+				region: { value: "eu-1", scope: "environment" },
+			};
+			const { result } = renderHook(() => useVariableSupport());
+			expect(result.current.maskSecrets?.("a=hunter2&r=eu-1")).toBe(
+				`a=${SECRET_UI_MASK}&r=eu-1`
+			);
+		});
+
+		it("reads the secrets when it is called, so the memo never holds one", () => {
+			variables = {};
+			const { result } = renderHook(() => useVariableSupport());
+			expect(result.current.maskSecrets?.("hunter2")).toBe("hunter2");
+
+			variables = { token: { value: "hunter2", scope: "environment", secret: true } };
+			expect(result.current.maskSecrets?.("hunter2")).toBe(SECRET_UI_MASK);
+		});
 	});
 });
