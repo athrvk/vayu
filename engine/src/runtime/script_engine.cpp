@@ -8873,7 +8873,7 @@ class ScriptEngine::Impl {
 
         // Install a wall-clock deadline interrupt so infinite-loop scripts
         // cannot hang the thread. The RuntimeState is owned by this runtime
-        // (freed in ~Impl) and refreshed before each execute().
+        // (freed with it) and refreshed before each execute().
         auto* rt_state = new RuntimeState ();
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
@@ -8945,24 +8945,43 @@ class ScriptEngine::Impl {
     /// Freezing and diffing cannot cover every intrinsic a script can reach, so
     /// the context is rebuilt instead; the runtime (limits, interrupt handler,
     /// class registrations) is what is worth keeping.
+    ///
+    /// Unless a promise job is still queued (#1823): each job holds functions
+    /// that pin their context, so `JS_FreeContext` would free nothing and the
+    /// runtime would fill with dead contexts until its memory limit failed a
+    /// later script. Draining the queue is not the answer, because it would
+    /// run user code after the script ended, unbounded when `timeout_ms` is 0.
+    /// `JS_FreeRuntime` drops the queued jobs unrun, which releases the context.
     void release_context (ContextPair pair) {
         if (!pair.first || !pair.second)
             return;
 
+        const bool jobs_pending = JS_IsJobPending (pair.first);
         JS_FreeContext (pair.second);
-        // Run garbage collection before returning to pool to free any unreferenced objects
-        // This prevents memory buildup from script execution
+        if (jobs_pending) {
+            free_runtime (pair.first);
+            return;
+        }
+        // Collect what the script left so the runtime goes back to the pool at
+        // its baseline footprint.
         JS_RunGC (pair.first);
 
         JSContext* fresh = build_context (pair.first);
         if (!fresh) {
-            delete static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
-            JS_FreeRuntime (pair.first);
+            free_runtime (pair.first);
             return;
         }
 
         std::lock_guard<std::mutex> lock (pool_mutex);
         context_pool.push_back ({ pair.first, fresh });
+    }
+
+    /// For a runtime whose contexts are all freed. The `RuntimeState` goes
+    /// last: the runtime's interrupt handler holds it until the runtime is gone.
+    static void free_runtime (JSRuntime* rt) {
+        auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
+        JS_FreeRuntime (rt);
+        delete rt_state;
     }
 
     ScriptResult execute (const std::string& script, const ScriptContext& ctx) {

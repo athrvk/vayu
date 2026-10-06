@@ -2373,7 +2373,10 @@ Globals it leaves behind (`globalThis.x = 1`, an implicit `x = 1`), a replaced
 `pm`, `pm.test` or `console.log`, and patches to `String.prototype`,
 `Array.prototype` or `Object.prototype` are gone before the next script on the
 thread starts, including one from another collection. Only the QuickJS runtime
-(memory limit, deadline, class registrations) is reused. State that should
+(memory limit, deadline, class registrations) is reused, and not even that
+when a script ends with a promise job still queued (a `.then` callback, the
+rest of an `async` function after an `await`): the job is discarded with the
+runtime, never run, and the next script starts on a new one. State that should
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
@@ -2406,7 +2409,8 @@ asynchronous. There is no `fetch`, but there **is**
 synchronous and bounded rather than a Promise-returning stand-in.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
-is Promise-based. `Promise` exists here, but nothing drains the job queue - there
+is Promise-based. `Promise` exists here, but nothing drains the job queue (jobs
+still queued when a script ends are discarded unrun) - there
 is no event loop and no `setTimeout` - so an `await crypto.subtle.digest(...)`
 would never resume and the script would report a timeout rather than a result.
 Vayu therefore takes a name of its own and is honestly synchronous. `btoa` and
