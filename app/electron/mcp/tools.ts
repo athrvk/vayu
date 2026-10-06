@@ -54,6 +54,7 @@ import {
 } from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 import {
+	runOutputShape,
 	secretsShape,
 	withheldAuthMembers,
 	withholdConfigCredentials,
@@ -62,11 +63,14 @@ import {
 	withholdReorderRows,
 	withholdRowListSecrets,
 	withholdRowSecrets,
+	withholdSpecDiffChanges,
 	WITHHELD_AUTH_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
+	WITHHELD_HEADER_DIFF_SENTENCE,
 	WITHHELD_HEADER_SENTENCE,
+	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 
@@ -845,6 +849,34 @@ function echoShape(ctx: ToolContext): (row: unknown) => unknown {
 
 function collectionEchoShape(ctx: ToolContext): (row: unknown) => unknown {
 	return (row) => echoShape(ctx)(presentCollection(row, ctx));
+}
+
+/**
+ * {@link callEngine} for what a run recorded: the answer withheld by
+ * {@link runOutputShape} first and only then bounded, because a cut through an
+ * unmasked secret leaves a prefix no form matches (#1809). The projection is
+ * read once the engine has answered, so a secret the call itself wrote - a
+ * pre-request script's `pm.environment.set` - is among the values masked.
+ */
+async function callEngineForRunOutput(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	options: {
+		bound?: (value: unknown) => unknown;
+		signal?: AbortSignal;
+		/** An auth block sent inline, whose API-key header no stored row names. */
+		auth?: unknown;
+	} = {}
+): Promise<ToolResult> {
+	let answer: unknown;
+	try {
+		answer = await fn();
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
+	const withheld = withhold(answer);
+	return jsonResult(options.bound ? options.bound(withheld) : withheld);
 }
 
 // --- Argument coercion helpers ----------------------------------------------
@@ -1762,7 +1794,8 @@ async function runStreamingRequest(
 		// A payload the engine refused *after* the flag was read, or a buffered
 		// answer to a request we asked to stream. Either way, hand back what it
 		// said rather than reading events for a run that does not exist.
-		return jsonResult(started);
+		const withhold = await runOutputShape(ctx, signal, [payload.auth]);
+		return jsonResult(withhold(started));
 	}
 
 	let consumed;
@@ -1772,6 +1805,7 @@ async function runStreamingRequest(
 		return engineErrorResult(err);
 	}
 
+	const withhold = await runOutputShape(ctx, signal, [payload.auth]);
 	const budgetExhausted = !consumed.completed && !consumed.capReached;
 	return structuredResult({
 		runId,
@@ -1786,7 +1820,7 @@ async function runStreamingRequest(
 		...(consumed.endReason !== undefined && { endReason: consumed.endReason }),
 		...(consumed.totalEvents !== undefined && { totalEvents: consumed.totalEvents }),
 		eventCount: consumed.events.length,
-		events: consumed.events,
+		events: withhold(consumed.events),
 		nextStep: consumed.completed
 			? "The stream has ended. get_run_report has the stored events and any test results."
 			: "The run is still streaming engine-side. Read more with get_run_report, or end it with stop_run.",
@@ -4683,7 +4717,8 @@ export const TOOLS: McpTool[] = [
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
 			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
-			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is.",
+			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "List runs",
 			readOnlyHint: true,
@@ -4738,12 +4773,16 @@ export const TOOLS: McpTool[] = [
 					"true lists only runs pinned as a baseline, false only unpinned ones. Omit for both."
 				),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			// Built before the call, not inside it: an argument the caller got
 			// wrong must reach dispatch as a ToolArgError - inside `pagedRead`'s
 			// try it would be reported as an engine failure.
 			const query = runListQuery(args);
-			return pagedRead(() => ctx.client.listRuns(query, signal), "runs");
+			return pagedRead(
+				() => ctx.client.listRuns(query, signal),
+				"runs",
+				await runOutputShape(ctx, signal)
+			);
 		},
 	},
 	{
@@ -4755,7 +4794,8 @@ export const TOOLS: McpTool[] = [
 			"A run may also carry `warnings`: what it did not do, even though it finished and its numbers look fine - a request sent with an unresolved `{{token}}`, or a step whose pre-request script load mode never runs. Each entry carries `code`, a human-readable `message`, and either `count`/`names` or `steps`. Absent for a run with nothing to report. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
 			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history. ` +
-			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history.`,
+			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get run report",
 			readOnlyHint: true,
@@ -4763,11 +4803,13 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
-		handler: (args, ctx, signal) =>
-			callEngine(
-				() => ctx.client.getRunReport(requireStr(args, "runId"), signal),
-				boundRunReport
-			),
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
+				bound: boundRunReport,
+				signal,
+			});
+		},
 	},
 	{
 		name: "get_run_samples",
@@ -4775,7 +4817,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. Only a run started with response capture on has any; a run that captured nothing returns an empty page, not an error. " +
-			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get run samples",
 			readOnlyHint: true,
@@ -4800,7 +4843,7 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many samples to skip, for paging (default 0)."),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = optionalPageLimit(
 				args,
@@ -4811,7 +4854,8 @@ export const TOOLS: McpTool[] = [
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
 				() => ctx.client.getRunSamples(runId, limit, offset, signal),
-				"captured samples"
+				"captured samples",
+				await runOutputShape(ctx, signal)
 			);
 		},
 	},
@@ -4938,7 +4982,8 @@ export const TOOLS: McpTool[] = [
 			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned.`,
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,
@@ -5079,9 +5124,10 @@ export const TOOLS: McpTool[] = [
 			const streaming = args.stream === true;
 			payload.stream = streaming;
 			if (!streaming) {
-				return callEngine(
+				return callEngineForRunOutput(
+					ctx,
 					() => ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal),
-					boundExecuteResponse
+					{ bound: boundExecuteResponse, signal, auth: payload.auth }
 				);
 			}
 			return runStreamingRequest(args, payload, ctx, signal);
@@ -5525,7 +5571,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half.",
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half. " +
+			WITHHELD_HEADER_DIFF_SENTENCE,
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
 			readOnlyHint: true,
@@ -5592,7 +5639,7 @@ export const TOOLS: McpTool[] = [
 					},
 					added: added.entries,
 					removed: removed.entries,
-					changed: changed.entries,
+					changed: secretsShape(ctx, withholdSpecDiffChanges)(changed.entries),
 					entriesTruncated: truncated,
 				}),
 				`\n\n${describeSpecDiff(diff)}${
@@ -7966,7 +8013,8 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["run"],
 		description:
-			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Pin run as baseline",
 			readOnlyHint: false,
@@ -7989,7 +8037,11 @@ export const TOOLS: McpTool[] = [
 				throw new ToolArgError('"baseline" is required and must be true or false.');
 			}
 			const baseline = args.baseline;
-			return callEngine(() => ctx.client.setRunBaseline(runId, baseline, signal));
+			return callEngineForRunOutput(
+				ctx,
+				() => ctx.client.setRunBaseline(runId, baseline, signal),
+				{ signal }
+			);
 		},
 	},
 	{
@@ -8723,7 +8775,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
-			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender.`,
+			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get inbox captures",
 			readOnlyHint: true,
@@ -8750,7 +8803,7 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many captures to skip, for paging (default 0)."),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			const inboxId = requireStr(args, "inboxId");
 			const limit = optionalPageLimit(
 				args,
@@ -8759,10 +8812,11 @@ export const TOOLS: McpTool[] = [
 				MAX_INBOX_CAPTURE_LIMIT
 			);
 			const offset = optionalOffset(args, "offset");
+			const withhold = await runOutputShape(ctx, signal);
 			return pagedRead(
 				() => ctx.client.getInboxCaptures(inboxId, limit, offset, signal),
 				"captures",
-				boundInboxCaptures
+				(page) => boundInboxCaptures(withhold(page))
 			);
 		},
 	},

@@ -9,10 +9,14 @@
  * The MCP server's sensitive-header list against the engine's. `electron/`
  * cannot import the renderer's copy (`src/lib/sensitive-headers.ts`), so this
  * module holds one of its own, and all three read `sensitiveHeaderNames` in
- * `engine/tests/fixtures/log-redaction-conformance.json`.
+ * `engine/tests/fixtures/log-redaction-conformance.json`. The run-output
+ * mask's query form against the engine's `encode_query_component`, over
+ * `engine/tests/fixtures/query-encoding-conformance.json`, for the same
+ * reason (#1809).
  *
  * Mutation check: drop `x-csrf-token` from `SENSITIVE_HEADER_NAMES` in
- * `withhold.ts` and the list-equality case reds.
+ * `withhold.ts` and the list-equality case reds; drop `&` from its query
+ * value set and the cases holding one red.
  */
 
 import { describe, expect, it } from "vitest";
@@ -20,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { SENSITIVE_HEADER_NAMES } from "@/lib/sensitive-headers";
 import {
+	encodeQueryValue,
 	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
 	withholdRowSecrets,
 } from "./withhold";
@@ -51,5 +56,20 @@ describe("MCP sensitive header conformance", () => {
 				headers: [{ key, enabled: true, valueWithheld: true }],
 			});
 		}
+	});
+});
+
+const [queryFixturePath] = ENGINE_READING_GUARDS.mcpQueryEncoding.paths.map(fromRepoRoot);
+const queryFixture = JSON.parse(readFileSync(queryFixturePath, "utf8")) as {
+	components: { name: string; text: string; value: string }[];
+};
+
+describe("MCP query value encoding conformance", () => {
+	it("read a non-empty fixture", () => {
+		expect(queryFixture.components.length).toBeGreaterThan(0);
+	});
+
+	it.each(queryFixture.components)("encodes $name as the engine writes a value", (row) => {
+		expect(encodeQueryValue(row.text)).toBe(row.value);
 	});
 });

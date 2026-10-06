@@ -38,6 +38,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type EngineClient,
 } from "./engine-client.js";
+import { WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
 /**
@@ -4311,12 +4312,12 @@ describe("inline body bounds", () => {
 	});
 
 	test("run_request cuts a large rawRequest but keeps its headers whole", async () => {
-		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\nCookie: session=abc\r\n\r\n";
+		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\nX-Trace: abc\r\n\r\n";
 		const out = await runRequest(executed(executeAnswer({ rawRequest: head + huge })));
 
 		const raw = out.rawRequest as string;
 		expect(raw.startsWith(head)).toBe(true);
-		expect(raw).toContain("Cookie: session=abc");
+		expect(raw).toContain("X-Trace: abc");
 		expect(Buffer.byteLength(raw, "utf8")).toBe(head.length + MAX_INLINE_BODY_BYTES);
 		expect(out.rawRequestTruncated).toBe(true);
 		expect(out.rawRequestBytes).toBe(head.length + huge.length);
@@ -10341,6 +10342,432 @@ describe("secret withholding", () => {
 				true
 			);
 		}
+	});
+
+	// What a run recorded carries the secrets it sent, in whatever encoding they
+	// went out in, and the credential headers on both sides of the exchange: the
+	// engine's snapshot rule masks them in place (#1809).
+	const RUN_SECRET = 'p@ss "w/rd"&x';
+	/** Each of `RUN_SECRET`'s forms holds one of these, so their absence is every form's. */
+	const RUN_SECRET_CORES = ["p@ss", "p%40ss"];
+	const RUN_LEAKS = [
+		...RUN_SECRET_CORES,
+		"glob-secret-1",
+		"col-secret-9",
+		"typed-bearer-token",
+		"resp-cookie-value",
+		"req-typed-key",
+		"tenant-typed-key",
+	];
+	const PERCENT_FORM = "p%40ss%20%22w%2Frd%22%26x";
+	const QUERY_FORM = "p@ss%20%22w/rd%22%26x";
+	const XML_FORM = 'p@ss "w/rd"&amp;x';
+
+	/** The reads `runOutputShape` makes, holding one secret per scope. */
+	const runScopes = () => ({
+		getGlobals: vi.fn().mockResolvedValue({
+			id: "globals",
+			variables: { gtok: { value: "glob-secret-1", secret: true, enabled: true } },
+		}),
+		listEnvironments: vi.fn().mockResolvedValue([
+			{
+				id: "env_1",
+				variables: {
+					pass: { value: RUN_SECRET, secret: true, enabled: true },
+					// Under the engine's four-byte floor: masked nowhere.
+					short: { value: "abc", secret: true, enabled: true },
+					plain: { value: "visible-value", enabled: true },
+				},
+			},
+		]),
+		listCollections: vi.fn().mockResolvedValue([
+			{
+				id: "c1",
+				variables: { ck: { value: "col-secret-9", secret: true } },
+				auth: { mode: "apikey", key: "X-Tenant-Key", in: "header" },
+			},
+		]),
+		listAllRequests: vi
+			.fn()
+			.mockResolvedValue([
+				{ id: "r1", auth: { mode: "apikey", key: "X-Req-Key", value: "v", in: "header" } },
+			]),
+	});
+
+	/** One trace node pair as `build_result_trace` stores it, every form of every secret on it. */
+	const RUN_TRACE = {
+		request: {
+			method: "POST",
+			url: `https://api.example.com/v1?key=${QUERY_FORM}&abc=1&plain=visible-value`,
+			headers: {
+				Authorization: "Bearer typed-bearer-token",
+				"X-Tenant-Key": "tenant-typed-key",
+				"X-Echo": "glob-secret-1",
+				Accept: "*/*",
+			},
+			body: JSON.stringify({ password: RUN_SECRET, region: "eu" }),
+			rawRequest:
+				`POST /v1?key=${PERCENT_FORM} HTTP/1.1\r\nHost: api.example.com\r\n` +
+				"Authorization: Bearer typed-bearer-token\r\nX-Req-Key: req-typed-key\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				`<login pw="${XML_FORM}">col-secret-9</login>`,
+		},
+		response: {
+			headers: {
+				"Set-Cookie": "sid=resp-cookie-value; HttpOnly",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ echo: RUN_SECRET }),
+			bodyBytes: 4321,
+		},
+	};
+
+	const runClient = (overrides: Partial<Record<keyof EngineClient, unknown>>) =>
+		fakeClient({ ...runScopes(), ...overrides });
+
+	function expectRunOutputWithheld(text: string) {
+		for (const leak of RUN_LEAKS) expect(text, leak).not.toContain(leak);
+		expect(text).toContain("<redacted>");
+	}
+
+	/** A trace node pair after the mask: every value gone, every name, order and size kept. */
+	function expectTraceMasked(trace: typeof RUN_TRACE) {
+		expect(trace.request.url).toBe(
+			"https://api.example.com/v1?key=<redacted>&abc=1&plain=visible-value"
+		);
+		expect(trace.request.headers).toEqual({
+			Authorization: "<redacted>",
+			"X-Tenant-Key": "<redacted>",
+			"X-Echo": "<redacted>",
+			Accept: "*/*",
+		});
+		expect(JSON.parse(trace.request.body)).toEqual({ password: "<redacted>", region: "eu" });
+		expect(trace.request.rawRequest).toBe(
+			"POST /v1?key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"Authorization: <redacted>\r\nX-Req-Key: <redacted>\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				'<login pw="<redacted>"><redacted></login>'
+		);
+		expect(trace.response.headers).toEqual({
+			"Set-Cookie": "<redacted>",
+			"Content-Type": "application/json",
+		});
+		expect(JSON.parse(trace.response.body)).toEqual({ echo: "<redacted>" });
+		expect(trace.response.bodyBytes).toBe(4321);
+	}
+
+	const EXECUTE_ANSWER = {
+		status: 200,
+		headers: RUN_TRACE.response.headers,
+		requestHeaders: RUN_TRACE.request.headers,
+		rawRequest: RUN_TRACE.request.rawRequest,
+		body: { echo: RUN_SECRET },
+		bodyRaw: RUN_TRACE.response.body,
+		bodySize: 4321,
+		bodyCapped: false,
+	};
+
+	const sendRequest = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) =>
+		read(
+			"run_request",
+			client,
+			{ ...ALLOW_API, ...safety },
+			{
+				url: "https://api.example.com/v1",
+			}
+		);
+
+	test("run_request masks every secret form and credential header in the exchange", async () => {
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		const { text, body } = await sendRequest(client);
+		expectRunOutputWithheld(text);
+		expect(body).toEqual({
+			status: 200,
+			headers: { "Set-Cookie": "<redacted>", "Content-Type": "application/json" },
+			requestHeaders: {
+				Authorization: "<redacted>",
+				"X-Tenant-Key": "<redacted>",
+				"X-Echo": "<redacted>",
+				Accept: "*/*",
+			},
+			rawRequest:
+				"POST /v1?key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"Authorization: <redacted>\r\nX-Req-Key: <redacted>\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				'<login pw="<redacted>"><redacted></login>',
+			body: { echo: "<redacted>" },
+			bodyRaw: '{"echo":"<redacted>"}',
+			bodySize: 4321,
+			bodyCapped: false,
+		});
+	});
+
+	test("run_request returns the exchange as the engine answered it with reveal on", async () => {
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		const { body } = await sendRequest(client, REVEAL);
+		expect(body).toEqual(EXECUTE_ANSWER);
+		// The identity costs nothing: no secret is read to build it.
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
+	});
+
+	test("run_request masks the header an inline API-key auth names", async () => {
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				...EXECUTE_ANSWER,
+				requestHeaders: { "X-Inline-Key": "inline-typed-key" },
+			}),
+		});
+		const { text, body } = await read("run_request", client, ALLOW_API, {
+			url: "https://api.example.com/v1",
+			auth: { mode: "apikey", key: "X-Inline-Key", value: "inline-typed-key", in: "header" },
+		});
+		expect(text).not.toContain("inline-typed-key");
+		expect(body.requestHeaders).toEqual({ "X-Inline-Key": "<redacted>" });
+	});
+
+	test("run_request masks a streamed run's events unless revealed", async () => {
+		const events = [{ event: "token", data: `{"t":"glob-secret-1","u":"${PERCENT_FORM}"}` }];
+		const client = runClient({
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+			consumeStreamEvents: vi
+				.fn()
+				.mockResolvedValue({ events, completed: true, capReached: false }),
+		});
+		const args = { url: "https://api.example.com/v1", stream: true };
+		const withheld = await read("run_request", client, ALLOW_API, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.events).toEqual([
+			{ event: "token", data: '{"t":"<redacted>","u":"<redacted>"}' },
+		]);
+		const revealed = await read("run_request", client, { ...ALLOW_API, ...REVEAL }, args);
+		expect(revealed.body.events).toEqual(events);
+	});
+
+	const RUN_REPORT = {
+		metadata: { runId: "run_1", requestUrl: `https://api.example.com/v1?key=${QUERY_FORM}` },
+		summary: { totalRequests: 1 },
+		results: [{ id: 1, statusCode: 200, trace: RUN_TRACE }],
+	};
+
+	test("get_run_report masks the stored trace and keeps its shape", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const { text, body } = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expectRunOutputWithheld(text);
+		expectTraceMasked(body.results[0].trace);
+		expect(body.metadata.requestUrl).toBe("https://api.example.com/v1?key=<redacted>");
+		expect(body.summary).toEqual(RUN_REPORT.summary);
+	});
+
+	test("get_run_report returns the stored trace whole with reveal on", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const { body } = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(body).toEqual(RUN_REPORT);
+	});
+
+	test("get_run_report masks before it cuts, so no prefix of a secret survives the cut", async () => {
+		// The secret straddles the per-body cut: bounded first, its first three
+		// bytes would be left behind where no form can match them.
+		const body = "x".repeat(MAX_INLINE_BODY_BYTES - 3) + "col-secret-9" + "y".repeat(100);
+		const report = { results: [{ id: 1, trace: { response: { body } } }] };
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(report) });
+		const out = await read("get_run_report", client, undefined, { runId: "run_1" });
+		const cut = out.body.results[0].trace.response;
+		expect(cut.bodyTruncated).toBe(true);
+		expect(cut.body.endsWith("<re")).toBe(true);
+		expect(cut.body).not.toContain("col");
+	});
+
+	test("get_run_samples masks a sample's Set-Cookie and body unless revealed", async () => {
+		const samples = page([
+			{
+				resultId: 1,
+				response: {
+					headers: {
+						"set-cookie": "sid=resp-cookie-value",
+						"content-type": "text/plain",
+					},
+					body: `token=glob-secret-1&p=${PERCENT_FORM}`,
+					bodyBytes: 40,
+				},
+			},
+		]);
+		const client = runClient({ getRunSamples: vi.fn().mockResolvedValue(samples) });
+		const withheld = await read("get_run_samples", client, undefined, { runId: "run_1" });
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0].response).toEqual({
+			headers: { "set-cookie": "<redacted>", "content-type": "text/plain" },
+			body: "token=<redacted>&p=<redacted>",
+			bodyBytes: 40,
+		});
+		expect(withheld.body.pagination).toEqual(samples.pagination);
+		const revealed = await read("get_run_samples", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(samples);
+	});
+
+	const RUN_ROW = {
+		id: "run_1",
+		type: "design",
+		baseline: true,
+		summary: {
+			url: `https://api.example.com/v1?key=${PERCENT_FORM}`,
+			comment: "after rotating col-secret-9",
+		},
+	};
+
+	test("list_runs masks a run row's summary unless revealed", async () => {
+		const runs = page([RUN_ROW]);
+		const client = runClient({ listRuns: vi.fn().mockResolvedValue(runs) });
+		const withheld = await read("list_runs", client);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0].summary).toEqual({
+			url: "https://api.example.com/v1?key=<redacted>",
+			comment: "after rotating <redacted>",
+		});
+		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
+	});
+
+	test("set_run_baseline masks the run row it echoes unless revealed", async () => {
+		const client = runClient({ setRunBaseline: vi.fn().mockResolvedValue(RUN_ROW) });
+		const args = { runId: "run_1", baseline: true };
+		const withheld = await read("set_run_baseline", client, { allowWrites: true }, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.summary.url).toBe("https://api.example.com/v1?key=<redacted>");
+		const revealed = await read(
+			"set_run_baseline",
+			client,
+			{ allowWrites: true, ...REVEAL },
+			args
+		);
+		expect(revealed.body).toEqual(RUN_ROW);
+	});
+
+	test("get_inbox_captures masks a capture's credential headers and secrets unless revealed", async () => {
+		const captures = page([
+			{
+				id: 1,
+				method: "POST",
+				path: "/hook",
+				query: `token=${QUERY_FORM}`,
+				headers: { Authorization: "Bearer typed-bearer-token", "User-Agent": "sender/1" },
+				body: JSON.stringify({ key: RUN_SECRET }),
+				bodyBytes: 30,
+				bodyTruncated: false,
+			},
+		]);
+		const client = runClient({ getInboxCaptures: vi.fn().mockResolvedValue(captures) });
+		const withheld = await read("get_inbox_captures", client, undefined, {
+			inboxId: "inbox_1",
+		});
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0]).toMatchObject({
+			query: "token=<redacted>",
+			headers: { Authorization: "<redacted>", "User-Agent": "sender/1" },
+			body: '{"key":"<redacted>"}',
+			bodyBytes: 30,
+		});
+		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
+		expect(revealed.body).toEqual(captures);
+	});
+
+	test("a failed secret lookup masks with what the others read, and the header rule always", async () => {
+		const client = runClient({
+			getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			listCollections: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			listAllRequests: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			getRunReport: vi.fn().mockResolvedValue(RUN_REPORT),
+		});
+		const { text, body } = await read("get_run_report", client, undefined, { runId: "run_1" });
+		for (const core of RUN_SECRET_CORES) expect(text).not.toContain(core);
+		const { request, response } = body.results[0].trace;
+		expect(request.headers.Authorization).toBe("<redacted>");
+		expect(response.headers["Set-Cookie"]).toBe("<redacted>");
+		// The globals read failed, so the value it would have named is unknown:
+		// masked only where a header rule covers it.
+		expect(request.headers["X-Echo"]).toBe("glob-secret-1");
+	});
+
+	test("compare_runs forwards no recorded string, so there is nothing for it to mask", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_0", targetRunId: "run_1" },
+			ctxWith(client, REVEAL)
+		);
+		expect(res.isError).toBeFalsy();
+		for (const leak of RUN_LEAKS) expect(JSON.stringify(res), leak).not.toContain(leak);
+	});
+
+	const SPEC_DIFF = {
+		identical: false,
+		added: [],
+		removed: [],
+		unchanged: 0,
+		unmapped: 0,
+		changed: [
+			{
+				requestId: "req_1",
+				name: "Me",
+				fields: [
+					{
+						field: "headers",
+						current: "2: Authorization=Bearer typed-bearer-token, Accept=json",
+						next: "1: Accept=json",
+						userTouched: false,
+					},
+					{ field: "url", current: "{{baseUrl}}/me", next: "{{baseUrl}}/v2/me" },
+				],
+			},
+			{
+				requestId: "req_2",
+				name: "Referenced",
+				fields: [
+					{
+						field: "headers",
+						current: "1: Authorization={{token}}",
+						next: "0: none",
+						userTouched: true,
+					},
+				],
+			},
+		],
+	};
+
+	test("diff_spec withholds a stored header line that names a credential unless revealed", async () => {
+		const client = fakeClient({ diffSpec: vi.fn().mockResolvedValue(SPEC_DIFF) });
+		const args = { collectionId: "c1", content: "{}" };
+		const withheld = await read("diff_spec", client, undefined, args);
+		expect(withheld.text).not.toContain("typed-bearer-token");
+		expect(withheld.body.changed[0].fields).toEqual([
+			{ field: "headers", next: "1: Accept=json", userTouched: false, currentWithheld: true },
+			{
+				field: "url",
+				current: "{{baseUrl}}/me",
+				next: "{{baseUrl}}/v2/me",
+				userTouched: false,
+			},
+		]);
+		// A pure reference names where the secret lives without being it.
+		expect(withheld.body.changed[1].fields[0].current).toBe("1: Authorization={{token}}");
+		const revealed = await read("diff_spec", client, REVEAL, args);
+		expect(revealed.body.changed[0].fields[0].current).toBe(
+			"2: Authorization=Bearer typed-bearer-token, Accept=json"
+		);
+	});
+
+	test.each([
+		"run_request",
+		"get_run_report",
+		"get_run_samples",
+		"list_runs",
+		"set_run_baseline",
+		"get_inbox_captures",
+	])("%s says what it withholds from run output", (name) => {
+		expect(TOOLS.find((tool) => tool.name === name)?.description).toContain(
+			WITHHELD_RUN_OUTPUT_SENTENCE
+		);
 	});
 });
 

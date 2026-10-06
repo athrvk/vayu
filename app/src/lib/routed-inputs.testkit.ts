@@ -335,6 +335,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/withhold.conformance.test.ts",
 		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
 	},
+	mcpQueryEncoding: {
+		reader: "app/electron/mcp/withhold.conformance.test.ts",
+		paths: ["engine/tests/fixtures/query-encoding-conformance.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**
