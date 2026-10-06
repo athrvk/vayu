@@ -86,7 +86,9 @@ depth (`vayu::utils::redact_fields`, `utils/log_redact.hpp`):
 
 The app's `log.ts` ports both rules, and
 `engine/tests/fixtures/log-redaction-conformance.json` pins the field list and
-the URL cases for the two languages.
+the URL cases for the two languages. Its `sensitiveHeaderNames` is the header
+subset the app's code snippets mask by name (`app/src/lib/sensitive-headers.ts`,
+#1806); each must also be a secret field name here.
 
 A curl verbose exchange (`vayu-engine --verbose 2`, or a run with its own
 `verbose` override) is one `cat=client` record per transfer rather than one

@@ -17,12 +17,11 @@
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { isSecretFieldName, stripUrlSecrets } from "./log";
 
-const fixture = JSON.parse(
-	readFileSync(fromRepoRoot("engine/tests/fixtures/log-redaction-conformance.json"), "utf8")
-) as {
+const [fixturePath] = ENGINE_READING_GUARDS.logRedaction.paths.map(fromRepoRoot);
+const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 	secretFieldNames: string[];
 	notSecretFieldNames: string[];
 	stripUrlSecrets: { name: string; in: string; out: string }[];

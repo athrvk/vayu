@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for log redaction (issue #1781). Read by BOTH the engine gtest suite (engine/tests/debug_redact_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/electron/log-redaction.conformance.test.ts). `secretFieldNames` is every name `is_secret_field_name` / `isSecretFieldName` must redact; `notSecretFieldNames` must pass through; `stripUrlSecrets` maps an input to what both `strip_url_secrets` and `stripUrlSecrets` must return.",
+  "$comment": "Cross-language conformance fixture for log redaction (issue #1781). Read by BOTH the engine gtest suite (engine/tests/debug_redact_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/electron/log-redaction.conformance.test.ts). `secretFieldNames` is every name `is_secret_field_name` / `isSecretFieldName` must redact; `notSecretFieldNames` must pass through; `sensitiveHeaderNames` is the header list the app's snippet generator masks by name (app/src/lib/sensitive-headers.ts, issue #1806), each of which must also be a secret field name here, and the app's list must equal it; `stripUrlSecrets` maps an input to what both `strip_url_secrets` and `stripUrlSecrets` must return.",
   "secretFieldNames": [
     "authorization", "Proxy-Authorization", "cookie", "Set-Cookie", "www-authenticate",
     "proxy-authenticate", "authentication-info", "token", "access_token", "refresh_token",
@@ -7,6 +7,10 @@
     "passphrase", "api_key", "id_token", "code", "code_verifier", "private_key"
   ],
   "notSecretFieldNames": ["auth_token", "content-type", "host", "codes"],
+  "sensitiveHeaderNames": [
+    "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token",
+    "x-csrf-token"
+  ],
   "stripUrlSecrets": [
     { "name": "userinfo and query", "in": "https://u:p@host/path?api_key=SECRET", "out": "https://host/path" },
     { "name": "bare path query", "in": "/p?api_key=SECRET", "out": "/p" },

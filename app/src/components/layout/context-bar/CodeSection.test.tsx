@@ -32,7 +32,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { CodeSection } from "./CodeSection";
-import { CODE_TARGETS } from "@/services/codegen";
+import { CODE_TARGETS, SECRET_PLACEHOLDER } from "@/services/codegen";
 import type { ResolvedVariable } from "@/types";
 
 const composeRequest = vi.fn();
@@ -139,7 +139,9 @@ describe("CodeSection - it generates from what will be sent", () => {
 		// The inherited auth the engine walked, applied as a header: the engine
 		// keeps `auth` beside the request and attaches it at send time, so a
 		// snippet built from the composed headers alone would not authenticate.
-		expect(snippet()).toContain("Authorization: Bearer");
+		// The row is masked by its name, so the line is present with no token.
+		expect(snippet()).toContain(`Authorization: ${SECRET_PLACEHOLDER}`);
+		expect(snippet()).not.toContain("inherited-bearer");
 	});
 
 	it("switches language without recomposing", async () => {

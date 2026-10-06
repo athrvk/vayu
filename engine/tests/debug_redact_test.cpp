@@ -22,8 +22,9 @@ using vayu::utils::strip_urls_in_text;
 
 namespace {
 
-// Shared with the app's `log-redaction.conformance.test.ts`: a case added to
-// the fixture fails whichever side answers it differently.
+// Shared with the app's `log-redaction.conformance.test.ts` and
+// `sensitive-headers.conformance.test.ts`: a case added to the fixture fails
+// whichever side answers it differently.
 nlohmann::json load_redaction_fixture () {
     const auto path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
     "fixtures" / "log-redaction-conformance.json";
@@ -41,6 +42,10 @@ TEST (LogRedactionConformance, SecretFieldNamesAndStripUrlSecretsFollowTheShared
     const auto fixture = load_redaction_fixture ();
     ASSERT_FALSE (fixture.at ("secretFieldNames").empty ());
     ASSERT_FALSE (fixture.at ("stripUrlSecrets").empty ());
+    ASSERT_FALSE (fixture.at ("sensitiveHeaderNames").empty ());
+    for (const auto& name : fixture.at ("sensitiveHeaderNames")) {
+        EXPECT_TRUE (is_secret_field_name (name.get<std::string> ())) << name;
+    }
     for (const auto& name : fixture.at ("secretFieldNames")) {
         EXPECT_TRUE (is_secret_field_name (name.get<std::string> ())) << name;
     }
