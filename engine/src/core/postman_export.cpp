@@ -262,44 +262,16 @@ void blank_response_cookies (json& cookies, Walk& walk) {
     }
 }
 
-/// What blanking one raw URL withheld, split by whether a Params table
-/// repeats it: the query and fragment are the table's other half, the
-/// userinfo password is only ever in the URL.
-struct RawUrlOmitted {
-    int password = 0;
-    int query    = 0;
-
-    /// What the URL and the @p rows (blanked separately, @p in_rows of them)
-    /// withheld between them: a credential in both is one value written
-    /// twice, so the larger count stands - exact when the rows mirror the
-    /// query, and a row the URL lacks (a turned-off one) is still counted.
-    [[nodiscard]] int distinct_with (int in_rows) const {
-        return password + std::max (query, in_rows);
-    }
-};
-
-std::string redact_raw_url (const std::string& raw,
-const std::vector<std::string>& param_names,
-RawUrlOmitted& omitted) {
-    int total = 0;
-    std::string out = vayu_ext::redact_url_credentials (raw, param_names, total);
-    int password = 0;
-    static_cast<void> (vayu_ext::redact_url_credentials (
-    std::string_view (raw).substr (0, raw.find_first_of ("?#")), param_names, password));
-    omitted.password += password;
-    omitted.query += total - password;
-    return out;
-}
-
 /// The URL @p raw with its credentials blanked, and the Params table
-/// @p query_rows that mirrors its query (see `RawUrlOmitted`).
+/// @p query_rows that mirrors its query (see `vayu_ext::UrlOmitted`).
 std::string blank_url_credentials (const std::string& raw, json& query_rows, Walk& walk) {
     if (walk.include_secrets) {
         return raw;
     }
-    RawUrlOmitted in_url;
-    int in_rows         = 0;
-    std::string written = redact_raw_url (raw, walk.apikey_params, in_url);
+    vayu_ext::UrlOmitted in_url;
+    int in_rows = 0;
+    std::string written =
+    vayu_ext::redact_url_credentials (raw, walk.apikey_params, in_url);
     vayu_ext::blank_credential_param_rows (query_rows, walk.apikey_params, in_rows);
     walk.secrets_omitted += in_url.distinct_with (in_rows);
     return written;
@@ -1494,9 +1466,10 @@ void append_names (std::vector<std::string>& names, const std::vector<std::strin
  * blanked without a count of its own.
  */
 void blank_recorded_url (json& url, const std::vector<std::string>& param_names, Walk& walk) {
-    RawUrlOmitted in_url;
+    vayu_ext::UrlOmitted in_url;
     if (url.is_string ()) {
-        url = redact_raw_url (url.get_ref<const std::string&> (), param_names, in_url);
+        url = vayu_ext::redact_url_credentials (
+        url.get_ref<const std::string&> (), param_names, in_url);
         walk.secrets_omitted += in_url.distinct_with (0);
         return;
     }
@@ -1505,7 +1478,8 @@ void blank_recorded_url (json& url, const std::vector<std::string>& param_names,
     }
     int in_rows = 0;
     if (const auto raw = url.find ("raw"); raw != url.end () && raw->is_string ()) {
-        *raw = redact_raw_url (raw->get_ref<const std::string&> (), param_names, in_url);
+        *raw = vayu_ext::redact_url_credentials (
+        raw->get_ref<const std::string&> (), param_names, in_url);
     }
     if (const auto query = url.find ("query"); query != url.end ()) {
         vayu_ext::blank_credential_param_rows (*query, param_names, in_rows);

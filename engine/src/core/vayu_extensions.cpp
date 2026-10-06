@@ -537,6 +537,19 @@ int& omitted) {
     return out;
 }
 
+std::string redact_url_credentials (std::string_view url,
+const std::vector<std::string>& extra_param_names,
+UrlOmitted& omitted) {
+    int total       = 0;
+    std::string out = redact_url_credentials (url, extra_param_names, total);
+    int password    = 0;
+    static_cast<void> (redact_url_credentials (
+    url.substr (0, url.find_first_of ("?#")), extra_param_names, password));
+    omitted.password += password;
+    omitted.query += total - password;
+    return out;
+}
+
 Json portable_body (const Json& body) {
     Json out = body;
     if (const auto file = out.find ("file"); file != out.end () && file->is_object ()) {

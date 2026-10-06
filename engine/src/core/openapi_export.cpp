@@ -851,13 +851,19 @@ DeclaredParameters inherited_parameters (const Json& document, const Json& path_
  * holding this operation's too. @p example_key is `example` in 3.x and the
  * `x-example` extension 2.0 tools read, which has no `example` on a
  * non-body parameter.
+ *
+ * A row whose value was withheld as a credential writes no example (the
+ * document's own is not replaced by an empty one). @p counts_withheld says
+ * whether that is counted here: it is where the export writes no
+ * `x-vayu-request`, which counts the row otherwise.
  */
 DeclaredParameters patch_parameters (Json& operation,
 const Json& document,
 const ExportRequest& entry,
 DeclaredParameters declared,
 ExportNotes& notes,
-std::string_view example_key = "example") {
+bool counts_withheld,
+std::string_view example_key) {
     const auto parameters = operation.find ("parameters");
     if (parameters == operation.end () || !parameters->is_array ()) {
         return declared;
@@ -897,7 +903,16 @@ std::string_view example_key = "example") {
         rows->begin (), rows->end (), [&] (const ExportKeyValue& candidate) {
             return vayu::utils::ascii_lower (candidate.key) == wanted;
         });
-        if (row == rows->end () || row->value.empty ()) {
+        if (row == rows->end ()) {
+            continue;
+        }
+        if (row->withheld) {
+            if (counts_withheld) {
+                notes.secrets_omitted += 1;
+            }
+            continue;
+        }
+        if (row->value.empty ()) {
             continue;
         }
         parameter[std::string (example_key)] = row->value;
@@ -921,7 +936,7 @@ ExportNotes& notes) {
     const auto count = [&] (const std::vector<ExportKeyValue>& rows,
                        const std::unordered_set<std::string>& names, bool headers) {
         for (const ExportKeyValue& row : rows) {
-            if (row.key.empty () || row.value.empty ()) {
+            if (row.key.empty () || (row.value.empty () && !row.withheld)) {
                 continue;
             }
             const std::string name = vayu::utils::ascii_lower (row.key);
@@ -1820,6 +1835,141 @@ bool says_something (const nlohmann::json& value) {
     return (value.is_object () || value.is_array ()) && !value.empty ();
 }
 
+// --- Credentials outside an auth block (#1804) ------------------------------
+//
+// A header row, a Params row, a URL and a saved response's headers carry what
+// the user typed or a server sent, and a name says whether it is a credential
+// (`Authorization`, `api_key`, `Set-Cookie`). Each is written twice over: as the
+// standard member another tool reads (a parameter's `example`, a `servers`
+// entry) and verbatim in `x-vayu-request`. `export_openapi` blanks the copy
+// every standard writer reads once, up front, so a writer added later cannot
+// forget to; `vayu_request_object` blanks what it writes, and is where a
+// credential is counted, so the two copies of one value count once.
+
+/// The header and query-parameter names the API-key auth in force claims
+/// (`ext::apikey_*_names`): a row typed under that name is the credential too.
+struct ApiKeyNames {
+    std::vector<std::string> headers;
+    std::vector<std::string> params;
+};
+
+ApiKeyNames apikey_names_of (const ExportAuth& auth) {
+    if (auth.mode != "apikey") {
+        return {};
+    }
+    const Json claimed{ { "mode", "apikey" }, { "key", auth.api_key_name },
+        { "in", auth.api_key_in } };
+    return { ext::apikey_header_names (claimed), ext::apikey_param_names (claimed) };
+}
+
+/// `ext::blank_credential_rows` or `ext::blank_credential_param_rows`.
+using BlankRows = void (*) (Json&, const std::vector<std::string>&, int&);
+
+/// @p rows with each credential's value emptied and the row marked `withheld`:
+/// the key stays, so the parameter is still declared.
+void withhold_row_values (std::vector<ExportKeyValue>& rows,
+BlankRows blank,
+const std::vector<std::string>& names) {
+    Json table = Json::array ();
+    for (const ExportKeyValue& row : rows) {
+        table.push_back (Json{ { "key", row.key }, { "value", row.value } });
+    }
+    int blanked = 0;
+    blank (table, names, blanked);
+    for (std::size_t at = 0; blanked > 0 && at < rows.size (); ++at) {
+        if (table[at].at ("value").get_ref<const std::string&> () != rows[at].value) {
+            rows[at].value.clear ();
+            rows[at].withheld = true;
+        }
+    }
+}
+
+/// @p entry with the values of its credential rows withheld, which is what
+/// every standard member (`parameter_object`, `patch_parameters`) reads.
+ExportRequest withhold_credentials (const ExportRequest& entry) {
+    ExportRequest safe        = entry;
+    const ApiKeyNames claimed = apikey_names_of (entry.auth);
+    withhold_row_values (safe.headers, ext::blank_credential_rows, claimed.headers);
+    withhold_row_values (safe.params, ext::blank_credential_param_rows, claimed.params);
+    withhold_row_values (
+    safe.path_params, ext::blank_credential_param_rows, claimed.params);
+    return safe;
+}
+
+/// @p collection with a `baseUrl` that carries credentials blanked (`servers`
+/// reads it). Counted with the `baseUrl` variable that holds the same URL.
+ExportCollection withhold_credentials (const ExportCollection& collection) {
+    ExportCollection safe         = collection;
+    int counted_with_the_variable = 0;
+    safe.base_url_value           = ext::redact_url_credentials (
+    collection.base_url_value, {}, counted_with_the_variable);
+    return safe;
+}
+
+/// A server origin read off a request URL, its userinfo password dropped.
+/// Counted with the URL it came from, which `x-vayu-request` carries.
+std::string server_origin_of (const std::string& origin) {
+    int counted_with_the_url = 0;
+    return ext::redact_url_credentials (origin, {}, counted_with_the_url);
+}
+
+/// How many of @p rows `withhold_credentials` emptied.
+int withheld_in (const std::vector<ExportKeyValue>& rows) {
+    return static_cast<int> (std::count_if (rows.begin (), rows.end (),
+    [] (const ExportKeyValue& row) { return row.withheld; }));
+}
+
+/// @p table (a stored Params or Headers column) blanked in place, and how many
+/// credentials the request holds in it. The stored table and the parsed rows
+/// (@p parsed_withheld of them withheld) are one table read twice, so the
+/// larger count stands: equal for a route-built request, and right for one
+/// built with only one of the two.
+int blank_stored_table (Json& table,
+BlankRows blank,
+const std::vector<std::string>& names,
+int parsed_withheld) {
+    int stored = 0;
+    blank (table, names, stored);
+    return std::max (stored, parsed_withheld);
+}
+
+/// A stored variables object with every secret variable blanked, and a
+/// `baseUrl` (the one variable this export reads as a URL) with its
+/// credentials blanked: `servers` carries the same URL, uncounted.
+Json redacted_variables (const nlohmann::json& stored, ExportNotes& notes) {
+    Json variables = ext::redact_variables (Json (stored), notes.secrets_omitted);
+    const auto base = variables.find ("baseUrl");
+    if (base == variables.end () || !base->is_object ()) {
+        return variables;
+    }
+    if (const auto value = base->find ("value");
+    value != base->end () && value->is_string ()) {
+        *value = ext::redact_url_credentials (
+        value->get_ref<const std::string&> (), {}, notes.secrets_omitted);
+    }
+    return variables;
+}
+
+/// The saved examples as `x-vayu-request.examples` writes them: the response
+/// headers a server sent (`Set-Cookie`, ...) blanked and counted - each
+/// example is its own source - and the body untouched, since a body cannot be
+/// judged.
+Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
+    Json examples = Json::array ();
+    for (const ExportExample& example : entry.examples) {
+        Json headers = Json (example.headers);
+        ext::blank_credential_rows (headers, {}, notes.secrets_omitted);
+        Json row{ { "name", example.name }, { "status", example.status },
+            { "contentType", example.content_type },
+            { "headers", std::move (headers) }, { "body", example.body } };
+        if (example.body_truncated) {
+            row["bodyTruncated"] = true;
+        }
+        examples.push_back (std::move (row));
+    }
+    return examples;
+}
+
 /**
  * `x-vayu-request`: everything about @p entry the operation's standard members
  * cannot state exactly. @p standalone adds what an operation would otherwise
@@ -1827,19 +1977,30 @@ bool says_something (const nlohmann::json& value) {
  * `x-vayu-collection.requests` with no operation of its own.
  */
 Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool standalone) {
+    const ApiKeyNames claimed = apikey_names_of (entry.auth);
+    ext::UrlOmitted in_url;
     Json out{ { "name", entry.name }, { "method", upper (entry.method) },
-        { "url", entry.url }, { "order", entry.order } };
+        { "url", ext::redact_url_credentials (entry.url, claimed.params, in_url) },
+        { "order", entry.order } };
     if (standalone && !entry.description.empty ()) {
         out["description"] = entry.description;
     }
     if (!entry.folder_path.empty ()) {
         out["folder"] = Json (entry.folder_path);
     }
-    if (says_something (entry.stored_params)) {
-        out["params"] = Json (entry.stored_params);
+    // The URL's query and the Params rows are one query written twice.
+    Json params = Json (entry.stored_params);
+    const int in_params = blank_stored_table (params, ext::blank_credential_param_rows,
+    claimed.params, withheld_in (entry.params) + withheld_in (entry.path_params));
+    notes.secrets_omitted += in_url.distinct_with (in_params);
+    if (says_something (params)) {
+        out["params"] = std::move (params);
     }
-    if (says_something (entry.stored_headers)) {
-        out["headers"] = Json (entry.stored_headers);
+    Json headers = Json (entry.stored_headers);
+    notes.secrets_omitted += blank_stored_table (headers,
+    ext::blank_credential_rows, claimed.headers, withheld_in (entry.headers));
+    if (says_something (headers)) {
+        out["headers"] = std::move (headers);
     }
     if (entry.stored_body.is_object () && entry.stored_body.value ("mode", "none") != "none") {
         out["body"] = ext::portable_body (Json (entry.stored_body));
@@ -1851,17 +2012,7 @@ Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool s
         out["settings"] = std::move (settings);
     }
     if (!entry.examples.empty ()) {
-        Json examples = Json::array ();
-        for (const ExportExample& example : entry.examples) {
-            Json row{ { "name", example.name }, { "status", example.status },
-                { "contentType", example.content_type },
-                { "headers", Json (example.headers) }, { "body", example.body } };
-            if (example.body_truncated) {
-                row["bodyTruncated"] = true;
-            }
-            examples.push_back (std::move (row));
-        }
-        out["examples"] = std::move (examples);
+        out["examples"] = examples_object_of (entry, notes);
     }
     if (entry.mock_response_mode != "first") {
         out["mockResponseMode"] = entry.mock_response_mode;
@@ -1887,8 +2038,7 @@ Json extra_requests,
 ExportNotes& notes) {
     Json out = Json::object ();
     if (says_something (collection.stored_variables)) {
-        out["variables"] = ext::redact_variables (
-        Json (collection.stored_variables), notes.secrets_omitted);
+        out["variables"] = redacted_variables (collection.stored_variables, notes);
     }
     if (says_something (collection.stored_auth)) {
         out["auth"] =
@@ -1904,8 +2054,7 @@ ExportNotes& notes) {
             entry["description"] = folder.description;
         }
         if (says_something (folder.variables)) {
-            entry["variables"] =
-            ext::redact_variables (Json (folder.variables), notes.secrets_omitted);
+            entry["variables"] = redacted_variables (folder.variables, notes);
         }
         if (says_something (folder.auth)) {
             entry["auth"] = ext::redact_auth (Json (folder.auth), notes.secrets_omitted);
@@ -2159,9 +2308,11 @@ const std::vector<ExportRequest>& requests) {
             carry_in_extension (entry, extra_requests, assembly.notes);
             continue;
         }
-        if (parts.origin &&
-        std::find (servers.begin (), servers.end (), *parts.origin) == servers.end ()) {
-            servers.push_back (*parts.origin);
+        if (parts.origin) {
+            const std::string origin = server_origin_of (*parts.origin);
+            if (std::find (servers.begin (), servers.end (), origin) == servers.end ()) {
+                servers.push_back (origin);
+            }
         }
 
         Json& item = child_record (paths, templated);
@@ -2431,10 +2582,11 @@ const ExportRequest& entry,
 DeclaredParameters inherited,
 ExportNotes& notes,
 const BoundWrite& write) {
-    const bool full             = write.mode == BoundMode::Full;
-    const Vocabulary vocabulary = write.context.vocabulary;
-    const DeclaredParameters declared = patch_parameters (operation, document, entry,
-    std::move (inherited), notes, vocabulary == Vocabulary::V3 ? "example" : "x-example");
+    const bool full                   = write.mode == BoundMode::Full;
+    const Vocabulary vocabulary       = write.context.vocabulary;
+    const DeclaredParameters declared = patch_parameters (operation, document,
+    entry, std::move (inherited), notes, /*counts_withheld=*/!full,
+    vocabulary == Vocabulary::V3 ? "example" : "x-example");
     count_edited_identity (entry, notes);
     if (full) {
         write_everything (operation, entry, declared, notes, write);
@@ -2883,9 +3035,17 @@ const std::vector<ExportRequest>& requests,
 const std::optional<std::string>& spec_content,
 ExportFormat format,
 BoundMode bound_mode) {
+    // Every writer below reads these copies, so none can write a credential
+    // row's value (see "Credentials outside an auth block").
+    const ExportCollection safe_collection = withhold_credentials (collection);
+    std::vector<ExportRequest> safe_requests;
+    safe_requests.reserve (requests.size ());
+    for (const ExportRequest& entry : requests) {
+        safe_requests.push_back (withhold_credentials (entry));
+    }
     Assembly assembly = spec_content ?
-    patch_bound_document (*spec_content, collection, requests, bound_mode) :
-    skeleton_document (collection, requests);
+    patch_bound_document (*spec_content, safe_collection, safe_requests, bound_mode) :
+    skeleton_document (safe_collection, safe_requests);
 
     ExportOutcome outcome;
     if (!assembly.error.empty ()) {

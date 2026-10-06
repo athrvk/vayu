@@ -644,6 +644,15 @@ logged as a warning: it means a client skipped composition.
     for both directions, which blanks every secret on the way out (counted as
     `secretsOmitted`; a pure `{{var}}` reference is kept) and checks every
     piece on the way in (`vayu_extension_invalid`, never a refused import).
+    Secrets are blanked outside auth blocks too (#1804, no `includeSecrets`
+    here): `export_openapi` first copies each request with its credential header
+    and Params rows emptied and flagged `withheld` (`withhold_credentials`, so
+    every standard member reads safe rows and a new writer cannot forget),
+    `x-vayu-request` blanks and counts its stored rows, URL and saved-response
+    headers, a server origin and a `baseUrl` variable lose a URL password, and a
+    credential written as both an `x-vayu-request` value and a parameter
+    `example` counts once (a `contract` export, with no `x-vayu-request`, counts
+    it at the declared parameter it declined to fill). Bodies are never judged.
     An `inherit` request's `security` is resolved through its folders by
     `resolve_inherited_auth`, the rule `POST /compose` uses. A bound export's
     `mode` is the user's choice: `contract` (default) patches as above,

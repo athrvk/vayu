@@ -490,7 +490,7 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
         "params":[{"key":"expand","value":"all","enabled":true,"description":"What"},
                   {"key":"Expand","value":"none","enabled":false}],
         "headers":[{"key":"Accept","value":"application/json","enabled":true},
-                   {"key":"Authorization","value":"Token {{t}}","enabled":false}],
+                   {"key":"Authorization","value":"{{t}}","enabled":false}],
         "auth":{"mode":"inherit"},
         "elements":[{"id":"el_3","kind":"assert.status","enabled":true,"config":{"in":[200]}}],
         "followRedirects":false,"maxRedirects":3,"httpVersion":"http2","verifySSL":false,"stream":true})json"));
@@ -558,6 +558,81 @@ TEST_F (SpecExportRouteTest, LeavesOutEverySecretAndCountsIt) {
     // A value that is one `{{variable}}` names a secret without being one.
     EXPECT_NE (text.find ("{{vault}}"), std::string::npos);
     EXPECT_EQ (exported["notes"]["secretsOmitted"], 3);
+}
+
+TEST_F (SpecExportRouteTest, LeavesOutACredentialOutsideAnAuthBlockToo) {
+    // What a dialog saying "credentials blanked" has to be true of: a typed
+    // `Authorization` row, a secret in the query, a URL's password, an
+    // Insomnia IAM key pair and a saved response's cookie, none of which sits
+    // in an auth block the old denylist read.
+    ASSERT_EQ (routes::update_collection_response (*db_, root_, json::parse (R"json({"variables":{"baseUrl":
+                   {"value":"https://root:rootpw@api.example.com","enabled":true}}})json"))
+               .first,
+    200);
+    const std::string id = create_request (
+    root_, "GET", "https://svc:pw9@api.example.com/x?api_key=KEY1&page=2");
+    ASSERT_EQ (routes::update_request_response (*db_, id, json::parse (R"json({"name":"Fetch",
+        "params":[{"key":"api_key","value":"KEY1","enabled":true},
+                  {"key":"page","value":"2","enabled":true}],
+        "headers":[{"key":"Authorization","value":"Bearer TOK1","enabled":true},
+                   {"key":"Cookie","value":"sid=SESS1","enabled":true},
+                   {"key":"X-Api-Key","value":"{{apiKey}}","enabled":true},
+                   {"key":"Accept","value":"application/json","enabled":true}],
+        "auth":{"mode":"aws","config":{"accessKeyId":"AKIA1","secretAccessKey":"SAK1",
+                                        "region":"us-east-1","service":"s3"}}})json"))
+               .first,
+    200);
+    add_example (id, json::parse (R"json({"name":"ok","status":200,"origin":"user",
+        "body":"{}","contentType":"application/json",
+        "headers":[{"key":"Content-Type","value":"application/json","enabled":true},
+                   {"key":"Set-Cookie","value":"sid=SETC1","enabled":true}]})json"));
+    create_request (root_, "GET", "{{baseUrl}}/y");
+
+    const json exported    = export_collection ();
+    const std::string text = exported["text"].get<std::string> ();
+    for (const char* secret :
+    { "KEY1", "pw9", "TOK1", "SESS1", "AKIA1", "SAK1", "SETC1", "rootpw" }) {
+        EXPECT_EQ (text.find (secret), std::string::npos) << secret << "\n"
+                                                          << text;
+    }
+    // What is not a credential, and a reference to one, stays.
+    for (const char* kept : { "{{apiKey}}", "us-east-1", "page=2",
+         "svc@api.example.com", "application/json" }) {
+        EXPECT_NE (text.find (kept), std::string::npos) << kept;
+    }
+    // URL password and query key (the Params row is the same query), the
+    // Authorization and Cookie rows, the two AWS keys, the Set-Cookie value
+    // and the base URL's password.
+    EXPECT_EQ (exported["notes"]["secretsOmitted"], 2 + 2 + 2 + 1 + 1);
+}
+
+TEST_F (SpecExportRouteTest, WritesNoCredentialRowIntoABoundDocumentInEitherMode) {
+    const std::string spec = store_spec (
+    R"({"openapi":"3.0.3","info":{"title":"Pets","version":"1.0.0"},"paths":{"/pets":{"get":{)"
+    R"("operationId":"listPets","parameters":[)"
+    R"({"name":"X-Api-Key","in":"header","schema":{"type":"string"},"example":"documented"}],)"
+    R"("responses":{"200":{"description":"ok"}}}}}})");
+    bind (root_, spec);
+    const std::string id = create_request (root_, "GET", "{{baseUrl}}/pets",
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } });
+    ASSERT_EQ (routes::update_request_response (*db_, id, json::parse (R"json({"headers":[
+                   {"key":"X-Api-Key","value":"KEY1","enabled":true},
+                   {"key":"Cookie","value":"sid=SESS1","enabled":true}]})json"))
+               .first,
+    200);
+
+    const json contract = export_ok (json{ { "collectionId", root_ } });
+    const json full = export_ok (json{ { "collectionId", root_ }, { "mode", "full" } });
+    for (const json& exported : { contract, full }) {
+        const std::string text = exported["text"].get<std::string> ();
+        EXPECT_EQ (text.find ("KEY1"), std::string::npos) << text;
+        EXPECT_EQ (text.find ("SESS1"), std::string::npos) << text;
+        EXPECT_NE (text.find ("documented"), std::string::npos) << text;
+    }
+    // The contract mode writes into the one declared parameter and nothing
+    // else; the full mode adds the extension, where both rows are counted.
+    EXPECT_EQ (contract["notes"]["secretsOmitted"], 1);
+    EXPECT_EQ (full["notes"]["secretsOmitted"], 2);
 }
 
 TEST_F (SpecExportRouteTest, KeepsTheContractByDefaultAndWritesEverythingWhenAsked) {

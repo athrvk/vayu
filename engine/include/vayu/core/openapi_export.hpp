@@ -78,6 +78,15 @@ struct ExportKeyValue {
     /// disabled row with a value reads as enabled on the way back in and an
     /// enabled row with none reads as disabled (issue #1441).
     bool enabled = true;
+    /**
+     * The exporter emptied `value` because the row names a credential
+     * (`Cookie`, an `api_key` parameter, the header an API-key auth claims).
+     * Set by `export_openapi` on its own copy, never by a caller: it is how a
+     * contract export, which writes no `x-vayu-request`, still counts a value
+     * it declined to write into a declared parameter, and how a row that now
+     * reads empty is still known to have held something.
+     */
+    bool withheld = false;
 };
 
 /**
@@ -405,11 +414,21 @@ struct ExportNotes {
     // --- What only the `x-vayu-*` extensions carry (vayu_extensions.hpp) ---
 
     /**
-     * Secret values written as `""`: tokens, passwords, API-key values, client
-     * secrets and variables marked secret, at every level the export writes.
-     * A value that is one `{{variable}}` reference is not a secret and is kept.
-     * This is the one thing an export of a collection deliberately leaves
-     * behind - a document is a file that gets shared.
+     * Secret values written as `""` or left unwritten: tokens, passwords,
+     * API-key values, client secrets, variables marked secret and every
+     * credential an auth `config` bag holds, at every level the export writes;
+     * and, outside an auth block, a header row naming a credential
+     * (`Authorization`, `Cookie`, `X-Api-Key`, the header an API-key auth names),
+     * a credential-named query parameter, the password of a URL's `user:pass@`
+     * and a saved example's `Set-Cookie`-like response headers. A value that is
+     * one `{{variable}}` reference is not a secret and is kept; a body is never
+     * judged. A credential the document would write twice from one source -
+     * a row in `x-vayu-request.headers` and the parameter that mirrors it, a
+     * URL's query and its Params rows, `servers` and the URL they came from -
+     * counts once, where `x-vayu-request` carries it, or where the declared
+     * parameter's example would have gone in a contract export, which writes
+     * no `x-vayu-request`. This is the one thing an export of a collection
+     * deliberately leaves behind - a document is a file that gets shared.
      */
     int secrets_omitted = 0;
     /**

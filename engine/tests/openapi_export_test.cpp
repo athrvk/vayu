@@ -1119,6 +1119,252 @@ TEST (SkeletonExport, NamesTheCollectionAndNeverInventsAVersionItWasTold) {
 }
 
 // ============================================================================
+// Credentials outside an auth block (#1804)
+// ============================================================================
+
+namespace {
+
+/// A document whose operation already documents the three parameters the
+/// credential cases write a row's value into.
+constexpr const char* DECLARES_CREDENTIAL_PARAMETERS =
+R"({"openapi":"3.0.3","info":{"title":"T","version":"1"},"paths":{"/pets":{"get":{)"
+R"("operationId":"listPets","parameters":[)"
+R"({"name":"X-Api-Key","in":"header","schema":{"type":"string"},"example":"documented"},)"
+R"({"name":"api_key","in":"query","schema":{"type":"string"},"example":"documented"},)"
+R"({"name":"limit","in":"query","schema":{"type":"integer"}}],)"
+R"("responses":{"200":{"description":"ok"}}}}}})";
+
+/// A request holding a credential header, a credential query parameter and a
+/// plain one, each as the route hands it over: parsed rows and the stored
+/// columns they were parsed from.
+ExportRequest credential_request () {
+    ExportRequest entry = bound_request (
+    "GET", "{{baseUrl}}/pets?api_key=KEY1&limit=5", "listPets", "/pets");
+    entry.headers = { row ("X-Api-Key", "KEY1"), row ("Cookie", "sid=SESS1") };
+    entry.params  = { row ("api_key", "KEY1"), row ("limit", "5") };
+    entry.stored_headers = nlohmann::json::parse (R"([
+        {"key":"X-Api-Key","value":"KEY1","enabled":true},
+        {"key":"Cookie","value":"sid=SESS1","enabled":true}])");
+    entry.stored_params  = nlohmann::json::parse (R"([
+        {"key":"api_key","value":"KEY1","enabled":true},
+        {"key":"limit","value":"5","enabled":true}])");
+    return entry;
+}
+
+const json& parameter_named (const json& operation, const std::string& name) {
+    static const json missing;
+    for (const json& parameter : operation.at ("parameters")) {
+        if (parameter.at ("name") == name) {
+            return parameter;
+        }
+    }
+    ADD_FAILURE () << "no parameter " << name;
+    return missing;
+}
+
+} // namespace
+
+TEST (SecretsExport, BlanksACredentialHeaderRowAndKeepsTheRowAndAReference) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.headers = { row ("Cookie", "sid=SESS1"), row ("Authorization", "Bearer TOK1"),
+        row ("X-Api-Key", "{{apiKey}}"), row ("X-Tenant", "acme") };
+    entry.stored_headers = nlohmann::json::parse (R"([
+        {"key":"Cookie","value":"sid=SESS1","enabled":true},
+        {"key":"Authorization","value":"Bearer TOK1","enabled":false},
+        {"key":"X-Api-Key","value":"{{apiKey}}","enabled":true},
+        {"key":"X-Tenant","value":"acme","enabled":true}])");
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.text.find ("SESS1"), std::string::npos) << exported.text;
+    EXPECT_EQ (exported.text.find ("TOK1"), std::string::npos) << exported.text;
+    const json& operation = operation_of (exported.document, "/pets", "get");
+    // The row stays - the parameter is still declared, still toggled - with no
+    // example; a reference and a plain header are written as they were.
+    EXPECT_FALSE (parameter_named (operation, "Cookie").contains ("example"));
+    EXPECT_TRUE (parameter_named (operation, "Cookie")["x-vayu-enabled"]);
+    EXPECT_EQ (parameter_named (operation, "X-Api-Key")["example"], "{{apiKey}}");
+    EXPECT_EQ (parameter_named (operation, "X-Tenant")["example"], "acme");
+    EXPECT_EQ (operation["x-vayu-request"]["headers"], json::parse (R"([
+        {"enabled":true,"key":"Cookie","value":""},
+        {"enabled":false,"key":"Authorization","value":""},
+        {"enabled":true,"key":"X-Api-Key","value":"{{apiKey}}"},
+        {"enabled":true,"key":"X-Tenant","value":"acme"}])"));
+    // Each row is written twice (parameter and extension) and counted once;
+    // `Authorization` has no parameter, only the extension.
+    EXPECT_EQ (exported.notes.secrets_omitted, 2);
+}
+
+TEST (SecretsExport, BlanksACredentialQueryParameterInTheRowsAndTheUrlAndCountsItOnce) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets?api_key=KEY1&code=US");
+    entry.params        = { row ("api_key", "KEY1"), row ("code", "US") };
+    entry.stored_params = nlohmann::json::parse (R"([
+        {"key":"api_key","value":"KEY1","enabled":true},
+        {"key":"code","value":"US","enabled":true}])");
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.text.find ("KEY1"), std::string::npos) << exported.text;
+    const json& operation = operation_of (exported.document, "/pets", "get");
+    EXPECT_FALSE (parameter_named (operation, "api_key").contains ("example"));
+    // `?code=` is as often a country as a credential, so it is data here.
+    EXPECT_EQ (parameter_named (operation, "code")["example"], "US");
+    EXPECT_EQ (operation["x-vayu-request"]["url"], "{{baseUrl}}/pets?api_key=&code=US");
+    EXPECT_EQ (operation["x-vayu-request"]["params"][0]["value"], "");
+    // One query written as a URL and as a table is one credential.
+    EXPECT_EQ (exported.notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, CountsAParsedRowTheStoredColumnDoesNotHoldOnce) {
+    // A request built with only the parsed rows still reports what it withheld,
+    // and a request built with both reports it once.
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.headers       = { row ("Cookie", "sid=SESS1") };
+
+    EXPECT_EQ (export_json ({ entry }).notes.secrets_omitted, 1);
+    entry.stored_headers =
+    nlohmann::json::parse (R"([{"key":"Cookie","value":"sid=SESS1","enabled":true}])");
+    EXPECT_EQ (export_json ({ entry }).notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, BlanksAPathRowTheNameOfWhichIsACredential) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/files/:token");
+    entry.path_params   = { row ("token", "PV1") };
+    entry.stored_params = nlohmann::json::parse (
+    R"([{"key":"token","value":"PV1","enabled":true,"in":"path"}])");
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.text.find ("PV1"), std::string::npos) << exported.text;
+    const json& operation = operation_of (exported.document, "/files/{token}", "get");
+    EXPECT_EQ (operation["parameters"][0]["name"], "token");
+    EXPECT_FALSE (operation["parameters"][0].contains ("example"));
+    EXPECT_EQ (exported.notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, BlanksTheNameAnApiKeyAuthClaimsOnlyForTheRequestItAuthenticates) {
+    const auto exported_with = [] (vayu::core::ExportAuth in_force) {
+        ExportRequest entry  = request ("GET", "{{baseUrl}}/pets?sess=SV1");
+        entry.auth           = std::move (in_force);
+        entry.headers        = { row ("X-Tenant-Token", "TT1") };
+        entry.params         = { row ("sess", "SV1") };
+        entry.stored_headers = nlohmann::json::parse (
+        R"([{"key":"X-Tenant-Token","value":"TT1","enabled":true}])");
+        entry.stored_params =
+        nlohmann::json::parse (R"([{"key":"sess","value":"SV1","enabled":true}])");
+        return export_json ({ entry });
+    };
+
+    // Neither name is on any list: only the auth in force says they are keys.
+    const Exported plain = exported_with (auth ("none"));
+    EXPECT_NE (plain.text.find ("TT1"), std::string::npos);
+    EXPECT_NE (plain.text.find ("SV1"), std::string::npos);
+    EXPECT_EQ (plain.notes.secrets_omitted, 0);
+
+    const Exported in_header =
+    exported_with (auth ("apikey", "X-Tenant-Token", "header"));
+    EXPECT_EQ (in_header.text.find ("TT1"), std::string::npos) << in_header.text;
+    EXPECT_NE (in_header.text.find ("SV1"), std::string::npos);
+    EXPECT_EQ (in_header.notes.secrets_omitted, 1);
+
+    const Exported in_query = exported_with (auth ("apikey", "sess", "query"));
+    EXPECT_NE (in_query.text.find ("TT1"), std::string::npos);
+    EXPECT_EQ (in_query.text.find ("SV1"), std::string::npos) << in_query.text;
+    EXPECT_EQ (in_query.notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, DropsAUrlPasswordFromTheServerAndTheExtensionAndKeepsTheUser) {
+    ExportRequest entry = request ("GET", "https://svc:hunter2@api.example.com/pets");
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.text.find ("hunter2"), std::string::npos) << exported.text;
+    EXPECT_EQ (exported.document["servers"],
+    json::parse (R"([{"url":"https://svc@api.example.com"}])"));
+    EXPECT_EQ (
+    operation_of (exported.document, "/pets", "get")["x-vayu-request"]["url"],
+    "https://svc@api.example.com/pets");
+    // The server is the URL's origin: one password, counted once.
+    EXPECT_EQ (exported.notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, BlanksACredentialInTheBaseUrlTheServerDefaultsToAndKeepsAReference) {
+    const auto exported_with = [] (const std::string& base) {
+        ExportCollection collection = named_collection ("Petstore");
+        collection.base_url_value   = base;
+        collection.stored_variables =
+        nlohmann::json{ { "baseUrl", { { "value", base }, { "enabled", true } } } };
+        return export_json ({ request ("GET", "{{baseUrl}}/pets") }, std::nullopt, collection);
+    };
+
+    const Exported literal =
+    exported_with ("https://svc:hunter2@api.example.com");
+    EXPECT_EQ (literal.text.find ("hunter2"), std::string::npos) << literal.text;
+    EXPECT_EQ (
+    literal.document["servers"][0]["variables"]["baseUrl"]["default"],
+    "https://svc@api.example.com");
+    EXPECT_EQ (
+    literal.document["x-vayu-collection"]["variables"]["baseUrl"]["value"],
+    "https://svc@api.example.com");
+    EXPECT_EQ (literal.notes.secrets_omitted, 1);
+
+    const Exported reference =
+    exported_with ("https://svc:{{pw}}@api.example.com");
+    EXPECT_EQ (
+    reference.document["servers"][0]["variables"]["baseUrl"]["default"],
+    "https://svc:{{pw}}@api.example.com");
+    EXPECT_EQ (reference.notes.secrets_omitted, 0);
+}
+
+TEST (SecretsExport, BlanksASavedResponsesCookieHeaderAndLeavesItsBodyAlone) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    ExportExample saved = example ("200 - ok", 200, R"({"session":"in-the-body"})");
+    saved.headers  = nlohmann::json::parse (R"([
+        {"key":"Content-Type","value":"application/json","enabled":true},
+        {"key":"Set-Cookie","value":"sid=SC1; Path=/","enabled":true}])");
+    entry.examples = { saved };
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.text.find ("SC1"), std::string::npos) << exported.text;
+    const json& written = operation_of (
+    exported.document, "/pets", "get")["x-vayu-request"]["examples"][0];
+    EXPECT_EQ (written["headers"][0]["value"], "application/json");
+    EXPECT_EQ (written["headers"][1],
+    json::parse (R"({"enabled":true,"key":"Set-Cookie","value":""})"));
+    // A body cannot be judged and is written as stored.
+    EXPECT_EQ (written["body"], R"({"session":"in-the-body"})");
+    EXPECT_EQ (exported.notes.secrets_omitted, 1);
+}
+
+TEST (SecretsExport, WritesNoCredentialIntoAContractExportAndCountsOnlyWhatItDeclined) {
+    const Exported exported = export_json (
+    { credential_request () }, std::string (DECLARES_CREDENTIAL_PARAMETERS));
+    EXPECT_EQ (exported.text.find ("KEY1"), std::string::npos) << exported.text;
+    EXPECT_EQ (exported.text.find ("SESS1"), std::string::npos) << exported.text;
+    const json& operation = operation_of (exported.document, "/pets", "get");
+    // The document's own example is neither replaced by the secret nor erased.
+    EXPECT_EQ (parameter_named (operation, "X-Api-Key")["example"], "documented");
+    EXPECT_EQ (parameter_named (operation, "api_key")["example"], "documented");
+    EXPECT_EQ (parameter_named (operation, "limit")["example"], "5");
+    EXPECT_FALSE (operation.contains ("x-vayu-request"));
+    // Two declared parameters took a value, and a `Cookie` row nobody declared
+    // was never going to be written: it is not a value this export withheld.
+    EXPECT_EQ (exported.notes.secrets_omitted, 2);
+    EXPECT_EQ (exported.notes.rows_not_declared, 1);
+}
+
+TEST (SecretsExport, CountsAFullExportsCredentialOnceWhereverItIsWritten) {
+    const ExportOutcome outcome = export_openapi (petstore (),
+    { credential_request () }, std::string (DECLARES_CREDENTIAL_PARAMETERS),
+    ExportFormat::Json, vayu::core::BoundMode::Full);
+    ASSERT_TRUE (outcome.ok ()) << outcome.error;
+    EXPECT_EQ (outcome.text.find ("KEY1"), std::string::npos) << outcome.text;
+    EXPECT_EQ (outcome.text.find ("SESS1"), std::string::npos) << outcome.text;
+    // X-Api-Key and Cookie headers, plus the one api_key credential that is
+    // both in the URL's query and in the Params table: three, not six.
+    EXPECT_EQ (outcome.notes.secrets_omitted, 3);
+    const json document = json::parse (outcome.text);
+    EXPECT_EQ (parameter_named (operation_of (document, "/pets", "get"), "X-Api-Key")["example"],
+    "documented");
+}
+
+// ============================================================================
 // Serialization
 // ============================================================================
 

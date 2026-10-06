@@ -153,6 +153,28 @@ void blank_cookie_values (Json& cookies, int& omitted);
 const std::vector<std::string>& extra_param_names,
 int& omitted);
 
+/// What blanking one URL withheld, split by whether a Params table repeats
+/// it: the query and fragment are the table's other half, the userinfo
+/// password is only ever in the URL.
+struct UrlOmitted {
+    int password = 0;
+    int query    = 0;
+
+    /// What the URL and the Params rows (blanked separately, @p in_rows of
+    /// them) withheld between them: a credential in both is one value written
+    /// twice, so the larger count stands - exact when the rows mirror the
+    /// query, and a row the URL lacks (a turned-off one) is still counted.
+    [[nodiscard]] int distinct_with (int in_rows) const {
+        return password + (query > in_rows ? query : in_rows);
+    }
+};
+
+/// @ref redact_url_credentials, adding what it withheld to @p omitted split
+/// into the password and the query halves instead of one total.
+[[nodiscard]] std::string redact_url_credentials (std::string_view url,
+const std::vector<std::string>& extra_param_names,
+UrlOmitted& omitted);
+
 /**
  * A stored body as another machine can use it: a file part, or a binary body's
  * `file`, keeps its type, declared file name and content type, never the local
