@@ -16,9 +16,11 @@
  * every opening.
  *
  * **The one choice is whether credentials travel.** A Postman export is
- * usually headed for somebody else, so the default writes auth secrets and
- * secret variables empty and says how many it left out; switching it on
- * writes them as stored, which is what Postman's own export does.
+ * usually headed for somebody else, so the default writes credentials empty
+ * (auth, secret variables, and by name the headers, parameters, URLs and
+ * cookies) and says how many it left out; switching it on writes them as
+ * stored, which is what Postman's own export does. Bodies and scripts are
+ * never judged, and the dialog says so while credentials are off.
  *
  * **Nothing Postman has no place for is dropped silently.** The engine names
  * each kind in `notes.notCarried` with a count and its own sentence, and every
@@ -123,8 +125,8 @@ export default function ExportPostmanDialog({
 							</span>
 							<span className="block text-xs font-normal text-muted-foreground">
 								{includeSecrets
-									? "Auth secrets and secret variables are written as stored, as Postman's own export does. Share the file with care."
-									: "Auth secrets and secret variables are written empty. Turn on to write them as stored."}
+									? "Everything is written as stored, as Postman's own export does. Share the file with care."
+									: "Auth secrets, secret variables, and credentials in headers, parameters, URLs, and cookies are written empty. Turn on to write them as stored."}
 							</span>
 						</Label>
 						<Switch
@@ -211,7 +213,9 @@ function SummarySkeleton() {
  * and everything else only when it is not zero. `secretsOmitted` belongs to the
  * switch rather than to the collection, so it is read against the switch's
  * current position: a previous answer held while credentials are switched on
- * does not go on saying they were left out.
+ * does not go on saying they were left out. The note that bodies and scripts
+ * are not judged follows the same position, and is a paragraph rather than a
+ * list item so it never reads as a count.
  */
 function ExportSummary({
 	notes,
@@ -235,6 +239,9 @@ function ExportSummary({
 					<Line count={notes.secretsOmitted} label="secret" suffix="written empty" />
 				)}
 			</ul>
+			{!includeSecrets && (
+				<p className="text-label text-muted-foreground">{BODIES_NOT_JUDGED}</p>
+			)}
 			{notCarried.length > 0 && (
 				<div className="space-y-1">
 					<p
@@ -259,6 +266,10 @@ function ExportSummary({
 		</div>
 	);
 }
+
+/** What credentials-off does not cover, which the count above cannot say. */
+const BODIES_NOT_JUDGED =
+	"Bodies and scripts are not checked for credentials and are written as they are. Check them before you share the file.";
 
 function Line({
 	count,

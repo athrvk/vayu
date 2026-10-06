@@ -2137,8 +2137,13 @@ export interface ExportNotes {
 	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
 	vocabularyNotWritten: boolean;
 	/**
-	 * Secret values exported as `""` - tokens, passwords, API-key values,
-	 * client secrets, variables marked secret. A pure `{{variable}}` is kept.
+	 * Credential values written as `""` - auth tokens, passwords, API-key and
+	 * client-secret values, variables marked secret, and by name the header,
+	 * query-parameter and URL-password values and a saved example's response
+	 * headers. Each is counted once wherever it is written.
+	 * A pure `{{variable}}` is kept; bodies and scripts are never judged.
+	 * Counted for a `contract` export too, at the parameter a withheld row would
+	 * have filled.
 	 */
 	secretsOmitted: number;
 	/**
@@ -2171,8 +2176,9 @@ export interface SpecExportResponse {
 export interface PostmanExportRequest {
 	collectionId: string;
 	/**
-	 * Write auth secrets and secret variables as stored. Defaults to `false`
-	 * engine-side, where they are written empty and counted in
+	 * Write credentials as stored. Defaults to `false` engine-side, where auth
+	 * secrets, secret variables and the credentials in headers, parameters,
+	 * URLs, saved examples and cookie values are written empty and counted in
 	 * `PostmanExportNotes.secretsOmitted`. `true` is what Postman's own export
 	 * does.
 	 */
@@ -2197,7 +2203,12 @@ export interface PostmanNotCarried {
 export interface PostmanExportNotes {
 	requestsExported: number;
 	foldersExported: number;
-	/** Auth secrets and secret variables written as `""`. Zero when `includeSecrets` was set. */
+	/**
+	 * Credential values written as `""`: auth secrets, secret variables, and by
+	 * name the header, parameter and URL values, a saved example's recorded
+	 * request and response headers, and every cookie value. Zero when
+	 * `includeSecrets` was set. Bodies are never judged.
+	 */
 	secretsOmitted: number;
 	notCarried: PostmanNotCarried[];
 }
