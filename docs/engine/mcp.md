@@ -176,7 +176,7 @@ How the name reaches the tool differs by transport:
   `initialize` with an `Mcp-Session-Id` header and records the handshake's name
   under it; a Streamable HTTP client echoes that id on every later request, and
   the host looks the name up for that request's server (`client-sessions.ts`).
-  The record is bounded: 256 sessions, the least recently used evicted first,
+  The record is bounded: 256 sessions of at most 128 characters of name each, the least recently used evicted first,
   and one idle for 24 hours forgotten. The transport still validates no
   session, so a request with no id, or one the host does not know (a restart of
   the app clears the record), is served as before and starts an unnamed MCP run.

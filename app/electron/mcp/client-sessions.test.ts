@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { CLIENT_SESSION_IDLE_MS, ClientSessions, MAX_CLIENT_SESSIONS } from "./client-sessions.js";
+import {
+	CLIENT_SESSION_IDLE_MS,
+	ClientSessions,
+	MAX_CLIENT_NAME_CHARS,
+	MAX_CLIENT_SESSIONS,
+} from "./client-sessions.js";
 
 /** A session map on a clock the test moves by hand. */
 function sessionsAt(start = 1_000_000, cap?: number, idleMs?: number) {
@@ -22,6 +27,14 @@ describe("ClientSessions", () => {
 		sessions.remember("s2", "cursor");
 		expect(sessions.clientName("s1")).toBe("claude-code");
 		expect(sessions.clientName("s2")).toBe("cursor");
+	});
+
+	test("keeps at most MAX_CLIENT_NAME_CHARS code points of a name", () => {
+		const { sessions } = sessionsAt();
+		sessions.remember("s1", "x".repeat(MAX_CLIENT_NAME_CHARS + 5000));
+		sessions.remember("s2", "😀".repeat(MAX_CLIENT_NAME_CHARS + 1));
+		expect(sessions.clientName("s1")).toBe("x".repeat(MAX_CLIENT_NAME_CHARS));
+		expect(sessions.clientName("s2")).toBe("😀".repeat(MAX_CLIENT_NAME_CHARS));
 	});
 
 	test("answers nothing for a missing or unknown id", () => {

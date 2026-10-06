@@ -24,6 +24,13 @@
  * run.
  */
 
+/**
+ * Longest name kept, in code points; the engine's own cap on `origin.client`.
+ * The handshake's `clientInfo.name` is an unbounded string up to the request
+ * body limit, so without it 256 entries could hold hundreds of megabytes.
+ */
+export const MAX_CLIENT_NAME_CHARS = 128;
+
 /** Most sessions remembered at once; past it the least recently seen goes. */
 export const MAX_CLIENT_SESSIONS = 256;
 
@@ -53,7 +60,10 @@ export class ClientSessions {
 	/** Record the client name a handshake gave under the session id it was issued. */
 	remember(sessionId: string, name: string): void {
 		this.entries.delete(sessionId);
-		this.entries.set(sessionId, { name, seenAt: this.now() });
+		this.entries.set(sessionId, {
+			name: [...name].slice(0, MAX_CLIENT_NAME_CHARS).join(""),
+			seenAt: this.now(),
+		});
 		this.evict();
 	}
 
