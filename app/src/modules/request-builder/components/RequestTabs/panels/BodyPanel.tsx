@@ -290,6 +290,11 @@ export default function BodyPanel() {
 		() => (request.body ? resolveString(request.body) : ""),
 		[request.body, resolveString]
 	);
+	// Masked at render, after the memo: the memo keeps a dynamic variable's value
+	// stable across renders, and `maskSecrets` reads the secrets as of this render
+	// (#1813). Only the preview needs it, so the Source view builds no masker.
+	const shownResolvedBody =
+		showResolved && variables.maskSecrets ? variables.maskSecrets(resolvedBody) : resolvedBody;
 	const isCodeMode =
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||
@@ -390,7 +395,7 @@ export default function BodyPanel() {
 				<div className={EDITOR_BOX}>
 					{showResolved ? (
 						<pre className="h-full overflow-auto whitespace-pre-wrap bg-muted/50 p-3 font-mono text-sm">
-							{resolvedBody || (
+							{shownResolvedBody || (
 								<span className="italic text-muted-foreground">Empty body</span>
 							)}
 						</pre>
