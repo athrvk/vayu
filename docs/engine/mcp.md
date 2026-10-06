@@ -113,7 +113,10 @@ derived from the underlying error reaches the wire - and `-32603`
 ("Internal error") is left to mean a genuine handler failure, including a socket
 error while reading.
 The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
-take effect on the next request with no extra bookkeeping.
+take effect on the next request with no extra bookkeeping. The one thing carried
+from one request to the next is the client's name from its handshake, under an
+`Mcp-Session-Id` the host issues - see
+[How History names the client](#how-history-names-the-client).
 
 ### stdio CLI (Zed / headless / CI)
 
@@ -149,6 +152,35 @@ The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
 holds that record. See [Data files](#data-files).
 
+### How History names the client
+
+Every run an MCP tool starts is sent with
+`origin: {"kind": "mcp", "client": "<name>"}` (#1817; the field is described
+under [`POST /execute`](api-reference.md#post-execute)): `run_request`,
+streaming or not, every request `run_collection_smoke` sends, `run_collection`,
+and both shapes of `start_load_run`. The name is the `clientInfo.name` the
+client gave in its `initialize` handshake, forwarded as given: the engine trims
+it and caps it at 128 characters, and the renderer turns a known identifier into
+a product name through `app/src/lib/mcp-client-names.ts`. When no name is known
+the run carries `{"kind": "mcp"}` alone, and History shows it as an unnamed MCP
+client. The origin is set after every argument has been folded into the
+payload, so no tool argument can claim another one. It is metadata the client
+asserts, not identity.
+
+How the name reaches the tool differs by transport:
+
+- **stdio** - one server serves the whole connection and reads the handshake
+  itself.
+- **Streamable HTTP** - every request gets a fresh server, so the one that read
+  the handshake is gone before the first `tools/call`. The host answers each
+  `initialize` with an `Mcp-Session-Id` header and records the handshake's name
+  under it; a Streamable HTTP client echoes that id on every later request, and
+  the host looks the name up for that request's server (`client-sessions.ts`).
+  The record is bounded: 256 sessions, the least recently used evicted first,
+  and one idle for 24 hours forgotten. The transport still validates no
+  session, so a request with no id, or one the host does not know (a restart of
+  the app clears the record), is served as before and starts an unnamed MCP run.
+
 ## Tools
 
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
@@ -181,9 +213,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
-| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; returns the row shaped as `list_collections` answers it |
@@ -221,7 +253,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1732,6 +1764,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
 | `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
+| `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
 | `cli.ts`           | Standalone stdio server (env-configured).                                   |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
@@ -1920,8 +1953,6 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
 
 ## Deferred
 
-- **MCP-originated run tagging** - tag runs started via MCP so History shows
-  provenance.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command
   ([#693](https://github.com/athrvk/vayu/issues/693)).
 - **Live push over HTTP** - stateful sessions (see Design notes).

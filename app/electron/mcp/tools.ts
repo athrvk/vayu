@@ -240,6 +240,13 @@ export interface ToolContext {
 	 * and so has no record of any path.
 	 */
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
+	/**
+	 * The `clientInfo.name` the connected client gave in its `initialize`
+	 * handshake, stamped on every run this server starts (#1817). A function
+	 * because the stdio host builds its server before the handshake arrives;
+	 * undefined when no handshake is known for this request.
+	 */
+	clientName?: () => string | undefined;
 }
 
 export interface ToolResult {
@@ -1629,6 +1636,21 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
 }
 
 /**
+ * The payload as `POST /execute` / `POST /runs` receives it from this server:
+ * marked as an MCP-started run, naming the handshake's client when one is
+ * known (#1817). Applied at the send, after every argument has been folded in,
+ * so nothing a caller passes can claim another origin. The name goes as the
+ * client sent it; the engine trims and caps it.
+ */
+function withMcpOrigin(
+	payload: Record<string, unknown>,
+	ctx: ToolContext
+): Record<string, unknown> {
+	const client = ctx.clientName?.();
+	return { ...payload, origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client } };
+}
+
+/**
  * Compose a request engine-side and return the execute-ready payload.
  *
  * This is the one place MCP's execute/load tools obtain a resolved request:
@@ -1696,7 +1718,7 @@ async function runStreamingRequest(
 
 	let started: Record<string, unknown>;
 	try {
-		const accepted = await ctx.client.executeRequest(payload, signal);
+		const accepted = await ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal);
 		if (!accepted || typeof accepted !== "object" || Array.isArray(accepted)) {
 			return errorResult("Engine returned an unusable answer for a streaming request.");
 		}
@@ -3388,7 +3410,7 @@ async function startScenarioLoadRun(
 	// path states: the run id in the answer is what the renderer watches (#1419).
 	let started: unknown;
 	try {
-		started = await ctx.client.startRun(payload, signal);
+		started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 	} catch (err) {
 		return engineErrorResult(err);
 	}
@@ -5026,7 +5048,7 @@ export const TOOLS: McpTool[] = [
 			payload.stream = streaming;
 			if (!streaming) {
 				return callEngine(
-					() => ctx.client.executeRequest(payload, signal),
+					() => ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal),
 					boundExecuteResponse
 				);
 			}
@@ -7152,8 +7174,10 @@ export const TOOLS: McpTool[] = [
 					continue;
 				}
 				try {
-					const resp = ((await ctx.client.executeRequest(outgoing, signal)) ??
-						{}) as Record<string, unknown>;
+					const resp = ((await ctx.client.executeRequest(
+						withMcpOrigin(outgoing, ctx),
+						signal
+					)) ?? {}) as Record<string, unknown>;
 					const code =
 						typeof resp.status === "number"
 							? resp.status
@@ -7321,7 +7345,7 @@ export const TOOLS: McpTool[] = [
 
 			let started: unknown;
 			try {
-				started = await ctx.client.startRun(payload, signal);
+				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err);
 			}
@@ -7810,7 +7834,7 @@ export const TOOLS: McpTool[] = [
 			// to (#1419) - a run has no id until this call returns.
 			let started: unknown;
 			try {
-				started = await ctx.client.startRun(payload, signal);
+				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err);
 			}
