@@ -12,6 +12,8 @@
  * {@link buildChangeset} returns and sends what {@link applyRunToRequest}
  * builds, so the rule about what may be written is testable without rendering
  * anything.
+ * {@link createFieldsFromRun} is the same rule for a run with no saved request
+ * (an agent's, issue #1817): one definition of what may be written, two writers.
  *
  * ## What is deliberately not written
  *
@@ -48,6 +50,7 @@
  */
 
 import type {
+	CreateRequestRequest,
 	ElementDef,
 	FormFieldEntry,
 	KeyValueEntry,
@@ -63,6 +66,14 @@ import { isPathRow } from "@/modules/request-builder/utils/path-variables";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { toFileRef } from "@/modules/request-builder/utils/execute-mapping";
 import { withFileTrust } from "@/lib/file-trust";
+import {
+	DEFAULT_DISABLE_COOKIES,
+	DEFAULT_DISABLE_URL_ENCODING,
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
+	DEFAULT_MAX_REDIRECTS,
+	DEFAULT_VERIFY_SSL,
+} from "@/constants/request";
 import type { DesignRunSeed } from "./design-run-seed";
 
 /** How one key/value entry differs between the request and the run. */
@@ -477,32 +488,82 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 }
 
 /**
- * The update payload for the saved request. Note there is no `auth` key at all
- * - not `auth: undefined`, which some callers would still serialise.
+ * What the run's values say for the fields it can write, when the seed has
+ * none of its own: the saved request's current values for an update, the
+ * defaults for a new request.
  */
-export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateRequestRequest {
+type WriteFallback = Pick<
+	Request,
+	| "method"
+	| "followRedirects"
+	| "maxRedirects"
+	| "httpVersion"
+	| "verifySSL"
+	| "disableCookies"
+	| "disabledSystemHeaders"
+	| "disableUrlEncoding"
+> & { url: string };
+
+/** What a request created from a run starts from where the run says nothing. */
+const NEW_REQUEST_FALLBACK: WriteFallback = {
+	method: "GET",
+	url: "",
+	followRedirects: DEFAULT_FOLLOW_REDIRECTS,
+	maxRedirects: DEFAULT_MAX_REDIRECTS,
+	httpVersion: DEFAULT_HTTP_VERSION,
+	verifySSL: DEFAULT_VERIFY_SSL,
+	disableCookies: DEFAULT_DISABLE_COOKIES,
+	disabledSystemHeaders: [],
+	disableUrlEncoding: DEFAULT_DISABLE_URL_ENCODING,
+};
+
+/** The fields a run can write, as both an update and a create state them. */
+type RunWritable = Pick<
+	Partial<CreateRequestRequest>,
+	| "url"
+	| "params"
+	| "headers"
+	| "body"
+	| "bodyType"
+	| "elements"
+	| "followRedirects"
+	| "maxRedirects"
+	| "httpVersion"
+	| "verifySSL"
+	| "disableCookies"
+	| "disabledSystemHeaders"
+	| "disableUrlEncoding"
+> & { method: string };
+
+/**
+ * The fields a run may write, with everything {@link applyRunToRequest}'s rules
+ * leave out already left out - one definition for the update and for a request
+ * created from the run, so the two cannot disagree about what is safe to write.
+ * No `auth` key at all - not `auth: undefined`, which some callers would still
+ * serialise.
+ */
+function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritable {
 	const request = seed.request;
 	const body = bodyFromSeed(request);
 
-	const patch: UpdateRequestRequest = {
-		id: live.id,
-		method: request.method ?? live.method,
+	const patch: RunWritable = {
+		method: request.method ?? fallback.method,
 		// System headers are dropped, not persisted: the builder re-injects them
 		// with current values on load, so writing a run's stale X-Vayu-Version /
 		// X-Request-ID would pin an old version onto the request.
 		headers: userEntries(items(request.headers)),
-		followRedirects: request.followRedirects ?? live.followRedirects,
-		maxRedirects: request.maxRedirects ?? live.maxRedirects,
-		httpVersion: request.httpVersion ?? live.httpVersion,
-		verifySSL: request.verifySSL ?? live.verifySSL,
-		disableCookies: request.disableCookies ?? live.disableCookies,
-		disabledSystemHeaders: request.disabledSystemHeaders ?? live.disabledSystemHeaders,
-		disableUrlEncoding: request.disableUrlEncoding ?? live.disableUrlEncoding,
+		followRedirects: request.followRedirects ?? fallback.followRedirects,
+		maxRedirects: request.maxRedirects ?? fallback.maxRedirects,
+		httpVersion: request.httpVersion ?? fallback.httpVersion,
+		verifySSL: request.verifySSL ?? fallback.verifySSL,
+		disableCookies: request.disableCookies ?? fallback.disableCookies,
+		disabledSystemHeaders: request.disabledSystemHeaders ?? fallback.disabledSystemHeaders,
+		disableUrlEncoding: request.disableUrlEncoding ?? fallback.disableUrlEncoding,
 	};
 
 	// A url or params holding the withheld marker is left off the patch the same
 	// way; params are parsed from the url, so the seed flags them with it.
-	if (!seed.withheld.url) patch.url = request.url ?? live.url;
+	if (!seed.withheld.url) patch.url = request.url ?? fallback.url;
 	if (!seed.withheld.params) patch.params = items(request.params);
 
 	// The body is only written when the run's stored request body was not
@@ -520,4 +581,22 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 	}
 
 	return patch;
+}
+
+/** The update payload for the saved request. */
+export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateRequestRequest {
+	return { id: live.id, ...writableFields(seed, live) };
+}
+
+/**
+ * The fields of a request created from a run that has no saved request: what
+ * {@link applyRunToRequest} would write, minus the destination and the name,
+ * which the caller supplies. A url the engine withheld becomes an empty one -
+ * a new request has no stored value for it to keep.
+ */
+export function createFieldsFromRun(
+	seed: DesignRunSeed
+): Omit<CreateRequestRequest, "collectionId" | "id" | "name"> {
+	const { url, ...fields } = writableFields(seed, NEW_REQUEST_FALLBACK);
+	return { ...fields, url: url ?? NEW_REQUEST_FALLBACK.url };
 }

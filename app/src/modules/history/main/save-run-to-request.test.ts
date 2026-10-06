@@ -27,7 +27,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildChangeset, applyRunToRequest, diffSegments } from "./save-run-to-request";
+import {
+	buildChangeset,
+	applyRunToRequest,
+	createFieldsFromRun,
+	diffSegments,
+} from "./save-run-to-request";
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
 
@@ -773,5 +778,43 @@ describe("applyRunToRequest, binary bodies", () => {
 		const bodyRow = buildChangeset(seed, live).find((item) => item.field === "Body");
 		expect(bodyRow?.state).toBe("kept");
 		expect(bodyRow?.note).toMatch(/did not record which file/);
+	});
+});
+
+describe("createFieldsFromRun", () => {
+	it("writes what the update writes, for a run with no request behind it", () => {
+		const orphan = run({ requestId: null });
+		const seed = seedFromRun(orphan, null);
+		const { id: _id, ...update } = applyRunToRequest(seed, liveRequest());
+
+		expect(createFieldsFromRun(seed)).toEqual(update);
+	});
+
+	it("never writes auth, which the run holds only the mode of", () => {
+		const orphan = run({ requestId: null });
+
+		expect(createFieldsFromRun(seedFromRun(orphan, null))).not.toHaveProperty("auth");
+	});
+
+	it("leaves out what the update leaves out, and gives a withheld url an empty one", () => {
+		const orphan = truncatedRun();
+		const seed = seedFromRun(orphan, null);
+		seed.withheld.url = true;
+		seed.withheld.params = true;
+		const fields = createFieldsFromRun(seed);
+
+		expect(fields).not.toHaveProperty("body");
+		expect(fields).not.toHaveProperty("bodyType");
+		expect(fields).not.toHaveProperty("params");
+		expect(fields.url).toBe("");
+	});
+
+	it("starts a field the run left unset from the new-request default", () => {
+		const seed = seedFromRun(run({ requestId: null }), null);
+		seed.request = { ...seed.request, method: undefined, verifySSL: undefined };
+		const fields = createFieldsFromRun(seed);
+
+		expect(fields.method).toBe("GET");
+		expect(fields.verifySSL).toBe(true);
 	});
 });

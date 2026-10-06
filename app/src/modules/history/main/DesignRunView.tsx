@@ -66,6 +66,8 @@ import { ApiError } from "@/services";
 import { seedFromRun, scriptPartToElement } from "./design-run-seed";
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
+import SaveAgentRunButton from "./SaveAgentRunButton";
+import { isUnsavedAgentRun } from "./save-run-as-request";
 import { WithheldValuesNotice } from "./components/WithheldValuesNotice";
 import type { Run, ScriptPart, ResolvedElement } from "@/types";
 
@@ -425,6 +427,13 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				    sha256 is what says whether it did. */}
 				{seed.requestBodyFile && <SentBodyFileNote file={seed.requestBodyFile} />}
 				<div className="ml-auto flex items-center gap-2">
+					{/*
+					 * An agent's run with no saved request has nothing to write back to,
+					 * so Save here makes the request, and leads the header - the only
+					 * thing this run still needs. A linked run keeps its overwrite
+					 * button below, unpromoted.
+					 */}
+					{isUnsavedAgentRun(run) && <SaveAgentRunButton run={run} seed={seed} />}
 					<Button
 						variant="outline"
 						size="sm"
