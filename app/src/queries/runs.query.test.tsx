@@ -44,6 +44,7 @@ import {
 	RunNotFoundError,
 	isRunNotFound,
 	useBaselineRunQuery,
+	runsListInfiniteOptions,
 } from "./runs";
 import { queryKeys } from "./keys";
 import { ApiError } from "@/services";
@@ -360,6 +361,33 @@ describe("useRunsQuery", () => {
 		renderHook(() => useRunsQuery(undefined, false), { wrapper: wrapper(makeClient()) });
 		await waitFor(() => expect(listRuns).toHaveBeenCalled());
 		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ baseline: undefined }));
+	});
+
+	// The origin kind is asked of the engine (#1817), so an agent's run older
+	// than the loaded pages is reachable; "all" leaves the param unsent.
+	it("passes the origin kind to the engine, and sends none for all", async () => {
+		listRuns.mockResolvedValue(page([]));
+
+		renderHook(() => useRunsQuery(undefined, false, "mcp"), {
+			wrapper: wrapper(makeClient()),
+		});
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ origin: "mcp" }));
+
+		listRuns.mockClear();
+		renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ origin: undefined }));
+	});
+
+	it("keys the origin in only when set, so the unfiltered list keeps its entry", () => {
+		const unfiltered = runsListInfiniteOptions().queryKey;
+		expect(unfiltered).toEqual(queryKeys.runs.list({ q: undefined, baseline: undefined }));
+		expect(Object.keys(unfiltered[2])).not.toContain("origin");
+		expect(runsListInfiniteOptions(undefined, false, "mcp").queryKey).not.toEqual(unfiltered);
+		expect(runsListInfiniteOptions(undefined, false, "mcp").queryKey[2]).toMatchObject({
+			origin: "mcp",
+		});
 	});
 });
 

@@ -9,7 +9,10 @@
 
 #include <httplib.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <expected>
 #include <format>
 #include <functional>
@@ -1068,6 +1071,44 @@ struct StreamFlag {
  * matching the suite's other route-core tests.
  */
 StreamFlag read_stream_flag (const nlohmann::json& json);
+
+/**
+ * Who started a run, as the starting client asserted it (#1817).
+ *
+ * Metadata, not identity: any caller of the API can claim any kind, so nothing
+ * may authorise on it. History reads it to say which runs an agent made.
+ */
+struct RunOrigin {
+    std::string kind = "other";
+    /// The MCP client's `clientInfo.name`; only ever set for kind `mcp`.
+    std::optional<std::string> client;
+};
+
+/// What `origin.kind` may be. `other` is also what a payload that names no
+/// origin, and a run stored before the field existed, reads as.
+inline constexpr std::array<std::string_view, 3> RUN_ORIGIN_KINDS{ "app", "mcp", "other" };
+
+/// The longest `origin.client` kept, in characters (code points, so the cut
+/// never splits a UTF-8 sequence).
+inline constexpr std::size_t MAX_RUN_ORIGIN_CLIENT_CHARS = 128;
+
+[[nodiscard]] inline bool is_run_origin_kind (std::string_view kind) {
+    return std::ranges::find (RUN_ORIGIN_KINDS, kind) != RUN_ORIGIN_KINDS.end ();
+}
+
+/**
+ * Read the optional `origin` object off a `POST /execute` or `POST /runs`
+ * payload, before any run row exists.
+ *
+ * Absent or `null` is `{other, no client}`. A non-object, a `kind` outside
+ * `RUN_ORIGIN_KINDS` (missing included) or a non-string `client` is the 400's
+ * message, naming the field. `client` is kept for `mcp` only, trimmed and cut
+ * to `MAX_RUN_ORIGIN_CLIENT_CHARS`, and an empty one is no client; otherwise it
+ * is stored exactly as sent, because the display name is the renderer's job.
+ *
+ * Non-static so run_origin_test.cpp can drive it directly.
+ */
+std::expected<RunOrigin, std::string> read_run_origin (const nlohmann::json& json);
 
 /**
  * The outcome of reading `POST /execute`'s `data` row (issue #601).

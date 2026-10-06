@@ -171,6 +171,7 @@ export const API_ENDPOINTS = {
 		collectionId?: string;
 		q?: string;
 		baseline?: boolean;
+		origin?: string;
 	}) => {
 		const qs = new URLSearchParams();
 		if (params.limit !== undefined) qs.set("limit", String(params.limit));
@@ -184,6 +185,7 @@ export const API_ENDPOINTS = {
 		// real question ("the runs that are not pinned"), and a falsy check
 		// would drop it and answer with every run instead.
 		if (params.baseline !== undefined) qs.set("baseline", String(params.baseline));
+		if (params.origin) qs.set("origin", params.origin);
 		const s = qs.toString();
 		return s ? `/runs?${s}` : `/runs`;
 	},

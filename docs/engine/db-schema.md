@@ -295,7 +295,7 @@ release that carries a bump says so in its notes.
 | `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
 | `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
 | `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
-| `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read | none: `sync_schema ()` drops the column at the constructor's probe, the migration only stamps |
+| `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read; [`runs.origin` and `runs.origin_client`](#runs) added (#1817) | none: `sync_schema ()` drops the one column at the constructor's probe and adds the defaulted and nullable two, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -305,6 +305,13 @@ stamped `2` still gets the four columns. **Merge gate:** before this merges, run
 `git grep "SCHEMA_VERSION\s*=" $(git describe --tags --abbrev=0)`; if the last
 tag already shows `2` (the `postman_response` change was released on its own),
 the #1765 columns need their own bump to `3` and a row of their own here.
+
+The #1817 `runs` columns joined version `5` the same way: `0.40.0`, the last
+release, stamps `4`, so no released build has stamped `5`. **Merge gate:** the
+same `git grep` against the last tag must still show `4`; if a release shipped
+`5` without these columns, they need their own bump to `6`. The release notes of
+the release that carries version `5` say so under Changed (one-way: every
+earlier engine refuses the workspace), naming both #1781 and #1817.
 
 ---
 
@@ -1084,6 +1091,8 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
 | `baseline`        | INTEGER | `1` when the run is pinned as a baseline. NOT NULL DEFAULT `0`               |
 | `has_warnings`    | INTEGER | `1` when `summary.warnings` is non-empty. NOT NULL DEFAULT `0`               |
+| `origin`          | TEXT    | Who started the run: `"app"` / `"mcp"` / `"other"`. NOT NULL DEFAULT `'other'` |
+| `origin_client`   | TEXT    | The MCP client's name, `mcp` runs only (nullable)                            |
 
 **`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
@@ -1113,6 +1122,21 @@ together and can never disagree. It exists apart from `summary` so
 off the row it already fetched for every page - no extra query, and no risk
 of the compact-summary cache (`RunSummaryCache`, keyed on the immutable
 `config_snapshot`) ever caching a completion-time fact.
+
+**`origin` / `origin_client`** (#1817, schema version 5) record who started
+the run, as the starting client asserted it on `POST /execute` or `POST /runs`
+(`read_run_origin`, `http/routes/execution.cpp`; the rules are in
+[POST /execute](api-reference.md#post-execute)). Client-asserted metadata, not
+identity: any caller can claim any kind and nothing authorises on it.
+`origin_client` is set only for `mcp`, trimmed and capped at 128 characters,
+and stored as the client sent it. The `default_value` on `origin` is what lets
+`sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing table, and it is the
+honest answer for every row stored before: nobody recorded one. No data
+migration. The client's `origin` object is kept out of `config_snapshot`
+(`sanitize_config_snapshot`), so these two columns are its one record.
+[`GET /runs?origin=<kind>`](api-reference.md#get-runs) filters on `origin`
+(`run_filter_where`, `db/db_runs.cpp`) with no index: History's list is already
+bounded by retention and ordered by `idx_runs_start_time`.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,

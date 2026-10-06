@@ -378,7 +378,12 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("baseline", &Run::baseline, default_value (false)),
     // Whether `summary` carries warnings; see Run::has_warnings. Same
     // ADD-COLUMN-onto-an-existing-table shape as `baseline` above.
-    make_column ("has_warnings", &Run::has_warnings, default_value (false))),
+    make_column ("has_warnings", &Run::has_warnings, default_value (false)),
+    // Who started the run (#1817); see Run::origin. The default is what lets
+    // sync_schema ADD COLUMN it onto an existing table, and it is the honest
+    // answer for every row stored before the column: nobody recorded one.
+    make_column ("origin", &Run::origin, default_value ("other")),
+    make_column ("origin_client", &Run::origin_client)),
 
     // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",

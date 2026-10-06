@@ -53,6 +53,11 @@ describe("API_ENDPOINTS canonical routes", () => {
 			"/runs?limit=1&requestId=req_1&baseline=true"
 		);
 		expect(API_ENDPOINTS.RUNS_LIST({ baseline: false })).toBe("/runs?baseline=false");
+		// History's origin filter (#1817); unset leaves the question unasked.
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, origin: "mcp" })).toBe(
+			"/runs?limit=50&origin=mcp"
+		);
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, origin: undefined })).toBe("/runs?limit=50");
 		// No params -> bare /runs, which the engine treats as the legacy array.
 		expect(API_ENDPOINTS.RUNS_LIST({})).toBe("/runs");
 	});

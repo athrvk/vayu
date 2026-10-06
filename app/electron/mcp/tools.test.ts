@@ -2907,9 +2907,10 @@ describe("run_collection_smoke", () => {
 			{ requestId: "r1", environmentId: "env_1" },
 			undefined
 		);
-		// Executed exactly as composed - resolved once, never re-resolved.
+		// Executed exactly as composed - resolved once, never re-resolved - with
+		// only the run's origin added beside it.
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(outgoing).toEqual(composed);
+		expect(outgoing).toEqual({ ...composed, origin: { kind: "mcp" } });
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
 	});
 
@@ -3425,6 +3426,7 @@ describe("run_collection", () => {
 				data: rows,
 			},
 			environmentId: "env_1",
+			origin: { kind: "mcp" },
 		});
 		// The absence of `mode` is what makes this a design-mode run: a mode
 		// beside the block would hand the same plan to the load executor.
@@ -3763,6 +3765,7 @@ describe("start_load_run scenario runs", () => {
 			environmentId: "env_1",
 			concurrency: 5,
 			duration: "30s",
+			origin: { kind: "mcp" },
 		});
 	});
 
@@ -7853,6 +7856,108 @@ describe("webhook inbox tools", () => {
 				TOOLS.map((t) => t.name).filter((n) => /inbox.*live|live.*inbox/.test(n))
 			).toEqual([]);
 			expect(byName().get("get_inbox_captures")?.description).toMatch(/no live stream/i);
+		});
+	});
+});
+
+/**
+ * Every tool that starts a run says the run is an agent's, and which client's
+ * (#1817): History reads `origin` to tell an MCP run from one the user sent.
+ * A tool that forgets the stamp records a run as `other`, which no store-level
+ * test notices, so each run-starting path is driven here by name.
+ */
+describe("every run an MCP tool starts carries an MCP origin", () => {
+	const allow = { allowlist: ["api.example.com"] };
+	const runStarters: Array<{
+		tool: string;
+		args: Record<string, unknown>;
+		sentTo: "executeRequest" | "startRun";
+	}> = [
+		{
+			tool: "run_request",
+			args: { url: "https://api.example.com/x" },
+			sentTo: "executeRequest",
+		},
+		{
+			tool: "run_request",
+			args: { url: "https://api.example.com/x", stream: true },
+			sentTo: "executeRequest",
+		},
+		{ tool: "run_collection_smoke", args: { collectionId: "c1" }, sentTo: "executeRequest" },
+		{ tool: "run_collection", args: { collectionId: "c1" }, sentTo: "startRun" },
+		{
+			tool: "start_load_run",
+			args: { url: "https://api.example.com/x", confirmed: true },
+			sentTo: "startRun",
+		},
+		{
+			tool: "start_load_run",
+			args: {
+				scenario: { collectionId: "c1" },
+				mode: "constant_concurrency",
+				concurrency: 5,
+				duration: "30s",
+				confirmed: true,
+			},
+			sentTo: "startRun",
+		},
+	];
+	const cases = runStarters.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
+
+	/**
+	 * One saved request in `c1`; an inline request composes to itself. `extra`
+	 * rides every composed payload, for a composition that names an origin.
+	 */
+	function runClient(extra: Record<string, unknown> = {}) {
+		return fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+			composeRequest: vi.fn().mockImplementation((body: { request?: object }) =>
+				Promise.resolve({
+					...(body.request ?? { method: "GET", url: "https://api.example.com/r1" }),
+					...extra,
+				})
+			),
+		});
+	}
+
+	async function originSent(
+		{ tool, args, sentTo }: (typeof runStarters)[number],
+		clientName?: () => string | undefined,
+		composedExtra?: Record<string, unknown>
+	): Promise<unknown> {
+		const client = runClient(composedExtra);
+		const res = await dispatchTool(tool, args, {
+			...ctxWith(client, allow),
+			...(clientName ? { clientName } : {}),
+		});
+		expect(res.isError, firstText(res)).toBeFalsy();
+		const send = client[sentTo] as ReturnType<typeof vi.fn>;
+		expect(send).toHaveBeenCalledTimes(1);
+		return (send.mock.calls[0][0] as Record<string, unknown>).origin;
+	}
+
+	test.each(cases)("%s names the handshake's client", async (_, starter) => {
+		expect(await originSent(starter, () => "claude-code")).toStrictEqual({
+			kind: "mcp",
+			client: "claude-code",
+		});
+	});
+
+	test.each(cases)("%s with no known client sends the kind alone", async (_, starter) => {
+		// Strict: a `client: undefined` key would serialize away, but it would
+		// also mean the omission is an accident of JSON rather than the rule.
+		expect(await originSent(starter)).toStrictEqual({ kind: "mcp" });
+		expect(await originSent(starter, () => undefined)).toStrictEqual({ kind: "mcp" });
+	});
+
+	// Both ways in: an argument, and a payload that already carries one by the
+	// time it is sent (composition hands back what it was given).
+	test.each(cases)("%s cannot be given another origin", async (_, starter) => {
+		const app = { kind: "app" };
+		const spoofed = { ...starter, args: { ...starter.args, origin: app } };
+		expect(await originSent(spoofed, () => "cursor", { origin: app })).toStrictEqual({
+			kind: "mcp",
+			client: "cursor",
 		});
 	});
 });

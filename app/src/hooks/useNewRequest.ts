@@ -29,20 +29,20 @@ import { useSessionStore, useTabsStore, useToastStore } from "@/stores";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
-import type { Collection } from "@/types";
+import type { Collection, CreateRequestRequest } from "@/types";
 
 const CREATE_FAILED = "Couldn't create the request. Check that Vayu's engine is running.";
 
 /**
  * A request to create with fields already filled in, rather than the blank
  * `DEFAULT_REQUEST_NAME` / GET / empty-URL shape - the Launcher's demo tile
- * (issue #1694) uses this to hand over a real method and URL.
+ * (issue #1694) hands over a real method and URL, and "Save to request" on an
+ * agent's run (issue #1817) hands over the whole request, description included.
+ * Everything but where it lands, which this flow decides.
  */
-export interface RequestPreset {
+export type RequestPreset = Omit<CreateRequestRequest, "id" | "collectionId" | "name"> & {
 	name?: string;
-	method: string;
-	url: string;
-}
+};
 
 /** Everything `CollectionPicker` needs, so a caller spreads it and nothing else. */
 export interface NewRequestPickerProps {
@@ -83,6 +83,7 @@ export function useNewRequest(): UseNewRequestReturn {
 			const preset = presetRef.current;
 			try {
 				const newRequest = await createRequestMutation.mutateAsync({
+					...preset,
 					collectionId,
 					name: preset?.name ?? DEFAULT_REQUEST_NAME,
 					method: preset?.method ?? "GET",

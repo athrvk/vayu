@@ -25,7 +25,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
-import type { Run, RunListResponse, StartScenarioRunRequest } from "@/types";
+import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
@@ -60,16 +60,25 @@ export function runsPollInterval(loadedPages: number): number | false {
  * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so
  *          a pin older than the loaded pages is reachable. Left unset rather
  *          than passed as `false`, which the engine reads as "only unpinned".
+ * @param origin Server-side as well (`origin=<kind>`): an agent's runs older
+ *          than the loaded pages have to be reachable. Part of the key only
+ *          when set, so the unfiltered list - the key the warm-up writes and
+ *          the other observers read - is the same entry it was before.
  */
-export function runsListInfiniteOptions(q?: string, pinnedOnly = false) {
+export function runsListInfiniteOptions(
+	q?: string,
+	pinnedOnly = false,
+	origin?: RunOrigin["kind"]
+) {
 	const search = q?.trim() || undefined;
 	const baseline = pinnedOnly ? true : undefined;
 	return {
-		queryKey: queryKeys.runs.list({ q: search, baseline }),
+		queryKey: queryKeys.runs.list({ q: search, baseline, ...(origin && { origin }) }),
 		queryFn: ({ pageParam }: { pageParam: number }): Promise<RunListResponse> =>
 			apiService.listRuns({
 				q: search,
 				baseline,
+				origin,
 				limit: RUNS_PAGE_LIMIT,
 				offset: pageParam,
 			}),
@@ -92,9 +101,9 @@ export function runsListInfiniteOptions(q?: string, pinnedOnly = false) {
  * is what an *observer* costs: a surface that renders runs pays it while it is
  * mounted, and nothing pays it while none is (#1150).
  */
-export function useRunsQuery(q?: string, pinnedOnly = false) {
+export function useRunsQuery(q?: string, pinnedOnly = false, origin?: RunOrigin["kind"]) {
 	return useInfiniteQuery({
-		...runsListInfiniteOptions(q, pinnedOnly),
+		...runsListInfiniteOptions(q, pinnedOnly, origin),
 		refetchInterval: (query) => runsPollInterval(query.state.data?.pages.length ?? 0),
 	});
 }

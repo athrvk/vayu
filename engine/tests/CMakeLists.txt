@@ -126,6 +126,7 @@ add_executable(vayu_tests
     auth_refresh_test.cpp
     request_builder_test.cpp
     config_snapshot_test.cpp
+    run_origin_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
@@ -390,6 +391,7 @@ set(vayu_scratch_database_suites
     RequestsRouteTest
     ResourceWriteRouteTest
     ResponseCaptureTest
+    RunOriginRouteTest
     RunRetentionReleaseTest
     RunShutdownTest
     RunStopAccountingTest

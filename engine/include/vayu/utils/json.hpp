@@ -91,6 +91,13 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Run& run);
 
 /**
+ * @brief A run's `origin` as both run shapes emit it (#1817):
+ * `{kind, client}`, `client` null when none was kept. The one copy, so the
+ * `GET /runs` list row and the single-run payload cannot drift.
+ */
+[[nodiscard]] Json serialize_run_origin (const vayu::db::Run& run);
+
+/**
  * @brief Parse a stored variables blob (collections/environments/globals
  * `variables` column) into an in-memory Environment.
  *
@@ -249,8 +256,9 @@ void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
  *   carries, inside `url`, `params`, `headers`, `body.content` and
  *   `body.fields`. A value shorter than four characters is left alone.
  *
- * Everything else is kept. If `body` is not valid JSON it is returned
- * unchanged.
+ * Everything else is kept, except the top-level `origin` (#1817), which the
+ * run row stores in its own columns. If `body` is not valid JSON it is
+ * returned unchanged.
  *
  * `body.content` (the request body being tested, not `body` itself) is capped
  * at `max_body_bytes`, the same limit `cap_trace_bodies` applies to a stored

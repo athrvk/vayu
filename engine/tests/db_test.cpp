@@ -2560,6 +2560,54 @@ TEST_F (DatabaseTest, TheVersionFourMigrationIsIdempotent) {
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
 }
 
+// #1817's `runs.origin` / `origin_client` joined version 5 rather than bumping
+// to 6 (no released build stamped 5), so a database an earlier build of that
+// version stamped without them still gets both, and a run stored before reads
+// as `other` with no client. Mutation check: drop the `default_value` from
+// `origin` in `make_vayu_storage` and the run row does not survive the
+// column's return.
+TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
+    // Recent, so the age-based prune `init ()` runs leaves the row alone.
+    const int64_t recent = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                           .count ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_run_with_children (db, "legacy", recent);
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        for (const char* column : { "origin", "origin_client" }) {
+            const std::string sql =
+            std::string ("ALTER TABLE runs DROP COLUMN ") + column;
+            char* err = nullptr;
+            ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+            << (err != nullptr ? err : "(no message)");
+            sqlite3_free (err);
+        }
+        sqlite3_close (handle);
+    }
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "runs", "origin"))
+    << "test setup did not remove the column";
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "runs", "origin_client"))
+    << "test setup did not remove the column";
+    set_user_version (TEST_DB_PATH, 5);
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 5);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));
+    const auto legacy = db.get_run ("legacy");
+    ASSERT_HAS_VALUE (legacy)
+    << "a run stored before the columns did not survive";
+    EXPECT_EQ (legacy->origin, "other");
+    EXPECT_FALSE (legacy->origin_client.has_value ());
+}
+
 // A database stamped by the next schema is refused before anything writes to
 // it: the file is byte-identical afterwards.
 TEST_F (DatabaseTest, ADatabaseStampedWithTheNextSchemaIsRefusedUntouched) {

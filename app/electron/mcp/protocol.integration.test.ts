@@ -389,6 +389,26 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(res.content[0].text).toMatch(/declined/i);
 		await server.close();
 	});
+
+	/*
+	 * The stdio CLI's shape: one server for the whole connection, built before
+	 * the handshake arrives, so the name is read from the SDK at send time.
+	 */
+	it("stamps a run with the client name its own handshake gave", async () => {
+		const executeRequest = vi.fn().mockResolvedValue({ statusCode: 200 });
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"] },
+			client: fakeClient({ executeRequest }),
+		});
+		await client.callTool({
+			name: "run_request",
+			arguments: { url: "https://api.example.com/x" },
+		});
+		expect(executeRequest.mock.calls[0][0]).toMatchObject({
+			origin: { kind: "mcp", client: "test-client" },
+		});
+		await server.close();
+	});
 });
 
 describe("resources", () => {
@@ -895,9 +915,7 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 		httpServer = null;
 	});
 
-	async function connect(
-		opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}
-	) {
+	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
 		const port = nextPort++;
 		httpServer = new McpHttpServer({
 			host: HOST,
@@ -906,10 +924,30 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 			contextProvider: contextProvider(opts.safety, opts.client),
 		});
 		await httpServer.start();
+		return port;
+	}
+
+	async function connect(
+		opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}
+	) {
+		const port = await host(opts);
 		const c = new Client({ name: "http-e2e", version: "1.0.0" });
 		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
 		client = c;
 		return c;
+	}
+
+	/** One JSON-RPC POST from a client that manages its own headers. */
+	function post(port: number, body: unknown, headers: Record<string, string> = {}) {
+		return fetch(`http://${HOST}:${port}/mcp`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json, text/event-stream",
+				...headers,
+			},
+			body: JSON.stringify(body),
+		});
 	}
 
 	it("initialize + tools/list + tools/call over real HTTP", async () => {
@@ -954,5 +992,66 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 		const c = await connect({ safety: { disabledTools: ["get_engine_health"] } });
 		const { tools } = await c.listTools();
 		expect(tools.map((t) => t.name)).not.toContain("get_engine_health");
+	});
+
+	/*
+	 * Every request reaches a fresh server, so the one that read the handshake
+	 * is gone by the first `tools/call`: the name crosses requests only through
+	 * the session id the host issued and the SDK client echoes (#1817).
+	 */
+	it("stamps runs with the client name from the handshake", async () => {
+		const executeRequest = vi.fn().mockResolvedValue({ statusCode: 200 });
+		const startRun = vi.fn().mockResolvedValue({ runId: "run_1", status: "running" });
+		const c = await connect({
+			safety: { allowlist: ["api.example.com"] },
+			client: fakeClient({ executeRequest, startRun }),
+		});
+		await c.callTool({ name: "run_request", arguments: { url: "https://api.example.com/x" } });
+		await c.callTool({
+			name: "start_load_run",
+			arguments: { url: "https://api.example.com/x", confirmed: true },
+		});
+
+		const named = { kind: "mcp", client: "http-e2e" };
+		expect(executeRequest.mock.calls[0][0]).toMatchObject({ origin: named });
+		expect(startRun.mock.calls[0][0]).toMatchObject({ origin: named });
+	});
+
+	it("a request without the issued session id starts an unnamed MCP run", async () => {
+		const executeRequest = vi.fn().mockResolvedValue({ statusCode: 200 });
+		const port = await host({
+			safety: { allowlist: ["api.example.com"] },
+			client: fakeClient({ executeRequest }),
+		});
+		const init = await post(port, {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "raw-client", version: "1.0.0" },
+			},
+		});
+		const issued = init.headers.get("mcp-session-id");
+		expect(issued).toMatch(/^[0-9a-f-]{36}$/);
+
+		const call = {
+			jsonrpc: "2.0",
+			id: 2,
+			method: "tools/call",
+			params: { name: "run_request", arguments: { url: "https://api.example.com/x" } },
+		};
+		const unnamed: Array<Record<string, string>> = [{}, { "mcp-session-id": "never-issued" }];
+		for (const headers of unnamed) {
+			expect((await post(port, call, headers)).status).toBe(200);
+		}
+		await post(port, call, { "mcp-session-id": issued! });
+
+		expect(executeRequest.mock.calls.map(([payload]) => payload.origin)).toStrictEqual([
+			{ kind: "mcp" },
+			{ kind: "mcp" },
+			{ kind: "mcp", client: "raw-client" },
+		]);
 	});
 });

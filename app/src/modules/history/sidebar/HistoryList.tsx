@@ -12,6 +12,8 @@ import { ApiError } from "@/services";
 import {
 	useHistoryStore,
 	filterRuns,
+	mcpClientNames,
+	type FilterOrigin,
 	type FilterStatus,
 	type FilterType,
 } from "@/modules/history/history-store";
@@ -48,6 +50,13 @@ import type { Run } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
+ * The origin Select carries one value for two store fields: a kind, or one
+ * agent client under it. A client's value is this prefix plus its display name,
+ * which no kind spelling can collide with.
+ */
+const CLIENT_VALUE_PREFIX = "client:";
+
+/**
  * A run that is still executing is stopped by the engine before it is deleted,
  * and the delete is refused with a 409 if the run's worker has not finished
  * writing within the engine's wait - deleting rows out from under a live writer
@@ -79,6 +88,10 @@ export default function HistoryList() {
 	const setFilterStatus = useHistoryStore((s) => s.setFilterStatus);
 	const pinnedOnly = useHistoryStore((s) => s.pinnedOnly);
 	const setPinnedOnly = useHistoryStore((s) => s.setPinnedOnly);
+	const filterOrigin = useHistoryStore((s) => s.filterOrigin);
+	const setFilterOrigin = useHistoryStore((s) => s.setFilterOrigin);
+	const filterClient = useHistoryStore((s) => s.filterClient);
+	const setFilterClient = useHistoryStore((s) => s.setFilterClient);
 	const sortBy = useHistoryStore((s) => s.sortBy);
 	const setSortBy = useHistoryStore((s) => s.setSortBy);
 
@@ -107,7 +120,11 @@ export default function HistoryList() {
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
-	} = useRunsQuery(debouncedSearch, pinnedOnly);
+	} = useRunsQuery(
+		debouncedSearch,
+		pinnedOnly,
+		filterOrigin === "all" ? undefined : filterOrigin
+	);
 	const deleteRunMutation = useDeleteRunMutation();
 	const setBaselineMutation = useSetRunBaselineMutation();
 	const showToast = useToastStore((s) => s.showToast);
@@ -121,7 +138,29 @@ export default function HistoryList() {
 	// current search.
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
-	const runs = filterRuns(allRuns, { filterType, filterStatus, pinnedOnly, sortBy });
+	const runs = filterRuns(allRuns, {
+		filterType,
+		filterStatus,
+		pinnedOnly,
+		filterOrigin,
+		filterClient,
+		sortBy,
+	});
+	// From `allRuns`, not `runs`: see `mcpClientNames`. One agent is not a
+	// choice, so the per-client entries wait for a second.
+	const clientNames = mcpClientNames(allRuns, filterClient);
+	const showClientEntries = clientNames.length > 1 || filterClient !== null;
+	const originValue = filterClient === null ? filterOrigin : CLIENT_VALUE_PREFIX + filterClient;
+	const handleOriginChange = (value: string) => {
+		if (value.startsWith(CLIENT_VALUE_PREFIX)) {
+			// The kind first: changing it drops the client, which is then set.
+			setFilterOrigin("mcp");
+			setFilterClient(value.slice(CLIENT_VALUE_PREFIX.length));
+			return;
+		}
+		setFilterOrigin(value as FilterOrigin);
+	};
+	const originNarrowing = filterOrigin !== "all" || filterClient !== null;
 	// Grouped after sorting/filtering, never before - a group is a label over
 	// whatever order `runs` is already in, not a second decision about it.
 	const runGroups = groupRunsByDay(runs);
@@ -294,6 +333,23 @@ export default function HistoryList() {
 								<SelectItem value="failed">Failed</SelectItem>
 							</SelectContent>
 						</Select>
+
+						<Select value={originValue} onValueChange={handleOriginChange}>
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Origin">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All origins</SelectItem>
+								<SelectItem value="app">App</SelectItem>
+								<SelectItem value="mcp">Agents</SelectItem>
+								{showClientEntries &&
+									clientNames.map((name) => (
+										<SelectItem key={name} value={CLIENT_VALUE_PREFIX + name}>
+											{name}
+										</SelectItem>
+									))}
+							</SelectContent>
+						</Select>
 					</div>
 
 					<div className="flex items-center gap-2 flex-wrap">
@@ -393,7 +449,10 @@ export default function HistoryList() {
 									// Order matters: with a search or a Select
 									// narrowing the list, "pin a run" would be
 									// advice for a state the user is not in.
-									searchQuery || filterType !== "all" || filterStatus !== "all"
+									searchQuery ||
+									filterType !== "all" ||
+									filterStatus !== "all" ||
+									originNarrowing
 										? "Try widening the search or clearing the filters."
 										: pinnedOnly
 											? "Pin a run as its request's baseline to keep it here."
@@ -405,13 +464,16 @@ export default function HistoryList() {
 									// when the list is empty because nothing ran.
 									searchQuery ||
 									filterType !== "all" ||
-									filterStatus !== "all" ? (
+									filterStatus !== "all" ||
+									originNarrowing ? (
 										<Button
 											variant="link"
 											onClick={() => {
 												setSearchQuery("");
 												setFilterType("all");
 												setFilterStatus("all");
+												// Drops the client with it.
+												setFilterOrigin("all");
 											}}
 										>
 											Clear the filters

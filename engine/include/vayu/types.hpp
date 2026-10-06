@@ -1506,6 +1506,14 @@ struct Run {
     // must never learn a completion-time fact, or a row cached while the run
     // was still running would show no warnings forever.
     bool has_warnings = false; // INTEGER NOT NULL DEFAULT 0
+    // Who started the run, as the starting client asserted it (#1817):
+    // `"app"`, `"mcp"` or `"other"`, validated by `read_run_origin` before the
+    // row exists. Metadata, not identity - nothing authorises on it. `"other"`
+    // is also what a row stored before the column reads as.
+    std::string origin = "other"; // TEXT NOT NULL DEFAULT 'other'
+    // The MCP client's `clientInfo.name`, trimmed and capped; kept only when
+    // `origin` is `"mcp"`, so it is null for every other kind.
+    std::optional<std::string> origin_client;
 };
 
 /**

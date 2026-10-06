@@ -116,6 +116,7 @@ auto run_filter_where (const RunFilter& filter) {
     const bool no_q          = !filter.q.has_value () || filter.q->empty ();
     const bool no_collection = !filter.collection_id.has_value ();
     const bool no_baseline   = !filter.baseline.has_value ();
+    const bool no_origin     = !filter.origin.has_value ();
 
     const RunType type_val     = filter.type.value_or (RunType::Design);
     const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
@@ -123,6 +124,7 @@ auto run_filter_where (const RunFilter& filter) {
     const std::string q_pat = "%" + (filter.q ? *filter.q : std::string{}) + "%";
     const std::string collection_val = filter.collection_id.value_or ("");
     const bool baseline_val          = filter.baseline.value_or (false);
+    const std::string origin_val     = filter.origin.value_or ("");
 
     // The snapshot when it is JSON, an empty object when it is not - the guard
     // described above, so json_extract below is always handed valid JSON.
@@ -137,6 +139,7 @@ auto run_filter_where (const RunFilter& filter) {
     (c (&Run::request_id) == req_val || no_req) &&
     (like (&Run::config_snapshot, q_pat) || no_q) &&
     (c (&Run::baseline) == baseline_val || no_baseline) &&
+    (c (&Run::origin) == origin_val || no_origin) &&
     (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val ||
     no_collection));
 }

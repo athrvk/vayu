@@ -125,10 +125,16 @@ function instructionsFor(config: ToolContext["config"]): string {
  * once per built server so the safety config can change at runtime (the HTTP
  * host builds a fresh server per request; the stdio CLI builds one per process).
  * Disabled tools are not registered, so they are absent from `tools/list`.
+ *
+ * `sessionClientName` is the client name an earlier request's handshake
+ * recorded, for a host whose server never sees the handshake itself (the
+ * stateless HTTP host, see `client-sessions.ts`). A server that did see one
+ * reads it from the SDK instead.
  */
 export function createMcpServer(
 	info: McpServerInfo,
-	contextProvider: ToolContextProvider
+	contextProvider: ToolContextProvider,
+	sessionClientName?: string
 ): McpServer {
 	const baseCtx = contextProvider();
 
@@ -158,7 +164,9 @@ export function createMcpServer(
 		return { action: res.action, content: res.content };
 	};
 
-	const ctx: ToolContext = { ...baseCtx, elicit };
+	const clientName = () => mcp.server.getClientVersion()?.name ?? sessionClientName;
+
+	const ctx: ToolContext = { ...baseCtx, elicit, clientName };
 
 	const sdkCallTool = captureCallToolHandler(mcp);
 

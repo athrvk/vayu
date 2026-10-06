@@ -101,3 +101,49 @@ describe("the renderer opts its own executions into pm.sendRequest", () => {
 		});
 	});
 });
+
+/**
+ * Every run the renderer starts says so (issue #1817). An unstamped run reads
+ * as `other` in History, so the four calls are asserted one by one: a fifth
+ * path that forgot the field would look exactly like a script's run.
+ */
+describe("the renderer stamps its own runs as origin app", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		post.mockResolvedValue({ runId: "run_1", eventsUrl: "/runs/run_1/events" } as never);
+	});
+
+	const app = { kind: "app" };
+
+	it("on execute", async () => {
+		await apiService.executeRequest({ method: "GET", url: "https://example.com" });
+		expect(post.mock.calls[0][1]).toMatchObject({ origin: app });
+	});
+
+	it("on a streaming send", async () => {
+		await apiService.executeStreamRequest({ method: "GET", url: "https://example.com" });
+		expect(post.mock.calls[0][1]).toMatchObject({ origin: app });
+	});
+
+	it("on a load run", async () => {
+		await apiService.startLoadTest({ method: "GET", url: "https://example.com" } as never);
+		expect(post.mock.calls[0][1]).toMatchObject({ origin: app });
+	});
+
+	it("on a collection run", async () => {
+		await apiService.startScenarioRun({ scenario: { collectionId: "col_1" } } as never);
+		expect(post.mock.calls[0][1]).toMatchObject({ origin: app });
+	});
+
+	it("over whatever the payload claimed", async () => {
+		// `ComposedRequest` carries an open record, so a spread payload could hold
+		// an `origin` of its own.
+		await apiService.executeRequest({
+			method: "GET",
+			url: "https://example.com",
+			origin: { kind: "mcp", client: "spoof" },
+		});
+		expect(post.mock.calls[0][1]).toMatchObject({ origin: app });
+		expect(post.mock.calls[0][1]).not.toHaveProperty("origin.client");
+	});
+});

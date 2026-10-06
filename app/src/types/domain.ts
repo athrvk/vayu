@@ -1635,6 +1635,21 @@ export interface RunSummary {
 	hasWarnings?: boolean;
 }
 
+/**
+ * Who started a run, as the engine records it (issue #1817): `app` for this
+ * renderer, `mcp` for an agent (with the `clientInfo.name` it sent in its
+ * handshake, as sent), `other` for any other caller of the engine and for every
+ * run recorded before the field existed. Client-asserted metadata, not
+ * identity - the engine takes the caller's word for it.
+ *
+ * `client` is `null` on the wire when there is none; optional here so a
+ * literal in a test or a mapper need not spell it.
+ */
+export interface RunOrigin {
+	kind: "app" | "mcp" | "other";
+	client?: string | null;
+}
+
 export interface Run {
 	id: string;
 	/**
@@ -1678,6 +1693,11 @@ export interface Run {
 	 * absent reads the same as `false` everywhere.
 	 */
 	baseline?: boolean;
+	/**
+	 * Who started the run - see {@link RunOrigin}. Optional because a row from
+	 * an engine older than the field has none; absent reads as `other`.
+	 */
+	origin?: RunOrigin;
 }
 
 /**
@@ -1729,6 +1749,11 @@ export interface RunListParams {
 	 * "either".
 	 */
 	baseline?: boolean;
+	/**
+	 * Only runs started by this kind of caller (`GET /runs?origin=`). Unset
+	 * lists every origin. An engine older than the filter ignores it.
+	 */
+	origin?: RunOrigin["kind"];
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */

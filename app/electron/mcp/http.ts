@@ -9,16 +9,21 @@
  * @file http.ts
  * @brief Hosts the MCP server over Streamable HTTP on loopback. Each POST /mcp
  *        is handled statelessly (fresh Server + transport per request), which
- *        suits a low-traffic local proxy and avoids session bookkeeping. DNS
- *        rebinding protection is enabled so a browser tab cannot reach the
+ *        suits a low-traffic local proxy and keeps the safety config current on
+ *        every call. The one thing carried across requests is the client's
+ *        handshake name, keyed by an `Mcp-Session-Id` (`client-sessions.ts`).
+ *        DNS rebinding protection is enabled so a browser tab cannot reach the
  *        endpoint via a forged Host header (MCP spec requirement).
  */
 
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
 import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
+import { ClientSessions } from "./client-sessions.js";
 
 export interface McpHttpServerOptions {
 	host: string;
@@ -34,6 +39,7 @@ export class McpHttpServer {
 	private server: http.Server | null = null;
 	private readonly opts: McpHttpServerOptions;
 	private readonly allowedHosts: string[];
+	private readonly sessions = new ClientSessions();
 
 	constructor(opts: McpHttpServerOptions) {
 		this.opts = opts;
@@ -115,14 +121,41 @@ export class McpHttpServer {
 			enableDnsRebindingProtection: true,
 			allowedHosts: this.allowedHosts,
 		});
-		const server = createMcpServer(this.opts.info, this.opts.contextProvider);
+		// Set before the transport writes the head, which merges it in; the
+		// stateless transport sends no session id of its own and accepts any
+		// it is sent.
+		const issuedSessionId = isInitialize(body) ? randomUUID() : undefined;
+		if (issuedSessionId) res.setHeader("Mcp-Session-Id", issuedSessionId);
+		const server = createMcpServer(
+			this.opts.info,
+			this.opts.contextProvider,
+			this.sessions.clientName(sessionIdOf(req))
+		);
 		res.on("close", () => {
 			void transport.close();
 			void server.close();
 		});
 		await server.connect(transport);
 		await transport.handleRequest(req, res, body);
+		// Read from the SDK rather than the body: it is set only when the
+		// server actually accepted the handshake. The response has been
+		// written, but the client's next request cannot be read before this
+		// continuation runs.
+		const handshake = server.server.getClientVersion();
+		if (issuedSessionId && handshake) this.sessions.remember(issuedSessionId, handshake.name);
 	}
+}
+
+/** Whether a body is an `initialize`, alone or as the one-message batch the SDK also accepts. */
+function isInitialize(body: unknown): boolean {
+	const message = Array.isArray(body) && body.length === 1 ? body[0] : body;
+	return isInitializeRequest(message);
+}
+
+/** The `Mcp-Session-Id` a request carries, if it carries exactly one. */
+function sessionIdOf(req: http.IncomingMessage): string | undefined {
+	const id = req.headers["mcp-session-id"];
+	return typeof id === "string" ? id : undefined;
 }
 
 /**
