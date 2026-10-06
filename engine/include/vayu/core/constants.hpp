@@ -518,10 +518,13 @@ constexpr size_t MAX_DATA_ROWS = 1000;
 /// Largest serialized size of that inline `data` array (config key
 /// `maxScenarioDataBytes`). The row bound alone does not bound the payload -
 /// one row with a megabyte in a cell is within it - and the transport's own
-/// ceiling is cpp-httplib's 100MB body cap, which would surface as a reset
-/// connection rather than as a message naming what was wrong. This is the
-/// engine-authored bound that answers first.
+/// ceiling (`request_body::MAX_BYTES`) refuses a whole payload without naming
+/// what in it was too large. This is the engine-authored bound that answers
+/// first.
 constexpr size_t MAX_DATA_BYTES = size_t{ 16 } * 1024 * 1024;
+/// The largest value `maxScenarioDataBytes` accepts (its config entry's
+/// maximum), which `request_body::MAX_BYTES` is held above.
+constexpr size_t MAX_CONFIGURABLE_DATA_BYTES = size_t{ 100 } * 1024 * 1024;
 /// Largest number of per-step `results` rows one scenario run stores (config
 /// key `maxScenarioStoredSteps`; 0 = unlimited). `Database::get_results` loads
 /// every row of a run with no limit and the report parses each `trace_data`,
@@ -914,6 +917,11 @@ namespace spec_document {
 /// is - cpp-httplib's own body cap would drop the connection instead.
 constexpr size_t MAX_BYTES = size_t{ 10 } * 1024 * 1024;
 
+/// The largest value `maxSpecDocumentBytes` accepts (its config entry's
+/// maximum). `request_body::MAX_BYTES` is derived from it, so raising the
+/// setting to its limit never meets a transport bound below it.
+constexpr size_t MAX_CONFIGURABLE_BYTES = size_t{ 100 } * 1024 * 1024;
+
 /// Operation rows one stored `spec_documents.operations` index may declare, and
 /// the same number of rows a coverage block reports (issue #629).
 ///
@@ -1011,6 +1019,35 @@ constexpr const char* EVENT_PROGRESS = "progress";
 constexpr const char* EVENT_RESULT   = "result";
 constexpr const char* EVENT_ERROR    = "error";
 } // namespace import_fetch
+
+/**
+ * @brief What the management API reads as a request body (issue #1824).
+ */
+namespace request_body {
+/// What an import route allows over its document for the JSON string the
+/// document travels in: quotes and newlines grow it, so half the document cap
+/// again plus this covers any real document. The route's exact check on
+/// `content` stays the precise one.
+constexpr size_t IMPORT_HEADROOM_BYTES = size_t{ 1 } * 1024 * 1024;
+
+/// The body an import route (`POST /import`, `/import/parse`,
+/// `/import/document`) admits under a given `maxSpecDocumentBytes`.
+constexpr size_t import_limit (size_t document_cap) {
+    return document_cap + (document_cap / 2) + IMPORT_HEADROOM_BYTES;
+}
+
+/// The largest body any management route reads, judged from `Content-Length`
+/// before a byte of it is read and applied to cpp-httplib as its own read
+/// bound. A fixed ceiling rather than a live one: cpp-httplib's limit is a
+/// plain member its worker threads read unsynchronised, so it cannot follow a
+/// setting changed while the server runs. Derived from the largest values the
+/// two body-size settings accept, so raising either to its limit still fits;
+/// the live, tighter bound on an import body is `import_limit`.
+constexpr size_t MAX_BYTES = import_limit (spec_document::MAX_CONFIGURABLE_BYTES);
+static_assert (MAX_BYTES > scenario::MAX_CONFIGURABLE_DATA_BYTES + IMPORT_HEADROOM_BYTES,
+"a collection run carrying the largest data set maxScenarioDataBytes allows "
+"must still fit under the body ceiling");
+} // namespace request_body
 
 /**
  * @brief Response schema validation bounds (issue #628).

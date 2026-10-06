@@ -47,13 +47,9 @@ httplib::Response& res) {
     if (req.path != "/import" && req.path != "/import/parse" && req.path != "/import/document") {
         return httplib::Server::HandlerResponse::Unhandled;
     }
-    // The body is the document inside a JSON string, so quotes and newlines
-    // grow it: half the cap again plus a megabyte covers any real document,
-    // and the route's exact check on `content` stays the precise one.
-    constexpr size_t HEADROOM = size_t{ 1 } * 1024 * 1024;
-    const size_t cap          = spec_size_cap (db);
-    const size_t limit        = cap + (cap / 2) + HEADROOM;
-    const size_t length       = req.get_header_value_u64 ("Content-Length");
+    const size_t limit =
+    vayu::core::constants::request_body::import_limit (spec_size_cap (db));
+    const size_t length = req.get_header_value_u64 ("Content-Length");
     if (length <= limit) {
         return httplib::Server::HandlerResponse::Unhandled;
     }

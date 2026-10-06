@@ -75,6 +75,35 @@ body out of a `<script>`), and **no `GET` route has a side effect**. A page
 can therefore neither read the engine nor change it, though it can make the
 engine run any `GET` handler.
 
+## Request bodies
+
+Every request body is judged from its headers, on the same pre-routing handler
+as the gate above, before any route runs and before a byte of the body is read
+(issue [#1824](https://github.com/athrvk/vayu/issues/1824)):
+
+- A body sent with `Transfer-Encoding: chunked` answers `411` `Refused: the
+  engine reads a request body only when its length is declared up front - send
+  Content-Length, not Transfer-Encoding: chunked`, on every route. A chunked
+  body's size is known only once it has been read, and cpp-httplib's read
+  bound is fixed for the listener's life, so it could not follow a body-size
+  setting changed while the engine runs. The app, `vayu-cli` and the MCP
+  server all send `Content-Length`.
+- A `Content-Length` over **151 MiB** (158334976 bytes) answers `413` `Request
+  body is N bytes, over the limit of M the engine reads for any request`, on
+  every route. The ceiling is fixed and derived from the largest values the two
+  body-size settings accept: `maxSpecDocumentBytes` at its 100 MiB maximum
+  under the import rule below, which also covers `maxScenarioDataBytes` at its
+  own 100 MiB maximum. Raising either setting never meets this ceiling first.
+- `POST /import`, `/import/parse` and `/import/document` carry a whole document
+  and are held to a tighter bound that follows the live
+  `maxSpecDocumentBytes`, checked first because its message names the setting;
+  see the body cap under [POST /import/parse](#post-importparse).
+
+Both refusals are the shared error shape, with code `error`. Because the body
+is not read, the engine answers and closes the connection: a client that is
+still writing a large body may see the connection reset rather than the
+response.
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,
@@ -3386,11 +3415,13 @@ API buffers a request body before a route sees it, so these three routes are
 bounded from the `Content-Length` header, before the body is read: a body over
 `maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string
 escaping of the document) answers `413` `Request body is N bytes, over the limit of
-M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`. A
-chunked body carries no length and is read to cpp-httplib's own 100 MB default.
-The exact check on the `content` string described below still runs after the
-parse. A client that streams a very large body may see the connection closed
-rather than the `413`, since the body is not read.
+M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`. The
+limit is read live, so a raised setting applies to the next request. A chunked
+body is refused with `411` like on every route (see
+[Request bodies](#request-bodies)). The exact check on the `content` string
+described below still runs after the parse. A client that streams a very large
+body may see the connection closed rather than the `413`, since the body is not
+read.
 
 ### POST /import
 
@@ -6508,7 +6539,7 @@ as a smaller one:
 | `data` present and empty | A data set that binds nothing is a mistake - omit the field to run without one. |
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
-| A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the transport's own body cap would drop the connection instead of explaining itself. |
+| A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
 | A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |

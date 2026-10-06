@@ -882,8 +882,9 @@ housekeeping and no 10 MiB blob is loaded to decide its fate.
 **Cap.** A document over the live `maxSpecDocumentBytes`
 [`config_entries`](#config_entries) value (default 10 MiB, aligned with
 `json::MAX_FIELD_SIZE`) is a `400` naming the size and the cap, on both write
-paths - never a truncation, and never cpp-httplib's own body cap dropping the
-connection without explaining itself.
+paths - never a truncation, and never the engine's general body cap refusing the
+whole request without naming the document
+([Request bodies](api-reference.md#request-bodies)).
 
 **operations** is what the document *declares* - a JSON array of
 `{operationId?, method, path, responses[]}` in document order - read by
