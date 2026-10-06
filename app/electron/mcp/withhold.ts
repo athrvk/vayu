@@ -17,7 +17,7 @@
  * broken, and acts on that. So a withheld variable or cookie carries
  * `valueWithheld: true`, an auth member `<member>Withheld: true`, a credential
  * row (a Postman attribute or parameter row) `valueWithheld: true` on the row,
- * and a config URL `credentialsWithheld: true`.
+ * and a config or proxy URL `credentialsWithheld: true`.
  *
  * What goes through here is what is *stored*: environments, globals,
  * collections and requests as the read tools and the `vayu://` resources answer
@@ -55,6 +55,9 @@ export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`value
 
 /** What `get_engine_config` says about proxy URLs. */
 export const WITHHELD_CONFIG_SENTENCE = `A URL entry's credentials (\`proxyUrl\`'s user:password) are stripped, with \`credentialsWithheld: true\` on the entry, unless the user has turned on ${REVEAL_SETTING}.`;
+
+/** What `diagnose_connection` says about the proxy URL it reports. */
+export const WITHHELD_DIAGNOSE_SENTENCE = `The proxy's URL has its credentials (user:password) stripped, with \`credentialsWithheld: true\` on \`proxy\`, unless the user has turned on ${REVEAL_SETTING}.`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -340,16 +343,19 @@ const URL_CONFIG_KEY = /url$/i;
  */
 const URL_USERINFO = /^([a-z][a-z0-9+.-]*:\/\/)?.*@/is;
 
+/** `value` without its userinfo, or null when it carries none. */
+function stripUserinfo(value: unknown): string | null {
+	if (typeof value !== "string" || !URL_USERINFO.test(value)) return null;
+	return value.replace(URL_USERINFO, "$1");
+}
+
 function withholdEntryCredentials(entry: unknown): unknown {
 	if (!isRecord(entry) || typeof entry.key !== "string" || !URL_CONFIG_KEY.test(entry.key)) {
 		return entry;
 	}
-	if (typeof entry.value !== "string" || !URL_USERINFO.test(entry.value)) return entry;
-	return {
-		...entry,
-		value: entry.value.replace(URL_USERINFO, "$1"),
-		credentialsWithheld: true,
-	};
+	const stripped = stripUserinfo(entry.value);
+	if (stripped === null) return entry;
+	return { ...entry, value: stripped, credentialsWithheld: true };
 }
 
 /**
@@ -361,4 +367,17 @@ function withholdEntryCredentials(entry: unknown): unknown {
 export function withholdConfigCredentials(answer: unknown): unknown {
 	if (!isRecord(answer) || !Array.isArray(answer.entries)) return answer;
 	return { ...answer, entries: answer.entries.map(withholdEntryCredentials) };
+}
+
+/**
+ * A connection diagnosis (`POST /diagnostics/connection`) with the credentials
+ * in `proxy.url` withheld. The engine reports the URL in force verbatim, so a
+ * `manual` proxy's `user:password@` would reach the agent here as it does not
+ * through {@link withholdConfigCredentials}.
+ */
+export function withholdDiagnoseCredentials(answer: unknown): unknown {
+	if (!isRecord(answer) || !isRecord(answer.proxy)) return answer;
+	const stripped = stripUserinfo(answer.proxy.url);
+	if (stripped === null) return answer;
+	return { ...answer, proxy: { ...answer.proxy, url: stripped, credentialsWithheld: true } };
 }
