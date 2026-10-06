@@ -21,12 +21,18 @@
 #include <array>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::utils {
+
+/// What every redaction in the engine writes in place of a withheld value - a
+/// log field, a curl debug header line, a run's config snapshot (#1803) - so
+/// all three read the same to whoever finds one.
+inline constexpr std::string_view kRedactedMarker = "<redacted>";
 
 /**
  * @brief Whether @p name is a field name whose value must never reach a log.
@@ -48,6 +54,19 @@ inline bool is_secret_field_name (std::string_view name) {
     };
     return std::any_of (kSecretFieldNames.begin (), kSecretFieldNames.end (),
     [name] (std::string_view secret) { return ascii_lower_equal (name, secret); });
+}
+
+/**
+ * @brief Whether a header named @p name carries a credential for one request:
+ *        a name from the shared set, or one of @p extra_secret_headers (the
+ *        header the request's own API-key auth names, which no static list can
+ *        know). Case-insensitive, as header names are.
+ */
+inline bool is_secret_header_name (std::string_view name,
+const std::vector<std::string>& extra_secret_headers) {
+    return is_secret_field_name (name) ||
+    std::any_of (extra_secret_headers.begin (), extra_secret_headers.end (),
+    [name] (const std::string& extra) { return ascii_lower_equal (name, extra); });
 }
 
 /**
@@ -164,7 +183,7 @@ inline std::string strip_urls_in_text (std::string_view text) {
 /**
  * @brief Redact @p node in place, at every depth.
  *
- * An object key matching `is_secret_field_name` becomes `"<redacted>"`
+ * An object key matching `is_secret_field_name` becomes `kRedactedMarker`
  * wholesale; a string-valued key matching `is_url_field_name` goes through
  * `strip_url_secrets`. Arrays and nested objects are walked rather than
  * treated as opaque leaves, because the config dump this exists for
@@ -175,7 +194,7 @@ inline void redact_fields (nlohmann::json& node) {
     if (node.is_object ()) {
         for (auto& [key, value] : node.items ()) {
             if (is_secret_field_name (key)) {
-                value = "<redacted>";
+                value = std::string (kRedactedMarker);
             } else if (value.is_string () && is_url_field_name (key)) {
                 value = strip_url_secrets (value.get<std::string> ());
             } else {

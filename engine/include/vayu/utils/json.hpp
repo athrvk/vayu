@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -229,13 +230,27 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
 void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
 
 /**
- * @brief Sanitize a run's config snapshot before persistence.
+ * @brief Sanitize a run's config snapshot before persistence: the composed
+ *        request, with its credentials withheld (#1803).
  *
- * Parses `body` (the raw /request or /run payload) and reduces the top-level
- * `auth` object to just its `mode`, dropping every credential field. This is an
- * allowlist (keep `mode`) rather than a blocklist of known secret names, so no
- * future auth field can leak into the stored snapshot. Non-auth fields are left
- * intact. If `body` is not valid JSON it is returned unchanged.
+ * `body` is the `POST /execute` or `POST /runs` payload, which is already
+ * composed: every `{{variable}}` it named holds its value. Three things are
+ * withheld, each written as `vayu::utils::kRedactedMarker` where it is not
+ * dropped:
+ *
+ * - **`auth`** is reduced to its `mode`. An allowlist (keep `mode`) rather
+ *   than a blocklist of known secret names, so no future auth field can leak.
+ * - **A credential header's value**: every `headers` entry whose name is in
+ *   the shared secret set (`vayu::utils::is_secret_field_name`), or is the
+ *   header an `apikey` auth names. The name is kept, so the snapshot still
+ *   says the request carried one.
+ * - **Every occurrence of a value in @p secret_values** (the request's
+ *   secret-flagged variables), raw and in the two percent-encoded forms a URL
+ *   carries, inside `url`, `params`, `headers`, `body.content` and
+ *   `body.fields`. A value shorter than four characters is left alone.
+ *
+ * Everything else is kept. If `body` is not valid JSON it is returned
+ * unchanged.
  *
  * `body.content` (the request body being tested, not `body` itself) is capped
  * at `max_body_bytes`, the same limit `cap_trace_bodies` applies to a stored
@@ -243,7 +258,8 @@ void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
  * behind. A cut records `bodyTruncated`/`bodyBytes` on the `body` object,
  * mirroring `cap_node_body`'s sibling-key shape.
  */
-[[nodiscard]] std::string
-sanitize_config_snapshot (const std::string& body, size_t max_body_bytes);
+[[nodiscard]] std::string sanitize_config_snapshot (const std::string& body,
+size_t max_body_bytes,
+const std::vector<std::string>& secret_values = {});
 
 } // namespace vayu::json

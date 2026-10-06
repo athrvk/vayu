@@ -7784,7 +7784,7 @@ step - its steps are read from the report's `results` array instead.
   "environmentId": null,
   "type": "design",
   "status": "completed",
-  "configSnapshot": { "...": "the raw run payload" },
+  "configSnapshot": { "...": "the run payload as composed, credentials withheld" },
   "startTime": 1234567890,
   "endTime": 1234567891,
   "result": {
@@ -7810,6 +7810,16 @@ to fetch the whole body.
 `body` object gains the same `bodyTruncated` / `bodyBytes` pair. A run can be
 truncated on one side and not the other, since each is written by its own call
 into `sanitize_config_snapshot`.
+
+`configSnapshot` withholds the composed request's credentials (issue #1803):
+`auth` is reduced to `{"mode": ...}`, a header named in the shared secret set
+(`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's `apikey` auth
+keeps its name with the value `"<redacted>"`, and every value of a variable
+marked secret in the payload's scopes (globals, `environmentId`, the collection
+chain of `requestId`'s request) is written as `<redacted>` wherever it landed in
+`url`, `params`, `headers` or `body`. A value under four characters is not
+masked. `result.trace` is the record of what was sent and keeps it all. A run
+stored before this change returns its snapshot as it was written.
 
 A load or collection run's `configSnapshot` also carries `defaultHeaders`
 (issue #1488), the run's resolved decision at start about what the engine

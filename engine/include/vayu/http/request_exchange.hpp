@@ -91,6 +91,14 @@ const std::optional<std::string>& environment_id,
 const std::string& collection_id);
 
 /**
+ * The value of every variable marked `secret` in @p scopes, enabled or not -
+ * what `sanitize_config_snapshot` masks out of a run's stored snapshot
+ * (#1803). Composition answers with values, not provenance, so the snapshot
+ * can only recognise a secret by its text.
+ */
+std::vector<std::string> secret_variable_values (const ScriptVariableScopes& scopes);
+
+/**
  * Persist script-set variables (design mode only; best-effort).
  *
  * A scope is rewritten only when a script actually changed one of its

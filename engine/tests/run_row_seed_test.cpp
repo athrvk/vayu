@@ -82,7 +82,7 @@ TEST (SeedRunTimes, RunEndTimeDefaultsToZeroBeforeAnySeed) {
 // The `data` rows are the point: they are user data of unknown sensitivity and
 // are never snapshotted, so the manifest (which records only their count) has
 // to *replace* the block rather than sit beside it. `sanitize_config_snapshot`
-// would keep them - it only strips credentials out of `auth`.
+// would keep them - it withholds credentials, not user data.
 TEST (ScenarioSnapshot, ReplacesTheSentBlockWithTheManifest) {
     const json manifest{ { "source", "collection" }, { "collectionId", "col_1" },
         { "recursive", false }, { "iterations", 2 }, { "dataRowCount", 2 },

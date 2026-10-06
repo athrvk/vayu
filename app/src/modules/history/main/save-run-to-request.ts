@@ -21,6 +21,13 @@
  * request's real credentials with a bare mode - and credentials exist nowhere
  * else, so nothing could recover them.
  *
+ * **Whatever the engine withheld from the snapshot** (#1803). A credential
+ * header's value, and a secret variable's value inside the url, params, headers
+ * or body, are stored as `<redacted>`. That is not what the request holds, so
+ * writing it back would overwrite a good value with the marker: a header keeps
+ * the request's own (the seed never carries the withheld row), and a url,
+ * params or body holding the marker is left off the patch like a truncated body.
+ *
  * **Scripts, for a run stored before script parts existed.** Those runs hold
  * one string glued from the collection chain's scripts plus the request's own,
  * with nothing marking the boundaries. The request's own part cannot be
@@ -239,6 +246,14 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 
 const TRUNCATED_BODY_NOTE =
 	"This run's request body was too large to store in full, so only a slice was kept. It is not written back, to avoid overwriting the saved body with an incomplete copy.";
+const WITHHELD_URL_NOTE =
+	"The engine withheld a secret from this run's URL, so it is not written back, to avoid overwriting the saved URL with a placeholder.";
+const WITHHELD_PARAMS_NOTE =
+	"The engine withheld a secret from this run's URL or params, so the params are not written back, to avoid overwriting the saved params with a placeholder.";
+const WITHHELD_BODY_NOTE =
+	"The engine withheld a secret from this run's request body, so it is not written back, to avoid overwriting the saved body with a placeholder.";
+const WITHHELD_HEADERS_NOTE =
+	"The engine withholds credential values from a stored run, so the request's own value for each of these headers is kept.";
 const PATHLESS_FILE_NOTE =
 	"This run did not record which file it sent, so the saved body is left alone rather than pointed at no file.";
 
@@ -249,10 +264,16 @@ const PATHLESS_FILE_NOTE =
  */
 function unwritableBodyNote(seed: DesignRunSeed): string | null {
 	if (seed.requestBodyTruncated) return TRUNCATED_BODY_NOTE;
+	if (seed.withheld.body) return WITHHELD_BODY_NOTE;
 	if (seed.request.bodyMode === "binary" && !seed.request.binaryFile?.src) {
 		return PATHLESS_FILE_NOTE;
 	}
 	return null;
+}
+
+/** A `kept` row for a field the save leaves alone, with the reason inline. */
+function keptItem(field: string, value: string, note: string): ChangesetItem {
+	return { field, state: "kept", detail: "kept", value, note };
 }
 
 /** A stable, human-readable rendering of a key/value list, for the diff only. */
@@ -380,21 +401,28 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 	};
 
 	scalar("Method", live.method, patch.method ?? live.method);
-	scalar("URL", live.url, patch.url ?? live.url);
-	keyValues("Params", paramsForDiff(live.params ?? []), paramsForDiff(patch.params ?? []));
+	if (seed.withheld.url) {
+		items.push(keptItem("URL", live.url, WITHHELD_URL_NOTE));
+	} else {
+		scalar("URL", live.url, patch.url ?? live.url);
+	}
+	if (seed.withheld.params) {
+		items.push(keptItem("Params", describeEntries(live.params ?? []), WITHHELD_PARAMS_NOTE));
+	} else {
+		keyValues("Params", paramsForDiff(live.params ?? []), paramsForDiff(patch.params ?? []));
+	}
 	keyValues("Headers", live.headers ?? [], patch.headers ?? []);
+	if (seed.withheld.headers.length > 0) {
+		items.push(
+			keptItem("Withheld headers", seed.withheld.headers.join(", "), WITHHELD_HEADERS_NOTE)
+		);
+	}
 	// A truncated run stores only a slice of its request body, so the body is not
 	// written (applyRunToRequest omits it). Shown as a kept row with the reason,
 	// the same way Auth is - never silently dropped.
 	const bodyNote = unwritableBodyNote(seed);
 	if (bodyNote) {
-		items.push({
-			field: "Body",
-			state: "kept",
-			detail: "kept",
-			value: describeBody(live.body),
-			note: bodyNote,
-		});
+		items.push(keptItem("Body", describeBody(live.body), bodyNote));
 	} else {
 		scalar("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
 	}
@@ -459,8 +487,6 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 	const patch: UpdateRequestRequest = {
 		id: live.id,
 		method: request.method ?? live.method,
-		url: request.url ?? live.url,
-		params: items(request.params),
 		// System headers are dropped, not persisted: the builder re-injects them
 		// with current values on load, so writing a run's stale X-Vayu-Version /
 		// X-Request-ID would pin an old version onto the request.
@@ -473,6 +499,11 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 		disabledSystemHeaders: request.disabledSystemHeaders ?? live.disabledSystemHeaders,
 		disableUrlEncoding: request.disableUrlEncoding ?? live.disableUrlEncoding,
 	};
+
+	// A url or params holding the withheld marker is left off the patch the same
+	// way; params are parsed from the url, so the seed flags them with it.
+	if (!seed.withheld.url) patch.url = request.url ?? live.url;
+	if (!seed.withheld.params) patch.params = items(request.params);
 
 	// The body is only written when the run's stored request body was not
 	// truncated. A truncated run holds only a slice of what was sent, and writing

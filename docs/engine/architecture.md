@@ -1332,8 +1332,10 @@ record shape, the category list, the redaction rule and the file layout
   path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: File lock prevents multiple daemon instances
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
-  are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its
-  `auth` object to `{mode}` before persistence; and every log record is
+  are stored in **plaintext** in SQLite; `runs.config_snapshot` withholds the
+  composed request's credentials before persistence (`auth` down to `{mode}`,
+  a credential header's value and every secret variable's value written as
+  `<redacted>`, issue #1803); and every log record is
   redacted by key before either sink sees it - a secret-named field becomes
   `<redacted>`, a URL-named field is stripped to scheme/host/path (issue
   #1557, [Engine Logging](logging.md)), which is what curl verbose logs go
@@ -1346,11 +1348,20 @@ record shape, the category list, the redaction rule and the file layout
   re-acquires a load run's OAuth 2.0 token before it expires.
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
-  `runs.config_snapshot` records the request **as authored**, so
-  `sanitize_config_snapshot` keeps `auth` down to `{mode}` and a scenario run
-  stores the uncomposed URL - a composed plan carries resolved `Authorization`
-  headers and an `apikey` in the query string, and persisting one would route
-  around that allowlist. `results.trace_data` records what was **sent**, which
+  `runs.config_snapshot` records the request **composed, with its credentials
+  withheld**: the payload arrives with every `{{variable}}` already resolved,
+  so `sanitize_config_snapshot` keeps `auth` down to `{mode}`, writes
+  `<redacted>` for the value of every header named in the shared secret set
+  (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's own
+  `apikey` auth, and masks every value of a variable marked secret, raw and
+  percent-encoded, wherever it landed in `url`, `params`, `headers`,
+  `body.content` or `body.fields` (issue #1803). Composition answers with
+  values, not provenance, so the secret values are read from the scopes the
+  payload names (globals, `environmentId`, the collection chain of
+  `requestId`'s request or of a scenario's collection), and a value under four
+  characters is not masked. A scenario run stores the uncomposed URL besides - a composed
+  plan carries resolved `Authorization` headers and an `apikey` in the query
+  string, and the sanitizer reads no plan. `results.trace_data` records what was **sent**, which
   is the only thing it is for: it stores the resolved request headers - both as
   composed and, since issue #664, as the transfer issued them
   (`request.sentHeaders`) - and since issue #348 the wire message itself

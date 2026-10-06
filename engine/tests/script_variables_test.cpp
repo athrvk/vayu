@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -506,6 +507,27 @@ TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnl
     auto root = db_->get_collection ("col_root");
     ASSERT_HAS_VALUE (root);
     EXPECT_EQ (root->updated_at, 1);
+}
+
+// ---------------------------------------------------------------------------
+// secret_variable_values - what a run snapshot masks (#1803)
+// ---------------------------------------------------------------------------
+
+// Every scope a composition reads is searched, an ancestor included, and a
+// disabled secret is still a secret. A non-secret value is never collected.
+TEST (SecretVariableValues, CollectsEverySecretFlaggedValueAcrossTheScopes) {
+    vayu::http::routes::ScriptVariableScopes scopes;
+    scopes.globals["g"]         = vayu::Variable{ "global-secret", true, true };
+    scopes.environment["e"]     = vayu::Variable{ "env-secret", true, false };
+    scopes.environment["plain"] = vayu::Variable{ "not-a-secret", false, true };
+    scopes.collection["c"]      = vayu::Variable{ "leaf-secret", true, true };
+    scopes.collection_ancestors.push_back (
+    { { "a", vayu::Variable{ "root-secret", true, true } },
+    { "empty", vayu::Variable{ "", true, true } } });
+
+    const auto values = vayu::http::routes::secret_variable_values (scopes);
+    EXPECT_EQ (values,
+    (std::vector<std::string>{ "global-secret", "env-secret", "leaf-secret", "root-secret" }));
 }
 
 } // namespace

@@ -144,9 +144,9 @@ const vayu::Response& response) {
     // the live field's documented contract: the `Cookie` line lands in the same
     // node that already stores the resolved `Authorization` header beside it.
     // The redaction that does apply to run rows is `sanitize_config_snapshot`,
-    // which guards `runs.config_snapshot` - a record of the request as
-    // *authored*. A trace is the record of what was *sent*, and one that hid
-    // what was sent would have no reason to exist. See
+    // which guards `runs.config_snapshot` - the request as *composed, with its
+    // credentials withheld* (#1803). A trace is the record of what was *sent*,
+    // and one that hid what was sent would have no reason to exist. See
     // docs/engine/architecture.md (Security).
     if (!response.raw_request.empty ()) {
         trace["request"]["rawRequest"] = response.raw_request;
@@ -250,6 +250,25 @@ load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run) {
         }
     }
     return load_script_variable_scopes (db, run.environment_id, collection_id);
+}
+
+std::vector<std::string> secret_variable_values (const ScriptVariableScopes& scopes) {
+    std::vector<std::string> values;
+    const auto collect = [&values] (const vayu::Environment& scope) {
+        for (const auto& entry : scope) {
+            const vayu::Variable& variable = entry.second;
+            if (variable.secret && !variable.value.empty ()) {
+                values.push_back (variable.value);
+            }
+        }
+    };
+    collect (scopes.globals);
+    collect (scopes.environment);
+    collect (scopes.collection);
+    for (const auto& ancestor : scopes.collection_ancestors) {
+        collect (ancestor);
+    }
+    return values;
 }
 
 // Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.

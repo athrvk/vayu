@@ -9,9 +9,10 @@
  * Starting values for a design run opened as a detached copy.
  *
  * Three sources, each for what only it has. `configSnapshot` is the payload
- * that was sent. `result.trace` is what went out after auth was applied. The
- * live request is the only place credentials exist, because
- * `sanitize_config_snapshot` strips them before saving.
+ * that was sent, minus what `sanitize_config_snapshot` withholds (auth down to
+ * its mode, credential values as `<redacted>`). `result.trace` is what went out
+ * after auth was applied. The live request holds the credentials the snapshot
+ * does not.
  */
 
 import { describe, it, expect } from "vitest";
@@ -243,6 +244,154 @@ describe("seedFromRun", () => {
 				configSnapshot: { method: "GET", url: "https://x.test/" },
 			} as Partial<Run>);
 			expect(seedFromRun(absent, liveRequest).recordedAuthMode).toBeUndefined();
+		});
+	});
+
+	describe("a value the engine withheld from the snapshot (#1803)", () => {
+		const base = run().configSnapshot as Record<string, unknown>;
+		const withheldRun = (snapshot: Record<string, unknown>) =>
+			run({ configSnapshot: { ...base, ...snapshot } } as Partial<Run>);
+		const headerKeys = (seed: ReturnType<typeof seedFromRun>) =>
+			seed.request.headers?.map((h) => h.key).filter(Boolean) ?? [];
+
+		it("never seeds a header whose value is the marker, and names it", () => {
+			const seed = seedFromRun(
+				withheldRun({
+					headers: { "X-Plain": "visible", Authorization: "<redacted>" },
+				}),
+				liveRequest
+			);
+
+			expect(headerKeys(seed)).toEqual(["X-Plain"]);
+			expect(seed.withheld.headers).toEqual(["Authorization"]);
+		});
+
+		it("never seeds a header whose value holds the marker inside it", () => {
+			const seed = seedFromRun(
+				withheldRun({ headers: { "X-Trace": "id=<redacted>&v=1" } }),
+				liveRequest
+			);
+
+			expect(headerKeys(seed)).toEqual([]);
+			expect(seed.withheld.headers).toEqual(["X-Trace"]);
+		});
+
+		it("puts the request's own header in the withheld one's place, by case-insensitive name", () => {
+			const live = {
+				...liveRequest,
+				headers: [{ key: "authorization", value: "Bearer {{token}}", enabled: true }],
+			} as unknown as Request;
+			const seed = seedFromRun(
+				withheldRun({ headers: { Authorization: "<redacted>" } }),
+				live
+			);
+
+			expect(
+				seed.request.headers?.filter((h) => h.key).map(({ key, value }) => ({ key, value }))
+			).toEqual([{ key: "authorization", value: "Bearer {{token}}" }]);
+		});
+
+		it("keeps a stand-in's enabled state, so a disabled header is not replayed or dropped", () => {
+			const live = {
+				...liveRequest,
+				headers: [
+					{
+						key: "X-Off",
+						value: "x",
+						enabled: false,
+						description: "kept",
+						source: "user",
+					},
+				],
+			} as unknown as Request;
+			const seed = seedFromRun(withheldRun({ headers: { "X-Off": "<redacted>" } }), live);
+
+			expect(seed.request.headers?.filter((h) => h.key)).toMatchObject([
+				{ key: "X-Off", value: "x", enabled: false, description: "kept", source: "user" },
+			]);
+		});
+
+		it("does not stand in a live header that itself holds the marker", () => {
+			const live = {
+				...liveRequest,
+				headers: [{ key: "Authorization", value: "<redacted>", enabled: true }],
+			} as unknown as Request;
+			const seed = seedFromRun(
+				withheldRun({ headers: { Authorization: "<redacted>" } }),
+				live
+			);
+
+			expect(headerKeys(seed)).toEqual([]);
+		});
+
+		it("drops a withheld trace header too, when the request is gone", () => {
+			const gone = run({
+				result: {
+					...run().result!,
+					trace: {
+						request: {
+							method: "GET",
+							url: "https://x.test/",
+							headers: { "X-Plain": "visible", Authorization: "<redacted>" },
+						},
+						response: { headers: {}, body: "{}" },
+					},
+				},
+			} as unknown as Partial<Run>);
+
+			const seed = seedFromRun(gone, null);
+
+			expect(headerKeys(seed)).toEqual(["X-Plain"]);
+			expect(seed.withheld.headers).toEqual(["Authorization"]);
+		});
+
+		it("flags a url that holds the marker, and the params parsed from it", () => {
+			const { withheld } = seedFromRun(
+				withheldRun({ url: "https://x.test/a?key=<redacted>" }),
+				liveRequest
+			);
+
+			expect(withheld).toMatchObject({ url: true, params: true, body: false });
+		});
+
+		it("flags a path row whose value holds the marker as params only", () => {
+			const { withheld } = seedFromRun(
+				withheldRun({
+					url: "https://x.test/users/:id",
+					params: [{ key: "id", value: "<redacted>", enabled: true, in: "path" }],
+				}),
+				liveRequest
+			);
+
+			expect(withheld).toMatchObject({ url: false, params: true });
+		});
+
+		it("flags a body whose content or fields hold the marker", () => {
+			const content = seedFromRun(
+				withheldRun({ body: { mode: "json", content: '{"k":"<redacted>"}' } }),
+				liveRequest
+			);
+			const fields = seedFromRun(
+				withheldRun({
+					body: {
+						mode: "x-www-form-urlencoded",
+						fields: [{ key: "k", value: "<redacted>", enabled: true }],
+					},
+				}),
+				liveRequest
+			);
+
+			expect(content.withheld.body).toBe(true);
+			expect(fields.withheld.body).toBe(true);
+		});
+
+		it("flags nothing for a run that withheld nothing", () => {
+			expect(seedFromRun(run(), liveRequest).withheld).toEqual({
+				headers: [],
+				url: false,
+				params: false,
+				body: false,
+			});
 		});
 	});
 

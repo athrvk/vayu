@@ -1078,7 +1078,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `environment_id`  | TEXT    | FK → `environments.id` (optional)                           |
 | `type`            | TEXT    | `"design"`, `"load"` or `"scenario"` (a collection run)      |
 | `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
-| `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
+| `config_snapshot` | TEXT    | JSON: the run's request as composed, credentials withheld (see below) |
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
@@ -1219,11 +1219,32 @@ because the report would otherwise count the rows that survived
 `maxScenarioStoredSteps` and call that the run's size. `steps_dropped` is what
 that cap thinned - always successes, never a failure.
 
-**`config_snapshot` redaction** - the snapshot is the raw run payload, which can
-carry auth credentials. Before persistence, its top-level `auth` object is
-reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
-`utils/json.cpp`) - an allowlist, so no current or future auth field
-(`clientSecret`, `password`, tokens) leaks into a stored run.
+**`config_snapshot` redaction** - the snapshot is the run payload as composed,
+with its credentials withheld. Composition has already written every
+`{{variable}}`'s value into the payload, so before persistence
+`sanitize_config_snapshot` (`utils/json.cpp`) withholds three things (issue
+#1803):
+
+- the top-level `auth` object is reduced to just `{"mode": "..."}` - an
+  allowlist, so no current or future auth field (`clientSecret`, `password`,
+  tokens) leaks into a stored run;
+- the value of every `headers` entry named in the shared secret set
+  (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
+  `X-Api-Key`, ...; `vayu::utils::is_secret_field_name`, case-insensitive) or
+  by the request's own `apikey` auth becomes `"<redacted>"`, the name kept;
+- every occurrence of a value of a variable marked `secret` - raw, strictly
+  percent-encoded (RFC 3986), and as composition writes a query value -
+  inside `url`, `params`, `headers`, `body.content` and `body.fields` becomes
+  `<redacted>`. The values come from the scopes the payload names: globals,
+  `environmentId`, and the collection chain of `requestId`'s request (a
+  scenario run: of its collection). A value under four characters is left
+  alone, because it recurs in ordinary text and masking it would shred the
+  snapshot.
+
+`results.trace_data` still records what was sent, credentials included, by
+design ([architecture](architecture.md#security)). Rows stored before #1803 stay
+as they were written: nothing rewrites a stored snapshot, and the schema
+version did not change.
 
 **`config_snapshot`'s body is capped at `maxTraceBodyBytes`** (issue #1486), the
 same limit and the same sibling-key shape the [`results`](#results) trace bodies
@@ -1256,8 +1277,8 @@ sitting beside it (`scenario_snapshot`, `http/routes/execution.cpp`).
 
 `url` is the **stored, uncomposed** one. The resolved plan is credential-grade -
 it carries resolved `Authorization` headers, and an `apikey` auth with
-`in: "query"` puts a live key in the composed URL - so persisting it would route
-around the `auth` allowlist above rather than respect it. The plan lives in
+`in: "query"` puts a live key in the composed URL - and the redaction above
+reads one composed request, not a plan's steps or the auth built for them. The plan lives in
 memory for the run's life and nowhere else. Inline `data` rows are not
 snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count. The writer is `vayu::core::build_scenario_manifest`

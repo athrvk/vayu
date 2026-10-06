@@ -13,10 +13,12 @@
  *
  * Three sources, each for what only it has:
  *
- *   configSnapshot    the payload that was sent
+ *   configSnapshot    the payload that was sent, minus what the engine
+ *                     withholds: auth is stored as its mode only, and a
+ *                     credential header or a secret variable's value is
+ *                     replaced by `<redacted>` (`sanitize_config_snapshot`)
  *   result.trace      what went out, after the engine applied auth
- *   the live request  credentials, which are never stored - the engine's
- *                     sanitize_config_snapshot keeps only the auth mode
+ *   the live request  credentials, which the snapshot does not hold
  */
 
 import type {
@@ -33,6 +35,7 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
+import { holdsWithheld, isWithheld } from "@/lib/withheld-value";
 import { noFile, withFileTrust } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
@@ -104,7 +107,7 @@ export interface DesignRunSeed {
 	legacyPostScript?: string;
 	/**
 	 * The auth mode this run actually sent, from the snapshot. Only the *mode*
-	 * survives storage (`sanitize_config_snapshot` strips the credential), so
+	 * survives storage (`sanitize_config_snapshot` drops the credential), so
 	 * this is all there is - but shown read-only next to the live request's
 	 * current auth it answers "did the request's auth change since this ran?",
 	 * which the editor alone cannot, because the editor shows the *current*
@@ -125,6 +128,22 @@ export interface DesignRunSeed {
 	 * absent for every other body and for a run stored before the field.
 	 */
 	requestBodyFile?: SentBodyFile;
+	/**
+	 * What the engine withheld from the snapshot (`<redacted>`, #1803), so none
+	 * of it is seeded as if the run had sent it and "Save to request" does not
+	 * write it back - see {@link applyRunToRequest}.
+	 */
+	withheld: WithheldParts;
+}
+
+/** The parts of a stored run whose recorded value holds the withheld marker. */
+export interface WithheldParts {
+	/** Header names, as recorded. Never seeded: see {@link toHeaderItems}. */
+	headers: string[];
+	/** The url holds it; its query rows, parsed from it, do too. */
+	url: boolean;
+	params: boolean;
+	body: boolean;
 }
 
 /** A snapshot body's `file` as an editor `FileRef`, or an empty one. */
@@ -150,22 +169,61 @@ function fileRefOf(node: unknown): FileRef {
  * old run would seed the copy with that run's frozen `X-Request-ID` and the
  * version string of the day it ran, and send both again as ordinary user
  * headers. Same rule as the request loader's, from the same definition.
+ *
+ * A header whose recorded value the engine withheld (#1803) is never a row:
+ * replayed, it would send the literal `<redacted>` as the credential. The
+ * request's own row of that name stands in for it when `liveHeaders` has one,
+ * the same way the live auth stands in for the recorded auth, so a header the
+ * user typed still goes out and "Save to request" finds nothing to change.
+ * The row is taken whole, disabled or not: a disabled one stays disabled in
+ * the copy instead of being replayed or dropped from the saved request.
  */
-function toHeaderItems(headers: Record<string, string> | undefined, bodyMode: unknown = []) {
+function toHeaderItems(
+	headers: Record<string, string> | undefined,
+	bodyMode: unknown = [],
+	liveHeaders: KeyValueEntry[] = []
+) {
 	// The run's `bodyModeHeaders` (issue #1765) put back on their rows, so the
 	// replay tells the engine the same thing the recorded Send did: these are
 	// the body mode's own, which a `content-type` opt-out removes.
 	const marked = new Set(Array.isArray(bodyMode) ? bodyMode : []);
+	const own = new Map(liveHeaders.map((h) => [h.key.toLowerCase(), h]));
 	return toKeyValueItems(
 		Object.entries(headers ?? {})
 			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
-			.map(([key, value]) => ({
-				key,
-				value,
-				enabled: true,
-				...(marked.has(key) ? { source: "body-mode" as const } : {}),
-			}))
+			.flatMap(([key, value]) => {
+				if (isWithheld(value)) {
+					const live = own.get(key.toLowerCase());
+					return live && !isWithheld(live.value) ? [live] : [];
+				}
+				return [
+					{
+						key,
+						value,
+						enabled: true,
+						...(marked.has(key) ? { source: "body-mode" as const } : {}),
+					},
+				];
+			})
 	);
+}
+
+/** The recorded headers whose value the engine withheld. */
+function withheldHeaderNames(headers: Record<string, string> | undefined): string[] {
+	return Object.entries(headers ?? {})
+		.filter(([, value]) => isWithheld(value))
+		.map(([key]) => key);
+}
+
+/** Which parts of the snapshot hold the marker. `params` follows `url`, which they are parsed from. */
+function withheldParts(snapshot: DesignSnapshot, headers?: Record<string, string>): WithheldParts {
+	const url = isWithheld(snapshot.url ?? "");
+	return {
+		headers: withheldHeaderNames(headers),
+		url,
+		params: url || holdsWithheld(snapshot.params),
+		body: holdsWithheld(snapshot.body?.content) || holdsWithheld(snapshot.body?.fields),
+	};
 }
 
 /**
@@ -227,12 +285,13 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	/*
 	 * Headers and auth move together. With a live request we show its current
 	 * auth, because that is what a fresh resolution will send, and the snapshot
-	 * headers hold no credential. Without one there is nothing to resolve, so
-	 * the wire headers are used as they are - the recorded Authorization
-	 * included - and the copy replays exactly what ran.
+	 * headers hold no credential: the engine withholds those values. Without one
+	 * there is nothing to resolve, so the wire headers are used as they are - the
+	 * recorded Authorization included - and the copy replays exactly what ran.
 	 */
+	const recordedHeaders = liveRequest ? snapshot.headers : trace?.request?.headers;
 	const headers = liveRequest
-		? toHeaderItems(snapshot.headers, snapshot.bodyModeHeaders)
+		? toHeaderItems(snapshot.headers, snapshot.bodyModeHeaders, liveRequest.headers)
 		: toHeaderItems(trace?.request?.headers);
 	const auth: RequestAuth = liveRequest ? liveRequest.auth : { mode: "none" };
 
@@ -313,5 +372,6 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		requestBodyTruncated:
 			trace?.request?.bodyTruncated || body?.bodyTruncated ? true : undefined,
 		requestBodyFile: sentBodyFileOf(trace?.request?.bodyFile),
+		withheld: withheldParts(snapshot, recordedHeaders),
 	};
 }

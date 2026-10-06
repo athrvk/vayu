@@ -8,19 +8,22 @@
 /**
  * Writing a run's values back onto its saved request.
  *
- * The two exclusions are the whole point of this module, and both are silent
- * failures if they go wrong:
+ * The exclusions are the whole point of this module, and each is a silent
+ * failure if it goes wrong:
  *
- *   auth     only the *mode* survives storage (`sanitize_config_snapshot`), so
- *            writing what the run recorded would replace real credentials with
- *            a bare mode and lock the user out of their own request.
- *   scripts  a run stored before script parts has one glued string with nothing
- *            marking where the collection's part ends, so writing it back would
- *            bury the collection's script inside the request permanently - and
- *            the next send would glue it on again and run it twice.
+ *   auth      only the *mode* survives storage (`sanitize_config_snapshot`), so
+ *             writing what the run recorded would replace real credentials with
+ *             a bare mode and lock the user out of their own request.
+ *   withheld  a credential header's value, and a secret variable's value in the
+ *             url, params or body, are stored as `<redacted>` (#1803); writing
+ *             that back would overwrite a good value with the placeholder.
+ *   scripts   a run stored before script parts has one glued string with nothing
+ *             marking where the collection's part ends, so writing it back would
+ *             bury the collection's script inside the request permanently - and
+ *             the next send would glue it on again and run it twice.
  *
- * Both are asserted here, and both are named to the user by
- * `excludedFromSave` rather than being quietly dropped.
+ * Each is asserted here, and each is named to the user as a `kept` row by
+ * `buildChangeset` rather than being quietly dropped.
  */
 
 import { describe, it, expect } from "vitest";
@@ -209,6 +212,130 @@ describe("applyRunToRequest", () => {
 		// The rest of the request still saves.
 		expect(patch.method).toBe("POST");
 		expect(patch.url).toBe("https://api.example.test/users?page=2");
+	});
+
+	describe("a value the engine withheld from the snapshot (#1803)", () => {
+		const withheldRun = (snapshot: Record<string, unknown>) =>
+			run({ configSnapshot: { ...run().configSnapshot, ...snapshot } } as Partial<Run>);
+		const changeset = (r: Run, live: Request) => buildChangeset(seedFromRun(r, live), live);
+
+		it("never writes a withheld header, and keeps the request's own", () => {
+			const live = liveRequest({
+				headers: [
+					{ key: "Authorization", value: "Bearer {{token}}", enabled: true },
+					{ key: "X-Old", value: "stale", enabled: true },
+				],
+			});
+			const r = withheldRun({
+				headers: { "X-Plain": "visible", Authorization: "<redacted>" },
+			});
+
+			const patch = applyRunToRequest(seedFromRun(r, live), live);
+
+			expect(patch.headers).toEqual([
+				{ key: "X-Plain", value: "visible", enabled: true },
+				{ key: "Authorization", value: "Bearer {{token}}", enabled: true },
+			]);
+			expect(JSON.stringify(patch)).not.toContain("<redacted>");
+		});
+
+		it("does not list the kept header as a change, and names it as kept", () => {
+			const live = liveRequest({
+				headers: [{ key: "Authorization", value: "Bearer {{token}}", enabled: true }],
+			});
+			const set = changeset(withheldRun({ headers: { Authorization: "<redacted>" } }), live);
+
+			expect(set.find((i) => i.field === "Headers")).toBeUndefined();
+			const kept = set.find((i) => i.field === "Withheld headers");
+			expect(kept).toMatchObject({ state: "kept", value: "Authorization" });
+			expect(kept!.note).toMatch(/withhold/i);
+		});
+
+		it("writes a disabled header back disabled rather than dropping it", () => {
+			const off = { key: "Authorization", value: "Bearer {{token}}", enabled: false };
+			const live = liveRequest({ headers: [off] });
+			const r = withheldRun({ headers: { Authorization: "<redacted>" } });
+			const seed = seedFromRun(r, live);
+
+			expect(applyRunToRequest(seed, live).headers).toEqual([off]);
+			expect(buildChangeset(seed, live).find((i) => i.field === "Headers")).toBeUndefined();
+		});
+
+		it("leaves a withheld url and its params off the patch, with kept rows saying why", () => {
+			const live = liveRequest({
+				url: "https://api.example.test/users?key={{apiKey}}",
+				params: [{ key: "key", value: "{{apiKey}}", enabled: true }],
+			});
+			const r = withheldRun({ url: "https://api.example.test/users?key=<redacted>" });
+			const seed = seedFromRun(r, live);
+
+			const patch = applyRunToRequest(seed, live);
+			expect(patch).not.toHaveProperty("url");
+			expect(patch).not.toHaveProperty("params");
+			expect(patch.method).toBe("POST");
+
+			const set = buildChangeset(seed, live);
+			for (const field of ["URL", "Params"]) {
+				const row = set.find((i) => i.field === field);
+				expect(row?.state).toBe("kept");
+				expect(row?.note).toMatch(/withheld/i);
+			}
+			expect(set.find((i) => i.field === "URL")!.value).toBe(live.url);
+		});
+
+		it("leaves only the params off when a path row, not the url, held the marker", () => {
+			const live = liveRequest({
+				url: "https://api.example.test/users/:id",
+				params: [{ key: "id", value: "{{userId}}", enabled: true, in: "path" }],
+			});
+			const r = withheldRun({
+				url: "https://api.example.test/users/:id",
+				params: [{ key: "id", value: "<redacted>", enabled: true, in: "path" }],
+			});
+
+			const patch = applyRunToRequest(seedFromRun(r, live), live);
+
+			expect(patch.url).toBe("https://api.example.test/users/:id");
+			expect(patch).not.toHaveProperty("params");
+		});
+
+		it("leaves a withheld body off the patch, as a truncated one is", () => {
+			const live = liveRequest({ body: { mode: "json", content: '{"k":"{{secret}}"}' } });
+			const r = withheldRun({ body: { mode: "json", content: '{"k":"<redacted>"}' } });
+			const seed = seedFromRun(r, live);
+
+			const patch = applyRunToRequest(seed, live);
+			expect(patch).not.toHaveProperty("body");
+			expect(patch).not.toHaveProperty("bodyType");
+
+			const body = buildChangeset(seed, live).find((i) => i.field === "Body");
+			expect(body?.state).toBe("kept");
+			expect(body?.note).toMatch(/withheld/i);
+		});
+
+		it("leaves form fields off the patch when one holds the marker", () => {
+			const live = liveRequest();
+			const r = withheldRun({
+				body: {
+					mode: "x-www-form-urlencoded",
+					fields: [{ key: "pw", value: "<redacted>", enabled: true }],
+				},
+			});
+
+			expect(applyRunToRequest(seedFromRun(r, live), live)).not.toHaveProperty("body");
+		});
+
+		it("writes everything normally when nothing was withheld", () => {
+			const live = liveRequest();
+			const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+			expect(patch.url).toBe("https://api.example.test/users?page=2");
+			expect(patch.params).toEqual([{ key: "page", value: "2", enabled: true }]);
+			expect(patch.body).toEqual({ mode: "json", content: '{"a":1}' });
+			expect(
+				buildChangeset(seedFromRun(run(), live), live).map((i) => i.field)
+			).not.toContain("Withheld headers");
+		});
 	});
 
 	it("writes the body normally when the run was not truncated", () => {
