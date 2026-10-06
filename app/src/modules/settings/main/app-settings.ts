@@ -382,8 +382,8 @@ export const APP_SETTINGS = [
 		panel: "mcp",
 		label: "Reveal secrets to agents",
 		searchText:
-			"Whether agents read secret variables, auth credentials, cookie values and proxy passwords.",
-		keywords: ["secret", "password", "token", "mask", "withheld", "privacy"],
+			"Whether agents ever receive secret values: in variables, requests, run output or write results.",
+		keywords: ["secret", "password", "token", "mask", "withheld", "redacted", "privacy"],
 	},
 	// Files
 	{

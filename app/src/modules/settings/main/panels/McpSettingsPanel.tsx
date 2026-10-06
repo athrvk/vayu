@@ -967,7 +967,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{REVEAL.label}</CardTitle>
 					</div>
 					<CardDescription>
-						<CollapsibleText text="When off (default), what agents read leaves out your secrets: a variable marked secret, the token, password or key in an auth block, every cookie value, and the password in a proxy URL each arrive marked as withheld. Requests an agent sends still use them - Vayu fills them in, the agent never sees them. Turn it on to let agents read them as your own screens show them; an agent backed by a hosted model passes what it reads to that model's provider. With write access on, an agent can still unmark a secret and then read it, so keep both off where that matters." />
+						<CollapsibleText text="When off (default), agents never receive secret values - not in variables, requests, run output or write results. A variable marked secret, the token, password or key in an auth block, a credential header such as Authorization, every cookie value and the password in a proxy URL each arrive marked as withheld, and a secret that appears in what a run recorded reads <redacted>. Requests an agent sends still use them - Vayu fills them in, the agent never sees them - and an agent cannot clear a variable's secret flag to read it. Turn it on to let agents read them as your own screens show them; an agent backed by a hosted model passes what it reads to that model's provider." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

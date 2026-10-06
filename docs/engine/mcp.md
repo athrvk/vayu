@@ -190,8 +190,9 @@ validated by the SDK). A few declare an `outputSchema` and return validated
 `structuredContent` alongside the text rendering.
 
 The four categories partition tools by what they can do - and thus which gate
-applies: **read** (inspection; returns workspace data, with secret values
-withheld unless the user enables reveal - see [Secret values](#secret-values)),
+applies: **read** (inspection; returns workspace data, with secrets withheld unless the
+user enables reveal - see [Secret values](#secret-values), which also covers
+what a **write** tool answers and what a run output reads as),
 **execute** (has an effect outside
 this process without touching saved data - allowlist when it sends real traffic
 to a target, none when the effect is a loopback service the engine hosts, as for
@@ -202,55 +203,55 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
-| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials withheld unless revealed) |
+| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials and credential-header values withheld unless revealed) |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
-| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary |
-| `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report |
-| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max |
+| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
-| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped as `list_collections` answers it |
-| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; returns the row shaped as `list_collections` answers it |
+| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
+| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
-| `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
+| `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped; a credential header's current value withheld unless revealed) |
 | `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (`mode`: `contract` by default, `full` to write every edit into a bound document; document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry and how many credentials it left out in `secretsOmitted`) |
 | `export_postman`       | read     | `POST /export/postman`                       | - (credentials always written empty - auth, secret variables, and by name header, parameter, URL and cookie values - counted in `notes.secretsOmitted`; bodies and scripts are not judged; including them is a choice the app's dialog asks a person for; `notes.notCarried` names what Postman has no place for; document text capped at 32 KB, with `contentBytes` for the true size) |
-| `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
+| `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept; the returned row is withheld as `list_collections` answers it |
 | `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
-| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts |
-| `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id |
+| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
+| `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash`                                 | -                          |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation) |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); a restored row is withheld as the read of it is |
 | `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm     |
-| `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list) |
-| `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import |
-| `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable |
+| `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
+| `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
+| `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
-| `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it |
-| `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive) |
-| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names |
-| `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction |
+| `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
+| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
+| `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the returned row has secret values withheld unless revealed |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
 | `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (secret values withheld unless revealed) |
-| `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge |
+| `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `get_cookies`          | read     | `GET /cookies`                               | - (values withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
-| `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
+| `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
@@ -271,7 +272,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
 | `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
 | `delete_webhook_inbox` | write    | `GET /inbox` + `DELETE /inbox/:id`           | write toggle + confirm (the prompt names the capture count) |
-| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max; each body capped at 32 KB |
+| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max; each body capped at 32 KB; secret values and credential header values read `<redacted>` unless revealed |
 | `clear_inbox_captures` | write    | `DELETE /inbox/:id/requests`                 | write toggle               |
 | `update_inbox_response`| execute  | `PUT /inbox/:id` (merge-patch)               | - (live edit of the canned reply) |
 
@@ -664,7 +665,8 @@ Notes:
   partial updates preserve untouched variables and the name. Overwriting an
   existing variable changes its value only - its `secret`, `type`, `createdAt`
   and enabled/disabled state are preserved, so a rotated secret stays masked and
-  a disabled variable stays disabled. It is a `PUT`, not
+  a disabled variable stays disabled. The answer is the stored row, withheld as
+  `list_environments` withholds it. It is a `PUT`, not
   a `POST`: since #95 the engine's `POST /environments` is create-only, and since
   #97 it rejects a body carrying an `id` outright. `create_request` and
   `create_environment` stay `POST`s for the same reason - they create, and let
@@ -686,8 +688,10 @@ Notes:
   leaves the name resolving to an empty string - and a name that was not there
   comes back as a note on the result rather than an error, so a retried call
   does not fail on its own success. `secret` masks the value in the app and
-  withholds it from every MCP read unless the user enables reveal (see
-  [Secret values](#secret-values)).
+  withholds it from every MCP read, write answer and run output unless the user
+  enables reveal (see [Secret values](#secret-values)). Clearing it with
+  `secret: false` is refused while reveal is off, since the next read would
+  return the value; `secret: true` is always accepted.
 - **Activation is one write, and `"none"` is the other direction.**
   `activate_environment` sends `isActive: true` and nothing else: the DB layer
   clears the previously active row in the same transaction
@@ -1385,7 +1389,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
-| `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
+| `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. Masked as `list_runs` is. |
 | `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`; secrets withheld the same way). |
 | `vayu://environments`       | All environments, secret values withheld as `list_environments` withholds them. |
 | `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
@@ -1393,7 +1397,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
 | `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
-| `vayu://run/{runId}/report` | A run's full report (templated). |
+| `vayu://run/{runId}/report` | A run's full report (templated), masked as `get_run_report` is. |
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
@@ -1500,9 +1504,9 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
-| `summarize_run`        | `runId`                  | The run report + a "summarize p50/p95/p99, errors, health". |
+| `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
 | `compare_runs`         | `baseRunId?, targetRunId` | The computed delta + "did this regress?". An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
-| `diagnose_errors`      | `runId`                  | The report + an error-focused diagnosis prompt.             |
+| `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
 
 ## Safety model
@@ -1620,8 +1624,11 @@ configurable in **Settings → MCP** and persisted.
   what lets that proxy read TLS. On its own it grants nothing; the write toggle
   still decides whether `update_engine_config` is offered at all.
 - **Reveal secrets** (`revealSecretsToAgents`, default off) - while it is off,
-  every read withholds secret variables, auth credentials, cookie values and
-  proxy URL credentials, and the server instructions say so; see
+  an agent reads no secret through any tool: reads withhold secret variables,
+  auth credentials, credential header values, cookie values and proxy URL
+  credentials, write tools answer through the same projection and refuse to
+  clear a secret flag, and run output reads `<redacted>` for a secret variable's
+  value and a credential header's value. The server instructions say so; see
   [Secret values](#secret-values).
 - **Loopback services carry no gate of their own** - `start_mock_issuer`,
   `stop_mock_issuer`, `update_mock_issuer`, `start_mock_server`,
@@ -1667,23 +1674,70 @@ process did not already have.
 
 ### Secret values
 
-What the user treats as a secret is withheld from every MCP read unless they
-turn on **Reveal secrets to agents** (`revealSecretsToAgents`, default off) in
-Settings → MCP (#1805). Withheld is stated, never a silent omission, so an agent
-cannot read a missing value as an empty one:
+With **Reveal secrets to agents** (`revealSecretsToAgents`, default off) in
+Settings → MCP off, an agent reads no secret through any tool, resource or
+prompt (#1805, #1809). Four paths lead to a secret - what is stored, what a
+write tool answers, what a run recorded, and clearing the secret flag - and
+each is closed below. Withheld is stated, never a silent omission, so an agent
+cannot read a missing value as an empty one.
+
+**What is stored** is withheld as a field the projection replaces:
 
 | What | Withheld as | Read by |
 | ---- | ----------- | ------- |
 | A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
 | A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `list_collections`, `vayu://collections` |
+| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `list_request_examples` |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
+| A credential-bearing header's current value in a spec drift entry | `current` dropped, `currentWithheld: true` | `diff_spec` |
+
+**What a write tool answers** goes through the projection of the read of the
+same row (`echoShape`, `withholdReorderRows`), so writing does not grant
+reading: `create_collection`, `update_collection`, `unbind_spec`,
+`create_request`, `update_request`, `restore_trash_entry`,
+`create_request_example`, `update_request_example`, `move_item` (the renumbered
+rows), `create_environment`, `update_environment`, `activate_environment`
+(either direction) and `update_globals` answer the row they changed with the
+rows above withheld. The write that would lift the withholding is refused:
+`secret: false` over a stored `secret: true` on a variable of an environment,
+the globals or a collection is an error naming the setting, because the next
+read would return the value. `secret: true` and every other edit pass, and with
+reveal on nothing is refused. Removing a variable and creating it again stores
+the value the agent sent, which is no secret of the user's.
+
+**What a run recorded** is masked in place with the engine's `<redacted>`
+marker, so the record keeps its shape (`runOutputShape`). A request that
+references a secret still sends it, so the trace holds the resolved value in
+whatever encoding it went out in; an agent reads `<redacted>` there instead:
+
+| What | Masked as | Read by |
+| ---- | --------- | ------- |
+| The value of every secret variable of the workspace (globals, every environment, every collection) in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run_samples`, `list_runs`, `get_inbox_captures`, `set_run_baseline`, `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
+| The value of a credential-bearing header (the names above, plus the API-key header an auth block names, including one sent inline) in a header map, a header row list and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
+
+The masking is the engine's own rule for a run's config snapshot (#1803),
+applied to what a read can know: the secrets of every scope rather than only
+the run's, because a run row names its environment but not the collection chain
+an inline send resolved through, a list reads many runs at once and an inbox
+capture belongs to no run. The values are read when the tool is called, so a
+secret rotated since masks under its new value only. Keys are not touched, nor
+numbers, so a size the engine reported still describes what it measured. A tool
+that cuts a body to a byte cap (`run_request`, `get_run_report`,
+`get_inbox_captures`) masks *before* it cuts, because a cut through an unmasked
+secret leaves a prefix no form matches. `compare_runs` forwards
+numbers only and has nothing to mask.
+
+The stored trace stays raw on purpose: Vayu's own History shows what went over
+the wire, and the engine's rows are unchanged. Only the MCP read is masked.
 
 The credential lists are the engine's own `SECRET_AUTH_KEYS` and
 `SECRET_PARAM_KEYS` (`core/vayu_extensions.cpp`), the sets a collection export
-blanks, and the `postman` walk is its `redact_postman_auth`. An auth
+blanks, and the `postman` walk is its `redact_postman_auth`; the header names
+are the shared sensitive-header list, pinned to the engine's by
+`withhold.conformance.test.ts`. An auth
 member or row holding one `{{variable}}` reference and nothing else is shown as
 written, the way the export keeps it: it names where the secret lives without
 being it, and the variable it names is withheld on its own terms. An auth block
@@ -1693,20 +1747,8 @@ is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
 authenticate with nothing. The server instructions state the withholding in
 every session where reveal is off, beside the write gate's sentence and for the
-same reason. The projection lives in `withhold.ts`.
-
-Withholding covers what is *stored*, not what a run *recorded*. A request that
-references a secret still sends it, because the engine resolves it, so the
-record of what was sent shows it: a trace's `rawRequest` and headers in
-`get_run_report`, `get_run_samples` and `vayu://run/{runId}/report`, the run
-rows in `list_runs` and `vayu://runs`, the run-report prompts, an inbox
-capture in `get_inbox_captures`, and a saved example in
-`list_request_examples` are answered as recorded, reveal or not.
-
-Nor is it a boundary against an agent with write access: a write tool's answer
-echoes the stored row it changed, and `update_environment` can clear a
-variable's `secret` flag, after which it reads in full. Keep write access off
-where that matters.
+same reason, and each tool that carries one of the rows above says so in its
+own description. The projection lives in `withhold.ts`.
 
 ### Safety config
 
@@ -1722,7 +1764,7 @@ where that matters.
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
 | `allowNetworkSettings` | `false` | -         | Let `update_engine_config` change the proxy and trust-anchor keys. |
-| `revealSecretsToAgents` | `false` | -        | Let reads return secret values in full ([Secret values](#secret-values)). |
+| `revealSecretsToAgents` | `false` | -        | Lift every withholding in [Secret values](#secret-values): reads, write answers and run output. |
 | `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
 The renderer never sets these directly: `main.ts` sanitizes every change
@@ -1898,7 +1940,7 @@ from environment variables:
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | `false`               | `true` opens the proxy and CA config keys to writes. |
-| `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lets reads return secret values. |
+| `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lifts the secret withholding (reads, write answers, run output). |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 | `VAYU_LOG_DIR`                  | (unset)                 | Also write `mcp_<stamp>.log` there (#1558). |
 

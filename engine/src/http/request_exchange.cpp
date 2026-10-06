@@ -143,6 +143,9 @@ const vayu::Response& response) {
     // This is credential-grade material and deliberately not redacted, matching
     // the live field's documented contract: the `Cookie` line lands in the same
     // node that already stores the resolved `Authorization` header beside it.
+    // The stored trace stays raw by decision (History and every engine read are
+    // unchanged); the MCP server masks it on the way to an agent instead
+    // (#1809).
     // The redaction that does apply to run rows is `sanitize_config_snapshot`,
     // which guards `runs.config_snapshot` - the request as *composed, with its
     // credentials withheld* (#1803). A trace is the record of what was *sent*,
