@@ -122,3 +122,10 @@ export interface GeneratedSnippet {
 
 /** The placeholder a masked value is replaced with. Never a plausible value. */
 export const SECRET_PLACEHOLDER = "<secret>";
+
+/**
+ * What a secret becomes where the UI shows resolved text (the "Sends" line, the
+ * key/value Σ peek): the bullets a `SecretInput` draws, once per value, so the
+ * text does not give away the secret's length.
+ */
+export const SECRET_UI_MASK = "••••";

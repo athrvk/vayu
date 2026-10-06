@@ -2080,6 +2080,15 @@ variables. That is what lets it mount outside `RequestBuilderProvider`; before
 it, `KeyValueRow` called the context hook in its body and that hook *throws*
 with no provider, so every other surface hand-rolled its own rows (issue #564).
 
+**The Σ peek hides a secret variable's value** (#1810). It prints the row's
+resolved text, so `token={{secretVar}}` would show the secret on Params, Headers
+and both Body tables. `ResolvedPeek` applies `variables.maskSecrets` to the text
+it draws and to nothing else: the cached resolution (`stableRowField`) and
+`hasVariables` keep the real value, and the trigger's `aria-label` is built from
+the row's unresolved key, so it never carried one. A scope without `maskSecrets`
+(a surface with no variables) shows the text as is. `KeyValuePeek.secrets.test.tsx`
+renders each table through its real panel.
+
 `allowFiles` (form-data only) turns each row into a text/file switch and stays
 on this table rather than the caller, since only the request builder has a wire
 format that can carry a file; `FilePartCell` is the value cell of a file part -
@@ -2528,6 +2537,12 @@ the optional `dataColumns` (the declared data contract in scope, issue #600).
 `dataColumns` is optional *within* a scope rather than with it: absent means the
 chain declares no contract, which is every workspace that has not opened the
 Data tab.
+
+`maskSecrets` is the other optional member: `useVariableSupport` builds it from
+`getAllVariables()` *at the call*, never at memo time, so the memoised scope
+holds no secret text, and it masks with `SECRET_UI_MASK` (`services/codegen`),
+the same bullets the Params tab's "Sends" line uses. Absent means the scope
+marks nothing secret.
 
 It exists because reaching for the context instead made two primitives
 unmountable anywhere but the request builder: `useRequestBuilderContext()`

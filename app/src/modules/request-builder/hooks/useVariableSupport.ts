@@ -20,7 +20,11 @@
  * fresh identity each render would re-render every row of the densest table in
  * the app on every keystroke.
  *
- * Every member is read straight off the context, `dataColumns` (the declared
+ * `maskSecrets` reads the secrets when it is called, not when this memo builds,
+ * so the memo never holds secret text; it is rebuilt only with `getAllVariables`,
+ * which is what changes when a variable does (#1810).
+ *
+ * Every other member is read straight off the context, `dataColumns` (the declared
  * data contract, issue #600) included. The provider resolves that one from the
  * collections it already holds rather than this hook querying for it: a token
  * painter that reached for the query cache would need a `QueryClientProvider`
@@ -29,6 +33,7 @@
 
 import { useMemo } from "react";
 import type { VariableSupport } from "@/types";
+import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
 import { useRequestBuilderContext } from "../context/RequestBuilderContext";
 
 export function useVariableSupport(): VariableSupport {
@@ -48,6 +53,13 @@ export function useVariableSupport(): VariableSupport {
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			maskSecrets: (text: string) =>
+				createSecretMasker(
+					collectSecrets(getAllVariables(), undefined),
+					true,
+					undefined,
+					SECRET_UI_MASK
+				).apply(text),
 		}),
 		[
 			resolveString,

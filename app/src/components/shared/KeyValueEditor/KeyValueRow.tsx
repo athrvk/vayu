@@ -85,8 +85,22 @@ interface KeyValueRowProps {
  * (`stableRowField` below), not a resolution of its own: "peek" promises the
  * value this row stands for, and opening it twice without editing anything has
  * to answer the same thing both times.
+ *
+ * **A secret variable's value is hidden here** (#1810), by `mask` applied to
+ * the text drawn and to nothing else: the cached resolution and `hasVariables`
+ * keep the real value, so the row's identity is unchanged and only the pixels
+ * differ. The trigger's name is `label`, the row's *unresolved* key, so it
+ * carries a variable's name and never its value.
  */
-function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) {
+function ResolvedPeek({
+	label,
+	resolved,
+	mask,
+}: {
+	label: string;
+	resolved: string;
+	mask?: (text: string) => string;
+}) {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -99,7 +113,7 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 				</button>
 			</TooltipTrigger>
 			<TooltipContent side="left" className="max-w-md">
-				<span className="font-mono break-all">{resolved}</span>
+				<span className="font-mono break-all">{mask ? mask(resolved) : resolved}</span>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -302,6 +316,7 @@ function KeyValueRow({
 					<ResolvedPeek
 						label={item.key || "this row"}
 						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}
+						mask={variables?.maskSecrets}
 					/>
 				) : (
 					<TimeMarker
