@@ -27,7 +27,11 @@ import {
 	type SnippetRequest,
 } from "./types";
 import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
-import { encodeQueryComponent } from "@/modules/request-builder/utils/query-encoding";
+import {
+	encodeAtUrlComponent,
+	encodeQueryComponent,
+} from "@/modules/request-builder/utils/query-encoding";
+import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -78,18 +82,48 @@ function asString(value: unknown): string {
 }
 
 /**
- * Replace every secret value wherever it appears.
- *
- * Longest first: two secrets where one is a prefix of the other would otherwise
- * leave the tail of the longer one in the output. Empty and whitespace-only
- * entries are dropped - a variable set to "" would otherwise match at every
- * position and shred the string.
+ * A secret as it can appear in a URL: as written, as substituted into URL text
+ * (`encodeAtUrlComponent`, the rule compose and the "Sends" line apply to a
+ * `{{token}}` in a path or query, which leaves `&` and `=` raw), as a query
+ * row's value (`encodeQueryComponent`) and as `encodeURIComponent` writes it.
+ * The raw value alone would miss `a b&c` sitting there as `a%20b&c`.
  */
-function maskerFor(secrets: string[] | undefined, mask: boolean | undefined) {
-	const values = mask
-		? [...new Set((secrets ?? []).filter((s) => s.trim().length > 0))].sort(
-				(a, b) => b.length - a.length
-			)
+function secretForms(secret: string): string[] {
+	return [
+		secret,
+		encodeAtUrlComponent(secret, "head").written,
+		encodeAtUrlComponent(secret, "query").written,
+		encodeQueryComponent(secret, "value"),
+		encodeURIComponent(secret),
+	];
+}
+
+/**
+ * Replace every secret value wherever it appears, and every header whose name
+ * says it holds a credential.
+ *
+ * Longest first, over the encoded forms too: two secrets where one is a prefix
+ * of the other would otherwise leave the tail of the longer one in the output.
+ * Empty and whitespace-only entries are dropped before expanding - a variable
+ * set to "" would otherwise match at every position and shred the string.
+ *
+ * A header row is replaced whole, whatever it holds: a typed `Authorization`
+ * is not a variable, so its name is the only signal there is
+ * (`isSensitiveHeaderName`).
+ *
+ * `placeholder` is what each hit becomes: `<secret>` for code, which must stay
+ * readable as text, and a surface that shows the value in a UI picks its own.
+ */
+export function createSecretMasker(
+	secrets: string[] | undefined,
+	active: boolean | undefined,
+	apiKeyHeaderName?: string,
+	placeholder: string = SECRET_PLACEHOLDER
+) {
+	const values = active
+		? [
+				...new Set((secrets ?? []).filter((s) => s.trim().length > 0).flatMap(secretForms)),
+			].sort((a, b) => b.length - a.length)
 		: [];
 	let used = false;
 	const apply = (text: string): string => {
@@ -97,11 +131,18 @@ function maskerFor(secrets: string[] | undefined, mask: boolean | undefined) {
 		for (const secret of values) {
 			if (!out.includes(secret)) continue;
 			used = true;
-			out = out.split(secret).join(SECRET_PLACEHOLDER);
+			out = out.split(secret).join(placeholder);
 		}
 		return out;
 	};
-	return { apply, wasUsed: () => used };
+	const applyHeader = (name: string, value: string): string => {
+		if (!active || value.trim() === "" || !isSensitiveHeaderName(name, apiKeyHeaderName)) {
+			return apply(value);
+		}
+		used = true;
+		return placeholder;
+	};
+	return { apply, applyHeader, wasUsed: () => used };
 }
 
 /**
@@ -254,7 +295,6 @@ export function prepareRequest(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
 ): PreparedRequest {
-	const masker = maskerFor(options.secrets, options.mask);
 	const notes: string[] = [];
 
 	// Path variables first, as the engine composes them (issue #1764), so a
@@ -269,6 +309,7 @@ export function prepareRequest(
 
 	const auth = request.auth;
 	const mode = auth ? asString(auth.mode) : "";
+	const masker = createSecretMasker(options.secrets, options.mask, apiKeyHeaderName(auth));
 	switch (mode) {
 		case "":
 		case "none":
@@ -315,7 +356,7 @@ export function prepareRequest(
 	return {
 		method: (request.method || "GET").toUpperCase(),
 		url: masker.apply(url),
-		headers: withContentType.map(([k, v]): [string, string] => [k, masker.apply(v)]),
+		headers: withContentType.map(([k, v]): [string, string] => [k, masker.applyHeader(k, v)]),
 		basicAuth: maskedBasic,
 		body: body ? maskedBody(body, masker.apply) : undefined,
 		stream: request.stream === true,
@@ -329,6 +370,16 @@ export function prepareRequest(
 		notes,
 		masked: masker.wasUsed(),
 	};
+}
+
+/**
+ * The header an API-key auth writes its key into, or none when it writes a
+ * query parameter instead (that value is masked by value, like any secret).
+ */
+function apiKeyHeaderName(auth: Record<string, unknown> | undefined): string | undefined {
+	if (!auth || asString(auth.mode) !== "apikey" || asString(auth.in) === "query")
+		return undefined;
+	return asString(auth.key) || undefined;
 }
 
 /**
@@ -349,4 +400,22 @@ export function authSecrets(auth: Record<string, unknown> | undefined): string[]
 		default:
 			return [];
 	}
+}
+
+/**
+ * Every value a snippet must hide: the secret variables in `variables` plus the
+ * request's own auth credentials. The one place that list is built, so a second
+ * surface showing the resolved request masks exactly what the snippet does;
+ * hand it to `createSecretMasker`, which adds the encoded forms.
+ */
+export function collectSecrets(
+	variables: Record<string, { value: string; secret?: boolean }>,
+	auth: Record<string, unknown> | undefined
+): string[] {
+	return [
+		...Object.values(variables)
+			.filter((v) => v.secret)
+			.map((v) => v.value),
+		...authSecrets(auth),
+	];
 }

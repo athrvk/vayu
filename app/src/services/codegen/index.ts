@@ -73,6 +73,6 @@ export { generateFetch } from "./fetch";
 export { generateHttpie } from "./httpie";
 export { generatePowerShell } from "./powershell";
 export { generatePython } from "./python";
-export { authSecrets } from "./prepare";
+export { authSecrets, collectSecrets, createSecretMasker } from "./prepare";
 export { SECRET_PLACEHOLDER } from "./types";
 export type { CodegenOptions, GeneratedSnippet, SnippetBody, SnippetRequest } from "./types";

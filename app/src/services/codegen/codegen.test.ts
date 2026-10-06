@@ -22,6 +22,7 @@ import {
 	CODE_TARGETS,
 	SECRET_PLACEHOLDER,
 	authSecrets,
+	collectSecrets,
 	generateCurl,
 	generateFetch,
 	generateHttpie,
@@ -316,6 +317,20 @@ describe("auth is applied, because the engine applies it at send time", () => {
 		);
 	});
 
+	it("builds the one secrets list from the secret variables and the auth", () => {
+		expect(
+			collectSecrets(
+				{
+					token: { value: "v-secret", secret: true },
+					host: { value: "api.example.com", secret: false },
+					plain: { value: "p" },
+				},
+				{ mode: "bearer", token: "t" }
+			)
+		).toEqual(["v-secret", "t"]);
+		expect(collectSecrets({}, undefined)).toEqual([]);
+	});
+
 	it("names the credential values a caller should mask", () => {
 		expect(authSecrets({ mode: "bearer", token: "t" })).toEqual(["t"]);
 		expect(authSecrets({ mode: "basic", username: "ada", password: "p" })).toEqual(["p"]);
@@ -356,7 +371,11 @@ describe("secret masking", () => {
 	it("ignores an empty or whitespace secret instead of shredding the output", () => {
 		// A variable set to "" is `includes("")` everywhere - masking on it would
 		// replace between every character of the command.
-		const { code } = generateCurl(request, { secrets: ["", "   "], mask: true });
+		// No auth: a bearer's Authorization header is masked by name regardless.
+		const { code } = generateCurl(
+			{ ...request, auth: undefined },
+			{ secrets: ["", "   "], mask: true }
+		);
 		expect(code).toContain("s3cret");
 		expect(code).not.toContain(SECRET_PLACEHOLDER);
 	});
@@ -379,6 +398,96 @@ describe("secret masking", () => {
 			{ secrets: ["it's secret"], mask: true }
 		);
 		expect(code).toContain(`--data-raw '${SECRET_PLACEHOLDER}'`);
+	});
+
+	describe("by header name (issue #1806)", () => {
+		it("masks a typed Authorization header no secret variable holds", () => {
+			const { code, masked } = generateCurl(
+				{ ...GET, headers: { authorization: "Basic dXNlcjpwYXNz", "X-Other": "public" } },
+				{ secrets: [], mask: true }
+			);
+			expect(code).toContain(`-H 'authorization: ${SECRET_PLACEHOLDER}'`);
+			expect(code).not.toContain("dXNlcjpwYXNz");
+			expect(code).toContain("X-Other: public");
+			expect(masked).toBe(true);
+		});
+
+		it("masks the header the API-key auth names, whatever it is called", () => {
+			const request: SnippetRequest = {
+				...GET,
+				headers: { "x-tenant-key": "k-123" },
+				auth: { mode: "apikey", key: "X-Tenant-Key", value: "", in: "header" },
+			};
+			const { code } = generateCurl(request, { secrets: [], mask: true });
+			expect(code).toContain(`-H 'x-tenant-key: ${SECRET_PLACEHOLDER}'`);
+			expect(code).not.toContain("k-123");
+		});
+
+		it("does not treat a query-located API key's name as a header", () => {
+			const { code } = generateCurl(
+				{
+					...GET,
+					headers: { "X-Tenant-Key": "public" },
+					auth: { mode: "apikey", key: "X-Tenant-Key", value: "", in: "query" },
+				},
+				{ secrets: [], mask: true }
+			);
+			expect(code).toContain("X-Tenant-Key: public");
+		});
+
+		it("leaves every header alone when masking is off", () => {
+			const { code, masked } = generateCurl(
+				{ ...GET, headers: { Authorization: "Bearer t0ken" } },
+				{ secrets: [], mask: false }
+			);
+			expect(code).toContain("Authorization: Bearer t0ken");
+			expect(masked).toBe(false);
+		});
+
+		it("leaves a sensitive header with nothing in it, and says nothing was masked", () => {
+			const { code, masked } = generateCurl(
+				{ ...GET, headers: { Cookie: "" } },
+				{ secrets: [], mask: true }
+			);
+			expect(code).not.toContain(SECRET_PLACEHOLDER);
+			expect(masked).toBe(false);
+		});
+	});
+
+	describe("encoded forms", () => {
+		const secret = "a b&c/d";
+
+		it.each([
+			["the query encoding", "https://h/p?k=a%20b%26c/d"],
+			["URL text substituted into the query", "https://h/p?k=a%20b&c/d"],
+			["encodeURIComponent", "https://h/p?k=a%20b%26c%2Fd"],
+		])("masks a secret substituted as %s", (_name, url) => {
+			const { code, masked } = generateCurl(
+				{ ...GET, url },
+				{ secrets: [secret], mask: true }
+			);
+			expect(code).toContain(`https://h/p?k=${SECRET_PLACEHOLDER}`);
+			expect(code).not.toMatch(/a%20b/);
+			expect(masked).toBe(true);
+		});
+
+		it("masks the longer secret's encoded form whole", () => {
+			// "a%20b" is a prefix of "a%20bc": shortest-first would leave the "c".
+			const { code } = generateCurl(
+				{ ...GET, url: "https://h/p?k=a%20bc" },
+				{ secrets: ["a b", "a bc"], mask: true }
+			);
+			expect(code).toContain(`?k=${SECRET_PLACEHOLDER}`);
+			expect(code).not.toContain("c'");
+		});
+
+		it("does not expand a whitespace-only secret into its encoded form", () => {
+			const { code } = generateCurl(
+				{ ...GET, url: "https://h/p?k=%20" },
+				{ secrets: [" "], mask: true }
+			);
+			expect(code).toContain("%20");
+		});
 	});
 });
 

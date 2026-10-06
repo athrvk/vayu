@@ -50,7 +50,12 @@ import {
 	ToggleGroupItem,
 	TooltipIconButton,
 } from "@/components/ui";
-import { CODE_TARGETS, authSecrets, generateSnippet, type CodeTargetId } from "@/services/codegen";
+import {
+	CODE_TARGETS,
+	collectSecrets,
+	generateSnippet,
+	type CodeTargetId,
+} from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { templatedRequest } from "./templated-request";
@@ -108,12 +113,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				? { ...(composed.data as SnippetRequest), stream: request.stream }
 				: null;
 
-	const secrets = [
-		...Object.values(getAllVariables())
-			.filter((v) => v.secret)
-			.map((v) => v.value),
-		...authSecrets(source?.auth),
-	];
+	const secrets = collectSecrets(getAllVariables(), source?.auth);
 
 	// Templated output holds `{{token}}`, not the value behind it, so there is
 	// nothing to reveal and nothing to hide - the toggle would be a control that

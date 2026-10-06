@@ -41,6 +41,7 @@ import {
 	CardTitle,
 	Skeleton,
 	Textarea,
+	SecretInput,
 	ICON_MOTION,
 } from "@/components/ui";
 import { EmptyState, ErrorState } from "@/components/shared";
@@ -68,6 +69,13 @@ const ENGINE_SAVE_NOTE = "Changes are staged here and written when you save.";
  * reports its success under it, and that call sits above the registration.
  */
 const SAVE_CONTEXT_ID = "settings";
+
+/**
+ * The one string setting drawn masked (#1806): a proxy URL carries credentials
+ * as `user:pass@host`. Keyed on the name, UI only - the engine stores it as
+ * plaintext like every other setting.
+ */
+const PROXY_URL_KEY = "proxyUrl";
 
 /**
  * Check if a config entry requires a restart when changed
@@ -825,6 +833,15 @@ export default function SettingsMain() {
 							// CardTitle, which nothing links to this control.
 							aria-label={entry.label}
 						/>
+					) : entry.key === PROXY_URL_KEY ? (
+						<div className="max-w-xs">
+							<SecretInput
+								value={currentValue}
+								onChange={(next) => handleValueChange(entry, next)}
+								disabled={dependentDisabled}
+								aria-label={entry.label}
+							/>
+						</div>
 					) : (
 						<Input
 							type="text"

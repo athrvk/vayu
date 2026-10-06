@@ -611,7 +611,9 @@ Variables are resolved with priority: **Environment > Collection > Global**
   otherwise downloads from a Google CDN at first use on Windows and Linux.
   Monaco's editors are unaffected either way; they own their own text area.
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
-  SQLite, the same way every other stored credential is. libcurl derives the
+  SQLite, the same way every other stored credential is. Settings draws that
+  one field as a `SecretInput` (masked until revealed, #1806), keyed on the
+  setting's name; the stored value and the engine's API are unchanged. libcurl derives the
   `Proxy-Authorization` header from the URL, and that header is on the
   redaction list, so credentials do not reach a stored trace. The engine's
   startup log is the exception today: it can print a scheme-less proxy URL

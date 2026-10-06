@@ -314,6 +314,19 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/components/shared/ElementList/element-categories.conformance.test.tsx",
 		paths: ["engine/tests/fixtures/element-kinds.json"],
 	},
+	/*
+	 * One fixture, two readers: `log.ts`'s port of the engine's redaction, and
+	 * the snippet generator's header-name list (#1806), whose names the engine
+	 * test asserts are secret field names.
+	 */
+	logRedaction: {
+		reader: "app/electron/log-redaction.conformance.test.ts",
+		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
+	},
+	sensitiveHeaders: {
+		reader: "app/src/lib/sensitive-headers.conformance.test.ts",
+		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**
