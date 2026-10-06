@@ -48,6 +48,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vayu::core::vayu_ext {
 
@@ -64,16 +65,22 @@ constexpr std::string_view INVALID_KIND = "vayu_extension_invalid";
 
 /**
  * A stored auth object with every secret blanked, `mode` and every other field
- * kept (`config` included, an OAuth 2.0 config's own secrets blanked the same
- * way). Adds one to @p omitted per value blanked.
+ * kept. The named credentials (`token`, `password`, an API key's `value`) are
+ * blanked by name; a `config` bag - an OAuth 2.0 config, or the data-only AWS,
+ * digest, NTLM, Hawk, OAuth 1.0, EdgeGrid and JWT modes - is blanked by
+ * allowlist instead: every member not known to describe the auth rather than
+ * carry a credential is emptied, so a name this file never heard of
+ * (Insomnia's `secretAccessKey`) does not leave. Adds one to @p omitted per
+ * value blanked.
  */
 [[nodiscard]] Json redact_auth (const Json& auth, int& omitted);
 
 /**
  * A Postman `auth` block as a file wrote it - v2.1's attribute arrays
  * (`{"type": "bearer", "bearer": [{"key": "token", "value": ...}]}`) or v2.0's
- * detail objects - with every secret value blanked in place, by the same key
- * set and the same `{{variable}}` exemption `redact_auth` uses. Used for the
+ * detail objects - with every secret value blanked in place, by the same rules
+ * and the same `{{variable}}` exemption `redact_auth` uses (the allowlist for
+ * the config-bag types, the credential names for the rest). Used for the
  * `postman` source a Postman import keeps on a stored auth, and for a stored
  * example's recorded request (`originalRequest.auth`). Adds one to @p omitted
  * per value blanked.
@@ -82,6 +89,59 @@ void redact_postman_auth (Json& source, int& omitted);
 
 /// A stored variables object with every `secret: true` value blanked.
 [[nodiscard]] Json redact_variables (const Json& variables, int& omitted);
+
+/**
+ * The header names an API-key auth sends its key under: `{mode: "apikey",
+ * key: "X-Tenant-Token", in: "header"}` names `X-Tenant-Token`, which no static
+ * list can know. Empty for every other mode, and for an API key placed in the
+ * query. @p auth is the auth in force for the request (an `inherit` already
+ * resolved), as the caller's `redact_auth` input is.
+ */
+[[nodiscard]] std::vector<std::string> apikey_header_names (const Json& auth);
+
+/// The query-parameter name an API-key auth placed `in: "query"` sends its
+/// key under; empty otherwise. The counterpart of @ref apikey_header_names.
+[[nodiscard]] std::vector<std::string> apikey_param_names (const Json& auth);
+
+/**
+ * A header table (`[{key, value, enabled}, ...]`) with each credential's value
+ * blanked in place: the row and its key stay, so the export still says which
+ * header was sent. A value is a credential when its name is a sensitive header
+ * (`utils::is_secret_header_name`, the set the logger redacts) or one of
+ * @p extra_header_names (@ref apikey_header_names), whether the row is enabled
+ * or not. An empty value and a value that is exactly one `{{variable}}`
+ * reference are kept. Adds one to @p omitted per value blanked; anything but
+ * an array of objects is left alone.
+ */
+void blank_credential_rows (Json& rows,
+const std::vector<std::string>& extra_header_names,
+int& omitted);
+
+/**
+ * A Params table with each credential's value blanked in place, by the same
+ * keep-the-row rule as @ref blank_credential_rows. The name set is narrower
+ * than a header's: a query parameter is data far more often than a header is,
+ * so the generic `code` (`?code=US`) is not a credential here, and `key`
+ * (a cache key, a sort key) is not either. @p extra_param_names adds what an
+ * API-key auth placed in the query names (@ref apikey_param_names).
+ */
+void blank_credential_param_rows (Json& rows,
+const std::vector<std::string>& extra_param_names,
+int& omitted);
+
+/**
+ * A URL with its credentials blanked and everything else kept: the password
+ * of `user:pass@host` is dropped (the user name stays), and the value of a
+ * query parameter whose name @ref blank_credential_param_rows treats as a
+ * credential is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`).
+ * Unlike `utils::strip_url_secrets`, which keeps scheme, host and path for a
+ * log line, this loses no query data an import would need. A `{{variable}}`
+ * reference stays wherever it stands alone. Adds one to @p omitted per value
+ * dropped.
+ */
+[[nodiscard]] std::string redact_url_credentials (std::string_view url,
+const std::vector<std::string>& extra_param_names,
+int& omitted);
 
 /**
  * A stored body as another machine can use it: a file part, or a binary body's
