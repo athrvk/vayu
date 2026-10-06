@@ -1233,8 +1233,10 @@ with its credentials withheld. Composition has already written every
   `X-Api-Key`, ...; `vayu::utils::is_secret_field_name`, case-insensitive) or
   by the request's own `apikey` auth becomes `"<redacted>"`, the name kept;
 - every occurrence of a value of a variable marked `secret` - raw, strictly
-  percent-encoded (RFC 3986), and as composition writes a query value -
-  inside `url`, `params`, `headers`, `body.content` and `body.fields` becomes
+  percent-encoded (RFC 3986), as composition writes a query value, JSON-escaped
+  (a JSON body is stored as text, so `pa"ss\word` is `pa\"ss\\word` inside
+  it) and XML-escaped (character data, and each attribute delimiter) - inside
+  `url`, `params`, `headers`, `body.content` and `body.fields` becomes
   `<redacted>`. The values come from the scopes the payload names: globals,
   `environmentId`, and the collection chain of `requestId`'s request (a
   scenario run: of its collection). A value under four characters is left

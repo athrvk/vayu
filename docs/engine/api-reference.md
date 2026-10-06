@@ -7890,9 +7890,11 @@ into `sanitize_config_snapshot`.
 keeps its name with the value `"<redacted>"`, and every value of a variable
 marked secret in the payload's scopes (globals, `environmentId`, the collection
 chain of `requestId`'s request) is written as `<redacted>` wherever it landed in
-`url`, `params`, `headers` or `body`. A value under four characters is not
-masked. `result.trace` is the record of what was sent and keeps it all. A run
-stored before this change returns its snapshot as it was written.
+`url`, `params`, `headers` or `body`, in its raw, percent-encoded,
+JSON-escaped and XML-escaped forms (a JSON body holds `pa"ss` as `pa\"ss`). A
+value under four characters is not masked. `result.trace` is the record of
+what was sent and keeps it all. A run stored before this change returns its
+snapshot as it was written.
 
 A load or collection run's `configSnapshot` also carries `defaultHeaders`
 (issue #1488), the run's resolved decision at start about what the engine

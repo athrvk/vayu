@@ -1353,9 +1353,9 @@ record shape, the category list, the redaction rule and the file layout
   so `sanitize_config_snapshot` keeps `auth` down to `{mode}`, writes
   `<redacted>` for the value of every header named in the shared secret set
   (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's own
-  `apikey` auth, and masks every value of a variable marked secret, raw and
-  percent-encoded, wherever it landed in `url`, `params`, `headers`,
-  `body.content` or `body.fields` (issue #1803). Composition answers with
+  `apikey` auth, and masks every value of a variable marked secret, raw,
+  percent-encoded, JSON-escaped and XML-escaped, wherever it landed in `url`,
+  `params`, `headers`, `body.content` or `body.fields` (issue #1803). Composition answers with
   values, not provenance, so the secret values are read from the scopes the
   payload names (globals, `environmentId`, the collection chain of
   `requestId`'s request or of a scenario's collection), and a value under four

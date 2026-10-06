@@ -206,6 +206,41 @@ TEST (SanitizeConfigSnapshot, MasksTheSecretsPercentEncodedForms) {
     EXPECT_EQ (parsed["url"], "https://x/a?u=<redacted>&q=<redacted>&r=keep");
 }
 
+// A JSON body is stored as text, so a secret holding `"` or `\` sits in it in
+// its JSON-escaped form and the raw text alone would miss it.
+TEST (SanitizeConfigSnapshot, MasksTheSecretsJsonEscapedForm) {
+    const std::string secret  = R"(pa"ss\word-12345)";
+    const std::string content = R"({"t": "pa\"ss\\word-12345", "n": 1})";
+    const json cfg            = { { "url", "https://x" },
+                   { "body", { { "mode", "json" }, { "content", content } } } };
+    const auto parsed         = sanitized (cfg, { secret });
+    EXPECT_EQ (parsed["body"]["content"], R"({"t": "<redacted>", "n": 1})");
+    EXPECT_EQ (parsed.dump ().find ("word-12345"), std::string::npos) << parsed.dump (2);
+}
+
+// A control character a JSON writer must escape is covered by the same form.
+TEST (SanitizeConfigSnapshot, MasksAJsonEscapedSecretHoldingControlCharacters) {
+    const std::string secret = "line1\nline2\ttab";
+    const json cfg           = { { "url", "https://x" },
+                  { "body", { { "mode", "json" }, { "content", R"({"t":"line1\nline2\ttab"})" } } } };
+    EXPECT_EQ (sanitized (cfg, { secret })["body"]["content"], R"({"t":"<redacted>"})");
+}
+
+// An XML body escapes `&`, `<` and `>` in character data, and the delimiter in
+// an attribute.
+TEST (SanitizeConfigSnapshot, MasksTheSecretsXmlEscapedForms) {
+    const std::string secret = R"(a&b<c>"d'e-12345)";
+    const json cfg           = { { "url", "https://x" },
+                  { "body",
+                  { { "mode", "xml" },
+                  { "content",
+                  "<p k=\"a&amp;b&lt;c&gt;&quot;d'e-12345\" "
+                            "j='a&amp;b&lt;c&gt;\"d&apos;e-12345'>"
+                            "a&amp;b&lt;c&gt;\"d'e-12345</p>" } } } };
+    EXPECT_EQ (sanitized (cfg, { secret })["body"]["content"],
+    "<p k=\"<redacted>\" j='<redacted>'><redacted></p>");
+}
+
 // The guard against shredding a snapshot: "dev" would match half the URLs a
 // workspace holds.
 TEST (SanitizeConfigSnapshot, LeavesASecretShorterThanFourCharactersAlone) {
