@@ -533,17 +533,18 @@ TEST_F (RunsRouteTest, MalformedSnapshotStaysEmptyAcrossPolls) {
 // entry no request can reach, and capacity is what reclaims it.
 TEST_F (RunsRouteTest, SummaryCacheStaysWithinCapacity) {
     constexpr std::size_t CAPACITY = 4;
-    vayu::http::RunSummaryCache small (CAPACITY);
+    // Not `small`: <httplib.h> pulls in <windows.h>, where MSVC defines it as `char`.
+    vayu::http::RunSummaryCache bounded (CAPACITY);
 
     for (int i = 0; i < 10; ++i) {
         seed ({ .id = "run_" + std::to_string (i), .start_time = i });
     }
 
-    auto [status, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, small);
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, bounded);
     EXPECT_EQ (status, 200);
     EXPECT_EQ (body["data"].size (), 10u);
-    EXPECT_EQ (small.build_count (), 10u);
-    EXPECT_LE (small.size (), CAPACITY);
+    EXPECT_EQ (bounded.build_count (), 10u);
+    EXPECT_LE (bounded.size (), CAPACITY);
 }
 
 // #1150's listing log line (the reason it stayed at DEBUG, not INFO, is
