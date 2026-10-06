@@ -73,11 +73,22 @@ secret variable's value, a credential typed into a saved auth block or a
 credential header's value appears, whatever encoding it went out in. If Vayu
 cannot read the values it masks against, the agent gets an error in place of
 the record, never a partly masked one. Requests an agent sends still use the
-real values; the engine fills them in. An agent cannot get around this by
-writing: clearing a variable's secret flag is refused while reveal is off. An
-agent backed by a hosted model forwards what it reads to that model's provider.
-Treat connecting an agent as granting it read access to the rest of your
-workspace, and keep the server off until you want that.
+real values; the engine fills them in. Clearing a variable's secret flag, the
+one write that would hand the value back on the next read, is refused while
+reveal is off.
+
+This is not a sandbox, and three paths remain open with reveal off. A
+pre-request script the agent sends with `run_request` runs with your
+environment's secrets and can copy one into a variable not marked secret, or
+into its own output (tracked in #1834). A credential the engine writes itself,
+such as an OAuth 2.0 token it placed in the URL's query, or an API key sent
+inline with one request and read back later, is not recognised as a secret in
+a trace (#1835). A password written into a saved request's URL, or a query
+parameter row that holds a key, is returned as stored (#1781).
+
+An agent backed by a hosted model forwards what it reads to that model's
+provider. Treat connecting an agent as granting it read access to the rest of
+your workspace, and keep the server off until you want that.
 
 The run history in Vayu's own screens is not masked: a request that references a
 secret sends it, so the stored trace and inbox captures keep what went over the

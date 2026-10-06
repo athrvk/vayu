@@ -1039,8 +1039,11 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   and
   `rawRequest` is the
   full wire frame including the `Cookie` line and libcurl's own `Accept` /
-  `Content-Length`. Both are passed through verbatim; read them rather than the
-  request the call sent. A `postRequestScript` reads the same set as
+  `Content-Length`. Both keep their shape and every non-credential value as
+  the engine recorded them; read them rather than the request the call sent.
+  Unless the user has turned on reveal, a credential-bearing header's value
+  and every secret value in either reads `<redacted>` (see
+  [Secret values](#secret-values)). A `postRequestScript` reads the same set as
   `pm.request.headers` (see
   [scripting.md](scripting.md#request-object-pmrequest)).
 - **Transport fields** - `httpVersion` rides the inline overlay for both tools,
@@ -1764,6 +1767,23 @@ authenticate with nothing. The server instructions state the withholding in
 every session where reveal is off, beside the write gate's sentence and for the
 same reason, and each tool that carries one of the rows above says so in its
 own description. The projection lives in `withhold.ts`.
+
+**What this does not cover.** The masking withholds what Vayu can recognise as
+a secret in what an agent reads; three paths are still open with reveal off:
+
+- A script the agent runs runs with the secrets. `run_request` takes an inline
+  `preRequestScript`, and the engine executes it with the environment's
+  variables, secret ones included, so it can copy a secret into a variable not
+  flagged `secret` or into its own console output, and the next read returns
+  that copy as an ordinary value. Tracked in #1834.
+- A credential the engine writes itself is not a masked value. An OAuth 2.0
+  access token the engine fetched and placed in the query is in no stored row,
+  and nor is an API key sent inline with a request and read back later through
+  `get_run_report`; both reach a trace as plain text. Tracked in #1835.
+- A saved request's own URL and parameter rows are not projected:
+  `user:password@` userinfo in its `url`, and a `params` row whose name says it
+  carries a credential (`api_key`, `token`), read back as stored through
+  `list_requests` and `vayu://collections`. Tracked under #1781.
 
 ### Safety config
 

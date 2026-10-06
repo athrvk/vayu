@@ -54,6 +54,7 @@ import {
 } from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 import {
+	HEADER_BODY_SEPARATOR,
 	MaskingIncompleteError,
 	runOutputShape,
 	secretsShape,
@@ -374,8 +375,6 @@ function boundText(
 	while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
 	return { text: buf.subarray(0, end).toString("utf8"), truncated: true, bytes: buf.byteLength };
 }
-
-const HEADER_BODY_SEPARATOR = "\r\n\r\n";
 
 /**
  * Bound a node's `rawRequest` wire message, cutting the body half only.

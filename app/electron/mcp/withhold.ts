@@ -641,29 +641,14 @@ export function encodeQueryValue(text: string): string {
 	return out + percentEncodeQueryValue(text.slice(plain));
 }
 
-const JSON_ESCAPES: Readonly<Record<string, string>> = {
-	'"': '\\"',
-	"\\": "\\\\",
-	"\b": "\\b",
-	"\f": "\\f",
-	"\n": "\\n",
-	"\r": "\\r",
-	"\t": "\\t",
-};
-
 /**
  * The engine's `escape_json_string_content`: only what JSON forbids raw is
- * rewritten, so `pa"ss` reads `pa\"ss` inside a JSON body's text.
+ * rewritten, so `pa"ss` reads `pa\"ss` inside a JSON body's text. A JSON
+ * string literal without its quotes is the same bytes, lowercase `\u00xx`
+ * included.
  */
 function escapeJsonStringContent(text: string): string {
-	let out = "";
-	for (const char of text) {
-		const code = char.charCodeAt(0);
-		out +=
-			JSON_ESCAPES[char] ??
-			(code < 0x20 ? `\\u00${code.toString(16).padStart(2, "0")}` : char);
-	}
-	return out;
+	return JSON.stringify(text).slice(1, -1);
 }
 
 /**
@@ -716,6 +701,9 @@ function maskSecretForms(text: string, forms: readonly string[]): string {
 	return forms.reduce((masked, form) => masked.split(form).join(REDACTED_MARKER), text);
 }
 
+/** The blank line between a wire frame's header block and its body. */
+export const HEADER_BODY_SEPARATOR = "\r\n\r\n";
+
 /** One `name: value` line of a header block, its line ending left outside the match. */
 const WIRE_HEADER_LINE = /^([^:\r\n]+):([ \t]*)([^\r\n]*)(?=\r?$)/gm;
 
@@ -726,7 +714,7 @@ const WIRE_HEADER_LINE = /^([^:\r\n]+):([ \t]*)([^\r\n]*)(?=\r?$)/gm;
  * read `Cookie: x` is the body's, and the request line has no name to match.
  */
 function withholdWireHeaders(frame: string, apiKeyHeaders: readonly string[]): string {
-	const end = frame.indexOf("\r\n\r\n");
+	const end = frame.indexOf(HEADER_BODY_SEPARATOR);
 	const head = end === -1 ? frame : frame.slice(0, end);
 	const masked = head.replace(WIRE_HEADER_LINE, (line, name: string, gap: string, value) =>
 		isCredentialHeader(name, value, apiKeyHeaders) ? `${name}:${gap}${REDACTED_MARKER}` : line

@@ -161,6 +161,8 @@ describe("secretForms", () => {
 
 	test("escapes control characters the way a JSON string holds them", () => {
 		expect(secretForms(["a\tb\u0001c"])).toContain("a\\tb\\u0001c");
+		// Lowercase hex, as the engine writes it.
+		expect(secretForms(["ab\u001fcd"])).toContain("ab\\u001fcd");
 	});
 
 	test("percent-encodes each UTF-8 byte", () => {
