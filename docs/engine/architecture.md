@@ -1233,6 +1233,7 @@ data/
 ├── db/
 │   ├── vayu.db          # SQLite database
 │   ├── vayu.db.bak      # Re-snapshotted after every clean start - crash recovery, not a user backup
+│   ├── ca-bundle.pem    # The merged CA bundle written when custom certificates are configured
 │   └── backups/
 │       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
 ├── logs/
@@ -1241,6 +1242,19 @@ data/
 │   └── cli_<stamp>.log      # vayu-cli writes here too, under its own data directory
 └── vayu.lock            # Single-instance lock file
 ```
+
+On Linux and macOS the daemon runs `vayu::platform::prepare_data_directory`
+(`platform.hpp`) before the logger or the database open (#1781, #1802):
+`umask 077` for the whole process, then `data/` (whatever `--data-dir` names),
+`logs/` and `db/` made or tightened to `0700`, then a pass that sets `0600` on
+every file wider than that among `vayu.lock` and the regular files directly in
+`db/`, `db/backups/` and `logs/`, and `0700` on `db/backups/`. The pass is an
+allowlist, not a walk of the data directory, so a `--data-dir` that also holds
+other files leaves them as they were; symlinks and anything not a regular file
+are skipped, and a path it cannot change is skipped rather than refusing to
+start. On Windows the directories get a protected DACL that files created
+afterwards inherit, and there is no pass over existing files.
+`tests/platform_test.cpp` covers the pass and scans `daemon.cpp` for the call.
 
 ### Workspace backups
 

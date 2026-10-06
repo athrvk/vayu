@@ -215,6 +215,16 @@ void restrict_new_files_to_owner () {
     // Nothing to set: new files take the private directory's inherited DACL.
 }
 
+void prepare_data_directory (const std::string& data_dir) {
+    restrict_new_files_to_owner ();
+    ensure_private_directory (data_dir);
+    ensure_private_directory (path_join (data_dir, "logs"));
+    ensure_private_directory (path_join (data_dir, "db"));
+    // No pass over existing files: mode bits do not exist here, the DACL is set
+    // per directory, and `SetFileSecurity` does not rewrite the DACL of a file
+    // already inside it. Files created from now on inherit it.
+}
+
 // ============================================================================
 // Signal Handling
 // ============================================================================

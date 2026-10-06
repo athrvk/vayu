@@ -46,10 +46,17 @@ read that file can read every value in it.
 
 On Linux and macOS the engine makes the data directory and the `db`, `logs` and
 `backups` folders inside it owner-only (`0700`) and everything it writes there
-(the database and its `-wal` and `-shm` files, backups, logs) `0600`, tightening
-a directory an older version left readable. On Windows the data directory gets
-a protected ACL for your account, SYSTEM and Administrators. A user who can act
-as you, or read your disk offline, still reads everything.
+(the database and its `-wal` and `-shm` files, backups, logs) `0600`. Each start
+tightens what an older version left readable, files as well as folders: the lock
+file, the regular files directly in `db`, `db/backups` and `logs`, and nothing
+else (symlinks are skipped). The data directory is `chmod`ed `0700` whatever
+`--data-dir` names, so point it at a folder of its own, not at one you share.
+The `umask` of `077` the engine sets covers the whole process, so a file it
+creates anywhere else, including a path you chose, is `0600` too.
+On Windows the data directory gets a protected ACL for your account, SYSTEM and
+Administrators, which files created afterwards inherit; files that already
+existed keep their old ACL. A user who can act as you, or read your disk
+offline, still reads everything.
 
 ## Agents (MCP)
 

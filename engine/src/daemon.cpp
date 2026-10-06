@@ -117,28 +117,19 @@ int run_daemon (std::span<char* const> args) {
     const std::string data_dir = parsed.data_dir;
 
     // The data directory holds secrets in plaintext, so everything under it is
-    // owner-only (#1781): files take 0600 from here on, directories are
-    // created or tightened to 0700 below.
-    vayu::platform::restrict_new_files_to_owner ();
-
-    // Ensure data directory exists
+    // owner-only (#1781, #1802): directories 0700, new files 0600, and the
+    // files an older engine left at 0644 are tightened here, before the
+    // logger or the database touch them. `tests/platform_test.cpp` scans for
+    // this call, because a daemon that skipped it passes every other test.
     try {
-        vayu::platform::ensure_private_directory (data_dir);
+        vayu::platform::prepare_data_directory (data_dir);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what () << "\n";
         return 1;
     }
 
-    // Create subdirectories for logs and database
-    std::string log_dir = vayu::platform::path_join (data_dir, "logs");
-    std::string db_dir  = vayu::platform::path_join (data_dir, "db");
-    try {
-        vayu::platform::ensure_private_directory (log_dir);
-        vayu::platform::ensure_private_directory (db_dir);
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what () << "\n";
-        return 1;
-    }
+    const std::string log_dir = vayu::platform::path_join (data_dir, "logs");
+    const std::string db_dir  = vayu::platform::path_join (data_dir, "db");
 
     // Initialize logger
     vayu::utils::Logger::instance ().init (log_dir, "engine");
