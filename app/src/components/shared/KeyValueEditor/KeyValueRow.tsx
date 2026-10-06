@@ -104,13 +104,14 @@ function ResolvedPeek({
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
-				<button
-					type="button"
+				<Button
+					size="icon"
+					variant="ghost"
 					aria-label={`Resolved value of ${label}`}
-					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-[color,scale] duration-150 hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none active:scale-[0.98]"
+					className="rounded-md text-subtle-foreground hover:text-primary-text"
 				>
 					<Sigma className="size-icon-sm" />
-				</button>
+				</Button>
 			</TooltipTrigger>
 			<TooltipContent side="left" className="max-w-md">
 				<span className="font-mono break-all">{mask ? mask(resolved) : resolved}</span>
@@ -197,8 +198,8 @@ function KeyValueRow({
 				// the checkbox inside it instead of leaving a 24px column around a
 				// 28px control.
 				allowFiles
-					? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_20px_28px]"
-					: "grid-cols-[var(--spacing-target)_1fr_1fr_20px_28px]",
+					? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_var(--spacing-target)_28px]"
+					: "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
@@ -319,11 +320,7 @@ function KeyValueRow({
 						mask={variables?.maskSecrets}
 					/>
 				) : (
-					<TimeMarker
-						value={item.value}
-						label={item.key || "This value"}
-						className="h-8 w-5"
-					/>
+					<TimeMarker value={item.value} label={item.key || "This value"} />
 				)}
 			</div>
 

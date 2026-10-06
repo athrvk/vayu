@@ -246,7 +246,7 @@ export function CannedResponseControls({
 						</Label>
 						<Input
 							id="inbox-status"
-							className="h-7 w-24 font-mono text-xs"
+							className="h-control-sm w-24 font-mono text-xs"
 							value={statusDraft}
 							disabled={disabled}
 							onChange={(e) => setStatusDraft(e.target.value)}
@@ -258,7 +258,7 @@ export function CannedResponseControls({
 						</Label>
 						<Input
 							id="inbox-delay"
-							className="h-7 w-24 font-mono text-xs"
+							className="h-control-sm w-24 font-mono text-xs"
 							value={delayDraft}
 							disabled={disabled}
 							onChange={(e) => setDelayDraft(e.target.value)}

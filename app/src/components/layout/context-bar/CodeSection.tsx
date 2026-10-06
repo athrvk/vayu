@@ -136,7 +136,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 			    segments do fit, and both choices being visible is the point of
 			    it. */}
 			<Select value={target} onValueChange={(v) => setTarget(v as CodeTargetId)}>
-				<SelectTrigger className="h-7 text-xs" aria-label="Snippet language">
+				<SelectTrigger className="h-control-sm text-xs" aria-label="Snippet language">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>
