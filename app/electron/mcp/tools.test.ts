@@ -1502,6 +1502,102 @@ describe("environments, globals and the cookie jar", () => {
 		expect(client.saveGlobals).not.toHaveBeenCalled();
 	});
 
+	/**
+	 * With Reveal secrets to agents off, an agent may not turn a stored secret
+	 * into a readable one by writing `secret: false` (#1809). The three tools that
+	 * merge variables share one gate, so each is driven through the same cases.
+	 */
+	describe("clearing a stored secret flag (#1809)", () => {
+		const stored = { token: { value: "t0k", enabled: true, secret: true, type: "string" } };
+		const cases = [
+			{
+				tool: "update_environment",
+				args: { environmentId: "env_1" },
+				seed: () => ({
+					getEnvironment: vi
+						.fn()
+						.mockResolvedValue({ id: "env_1", name: "Dev", variables: stored }),
+				}),
+				write: (c: EngineClient) => c.updateEnvironment,
+				sent: (call: unknown[]) => varsOf(call[1]),
+			},
+			{
+				tool: "update_globals",
+				args: {},
+				seed: () => ({ getGlobals: vi.fn().mockResolvedValue({ variables: stored }) }),
+				write: (c: EngineClient) => c.saveGlobals,
+				sent: (call: unknown[]) => varsOf(call[0]),
+			},
+			{
+				tool: "update_collection",
+				args: { collectionId: "col_1" },
+				seed: () => ({
+					getCollection: vi
+						.fn()
+						.mockResolvedValue({ id: "col_1", name: "API", variables: stored }),
+				}),
+				write: (c: EngineClient) => c.updateCollection,
+				sent: (call: unknown[]) => varsOf(call[1]),
+			},
+		];
+
+		describe.each(cases)("$tool", ({ tool, args, seed, write, sent }) => {
+			const run = (variables: Record<string, unknown>, safety: Partial<McpSafetyConfig>) => {
+				const client = fakeClient(seed());
+				return dispatchTool(tool, { ...args, variables }, ctxWith(client, safety)).then(
+					(res) => ({ res, client })
+				);
+			};
+
+			test("refuses secret:false over a stored secret, naming the setting", async () => {
+				const { res, client } = await run({ token: { secret: false } }, WRITES);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).toContain("token");
+				expect(firstText(res)).toContain("Reveal secrets to agents");
+				expect(firstText(res)).toContain("Settings > MCP");
+				expect(write(client)).not.toHaveBeenCalled();
+			});
+
+			test("refuses it when a value rides along, too", async () => {
+				const { res, client } = await run(
+					{ token: { value: "new", secret: false } },
+					WRITES
+				);
+				expect(res.isError).toBe(true);
+				expect(write(client)).not.toHaveBeenCalled();
+			});
+
+			test("allows it once reveal is on", async () => {
+				const { res, client } = await run(
+					{ token: { secret: false } },
+					{ ...WRITES, revealSecretsToAgents: true }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(sent(lastCall(write(client))).token).toMatchObject({ secret: false });
+			});
+
+			test("leaves secret:true and unrelated edits alone with reveal off", async () => {
+				const keep = await run({ token: { secret: true, enabled: false } }, WRITES);
+				expect(keep.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(keep.client))).token).toMatchObject({
+					secret: true,
+					enabled: false,
+				});
+
+				const rotate = await run({ token: "rotated" }, WRITES);
+				expect(rotate.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(rotate.client))).token).toMatchObject({
+					value: "rotated",
+					secret: true,
+				});
+
+				const fresh = await run({ other: { value: "o", secret: false } }, WRITES);
+				expect(fresh.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(fresh.client))).other).toMatchObject({ secret: false });
+			});
+		});
+	});
+
 	test("clear_cookies distinguishes every jar, one environment's, and the unnamed one", async () => {
 		// Three calls, not two: the engine reads an absent parameter as "all" and
 		// a present-but-empty one as the no-environment jar, so collapsing null

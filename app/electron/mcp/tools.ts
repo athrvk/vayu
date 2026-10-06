@@ -1307,7 +1307,7 @@ const VARIABLE_INPUT = z.union([
 			.boolean()
 			.optional()
 			.describe(
-				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP."
+				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP. `true` is always accepted; `false` over a stored secret is refused unless that setting is on, because it would make the value readable."
 			),
 		type: z
 			.enum(["string", "number", "boolean", "json"])
@@ -1326,7 +1326,7 @@ function variablesInput(subject: string) {
 		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on in Vayu Settings → MCP. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
 }
 
@@ -1486,11 +1486,18 @@ interface MergedVariables {
  * typo becomes a variable rather than an error. "New" covers a stored entry
  * that is not usable either (a bare string off disk, `lib/variable-resolution.ts`
  * D17), since there is no value there to keep.
+ *
+ * With `revealSecrets` off, `secret: false` over a stored `secret: true` is
+ * refused (#1809): the call would turn a withheld value into one the next read
+ * returns, which is the switch the user has not thrown. `secret: true` and every
+ * other edit pass, and so does everything once reveal is on. Removing and
+ * re-creating a variable is not covered.
  */
 function mergeVariables(
 	stored: unknown,
 	patch: Record<string, unknown> | undefined,
-	removals: readonly string[]
+	removals: readonly string[],
+	revealSecrets: boolean
 ): MergedVariables {
 	const merged: Record<string, unknown> = isRecord(stored) ? { ...stored } : {};
 	const absentRemovals: string[] = [];
@@ -1531,6 +1538,11 @@ function mergeVariables(
 		if (stated.value === undefined && typeof base.value !== "string") {
 			throw new ToolArgError(
 				`"${name}" has no stored value to keep, so this call has to give it one: pass a string, or an object carrying "value".`
+			);
+		}
+		if (!revealSecrets && stated.secret === false && base.secret === true) {
+			throw new ToolArgError(
+				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - the user can turn it on in Vayu Settings > MCP, or clear the flag in the Variables drawer.`
 			);
 		}
 		merged[name] = { enabled: true, ...base, ...stated };
@@ -5177,7 +5189,13 @@ export const TOOLS: McpTool[] = [
 			// Merged against nothing, the way create_environment does it: on a
 			// create every variable is new, which is what turns the string form
 			// into a stored entry and enforces "a new variable carries a value".
-			if (patch !== undefined) payload.variables = mergeVariables({}, patch, []).variables;
+			if (patch !== undefined)
+				payload.variables = mergeVariables(
+					{},
+					patch,
+					[],
+					ctx.config.revealSecretsToAgents
+				).variables;
 			const elementsGiven = elementsArg(args);
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
@@ -5284,7 +5302,12 @@ export const TOOLS: McpTool[] = [
 					return engineErrorResult(err);
 				}
 				if (patch !== undefined || removals.length > 0) {
-					const merged = mergeVariables(existing.variables, patch, removals);
+					const merged = mergeVariables(
+						existing.variables,
+						patch,
+						removals,
+						ctx.config.revealSecretsToAgents
+					);
 					payload.variables = merged.variables;
 					absentRemovals = merged.absentRemovals;
 				}
@@ -6692,7 +6715,7 @@ export const TOOLS: McpTool[] = [
 			// Merged against nothing, which is what turns the string form into a
 			// stored entry and enforces "a new variable carries a value" - on a
 			// create every variable is new.
-			const merged = mergeVariables({}, patch, []);
+			const merged = mergeVariables({}, patch, [], ctx.config.revealSecretsToAgents);
 			// No `id`: the engine assigns every id it stores and answers a body
 			// carrying one with a 400 (issue #97), so the tool does not offer a
 			// field it would only have to refuse.
@@ -6747,7 +6770,12 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
-			const merged = mergeVariables(existing.variables, patch, removals);
+			const merged = mergeVariables(
+				existing.variables,
+				patch,
+				removals,
+				ctx.config.revealSecretsToAgents
+			);
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no
 			// default - omitting it would keep the stored name, but sending the
@@ -7009,7 +7037,8 @@ export const TOOLS: McpTool[] = [
 			const merged = mergeVariables(
 				isRecord(stored) ? stored.variables : undefined,
 				patch,
-				removals
+				removals,
+				ctx.config.revealSecretsToAgents
 			);
 			const result = await callEngine(() =>
 				ctx.client.saveGlobals({ variables: merged.variables }, signal)
