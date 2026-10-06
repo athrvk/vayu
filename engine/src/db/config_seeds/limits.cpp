@@ -49,13 +49,12 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max Scenario Data Size",
     "Largest data set one collection run may carry, measured over its JSON. "
     "The row limit alone does not bound the payload - one row is free to hold "
-    "a "
-    "megabyte in a single cell - and the HTTP body cap above this would drop "
-    "the connection instead of explaining itself. A larger data set is "
-    "rejected "
-    "with a message naming this setting.",
-    "limits", std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES),
-    "1024", "104857600", std::nullopt, now }));
+    "a megabyte in a single cell - and the engine's HTTP body cap, far above "
+    "this, refuses a whole request without saying what in it was too large. A "
+    "larger data set is rejected with a message naming this setting.",
+    "limits", std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "1024",
+    std::to_string (vayu::core::constants::scenario::MAX_CONFIGURABLE_DATA_BYTES),
+    std::nullopt, now }));
 
     seed (unit ("bytes") (
     keywords ({ "swagger" }) (ConfigEntry{ "maxSpecDocumentBytes",
@@ -64,8 +63,9 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     "verbatim and parsed back by every feature that reads it, so this bounds "
     "both the row and that parse. A larger document is rejected with a message "
     "naming this setting, never stored truncated.",
-    "limits", std::to_string (vayu::core::constants::spec_document::MAX_BYTES),
-    "1024", "104857600", std::nullopt, now })));
+    "limits", std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "1024",
+    std::to_string (vayu::core::constants::spec_document::MAX_CONFIGURABLE_BYTES),
+    std::nullopt, now })));
 
     seed (unit ("bytes") (ConfigEntry{ "maxResponseBodyBytes",
     std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),

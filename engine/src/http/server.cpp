@@ -97,6 +97,35 @@ admit_management_request (const httplib::Request& req, httplib::Response& res, i
     return httplib::Server::HandlerResponse::Unhandled;
 }
 
+/**
+ * Every body this server reads is judged before a byte of it is read
+ * (#1824), which needs its length up front: a chunked body could only be
+ * bounded by cpp-httplib while it is read, against a limit that cannot follow
+ * a setting changed while the server runs, so it is refused instead. Every
+ * first-party client (the app, `vayu-cli`, the MCP server) sends
+ * `Content-Length`. cpp-httplib already answers 400 for any
+ * `Transfer-Encoding` that does not end in `chunked`.
+ */
+httplib::Server::HandlerResponse
+refuse_unbounded_body (const httplib::Request& req, httplib::Response& res) {
+    using vayu::core::constants::request_body::MAX_BYTES;
+    if (req.has_header ("Transfer-Encoding")) {
+        routes::send_error (res, 411,
+        "Refused: the engine reads a request body only when its length is "
+        "declared up front - send Content-Length, not Transfer-Encoding: "
+        "chunked");
+        return httplib::Server::HandlerResponse::Handled;
+    }
+    const size_t length = req.get_header_value_u64 ("Content-Length");
+    if (length <= MAX_BYTES) {
+        return httplib::Server::HandlerResponse::Unhandled;
+    }
+    routes::send_error (res, 413,
+    "Request body is " + std::to_string (length) + " bytes, over the limit of " +
+    std::to_string (MAX_BYTES) + " the engine reads for any request");
+    return httplib::Server::HandlerResponse::Handled;
+}
+
 } // namespace
 
 Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port)
@@ -228,15 +257,22 @@ void Server::setup_routes () {
     // server_: a route registered below that never logged its own entry now
     // always does, at the level its status calls for. The gate rides the same
     // pre-routing handler, so a refused request gets its line too. The Host
-    // and Origin rules run first; the import body cap needs the header only.
+    // and Origin rules run first. The body caps need the headers only, and the
+    // import one goes before the general one because it names the setting.
+    // A refusal is a 4xx, on which cpp-httplib closes the connection rather
+    // than draining the unread body.
     install_request_logger (server_,
     [this, port = port_] (const httplib::Request& req, httplib::Response& res) {
-        if (admit_management_request (req, res, port) ==
-        httplib::Server::HandlerResponse::Handled) {
-            return httplib::Server::HandlerResponse::Handled;
+        constexpr auto handled = httplib::Server::HandlerResponse::Handled;
+        if (admit_management_request (req, res, port) == handled ||
+        routes::reject_oversized_import (db_, req, res) == handled) {
+            return handled;
         }
-        return routes::reject_oversized_import (db_, req, res);
+        return refuse_unbounded_body (req, res);
     });
+    // Without this, cpp-httplib's own 100 MB default would refuse a body the
+    // guard above admits once a body-size setting is raised.
+    server_.set_payload_max_length (vayu::core::constants::request_body::MAX_BYTES);
 
     // Every response here is a live read of state that changes under the
     // client (#1507); none of it is valid to replay from a browser's disk

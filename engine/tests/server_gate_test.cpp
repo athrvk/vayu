@@ -8,14 +8,16 @@
 /**
  * @file tests/server_gate_test.cpp
  * @brief The management API serves no browser: the request gate in
- *        `server.cpp` (`admit_management_request`).
+ *        `server.cpp` (`admit_management_request`), and the request-body
+ *        caps on the same pre-routing handler (#1824).
  *
  * Driven through a real `Server` on a free port, because the rule is wiring:
  * it must run before routing on every route, and a route-core test cannot
  * see a pre-routing handler. The `Host` the client sends is set by hand where
  * a test needs a name other than the one `httplib::Client` writes itself
  * (`127.0.0.1:<port>`); a request with no `Host` or with two is written to a
- * socket byte for byte (`raw_status`), because the client never sends one.
+ * socket byte for byte (`raw_status`), because the client never sends one, and
+ * so is a request announcing a body it never sends (`raw_answer`).
  */
 
 #include <gtest/gtest.h>
@@ -27,9 +29,11 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/server.hpp"
@@ -62,15 +66,17 @@ bool has_cors_header (const httplib::Response& response) {
     return false;
 }
 
-/// The status code the listener on @p port answers to @p request, written to
-/// the socket as given; 0 when the exchange fails. Through httplib's own
-/// socket helpers, which already hold every platform's spelling of a socket.
-int raw_status (int port, const std::string& request) {
+/// What the listener on @p port answers to @p request, written to the socket
+/// as given and read until the server closes (every request here asks it to);
+/// "" when the request could not be sent whole. Through httplib's own socket
+/// helpers, which already hold every platform's spelling of a socket.
+std::string raw_answer (int port, const std::string& request) {
     auto error        = httplib::Error::Success;
     const auto socket = httplib::detail::create_client_socket ("127.0.0.1", "",
     port, AF_INET, true, false, nullptr, 5, 0, 5, 0, 5, 0, "", error);
-    if (socket == INVALID_SOCKET) {
-        return 0;
+    // SOCKET is unsigned on Windows and INVALID_SOCKET is (-1) there.
+    if (socket == static_cast<std::remove_cv_t<decltype (socket)>> (INVALID_SOCKET)) {
+        return {};
     }
     std::size_t sent = 0;
     while (sent < request.size ()) {
@@ -84,7 +90,7 @@ int raw_status (int port, const std::string& request) {
     }
     std::string answer;
     std::array<char, 512> buffer{};
-    while (answer.find ("\r\n") == std::string::npos) {
+    while (sent == request.size ()) {
         const auto n =
         httplib::detail::read_socket (socket, buffer.data (), buffer.size (), 0);
         if (n <= 0) {
@@ -93,9 +99,15 @@ int raw_status (int port, const std::string& request) {
         answer.append (buffer.data (), static_cast<std::size_t> (n));
     }
     httplib::detail::close_socket (socket);
+    return answer;
+}
+
+/// The status code in a `raw_answer`; 0 when the exchange failed.
+int raw_status (int port, const std::string& request) {
+    const std::string answer = raw_answer (port, request);
     // "HTTP/1.1 403 Forbidden": the code is the second word.
     const auto space = answer.find (' ');
-    if (sent != request.size () || space == std::string::npos || answer.size () < space + 4) {
+    if (space == std::string::npos || answer.size () < space + 4) {
         return 0;
     }
     return std::stoi (answer.substr (space + 1, 3));
@@ -136,6 +148,15 @@ class ServerGateTest : public ::testing::Test {
 
     [[nodiscard]] std::string with_port (const std::string& name) const {
         return name + ":" + std::to_string (port_);
+    }
+
+    /// A POST whose headers announce a body that is never sent, so a listener
+    /// that answers it decided from the headers alone, before reading any
+    /// body; one that reads instead waits out the socket timeout.
+    [[nodiscard]] std::string body_announced_but_unsent (const std::string& path,
+    const std::string& framing) const {
+        return "POST " + path + " HTTP/1.1\r\nHost: " + with_port ("127.0.0.1") +
+        "\r\nContent-Type: application/json\r\n" + framing + "\r\nConnection: close\r\n\r\n";
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -248,6 +269,48 @@ TEST_F (ServerGateTest, EveryLoopbackSpellingOfThisListenerIsServed) {
         ASSERT_TRUE (response) << name;
         EXPECT_EQ (response->status, 200) << name << ": " << response->body;
     }
+}
+
+// The body caps (#1824) are judged from the headers before routing, so each
+// probe below announces a body and sends none of it. Mutation check: drop
+// `refuse_unbounded_body` from the pre-routing handler in `server.cpp` and the
+// chunked and any-route cases wait for a body instead of answering (status 0);
+// drop `reject_oversized_import` and the import case does.
+TEST_F (ServerGateTest, AChunkedBodyIsRefusedBeforeAnyOfItIsRead) {
+    for (const char* path : { "/import/parse", "/environments" }) {
+        const std::string answer = raw_answer (
+        port_, body_announced_but_unsent (path, "Transfer-Encoding: chunked"));
+        EXPECT_TRUE (answer.starts_with ("HTTP/1.1 411 ")) << path << ": " << answer;
+        EXPECT_NE (answer.find ("send Content-Length"), std::string::npos)
+        << path << ": " << answer;
+    }
+}
+
+TEST_F (ServerGateTest, ABodyOverTheCeilingIsRefusedOnAnyRouteFromItsDeclaredLength) {
+    const std::string over =
+    std::to_string (vayu::core::constants::request_body::MAX_BYTES + 1);
+    const std::string answer = raw_answer (port_,
+    body_announced_but_unsent ("/environments", "Content-Length: " + over));
+    EXPECT_TRUE (answer.starts_with ("HTTP/1.1 413 ")) << answer;
+    EXPECT_NE (answer.find ("Request body is " + over + " bytes"), std::string::npos)
+    << answer;
+    EXPECT_NE (answer.find ("for any request"), std::string::npos) << answer;
+}
+
+TEST_F (ServerGateTest, AnImportBodyOverItsLiveLimitIsRefusedFromItsDeclaredLength) {
+    // The default document cap is 10 MiB, so an import body may be 16 MiB.
+    const std::string answer = raw_answer (port_,
+    body_announced_but_unsent (
+    "/import/parse", "Content-Length: " + std::to_string (20U * 1024U * 1024U)));
+    EXPECT_TRUE (answer.starts_with ("HTTP/1.1 413 ")) << answer;
+    EXPECT_NE (answer.find ("maxSpecDocumentBytes"), std::string::npos) << answer;
+}
+
+TEST_F (ServerGateTest, ABodyWithADeclaredLengthUnderTheCapsReachesItsRoute) {
+    auto response = client ().Post (
+    "/environments", json{ { "name", "Staging" } }.dump (), "application/json");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 200) << response->body;
 }
 
 } // namespace
