@@ -125,3 +125,68 @@ describe("compare_runs", () => {
 		).rejects.toThrow(/baseline/i);
 	});
 });
+
+/*
+ * The run-report prompts embed the report, so they are a third read path to
+ * what a run recorded and mask it the way get_run_report does (#1809).
+ */
+describe("run output in prompts", () => {
+	const SECRET = 'qz7k "en"&1';
+	const recorded = {
+		...REPORT,
+		results: [
+			{
+				id: 1,
+				trace: {
+					request: {
+						url: "https://x.test/?k=qz7k%20%22en%22%261",
+						headers: { Authorization: "Bearer typed-prompt-token" },
+						body: JSON.stringify({ k: SECRET }),
+					},
+					response: { headers: { "set-cookie": "sid=prompt-cookie" } },
+				},
+			},
+		],
+	};
+	const LEAKS = ["qz7k", "typed-prompt-token", "prompt-cookie"];
+
+	function reportClient() {
+		return fakeClient({
+			getRunReport: vi.fn().mockResolvedValue(recorded),
+			getGlobals: vi.fn().mockResolvedValue({
+				variables: { k: { value: SECRET, secret: true } },
+			}),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+			listCollections: vi.fn().mockResolvedValue([]),
+			listAllRequests: vi.fn().mockResolvedValue([]),
+		});
+	}
+
+	const build = (name: string, reveal: boolean, args: Record<string, unknown>) =>
+		prompt(name).build(args, {
+			client: reportClient(),
+			config: resolveSafetyConfig({ revealSecretsToAgents: reveal }),
+		});
+
+	test.each(["summarize_run", "diagnose_errors"])(
+		"%s embeds the report masked unless revealed",
+		async (name) => {
+			const withheld = textOf(await build(name, false, { runId: "run_1" }));
+			for (const leak of LEAKS) expect(withheld, leak).not.toContain(leak);
+			expect(withheld).toContain('"url": "https://x.test/?k=<redacted>"');
+			expect(withheld).toContain('"Authorization": "<redacted>"');
+			expect(withheld).toContain('"set-cookie": "<redacted>"');
+			expect(withheld).toContain('"p99": 120');
+
+			const revealed = textOf(await build(name, true, { runId: "run_1" }));
+			expect(revealed).toContain(JSON.stringify(recorded, null, 2));
+		}
+	);
+
+	test("compare_runs embeds only the comparison, which carries no recorded string", async () => {
+		const text = textOf(
+			await build("compare_runs", true, { baseRunId: "run_0", targetRunId: "run_1" })
+		);
+		for (const leak of LEAKS) expect(text, leak).not.toContain(leak);
+	});
+});
