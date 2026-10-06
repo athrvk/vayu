@@ -515,6 +515,10 @@ int& omitted) {
     });
 }
 
+void blank_cookie_values (Json& cookies, int& omitted) {
+    blank_rows_where (cookies, omitted, [] (std::string_view) { return true; });
+}
+
 std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
 int& omitted) {

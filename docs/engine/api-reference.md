@@ -3596,10 +3596,41 @@ at a collection bound to another OpenAPI document.
 `includeSecrets: false` writes every credential as `""`: a bearer token, a
 basic or digest or NTLM password, an API-key value, an OAuth 2.0 client secret
 or password-grant password, an AWS key pair or session token, and the value of
-a variable marked secret. A value that is exactly one `{{variable}}`
-reference names a secret without being one and is kept. Each blanked value is
-counted in `secretsOmitted`. `true` writes them as stored, which is what
-Postman's own export does.
+a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
+NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
+allowlist of the members known to describe the auth, not by credential name, so
+a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
+A credential outside an auth block is blanked too, by name, wherever the
+document writes a value as typed or as recorded:
+
+- a request header whose name is sensitive (`Authorization`,
+  `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
+  `X-CSRF-Token`, the other names the logger redacts) or is the header an
+  API-key auth in force for the request names, enabled or not; the row and its
+  name stay. The auth in force is the request's own, or the nearest folder's
+  when it inherits;
+- a query parameter by the narrower name set of the Params table (the same
+  names less the generic `code` and `key`, plus `secret`, `signature`,
+  `x-amz-signature` and the like, plus an API-key auth's own parameter), in the
+  Params rows and in the URL's `raw` query and fragment, and the password of
+  the URL's `user:pass@` (the user name stays);
+- on every saved example, the recorded request's headers and URL by the same
+  rules, the response's `header[]` by the header names (a `Set-Cookie` row
+  included, in full), and the value of every `cookie[]` entry whatever its
+  name (the name, path, flags and expiry stay). An example written from the
+  request's current state carries the request's own blanked rows.
+
+A value that is exactly one `{{variable}}` reference names a secret without
+being one and is kept. Each blanked value is counted in `secretsOmitted`; a
+credential the document writes twice with one source - a query parameter in the
+URL and in the Params table, an example's `originalRequest` copied from the
+request - is counted once, while a `Set-Cookie` row and the `cookie[]` value
+it sets, or a recorded `Authorization` header and the `auth` beside it, are
+two written values and count twice. A **body** is never judged (a response
+example's body, a request body outside the form-data file rule) and cookie
+names are not either, so neither is blanked. `true` writes everything as
+stored, which is what Postman's own export does, and is byte for byte what it
+was before these rules.
 
 **Response:**
 ```json
@@ -3710,7 +3741,9 @@ left out (`code`, `status`) stays out until an edit gives it a value. The
 recorded request's `auth` is written in v2.1's attribute-array shape (a v2.0
 file states it as an object, which the v2.1 schema refuses), and with
 `includeSecrets: false` it is blanked like any other credential and counted in
-`secretsOmitted`. An example with no stored response
+`secretsOmitted`, as are the credentials in the recorded request's headers and
+URL, the response's `Set-Cookie` and other sensitive `header[]` rows and the
+values in `cookie[]`. An example with no stored response
 (saved in Vayu before #1763 or from a response restored from a stored run, or
 imported from OpenAPI) gets `originalRequest` from the
 request's current state, the status text from the engine's reason-phrase table

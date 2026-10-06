@@ -351,4 +351,26 @@ TEST (VayuExtensions, BlanksASecretQueryValueAndKeepsTheOtherQueryData) {
     EXPECT_EQ (omitted, 3);
 }
 
+TEST (VayuExtensions, BlanksEveryCookieValueWhateverItsName) {
+    Json cookies = Json::parse (R"([
+        {"key":"sid","value":"abc","path":"/"},
+        {"key":"theme","value":"dark"},
+        {"key":"ref","value":"{{session}}"},
+        {"key":"empty","value":""},
+        {"key":"flag","value":true}])");
+    int omitted  = 0;
+    ext::blank_cookie_values (cookies, omitted);
+    EXPECT_EQ (cookies[0].dump (), R"({"key":"sid","value":"","path":"/"})");
+    EXPECT_EQ (cookies[1]["value"], "");
+    EXPECT_EQ (cookies[2]["value"], "{{session}}");
+    EXPECT_EQ (cookies[3]["value"], "");
+    EXPECT_EQ (cookies[4]["value"], true);
+    EXPECT_EQ (omitted, 2);
+
+    Json not_a_list = Json::parse (R"({"key":"sid","value":"abc"})");
+    ext::blank_cookie_values (not_a_list, omitted);
+    EXPECT_EQ (not_a_list["value"], "abc");
+    EXPECT_EQ (omitted, 2);
+}
+
 } // namespace

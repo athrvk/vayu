@@ -134,8 +134,11 @@ struct PostmanExportOptions {
     /**
      * Write credentials as stored. Off blanks every token, password, API-key
      * value, client secret and secret variable - a whole-value `{{variable}}`
-     * reference names a secret without being one and is kept - and counts
-     * each blanked value in `secrets_omitted`.
+     * reference names a secret without being one and is kept - and the
+     * values of sensitive header and query-parameter rows, a URL's password,
+     * a saved example's recorded request and response headers, and its
+     * cookie values, counting each blanked value in `secrets_omitted`. A
+     * body is never judged.
      */
     bool include_secrets = false;
 };

@@ -1251,7 +1251,8 @@ TEST (PostmanExport, ARecordedRequestsCredentialsAreBlankedUnlessAskedFor) {
     PostmanExportFolder root = collection ();
     root.requests.push_back (entry);
     const auto blanked = run (root, /*secrets=*/false);
-    EXPECT_EQ (blanked.notes.secrets_omitted, 1);
+    // The auth's token, and the `sid` cookie's value the response recorded.
+    EXPECT_EQ (blanked.notes.secrets_omitted, 2);
     EXPECT_EQ (blanked.text.find ("tok-live"), std::string::npos);
     const auto kept = run (root, /*secrets=*/true);
     EXPECT_NE (kept.text.find ("tok-live"), std::string::npos);
@@ -1271,6 +1272,283 @@ TEST (PostmanExport, ARecordedV20AuthIsWrittenInV21Shape) {
     R"({"type":"basic","basic":[{"key":"username","value":"u","type":"string"},)"
     R"({"key":"password","value":"p","type":"string"},)"
     R"({"key":"showPassword","value":false,"type":"boolean"}]})");
+}
+
+// ---------------------------------------------------------------------------
+// Credentials outside an auth block (#1804)
+// ---------------------------------------------------------------------------
+
+/// How many times @p needle occurs in @p text.
+std::size_t occurrences (const std::string& text, std::string_view needle) {
+    std::size_t count = 0;
+    for (auto at = text.find (needle); at != std::string::npos;
+    at           = text.find (needle, at + needle.size ())) {
+        count += 1;
+    }
+    return count;
+}
+
+// The three places a secret sits outside an auth block's named fields: a
+// header the user typed, a query parameter (in the URL and in the Params
+// table that mirrors it) and an Insomnia IAM auth's `secretAccessKey`, which
+// no name list knows. Each is one withheld value, so the count is three.
+// Mutation check: take `authorization` out of `is_secret_field_name` and the
+// header assertions and the count red; make `postman_url` skip
+// `blank_url_credentials` and the query ones do.
+TEST (PostmanExport, AHeaderAQueryParamAndAnIamKeyAreBlankedAndCounted) {
+    PostmanExportRequest entry =
+    request ("signed", "https://api.test/pets?api_key=QUERY-SECRET&page=2");
+    entry.params =
+    ordered::array ({ row ("api_key", "QUERY-SECRET"), row ("page", "2") });
+    entry.headers = ordered::array ({ row ("Authorization", "Bearer HEADER-SECRET"),
+    row ("X-Api-Key", "{{apiKey}}"), row ("Accept", "application/json") });
+    entry.auth               = ordered{ { "mode", "aws" },
+                      { "config",
+                      { { "secretAccessKey", "IAM-SECRET" }, { "region", "us-east-1" },
+                      { "service", "s3" } } } };
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 3);
+    for (const char* secret : { "HEADER-SECRET", "QUERY-SECRET", "IAM-SECRET" }) {
+        EXPECT_EQ (blanked.text.find (secret), std::string::npos) << secret;
+    }
+    const ordered request_node =
+    ordered::parse (blanked.text)["item"][0]["request"];
+    EXPECT_EQ (request_node["header"].dump (),
+    R"([{"key":"Authorization","value":"","type":"text"},{"key":"X-Api-Key","value":"{{apiKey}}","type":"text"},{"key":"Accept","value":"application/json","type":"text"}])")
+    << "the row and its name stay; a bare {{variable}} reference is not a "
+       "secret";
+    EXPECT_EQ (request_node["url"]["raw"], "https://api.test/pets?api_key=&page=2");
+    EXPECT_EQ (request_node["url"]["query"].dump (),
+    R"([{"key":"api_key","value":""},{"key":"page","value":"2"}])");
+    EXPECT_EQ (
+    request_node["auth"]["awsv4"].dump ().find ("us-east-1") != std::string::npos, true)
+    << "what describes the auth stays";
+
+    const auto kept = run (root, /*secrets=*/true);
+    EXPECT_EQ (kept.notes.secrets_omitted, 0);
+    for (const char* secret : { "HEADER-SECRET", "IAM-SECRET" }) {
+        EXPECT_EQ (occurrences (kept.text, secret), 1U) << secret;
+    }
+    EXPECT_EQ (occurrences (kept.text, "QUERY-SECRET"), 2U)
+    << "the raw URL and the row";
+}
+
+// A password in the URL's userinfo and a turned-off query row are credentials
+// the other half of the URL does not repeat, so each adds to the count.
+TEST (PostmanExport, AUrlsPasswordAndATurnedOffQueryRowAreCounted) {
+    PostmanExportRequest entry = request ("r", "https://ada:PW-SECRET@api.test/x?page=2");
+    entry.params = ordered::array (
+    { row ("page", "2"), row ("access_token", "OFF-SECRET", /*enabled=*/false) });
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 2);
+    EXPECT_EQ (blanked.text.find ("PW-SECRET"), std::string::npos);
+    EXPECT_EQ (blanked.text.find ("OFF-SECRET"), std::string::npos);
+    EXPECT_NE (blanked.text.find ("ada@api.test"), std::string::npos)
+    << "the user name stays";
+}
+
+// The header or parameter an API-key auth names is a credential for the
+// requests that send it, found through the folders when the request inherits
+// (`resolve_inherited_auth`'s rule), and for them only: a request that sends
+// no auth does not.
+TEST (PostmanExport, AnApiKeyAuthsNameMakesThatHeaderAndParameterACredential) {
+    PostmanExportFolder root = collection ();
+    root.auth = ordered{ { "mode", "apikey" }, { "key", "X-Tenant-Token" },
+        { "value", "{{tenantToken}}" }, { "in", "header" } };
+    PostmanExportFolder folder = collection ("Inner");
+    folder.auth = ordered{ { "mode", "apikey" }, { "key", "session" },
+        { "value", "{{sessionKey}}" }, { "in", "query" } };
+    PostmanExportRequest inherits = request ("inherits", "u?session=Q-SECRET");
+    inherits.auth                 = ordered{ { "mode", "inherit" } };
+    inherits.params = ordered::array ({ row ("session", "Q-SECRET") });
+    folder.requests.push_back (inherits);
+    PostmanExportRequest direct = request ("direct", "u");
+    direct.auth    = ordered{ { "mode", "apikey" }, { "key", "X-Own-Key" },
+           { "value", "{{own}}" }, { "in", "header" } };
+    direct.headers = ordered::array (
+    { row ("X-Own-Key", "OWN-SECRET"), row ("X-Tenant-Token", "NOT-OURS") });
+    root.folders.push_back (folder);
+    PostmanExportFolder bare  = collection ("Bare");
+    PostmanExportRequest deep = request ("deep", "u");
+    deep.headers = ordered::array ({ row ("x-tenant-token", "DEEP-SECRET") });
+    bare.requests.push_back (deep);
+    root.folders.push_back (bare);
+    root.requests.push_back (direct);
+    PostmanExportRequest quiet = request ("quiet", "u");
+    quiet.auth                 = ordered{ { "mode", "none" } };
+    quiet.headers = ordered::array ({ row ("X-Tenant-Token", "TENANT-VALUE") });
+    root.requests.push_back (quiet);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.text.find ("Q-SECRET"), std::string::npos);
+    EXPECT_EQ (blanked.text.find ("OWN-SECRET"), std::string::npos);
+    EXPECT_EQ (blanked.text.find ("DEEP-SECRET"), std::string::npos)
+    << "a folder that sets no auth passes the collection's down, whatever the "
+       "case";
+    EXPECT_NE (blanked.text.find ("NOT-OURS"), std::string::npos)
+    << "the folder's key does not reach a request that sets its own auth";
+    EXPECT_NE (blanked.text.find ("TENANT-VALUE"), std::string::npos)
+    << "a request that sends no auth names no credential";
+    EXPECT_EQ (blanked.notes.secrets_omitted, 3);
+}
+
+// An example saved in Vayu records the request as it stands, so its
+// `originalRequest` holds the same blanked rows - written once per example
+// without being counted again - and its response headers are judged by name:
+// `Set-Cookie` is one, a `{{variable}}` reference is not. Mutation check: have
+// the request item build `original` from a fresh `Walk` (secrets on) and the
+// originalRequest assertion reds; from the real `walk` and the count does.
+TEST (PostmanExport, ExamplesSavedInVayuBlankTheirOriginalRequestAndResponseHeaders) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.headers = ordered::array ({ row ("Authorization", "Bearer REQ-SECRET") });
+    for (const char* name : { "one", "two" }) {
+        entry.examples.push_back ({ name, 200,
+        ordered::array ({ row ("Content-Type", "text/plain"),
+        row ("Set-Cookie", "sid=RESP-SECRET; Path=/"), row ("X-Echo", "{{echo}}") }),
+        "ok", "text/plain", false });
+    }
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 3)
+    << "the request's header once, and each example's Set-Cookie";
+    EXPECT_EQ (blanked.text.find ("REQ-SECRET"), std::string::npos);
+    EXPECT_EQ (blanked.text.find ("RESP-SECRET"), std::string::npos);
+    const ordered item = ordered::parse (blanked.text)["item"][0];
+    for (const ordered& response : item["response"]) {
+        EXPECT_EQ (response["originalRequest"]["header"], item["request"]["header"]);
+        EXPECT_EQ (response["header"].dump (),
+        R"([{"key":"Content-Type","value":"text/plain"},{"key":"Set-Cookie","value":""},{"key":"X-Echo","value":"{{echo}}"}])");
+    }
+    EXPECT_EQ (occurrences (run (root, true).text, "RESP-SECRET"), 2U);
+}
+
+/// A recorded example whose `originalRequest` carries a header and a query
+/// credential and whose response carries a cookie in both of its places.
+PostmanExportExample credentialed_recorded_example () {
+    ordered recorded                      = recorded_response ();
+    recorded["originalRequest"]["header"] = ordered::array (
+    { ordered{ { "key", "Authorization" }, { "value", "Bearer ORIG-HEADER" } } });
+    recorded["originalRequest"]["url"] = ordered::parse (
+    R"({"raw": "https://api.example.com/tweets?ids=20&api_key=ORIG-QUERY",
+        "query": [{"key": "ids", "value": "20"}, {"key": "api_key", "value": "ORIG-QUERY"}]})");
+    recorded["header"].push_back (ordered{ { "key", "Set-Cookie" },
+    { "value", "sid=abc; Path=/" }, { "name", "Set-Cookie" } });
+    PostmanExportExample example = recorded_example (recorded);
+    example.headers.push_back (row ("Set-Cookie", "sid=abc; Path=/"));
+    return example;
+}
+
+// A saved response imported from Postman is written back as it was recorded,
+// so what it recorded is blanked in place: the request's headers and url
+// (`raw`, `query[]`), the response's `header[]` and its `cookie[]` values.
+// Mutation check: return `value` unblanked from the `originalRequest` branch
+// of `stored_member` and the header and url assertions red.
+TEST (PostmanExport, ARecordedExamplesRequestHeadersUrlAndCookiesAreBlankedUnlessAskedFor) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back (credentialed_recorded_example ());
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    // The auth token, the request's Authorization header, its api_key (raw
+    // and query row are one), the Set-Cookie header and the cookie's value.
+    EXPECT_EQ (blanked.notes.secrets_omitted, 5);
+    for (const char* secret : { "tok-live", "ORIG-HEADER", "ORIG-QUERY", "sid=abc" }) {
+        EXPECT_EQ (blanked.text.find (secret), std::string::npos) << secret;
+    }
+    const ordered response =
+    ordered::parse (blanked.text)["item"][0]["response"][0];
+    const ordered& original = response["originalRequest"];
+    EXPECT_EQ (original["header"].dump (), R"([{"key":"Authorization","value":""}])");
+    EXPECT_EQ (original["url"]["raw"], "https://api.example.com/tweets?ids=20&api_key=");
+    EXPECT_EQ (original["url"]["query"].dump (),
+    R"([{"key":"ids","value":"20"},{"key":"api_key","value":""}])");
+    EXPECT_EQ (response["header"][2].dump (),
+    R"({"key":"Set-Cookie","value":"","name":"Set-Cookie"})");
+    EXPECT_EQ (response["cookie"].dump (), R"([{"key":"sid","value":""}])");
+
+    const auto kept = run (root, /*secrets=*/true);
+    EXPECT_EQ (kept.notes.secrets_omitted, 0);
+    for (const char* secret : { "tok-live", "ORIG-HEADER", "ORIG-QUERY", "sid=abc" }) {
+        EXPECT_NE (kept.text.find (secret), std::string::npos) << secret;
+    }
+}
+
+// v2.0 wrote a recorded request's url as a string, and its `hash` is the
+// tail of `raw`: both are blanked, and the password is a value of its own.
+TEST (PostmanExport, ARecordedUrlWrittenAsAStringOrWithAHashIsBlanked) {
+    ordered recorded = recorded_response ();
+    recorded["originalRequest"].erase ("auth");
+    recorded["cookie"] = ordered::array ();
+    recorded["originalRequest"]["url"] =
+    "https://ada:PW-SECRET@h.test/x?token=TOK-SECRET";
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back (recorded_example (recorded));
+    recorded["originalRequest"]["url"] = ordered::parse (
+    R"({"raw": "https://h.test/cb#access_token=HASH-SECRET", "hash": "access_token=HASH-SECRET"})");
+    entry.examples.push_back (recorded_example (recorded));
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 3);
+    for (const char* secret : { "PW-SECRET", "TOK-SECRET", "HASH-SECRET" }) {
+        EXPECT_EQ (blanked.text.find (secret), std::string::npos) << secret;
+    }
+    const ordered responses =
+    ordered::parse (blanked.text)["item"][0]["response"];
+    EXPECT_EQ (responses[0]["originalRequest"]["url"], "https://ada@h.test/x?token=");
+    EXPECT_EQ (responses[1]["originalRequest"]["url"]["hash"], "access_token=");
+}
+
+// A cookie rebuilt from edited `Set-Cookie` rows keeps its name and flags and
+// loses its value, so an edit does not carry a secret past the blanking.
+TEST (PostmanExport, ARebuiltCookieKeepsItsAttributesAndLosesItsValue) {
+    ordered recorded   = recorded_response ();
+    recorded["cookie"] = ordered::array ();
+    recorded["originalRequest"].erase ("auth");
+    PostmanExportExample example = recorded_example (recorded);
+    example.headers.push_back (row ("Set-Cookie", "sid=REBUILT; Path=/x; HttpOnly"));
+    PostmanExportRequest entry = request ("r", "u");
+    entry.examples.push_back (example);
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 2)
+    << "the Set-Cookie row and the cookie";
+    EXPECT_EQ (blanked.text.find ("REBUILT"), std::string::npos);
+    const ordered cookie =
+    ordered::parse (blanked.text)["item"][0]["response"][0]["cookie"][0];
+    EXPECT_EQ (cookie["key"], "sid");
+    EXPECT_EQ (cookie["value"], "");
+    EXPECT_EQ (cookie["path"], "/x");
+    EXPECT_EQ (cookie["httpOnly"], true);
+}
+
+// The saved-response text a save in the app records is stored in the workspace
+// and read back by the export, which is where it is blanked; blanking it
+// here would leave the user's own saved request without its credentials.
+// Mutation check: drop `scratch.include_secrets = true` in
+// `postman_saved_response_text` and this reds.
+TEST (PostmanExport, TheStoredSavedResponseTextKeepsItsCredentials) {
+    PostmanExportRequest sent = request ("r", "https://api.test/x?api_key=STORED-QUERY");
+    sent.headers = ordered::array ({ row ("Authorization", "Bearer STORED-HEADER") });
+    PostmanExportExample example;
+    example.headers =
+    ordered::array ({ row ("Set-Cookie", "sid=STORED-COOKIE; Path=/") });
+    const auto text =
+    vayu::core::postman_saved_response_text (sent, example, "", std::nullopt, 0);
+    ASSERT_HAS_VALUE (text);
+    for (const char* secret : { "STORED-QUERY", "STORED-HEADER", "STORED-COOKIE" }) {
+        EXPECT_NE (text->find (secret), std::string::npos) << secret;
+    }
 }
 
 TEST (PostmanExport, ExampleFactsPostmanCannotHoldAreNotes) {

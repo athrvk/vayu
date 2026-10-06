@@ -130,6 +130,16 @@ const std::vector<std::string>& extra_param_names,
 int& omitted);
 
 /**
+ * A `[{key, value, ...}, ...]` list of cookies (a Postman saved response's
+ * `cookie[]`) with every cookie's value blanked in place, whatever its name:
+ * a cookie name does not say whether the value is a session. The name and the
+ * other members stay. An empty value and a value that is exactly one
+ * `{{variable}}` reference are kept. Adds one to @p omitted per value blanked;
+ * anything but an array of objects is left alone.
+ */
+void blank_cookie_values (Json& cookies, int& omitted);
+
+/**
  * A URL with its credentials blanked and everything else kept: the password
  * of `user:pass@host` is dropped (the user name stays), and the value of a
  * query parameter whose name @ref blank_credential_param_rows treats as a

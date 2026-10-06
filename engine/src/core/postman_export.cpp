@@ -119,6 +119,11 @@ struct Walk {
     /// When the export runs: a cookie regenerated from edited rows has no
     /// other time to count its `Max-Age` from.
     std::time_t now = 0;
+    /// The header and query-parameter names the API-key auth in force for the
+    /// request being written claims (`vayu_ext::apikey_*_names`): a header or a
+    /// parameter the user typed under that name is the credential too.
+    std::vector<std::string> apikey_headers;
+    std::vector<std::string> apikey_params;
 
     void lose (Loss loss, int count = 1) {
         losses.at (static_cast<std::size_t> (loss)) += count;
@@ -220,6 +225,84 @@ json postman_rows (const json& rows, RowShape shape, Walk& walk) {
         }
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Credentials outside an auth block (#1804)
+//
+// Every site below writes a value the user typed, or a server sent, into the
+// document, and a name says whether it is a credential: `Authorization`, an
+// `api_key` parameter, `Set-Cookie`. Each is a no-op when secrets are asked
+// for, so that export stays byte for byte what was stored.
+// ---------------------------------------------------------------------------
+
+/// A request header table with the credentials' values blanked, counted.
+json blank_request_headers (json headers, Walk& walk) {
+    if (!walk.include_secrets) {
+        vayu_ext::blank_credential_rows (headers, walk.apikey_headers, walk.secrets_omitted);
+    }
+    return headers;
+}
+
+/// A saved response's header table with the credentials' values blanked,
+/// counted. No API-key name applies: that auth signs the request.
+json blank_response_headers (json headers, Walk& walk) {
+    if (!walk.include_secrets) {
+        vayu_ext::blank_credential_rows (headers, {}, walk.secrets_omitted);
+    }
+    return headers;
+}
+
+/// A saved response's `cookie[]` with every cookie's value blanked, counted.
+/// A cookie holds a session or a token as often as not, and its name does not
+/// say which; the names, flags and expiry stay.
+void blank_response_cookies (json& cookies, Walk& walk) {
+    if (!walk.include_secrets) {
+        vayu_ext::blank_cookie_values (cookies, walk.secrets_omitted);
+    }
+}
+
+/// What blanking one raw URL withheld, split by whether a Params table
+/// repeats it: the query and fragment are the table's other half, the
+/// userinfo password is only ever in the URL.
+struct RawUrlOmitted {
+    int password = 0;
+    int query    = 0;
+
+    /// What the URL and the @p rows (blanked separately, @p in_rows of them)
+    /// withheld between them: a credential in both is one value written
+    /// twice, so the larger count stands - exact when the rows mirror the
+    /// query, and a row the URL lacks (a turned-off one) is still counted.
+    [[nodiscard]] int distinct_with (int in_rows) const {
+        return password + std::max (query, in_rows);
+    }
+};
+
+std::string redact_raw_url (const std::string& raw,
+const std::vector<std::string>& param_names,
+RawUrlOmitted& omitted) {
+    int total = 0;
+    std::string out = vayu_ext::redact_url_credentials (raw, param_names, total);
+    int password = 0;
+    static_cast<void> (vayu_ext::redact_url_credentials (
+    std::string_view (raw).substr (0, raw.find_first_of ("?#")), param_names, password));
+    omitted.password += password;
+    omitted.query += total - password;
+    return out;
+}
+
+/// The URL @p raw with its credentials blanked, and the Params table
+/// @p query_rows that mirrors its query (see `RawUrlOmitted`).
+std::string blank_url_credentials (const std::string& raw, json& query_rows, Walk& walk) {
+    if (walk.include_secrets) {
+        return raw;
+    }
+    RawUrlOmitted in_url;
+    int in_rows         = 0;
+    std::string written = redact_raw_url (raw, walk.apikey_params, in_url);
+    vayu_ext::blank_credential_param_rows (query_rows, walk.apikey_params, in_rows);
+    walk.secrets_omitted += in_url.distinct_with (in_rows);
+    return written;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,11 +492,12 @@ std::pair<json, json> split_params (const json& params) {
 /// The url object with the query rows, which come from Params rather than
 /// from `raw` so a turned-off row survives, and the path rows as
 /// `url.variable[]` - after everything else, where Postman writes it.
-json postman_url (const std::string& raw, const json& params, Walk& walk) {
-    const auto [query_rows, path_rows] = split_params (params);
-    json url                           = postman_url_parts (raw);
-    const json query = postman_rows (query_rows, RowShape::Plain, walk);
-    json variable    = json::array ();
+json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
+    auto [query_rows, path_rows] = split_params (params);
+    const std::string raw = blank_url_credentials (raw_url, query_rows, walk);
+    json url              = postman_url_parts (raw);
+    const json query      = postman_rows (query_rows, RowShape::Plain, walk);
+    json variable         = json::array ();
     for (const json& row : path_rows) {
         if (row.is_object () && !skip_unnamed (row, walk)) {
             variable.push_back (postman_path_variable (row));
@@ -1097,7 +1181,8 @@ Walk& walk) {
     json out;
     out["method"] = request.method;
     out["header"] = postman_rows (
-    without_implied_body_header (request.headers, body), RowShape::Typed, walk);
+    blank_request_headers (without_implied_body_header (request.headers, body), walk),
+    RowShape::Typed, walk);
     if (body) {
         out["body"] = *body;
     }
@@ -1386,6 +1471,86 @@ json postman_cookies (const json& headers, std::time_t received_at) {
     return out;
 }
 
+/// Whether @p names already holds @p name, in any letter case.
+bool holds_name (const std::vector<std::string>& names, const std::string& name) {
+    return std::any_of (names.begin (), names.end (), [&name] (const std::string& held) {
+        return vayu::utils::ascii_lower_equal (held, name);
+    });
+}
+
+/// @p names with what @p more adds, none twice.
+void append_names (std::vector<std::string>& names, const std::vector<std::string>& more) {
+    for (const std::string& name : more) {
+        if (!holds_name (names, name)) {
+            names.push_back (name);
+        }
+    }
+}
+
+/**
+ * A recorded request's `url` (v2.0 wrote a string, v2.1 an object) with its
+ * credentials blanked, by the rule `blank_url_credentials` states: `raw` and
+ * `query[]` are one query written twice. `hash` is the tail of `raw` and is
+ * blanked without a count of its own.
+ */
+void blank_recorded_url (json& url, const std::vector<std::string>& param_names, Walk& walk) {
+    RawUrlOmitted in_url;
+    if (url.is_string ()) {
+        url = redact_raw_url (url.get_ref<const std::string&> (), param_names, in_url);
+        walk.secrets_omitted += in_url.distinct_with (0);
+        return;
+    }
+    if (!url.is_object ()) {
+        return;
+    }
+    int in_rows = 0;
+    if (const auto raw = url.find ("raw"); raw != url.end () && raw->is_string ()) {
+        *raw = redact_raw_url (raw->get_ref<const std::string&> (), param_names, in_url);
+    }
+    if (const auto query = url.find ("query"); query != url.end ()) {
+        vayu_ext::blank_credential_param_rows (*query, param_names, in_rows);
+    }
+    if (const auto hash = url.find ("hash"); hash != url.end () && hash->is_string ()) {
+        int tail = 0;
+        *hash    = vayu_ext::redact_url_credentials (
+        "#" + hash->get_ref<const std::string&> (), param_names, tail)
+                .substr (1);
+    }
+    walk.secrets_omitted += in_url.distinct_with (in_rows);
+}
+
+/**
+ * A saved response's `originalRequest` as written: its auth in v2.1's shape,
+ * and, unless secrets were asked for, every credential in it blanked - the
+ * auth, a header such as `Authorization` and the url's query. The names an
+ * API-key auth claims are the recorded auth's own and the request's. The
+ * body is not judged.
+ */
+json recorded_request (const json& value, Walk& walk) {
+    json request = value;
+    if (value.contains ("auth")) {
+        request["auth"] = v21_auth (value.at ("auth"));
+    }
+    if (walk.include_secrets) {
+        return request;
+    }
+    std::vector<std::string> header_names = walk.apikey_headers;
+    std::vector<std::string> param_names  = walk.apikey_params;
+    if (const auto auth = request.find ("auth"); auth != request.end ()) {
+        const json recorded = postman_auth_mapping (*auth);
+        append_names (header_names, vayu_ext::apikey_header_names (recorded));
+        append_names (param_names, vayu_ext::apikey_param_names (recorded));
+        vayu_ext::redact_postman_auth (*auth, walk.secrets_omitted);
+    }
+    if (const auto header = request.find ("header"); header != request.end ()) {
+        vayu_ext::blank_credential_rows (*header, header_names, walk.secrets_omitted);
+    }
+    if (const auto url = request.find ("url"); url != request.end ()) {
+        blank_recorded_url (*url, param_names, walk);
+    }
+    return request;
+}
+
 /// One stored member as written back, or nothing to write.
 std::optional<json> stored_member (const std::string& key,
 const json& value,
@@ -1408,14 +1573,16 @@ Walk& walk) {
     }
     if (key == "header") {
         return write (recorded.rows_same ?
-        value :
-        postman_rows (example.headers, RowShape::Plain, walk));
+        blank_response_headers (value, walk) :
+        postman_rows (blank_response_headers (example.headers, walk), RowShape::Plain, walk));
     }
     if (key == "cookie") {
         // Built from the Set-Cookie rows, so an edit that removes one must
         // not leave its value behind here.
-        return write (
-        recorded.cookies_same ? value : postman_cookies (example.headers, walk.now));
+        json cookies =
+        recorded.cookies_same ? value : postman_cookies (example.headers, walk.now);
+        blank_response_cookies (cookies, walk);
+        return write (std::move (cookies));
     }
     if (key == "_postman_previewlanguage") {
         return write (
@@ -1424,13 +1591,8 @@ Walk& walk) {
     if (key == "_postman_previewtype") {
         return recorded.type_same ? write (value) : std::nullopt;
     }
-    if (key == "originalRequest" && value.is_object () && value.contains ("auth")) {
-        json request    = value;
-        request["auth"] = v21_auth (value.at ("auth"));
-        if (!walk.include_secrets) {
-            vayu_ext::redact_postman_auth (request["auth"], walk.secrets_omitted);
-        }
-        return write (std::move (request));
+    if (key == "originalRequest" && value.is_object ()) {
+        return write (recorded_request (value, walk));
     }
     return write (value);
 }
@@ -1452,9 +1614,11 @@ Walk& walk) {
  * is Postman's own guess. `originalRequest` is kept verbatim: it records the
  * request as it was sent when the response was saved, which differing from
  * the request's current state does not make wrong, and nothing in Vayu edits
- * it. Its auth is written in v2.1's shape and blanked like any other
- * credential unless secrets were asked for. A member the source left out stays out while the column still holds
- * the importer's default for it.
+ * it. Its auth is written in v2.1's shape and its credentials (auth, headers,
+ * url query) are blanked like any other unless secrets were asked for; so are
+ * the credentials in the `header[]` and `cookie[]` written back. A member the
+ * source left out stays out while the column still holds the importer's
+ * default for it.
  */
 json stored_response (const PostmanExportExample& example,
 const std::optional<std::string>& declared,
@@ -1483,7 +1647,8 @@ Walk& walk) {
         out["_postman_previewlanguage"] = preview_language (declared.value_or (""));
     }
     if (absent ("header") && !example.headers.empty ()) {
-        out["header"] = postman_rows (example.headers, RowShape::Plain, walk);
+        out["header"] = postman_rows (
+        blank_response_headers (example.headers, walk), RowShape::Plain, walk);
     }
     if (absent ("body") && !example.body.empty ()) {
         out["body"] = example.body;
@@ -1513,7 +1678,8 @@ Walk& walk) {
     out["status"]                   = vayu::http::status_text (example.status);
     out["code"]                     = example.status;
     out["_postman_previewlanguage"] = preview_language (declared.value_or (""));
-    out["header"] = postman_rows (example.headers, RowShape::Plain, walk);
+    out["header"]                   = postman_rows (
+    blank_response_headers (example.headers, walk), RowShape::Plain, walk);
     out["cookie"] = json::array ();
     out["body"]   = example.body;
     return out;
@@ -1695,9 +1861,35 @@ void note_request_losses (const PostmanExportRequest& request, Walk& walk) {
     }
 }
 
-json postman_request_item (const PostmanExportRequest& request, Walk& walk) {
+/**
+ * The auth in force for what a container holds: its own, else the one it
+ * inherits, by the rule `POST /compose` applies (`resolve_inherited_auth`) -
+ * `noauth` ends the walk with nothing, `none` and an unset auth defer upward.
+ * A null result is no auth.
+ */
+json container_auth_in_force (const json& own, const json& inherited) {
+    const std::string mode = text_of (own, "mode");
+    if (mode == "noauth") {
+        return json ();
+    }
+    return mode.empty () || mode == "none" || mode == "inherit" ? inherited : own;
+}
+
+/// The auth a request sends: its own, or @p inherited when it names none.
+/// `none` on a request sends nothing, so it does not defer.
+json request_auth_in_force (const json& own, const json& inherited) {
+    const std::string mode = text_of (own, "mode");
+    return mode.empty () || mode == "inherit" ? inherited : own;
+}
+
+json postman_request_item (const PostmanExportRequest& request,
+const json& inherited_auth,
+Walk& walk) {
     walk.requests += 1;
     note_request_losses (request, walk);
+    const json auth_in_force = request_auth_in_force (request.auth, inherited_auth);
+    walk.apikey_headers = vayu_ext::apikey_header_names (auth_in_force);
+    walk.apikey_params  = vayu_ext::apikey_param_names (auth_in_force);
     const std::optional<json> body = postman_body (request.body, walk);
 
     json inner;
@@ -1726,8 +1918,9 @@ json postman_request_item (const PostmanExportRequest& request, Walk& walk) {
     json responses = json::array ();
     if (!request.examples.empty ()) {
         // Counted once per request rather than once per example: the rows
-        // are the request's own and were already counted above.
-        Walk scratch;
+        // are the request's own and were already counted above. The copy
+        // blanks what the real walk blanked and counts into itself.
+        Walk scratch        = walk;
         const json original = request_core (request, body, scratch);
         for (const PostmanExportExample& example : request.examples) {
             responses.push_back (postman_response (example, original, walk));
@@ -1750,14 +1943,17 @@ void note_container_losses (const PostmanExportFolder& folder, Walk& walk) {
     }
 }
 
-json postman_items (const PostmanExportFolder& folder, Walk& walk);
+json postman_items (const PostmanExportFolder& folder, const json& auth_in_force, Walk& walk);
 
-json postman_folder_item (const PostmanExportFolder& folder, Walk& walk) {
+json postman_folder_item (const PostmanExportFolder& folder,
+const json& inherited_auth,
+Walk& walk) {
     walk.folders += 1;
     note_container_losses (folder, walk);
     json item;
     item["name"] = folder.name;
-    item["item"] = postman_items (folder, walk);
+    item["item"] = postman_items (
+    folder, container_auth_in_force (folder.auth, inherited_auth), walk);
     if (!folder.description.empty ()) {
         item["description"] = folder.description;
     }
@@ -1776,13 +1972,13 @@ json postman_folder_item (const PostmanExportFolder& folder, Walk& walk) {
 
 /// Folders first, then requests: the order the sidebar lists them in, and
 /// the one an import reads back into the same `order` values.
-json postman_items (const PostmanExportFolder& folder, Walk& walk) {
+json postman_items (const PostmanExportFolder& folder, const json& auth_in_force, Walk& walk) {
     json items = json::array ();
     for (const PostmanExportFolder& child : folder.folders) {
-        items.push_back (postman_folder_item (child, walk));
+        items.push_back (postman_folder_item (child, auth_in_force, walk));
     }
     for (const PostmanExportRequest& request : folder.requests) {
-        items.push_back (postman_request_item (request, walk));
+        items.push_back (postman_request_item (request, auth_in_force, walk));
     }
     return items;
 }
@@ -1838,8 +2034,10 @@ const std::string& status_text,
 std::optional<double> response_time_ms,
 std::time_t received_at) {
     // What the mapping cannot carry is the request's own export to report,
-    // not this save's.
+    // not this save's. Nothing is blanked: the text is stored, and the export
+    // blanks what it writes back.
     Walk scratch;
+    scratch.include_secrets        = true;
     const std::optional<json> body = postman_body (sent.body, scratch);
     const std::optional<std::string> declared = declared_content_type (example.headers);
     json out;
@@ -1911,7 +2109,8 @@ const PostmanExportOptions& options) {
 
     json document;
     document["info"] = std::move (info);
-    document["item"] = postman_items (root, walk);
+    document["item"] =
+    postman_items (root, container_auth_in_force (root.auth, json ()), walk);
     if (std::optional<json> auth = postman_auth (root.auth, AuthLevel::Collection, walk)) {
         document["auth"] = std::move (*auth);
     }
