@@ -61,7 +61,10 @@ export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a crede
 export const REDACTED_MARKER = "<redacted>";
 
 /** What a read of run output says about the secrets the run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped) reads \`${REDACTED_MARKER}\`, and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+
+/** What `start_load_run` says about its confirmation preview's planned run. */
+export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
 
 /** What `diff_spec` says about a stored request's credential headers. */
 export const WITHHELD_HEADER_DIFF_SENTENCE = `A \`headers\` change whose current value names a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
@@ -148,9 +151,11 @@ const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
 	"assertion",
 ]);
 
+const WITHHELD_SUFFIX = "Withheld";
+
 /** The member an auth block carries in place of @p member once it is withheld. */
 function withheldMarker(member: string): string {
-	return `${member}Withheld`;
+	return `${member}${WITHHELD_SUFFIX}`;
 }
 
 /**
@@ -256,6 +261,35 @@ function withholdAuth(auth: unknown): unknown {
 	};
 }
 
+/**
+ * The values @p withheld - a withholding projection of @p original, which
+ * keeps every key and array position - holds a marker in place of: `<member>`
+ * beside each new `<member>Withheld: true`, `value` beside a row's
+ * `valueWithheld: true`. A marker @p original already carried replaced nothing.
+ */
+function valuesWithheldBy(original: unknown, withheld: unknown): string[] {
+	if (Array.isArray(original) && Array.isArray(withheld)) {
+		return original.flatMap((item, at) => valuesWithheldBy(item, withheld[at]));
+	}
+	if (!isRecord(original) || !isRecord(withheld)) return [];
+	return Object.entries(withheld).flatMap(([key, value]) => {
+		const isNewMarker =
+			value === true && key.endsWith(WITHHELD_SUFFIX) && original[key] === undefined;
+		if (!isNewMarker) return valuesWithheldBy(original[key], value);
+		const replaced = original[key.slice(0, -WITHHELD_SUFFIX.length)];
+		return typeof replaced === "string" ? [replaced] : [];
+	});
+}
+
+/**
+ * The literal credentials an auth block holds: every member {@link withholdAuth}
+ * withholds (the same set {@link withheldAuthMembers} names on the way back),
+ * so an empty value or a lone `{{variable}}` is not one.
+ */
+function authCredentialValues(auth: unknown): string[] {
+	return valuesWithheldBy(auth, withholdAuth(auth));
+}
+
 function memberMarkers(block: Record<string, unknown>): string[] {
 	return [...CREDENTIAL_AUTH_MEMBERS]
 		.map(withheldMarker)
@@ -323,11 +357,13 @@ export const SENSITIVE_HEADER_NAMES: readonly string[] = [
 ];
 
 /**
- * The header an API-key auth writes its key into: the engine's rule, header
- * unless `in` says `query`. The one sensitive name no list can hold.
+ * The header name an API-key auth declares, whatever its `in` says: the
+ * engine's `api_key_header_names` (`engine/src/utils/json.cpp`), which reads
+ * the key off any `apikey` block, so the two mask the same header. The one
+ * sensitive name no list can hold.
  */
 function apiKeyHeaderName(auth: unknown): string | undefined {
-	if (!isRecord(auth) || auth.mode !== "apikey" || auth.in === "query") return undefined;
+	if (!isRecord(auth) || auth.mode !== "apikey") return undefined;
 	return typeof auth.key === "string" ? auth.key.trim().toLowerCase() : undefined;
 }
 
@@ -768,9 +804,59 @@ function secretValuesOf(row: unknown): string[] {
 	);
 }
 
-function rowsOf(settled: PromiseSettledResult<unknown>): unknown[] {
-	if (settled.status !== "fulfilled") return [];
-	return Array.isArray(settled.value) ? settled.value : [settled.value];
+function rowsOf(answer: unknown): unknown[] {
+	return Array.isArray(answer) ? answer : [answer];
+}
+
+/** The workspace reads a run-output rule is built from, each by the name a failure reports. */
+const SCOPE_LOOKUPS = {
+	globals: (client: RunOutputClient, signal?: AbortSignal) => client.getGlobals(signal),
+	environments: (client: RunOutputClient, signal?: AbortSignal) =>
+		client.listEnvironments(signal),
+	collections: (client: RunOutputClient, signal?: AbortSignal) => client.listCollections(signal),
+	requests: (client: RunOutputClient, signal?: AbortSignal) => client.listAllRequests(signal),
+};
+
+type ScopeName = keyof typeof SCOPE_LOOKUPS;
+
+/**
+ * A run-output projection that could not be built because a workspace read
+ * failed. Masking with the reads that answered would hand an agent every
+ * secret the failed one holds, so the read it guards answers this instead:
+ * a tool as an error result, a resource or a prompt as a failed request.
+ */
+export class MaskingIncompleteError extends Error {
+	constructor(failed: readonly ScopeName[], reason: unknown) {
+		const detail = reason instanceof Error ? reason.message : String(reason);
+		super(
+			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
+				`With ${REVEAL_SETTING} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
+				`Retry once the engine answers; a call that sent a request has already sent it, so check list_runs before sending it again.`
+		);
+		this.name = "MaskingIncompleteError";
+	}
+}
+
+/** Every scope's rows, or {@link MaskingIncompleteError} naming each read that failed. */
+async function readScopes(
+	client: RunOutputClient,
+	signal?: AbortSignal
+): Promise<Record<ScopeName, unknown[]>> {
+	const names = Object.keys(SCOPE_LOOKUPS) as ScopeName[];
+	// `async` so a read that throws before it returns a promise is a rejection too.
+	const settled = await Promise.allSettled(
+		names.map(async (name) => SCOPE_LOOKUPS[name](client, signal))
+	);
+	const rejected = settled.flatMap((result) => (result.status === "rejected" ? [result] : []));
+	if (rejected.length > 0) {
+		const failed = names.filter((_, at) => settled[at].status === "rejected");
+		throw new MaskingIncompleteError(failed, rejected[0].reason);
+	}
+	const rows = settled.map((result) => rowsOf((result as PromiseFulfilledResult<unknown>).value));
+	return Object.fromEntries(names.map((name, at) => [name, rows[at]])) as Record<
+		ScopeName,
+		unknown[]
+	>;
 }
 
 /**
@@ -778,19 +864,20 @@ function rowsOf(settled: PromiseSettledResult<unknown>): unknown[] {
  * reveal secrets to agents, with no engine call made; otherwise
  * {@link withholdRunOutput} under the rule read from the workspace now.
  *
- * The values are every secret the workspace holds - globals, every
- * environment, every collection - and the API-key header names every
- * collection's and request's auth declares, plus @p auth (a block the caller
- * sent inline). That is a superset of the scopes the engine masks a snapshot
- * against (globals, the run's environment, its collection chain), and it is
- * what a read can know: a run row names its environment but not the chain an
- * inline send resolved through, a list reads many runs at once and an inbox
- * capture belongs to no run at all. A secret is a secret whichever scope a
- * run read it from.
+ * The values are every secret variable the workspace holds - globals, every
+ * environment, every collection - and every literal credential a collection's
+ * or a request's stored auth holds, which the engine writes into a header or
+ * the query on the way out; the API-key header names are every stored block's
+ * plus @p auth (a block the caller sent inline). That is a superset of the
+ * scopes the engine masks a snapshot against (globals, the run's environment,
+ * its collection chain), and it is what a read can know: a run row names its
+ * environment but not the chain an inline send resolved through, a list reads
+ * many runs at once and an inbox capture belongs to no run at all. A secret is
+ * a secret whichever scope a run read it from.
  *
- * A read that fails contributes nothing and the rest still mask; the header
- * list needs no read, so it always applies. The values are read now, not as
- * the run read them: a secret changed since masks under its new value only.
+ * Every read must answer: one that fails throws {@link MaskingIncompleteError}
+ * rather than masking with what the others read. The values are read now, not
+ * as the run read them: a secret changed since masks under its new value only.
  */
 export async function runOutputShape(
 	ctx: RunOutputContext,
@@ -798,21 +885,35 @@ export async function runOutputShape(
 	auth: readonly unknown[] = []
 ): Promise<Projection> {
 	if (ctx.config.revealSecretsToAgents) return (value) => value;
-	const { client } = ctx;
-	const [globals, environments, collections, requests] = await Promise.allSettled(
-		[
-			() => client.getGlobals(signal),
-			() => client.listEnvironments(signal),
-			() => client.listCollections(signal),
-			() => client.listAllRequests(signal),
-		].map(async (read) => read())
+	const { globals, environments, collections, requests } = await readScopes(ctx.client, signal);
+	const ownerAuth = [...collections, ...requests].map((row) =>
+		isRecord(row) ? row.auth : undefined
 	);
-	const scopes = [globals, environments, collections].flatMap(rowsOf);
-	const owners = [...rowsOf(collections), ...rowsOf(requests)];
-	const authBlocks = [...owners.map((row) => (isRecord(row) ? row.auth : undefined)), ...auth];
 	const rule: RunOutputRule = {
-		forms: secretForms(scopes.flatMap(secretValuesOf)),
-		apiKeyHeaders: authBlocks.flatMap((block) => apiKeyHeaderName(block) || []),
+		forms: secretForms([
+			...[...globals, ...environments, ...collections].flatMap(secretValuesOf),
+			...ownerAuth.flatMap(authCredentialValues),
+		]),
+		apiKeyHeaders: [...ownerAuth, ...auth].flatMap((block) => apiKeyHeaderName(block) || []),
 	};
 	return (value) => withholdRunOutput(value, rule);
+}
+
+/**
+ * A request about to be sent - `start_load_run`'s planned run, composed with
+ * everything resolved - as an agent may read it, which is as the run will
+ * record it: its `auth` block withheld as a stored row's is, so a literal
+ * token reads as `<member>Withheld`, then every string under
+ * {@link runOutputShape}'s rule. @p request itself with reveal on, with no
+ * engine call made.
+ */
+export async function withholdPlannedRequest(
+	ctx: RunOutputContext,
+	request: Record<string, unknown>,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	if (ctx.config.revealSecretsToAgents) return request;
+	const mask = await runOutputShape(ctx, signal, [request.auth]);
+	const authWithheld = "auth" in request ? { auth: withholdAuth(request.auth) } : {};
+	return mask({ ...request, ...authWithheld }) as Record<string, unknown>;
 }

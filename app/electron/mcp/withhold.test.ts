@@ -17,6 +17,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { resolveSafetyConfig } from "./config.js";
 import {
+	MaskingIncompleteError,
 	REDACTED_MARKER,
 	runOutputShape,
 	secretForms,
@@ -78,8 +79,14 @@ describe("withholdRowSecrets headers", () => {
 		);
 	});
 
+	test("a query-placed key still names its header, as the engine's rule does", () => {
+		const auth = { mode: "apikey", key: "X-Tenant-Key", in: "query" };
+		expect(
+			withholdRowSecrets(row([{ key: "X-Tenant-Key", value: "k", enabled: true }], auth))
+		).toEqual(row([{ key: "X-Tenant-Key", enabled: true, valueWithheld: true }], auth));
+	});
+
 	test.each([
-		["a query-placed key", { mode: "apikey", key: "X-Tenant-Key", in: "query" }],
 		["another auth mode", { mode: "bearer", key: "X-Tenant-Key" }],
 		["a non-string key", { mode: "apikey", key: 7 }],
 		["no auth", undefined],
@@ -295,23 +302,56 @@ describe("runOutputShape", () => {
 
 	const sample = {
 		body: "global-secret env-secret collection-secret flagged-loosely",
-		headers: { "X-Col-Key": "c", "X-Req-Key": "q" },
+		headers: { "X-Col-Key": "c", "X-Req-Key": "q", "X-Inline-Key": "i" },
 	};
 
 	test("masks every scope's secret, disabled ones included, and the API-key headers the workspace names", async () => {
 		const withhold = await runOutputShape(ctx(scopes()));
 		expect(withhold(sample)).toEqual({
 			body: "<redacted> <redacted> <redacted> flagged-loosely",
-			// A query-placed key writes no header, so its name is an ordinary one.
-			headers: { "X-Col-Key": "<redacted>", "X-Req-Key": "q" },
+			// A query-placed key names its header too: the engine's rule.
+			headers: { "X-Col-Key": "<redacted>", "X-Req-Key": "<redacted>", "X-Inline-Key": "i" },
 		});
 	});
 
 	test("takes an inline auth block's API-key header beside the workspace's", async () => {
 		const withhold = await runOutputShape(ctx(scopes()), undefined, [
-			{ mode: "apikey", key: "X-Req-Key" },
+			{ mode: "apikey", key: "X-Inline-Key" },
 		]);
-		expect(withhold(sample)).toMatchObject({ headers: { "X-Req-Key": "<redacted>" } });
+		expect(withhold(sample)).toMatchObject({ headers: { "X-Inline-Key": "<redacted>" } });
+	});
+
+	test("masks the literal credentials a stored auth block holds, wherever the engine wrote them", async () => {
+		const client = scopes();
+		client.listCollections.mockResolvedValue([
+			{ auth: { mode: "bearer", token: "col-bearer-literal" } },
+			{ auth: { mode: "oauth2", config: { clientSecret: "col-client-secret" } } },
+		]);
+		client.listAllRequests.mockResolvedValue([
+			{ auth: { mode: "apikey", key: "api_key", value: "req-query-key", in: "query" } },
+			{
+				auth: {
+					mode: "oauth2",
+					postman: {
+						type: "oauth2",
+						oauth2: [{ key: "clientSecret", value: "postman-row-secret" }],
+					},
+				},
+			},
+			// Neither is a credential: a reference names one, an empty value holds none.
+			{ auth: { mode: "bearer", token: "{{bearerToken}}" } },
+			{ auth: { mode: "basic", username: "visible-user", password: "" } },
+		]);
+		const withhold = await runOutputShape(ctx(client));
+		expect(
+			withhold({
+				url: "https://x.test/v1?api_key=req-query-key&user=visible-user",
+				body: "col-bearer-literal col-client-secret postman-row-secret {{bearerToken}}",
+			})
+		).toEqual({
+			url: "https://x.test/v1?api_key=<redacted>&user=visible-user",
+			body: "<redacted> <redacted> <redacted> {{bearerToken}}",
+		});
 	});
 
 	test("is the identity with reveal on, and reads nothing to be it", async () => {
@@ -321,28 +361,25 @@ describe("runOutputShape", () => {
 		for (const read of Object.values(client)) expect(read).not.toHaveBeenCalled();
 	});
 
-	const bodyOf = (shape: (value: unknown) => unknown) => (shape(sample) as typeof sample).body;
-
-	test("keeps masking with the reads that answered, and keeps the header rule with none", async () => {
+	test("fails closed when one read fails, naming it, rather than masking with the rest", async () => {
 		const client = scopes();
 		client.listEnvironments.mockRejectedValue(new Error("down"));
-		const partial = await runOutputShape(ctx(client));
-		expect(bodyOf(partial)).toBe("<redacted> env-secret <redacted> flagged-loosely");
+		const shape = runOutputShape(ctx(client));
+		await expect(shape).rejects.toBeInstanceOf(MaskingIncompleteError);
+		await expect(shape).rejects.toThrow(/the environments lookup .*failed \(down\)/);
+	});
 
-		const none = await runOutputShape(
+	test("names every read that failed, a read that throws before it returns a promise included", async () => {
+		const shape = runOutputShape(
 			ctx({
 				getGlobals: vi.fn().mockRejectedValue(new Error("down")),
-				listEnvironments: vi.fn().mockRejectedValue(new Error("down")),
+				listEnvironments: vi.fn().mockResolvedValue([]),
 				listCollections: vi.fn().mockRejectedValue(new Error("down")),
-				// A read that throws before it returns a promise is a failure too.
 				listAllRequests: vi.fn(() => {
 					throw new Error("not a function");
 				}),
 			})
 		);
-		expect(none({ headers: { Cookie: "sid=1" }, body: "global-secret" })).toEqual({
-			headers: { Cookie: "<redacted>" },
-			body: "global-secret",
-		});
+		await expect(shape).rejects.toThrow(/the globals, collections, requests lookups /);
 	});
 });

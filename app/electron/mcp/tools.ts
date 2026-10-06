@@ -54,12 +54,14 @@ import {
 } from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 import {
+	MaskingIncompleteError,
 	runOutputShape,
 	secretsShape,
 	withheldAuthMembers,
 	withholdConfigCredentials,
 	withholdCookieValues,
 	withholdDiagnoseCredentials,
+	withholdPlannedRequest,
 	withholdReorderRows,
 	withholdRowListSecrets,
 	withholdRowSecrets,
@@ -70,6 +72,7 @@ import {
 	WITHHELD_DIAGNOSE_SENTENCE,
 	WITHHELD_HEADER_DIFF_SENTENCE,
 	WITHHELD_HEADER_SENTENCE,
+	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
@@ -7234,7 +7237,9 @@ export const TOOLS: McpTool[] = [
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data. " +
-			ENGINE_DEFAULT_HEADERS_SENTENCE,
+			ENGINE_DEFAULT_HEADERS_SENTENCE +
+			" " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -7377,6 +7382,10 @@ export const TOOLS: McpTool[] = [
 				}
 			}
 
+			// A row's `url`, `reason`, `error` and failing test lines are what the
+			// composed request resolved to, secrets included, so the matrix is run
+			// output (#1809); read after the sends, so a secret a script set is known.
+			const withhold = await runOutputShape(ctx, signal);
 			return withCaveat(
 				structuredResult({
 					collectionId,
@@ -7384,7 +7393,7 @@ export const TOOLS: McpTool[] = [
 					passed,
 					failed,
 					skipped,
-					results,
+					results: withhold(results),
 				}),
 				smokeScopeCaveat(children)
 			);
@@ -7528,6 +7537,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: ["run"],
 		description:
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
+			WITHHELD_PLANNED_RUN_SENTENCE +
+			" " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" A load run reads `loadNegotiateCompression` rather than `negotiateCompression` for the Accept-Encoding decision, because decompressing every response changes what the run measures.",
 		annotations: {
@@ -7965,7 +7976,10 @@ export const TOOLS: McpTool[] = [
 					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - they are not marked to run inline, and this run's own elements.scripts is not "allInline", so anything they sign or rewrite is missing from the requests this run sends.`
 					: "";
 
-			const summary = `Start a load test against ${payload.url} (mode: ${payload.mode})?`;
+			// The composed payload holds every secret the run will send, so the
+			// preview shows it as the run will record it (#1809).
+			const shown = await withholdPlannedRequest(ctx, payload, signal);
+			const summary = `Start a load test against ${shown.url} (mode: ${shown.mode})?`;
 
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
@@ -7975,7 +7989,7 @@ export const TOOLS: McpTool[] = [
 				preview:
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
 					"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
-					`Planned run:\n${JSON.stringify(payload, null, 2)}${caveat}`,
+					`Planned run:\n${JSON.stringify(shown, null, 2)}${caveat}`,
 			});
 			if (unconfirmed) return unconfirmed;
 
@@ -8942,7 +8956,9 @@ export async function dispatchTool(
 	try {
 		result = await tool.handler(args, ctx, signal);
 	} catch (err) {
-		if (err instanceof ToolArgError) return errorResult(err.message);
+		if (err instanceof ToolArgError || err instanceof MaskingIncompleteError) {
+			return errorResult(err.message);
+		}
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	// One record per served call, whichever transport served it (#1558) - the

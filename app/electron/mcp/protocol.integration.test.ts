@@ -47,6 +47,8 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		listCollections: async () => [{ id: "col_1", name: "API" }],
 		listEnvironments: async () => [],
+		listAllRequests: async () => [],
+		getGlobals: async () => ({ variables: {} }),
 		// The engine's completions shape, Monaco fields included - the resource is
 		// expected to hand the agent the names and drop the editor scaffolding.
 		getScriptCompletions: async () => ({
@@ -576,6 +578,23 @@ describe("resources", () => {
 		expect(withheld).not.toContain(secret);
 		expect(await text({ revealSecretsToAgents: true })).toContain(secret);
 	});
+
+	it.each(["vayu://runs", "vayu://run/run_1/report"])(
+		"%s fails the read when a secret lookup fails, rather than answer it partly masked",
+		async (uri) => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					getGlobals: async () => {
+						throw new Error("engine hiccup");
+					},
+				}),
+			});
+			await expect(client.readResource({ uri })).rejects.toThrow(
+				/the globals lookup .*failed \(engine hiccup\)/
+			);
+			await server.close();
+		}
+	);
 
 	it("exposes the run-report template and enumerates concrete runs", async () => {
 		const { client, server } = await connectClient();

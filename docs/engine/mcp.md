@@ -215,7 +215,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
 | `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
@@ -254,7 +254,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1688,7 +1688,7 @@ cannot read a missing value as an empty one.
 | A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
 | A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `list_collections`, `vayu://collections` |
-| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `list_request_examples` |
+| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `list_request_examples` |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
@@ -1715,20 +1715,35 @@ whatever encoding it went out in; an agent reads `<redacted>` there instead:
 
 | What | Masked as | Read by |
 | ---- | --------- | ------- |
-| The value of every secret variable of the workspace (globals, every environment, every collection) in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run_samples`, `list_runs`, `get_inbox_captures`, `set_run_baseline`, `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
-| The value of a credential-bearing header (the names above, plus the API-key header an auth block names, including one sent inline) in a header map, a header row list and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
+| The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run_samples`, `list_runs`, `get_inbox_captures`, `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
+| The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
+| The planned run's `auth` block, composed with the stored or inherited credential in it | as a stored row's: the member dropped, `<member>Withheld: true` | `start_load_run`'s confirmation preview |
 
 The masking is the engine's own rule for a run's config snapshot (#1803),
 applied to what a read can know: the secrets of every scope rather than only
 the run's, because a run row names its environment but not the collection chain
 an inline send resolved through, a list reads many runs at once and an inbox
-capture belongs to no run. The values are read when the tool is called, so a
+capture belongs to no run. A literal credential typed into a stored auth block
+is no variable, but the engine writes it onto the wire after composing (an
+API key `in: "query"` lands in the trace URL and `rawRequest`), so it is masked
+as a value too. The values are read when the tool is called, so a
 secret rotated since masks under its new value only. Keys are not touched, nor
 numbers, so a size the engine reported still describes what it measured. A tool
 that cuts a body to a byte cap (`run_request`, `get_run_report`,
 `get_inbox_captures`) masks *before* it cuts, because a cut through an unmasked
 secret leaves a prefix no form matches. `compare_runs` forwards
 numbers only and has nothing to mask.
+
+**Masking fails closed.** It needs four reads (the globals, the environments,
+the collections, every request) to know the values it masks. If any of them
+fails, the read answers an error naming the lookup that failed and that masking
+could not complete, and returns none of the result: masking with the reads that
+answered would hand over every secret the failed one holds. A tool answers it
+as an error result, a resource or a prompt as a failed request
+(`MaskingIncompleteError`). A tool that sends traffic (`run_request`,
+`run_collection_smoke`) has already sent it when it answers so; the run is in
+`list_runs` once the engine answers again. With reveal on none of the reads is
+made.
 
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.

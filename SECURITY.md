@@ -67,9 +67,12 @@ marked secret, the credentials in auth blocks, the values of credential-bearing
 headers (`Authorization`, `Cookie`, `X-Api-Key` and the like), cookie values and
 the password in a proxy URL are withheld wherever an agent reads what you
 stored, and what a write tool echoes back is withheld the same way. What a run
-recorded - a trace, a report, a sample, a run row, an inbox capture - reads
-`<redacted>` wherever a secret variable's value or a credential header's value
-appears, whatever encoding it went out in. Requests an agent sends still use the
+recorded - a trace, a report, a sample, a run row, an inbox capture, a smoke
+run's rows, a load run's confirmation preview - reads `<redacted>` wherever a
+secret variable's value, a credential typed into a saved auth block or a
+credential header's value appears, whatever encoding it went out in. If Vayu
+cannot read the values it masks against, the agent gets an error in place of
+the record, never a partly masked one. Requests an agent sends still use the
 real values; the engine fills them in. An agent cannot get around this by
 writing: clearing a variable's secret flag is refused while reveal is off. An
 agent backed by a hosted model forwards what it reads to that model's provider.

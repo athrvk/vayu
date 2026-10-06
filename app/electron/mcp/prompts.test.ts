@@ -183,6 +183,19 @@ describe("run output in prompts", () => {
 		}
 	);
 
+	test.each(["summarize_run", "diagnose_errors"])(
+		"%s fails rather than embed a report it could not mask",
+		async (name) => {
+			const client = reportClient();
+			(client.listEnvironments as ReturnType<typeof vi.fn>).mockRejectedValue(
+				new Error("engine hiccup")
+			);
+			await expect(
+				prompt(name).build({ runId: "run_1" }, { client, config: resolveSafetyConfig() })
+			).rejects.toThrow(/the environments lookup .*failed \(engine hiccup\)/);
+		}
+	);
+
 	test("compare_runs embeds only the comparison, which carries no recorded string", async () => {
 		const text = textOf(
 			await build("compare_runs", true, { baseRunId: "run_0", targetRunId: "run_1" })

@@ -104,6 +104,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		health: vi.fn().mockResolvedValue({ status: "ok", version: "1.2.3" }),
 		listCollections: vi.fn().mockResolvedValue([]),
 		listRequests: vi.fn().mockResolvedValue([]),
+		listAllRequests: vi.fn().mockResolvedValue([]),
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue(emptyPage()),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
@@ -3445,10 +3446,12 @@ describe("run_collection_smoke", () => {
 				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
 			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
 		});
+		// Revealed, because with secrets withheld the same failed read leaves the
+		// matrix unmaskable and the call fails closed (`secret withholding`).
 		const res = await dispatchTool(
 			"run_collection_smoke",
 			{ collectionId: "c1" },
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 		// The run itself still succeeds - the lookup is a disclosure, not a gate.
 		expect(res.isError).toBeFalsy();
@@ -10056,7 +10059,7 @@ describe("secret withholding", () => {
 			id: "req_h3",
 			name: "API-key auth in the query",
 			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "query" },
-			headers: [{ key: "X-Tenant-Key", value: "plain-header", enabled: true }],
+			headers: [{ key: "X-Tenant-Key", value: "typed-query-tenant", enabled: true }],
 		},
 	];
 
@@ -10065,7 +10068,12 @@ describe("secret withholding", () => {
 		const { text, body } = await read("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
-		for (const secret of ["typed-live-token", "typed-cookie", "typed-tenant-key"]) {
+		for (const secret of [
+			"typed-live-token",
+			"typed-cookie",
+			"typed-tenant-key",
+			"typed-query-tenant",
+		]) {
 			expect(text).not.toContain(secret);
 		}
 		expect(body[0].headers).toEqual([
@@ -10080,8 +10088,11 @@ describe("secret withholding", () => {
 		expect(body[1].headers).toEqual([
 			{ key: "x-tenant-key", enabled: true, valueWithheld: true },
 		]);
-		// `in: query` writes no header, so the same name there is an ordinary one.
-		expect(body[2].headers[0].value).toBe("plain-header");
+		// The engine names the API-key header whatever `in` says, so a header row
+		// under that name is withheld beside a query-placed key too.
+		expect(body[2].headers).toEqual([
+			{ key: "X-Tenant-Key", enabled: true, valueWithheld: true },
+		]);
 	});
 
 	test("list_requests returns every header whole with reveal on", async () => {
@@ -10672,21 +10683,210 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(captures);
 	});
 
-	test("a failed secret lookup masks with what the others read, and the header rule always", async () => {
+	test("a failed secret lookup fails the read closed, naming the lookup and returning nothing", async () => {
 		const client = runClient({
 			getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
-			listCollections: vi.fn().mockRejectedValue(new Error("engine hiccup")),
-			listAllRequests: vi.fn().mockRejectedValue(new Error("engine hiccup")),
 			getRunReport: vi.fn().mockResolvedValue(RUN_REPORT),
 		});
-		const { text, body } = await read("get_run_report", client, undefined, { runId: "run_1" });
-		for (const core of RUN_SECRET_CORES) expect(text).not.toContain(core);
-		const { request, response } = body.results[0].trace;
-		expect(request.headers.Authorization).toBe("<redacted>");
-		expect(response.headers["Set-Cookie"]).toBe("<redacted>");
-		// The globals read failed, so the value it would have named is unknown:
-		// masked only where a header rule covers it.
-		expect(request.headers["X-Echo"]).toBe("glob-secret-1");
+		const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toMatch(/masking .* could not complete, because the globals lookup/);
+		expect(text).toContain("engine hiccup");
+		// None of the report, masked or not: the other reads answered, but a
+		// partly masked record is the leak this refuses.
+		expect(text).not.toContain("api.example.com");
+		for (const leak of RUN_LEAKS) expect(text, leak).not.toContain(leak);
+		expect(res.content).toHaveLength(1);
+
+		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(RUN_REPORT);
+	});
+
+	test.each([
+		["list_runs", {}],
+		["get_run_samples", { runId: "run_1" }],
+		["get_inbox_captures", { inboxId: "inbox_1" }],
+		["run_request", { url: "https://api.example.com/v1" }],
+	])("%s fails closed on a failed secret lookup too", async (tool, args) => {
+		const client = runClient({
+			listAllRequests: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER),
+		});
+		const res = await dispatchTool(tool, args, ctxWith(client, ALLOW_API));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/the requests lookup .*failed \(engine hiccup\)/);
+	});
+
+	test("get_run_report masks a stored auth's literal key the engine wrote into the URL", async () => {
+		const STORED_KEY = "stored-query-key-77";
+		const report = {
+			results: [
+				{
+					id: 1,
+					trace: {
+						request: {
+							url: `https://api.example.com/v1?api_key=${STORED_KEY}`,
+							rawRequest: `GET /v1?api_key=${STORED_KEY} HTTP/1.1\r\nHost: api.example.com\r\n\r\n`,
+						},
+					},
+				},
+			],
+		};
+		const client = runClient({
+			listAllRequests: vi.fn().mockResolvedValue([
+				{
+					id: "r9",
+					auth: { mode: "apikey", key: "api_key", value: STORED_KEY, in: "query" },
+				},
+			]),
+			getRunReport: vi.fn().mockResolvedValue(report),
+		});
+		const withheld = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expect(withheld.text).not.toContain(STORED_KEY);
+		expect(withheld.body.results[0].trace.request).toEqual({
+			url: "https://api.example.com/v1?api_key=<redacted>",
+			rawRequest: "GET /v1?api_key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n\r\n",
+		});
+		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(report);
+	});
+
+	/** Three saved requests: one that runs and fails a test, one off the allowlist, one that errors. */
+	const smokeClient = () =>
+		runClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r_ok", name: "Runs" },
+				{ id: "r_off", name: "Off the list" },
+				{ id: "r_err", name: "Errors" },
+			]),
+			composeRequest: vi.fn().mockImplementation((body: { requestId?: string }) =>
+				Promise.resolve(
+					body.requestId === "r_off"
+						? { method: "GET", url: "https://elsewhere.test/?k=glob-secret-1" }
+						: {
+								method: "GET",
+								url: `https://api.example.com/v1?key=${QUERY_FORM}&id=${body.requestId}`,
+							}
+				)
+			),
+			executeRequest: vi.fn().mockImplementation((payload: { url: string }) =>
+				payload.url.endsWith("r_err")
+					? Promise.reject(new Error(`connect failed for ${payload.url}`))
+					: Promise.resolve({
+							status: 200,
+							testResults: [
+								{ name: "token echoed", passed: false, error: "got col-secret-9" },
+							],
+						})
+			),
+		});
+
+	test("run_collection_smoke masks each row's URL, test lines and error unless revealed", async () => {
+		const client = smokeClient();
+		const args = { collectionId: "c1" };
+		const withheld = await read("run_collection_smoke", client, ALLOW_API, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.results).toEqual([
+			{
+				name: "Runs",
+				method: "GET",
+				url: "https://api.example.com/v1?key=<redacted>&id=r_ok",
+				ok: false,
+				statusCode: 200,
+				tests: { total: 1, failed: 1, failures: ["token echoed: got <redacted>"] },
+			},
+			{
+				name: "Off the list",
+				method: "GET",
+				url: "https://elsewhere.test/?k=<redacted>",
+				ok: false,
+				skipped: true,
+				reason: expect.stringContaining("elsewhere.test"),
+			},
+			{
+				name: "Errors",
+				method: "GET",
+				url: "https://api.example.com/v1?key=<redacted>&id=r_err",
+				ok: false,
+				error: "connect failed for https://api.example.com/v1?key=<redacted>&id=r_err",
+			},
+		]);
+
+		const revealed = await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			args
+		);
+		expect(revealed.text).toContain(QUERY_FORM);
+		expect(revealed.body.results[1].url).toBe("https://elsewhere.test/?k=glob-secret-1");
+		expect(revealed.body.results[2].error).toContain(QUERY_FORM);
+	});
+
+	test("run_collection_smoke reads no secret to return its matrix with reveal on", async () => {
+		const client = smokeClient();
+		await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			{ collectionId: "c1" }
+		);
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
+	});
+
+	/** A composed load target carrying a secret in its query, a header and its auth block. */
+	const LOAD_TARGET = {
+		method: "GET",
+		url: `https://api.example.com/v1?key=${QUERY_FORM}`,
+		headers: { Authorization: "Bearer typed-bearer-token", "X-Echo": "glob-secret-1" },
+		auth: { mode: "bearer", token: "typed-bearer-token" },
+	};
+
+	const planLoadRun = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) => {
+		const elicit = vi.fn().mockRejectedValue(new Error("client does not support elicitation"));
+		const ctx = { ...ctxWith(client, { ...ALLOW_API, ...safety }), elicit };
+		return dispatchTool("start_load_run", { requestId: "req_1", duration: "10s" }, ctx);
+	};
+
+	test("start_load_run's preview shows the planned run masked, its auth withheld", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const preview = firstText(await planLoadRun(client));
+		expect(preview).toMatch(/AWAITING CONFIRMATION/);
+		expectRunOutputWithheld(preview);
+		const planned = JSON.parse(
+			preview.slice(preview.indexOf("{"), preview.lastIndexOf("}") + 1)
+		);
+		expect(planned).toMatchObject({
+			url: "https://api.example.com/v1?key=<redacted>",
+			headers: { Authorization: "<redacted>", "X-Echo": "<redacted>" },
+			auth: { mode: "bearer", tokenWithheld: true },
+		});
+		expect(planned.auth).not.toHaveProperty("token");
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run's confirmation question names the masked target", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const elicit = vi.fn().mockResolvedValue({ action: "decline" });
+		await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "10s" },
+			{ ...ctxWith(client, ALLOW_API), elicit }
+		);
+		const { message } = elicit.mock.calls[0][0] as { message: string };
+		expect(message).toContain("https://api.example.com/v1?key=<redacted>");
+		expect(message).not.toContain("p@ss");
+	});
+
+	test("start_load_run's preview is the planned run as composed with reveal on, with no secret read", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const preview = firstText(await planLoadRun(client, REVEAL));
+		expect(preview).toContain(QUERY_FORM);
+		expect(preview).toContain('"token": "typed-bearer-token"');
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
 	});
 
 	test("compare_runs forwards no recorded string, so there is nothing for it to mask", async () => {
