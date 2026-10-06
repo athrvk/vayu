@@ -688,7 +688,7 @@ export default function LoadTestConfigDialog({
 							value={comment}
 							onChange={(e) => setComment(e.target.value)}
 							placeholder="Checkout after the cache change"
-							className="h-9 text-sm"
+							className="text-sm"
 						/>
 					</div>
 
@@ -1185,7 +1185,7 @@ export default function LoadTestConfigDialog({
 										setMonitor((prev) => ({ ...prev, url: e.target.value }))
 									}
 									placeholder="http://localhost:9100/metrics"
-									className="h-9 text-sm"
+									className="text-sm"
 								/>
 							</div>
 

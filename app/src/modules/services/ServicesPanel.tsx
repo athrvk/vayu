@@ -582,7 +582,7 @@ function IssuerDelayControl({
 					disabled={pending}
 					aria-invalid={!valid}
 					aria-describedby={valid ? undefined : errorId}
-					className="h-7 flex-1 text-xs"
+					className="h-control-sm flex-1 text-xs"
 				/>
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>

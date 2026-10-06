@@ -103,7 +103,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 							// responsive variant in its own group - so an unqualified
 							// `text-xs` loses to it above 768px and the field renders a
 							// step larger than everything around it.
-							className="h-7 pl-7 text-xs md:text-xs"
+							className="h-control-sm pl-7 text-xs md:text-xs"
 						/>
 					</div>
 

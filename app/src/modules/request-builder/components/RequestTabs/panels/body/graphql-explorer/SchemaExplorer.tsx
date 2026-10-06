@@ -329,7 +329,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 						}}
 						placeholder="Search schema"
 						aria-label="Search schema"
-						className="h-6 pl-6 text-label"
+						className="h-control-sm pl-6 text-label"
 					/>
 				</div>
 				{/*

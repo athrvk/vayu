@@ -448,7 +448,7 @@ export default function VariablesCategoryTree() {
 												}
 											}}
 											autoFocus
-											className="h-8 text-sm"
+											className="h-control-sm text-sm"
 											placeholder="Environment name"
 										/>
 									</div>
@@ -586,7 +586,7 @@ export default function VariablesCategoryTree() {
 															autoFocus
 															{...rename.inputProps}
 															onClick={(e) => e.stopPropagation()}
-															className="h-6 flex-1 text-sm"
+															className="h-full flex-1 text-sm"
 														/>
 													) : (
 														<button

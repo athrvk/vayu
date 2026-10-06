@@ -61,7 +61,7 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 					onChange={() => {}}
 					readOnly
 					aria-label={`Value of ${name}`}
-					className="h-7 text-xs"
+					className="h-control-sm text-xs"
 				/>
 			) : (
 				<Input
@@ -78,7 +78,7 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 					key={`${name}:${resolved.scope}:${resolved.sourceId}:${resolved.value}`}
 					defaultValue={resolved.value}
 					aria-label={`Value of ${name}`}
-					className="h-7 text-xs font-mono"
+					className="h-control-sm text-xs font-mono"
 					onBlur={(e) => onCommit(e.target)}
 					onKeyDown={(e) => {
 						// `isCommitEnter`, not a bare Enter (#939, #935): the blur below

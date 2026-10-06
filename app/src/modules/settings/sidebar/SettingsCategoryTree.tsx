@@ -153,7 +153,7 @@ export default function SettingsCategoryTree() {
 							onChange={(e) => setQuery(e.target.value)}
 							placeholder="Search settings"
 							aria-label="Search settings"
-							className="h-8 pl-8 pr-8 text-sm"
+							className="h-control-sm pl-8 pr-8 text-sm"
 						/>
 						{query !== "" && (
 							<Button

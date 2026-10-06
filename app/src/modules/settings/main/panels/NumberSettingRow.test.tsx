@@ -212,7 +212,7 @@ describe("NumberSettingRow", () => {
 		it("lets a compact input fill whatever holds it, at the denser type", () => {
 			render(<NumberSettingRow label="A" value="5" compact />);
 
-			expect(field("A").className).toContain("h-8");
+			expect(field("A").className).toContain("h-control-sm");
 			expect(field("A").className).not.toContain("max-w-[12rem]");
 			expect(screen.getByText("A").className).toContain("text-xs");
 		});

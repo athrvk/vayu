@@ -175,12 +175,17 @@ function underPanelClip(el: Element): boolean {
  * `h-8` to `VariableInput`, whose wrapper owns the box, while the variables
  * table puts it on the `Input` itself - so this walks out from the input until
  * it finds the element that declares a height. Comparing the *value* is the
- * point; which element carries it is each table's business.
+ * point; which element carries it is each table's business. `h-control-sm`
+ * is the named step for `h-8` (24px at Default and 32px at Comfortable, both
+ * of them), and the variables table writes it because an `Input` may not
+ * state a numeric height (`chrome-floors.test.ts`).
  */
 function declaredHeight(input: Element): string {
 	let node: Element | null = input;
 	for (let hops = 0; node && hops < 3; hops++, node = node.parentElement) {
-		const match = String(node.className ?? "").match(/\bh-(\d+(?:\.\d+)?)\b/);
+		const className = String(node.className ?? "");
+		if (/\bh-control-sm\b/.test(className)) return "h-8";
+		const match = className.match(/\bh-(\d+(?:\.\d+)?)\b/);
 		if (match) return `h-${match[1]}`;
 	}
 	throw new Error("no height declared on the field or its box - the markup changed");

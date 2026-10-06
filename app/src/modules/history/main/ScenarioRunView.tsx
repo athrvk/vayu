@@ -340,7 +340,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						// carries `md:text-sm`, and tailwind-merge keeps a
 						// responsive variant in its own group - so an unqualified
 						// `text-xs` loses to it above 768px.
-						className="h-7 pl-7 text-xs md:text-xs"
+						className="h-control-sm pl-7 text-xs md:text-xs"
 					/>
 				</div>
 

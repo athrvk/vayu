@@ -31,6 +31,28 @@ function read(relPath: string): string {
 	return readFileSync(join(srcRoot, relPath), "utf8");
 }
 
+/** The opening tag's text: up to the first `>` outside quotes and braces. */
+function openingTag(code: string, start: number): string {
+	let depth = 0;
+	let quote = "";
+	for (let i = start; i < code.length; i++) {
+		const c = code[i];
+		if (quote) {
+			if (c === quote) quote = "";
+		} else if (c === '"' || c === "'" || c === "`") quote = c;
+		else if (c === "{") depth++;
+		else if (c === "}") depth--;
+		else if (c === ">" && depth === 0) return code.slice(start, i);
+	}
+	return code.slice(start);
+}
+
+function files(): string[] {
+	return globSync("**/*.tsx", { cwd: srcRoot })
+		.filter((f) => !f.includes(".test."))
+		.map((f) => join(srcRoot, f));
+}
+
 describe("chrome bands carry their own floor, not a list-row height", () => {
 	const cases: [label: string, path: string, needle: RegExp][] = [
 		// TabStrip and DrawerPanel both read --tabstrip-height, which
@@ -118,9 +140,8 @@ describe('interactive elements keep no undersized override on Button\'s size="ic
 	// `size-N` overrides (N 4-7); the check below is scoped to exactly that
 	// shape rather than a blanket "no h-N or w-N anywhere in the file" scan,
 	// since several of these files also carry legitimately different-sized
-	// Select/Input controls that would false-positive on a bare single-axis
-	// scan (VariablesCategoryTree.tsx's `h-6` Input is a single-axis override,
-	// not a same-size pair, so it does not match).
+	// Select controls that would false-positive on a bare single-axis scan.
+	// An `Input`'s height has its own rule, in the last block of this file.
 	const cases: [label: string, path: string][] = [
 		["UpdateBanner", "components/shared/UpdateBanner.tsx"],
 		["RecoveryBanner", "components/shared/RecoveryBanner.tsx"],
@@ -199,8 +220,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// gap #1679 was reopened for). A plain `<button>` and `TimeMarker` (which
 	// forwards `className` to its Button) are in scope too: a hand-rolled
 	// trigger is where the floor slipped before. So is `SelectTrigger`, whose
-	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. `Input`
-	// is not scanned; a dozen dense-row inputs state `h-6` / `h-7`. At the 3px unit h-N / w-N /
+	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. At the 3px unit h-N / w-N /
 	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
@@ -222,28 +242,6 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 			if (px < TARGET_FLOOR_PX) return m[0];
 		}
 		return undefined;
-	}
-
-	/** The opening tag's text: up to the first `>` outside quotes and braces. */
-	function openingTag(code: string, start: number): string {
-		let depth = 0;
-		let quote = "";
-		for (let i = start; i < code.length; i++) {
-			const c = code[i];
-			if (quote) {
-				if (c === quote) quote = "";
-			} else if (c === '"' || c === "'" || c === "`") quote = c;
-			else if (c === "{") depth++;
-			else if (c === "}") depth--;
-			else if (c === ">" && depth === 0) return code.slice(start, i);
-		}
-		return code.slice(start);
-	}
-
-	function files(): string[] {
-		return globSync("**/*.tsx", { cwd: srcRoot })
-			.filter((f) => !f.includes(".test."))
-			.map((f) => join(srcRoot, f));
 	}
 
 	it.each([
@@ -292,6 +290,70 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
 				const hit = undersizedClass(openingTag(code, m.index));
+				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
+			}
+		}
+		expect(offences.join("\n")).toBe("");
+	});
+});
+
+describe("a text input is the height of its row, or the compact control height alone", () => {
+	// `Input`'s own base is `h-control` (28px). Inside a 24px list row that
+	// overflows it, and a hand-picked `h-6` / `h-7` is a third height the row
+	// never agreed to (#1830). The rule has two states: an input in a row
+	// states `h-full` and takes the row's height whatever the density; one that
+	// stands alone states `h-control-sm`, or nothing and keeps `h-control`.
+	// Any numeric step or arbitrary height is a mixed height and fails.
+	const OPEN = /<Input\b/g;
+	const FIXED_HEIGHT = /(?<![\w-])(?:h|size)-(?:\d|\[)[^\s"'`]*/;
+
+	/** The first class in `tag` that pins a numeric or arbitrary height. */
+	function fixedHeightClass(tag: string): string | undefined {
+		return tag.match(FIXED_HEIGHT)?.[0];
+	}
+
+	it.each([
+		["a whole step", "h-6", "h-6"],
+		["a larger whole step", "h-8", "h-8"],
+		["a fractional step", "h-7.5", "h-7.5"],
+		["an arbitrary height", "h-[26px]", "h-[26px]"],
+		["a size- step", "size-7", "size-7"],
+		["a fraction of the parent", "h-1/2", "h-1/2"],
+	])("flags %s", (_label, classes, expected) => {
+		expect(fixedHeightClass(`<Input className="${classes}"`)).toBe(expected);
+	});
+
+	it.each([
+		["filling its row", "flex-1 h-full text-sm"],
+		["the compact control height", "h-control-sm w-24"],
+		["no height at all", "font-mono text-xs"],
+		["a min-height floor", "min-h-6"],
+		["a max-height cap", "max-h-8"],
+		["a width", "w-24 w-1/2"],
+	])("does not flag %s", (_label, classes) => {
+		expect(fixedHeightClass(`<Input className="${classes}"`)).toBeUndefined();
+	});
+
+	it("reads past a URL in a string to the end of the tag", () => {
+		const code = stripComments(
+			'<Input placeholder="https://example.test/spec.json" className="flex-1" /><div className="h-4" />'
+		);
+		expect(fixedHeightClass(openingTag(code, 0))).toBeUndefined();
+	});
+
+	it("scans a non-empty set of Input tags", () => {
+		const tags = files().flatMap((f) => [
+			...stripComments(readFileSync(f, "utf8")).matchAll(OPEN),
+		]);
+		expect(tags.length).toBeGreaterThan(30);
+	});
+
+	it("finds no numeric or arbitrary height on an Input", () => {
+		const offences: string[] = [];
+		for (const file of files()) {
+			const code = stripComments(readFileSync(file, "utf8"));
+			for (const m of code.matchAll(OPEN)) {
+				const hit = fixedHeightClass(openingTag(code, m.index));
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}

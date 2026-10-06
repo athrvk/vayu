@@ -300,7 +300,7 @@ export default function CollectionTree() {
 								if (e.key === "Escape") panel.cancelNewCollectionForm();
 							}}
 							placeholder="Collection name"
-							className="flex-1 h-8 text-sm"
+							className="flex-1 h-control-sm text-sm"
 							disabled={panel.isCreatingCollection}
 							autoFocus
 						/>

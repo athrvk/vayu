@@ -120,7 +120,7 @@ function VariableRow({
 					onBlur={onBlur}
 					placeholder="variable_name"
 					className={cn(
-						"h-8 text-primary",
+						"h-control-sm text-primary",
 						!variable.enabled && !variable.isNew && "text-muted-foreground bg-muted"
 					)}
 				/>
@@ -144,7 +144,10 @@ function VariableRow({
 						onChange={(v) => onUpdate(variable.id, "value", v)}
 						onBlur={onBlur}
 						placeholder="value"
-						className={cn("h-8", !variable.enabled && "text-muted-foreground bg-muted")}
+						className={cn(
+							"h-control-sm",
+							!variable.enabled && "text-muted-foreground bg-muted"
+						)}
 					/>
 				) : (
 					// The time marker sits inside the field the way `SecretInput`'s eye
@@ -157,7 +160,7 @@ function VariableRow({
 							onBlur={onBlur}
 							placeholder="value"
 							className={cn(
-								"h-8",
+								"h-control-sm",
 								!variable.enabled &&
 									!variable.isNew &&
 									"text-muted-foreground bg-muted",

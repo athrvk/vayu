@@ -468,7 +468,7 @@ describe("ModeElementForm - the fields are the schema's own", () => {
 		expect(
 			document.querySelector('[data-setting-row="Standard deviation"]')?.parentElement
 		).toBe(line);
-		expect(screen.getByLabelText("Mean").className).toContain("h-8");
+		expect(screen.getByLabelText("Mean").className).toContain("h-control-sm");
 	});
 
 	it("explains a marker mode from its schema description, having no field to carry it", () => {

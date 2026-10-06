@@ -591,7 +591,7 @@ export function NumberSettingRow({
 							if (isCommitEnter(e)) e.currentTarget.blur();
 						}}
 						className={cn(
-							compact ? "h-8" : "max-w-[12rem]",
+							compact ? "h-control-sm" : "max-w-[12rem]",
 							// Literal classes, not a computed string: Tailwind's
 							// scanner cannot see one that is assembled at runtime.
 							unit && (unit.length > 4 ? "pr-20" : "pr-12"),

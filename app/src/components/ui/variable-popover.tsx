@@ -718,7 +718,7 @@ export function VariablePopover({
 											value={varInfo.value ? SECRET_MASK : ""}
 											placeholder="not set"
 											aria-label={`Value of ${name} (hidden)`}
-											className="h-8 select-none pr-8 font-mono text-sm"
+											className="h-control-sm select-none pr-8 font-mono text-sm"
 										/>
 										<RevealButton
 											revealed={false}
@@ -751,7 +751,7 @@ export function VariablePopover({
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}
 											className={cn(
-												"h-8 font-mono text-sm",
+												"h-control-sm font-mono text-sm",
 												isSecret && "pr-8"
 											)}
 											aria-label={`Value of ${name}`}
@@ -824,7 +824,7 @@ export function VariablePopover({
 									}
 								}}
 								placeholder="value…"
-								className="h-8 font-mono text-sm"
+								className="h-control-sm font-mono text-sm"
 								aria-label={`Value for new variable ${name}`}
 								// See the resolved branch's own `autoFocus={focusOnOpen}`: a
 								// real DOM attribute fires on mount regardless of Radix's own

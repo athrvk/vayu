@@ -126,7 +126,7 @@ export default function FilesPanel() {
 						}}
 						placeholder="/path/to/folder"
 						aria-label="Folder to allow"
-						className="h-8 font-mono text-xs"
+						className="h-control-sm font-mono text-xs"
 					/>
 					<Button
 						variant="outline"

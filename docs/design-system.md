@@ -1281,9 +1281,16 @@ latter that the chrome bands, interactive targets and icon classes across
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
 under 24px: such an override outranks the size variant in emission order. A
 compact text button or select trigger states `h-control-sm`, an icon button
-`size-target`. `Input` is not scanned, and a dense-row input at `h-6` / `h-7`
-is still under the floor. The tree-row controls are 24px at Default inside 24px rows, so
-they carry `size-target` rather than an exemption.
+`size-target`. `Input` is scanned too, by a rule of its own (#1830): a text
+input is the height of its row, or the compact control height when it stands
+alone. An input in a fixed-height list row (a tree row's inline rename) states
+`h-full` and takes the row's height at either density; one that stands alone, or
+sits in a row whose height it sets itself (a table cell, a label beside its
+field), states `h-control-sm` or nothing and keeps `h-control`. A numeric
+`h-N`, an arbitrary `h-[...]` or a fractional height on an `Input` fails the
+sweep, because each is a third height the row never agreed to. Small inputs are
+fine; mixed heights are not. The tree-row controls are 24px at Default inside
+24px rows, so they carry `size-target` rather than an exemption.
 
 ---
 
