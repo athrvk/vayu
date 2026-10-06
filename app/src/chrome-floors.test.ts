@@ -10,7 +10,7 @@
  * density must not carry them below it (issue #1679). `--spacing` scales
  * rhythm - row heights, paddings, gaps - and these three classes of thing are
  * exactly the ones that do not ride it: see the "Chrome, Target and Icon
- * Floors" table in docs/design-system.md and the seven steps `density.test.ts`
+ * Floors" table in docs/design-system.md and the nine steps `density.test.ts`
  * checks against `index.css`.
  *
  * This is a source scan, not a render: vitest stubs CSS imports to `""`, and
@@ -194,14 +194,35 @@ describe("icons use the size-icon / size-icon-sm step, not a --spacing multiple"
 	});
 });
 
-describe("no Button or TooltipIconButton anywhere carries a sub-24px box override", () => {
+describe("no interactive element anywhere carries a sub-24px box override", () => {
 	// The enumerated list above guards files someone remembered; this one scans
 	// every non-test file, because a `className="h-7 w-7"` on an icon Button
 	// outranks `size-target` in emission order and nothing else notices (the
-	// gap #1679 was reopened for). At the 3px unit h-N / w-N / size-N is 3N px,
-	// so N <= 7 is under 24px; use `h-control-sm` / `size-target` instead.
-	const OPEN = /<(?:Button|TooltipIconButton)\b/g;
-	const UNDERSIZED = /\b(?:h|w|size)-[1-7]\b(?![./])/;
+	// gap #1679 was reopened for). A plain `<button>` and `TimeMarker` (which
+	// forwards `className` to its Button) are in scope too: a hand-rolled
+	// trigger is where the floor slipped before. At the 3px unit h-N / w-N /
+	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
+	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
+	// rem. Use `h-control-sm` / `size-target` instead.
+	const OPEN = /<(?:Button|button|TooltipIconButton|TimeMarker)\b/g;
+	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
+	// the box) while still catching a variant-prefixed `sm:w-5` or
+	// `[&_svg]:size-3`. Bare `0` is not matched: `w-0` hides a box rather than
+	// shrinking a target.
+	const BOX_SIZE =
+		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\d./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
+	const TARGET_FLOOR_PX = 24;
+	const PX_PER_REM = 16;
+
+	/** The first class in `tag` that sizes a box under the 24px target floor. */
+	function undersizedClass(tag: string): string | undefined {
+		for (const m of tag.matchAll(BOX_SIZE)) {
+			if (m[1] !== undefined) return m[0];
+			const px = Number(m[2]) * (m[3] === "rem" ? PX_PER_REM : 1);
+			if (px < TARGET_FLOOR_PX) return m[0];
+		}
+		return undefined;
+	}
 
 	/** The opening tag's text: up to the first `>` outside quotes and braces. */
 	function openingTag(code: string, start: number): string {
@@ -225,21 +246,51 @@ describe("no Button or TooltipIconButton anywhere carries a sub-24px box overrid
 			.map((f) => join(srcRoot, f));
 	}
 
+	it.each([
+		["a whole step", "h-7", "h-7"],
+		["a fractional step", "h-3.5 rounded-md", "h-3.5"],
+		["a sub-1 step", "size-0.5", "size-0.5"],
+		["the top fractional step", "w-7.5", "w-7.5"],
+		["a variant-prefixed class", "sm:w-5", "w-5"],
+		["an arbitrary px size", "h-[18px]", "h-[18px]"],
+		["an arbitrary rem size", "size-[1rem]", "size-[1rem]"],
+		["an svg descendant override", "[&_svg]:size-3", "size-3"],
+	])("flags %s", (_label, classes, expected) => {
+		expect(undersizedClass(`<Button className="${classes}"`)).toBe(expected);
+	});
+
+	it.each([
+		["the target floor class", "size-target"],
+		["a step at the floor", "h-8 w-8"],
+		["a step above the floor", "h-10 size-12"],
+		["an arbitrary size at the floor", "h-[24px] w-[1.5rem]"],
+		["an arbitrary size above the floor", "h-[2rem]"],
+		["a variable-backed size", "h-[var(--spacing-target)]"],
+		["a zero minimum", "min-w-0"],
+		["a max cap", "max-h-6"],
+		["a fraction of the parent", "w-1/2"],
+		["the size-icon step", "size-icon-sm"],
+	])("does not flag %s", (_label, classes) => {
+		expect(undersizedClass(`<Button className="${classes}"`)).toBeUndefined();
+	});
+
 	it("scans a non-empty set of files and tags", () => {
 		expect(files().length).toBeGreaterThan(200);
 		const tags = files().flatMap((f) =>
 			[...stripComments(readFileSync(f, "utf8")).matchAll(OPEN)].map((m) => m[0])
 		);
 		expect(tags.length).toBeGreaterThan(100);
+		expect(tags).toContain("<button");
+		expect(tags).toContain("<TimeMarker");
 	});
 
-	it("finds no h-N / w-N / size-N (N <= 7) in a Button's own tag", () => {
+	it("finds no undersized h / w / size in an interactive element's own tag", () => {
 		const offences: string[] = [];
 		for (const file of files()) {
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
-				const hit = openingTag(code, m.index).match(UNDERSIZED);
-				if (hit) offences.push(`${relative(srcRoot, file)}: ${hit[0]}`);
+				const hit = undersizedClass(openingTag(code, m.index));
+				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}
 		expect(offences.join("\n")).toBe("");

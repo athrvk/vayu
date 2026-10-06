@@ -1276,8 +1276,10 @@ halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them. The latter also scans every non-test file for a
-`Button` / `TooltipIconButton` tag carrying `h-N`, `w-N` or `size-N` with N <= 7
-(under 24px at the 3px unit): such an override outranks the size variant in
+`Button` / `TooltipIconButton` / `TimeMarker` / plain `<button>` tag carrying
+`h-N`, `w-N` or `size-N` with N <= 7.5 (under 24px at the 3px unit, fractions
+included), or an arbitrary `h-[18px]` / `size-[1rem]` under 24px: such an
+override outranks the size variant in
 emission order. A compact text button states `h-control-sm`, an icon button
 `size-target`. The tree-row controls are 24px at Default inside 24px rows, so
 they carry `size-target` rather than an exemption.
@@ -1288,7 +1290,7 @@ they carry `size-target` rather than an exemption.
 
 ```css
 --radius: 0.375rem;      /* 6px - base border radius (default) */
---dock-height: 2rem;     /* 32px - footer status strip */
+--dock-height: var(--spacing-band); /* 32px - footer status strip */
 --rail-width: 2.5rem;    /* 40px - ActivityRail and ContextRail */
 ```
 
@@ -2026,9 +2028,9 @@ centre; do not re-add vertical padding, which is what caused the drift.
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
-The disclosure chevron is `w-6 h-6` - 18px at the default density, 24px at
-Comfortable - sized to fit the row at either. That is still an adequate
-pointer target, and the row around it opens the collection.
+The disclosure chevron is `size-target` - 24px at the default density, 28px at
+Comfortable - so it clears the interactive floor at either. The row around it
+opens the collection.
 
 **`h-8 items-center` on the row means the activator needs `self-stretch`.** The
 two rules above interact, and the interaction is a bug the eye cannot see. A

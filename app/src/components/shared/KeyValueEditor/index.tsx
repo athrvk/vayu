@@ -210,8 +210,8 @@ export default function KeyValueEditor({
 					EYEBROW_CLASS,
 					`grid gap-2 ${
 						allowFiles
-							? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
-							: "grid-cols-[24px_1fr_1fr_20px_28px]"
+							? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_var(--spacing-target)_28px]"
+							: "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_28px]"
 					} px-1 text-subtle-foreground`
 				)}
 			>
