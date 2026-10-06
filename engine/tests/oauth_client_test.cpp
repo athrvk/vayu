@@ -406,7 +406,6 @@ TEST_F (OAuthClientTest, DbRoundTrip) {
     t.scope         = "s";
     t.expires_in    = 10;
     t.created_at    = 42;
-    t.raw_response  = "{}";
     db_->save_oauth_token (t);
     auto got = db_->get_oauth_token ("k1");
     ASSERT_HAS_VALUE (got);

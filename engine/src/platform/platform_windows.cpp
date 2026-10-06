@@ -28,6 +28,8 @@
 #include <sys/types.h>
 #include <windows.h>
 
+#include <sddl.h>
+
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -186,6 +188,31 @@ void ensure_directory (const std::string& path) {
     } else if ((attribs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
         throw std::runtime_error ("Path exists but is not a directory: " + path);
     }
+}
+
+void ensure_private_directory (const std::string& path) {
+    ensure_directory (path);
+    // Protected (no inherited ACEs), then owner / SYSTEM / Administrators,
+    // inheritable by files and subdirectories created inside.
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA (
+        "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", SDDL_REVISION_1,
+        &descriptor, nullptr)) {
+        throw std::runtime_error ("Failed to build the directory ACL for: " + path +
+        " - error code " + std::to_string (GetLastError ()));
+    }
+    const BOOL applied = SetFileSecurityA (path.c_str (),
+    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, descriptor);
+    const DWORD error  = GetLastError ();
+    LocalFree (descriptor);
+    if (!applied) {
+        throw std::runtime_error ("Failed to restrict directory: " + path +
+        " - error code " + std::to_string (error));
+    }
+}
+
+void restrict_new_files_to_owner () {
+    // Nothing to set: new files take the private directory's inherited DACL.
 }
 
 // ============================================================================

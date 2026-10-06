@@ -141,6 +141,28 @@ bool create_directory (const std::string& path);
  */
 void ensure_directory (const std::string& path);
 
+/**
+ * @brief Ensure a directory exists and only its owner can enter it
+ *
+ * The data directory holds secrets in plaintext (variables, tokens, run
+ * history), so it is created owner-only and a directory an older engine left
+ * open is tightened. POSIX: mode 0700. Windows: a protected DACL granting the
+ * owner, SYSTEM and Administrators, inherited by what is created inside.
+ * @param path Path to ensure
+ * @throws std::runtime_error if the directory cannot be created or restricted
+ */
+void ensure_private_directory (const std::string& path);
+
+/**
+ * @brief Make every file this process creates from here on owner-only
+ *
+ * POSIX: `umask (077)`, so the database, its `-wal`/`-shm`, the `.bak` and
+ * backup copies and the logs are 0600 whichever library opens them. Windows:
+ * a no-op, the private directory's inherited DACL is what protects new files.
+ * Call once at startup, before the first file is created.
+ */
+void restrict_new_files_to_owner ();
+
 // ============================================================================
 // Signal Handling
 // ============================================================================

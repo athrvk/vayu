@@ -342,6 +342,9 @@ int run_cli (std::span<char* const> args) {
     // land side by side when both run from the same shell with no flags.
     const std::string log_dir =
     vayu::platform::path_join (vayu::platform::default_data_dir (), "logs");
+    // The logs directory is the daemon's, so a `cli_<stamp>.log` written first
+    // must not be the file (or the directory) that is readable by others (#1781).
+    vayu::platform::restrict_new_files_to_owner ();
     vayu::utils::Logger::instance ().init (log_dir, "cli");
 
     // Parse arguments

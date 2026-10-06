@@ -183,7 +183,6 @@ const std::string& key) {
     token.scope         = field (body, "scope");
     token.expires_in    = parse_expires_in (body);
     token.created_at    = now_ms ();
-    token.raw_response  = resp.body.substr (0, 4096);
 
     db.save_oauth_token (token);
     return token;

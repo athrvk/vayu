@@ -221,7 +221,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `4`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `5`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path rather than being read
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
@@ -295,6 +295,7 @@ release that carries a bump says so in its notes.
 | `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
 | `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
 | `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
+| `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read | none: `sync_schema ()` drops the column at the constructor's probe, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -1310,7 +1311,6 @@ Auto-created by `sync_schema()`.
 | `scope`         | TEXT    | Granted scope, if returned                                        |
 | `expires_in`    | INTEGER | Seconds; `0` = non-expiring                                       |
 | `created_at`    | INTEGER | Unix ms                                                           |
-| `raw_response`  | TEXT    | Provider JSON (truncated to 4 KB); debugging only, never logged   |
 
 Expiry is `now > created_at + expires_in*1000 − 45s` (skew). On refresh the
 `refresh_token` rotates when the provider issues a new one; a rejected refresh
@@ -1334,8 +1334,10 @@ failure, is reported in the run's `auth` section; a failed refresh never fails
 the run. See `plan_auth_refresh` (`engine/src/http/auth_resolver.cpp`) and
 `run_auth_refresh` (`engine/src/core/auth_refresh.cpp`).
 
-Tokens are plaintext at rest (v1 posture); the row is cleared via
-`DELETE /oauth2/token`.
+Tokens are plaintext at rest (v1 posture), in a database file only its owner can read
+(`0600` in a `0700` directory on POSIX); the row is cleared via `DELETE /oauth2/token`. The
+provider's raw response (refresh and id tokens included) is not stored: the column was
+dropped at schema version `5`.
 
 ---
 
