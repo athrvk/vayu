@@ -36,6 +36,7 @@
 #include <chrono>
 #include <csignal>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -189,6 +190,77 @@ void ensure_private_directory (const std::string& path) {
 
 void restrict_new_files_to_owner () {
     umask (S_IRWXG | S_IRWXO);
+}
+
+namespace {
+constexpr mode_t OWNER_ONLY_FILE_MODE      = S_IRUSR | S_IWUSR;
+constexpr mode_t OWNER_ONLY_DIRECTORY_MODE = S_IRWXU;
+
+/// Narrows @p path to @p mode when it is a @p kind (`S_IFREG` / `S_IFDIR`) and
+/// carries any permission bit outside @p mode. A mode already inside @p mode
+/// (a 0400 file) is left alone: the pass tightens, never widens.
+///
+/// The descriptor is opened `O_NOFOLLOW` and the mode read and set through it,
+/// so a symlink is refused (`ELOOP`) and cannot be swapped in between a check
+/// and the `chmod`; `O_NONBLOCK` keeps a FIFO from blocking the open, and the
+/// kind check then turns it away. Every failure skips the entry: the pass is
+/// best-effort and never stops the engine from starting, and a file it cannot
+/// open or change is one the engine's own open will report if it matters.
+void restrict_entry (const std::string& path, mode_t kind, mode_t mode, int extra_flags) {
+    // POSIX declares `open` variadic; there is no non-variadic spelling that
+    // takes the `O_NOFOLLOW` this needs.
+    const int flags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | extra_flags;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    const int fd = open (path.c_str (), flags);
+    if (fd < 0) {
+        return;
+    }
+    struct stat st{};
+    const bool wider = fstat (fd, &st) == 0 && (st.st_mode & S_IFMT) == kind &&
+    (st.st_mode & ~mode & (S_IRWXU | S_IRWXG | S_IRWXO)) != 0;
+    if (wider) {
+        static_cast<void> (fchmod (fd, mode));
+    }
+    close (fd);
+}
+
+/// Every regular file directly inside @p directory, not its subdirectories.
+void restrict_files_in (const std::filesystem::path& directory) {
+    std::error_code ec;
+    std::filesystem::directory_iterator entries (directory, ec);
+    for (const std::filesystem::directory_iterator end; !ec && entries != end;
+    entries.increment (ec)) {
+        restrict_entry (entries->path ().string (), S_IFREG, OWNER_ONLY_FILE_MODE, 0);
+    }
+}
+
+/// `backups/` and the snapshots in it. Not created here: the engine makes it on
+/// the first snapshot, and under the umask above that is already 0700. A
+/// symlinked one is skipped whole, files included, because listing it would
+/// walk wherever the link points.
+void restrict_backups_directory (const std::filesystem::path& backups) {
+    std::error_code ec;
+    if (std::filesystem::is_symlink (backups, ec)) {
+        return;
+    }
+    restrict_entry (backups.string (), S_IFDIR, OWNER_ONLY_DIRECTORY_MODE, O_DIRECTORY);
+    restrict_files_in (backups);
+}
+} // namespace
+
+void prepare_data_directory (const std::string& data_dir) {
+    restrict_new_files_to_owner ();
+    ensure_private_directory (data_dir);
+    ensure_private_directory (path_join (data_dir, "logs"));
+    ensure_private_directory (path_join (data_dir, "db"));
+
+    // Only the paths the engine itself writes, never a walk of `data_dir`:
+    // `--data-dir` can name a directory that holds other things.
+    const std::filesystem::path root (data_dir);
+    restrict_entry ((root / "vayu.lock").string (), S_IFREG, OWNER_ONLY_FILE_MODE, 0);
+    restrict_files_in (root / "logs");
+    restrict_files_in (root / "db");
+    restrict_backups_directory (root / "db" / "backups");
 }
 
 // ============================================================================

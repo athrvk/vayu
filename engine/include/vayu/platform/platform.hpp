@@ -163,6 +163,28 @@ void ensure_private_directory (const std::string& path);
  */
 void restrict_new_files_to_owner ();
 
+/**
+ * @brief Make the data directory and what the engine keeps in it owner-only
+ *
+ * The whole of the daemon's data-layout setup, in one call so a test can make
+ * it: `restrict_new_files_to_owner`, then `ensure_private_directory` for
+ * @p data_dir (whatever `--data-dir` names - it is chmod'd 0700), `logs` and
+ * `db`, then, on POSIX, a pass over the files an older engine left open. The
+ * pass tightens to 0600 any file wider than that among `vayu.lock`, the
+ * regular files directly under `db/` (the database, its `-wal` and `-shm`, the
+ * `.bak` family, quarantined sets, `ca-bundle.pem`), under `db/backups/` and
+ * under `logs/`, and `db/backups` itself to 0700. It is an allowlist and never
+ * a walk of @p data_dir, which can be a directory the user keeps other things
+ * in; symlinks and non-regular files are skipped; a path it cannot change is
+ * skipped without an error. Windows has no file pass: the DACL is per
+ * directory and files created from now on inherit it.
+ *
+ * Call once at startup, before the database opens or the logger writes.
+ * @param data_dir The data directory
+ * @throws std::runtime_error if a directory cannot be created or restricted
+ */
+void prepare_data_directory (const std::string& data_dir);
+
 // ============================================================================
 // Signal Handling
 // ============================================================================

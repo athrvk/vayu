@@ -202,6 +202,12 @@ on is refused on stderr with exit code **1** rather than dropped:
 | `-d, --data-dir <DIR>` | A directory path |
 | `-v, --verbose [LEVEL]` | 0 (warn/error), 1 (info) or 2 (debug); `-v` on its own means 1 |
 
+`--data-dir` is made owner-only (`0700` on Linux and macOS) whatever it names,
+and the engine's own files under it are tightened to `0600` on every start
+(`vayu.lock` and the regular files directly in `db/`, `db/backups/` and
+`logs/`), so give it a directory of its own rather than one that holds other
+things you share.
+
 At `-v 2`, every route on the management server and every capture on a webhook
 inbox writes one request line - method, path, status, duration and response
 bytes, never the query string, headers or body (issue #1510). `-v 1` shows

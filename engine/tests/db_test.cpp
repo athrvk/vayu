@@ -2284,6 +2284,62 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
     expect_protocol_settings_backfilled (reopened);
 }
 
+// Schema version 5 dropped `oauth_tokens.raw_response` (#1781): it held the
+// provider's whole token response, refresh and id tokens included, and nothing
+// read it. The drop is `sync_schema ()`'s, so a row written by an older engine
+// must survive it with the columns the engine still maps. Mutation check:
+// map `make_column ("raw_response", ...)` back onto `oauth_tokens` and the
+// column is still there after the upgrade, which reds the first assertion.
+TEST_F (DatabaseTest, AVersionFourDatabaseLosesTheStoredOAuthRawResponseButKeepsTheToken) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE oauth_tokens ADD COLUMN raw_response TEXT",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        ASSERT_EQ (
+        sqlite3_exec (handle,
+        "INSERT INTO oauth_tokens (cache_key, access_token, token_type, "
+        "refresh_token, scope, expires_in, created_at, raw_response) VALUES "
+        "('key_1', 'at-secret', 'Bearer', 'rt-secret', 'read', 3600, 1, "
+        "'{\"access_token\":\"at-secret\",\"id_token\":\"idt-secret\"}')",
+        nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+    ASSERT_TRUE (table_has_column (TEST_DB_PATH, "oauth_tokens", "raw_response"))
+    << "test setup did not add the column";
+    set_user_version (TEST_DB_PATH, 4);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "oauth_tokens", "raw_response"));
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "a version-4 database has no script to fold and needs no fold backup";
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    const auto token = reopened.get_oauth_token ("key_1");
+    ASSERT_HAS_VALUE (token);
+    EXPECT_EQ (token->access_token, "at-secret");
+    EXPECT_EQ (token->refresh_token, "rt-secret");
+    EXPECT_EQ (token->scope, "read");
+    EXPECT_EQ (token->expires_in, 3600);
+}
+
 // Issue #1765 folded the four `requests` protocol-setting columns into the
 // same version 2 (no released build ever stamped 2), so a database an earlier
 // build of that version already stamped still gets them: `sync_schema ()`
