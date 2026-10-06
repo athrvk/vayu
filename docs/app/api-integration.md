@@ -1288,7 +1288,10 @@ raw, the Sends line writes a value a `{{variable}}` brings into the query raw
 (otherwise as URL text whose query part takes `QUERY_ENCODE_SET`, issue #1773,
 `resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`), and a
 query-located API key is
-appended raw, all matching what the engine sends. The imported
+appended raw, all matching what the engine sends. The Sends line draws that
+URL with every secret variable value and auth credential (each encoded
+spelling too) replaced by `••••`; the masking is at render, so what
+resolves and what is sent are unchanged (#1806). The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
 the Postman exporter only: `GET /requests` returns it as the stored JSON text,
 which the app keeps as a string and never parses, so an import and a Duplicate

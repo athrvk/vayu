@@ -45,6 +45,7 @@ import {
 	substitutePathVariables,
 } from "../../../utils/path-variables";
 import { resolveUrlTemplate } from "../../../utils/query-encoding";
+import { collectSecrets, createSecretMasker } from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 
 /*
@@ -59,6 +60,10 @@ import { EmptyTableHint } from "./EmptyTableHint";
  * keyed by request id rather than by the URL text.
  */
 const stableResolvedUrl = createStableResolve();
+
+// What a secret becomes on the "Sends" line: the bullets a `SecretInput` draws,
+// once per value, so the line does not give away the secret's length.
+const SENDS_SECRET_MASK = "\u2022\u2022\u2022\u2022";
 
 /*
  * The cache's resolver for the "Sends" line: its input is the URL and the path
@@ -97,7 +102,7 @@ const PATH_KEY_LOCKED = (_item: KeyValueItem, field: keyof KeyValueItem) => fiel
 const PATH_NOT_REMOVABLE = () => false;
 
 export default function ParamsPanel() {
-	const { request, updateField, resolveString } = useRequestBuilderContext();
+	const { request, updateField, resolveString, getAllVariables } = useRequestBuilderContext();
 	const variables = useVariableSupport();
 
 	// Derived, never written by rendering: a `:name` no stored row answers
@@ -177,6 +182,14 @@ export default function ParamsPanel() {
 		}),
 		sendsResolver(resolveString)
 	);
+	// Masked here, after the cache: the cache keeps the resolved URL (a
+	// `{{$randomInt}}` stays what it rolled) and only what is drawn is hidden.
+	const sendsText = createSecretMasker(
+		collectSecrets(getAllVariables(), request.auth),
+		true,
+		undefined,
+		SENDS_SECRET_MASK
+	).apply(resolvedUrl);
 	const displayParams = queryRowsOf(request.params).filter((param) => !param.system);
 
 	return (
@@ -246,7 +259,7 @@ export default function ParamsPanel() {
 							Sends
 						</span>
 						<span className="min-w-0 flex-1 break-all font-mono text-muted-foreground">
-							{resolvedUrl || <span className="italic">No URL</span>}
+							{sendsText || <span className="italic">No URL</span>}
 						</span>
 					</div>
 				</>

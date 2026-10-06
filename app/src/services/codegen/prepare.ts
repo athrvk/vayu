@@ -27,7 +27,10 @@ import {
 	type SnippetRequest,
 } from "./types";
 import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
-import { encodeQueryComponent } from "@/modules/request-builder/utils/query-encoding";
+import {
+	encodeAtUrlComponent,
+	encodeQueryComponent,
+} from "@/modules/request-builder/utils/query-encoding";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
@@ -79,14 +82,20 @@ function asString(value: unknown): string {
 }
 
 /**
- * A secret as it can appear in a URL: as written, in the query encoding the
- * engine writes (`encodeQueryComponent`, also what substitution into a URL
- * does) and as `encodeURIComponent` writes it. A `{{token}}` substituted into
- * a path or query reaches the composed payload encoded, so the raw value alone
- * would miss `a b&c` sitting there as `a%20b%26c`.
+ * A secret as it can appear in a URL: as written, as substituted into URL text
+ * (`encodeAtUrlComponent`, the rule compose and the "Sends" line apply to a
+ * `{{token}}` in a path or query, which leaves `&` and `=` raw), as a query
+ * row's value (`encodeQueryComponent`) and as `encodeURIComponent` writes it.
+ * The raw value alone would miss `a b&c` sitting there as `a%20b&c`.
  */
 function secretForms(secret: string): string[] {
-	return [secret, encodeQueryComponent(secret, "value"), encodeURIComponent(secret)];
+	return [
+		secret,
+		encodeAtUrlComponent(secret, "head").written,
+		encodeAtUrlComponent(secret, "query").written,
+		encodeQueryComponent(secret, "value"),
+		encodeURIComponent(secret),
+	];
 }
 
 /**
@@ -101,11 +110,15 @@ function secretForms(secret: string): string[] {
  * A header row is replaced whole, whatever it holds: a typed `Authorization`
  * is not a variable, so its name is the only signal there is
  * (`isSensitiveHeaderName`).
+ *
+ * `placeholder` is what each hit becomes: `<secret>` for code, which must stay
+ * readable as text, and a surface that shows the value in a UI picks its own.
  */
 export function createSecretMasker(
 	secrets: string[] | undefined,
 	active: boolean | undefined,
-	apiKeyHeaderName?: string
+	apiKeyHeaderName?: string,
+	placeholder: string = SECRET_PLACEHOLDER
 ) {
 	const values = active
 		? [
@@ -118,7 +131,7 @@ export function createSecretMasker(
 		for (const secret of values) {
 			if (!out.includes(secret)) continue;
 			used = true;
-			out = out.split(secret).join(SECRET_PLACEHOLDER);
+			out = out.split(secret).join(placeholder);
 		}
 		return out;
 	};
@@ -127,7 +140,7 @@ export function createSecretMasker(
 			return apply(value);
 		}
 		used = true;
-		return SECRET_PLACEHOLDER;
+		return placeholder;
 	};
 	return { apply, applyHeader, wasUsed: () => used };
 }

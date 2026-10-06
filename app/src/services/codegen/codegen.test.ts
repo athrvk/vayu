@@ -459,6 +459,7 @@ describe("secret masking", () => {
 
 		it.each([
 			["the query encoding", "https://h/p?k=a%20b%26c/d"],
+			["URL text substituted into the query", "https://h/p?k=a%20b&c/d"],
 			["encodeURIComponent", "https://h/p?k=a%20b%26c%2Fd"],
 		])("masks a secret substituted as %s", (_name, url) => {
 			const { code, masked } = generateCurl(
