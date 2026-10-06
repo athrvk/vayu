@@ -58,11 +58,13 @@ import {
 	withheldAuthMembers,
 	withholdConfigCredentials,
 	withholdCookieValues,
+	withholdDiagnoseCredentials,
 	withholdRowListSecrets,
 	withholdRowSecrets,
 	WITHHELD_AUTH_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
+	WITHHELD_DIAGNOSE_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 
@@ -8050,7 +8052,9 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: [],
 		description:
-			"Test whether Vayu can reach a URL under the proxy, custom CA and client-certificate settings in force, and say which hop failed. Sends one HEAD with certificate verification on, redirects off and a 10-second deadline, and returns `outcome` (ok, proxy_failed, tls_failed, timed_out, failed), the proxy mode and URL used, the client certificate that answered for the host (\"\" when none), and on failure the engine's error code and libcurl's message. Use it when requests fail with connection or TLS errors, before concluding the API is down. Never returns a response body or headers. GUARDED: the URL's host must be on Vayu's MCP allowlist.",
+			"Test whether Vayu can reach a URL under the proxy, custom CA and client-certificate settings in force, and say which hop failed. Sends one HEAD with certificate verification on, redirects off and a 10-second deadline, and returns `outcome` (ok, proxy_failed, tls_failed, timed_out, failed), the proxy mode and URL used, the client certificate that answered for the host (\"\" when none), and on failure the engine's error code and libcurl's message. Use it when requests fail with connection or TLS errors, before concluding the API is down. Never returns a response body or headers. " +
+			WITHHELD_DIAGNOSE_SENTENCE +
+			" GUARDED: the URL's host must be on Vayu's MCP allowlist.",
 		annotations: {
 			title: "Diagnose a connection",
 			readOnlyHint: true,
@@ -8075,7 +8079,10 @@ export const TOOLS: McpTool[] = [
 			const outcome = asRecord(answer).outcome;
 			const hint =
 				typeof outcome === "string" ? CONNECTION_OUTCOME_HINTS[outcome] : undefined;
-			return withCaveat(jsonResult(answer), hint ? `\n\n${hint}` : "");
+			return withCaveat(
+				jsonResult(secretsShape(ctx, withholdDiagnoseCredentials)(answer)),
+				hint ? `\n\n${hint}` : ""
+			);
 		},
 	},
 	{

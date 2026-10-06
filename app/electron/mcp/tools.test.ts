@@ -9496,6 +9496,7 @@ describe("resolve_variables", () => {
  */
 describe("secret withholding", () => {
 	const REVEAL = { revealSecretsToAgents: true };
+	const ALLOW_API = { allowlist: ["api.example.com"] };
 
 	const read = async (
 		tool: string,
@@ -9690,6 +9691,41 @@ describe("secret withholding", () => {
 	test("get_engine_config returns proxy credentials with reveal on", async () => {
 		const client = fakeClient({ getConfig: vi.fn().mockResolvedValue(CONFIG) });
 		expect((await read("get_engine_config", client, REVEAL)).body).toEqual(CONFIG);
+	});
+
+	const DIAGNOSIS = {
+		url: "https://api.example.com/",
+		outcome: "proxy_failed",
+		errorCode: "PROXY_ERROR",
+		proxy: { mode: "manual", url: "http://alice:pa@ss/w0rd@proxy.corp:8080" },
+		clientCertificate: "",
+	};
+
+	test("diagnose_connection strips the proxy URL's credentials and keeps the host", async () => {
+		const client = fakeClient({ diagnoseConnection: vi.fn().mockResolvedValue(DIAGNOSIS) });
+		const { text, body } = await read("diagnose_connection", client, ALLOW_API, {
+			url: "https://api.example.com/",
+		});
+		for (const secret of ["alice", "pa@ss", "w0rd"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body.proxy).toEqual({
+			mode: "manual",
+			url: "http://proxy.corp:8080",
+			credentialsWithheld: true,
+		});
+		expect(body.outcome).toBe("proxy_failed");
+	});
+
+	test("diagnose_connection returns the proxy URL as the engine reported it with reveal on", async () => {
+		const client = fakeClient({ diagnoseConnection: vi.fn().mockResolvedValue(DIAGNOSIS) });
+		const { body } = await read(
+			"diagnose_connection",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			{ url: "https://api.example.com/" }
+		);
+		expect(body).toEqual(DIAGNOSIS);
 	});
 
 	test("update_engine_config's echo of the config table withholds the same credentials", async () => {
