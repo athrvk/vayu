@@ -122,8 +122,8 @@ beforeEach(() => {
 	queryState.rows = [
 		run("a1", null, "app"),
 		run("c1", "cursor-vscode"),
-		run("k1", "claude-code"),
-		run("k2", "Claude Code"),
+		run("k1", "windsurf-client"),
+		run("k2", "Windsurf"),
 	];
 });
 
@@ -150,22 +150,22 @@ describe("the history sidebar's origin filter", () => {
 
 	it("lists one entry per client, folding two spellings of one product, once there are several", () => {
 		renderList();
-		expect(optionNames()).toEqual(["All origins", "App", "Agents", "Claude Code", "Cursor"]);
+		expect(optionNames()).toEqual(["All origins", "App", "Agents", "Cursor", "Windsurf"]);
 	});
 
 	it("offers no per-client entries for a single agent", () => {
-		queryState.rows = [run("a1", null, "app"), run("c1", "cursor-vscode"), run("c2", "cursor")];
+		queryState.rows = [run("a1", null, "app"), run("c1", "cursor-vscode"), run("c2", "Cursor")];
 		renderList();
 		expect(optionNames()).toEqual(["All origins", "App", "Agents"]);
 	});
 
 	it("narrows to one client without asking the engine for anything but the kind", () => {
 		renderList();
-		choose("Claude Code");
+		choose("Windsurf");
 
 		expect(lastQuery().origin).toBe("mcp");
-		expect(useHistoryStore.getState().filterClient).toBe("Claude Code");
-		expect(originSelect()).toHaveTextContent("Claude Code");
+		expect(useHistoryStore.getState().filterClient).toBe("Windsurf");
+		expect(originSelect()).toHaveTextContent("Windsurf");
 		expect(screen.getByText("row-k1")).toBeInTheDocument();
 		expect(screen.getByText("row-k2")).toBeInTheDocument();
 		expect(screen.queryByText("row-c1")).not.toBeInTheDocument();

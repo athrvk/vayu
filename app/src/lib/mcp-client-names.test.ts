@@ -11,21 +11,32 @@ import { MCP_CLIENTS, UNNAMED_MCP_CLIENT, mcpClientDisplayName } from "./mcp-cli
 /** One expectation per row of the table, spelled out rather than read back from it. */
 const EXPECTED: [identifier: string, label: string][] = [
 	["claude-code", "Claude Code"],
-	["Claude Code", "Claude Code"],
 	["claude-ai", "Claude Desktop"],
-	["Claude Desktop", "Claude Desktop"],
 	["Visual Studio Code", "VS Code"],
-	["vscode", "VS Code"],
-	["vscode-mcp-client", "VS Code"],
+	["Visual-Studio-Code", "VS Code"],
+	["Visual Studio Code - Insiders", "VS Code Insiders"],
 	["cursor-vscode", "Cursor"],
-	["cursor", "Cursor"],
 	["codex-mcp-client", "Codex"],
-	["codex", "Codex"],
+	["Codex", "Codex"],
 	["windsurf-client", "Windsurf"],
-	["windsurf", "Windsurf"],
-	["zed", "Zed"],
+	["Windsurf", "Windsurf"],
+	["Zed", "Zed"],
 	["gemini-cli-mcp-client", "Gemini CLI"],
-	["gemini-cli", "Gemini CLI"],
+	["github-copilot-developer", "GitHub Copilot CLI"],
+	["Cline", "Cline"],
+	["Roo-Code", "Roo Code"],
+	["Kilo-Code", "Kilo Code"],
+	["continue-cli-client", "Continue"],
+	["opencode", "OpenCode"],
+	["goose", "Goose"],
+	["ChatGPT", "ChatGPT"],
+	["JetBrains-IU-copilot-intellij", "JetBrains AI Assistant"],
+	["JetBrains-JBC-copilot-intellij", "JetBrains AI Assistant"],
+	["com.raycast.macos", "Raycast"],
+	["amp-mcp-client", "Amp"],
+	["antigravity-client", "Google Antigravity"],
+	["Q-DEV-CLI", "Amazon Q Developer CLI"],
+	["Postman-Client", "Postman"],
 ];
 
 describe("mcpClientDisplayName", () => {
@@ -40,6 +51,20 @@ describe("mcpClientDisplayName", () => {
 
 	it("ignores surrounding whitespace", () => {
 		expect(mcpClientDisplayName("  claude-code \n")).toBe("Claude Code");
+	});
+
+	it("shows an identifier the registry never saw exactly as sent", () => {
+		// Guesses deleted by #1819: nothing was seen sending them.
+		for (const guess of [
+			"Claude Code",
+			"Claude Desktop",
+			"vscode",
+			"vscode-mcp-client",
+			"cursor",
+			"gemini-cli",
+		]) {
+			expect(mcpClientDisplayName(guess)).toBe(guess);
+		}
 	});
 
 	it("returns an identifier it does not know exactly as sent", () => {
