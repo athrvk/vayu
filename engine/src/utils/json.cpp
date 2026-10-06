@@ -25,6 +25,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
+#include "vayu/utils/text_escape.hpp"
 
 namespace vayu::json {
 
@@ -1610,8 +1611,10 @@ void cap_snapshot_body (nlohmann::json& parsed, size_t max_body_bytes) {
 constexpr size_t kMinMaskedSecretLength = 4;
 
 // Each secret value as the snapshot can hold it: raw, RFC 3986's strict form
-// (`url_encode`, what a client escaping a component writes) and Postman's
-// query form (what composition writes, `encode_query_component`). Longest
+// (`url_encode`, what a client escaping a component writes), Postman's query
+// form (what composition writes, `encode_query_component`), the JSON string
+// escape (a JSON body is stored as text, so `pa"ss` is `pa\"ss` inside it) and
+// the XML escapes of character data and of each attribute delimiter. Longest
 // first, so a secret that contains another is masked whole rather than around
 // the shorter one.
 std::vector<std::string> masked_secret_forms (const std::vector<std::string>& values) {
@@ -1624,6 +1627,10 @@ std::vector<std::string> masked_secret_forms (const std::vector<std::string>& va
         forms.push_back (vayu::utils::url_encode (value));
         forms.push_back (
         vayu::core::encode_query_component (value, vayu::core::QueryPart::Value));
+        forms.push_back (vayu::utils::escape_json_string_content (value));
+        for (const char quote : { '\0', '"', '\'' }) {
+            forms.push_back (vayu::utils::escape_xml_content (value, quote));
+        }
     }
     std::sort (forms.begin (), forms.end (), [] (const std::string& a, const std::string& b) {
         return a.size () != b.size () ? a.size () > b.size () : a < b;

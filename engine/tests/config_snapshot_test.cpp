@@ -7,14 +7,14 @@
 
 /**
  * @file tests/config_snapshot_test.cpp
- * @brief A design run's stored `config_snapshot` withholds the composed
- *        request's credentials (#1803).
+ * @brief A run's stored `config_snapshot` withholds the composed request's
+ *        credentials, from `POST /execute` and from `POST /runs` (#1803).
  *
  * `request_builder_test.cpp` holds `sanitize_config_snapshot` to its rules on
  * a payload it builds by hand. This file holds the route to them: the real
- * `POST /execute` handler, with the secret values read from the scopes the
- * payload names - an environment and the collection of the request it links -
- * and the run row read back out of the database.
+ * `POST /execute` and `POST /runs` handlers, with the secret values read from
+ * the scopes the payload names - an environment and the collection of the
+ * request it links - and the run row read back out of the database.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -26,6 +26,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -49,6 +50,8 @@ using nlohmann::json;
 
 constexpr const char* ENV_SECRET        = "env-secret-7f3a";
 constexpr const char* COLLECTION_SECRET = "collection-secret-91c2";
+// A value a JSON body holds escaped: `"` and `\` become `\"` and `\\`.
+constexpr const char* QUOTED_SECRET = R"(pa"ss\word-12345)";
 
 class ConfigSnapshotExecuteTest : public ::testing::Test {
     protected:
@@ -71,6 +74,8 @@ class ConfigSnapshotExecuteTest : public ::testing::Test {
     }
 
     void TearDown () override {
+        // A `POST /runs` worker writes through `db_`, so it is drained first.
+        run_manager_.shutdown ();
         svr_.stop ();
         if (thread_.joinable ()) {
             thread_.join ();
@@ -98,6 +103,7 @@ class ConfigSnapshotExecuteTest : public ::testing::Test {
         collection.name      = "API";
         collection.variables = json{
             { "signing", { { "value", COLLECTION_SECRET }, { "secret", true } } },
+            { "quoted", { { "value", QUOTED_SECRET }, { "secret", true } } },
             { "region", { { "value", "eu-west-1" } } }
         }.dump ();
         collection.auth = "{}";
@@ -123,6 +129,27 @@ class ConfigSnapshotExecuteTest : public ::testing::Test {
         auto response = client.Post ("/execute", payload.dump (), "application/json");
         ASSERT_TRUE (response);
         EXPECT_EQ (response->status, 200) << response->body;
+    }
+
+    /// `POST /runs` for @p payload, held until the run it started has settled.
+    void start_run_and_wait (const json& payload) const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/runs", payload.dump (), "application/json");
+        ASSERT_TRUE (response);
+        ASSERT_EQ (response->status, 202) << response->body;
+        const std::string run_id = json::parse (response->body).value ("runId", "");
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (20);
+        while (std::chrono::steady_clock::now () < deadline) {
+            const auto run = db_->get_run (run_id);
+            if (run && run->status != vayu::RunStatus::Pending &&
+            run->status != vayu::RunStatus::Running) {
+                return;
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+        ADD_FAILURE () << "run " << run_id << " never settled";
     }
 
     /// The one run the send recorded, or an empty snapshot after a failure.
@@ -178,6 +205,34 @@ TEST_F (ConfigSnapshotExecuteTest, ADesignRunsSnapshotHoldsNoComposedCredential)
     EXPECT_EQ (parsed["url"], echo.url () + "?sig=<redacted>");
     EXPECT_EQ (json::parse (parsed["body"]["content"].get<std::string> ()),
     (json{ { "token", "<redacted>" }, { "n", 1 } }));
+}
+
+// Mutation check: replace `run_snapshot_secrets (...)` in
+// `execution.cpp`'s `POST /runs` handler with `{}` and the collection secret
+// stays in the URL and the JSON body. Its JSON-escaped form is in the body
+// too, because that is how a JSON body holds a value with a quote in it.
+TEST_F (ConfigSnapshotExecuteTest, ALoadRunsSnapshotHoldsNoCollectionScopeSecret) {
+    const vayu::tests::EchoServer echo;
+    const std::string collection_secret = COLLECTION_SECRET;
+    const std::string quoted_secret     = QUOTED_SECRET;
+
+    start_run_and_wait (
+    { { "method", "POST" }, { "url", echo.url () + "?sig=" + collection_secret },
+    { "body",
+    { { "mode", "json" },
+    { "content", json{ { "sig", collection_secret }, { "q", quoted_secret } }.dump () } } },
+    { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 },
+    { "requestId", "req_1" } });
+
+    const std::string snapshot = stored_snapshot ();
+    ASSERT_FALSE (snapshot.empty ());
+    EXPECT_EQ (snapshot.find (collection_secret), std::string::npos) << snapshot;
+    EXPECT_EQ (snapshot.find ("word-12345"), std::string::npos) << snapshot;
+
+    const auto parsed = json::parse (snapshot);
+    EXPECT_EQ (parsed["url"], echo.url () + "?sig=<redacted>");
+    EXPECT_EQ (json::parse (parsed["body"]["content"].get<std::string> ()),
+    (json{ { "sig", "<redacted>" }, { "q", "<redacted>" } }));
 }
 
 } // namespace
