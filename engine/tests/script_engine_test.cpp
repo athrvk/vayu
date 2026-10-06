@@ -5175,6 +5175,49 @@ TEST_F (ScriptEngineTest, AScriptThatReplacesPmDoesNotBreakTheNextExecution) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// A queued promise job pins its context, so a pooled runtime that only freed
+// the context kept every one of them (#1823). One engine is one thread's pool.
+// Each script claims half the memory limit, so the contexts a leaking runtime
+// keeps fail that allocation within a few dozen scripts; without it the leak
+// surfaces only as a slowdown, because a failed context rebuild discards the
+// runtime instead of reporting anything.
+TEST_F (ScriptEngineTest, PromiseJobsLeftBehindDoNotExhaustThePooledRuntime) {
+    ScriptConfig cfg;
+    cfg.memory_limit = size_t{ 8 } * 1024 * 1024;
+    ScriptEngine pooled (cfg);
+
+    constexpr int executions = 2000;
+    for (int i = 0; i < executions; ++i) {
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = pooled.execute (R"JS(
+            const headroom = new ArrayBuffer(4 * 1024 * 1024);
+            Promise.resolve(1).then(function () {});
+            pm.test("ran", function () {});
+        )JS",
+        ctx);
+        ASSERT_TRUE (result.success) << "execution " << i << ": " << result.error_message;
+        ASSERT_EQ (result.tests.size (), 1u) << "execution " << i;
+    }
+}
+
+// The queue is discarded, never drained: a job run after its script ended
+// would be user code with no deadline and a dead context behind it.
+TEST_F (ScriptEngineTest, APromiseJobLeftBehindNeverRuns) {
+    auto first        = ScriptContext::for_test (request, response);
+    first.environment = &env;
+    auto first_result = engine.execute (
+    R"JS(Promise.resolve().then(function () { pm.environment.set("late", "1"); });)JS", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second        = ScriptContext::for_test (request, response);
+    second.environment = &env;
+    auto second_result = engine.execute ("pm.environment.set('next', '1');", second);
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+
+    EXPECT_EQ (env.count ("late"), 0U);
+    EXPECT_EQ (env.count ("next"), 1U);
+}
+
 // What a context that declares neither reports (#353): a bare `for_test` shape,
 // which is what an ordinary `POST /execute` send - one carrying no `data` row -
 // reaches the engine with. Both read undefined, and that is #300's ruling
