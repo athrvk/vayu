@@ -432,6 +432,11 @@ describe("bundleExternalRefs - what a spec may make Vayu fetch or read (#1782)",
 		"http://169.254.169.254/latest/meta-data.json",
 		"http://[::1]/x.json",
 		"http://[fe80::1]/x.json",
+		"http://[::ffff:127.0.0.1]/x.json",
+		"http://[::ffff:169.254.169.254]/latest/meta-data.json",
+		"http://0.0.0.0/x.json",
+		"http://[::]/x.json",
+		"http://localhost./x.json",
 	])("refuses to fetch %s for a reference, and names it", async (url) => {
 		const fetchUrl = vi.fn(async () => "{}");
 		const result = await bundleExternalRefs(specReferencing(url), {
@@ -510,9 +515,27 @@ describe("isLocalAddress", () => {
 			"https://localhost.example.com/x",
 			"https://128.0.0.1/x",
 			"https://169.255.0.1/x",
+			"https://[::ffff:8.8.8.8]/x",
+			"https://[::ffff:808:808]/x",
+			"https://[2001:db8::1]/x",
 			"not a url",
 		]) {
 			expect(isLocalAddress(url)).toBe(false);
 		}
+	});
+
+	it.each([
+		["dotted IPv4-mapped loopback", "http://[::ffff:127.0.0.1]/x"],
+		["dotted IPv4-mapped metadata address", "http://[::ffff:169.254.169.254]/x"],
+		["hex IPv4-mapped loopback", "http://[::ffff:7f00:1]/x"],
+		["hex IPv4-mapped metadata address", "http://[::ffff:a9fe:a9fe]/x"],
+		["IPv4-mapped 127/8 beyond .1", "http://[::ffff:7f12:3456]/x"],
+		["unspecified IPv4", "http://0.0.0.0/x"],
+		["unspecified IPv6", "http://[::]/x"],
+		["localhost with a trailing dot", "http://localhost./x"],
+		["a .localhost name with a trailing dot", "http://app.localhost./x"],
+		["loopback IPv4 with a trailing dot", "http://127.0.0.1./x"],
+	])("is true for %s", (_name, url) => {
+		expect(isLocalAddress(url)).toBe(true);
 	});
 });

@@ -116,8 +116,14 @@ Where a referenced file is read from depends on where the spec came from:
 A reference to a loopback or link-local address (`localhost`, `127.0.0.0/8`,
 `::1`, `169.254.0.0/16`, `fe80::/10`) is never fetched, because a spec from the
 internet should not be able to make Vayu call into your machine or network edge.
-The one exception is a spec that was itself fetched from such a host (a dev
-server), which may reference its own host.
+The unspecified addresses (`0.0.0.0`, `::`), a trailing dot (`localhost.`) and
+the IPv4-mapped IPv6 spelling of any of these (`[::ffff:127.0.0.1]`,
+`[::ffff:a9fe:a9fe]`) are refused the same way. The one exception is a spec that
+was itself fetched from such a host (a dev server), which may reference its own
+host.
+
+The check reads the address as written. A DNS name that resolves to a local
+address, and a redirect that lands on one, are not caught on the renderer side.
 
 References are followed through the files they lead to, so a file that refers to
 a third is resolved too, and a cycle stops rather than looping. Each file is read

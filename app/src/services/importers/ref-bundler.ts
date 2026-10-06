@@ -501,10 +501,14 @@ export async function bundleExternalRefs(
 }
 
 /**
- * Whether a URL names this machine or its link-local range: `localhost`, the
+ * Whether a URL names this machine or its link-local range: `localhost` (with
+ * or without a trailing dot), the unspecified `0.0.0.0` and `::`, the
  * `127.0.0.0/8` block, `::1`, `169.254.0.0/16` (cloud metadata lives there) and
- * `fe80::/10`. Judged from the text; a name that merely resolves to one is the
- * engine's to refuse, since only it sees the connection.
+ * `fe80::/10`, plus any IPv4-mapped IPv6 form of those (`::ffff:7f00:1`).
+ *
+ * Judged from the text only. A DNS name that resolves to a local address, and a
+ * redirect that lands on one, are out of scope for a check made before any
+ * connection exists.
  */
 export function isLocalAddress(url: string): boolean {
 	let host: string;
@@ -513,10 +517,23 @@ export function isLocalAddress(url: string): boolean {
 	} catch {
 		return false;
 	}
-	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	host = unmapIPv4(host.replace(/^\[|\]$/g, "").replace(/\.$/, ""));
 	if (host === "localhost" || host.endsWith(".localhost")) return true;
+	if (host === "0.0.0.0" || host === "::") return true;
 	if (/^127\.\d+\.\d+\.\d+$/.test(host) || /^169\.254\.\d+\.\d+$/.test(host)) return true;
 	return host === "::1" || /^fe[89ab][0-9a-f]?:/.test(host);
+}
+
+/**
+ * The dotted IPv4 behind an IPv4-mapped IPv6 host, else the host unchanged.
+ * `URL` serializes `::ffff:127.0.0.1` as `::ffff:7f00:1`, so the hex pair is
+ * the form to decode.
+ */
+function unmapIPv4(host: string): string {
+	const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+	if (!mapped) return host;
+	const [high, low] = [parseInt(mapped[1], 16), parseInt(mapped[2], 16)];
+	return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 
 function isOwnHost(url: string, sourceUrl: string | undefined): boolean {
