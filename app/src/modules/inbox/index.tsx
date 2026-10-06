@@ -322,7 +322,10 @@ export default function InboxView() {
 				    does nothing. */}
 				{inboxes.length > 1 && (
 					<Select value={inbox.inboxId} onValueChange={show}>
-						<SelectTrigger className="h-7 w-auto gap-1 text-xs" aria-label="Inbox">
+						<SelectTrigger
+							className="h-control-sm w-auto gap-1 text-xs"
+							aria-label="Inbox"
+						>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>

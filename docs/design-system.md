@@ -1276,12 +1276,13 @@ halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them. The latter also scans every non-test file for a
-`Button` / `TooltipIconButton` / `TimeMarker` / plain `<button>` tag carrying
-`h-N`, `w-N` or `size-N` with N <= 7.5 (under 24px at the 3px unit, fractions
-included), or an arbitrary `h-[18px]` / `size-[1rem]` under 24px: such an
-override outranks the size variant in
-emission order. A compact text button states `h-control-sm`, an icon button
-`size-target`. The tree-row controls are 24px at Default inside 24px rows, so
+`Button` / `TooltipIconButton` / `TimeMarker` / `SelectTrigger` / plain
+`<button>` tag carrying `h-N`, `w-N` or `size-N` with N <= 7.5 (under 24px at
+the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
+under 24px: such an override outranks the size variant in emission order. A
+compact text button or select trigger states `h-control-sm`, an icon button
+`size-target`. `Input` is not scanned, and a dense-row input at `h-6` / `h-7`
+is still under the floor. The tree-row controls are 24px at Default inside 24px rows, so
 they carry `size-target` rather than an exemption.
 
 ---

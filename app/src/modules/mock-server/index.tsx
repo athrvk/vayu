@@ -118,7 +118,7 @@ export default function MockServerView() {
 					{mocks.length > 1 && (
 						<Select value={mock.mockId} onValueChange={show}>
 							<SelectTrigger
-								className="h-7 w-auto gap-1 text-xs"
+								className="h-control-sm w-auto gap-1 text-xs"
 								aria-label="Mock server"
 							>
 								<SelectValue />

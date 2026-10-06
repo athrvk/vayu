@@ -119,10 +119,8 @@ describe('interactive elements keep no undersized override on Button\'s size="ic
 	// shape rather than a blanket "no h-N or w-N anywhere in the file" scan,
 	// since several of these files also carry legitimately different-sized
 	// Select/Input controls that would false-positive on a bare single-axis
-	// scan (CodeSection.tsx's `h-7` Select trigger, VariablesCategoryTree.tsx's
-	// `h-6` Input, ExamplesPanel.tsx's `h-7 w-40` Select trigger,
-	// GraphQLBody.tsx's `h-6 w-auto` Select trigger - none of them a same-size
-	// pair, so none match).
+	// scan (VariablesCategoryTree.tsx's `h-6` Input is a single-axis override,
+	// not a same-size pair, so it does not match).
 	const cases: [label: string, path: string][] = [
 		["UpdateBanner", "components/shared/UpdateBanner.tsx"],
 		["RecoveryBanner", "components/shared/RecoveryBanner.tsx"],
@@ -200,17 +198,19 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// outranks `size-target` in emission order and nothing else notices (the
 	// gap #1679 was reopened for). A plain `<button>` and `TimeMarker` (which
 	// forwards `className` to its Button) are in scope too: a hand-rolled
-	// trigger is where the floor slipped before. At the 3px unit h-N / w-N /
+	// trigger is where the floor slipped before. So is `SelectTrigger`, whose
+	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. `Input`
+	// is not scanned; a dozen dense-row inputs state `h-6` / `h-7`. At the 3px unit h-N / w-N /
 	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
-	const OPEN = /<(?:Button|button|TooltipIconButton|TimeMarker)\b/g;
+	const OPEN = /<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
 	// the box) while still catching a variant-prefixed `sm:w-5` or
 	// `[&_svg]:size-3`. Bare `0` is not matched: `w-0` hides a box rather than
 	// shrinking a target.
 	const BOX_SIZE =
-		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\d./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
+		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\w./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
 	const TARGET_FLOOR_PX = 24;
 	const PX_PER_REM = 16;
 
@@ -270,6 +270,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["a max cap", "max-h-6"],
 		["a fraction of the parent", "w-1/2"],
 		["the size-icon step", "size-icon-sm"],
+		["a container-size width", "w-3xs"],
 	])("does not flag %s", (_label, classes) => {
 		expect(undersizedClass(`<Button className="${classes}"`)).toBeUndefined();
 	});
@@ -282,6 +283,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(tags.length).toBeGreaterThan(100);
 		expect(tags).toContain("<button");
 		expect(tags).toContain("<TimeMarker");
+		expect(tags).toContain("<SelectTrigger");
 	});
 
 	it("finds no undersized h / w / size in an interactive element's own tag", () => {

@@ -493,7 +493,7 @@ function IssuerRow({
 							}
 							disabled={updateIssuer.isPending}
 						>
-							<SelectTrigger className="h-7 flex-1 text-xs">
+							<SelectTrigger className="h-control-sm flex-1 text-xs">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
