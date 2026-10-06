@@ -345,7 +345,7 @@ describe("a text input is the height of its row, or the compact control height a
 		const tags = files().flatMap((f) => [
 			...stripComments(readFileSync(f, "utf8")).matchAll(OPEN),
 		]);
-		expect(tags.length).toBeGreaterThan(30);
+		expect(tags.length).toBeGreaterThan(50);
 	});
 
 	it("finds no numeric or arbitrary height on an Input", () => {
