@@ -327,6 +327,14 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/lib/sensitive-headers.conformance.test.ts",
 		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
 	},
+	/*
+	 * The MCP server's own copy of that list (#1809): `electron/` cannot import
+	 * `src/lib/sensitive-headers.ts`, so the fixture pins a third list.
+	 */
+	mcpSensitiveHeaders: {
+		reader: "app/electron/mcp/withhold.conformance.test.ts",
+		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

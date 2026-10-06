@@ -65,6 +65,7 @@ import {
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
+	WITHHELD_HEADER_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 
@@ -4619,7 +4620,9 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small. " +
-			WITHHELD_AUTH_SENTENCE,
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -6394,7 +6397,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
-			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.`,
+			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured. ` +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "List saved examples",
 			readOnlyHint: true,
@@ -6407,7 +6411,7 @@ export const TOOLS: McpTool[] = [
 			const requestId = requireStr(args, "requestId");
 			return callEngine(
 				() => ctx.client.listRequestExamples(requestId, signal),
-				boundExampleBodies
+				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))
 			);
 		},
 	},

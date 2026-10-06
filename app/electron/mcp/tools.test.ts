@@ -10028,6 +10028,106 @@ describe("secret withholding", () => {
 		expect(firstText(res)).toContain("postman.bearer.tokenWithheld");
 		expect(client.createCollection).not.toHaveBeenCalled();
 	});
+
+	// A header typed straight into the Headers tab is no variable: its name is
+	// the only signal, and the shared list plus the request's API-key header
+	// decide (#1809).
+	const HEADER_REQUESTS = [
+		{
+			id: "req_h1",
+			name: "Typed credentials",
+			auth: { mode: "none" },
+			headers: [
+				{ key: "Authorization", value: "Bearer typed-live-token", enabled: true },
+				{ key: "cookie", value: "sid=typed-cookie", enabled: false },
+				{ key: "X-Api-Key", value: "{{apiKey}}", enabled: true },
+				{ key: "X-Auth-Token", value: "", enabled: true },
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			],
+		},
+		{
+			id: "req_h2",
+			name: "API-key auth names its header",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "header" },
+			headers: [{ key: "x-tenant-key", value: "typed-tenant-key", enabled: true }],
+		},
+		{
+			id: "req_h3",
+			name: "API-key auth in the query",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "query" },
+			headers: [{ key: "X-Tenant-Key", value: "plain-header", enabled: true }],
+		},
+	];
+
+	test("list_requests withholds a credential-bearing header's value and keeps the row", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of ["typed-live-token", "typed-cookie", "typed-tenant-key"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].headers).toEqual([
+			{ key: "Authorization", enabled: true, valueWithheld: true },
+			{ key: "cookie", enabled: false, valueWithheld: true },
+			// A reference names where the secret lives without being it, and an
+			// empty value holds none.
+			{ key: "X-Api-Key", value: "{{apiKey}}", enabled: true },
+			{ key: "X-Auth-Token", value: "", enabled: true },
+			{ key: "Content-Type", value: "application/json", enabled: true },
+		]);
+		expect(body[1].headers).toEqual([
+			{ key: "x-tenant-key", enabled: true, valueWithheld: true },
+		]);
+		// `in: query` writes no header, so the same name there is an ordinary one.
+		expect(body[2].headers[0].value).toBe("plain-header");
+	});
+
+	test("list_requests returns every header whole with reveal on", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual(HEADER_REQUESTS);
+	});
+
+	const EXAMPLES = [
+		{
+			id: "exa_1",
+			requestId: "req_1",
+			name: "200 OK",
+			status: 200,
+			headers: [
+				{ key: "Set-Cookie", value: "session=example-session; HttpOnly", enabled: true },
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			],
+			body: "{}",
+			contentType: "application/json",
+			order: 0,
+			origin: "user",
+			bodyTruncated: false,
+		},
+	];
+
+	test("list_request_examples withholds a Set-Cookie value and keeps the rest of the row", async () => {
+		const client = fakeClient({ listRequestExamples: vi.fn().mockResolvedValue(EXAMPLES) });
+		const { text, body } = await read("list_request_examples", client, undefined, {
+			requestId: "req_1",
+		});
+		expect(text).not.toContain("example-session");
+		expect(body.examples[0].headers).toEqual([
+			{ key: "Set-Cookie", enabled: true, valueWithheld: true },
+			{ key: "Content-Type", value: "application/json", enabled: true },
+		]);
+		expect(body.examples[0].body).toBe("{}");
+		expect(body.examples[0].name).toBe("200 OK");
+	});
+
+	test("list_request_examples returns the headers as stored with reveal on", async () => {
+		const client = fakeClient({ listRequestExamples: vi.fn().mockResolvedValue(EXAMPLES) });
+		const { body } = await read("list_request_examples", client, REVEAL, {
+			requestId: "req_1",
+		});
+		expect(body.examples).toEqual(EXAMPLES);
+	});
 });
 
 /**

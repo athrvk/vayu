@@ -8,11 +8,12 @@
 /**
  * @file withhold.test.ts
  * @brief The shapes `withholdDiagnoseCredentials` leaves alone (#1805): an
- *        answer with nothing to strip is returned as it came.
+ *        answer with nothing to strip is returned as it came; and the header
+ *        rows `withholdRowSecrets` masks (#1809).
  */
 
 import { describe, expect, test } from "vitest";
-import { withholdDiagnoseCredentials } from "./withhold.js";
+import { withholdDiagnoseCredentials, withholdRowSecrets } from "./withhold.js";
 
 describe("withholdDiagnoseCredentials", () => {
 	test("strips userinfo from proxy.url and marks the proxy node", () => {
@@ -40,5 +41,55 @@ describe("withholdDiagnoseCredentials", () => {
 		["a null answer", null],
 	])("passes %s through untouched", (_name, answer) => {
 		expect(withholdDiagnoseCredentials(answer)).toBe(answer);
+	});
+});
+
+describe("withholdRowSecrets headers", () => {
+	const row = (headers: unknown, auth?: unknown) => ({
+		id: "r",
+		headers,
+		...(auth === undefined ? {} : { auth }),
+	});
+
+	test("an API-key header is matched by the auth's key, ignoring case and padding", () => {
+		const out = withholdRowSecrets(
+			row([{ key: " X-Tenant-Key ", value: "k", enabled: true }], {
+				mode: "apikey",
+				key: "x-TENANT-key",
+			})
+		);
+		expect(out).toEqual(
+			row([{ key: " X-Tenant-Key ", enabled: true, valueWithheld: true }], {
+				mode: "apikey",
+				key: "x-TENANT-key",
+			})
+		);
+	});
+
+	test.each([
+		["a query-placed key", { mode: "apikey", key: "X-Tenant-Key", in: "query" }],
+		["another auth mode", { mode: "bearer", key: "X-Tenant-Key" }],
+		["a non-string key", { mode: "apikey", key: 7 }],
+		["no auth", undefined],
+	])("a custom header stays readable under %s", (_name, auth) => {
+		const headers = [{ key: "X-Tenant-Key", value: "k", enabled: true }];
+		expect(withholdRowSecrets(row(headers, auth))).toEqual(row(headers, auth));
+	});
+
+	test.each([
+		["a header map", { Authorization: "Bearer x" }],
+		["no list", null],
+	])("%s passes through untouched", (_name, headers) => {
+		expect(withholdRowSecrets(row(headers))).toEqual(row(headers));
+	});
+
+	test("a malformed row, or a nameless one, is left as it came", () => {
+		const headers = [
+			"Authorization: Bearer x",
+			{ value: "Bearer x" },
+			{ key: "", value: "Bearer x" },
+			{ key: "Authorization", value: 5 },
+		];
+		expect(withholdRowSecrets(row(headers))).toEqual(row(headers));
 	});
 });

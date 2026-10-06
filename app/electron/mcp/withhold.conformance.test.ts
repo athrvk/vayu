@@ -1,0 +1,55 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * The MCP server's sensitive-header list against the engine's. `electron/`
+ * cannot import the renderer's copy (`src/lib/sensitive-headers.ts`), so this
+ * module holds one of its own, and all three read `sensitiveHeaderNames` in
+ * `engine/tests/fixtures/log-redaction-conformance.json`.
+ *
+ * Mutation check: drop `x-csrf-token` from `SENSITIVE_HEADER_NAMES` in
+ * `withhold.ts` and the list-equality case reds.
+ */
+
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { SENSITIVE_HEADER_NAMES } from "@/lib/sensitive-headers";
+import {
+	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
+	withholdRowSecrets,
+} from "./withhold";
+
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [fixturePath] = ENGINE_READING_GUARDS.mcpSensitiveHeaders.paths.map(fromRepoRoot);
+const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
+	sensitiveHeaderNames: string[];
+};
+
+describe("MCP sensitive header conformance", () => {
+	it("read a non-empty fixture", () => {
+		expect(fixture.sensitiveHeaderNames.length).toBeGreaterThan(0);
+	});
+
+	it("holds exactly the engine's list", () => {
+		expect([...MCP_SENSITIVE_HEADER_NAMES].sort()).toEqual(
+			[...fixture.sensitiveHeaderNames].sort()
+		);
+	});
+
+	it("holds the renderer's list", () => {
+		expect([...MCP_SENSITIVE_HEADER_NAMES].sort()).toEqual([...SENSITIVE_HEADER_NAMES].sort());
+	});
+
+	it.each(fixture.sensitiveHeaderNames)("withholds a %s row's value in any case", (name) => {
+		for (const key of [name, name.toUpperCase()]) {
+			expect(withholdRowSecrets({ headers: [{ key, value: "v", enabled: true }] })).toEqual({
+				headers: [{ key, enabled: true, valueWithheld: true }],
+			});
+		}
+	});
+});

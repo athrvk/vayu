@@ -20,15 +20,14 @@
  * and a config or proxy URL `credentialsWithheld: true`.
  *
  * What goes through here is what is *stored*: environments, globals,
- * collections and requests as the read tools and the `vayu://` resources answer
- * them, the cookie jars, and the config table (`update_engine_config`'s echo
- * included). What a run *recorded* does not: a request that references a
- * secret still sends it, so the trace of what was sent carries it, and
- * `rawRequest`, `get_run_report`, `get_run_samples`, `list_runs`,
- * `vayu://runs`, `vayu://run/*`, the run-report prompts, `get_inbox_captures`
- * and `list_request_examples` answer it as recorded. SECURITY.md says so, and
- * says what write access adds: an agent can clear a variable's `secret` flag
- * and read it back, and a write tool's own answer echoes the stored row.
+ * collections, requests and saved examples as the read tools and the `vayu://`
+ * resources answer them, the cookie jars, and the config table
+ * (`update_engine_config`'s echo included). What a run *recorded* does not: a
+ * request that references a secret still sends it, so the trace of what was
+ * sent carries it, and `rawRequest`, `get_run_report`, `get_run_samples`,
+ * `list_runs`, `vayu://runs`, `vayu://run/*`, the run-report prompts and
+ * `get_inbox_captures` answer it as recorded (#1809 retires that carve-out).
+ * A write tool's own answer echoes the stored row, and SECURITY.md says so.
  */
 
 import type { McpSafetyConfig } from "./config.js";
@@ -49,6 +48,9 @@ export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes b
 
 /** What a read carrying auth blocks says about the credentials in them. */
 export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value, and a credential row in a Postman import's \`postman\` source as \`valueWithheld: true\` on the row, unless the user has turned on ${REVEAL_SETTING}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
+
+/** What a read carrying header rows says about the credential-bearing ones. */
+export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a credential (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or the header the request's API-key auth names) comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
 
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
@@ -286,11 +288,61 @@ export function withheldAuthMembers(auth: Record<string, unknown>): string[] {
 	];
 }
 
+// --- Headers ------------------------------------------------------------------
+
+/**
+ * The header names that hold a credential whatever their value is: a header
+ * typed straight into a request is no variable, so the name is the only signal.
+ * `app/src/lib/sensitive-headers.ts`'s list, which this module cannot import
+ * (`electron/` may not reach into `src/`); both are pinned to the engine's by
+ * `sensitiveHeaderNames` in `engine/tests/fixtures/log-redaction-conformance.json`
+ * (`withhold.conformance.test.ts`).
+ */
+export const SENSITIVE_HEADER_NAMES: readonly string[] = [
+	"authorization",
+	"proxy-authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"x-csrf-token",
+];
+
+/**
+ * The header an API-key auth writes its key into: the engine's rule, header
+ * unless `in` says `query`. The one sensitive name no list can hold.
+ */
+function apiKeyHeaderName(auth: unknown): string | undefined {
+	if (!isRecord(auth) || auth.mode !== "apikey" || auth.in === "query") return undefined;
+	return typeof auth.key === "string" ? auth.key.trim().toLowerCase() : undefined;
+}
+
+function isSensitiveHeaderRow(row: unknown, apiKeyHeader: string | undefined): boolean {
+	if (!isRecord(row) || typeof row.key !== "string" || !holdsCredential(row.value)) return false;
+	const name = row.key.trim().toLowerCase();
+	if (name === "") return false;
+	return SENSITIVE_HEADER_NAMES.includes(name) || name === apiKeyHeader;
+}
+
+/**
+ * `{key, value, enabled}` header rows with each credential-bearing row's value
+ * withheld, disabled rows included: a row switched off is one click from sent.
+ * @p auth is the owning request's, for the API-key header; an example has none.
+ */
+function withholdHeaderRows(headers: unknown, auth: unknown): unknown {
+	if (!Array.isArray(headers)) return headers;
+	const apiKeyHeader = apiKeyHeaderName(auth);
+	return headers.map((row) =>
+		isSensitiveHeaderRow(row, apiKeyHeader) ? withholdRowValue(row) : row
+	);
+}
+
 // --- Rows ---------------------------------------------------------------------
 
 /**
- * One stored row - an environment, the globals, a collection, a saved request -
- * with its `variables` and `auth` withheld. Every other field passes through.
+ * One stored row - an environment, the globals, a collection, a saved request
+ * or one of its examples - with its `variables`, `auth` and credential-bearing
+ * `headers` withheld. Every other field passes through.
  */
 export function withholdRowSecrets(row: unknown): unknown {
 	if (!isRecord(row)) return row;
@@ -298,6 +350,7 @@ export function withholdRowSecrets(row: unknown): unknown {
 		...row,
 		...("variables" in row ? { variables: withholdVariableBag(row.variables) } : {}),
 		...("auth" in row ? { auth: withholdAuth(row.auth) } : {}),
+		...("headers" in row ? { headers: withholdHeaderRows(row.headers, row.auth) } : {}),
 	};
 }
 
