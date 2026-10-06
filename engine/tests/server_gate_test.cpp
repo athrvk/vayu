@@ -29,6 +29,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 
 #include <nlohmann/json.hpp>
 
@@ -73,7 +74,8 @@ std::string raw_answer (int port, const std::string& request) {
     auto error        = httplib::Error::Success;
     const auto socket = httplib::detail::create_client_socket ("127.0.0.1", "",
     port, AF_INET, true, false, nullptr, 5, 0, 5, 0, 5, 0, "", error);
-    if (socket == INVALID_SOCKET) {
+    // SOCKET is unsigned on Windows and INVALID_SOCKET is (-1) there.
+    if (socket == static_cast<std::remove_cv_t<decltype (socket)>> (INVALID_SOCKET)) {
         return {};
     }
     std::size_t sent = 0;
