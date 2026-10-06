@@ -359,6 +359,21 @@ TEST_F (PrepareDataDirectoryTest, ALayoutThatDoesNotExistYetIsCreatedOwnerOnly) 
     EXPECT_FALSE (fs::exists (fresh / "db" / "backups"));
 }
 
+// The pass closes what exists; the umask it also sets is what keeps the files
+// the engine creates afterwards (the log, the database, the lock) closed. The
+// fixture's 022 would make each of these 0644 if the call were dropped.
+TEST_F (PrepareDataDirectoryTest, FilesCreatedAfterwardsAreOwnerOnly) {
+    const auto fresh = root_ / "fresh";
+
+    prepare_data_directory (fresh.string ());
+
+    for (const auto& file : { fresh / "vayu.lock", fresh / "db" / "created.db",
+         fresh / "logs" / "created.log" }) {
+        std::ofstream (file) << "x";
+        EXPECT_EQ (permissions_of (file), OWNER_ONLY_FILE) << file;
+    }
+}
+
 } // namespace
 #else
 TEST (PrivateDirectory, ModeBitsAreNotReadableOnWindows) {
