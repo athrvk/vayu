@@ -610,9 +610,14 @@ gives you the collection you exported: the same tree, the same tabs, the same
 values.
 
 **Secrets are the one thing left behind.** A token, password, API-key value,
-client secret or a variable you marked secret is exported empty, and the dialog
-says how many. A value that is just a `{{variable}}` reference is kept - it
-names where the secret lives without being one. A form's file part, and a
+client secret or a variable you marked secret is written empty, and so is a
+credential typed outside an auth block: a header such as `Authorization` or
+`X-Api-Key`, a query parameter such as `api_key` or `signature`, the password in
+a URL's `user:pass@`, and the response headers of a saved example (`Set-Cookie`
+included). The dialog says how many, in both modes. A value that is just a
+`{{variable}}` reference is kept - it names where the secret lives without being
+one. **Bodies, examples and scripts are not checked** and are written as they
+are, so look through them before you share the file. A form's file part, and a
 binary body's file, keep their name but not the path of the file on your
 machine.
 
@@ -624,7 +629,7 @@ says, and lists it in the import summary.
 
 The dialog lists only what you would act on or miss, and only when it happened:
 the requests exported (always shown, because none exported is news), secrets
-exported empty, requests other tools will not see (no path of their own, or a
+written empty, requests other tools will not see (no path of their own, or a
 second request on a method and path another already claimed - Vayu re-imports
 them), examples included, and examples written without a body (no recorded
 media type, or stored only in part).

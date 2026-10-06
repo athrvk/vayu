@@ -460,8 +460,10 @@ not stored, or stored bytes that will not read as OpenAPI; the renderer prints
 the engine's sentence rather than falling back to a skeleton.
 
 `exportPostman` is the same kind of read for the other way out: a collection id
-and `includeSecrets` (default `false`, which writes auth secrets and secret
-variables empty and counts them in `notes.secretsOmitted`). The answer is the
+and `includeSecrets` (default `false`, which writes auth secrets, secret
+variables and, by name, the credentials in headers, parameters, URLs, saved
+examples and cookie values empty, and counts them in `notes.secretsOmitted`;
+bodies and scripts are not judged). The answer is the
 Postman Collection v2.1 text, a `<name>.postman_collection.json` file name, and
 notes with the request and folder counts plus `notCarried` - one entry per kind
 of thing Postman has no place for, each with a count and the engine's sentence,

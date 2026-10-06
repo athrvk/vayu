@@ -384,7 +384,7 @@ Key endpoints:
 | POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (#854); reads only, applying is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (#862): the document, the binding and every stamp, written **and cleared**, in one transaction |
 | POST | `/specs/export` | A collection back out as an OpenAPI document (#855): its bound document patched, or a skeleton when it binds none; reads only |
-| POST | `/export/postman` | A collection's subtree as a Postman Collection v2.1.0 document in the shape Postman's own export writes (`core/postman_export.hpp`, the Postman importer's inverse); credentials blanked unless `includeSecrets`, everything the format cannot carry listed in `notes.notCarried`; reads only |
+| POST | `/export/postman` | A collection's subtree as a Postman Collection v2.1.0 document in the shape Postman's own export writes (`core/postman_export.hpp`, the Postman importer's inverse); credentials blanked unless `includeSecrets` (auth blocks, sensitive header and query-parameter rows, the URL, and a saved example's recorded request, headers and cookie values; bodies are never judged), everything the format cannot carry listed in `notes.notCarried`; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 
@@ -545,8 +545,9 @@ logged as a warning: it means a client skipped composition.
   route returns it, and `POST /export/postman` is its one reader: members
   describing `status` or `headers` are written back only while those columns
   still say what was imported, so an edit is never contradicted by the stored
-  copy; `originalRequest` is always kept (its `auth` blanked without
-  `includeSecrets`).
+  copy; `originalRequest` is always kept (its `auth`, headers and URL blanked
+  without `includeSecrets`, and the `header[]` and `cookie[]` it writes back
+  likewise, `vayu_ext::blank_*`).
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start. A `404`
   means the request was genuinely deleted; anything else is a transport failure,
@@ -643,6 +644,15 @@ logged as a warning: it means a client skipped composition.
     for both directions, which blanks every secret on the way out (counted as
     `secretsOmitted`; a pure `{{var}}` reference is kept) and checks every
     piece on the way in (`vayu_extension_invalid`, never a refused import).
+    Secrets are blanked outside auth blocks too (#1804, no `includeSecrets`
+    here): `export_openapi` first copies each request with its credential header
+    and Params rows emptied and flagged `withheld` (`withhold_credentials`, so
+    every standard member reads safe rows and a new writer cannot forget),
+    `x-vayu-request` blanks and counts its stored rows, URL and saved-response
+    headers, a server origin and a `baseUrl` variable lose a URL password, and a
+    credential written as both an `x-vayu-request` value and a parameter
+    `example` counts once (a `contract` export, with no `x-vayu-request`, counts
+    it at the declared parameter it declined to fill). Bodies are never judged.
     An `inherit` request's `security` is resolved through its folders by
     `resolve_inherited_auth`, the rule `POST /compose` uses. A bound export's
     `mode` is the user's choice: `contract` (default) patches as above,

@@ -119,6 +119,9 @@ function deferred() {
 	return { promise, settle };
 }
 
+const BODIES_NOTE =
+	"Bodies and scripts are not checked for credentials and are written as they are. Check them before you share the file.";
+
 function summaryLines() {
 	return screen
 		.getAllByRole("listitem")
@@ -161,6 +164,29 @@ describe("ExportPostmanDialog", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent)
 		).toEqual(["Load-test settings (1)", "Timers between steps (4)"]);
+	});
+
+	it("says what credentials-off does not cover, and drops that once credentials are on", async () => {
+		open();
+		await screen.findByText("Postman Collection");
+
+		// The paragraph is not a list item, so it is outside `summaryLines`.
+		const note = screen.getByText(BODIES_NOTE);
+		expect(note.tagName).toBe("P");
+		expect(note.className).toContain("text-muted-foreground");
+		expect(
+			screen.getByText(
+				/credentials in headers, parameters, URLs, and cookies are written empty/
+			)
+		).toBeTruthy();
+
+		fireEvent.click(screen.getByRole("switch", { name: /Include credentials/ }));
+		await waitFor(() => expect(exportPostman).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(assembling()).toBeNull());
+
+		expect(screen.queryByText(BODIES_NOTE)).toBeNull();
+		expect(screen.getByText(/Everything is written as stored/)).toBeTruthy();
+		expect(screen.queryByText(/are written empty/)).toBeNull();
 	});
 
 	it("says nothing about notes or secrets when there are none", async () => {

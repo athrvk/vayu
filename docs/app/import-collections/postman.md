@@ -348,9 +348,16 @@ auth and scripts - and the dialog offers **Copy** or **Download**, saving
 nothing is written: an export is a read of what the collection already is.
 
 **Credentials stay out by default.** With **Include credentials** off, auth
-secrets and variables marked secret are written empty, and the dialog says how
-many. Turn it on to write them as stored, which is what Postman's own export
-does - only for a file that stays with you.
+secrets and variables marked secret are written empty, and so are the
+credentials typed outside an auth block: a request header such as
+`Authorization` or `X-Api-Key` (and the API-key auth's own header), a query
+parameter such as `api_key` or `signature` in the Params rows and the URL, the
+password in a URL's `user:pass@`, and on every saved example the recorded
+request's headers and URL, the response's sensitive headers (a `Set-Cookie`
+row in full) and the value of every cookie. The dialog says how many. Request
+and response **bodies and scripts are not checked** and are written as they
+are, which the dialog also says. Turn it on to write everything as stored,
+which is what Postman's own export does - only for a file that stays with you.
 
 **Saved responses come back as they were recorded.** An example imported from
 Postman keeps the request it was recorded against, its status text, preview
@@ -369,10 +376,11 @@ the server's own status text, the response's cookies (a `Max-Age` counted from
 when the response arrived) and its response time.
 The export writes those back, so editing the request afterwards does not change
 what the example says it was sent with. A value typed literally into a header
-or the URL at Send stays in that example after you remove it from the request,
-and exports even with **Include credentials** off, the same as a header on the
-request itself. A streamed response keeps the record too: the copy the
-app reloads when the stream ends is matched to the Send that started it. An
+or the URL at Send stays in that example after you remove it from the request;
+with **Include credentials** off it is exported empty, by the same name rules as
+a header on the request itself, and counted. A streamed response keeps the
+record too: the copy the app reloads when the stream ends is matched to the
+Send that started it. An
 example saved before this, or from a response the app fetched without a Send
 of its own to match it to (the last run shown again after a restart, or a
 response opened from History), has no such record and exports regenerated from

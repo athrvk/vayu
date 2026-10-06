@@ -402,7 +402,7 @@ export const apiService = {
 	 * A collection as a Postman Collection v2.1 document.
 	 *
 	 * Assembled engine-side for the reason `exportSpec` is: an agent over MCP
-	 * gets the same document the dialog downloads. Secrets are written empty
+	 * gets the same document the dialog downloads. Credentials are written empty
 	 * unless `includeSecrets` is set.
 	 */
 	async exportPostman(payload: PostmanExportRequest): Promise<PostmanExportResponse> {

@@ -169,6 +169,39 @@ describe("ExportSpecDialog", () => {
 		]);
 	});
 
+	it("says bodies, examples and scripts are not checked, in every mode and direction", async () => {
+		const note =
+			"Bodies, examples, and scripts are not checked for credentials and are written as they are. Check them before you share the file.";
+		open(BOUND);
+		const contractNote = await screen.findByText(note);
+		// A paragraph, not a count: the list assertions elsewhere do not see it.
+		expect(contractNote.tagName).toBe("P");
+		expect(screen.getAllByRole("listitem").some((li) => li.textContent === note)).toBe(false);
+
+		exportSpec.mockResolvedValue(answer({ notes: notes({ boundMode: "full" }) }));
+		fireEvent.click(screen.getByRole("radio", { name: "All edits" }));
+		await screen.findByText(/all edits applied/);
+		expect(screen.getByText(note)).toBeTruthy();
+	});
+
+	it("counts the credentials a contract export withheld", async () => {
+		exportSpec.mockResolvedValue(answer({ notes: notes({ secretsOmitted: 2 }) }));
+		open(BOUND);
+
+		expect(await screen.findByText(/values updated/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain("2 secrets written empty");
+	});
+
+	it("says nothing about withheld credentials in a contract export when there were none", async () => {
+		exportSpec.mockResolvedValue(answer({ notes: notes({ secretsOmitted: 0 }) }));
+		open(BOUND);
+
+		expect(await screen.findByText(/values updated/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines.some((line) => line?.includes("written empty"))).toBe(false);
+	});
+
 	it("lists only the counts that happened, but always the headline", async () => {
 		exportSpec.mockResolvedValue(
 			answer({
@@ -301,7 +334,7 @@ describe("ExportSpecDialog", () => {
 		expect(screen.getByText(/so Vayu can re-import it/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
 		expect(lines).toContain("1 request not visible to other tools");
-		expect(lines).toContain("3 secrets exported empty");
+		expect(lines).toContain("3 secrets written empty");
 		// A skeleton has no document of its own: nothing was removed from one,
 		// even when the notes carry a stray count.
 		expect(lines.some((line) => line?.includes("removed"))).toBe(false);
@@ -328,7 +361,7 @@ describe("ExportSpecDialog", () => {
 		expect(screen.getByText(/new requests included/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
 		expect(lines).toContain("2 new requests added");
-		expect(lines).toContain("1 secret exported empty");
+		expect(lines).toContain("1 secret written empty");
 		// The contract mode's "not added" line says nothing about this one.
 		expect(lines.some((line) => line?.includes("not added"))).toBe(false);
 	});

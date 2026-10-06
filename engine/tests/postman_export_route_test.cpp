@@ -298,16 +298,60 @@ TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted
     json body = export_ok (id, /*secrets=*/false);
     // The secret variable, the Admin folder's basic password, and the digest,
     // API-key, OAuth 2.0 client secret, AWS key pair and NTLM credentials,
-    // and the bearer token a saved response's recorded request carries; the
-    // two `{{variable}}` references (bearer, the GraphQL API key) stay.
-    EXPECT_EQ (body["notes"]["secretsOmitted"], 9);
+    // and the bearer token a saved response's recorded request carries, twice
+    // (its `auth` and the `Authorization` header Postman writes beside it),
+    // and the value of that response's `sid` cookie; the two `{{variable}}`
+    // references (bearer, the GraphQL API key) stay.
+    EXPECT_EQ (body["notes"]["secretsOmitted"], 11);
     const std::string text = body["text"].get<std::string> ();
     for (const char* secret : { "s3cr3t", "hunter2", "\"pw\"", "k-123",
-         "\"shh\"", "SECRET", "AKIA", "\"tok-live\"" }) {
+         "\"shh\"", "SECRET", "AKIA", "tok-live", "\"value\": \"abc\"" }) {
         EXPECT_EQ (text.find (secret), std::string::npos) << secret;
     }
     EXPECT_NE (text.find ("{{token}}"), std::string::npos);
     EXPECT_NE (text.find ("{{apiKey}}"), std::string::npos);
+}
+
+// The case #1804 names, end to end from an Insomnia v4 file: a typed
+// `Authorization` header, a secret in a query parameter and an IAM auth whose
+// `secretAccessKey` the importer keeps in the auth's `config` under a name no
+// list holds. None of the three leaves, and each is counted once.
+// Mutation check: take `authorization` out of `is_secret_field_name` and this
+// reds on the header; put `secretAccessKey` back on a name list instead of the
+// allowlist and the IAM assertion reds only if the list lacks it.
+TEST_F (PostmanExportRouteTest, AnInsomniaRequestsHeaderQueryAndIamKeyDoNotLeaveWithoutSecrets) {
+    const std::string insomnia = R"({
+        "_type": "export", "__export_format": 4,
+        "resources": [
+            {"_id": "wrk_1", "_type": "workspace", "name": "Signed"},
+            {"_id": "req_1", "_type": "request", "parentId": "wrk_1", "name": "List",
+             "method": "GET", "url": "https://api.test/pets",
+             "parameters": [{"name": "api_key", "value": "QUERY-SECRET"},
+                            {"name": "page", "value": "2"}],
+             "headers": [{"name": "Authorization", "value": "Bearer HEADER-SECRET"},
+                         {"name": "Accept", "value": "application/json"}],
+             "authentication": {"type": "iam", "accessKeyId": "",
+                                "secretAccessKey": "IAM-SECRET",
+                                "region": "us-east-1", "service": "s3"}}
+        ]})";
+    const std::string id       = import_text (insomnia);
+    ASSERT_FALSE (id.empty ());
+
+    const json blanked     = export_ok (id, /*secrets=*/false);
+    const std::string text = blanked["text"].get<std::string> ();
+    for (const char* secret : { "HEADER-SECRET", "QUERY-SECRET", "IAM-SECRET" }) {
+        EXPECT_EQ (text.find (secret), std::string::npos) << secret;
+    }
+    EXPECT_EQ (blanked["notes"]["secretsOmitted"], 3);
+    EXPECT_NE (text.find ("us-east-1"), std::string::npos)
+    << "what describes the auth stays";
+    EXPECT_NE (text.find ("page=2"), std::string::npos)
+    << "other query data stays";
+
+    const std::string kept = export_text (id);
+    for (const char* secret : { "HEADER-SECRET", "QUERY-SECRET", "IAM-SECRET" }) {
+        EXPECT_NE (kept.find (secret), std::string::npos) << secret;
+    }
 }
 
 /// The stored examples of the fixture's request named @p name.

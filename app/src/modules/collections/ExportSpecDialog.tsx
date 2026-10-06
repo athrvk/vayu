@@ -14,7 +14,7 @@
  * lands in their downloads folder. A bound collection updates its own document;
  * a free-form one gets a skeleton, which is a starting point and not a contract.
  * Both statements are on screen, and so is what the export could not carry
- * that a user would miss - a new request left out, a secret exported empty.
+ * that a user would miss - a new request left out, a secret written empty.
  *
  * **The assembly is the engine's** (`POST /specs/export`). It used to be three
  * reads and ~900 lines here: the subtree's requests, every request's examples,
@@ -341,7 +341,6 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 								suffix="added"
 							/>
 						)}
-						<Line count={notes.secretsOmitted} label="secret" suffix="exported empty" />
 						<Line
 							count={notes.requestsOnlyInExtension}
 							label="request"
@@ -349,6 +348,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 						/>
 					</>
 				)}
+				<Line count={notes.secretsOmitted} label="secret" suffix="written empty" />
 				{bound && (
 					<Line
 						count={notes.operationsRemoved}
@@ -370,6 +370,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 					/>
 				)}
 			</ul>
+			<p className="text-label text-muted-foreground">{BODIES_NOT_JUDGED}</p>
 			{contract && notes.vocabularyNotWritten && (
 				<p className="text-label text-muted-foreground">
 					{notes.dialect}: values are not updated in this mode. Choose All edits to write
@@ -379,6 +380,10 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 		</div>
 	);
 }
+
+/** What the withheld count does not cover, which the count above cannot say. */
+const BODIES_NOT_JUDGED =
+	"Bodies, examples, and scripts are not checked for credentials and are written as they are. Check them before you share the file.";
 
 function Line({
 	count,
