@@ -13,13 +13,24 @@
  * chose, so it is shown through this table: `claude-ai` is not a name anyone
  * would call Claude Desktop.
  *
- * **Unmeasured.** These spellings come from the clients' public documentation
- * and source, not from a capture of each client talking to Vayu, and a client
- * may change its identifier in any release. A row that is wrong or missing
- * degrades to the raw identifier (below), never to a wrong product name, so the
- * cost of a stale row is an ugly label. When a client's real identifier has
- * been observed (the run's row in History shows the raw string for an unknown
- * one), adding it is one line in `MCP_CLIENTS`.
+ * **Evidence per row** (checked 2026-10-06; none is a capture of the client
+ * talking to Vayu, and a client may rename itself in any release):
+ * - From the client's own source: `gemini-cli-mcp-client` (gemini-cli
+ *   `packages/core/src/tools/mcp-client.ts`), `Zed` (zed `context_server`),
+ *   `Visual Studio Code` (vscode `mcpServerRequestHandler.ts` sends
+ *   `productService.nameLong`, so Insiders and forks send their own product
+ *   name and fall through to the raw identifier).
+ * - Listed as what the client sends by the community registry
+ *   apify/mcp-client-capabilities (browsable at canimcp.dev), not confirmed
+ *   in source: `claude-code`, `claude-ai` (Claude Desktop and Claude.ai share
+ *   it), `cursor-vscode`, `windsurf-client` and `Windsurf`, `codex-mcp-client`
+ *   and `Codex`.
+ * - Guesses with no evidence found, kept only because a miss costs nothing:
+ *   `Claude Code`, `Claude Desktop`, `vscode`, `vscode-mcp-client`, `cursor`,
+ *   `gemini-cli`.
+ *
+ * A row that is wrong or missing degrades to the raw identifier (below),
+ * never to a wrong product name. #1819 tracks capturing the real strings.
  *
  * Matching is case-insensitive on the trimmed identifier. An identifier this
  * table does not know is returned as sent: guessing a product from a
