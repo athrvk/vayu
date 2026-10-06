@@ -29,6 +29,7 @@ import type {
 	GlobalVariables,
 	VariableValue,
 	Run,
+	RunOrigin,
 	RunListResponse,
 	RunListParams,
 	RunReport,
@@ -133,6 +134,9 @@ import {
 	RUNS_PAGE_LIMIT,
 	INBOX_CAPTURES_PAGE_LIMIT,
 } from "@/config/network";
+
+/** Every run this renderer starts says so; see `executeRequest`. */
+const APP_ORIGIN: RunOrigin = { kind: "app" };
 
 /**
  * Timeout for engine calls that proxy a remote server (/request,
@@ -738,11 +742,16 @@ export const apiService = {
 	 * and quietly lose the feature - the same single-choke-point reason
 	 * `httpVersion` and the redirect policy are sent on every execute rather
 	 * than elided when they match a default.
+	 *
+	 * `origin` is stamped at the same choke point, on all four run-starting
+	 * calls below, and for the same reason: an unstamped run reads as `other`
+	 * in History, indistinguishable from a script's. It is set after the spread
+	 * so a payload cannot claim a different one (issue #1817).
 	 */
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
 		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
-			{ ...data, allowScriptRequests: true },
+			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
 	},
@@ -772,6 +781,7 @@ export const apiService = {
 			...data,
 			stream: true,
 			allowScriptRequests: true,
+			origin: APP_ORIGIN,
 		});
 		// Loud rather than a stream that silently never opens: without both
 		// fields there is no run to stop and no URL to tail, and the response
@@ -790,6 +800,7 @@ export const apiService = {
 		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
 			...data,
 			allowScriptRequests: true,
+			origin: APP_ORIGIN,
 		});
 	},
 
@@ -805,6 +816,7 @@ export const apiService = {
 		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
 			...data,
 			allowScriptRequests: true,
+			origin: APP_ORIGIN,
 		});
 	},
 
@@ -824,6 +836,7 @@ export const apiService = {
 			collectionId,
 			q,
 			baseline,
+			origin,
 		} = params;
 		return await httpClient.get<RunListResponse>(
 			API_ENDPOINTS.RUNS_LIST({
@@ -835,6 +848,7 @@ export const apiService = {
 				collectionId,
 				q,
 				baseline,
+				origin,
 			})
 		);
 	},

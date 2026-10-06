@@ -1289,21 +1289,23 @@ collapsing goes through `toggleCollectionExpanded`.
 
 #### `modules/history/history-store.ts` - History Filter & Sort
 
-UI-only: Search, filter (type/status/pinned), and sort (newest/oldest) for the history tab.
+UI-only: Search, filter (type/status/pinned/origin), and sort (newest/oldest) for the history tab.
 
 **State:**
 ```typescript
 {
   searchQuery: string
-  filterType: "all" | "load" | "design"
+  filterType: "all" | "load" | "design" | "scenario"
   filterStatus: "all" | "pending" | "running" | "completed" | "stopped" | "failed"
   pinnedOnly: boolean
+  filterOrigin: "all" | "app" | "mcp"
+  filterClient: string | null   // an MCP client's display name; client-side only
   sortBy: "newest" | "oldest"
 }
 ```
 
-**Helper:** `filterRuns(runs, filters)` applies **type/status filtering and
-sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
+**Helper:** `filterRuns(runs, filters)` applies **type/status/origin filtering
+and sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
 debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
 runs, not just the pages loaded into the sidebar.
 
@@ -1317,6 +1319,18 @@ what is fetched; the pass decides what is shown. `false` is never sent: the
 engine reads `baseline=false` as "only unpinned runs", so the off state omits
 the param entirely.
 
+`filterOrigin` has the same two halves (#1817): a kind other than `"all"` is
+sent as `GET /runs?origin=<kind>` through `useRunsQuery`'s third argument, and
+`filterRuns` re-applies it on `run.origin?.kind` - a run from an engine older
+than the field has no origin and shows under neither entry. `filterClient`
+narrows `"mcp"` to one client and is **client-side only**; the engine filters on
+kind, not on a client's name. It holds the client's **display name**
+(`mcpClientDisplayName`, `lib/mcp-client-names.ts`), so two spellings of one
+product are one entry, and `setFilterOrigin` clears it because a client belongs
+to the kind it was picked under. `mcpClientNames(runs, selected)` lists the
+Select's per-client entries from the rows *before* the client narrowing, so
+choosing one client does not hide the others.
+
 **Key Methods:**
 ```typescript
 const {
@@ -1324,6 +1338,8 @@ const {
   filterType, setFilterType,
   filterStatus, setFilterStatus,
   pinnedOnly, setPinnedOnly,
+  filterOrigin, setFilterOrigin,
+  filterClient, setFilterClient,
   sortBy, setSortBy,
   resetFilters
 } = useHistoryStore();
@@ -1637,11 +1653,12 @@ click; refetching either removes it or proves it real.
 
 #### Runs & History
 
-- **`useRunsQuery(q?)`** - Run history as an **infinite query** over the
-  paginated `GET /runs` `{data, pagination}` envelope, newest first. Mirrors
-  `useRunTimeSeriesQuery`'s `getNextPageParam` on the same envelope shape;
-  `fetchNextPage` pages older runs in on demand. `q` is the optional
-  server-side search.
+- **`useRunsQuery(q?, pinnedOnly?, origin?)`** - Run history as an **infinite
+  query** over the paginated `GET /runs` `{data, pagination}` envelope, newest
+  first. Mirrors `useRunTimeSeriesQuery`'s `getNextPageParam` on the same
+  envelope shape; `fetchNextPage` pages older runs in on demand. `q` is the
+  optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
+  all) is `GET /runs?origin=`.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
     only page 1 is loaded, **off** once the user has paged older runs in.
     Refetching an infinite query re-fetches *every* loaded page in sequence, so
@@ -1657,9 +1674,10 @@ click; refetching either removes it or proves it real.
     observing it. `HistoryList`, `WelcomeScreen` and the palette's
     `useEntityItems` observe the key while they are visible and drive the
     cadence themselves.
-  - **`runsListInfiniteOptions(q?, pinnedOnly?)`** - the key, fetcher and page
-    params, shared by the hook and the warm-up so the entry one writes is the
-    entry the other reads. `prefetchInfiniteQuery`, not `prefetchQuery`: the
+  - **`runsListInfiniteOptions(q?, pinnedOnly?, origin?)`** - the key, fetcher
+    and page params, shared by the hook and the warm-up so the entry one writes
+    is the entry the other reads. `origin` joins the key only when set, so the
+    unfiltered list stays the entry the warm-up and the other observers share. `prefetchInfiniteQuery`, not `prefetchQuery`: the
     readers are infinite queries and the cache entry has to be in `InfiniteData`
     shape.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`

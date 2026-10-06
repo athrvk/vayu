@@ -19,6 +19,7 @@ import type {
 	Request,
 	Environment,
 	Run,
+	RunOrigin,
 	SanityResult,
 	RunReport,
 	EngineHealth,
@@ -524,6 +525,12 @@ export interface ExecuteRequestRequest {
 	 * oauth2 config is a `400` naming the token.
 	 */
 	data?: Record<string, unknown>;
+	/**
+	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
+	 * on every execute and run start, so a caller never sets it; declared here
+	 * because the payload is the wire's shape.
+	 */
+	origin?: RunOrigin;
 }
 
 export type ExecuteRequestResponse = SanityResult;
@@ -767,6 +774,12 @@ export interface StartLoadTestRequest {
 	 * request that carried it, which the run stores with its retained traces.
 	 */
 	data?: Record<string, unknown>[];
+	/**
+	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
+	 * on every execute and run start, so a caller never sets it; declared here
+	 * because the payload is the wire's shape.
+	 */
+	origin?: RunOrigin;
 }
 
 export interface StartLoadTestResponse {
@@ -931,6 +944,12 @@ export interface StartScenarioRunRequest {
 	 * run measured but not judged - the pre-existing behaviour.
 	 */
 	thresholds?: RunThresholds;
+	/**
+	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
+	 * on every execute and run start, so a caller never sets it; declared here
+	 * because the payload is the wire's shape.
+	 */
+	origin?: RunOrigin;
 }
 
 // Run Management API

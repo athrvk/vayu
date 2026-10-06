@@ -12,6 +12,7 @@ import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
+import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import type { TimeRow } from "@/lib/time-value";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
 import { TimeTooltip } from "@/components/shared/TimeValue";
@@ -178,6 +179,21 @@ export default function RunItem({
 	// plain label if the run predates the descriptor. Never a blank line.
 	const scenarioLabel = collectionName ?? scenario?.collectionId ?? null;
 
+	/*
+	 * Neither a collection run nor a scenario load run ever links a request: its
+	 * work is the collection's, so a null `requestId` says nothing about it and
+	 * "Unsaved" there would be wrong on every row. For any other run it means
+	 * the exchange came from a tab that was never saved, or from an agent that
+	 * sent the request inline (#1817) - the run has no request to open it from.
+	 */
+	const isScenarioRun = run.type === "scenario" || scenario !== undefined;
+	const isUnsaved = !run.requestId && !isScenarioRun;
+
+	// Only an agent's run is marked: the app is the default and says nothing, and
+	// `other` is every caller the app cannot name.
+	const mcpClientLabel =
+		run.origin?.kind === "mcp" ? mcpClientDisplayName(run.origin.client) : null;
+
 	// A load run's pin is also its request's comparison baseline, so it keeps
 	// the more specific label; every other type just gets "Pin"/"Unpin".
 	const isLoadRun = run.type === "load";
@@ -311,6 +327,29 @@ export default function RunItem({
 					>
 						{identityText}
 					</span>
+					{/* Its own element, not part of the identity span: the url stays
+					    the row's identity, and the identity span is the only thing on
+					    this line that gives way when the drawer is narrow. */}
+					{isUnsaved && (
+						<span
+							className="shrink-0 text-micro text-muted-foreground"
+							title="Not linked to a saved request"
+						>
+							Unsaved
+						</span>
+					)}
+					{/* `chip` for the same reason as the pin badge below: it paints its
+					    own background. Neutral, because who started a run is a fact
+					    about it, not a status. */}
+					{mcpClientLabel && (
+						<Badge
+							variant="chip"
+							className="shrink-0 bg-muted px-1.5 py-0 text-micro font-medium text-muted-foreground"
+							title="Started by an MCP client"
+						>
+							{mcpClientLabel}
+						</Badge>
+					)}
 					{/* `variant="chip"` because this badge paints its own background:
 					    every other variant pairs `bg-x` with a `hover:bg-x/80` that
 					    tailwind-merge would leave behind, turning the chip the accent
@@ -502,7 +541,7 @@ export default function RunItem({
 						// apart from any other row in the list.
 						aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
 							identitySuffix ? `, ${identitySuffix}` : ""
-						}`}
+						}${mcpClientLabel ? `, started by ${mcpClientLabel}` : ""}`}
 						className="absolute inset-0 z-0 cursor-pointer"
 						// Marks this button as one stop of `useHistoryListFocus`'s roving
 						// tabindex - one Tab stop for the whole list, Up/Down/Home/End move

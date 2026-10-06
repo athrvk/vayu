@@ -733,6 +733,16 @@ run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
 `400` with **no run row created** - a failed start leaves nothing to clean up.
 
+**All four run-starting calls (`executeRequest`, `executeStreamRequest`,
+`startLoadTest`, `startScenarioRun`) stamp `origin: {kind: "app"}`** on the
+payload (#1817), set after the caller's spread so a payload cannot claim
+another. The engine records it on the run, and History reads it back: an
+unstamped run is `other`, indistinguishable from one a script started. The
+type is `RunOrigin` (`types/domain.ts`); `listRuns` takes the kind as
+`origin` and sends `GET /runs?origin=`. See
+[engine/api-reference.md](../engine/api-reference.md) for what the engine
+validates.
+
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it
 previewed, and the engine binds one row per request the run sends. Omitted when
