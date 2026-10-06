@@ -27,7 +27,8 @@
  * sent carries it, and `rawRequest`, `get_run_report`, `get_run_samples`,
  * `list_runs`, `vayu://runs`, `vayu://run/*`, the run-report prompts and
  * `get_inbox_captures` answer it as recorded (#1809 retires that carve-out).
- * A write tool's own answer echoes the stored row, and SECURITY.md says so.
+ * A write tool's own answer, which echoes the stored row, goes through the same
+ * projection as the read of that row: writing does not grant reading.
  */
 
 import type { McpSafetyConfig } from "./config.js";
@@ -357,6 +358,21 @@ export function withholdRowSecrets(row: unknown): unknown {
 /** {@link withholdRowSecrets} over a list; a non-list answer passes through untouched. */
 export function withholdRowListSecrets(list: unknown): unknown {
 	return Array.isArray(list) ? list.map(withholdRowSecrets) : list;
+}
+
+/**
+ * `POST /reorder`'s answer - `{collections, requests}`, the whole rows a move
+ * renumbered - with each list withheld as the read of its rows is.
+ */
+export function withholdReorderRows(answer: unknown): unknown {
+	if (!isRecord(answer)) return answer;
+	return {
+		...answer,
+		...("collections" in answer
+			? { collections: withholdRowListSecrets(answer.collections) }
+			: {}),
+		...("requests" in answer ? { requests: withholdRowListSecrets(answer.requests) } : {}),
+	};
 }
 
 // --- Cookies ------------------------------------------------------------------

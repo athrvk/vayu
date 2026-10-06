@@ -10128,6 +10128,220 @@ describe("secret withholding", () => {
 		});
 		expect(body.examples).toEqual(EXAMPLES);
 	});
+
+	// Writing does not grant reading: a write tool's answer echoes the stored
+	// row, so it is withheld exactly as the read of that row is (#1809).
+	const ECHO_ENVIRONMENT = {
+		id: "env_1",
+		name: "Staging",
+		isActive: true,
+		variables: { apiKey: { value: "echo-env-secret", secret: true, enabled: true } },
+	};
+	const ECHO_COLLECTION = {
+		id: "c1",
+		name: "API",
+		variables: { pass: { value: "echo-collection-secret", secret: true, enabled: true } },
+		auth: { mode: "bearer", token: "echo-collection-token" },
+		openapi: { specId: "spec_1" },
+	};
+	const ECHO_REQUEST = {
+		id: "req_1",
+		collectionId: "c1",
+		name: "Me",
+		auth: { mode: "bearer", token: "echo-request-token" },
+		headers: [{ key: "Authorization", value: "Bearer echo-request-header", enabled: true }],
+	};
+	const ECHO_EXAMPLE = {
+		id: "exa_1",
+		requestId: "req_1",
+		name: "200 OK",
+		headers: [{ key: "Set-Cookie", value: "echo-example-cookie", enabled: true }],
+	};
+	const ECHO_GLOBALS = {
+		id: "globals",
+		variables: { token: { value: "echo-globals-secret", secret: true, enabled: true } },
+	};
+
+	interface WriteEcho {
+		tool: string;
+		args: Record<string, unknown>;
+		/** The client method whose answer the tool hands back. */
+		method: keyof EngineClient;
+		answer: unknown;
+		secrets: string[];
+		/** Reads the tool makes before it writes. */
+		reads?: Partial<EngineClient>;
+	}
+
+	const WRITE_ECHOES: WriteEcho[] = [
+		{
+			tool: "create_collection",
+			args: { name: "API" },
+			method: "createCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+		},
+		{
+			tool: "update_collection",
+			args: { collectionId: "c1", name: "API" },
+			method: "updateCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+		},
+		{
+			tool: "unbind_spec",
+			args: { collectionId: "c1" },
+			method: "updateCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+			reads: { getCollection: vi.fn().mockResolvedValue(ECHO_COLLECTION) },
+		},
+		{
+			tool: "create_request",
+			args: { collectionId: "c1", name: "Me", url: "https://api.example.com" },
+			method: "createRequest",
+			answer: ECHO_REQUEST,
+			secrets: ["echo-request-token", "echo-request-header"],
+		},
+		{
+			tool: "update_request",
+			args: { requestId: "req_1", name: "Me" },
+			method: "updateRequest",
+			answer: ECHO_REQUEST,
+			secrets: ["echo-request-token", "echo-request-header"],
+		},
+		{
+			tool: "create_request_example",
+			args: { requestId: "req_1", name: "200 OK" },
+			method: "createRequestExample",
+			answer: ECHO_EXAMPLE,
+			secrets: ["echo-example-cookie"],
+		},
+		{
+			tool: "update_request_example",
+			args: { requestId: "req_1", exampleId: "exa_1", name: "200 OK" },
+			method: "updateRequestExample",
+			answer: ECHO_EXAMPLE,
+			secrets: ["echo-example-cookie"],
+		},
+		{
+			tool: "create_environment",
+			args: { name: "Staging" },
+			method: "createEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "update_environment",
+			args: { environmentId: "env_1", name: "Staging" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "activate_environment",
+			args: { environmentId: "env_1" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "activate_environment (none)",
+			args: { environmentId: "none" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+			reads: { listEnvironments: vi.fn().mockResolvedValue([ECHO_ENVIRONMENT]) },
+		},
+		{
+			tool: "update_globals",
+			args: { variables: { region: "eu" } },
+			method: "saveGlobals",
+			answer: ECHO_GLOBALS,
+			secrets: ["echo-globals-secret"],
+		},
+		{
+			// The engine answers a restore with the trash entry alone; the
+			// projection is what keeps a row it ever added from being echoed.
+			tool: "restore_trash_entry",
+			args: { id: "c1" },
+			method: "restoreTrashEntry",
+			answer: { id: "c1", kind: "collection", restored: true, auth: ECHO_COLLECTION.auth },
+			secrets: ["echo-collection-token"],
+		},
+		{
+			tool: "move_item",
+			args: { type: "request", id: "req_1", collectionId: "c1" },
+			method: "reorder",
+			answer: { collections: [ECHO_COLLECTION], requests: [ECHO_REQUEST] },
+			secrets: [
+				"echo-collection-secret",
+				"echo-collection-token",
+				"echo-request-token",
+				"echo-request-header",
+			],
+			reads: {
+				listCollections: vi
+					.fn()
+					.mockResolvedValue([{ id: "c1", name: "API", parentId: "" }]),
+				listRequests: vi.fn().mockResolvedValue([]),
+			},
+		},
+	];
+
+	const echoClient = ({ method, answer, reads }: WriteEcho) =>
+		fakeClient({ ...reads, [method]: vi.fn().mockResolvedValue(answer) });
+
+	const echoOf = async (echo: WriteEcho, safety: Partial<McpSafetyConfig>) => {
+		const name = echo.tool.replace(/ \(none\)$/, "");
+		const res = await dispatchTool(name, echo.args, ctxWith(echoClient(echo), safety));
+		expect(res.isError).toBeFalsy();
+		return { text: firstText(res), body: JSON.parse(firstText(res)) };
+	};
+
+	test.each(WRITE_ECHOES)("$tool withholds the echoed row's secrets by default", async (echo) => {
+		const { text } = await echoOf(echo, { allowWrites: true });
+		for (const secret of echo.secrets) expect(text).not.toContain(secret);
+		expect(text).toMatch(/Withheld": true/);
+	});
+
+	test.each(WRITE_ECHOES)("$tool echoes the stored row whole with reveal on", async (echo) => {
+		const { body } = await echoOf(echo, { allowWrites: true, ...REVEAL });
+		expect(body).toEqual(echo.answer);
+	});
+
+	test("update_collection keeps the row's structure around what it withholds", async () => {
+		const { body } = await echoOf(WRITE_ECHOES[1], { allowWrites: true });
+		expect(body).toEqual({
+			...ECHO_COLLECTION,
+			variables: { pass: { enabled: true, secret: true, valueWithheld: true } },
+			auth: { mode: "bearer", tokenWithheld: true },
+		});
+	});
+
+	test("every write tool that answers a stored row is covered here", () => {
+		const covered = new Set(WRITE_ECHOES.map((echo) => echo.tool.replace(/ \(none\)$/, "")));
+		for (const name of [
+			"create_collection",
+			"update_collection",
+			"create_request",
+			"update_request",
+			"create_request_example",
+			"update_request_example",
+			"create_environment",
+			"update_environment",
+			"activate_environment",
+			"update_globals",
+			"restore_trash_entry",
+			"move_item",
+			"unbind_spec",
+		]) {
+			expect(covered.has(name), name).toBe(true);
+			expect(TOOLS.some((tool) => tool.name === name && tool.category === "write")).toBe(
+				true
+			);
+		}
+	});
 });
 
 /**
