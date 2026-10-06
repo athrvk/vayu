@@ -807,9 +807,8 @@ TEST_F (ScenarioPlanTest, AnOversizedDataBlockIsRejectedByItsByteBound) {
 
     // Two rows - comfortably inside `maxScenarioDataRows` - carrying far more
     // than the byte bound between them. The row count cannot catch this, which
-    // is the whole reason the byte bound exists: without it the payload runs
-    // into the transport's own body cap and the user gets a dropped connection
-    // instead of a sentence.
+    // is the whole reason the byte bound exists: without it the payload is
+    // bounded only by the transport's body cap, which names nothing.
     json scenario = block ("col");
     scenario["data"] = json::array ({ json{ { "blob", std::string (400, 'x') } },
     json{ { "blob", std::string (400, 'y') } } });

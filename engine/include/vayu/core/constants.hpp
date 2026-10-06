@@ -914,7 +914,7 @@ namespace spec_document {
 /// later phase parses the stored text back as JSON and that is the ceiling the
 /// parse path already carries. Engine-authored so an oversized document is
 /// refused with a message naming the count and the cap, the way `MAX_DATA_BYTES`
-/// is - cpp-httplib's own body cap would drop the connection instead.
+/// is - the transport's `request_body::MAX_BYTES` refuses without naming it.
 constexpr size_t MAX_BYTES = size_t{ 10 } * 1024 * 1024;
 
 /// The largest value `maxSpecDocumentBytes` accepts (its config entry's
