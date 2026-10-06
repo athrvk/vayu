@@ -378,8 +378,9 @@ The export writes those back, so editing the request afterwards does not change
 what the example says it was sent with. A value typed literally into a header
 or the URL at Send stays in that example after you remove it from the request;
 with **Include credentials** off it is exported empty, by the same name rules as
-a header on the request itself, and counted. A streamed response keeps the record too: the copy the
-app reloads when the stream ends is matched to the Send that started it. An
+a header on the request itself, and counted. A streamed response keeps the
+record too: the copy the app reloads when the stream ends is matched to the
+Send that started it. An
 example saved before this, or from a response the app fetched without a Send
 of its own to match it to (the last run shown again after a restart, or a
 response opened from History), has no such record and exports regenerated from

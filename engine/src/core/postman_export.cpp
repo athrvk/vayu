@@ -467,9 +467,15 @@ std::pair<json, json> split_params (const json& params) {
 json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
     auto [query_rows, path_rows] = split_params (params);
     const std::string raw = blank_url_credentials (raw_url, query_rows, walk);
-    json url              = postman_url_parts (raw);
-    const json query      = postman_rows (query_rows, RowShape::Plain, walk);
-    json variable         = json::array ();
+    if (!walk.include_secrets) {
+        // A path row's value never appears in `raw` (it is `:name` there), so
+        // it is a credential of its own to count.
+        vayu_ext::blank_credential_param_rows (
+        path_rows, walk.apikey_params, walk.secrets_omitted);
+    }
+    json url         = postman_url_parts (raw);
+    const json query = postman_rows (query_rows, RowShape::Plain, walk);
+    json variable    = json::array ();
     for (const json& row : path_rows) {
         if (row.is_object () && !skip_unnamed (row, walk)) {
             variable.push_back (postman_path_variable (row));
@@ -1484,6 +1490,9 @@ void blank_recorded_url (json& url, const std::vector<std::string>& param_names,
     if (const auto query = url.find ("query"); query != url.end ()) {
         vayu_ext::blank_credential_param_rows (*query, param_names, in_rows);
     }
+    if (const auto path = url.find ("variable"); path != url.end ()) {
+        vayu_ext::blank_credential_param_rows (*path, param_names, walk.secrets_omitted);
+    }
     if (const auto hash = url.find ("hash"); hash != url.end () && hash->is_string ()) {
         int tail = 0;
         *hash    = vayu_ext::redact_url_credentials (
@@ -1839,7 +1848,8 @@ void note_request_losses (const PostmanExportRequest& request, Walk& walk) {
  * The auth in force for what a container holds: its own, else the one it
  * inherits, by the rule `POST /compose` applies (`resolve_inherited_auth`) -
  * `noauth` ends the walk with nothing, `none` and an unset auth defer upward.
- * A null result is no auth.
+ * A null result is no auth. Walked here, not called: `resolve_inherited_auth`
+ * takes the database's collection chain, and this exporter reads none.
  */
 json container_auth_in_force (const json& own, const json& inherited) {
     const std::string mode = text_of (own, "mode");

@@ -367,10 +367,16 @@ TEST (VayuExtensions, BlanksEveryCookieValueWhateverItsName) {
     EXPECT_EQ (cookies[4]["value"], true);
     EXPECT_EQ (omitted, 2);
 
+    // A stored Postman cookie names itself `name`, not `key`.
+    Json postman_named = Json::parse (R"([{"name":"sid","value":"abc","domain":"x"}])");
+    ext::blank_cookie_values (postman_named, omitted);
+    EXPECT_EQ (postman_named[0]["value"], "");
+    EXPECT_EQ (omitted, 3);
+
     Json not_a_list = Json::parse (R"({"key":"sid","value":"abc"})");
     ext::blank_cookie_values (not_a_list, omitted);
     EXPECT_EQ (not_a_list["value"], "abc");
-    EXPECT_EQ (omitted, 2);
+    EXPECT_EQ (omitted, 3);
 }
 
 } // namespace

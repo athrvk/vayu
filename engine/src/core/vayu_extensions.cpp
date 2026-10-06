@@ -516,7 +516,18 @@ int& omitted) {
 }
 
 void blank_cookie_values (Json& cookies, int& omitted) {
-    blank_rows_where (cookies, omitted, [] (std::string_view) { return true; });
+    if (!cookies.is_array ()) {
+        return;
+    }
+    // Not `blank_rows_where`: a stored Postman cookie names itself `name`, ours
+    // `key`, and either way every value is a credential.
+    for (Json& cookie : cookies) {
+        if (const auto value =
+            cookie.is_object () ? cookie.find ("value") : cookie.end ();
+        cookie.is_object () && value != cookie.end ()) {
+            blank_secret (*value, omitted);
+        }
+    }
 }
 
 std::string redact_url_credentials (std::string_view url,

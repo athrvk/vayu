@@ -1532,6 +1532,29 @@ TEST (PostmanExport, ARebuiltCookieKeepsItsAttributesAndLosesItsValue) {
     EXPECT_EQ (cookie["httpOnly"], true);
 }
 
+// A path row's value is written into `url.variable[]`, never into `raw`, so the
+// URL redaction cannot see it. Mutation check: drop the `variable` blanking in
+// `postman_url` and `blank_recorded_url`, and both halves red.
+TEST (PostmanExport, APathRowNamedLikeACredentialIsBlankedAndCounted) {
+    PostmanExportRequest entry = request ("r", "https://api.test/bot:token/getMe");
+    ordered path_row         = row ("token", "123:ABC");
+    path_row["in"]           = "path";
+    ordered plain            = row ("id", "7");
+    plain["in"]              = "path";
+    entry.params             = ordered::array ({ path_row, plain });
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 1);
+    EXPECT_EQ (blanked.text.find ("123:ABC"), std::string::npos);
+    const ordered variable =
+    ordered::parse (blanked.text)["item"][0]["request"]["url"]["variable"];
+    EXPECT_EQ (variable[0]["value"], "");
+    EXPECT_EQ (variable[1]["value"], "7");
+    EXPECT_NE (run (root, /*secrets=*/true).text.find ("123:ABC"), std::string::npos);
+}
+
 // The saved-response text a save in the app records is stored in the workspace
 // and read back by the export, which is where it is blanked; blanking it
 // here would leave the user's own saved request without its credentials.
