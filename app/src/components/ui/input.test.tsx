@@ -72,14 +72,18 @@ describe("Input size", () => {
 		expect(screen.getByLabelText("f").hasAttribute("size")).toBe(false);
 	});
 
-	it("centres the cap band of its text at every size, the way a cap-centred label does", () => {
-		// The rename field replaces a `cap-centred` label in place; without the
-		// trim its text sat on its line box and jumped 1px down as rename began.
+	it("never trims or clips its text box, at any size", () => {
+		// A `text-box` trim on a field with no vertical padding (xs is `py-0`)
+		// cut every descender and underscore off at the field's own edge
+		// (#1830): "Create charge" rendered as "Create charae", "base_url" as
+		// "base url". The rename field lands on a `cap-centred` label's line
+		// without one, so nothing here may trim, clamp or clip vertically.
 		for (const size of [undefined, "sm", "xs"] as const) {
-			const { unmount } = render(<Input aria-label="f" size={size} className="text-sm" />);
-			expect(classes(screen.getByLabelText("f"))).toContain(
-				"[text-box:trim-both_cap_alphabetic]"
-			);
+			const { unmount } = render(<Input aria-label="f" size={size} />);
+			const list = classes(screen.getByLabelText("f"));
+			expect(
+				list.filter((c) => /text-box|cap-centred|overflow-|leading-none/.test(c))
+			).toEqual([]);
 			unmount();
 		}
 	});

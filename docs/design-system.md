@@ -1206,12 +1206,25 @@ glyphs do not sit in the middle of their line box: the browser rounds the
 face's ascent and descent to whole pixels and gives an odd leading pixel to the
 bottom, so the cap band lands off centre by an amount that changes with the
 face, the size and the platform. Space Grotesk at `text-sm` puts its caps
-0.57px above the centre of every drawer row, which is the chevron and folder
-reading low beside the name. `cap-centred` trims the label's box to the cap
-band (`text-box: trim-both cap alphabetic`) and pads it back out to one line
-(`padding-block: calc((1lh - 1cap) / 2)`), so the box keeps its height and its
-centre is the cap band's, for any face the user picks. What remains is the
-renderer snapping the baseline to a pixel, never more than half of one.
+0.57px above the centre of every drawer row, which is the chevron reading low
+beside the name. `cap-centred` trims the label's box to the cap band
+(`text-box: trim-both cap alphabetic`) and pads it back out to one line
+(`padding-block: calc((1lh - 1cap) / 2)`, floored at `1lh`), so the box keeps
+its height and its centre is the cap band's, for any face the user picks.
+
+What remains is the renderer snapping the baseline to a pixel. Measured at 2x
+in the collections tree, settings categories and element headers: the worst
+icon-to-caps offset went from 0.57px to 0.43px (a row on a whole pixel can
+only put its caps 0.57px above centre or 0.43px below it, and the trim picks
+the nearer), and rows on a half pixel stay at 0.07px.
+
+Lucide draws three glyphs on these rows from y=3 to y=20 of its 24-unit grid,
+half a unit above every other glyph: `folder`, `folder-open` and `gauge`. In a
+row whose text is `cap-centred` they come down by that half unit (1/48 of the
+box, a `transform` because the icon motions own `translate`), so the folder
+and the chevron sit on one line with the name. The rule is scoped to those
+rows: beside a label still on its line box the high glyph happens to match the
+text, and centring it there would leave it the lower of the two.
 
 Put it on every bare text item in the row, not only the one next to the icon:
 an item left on its line box sits half a pixel off the others. Two sizes in one
@@ -1219,8 +1232,11 @@ row then share a cap centre rather than a baseline (13px and 12px differ by
 0.35px). Not on an element that sets its own `py-*` (the two fight over the
 padding), and it cannot reach a `Button` or `SelectTrigger` label: the first
 is an anonymous box, the second a line-clamped one the trim does not apply to.
-`Input` carries the trim alone, because the field's box is its own height;
-that is what keeps a rename field's text on the line of the label it replaces.
+**Never on an `Input`, as a class or a `text-box`:** a field with no vertical
+padding (`size="xs"`) clips every descender and underscore at its own edge
+("Create charae", "base url"); `input.test.tsx` fails on one. The field needs
+nothing: its text already lands on a `cap-centred` label's line, so a rename
+moves no text at either density.
 
 ### Spacing Scale Conventions
 
@@ -2066,7 +2082,7 @@ Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and
 `VariablesCategoryTree` rows. Put `h-8 items-center` on the row and let content
 centre; do not re-add vertical padding, which is what caused the drift. The
 row's text carries `cap-centred` (see Type Scale Conventions), or its caps sit
-above the chevron and the folder beside them.
+above the chevron beside them.
 
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
@@ -3102,7 +3118,10 @@ Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
 sidebar's environments and the element list. The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
-label's position on both axes; the hook owns the behaviour:
+label's position on both axes. `xs` pulls its border back over the row's gap
+by its padding plus 1px; where that gap is the element list's `gap-1.5`, the
+field takes `px-0.5` with the matching one-step pull-back so the border clears
+the kind icon. The hook owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
   bare `e.key === "Enter"`. An IME commits its composition buffer with an

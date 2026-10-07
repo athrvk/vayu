@@ -552,6 +552,21 @@ describe("ElementList - rename", () => {
 		expect(input.parentElement?.className).toMatch(/\bgap-1\.5\b/);
 	});
 
+	// xs pulls its border back by its padding plus 1px, which is the whole of
+	// this row's gap-1.5 and put the border on the icon. The field takes a
+	// one-step padding with the matching pull-back: the border clears the icon
+	// by a step and the text stays at the gap, where the title's sat. Only the
+	// pair is asserted - one without the other moves the text.
+	it("keeps the field's border clear of the icon without moving its text", async () => {
+		renderList([extractElement("e1")]);
+		await chooseRowAction("Extract JSON", "Rename");
+		const list = (await screen.findByPlaceholderText("Extract JSON")).className.split(/\s+/);
+
+		expect(list).toContain("px-0.5");
+		expect(list).toContain("-ml-[calc(var(--spacing)*0.5+1px)]");
+		expect(list).not.toContain("px-1.5");
+	});
+
 	it("reverts on Escape without committing", async () => {
 		const onChange = renderList([extractElement("e1")]);
 

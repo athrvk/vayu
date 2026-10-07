@@ -9,8 +9,9 @@
  * Text beside an icon is `cap-centred` (#1830, "Type Scale Conventions" in
  * docs/design-system.md). An `items-center` row centres a label's line box,
  * and Space Grotesk's caps sit 0.57px above that centre at 13px, so every
- * chevron and folder beside them read low; a rename field's text, centred
- * by its own rules, jumped a pixel as the label gave way to it.
+ * chevron beside them read low; a rename field's text, centred by its own
+ * rules, jumped a pixel as the label gave way to it. Three lucide glyphs are
+ * drawn half a unit high and come down to meet the centred caps.
  *
  * A source scan, like `chrome-floors.test.ts`: vitest stubs CSS imports to
  * `""` and jsdom does no layout, so the stylesheet is read off disk and the
@@ -42,6 +43,19 @@ describe("the cap-centred utility", () => {
 		expect(rule).toMatch(/text-box:\s*trim-both cap alphabetic;/);
 		expect(rule).toMatch(/padding-block:\s*calc\(\(1lh - 1cap\) \/ 2\);/);
 		expect(rule).toMatch(/min-height:\s*1lh;/);
+	});
+});
+
+describe("a glyph lucide draws high comes down beside cap-centred text", () => {
+	it("moves folder, folder-open and gauge by half a grid unit, only in those rows", () => {
+		const css = stripComments(indexCss);
+		const rule = css.match(/:has\(> \.cap-centred\)\s+:is\(([^)]*)\)\s*\{([^}]*)\}/);
+		expect(rule, "no glyph rule scoped to cap-centred rows").not.toBeNull();
+		for (const glyph of ["svg.lucide-folder", "svg.lucide-folder-open", "svg.lucide-gauge"]) {
+			expect(rule?.[1]).toContain(glyph);
+		}
+		// `transform`: `translate` belongs to the icon motions and would be replaced.
+		expect(rule?.[2]).toMatch(/transform:\s*translateY\(calc\(100% \/ 48\)\);/);
 	});
 });
 
