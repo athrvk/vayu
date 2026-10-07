@@ -43,15 +43,17 @@ const inputVariants = cva(
 				default:
 					"h-control w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring",
 				sm: "h-control-sm w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring",
-				// The inline rename field inside a `target` row. It sits `-ml-1.5`
-				// left of the row's content edge, by exactly its own `px-1.5`, so
-				// the text does not move when rename begins; `w-[calc(100%+...)]`
-				// gives that offset back on the right, so the box still ends at
-				// the content edge. Keep the two pairs in step (`input.test.tsx`
-				// asserts it). The border takes the focus colour in place of the
-				// ring, so one edge draws instead of a ring stacked on a border
-				// inside a row that cannot spare the outset.
-				xs: "h-control-xs w-[calc(100%+var(--spacing)*1.5)] -ml-1.5 rounded-sm px-1.5 py-0 focus-visible:border-ring focus-visible:ring-0",
+				// The inline rename field inside a `target` row. The label text sits
+				// at the row's content edge, so the field is pulled back by its
+				// padding plus its 1px border (`px-1.5` + `1px`): the border sits
+				// outside the padding, and pulling back by the padding alone left
+				// the text 1px right of the label it replaces. The width gives the
+				// same offset back on the right, so the box still ends at the
+				// content edge. Keep the margin, the width and the padding in step
+				// (`input.test.tsx` asserts it). The border takes the focus colour
+				// in place of the ring, so one edge draws instead of a ring stacked
+				// on a border inside a row that cannot spare the outset.
+				xs: "h-control-xs w-[calc(100%+var(--spacing)*1.5+1px)] -ml-[calc(var(--spacing)*1.5+1px)] rounded-sm px-1.5 py-0 focus-visible:border-ring focus-visible:ring-0",
 			},
 		},
 		defaultVariants: { size: "default" },

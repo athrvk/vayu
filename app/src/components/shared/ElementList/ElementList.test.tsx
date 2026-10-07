@@ -535,6 +535,23 @@ describe("ElementList - rename", () => {
 		expect(onChange).toHaveBeenCalledWith([{ ...extractElement("e1"), name: "Token lookup" }]);
 	});
 
+	// The field replaces the title button, not the icon beside the title:
+	// dropping the icon moved the title text left by the icon and its gap, and
+	// the field's pull-back then reached into the chevron button.
+	//
+	// Mutation check: drop `{titleIcon}` from the rename branch in `index.tsx`
+	// and this reddens.
+	it("keeps the kind icon beside the field while renaming", async () => {
+		renderList([extractElement("e1")]);
+		await chooseRowAction("Extract JSON", "Rename");
+		const input = await screen.findByPlaceholderText("Extract JSON");
+
+		const icon = input.parentElement?.querySelector("svg.size-icon-sm");
+		expect(icon, "the kind icon was dropped while renaming").not.toBeNull();
+		expect(icon?.nextElementSibling).toBe(input);
+		expect(input.parentElement?.className).toMatch(/\bgap-1\.5\b/);
+	});
+
 	it("reverts on Escape without committing", async () => {
 		const onChange = renderList([extractElement("e1")]);
 

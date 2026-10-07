@@ -1297,8 +1297,9 @@ A numeric step is a height the row never agreed to, and `h-full` makes the
 input's height whatever its row happens to be; a size names a token, so every
 input is one of three heights and Comfortable follows. `size="xs"` on an input that stands alone is a
 review matter, since the scan cannot know the row. The `xs` field is pulled
-back by exactly its own padding (`-ml-1.5` with `px-1.5`) so the text does not
-move when rename begins, and takes the focus colour on its border in place of
+back by its padding plus its 1px border (`px-1.5`, and a margin of
+`calc(var(--spacing) * 1.5 + 1px)`) so the text does not move when rename
+begins, and takes the focus colour on its border in place of
 the ring. The tree-row controls are 24px at Default inside
 24px rows, so they carry `size-target` rather than an exemption.
 

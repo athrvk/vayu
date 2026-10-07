@@ -54,14 +54,17 @@ describe("Input size", () => {
 		}
 	});
 
-	it("pulls the xs field back by exactly its own padding, and gives it back on the right", () => {
+	it("pulls the xs field back by its padding plus its border, and gives it back on the right", () => {
 		render(<Input aria-label="f" size="xs" />);
 		const list = classes(screen.getByLabelText("f"));
 		const pad = list.find((c) => /^px-[\d.]+$/.test(c))?.slice(3);
-		const pull = list.find((c) => /^-ml-[\d.]+$/.test(c))?.slice(4);
 		expect(pad, "xs lost its horizontal padding").toBeDefined();
-		expect(pull).toBe(pad);
-		expect(list).toContain(`w-[calc(100%+var(--spacing)*${pad})]`);
+		// The 1px border sits outside the padding, so the pull-back is
+		// padding + border or the text lands 1px right of the label.
+		const offset = `var(--spacing)*${pad}+1px`;
+		expect(list).toContain(`-ml-[calc(${offset})]`);
+		expect(list).toContain(`w-[calc(100%+${offset})]`);
+		expect(list).toContain("border");
 	});
 
 	it("does not forward size to the DOM as the native numeric attribute", () => {

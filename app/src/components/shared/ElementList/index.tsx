@@ -197,6 +197,10 @@ function ElementRow({
 	const label = kindLabel(element.kind, kinds);
 	const title = element.name ?? label;
 	const Icon = kindIcon(schema);
+	const titleIcon = Icon && (
+		// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
+		<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
+	);
 	const summary = summarizeElement(element, schema);
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
@@ -320,13 +324,18 @@ function ElementRow({
 						/>
 					</button>
 					{renaming ? (
-						<Input
-							autoFocus
-							{...rename.inputProps}
-							placeholder={label}
-							size="xs"
-							className="flex-1"
-						/>
+						// The title button's own box without the button: the same icon
+						// and gap-1.5, so the field's text lands where the title's did.
+						<div className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">
+							{titleIcon}
+							<Input
+								autoFocus
+								{...rename.inputProps}
+								placeholder={label}
+								size="xs"
+								className="min-w-0 flex-1"
+							/>
+						</div>
 					) : (
 						<button
 							type="button"
@@ -334,10 +343,7 @@ function ElementRow({
 							onKeyDown={handleRowKeyDown}
 							className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
 						>
-							{Icon && (
-								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
-								<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
-							)}
+							{titleIcon}
 							{/*
 							 * `shrink-0` keeps a title at its natural width instead of
 							 * ceding space in the flex distribution - the summary

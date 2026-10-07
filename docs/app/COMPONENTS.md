@@ -2581,8 +2581,8 @@ tokens, so Comfortable follows without a call site doing anything:
 | `"xs"` | `h-control-xs` | 20px | 24px | A field inside a `target` row: the inline renames in the collection, request, variables and element trees |
 
 `xs` is the one size with more than a height. It is `rounded-sm`, has
-`px-1.5`, and sits `-ml-1.5` left of the row's content edge - exactly its own
-padding - with a width that gives the offset back on the right, so the text
+`px-1.5`, and sits left of the row's content edge by its padding plus its 1px
+border (`-ml-[calc(var(--spacing)*1.5+1px)]`) - with a width that gives the offset back on the right, so the text
 does not move when a rename begins and the box still ends at the row's edge.
 Its border takes the focus colour in place of the ring, so one edge draws.
 A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`:
