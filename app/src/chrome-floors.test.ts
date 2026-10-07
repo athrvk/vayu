@@ -220,11 +220,14 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// gap #1679 was reopened for). A plain `<button>` and `TimeMarker` (which
 	// forwards `className` to its Button) are in scope too: a hand-rolled
 	// trigger is where the floor slipped before. So is `SelectTrigger`, whose
-	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. At the 3px unit h-N / w-N /
+	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. So is
+	// `DialogCancelButton`, a `Button` under another name: an `h-7` on one sat
+	// 3px short of the `Input` and Add button beside it (#1830). At the 3px unit h-N / w-N /
 	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
-	const OPEN = /<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger)\b/g;
+	const OPEN =
+		/<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger|DialogCancelButton)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
 	// the box) while still catching a variant-prefixed `sm:w-5` or
 	// `[&_svg]:size-3`. Bare `0` is not matched: `w-0` hides a box rather than
@@ -282,6 +285,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(tags).toContain("<button");
 		expect(tags).toContain("<TimeMarker");
 		expect(tags).toContain("<SelectTrigger");
+		expect(tags).toContain("<DialogCancelButton");
 	});
 
 	it("finds no undersized h / w / size in an interactive element's own tag", () => {

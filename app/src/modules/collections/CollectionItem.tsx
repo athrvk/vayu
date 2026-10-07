@@ -420,7 +420,6 @@ export default function CollectionItem({
 								size="sm"
 								onClick={() => onCreateSubfolder(collection.id)}
 								disabled={isCreatingSubfolder}
-								className="h-control-sm text-xs"
 							>
 								{isCreatingSubfolder && (
 									<Loader2 className="size-icon-sm animate-spin mr-1" />
@@ -431,7 +430,6 @@ export default function CollectionItem({
 								size="sm"
 								onClick={onCancelSubfolder}
 								disabled={isCreatingSubfolder}
-								className="h-7 text-xs"
 							/>
 						</div>
 					)}
