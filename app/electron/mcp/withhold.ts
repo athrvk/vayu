@@ -19,19 +19,23 @@
  * row (a Postman attribute or parameter row) `valueWithheld: true` on the row,
  * and a config or proxy URL `credentialsWithheld: true`.
  *
- * What goes through here is what is *stored*: environments, globals,
- * collections and requests as the read tools and the `vayu://` resources answer
- * them, the cookie jars, and the config table (`update_engine_config`'s echo
- * included). What a run *recorded* does not: a request that references a
- * secret still sends it, so the trace of what was sent carries it, and
- * `rawRequest`, `get_run_report`, `get_run_samples`, `list_runs`,
- * `vayu://runs`, `vayu://run/*`, the run-report prompts, `get_inbox_captures`
- * and `list_request_examples` answer it as recorded. SECURITY.md says so, and
- * says what write access adds: an agent can clear a variable's `secret` flag
- * and read it back, and a write tool's own answer echoes the stored row.
+ * What goes through the row projections is what is *stored*: environments,
+ * globals, collections, requests and saved examples as the read tools and the
+ * `vayu://` resources answer them, the cookie jars, and the config table
+ * (`update_engine_config`'s echo included). A write tool's own answer, which
+ * echoes the stored row, goes through the same projection as the read of that
+ * row: writing does not grant reading.
+ *
+ * What a run *recorded* - a trace, a report, a sample, a run row, an inbox
+ * capture - goes through {@link runOutputShape} instead (#1809). A request
+ * that references a secret still sends it, so the record of what was sent
+ * carries the resolved value in whatever encoding it went out in; that value
+ * is masked in place with the engine's `<redacted>` marker, the rule the engine
+ * applies to a run's config snapshot (#1803), so the record keeps its shape.
  */
 
 import type { McpSafetyConfig } from "./config.js";
+import type { EngineClient } from "./engine-client.js";
 import { withValue } from "./variable-origins.js";
 
 /** The one setting this module reads off a tool context. */
@@ -49,6 +53,21 @@ export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes b
 
 /** What a read carrying auth blocks says about the credentials in them. */
 export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value, and a credential row in a Postman import's \`postman\` source as \`valueWithheld: true\` on the row, unless the user has turned on ${REVEAL_SETTING}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
+
+/** What a read carrying header rows says about the credential-bearing ones. */
+export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a credential (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or the header the request's API-key auth names) comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
+
+/** The marker a masked value reads as in run output: the engine's `kRedactedMarker`. */
+export const REDACTED_MARKER = "<redacted>";
+
+/** What a read of run output says about the secrets the run sent. */
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+
+/** What `start_load_run` says about its confirmation preview's planned run. */
+export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
+
+/** What `diff_spec` says about a stored request's credential headers. */
+export const WITHHELD_HEADER_DIFF_SENTENCE = `A \`headers\` change whose current value names a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
 
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
@@ -132,9 +151,11 @@ const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
 	"assertion",
 ]);
 
+const WITHHELD_SUFFIX = "Withheld";
+
 /** The member an auth block carries in place of @p member once it is withheld. */
 function withheldMarker(member: string): string {
-	return `${member}Withheld`;
+	return `${member}${WITHHELD_SUFFIX}`;
 }
 
 /**
@@ -240,6 +261,35 @@ function withholdAuth(auth: unknown): unknown {
 	};
 }
 
+/**
+ * The values @p withheld - a withholding projection of @p original, which
+ * keeps every key and array position - holds a marker in place of: `<member>`
+ * beside each new `<member>Withheld: true`, `value` beside a row's
+ * `valueWithheld: true`. A marker @p original already carried replaced nothing.
+ */
+function valuesWithheldBy(original: unknown, withheld: unknown): string[] {
+	if (Array.isArray(original) && Array.isArray(withheld)) {
+		return original.flatMap((item, at) => valuesWithheldBy(item, withheld[at]));
+	}
+	if (!isRecord(original) || !isRecord(withheld)) return [];
+	return Object.entries(withheld).flatMap(([key, value]) => {
+		const isNewMarker =
+			value === true && key.endsWith(WITHHELD_SUFFIX) && original[key] === undefined;
+		if (!isNewMarker) return valuesWithheldBy(original[key], value);
+		const replaced = original[key.slice(0, -WITHHELD_SUFFIX.length)];
+		return typeof replaced === "string" ? [replaced] : [];
+	});
+}
+
+/**
+ * The literal credentials an auth block holds: every member {@link withholdAuth}
+ * withholds (the same set {@link withheldAuthMembers} names on the way back),
+ * so an empty value or a lone `{{variable}}` is not one.
+ */
+function authCredentialValues(auth: unknown): string[] {
+	return valuesWithheldBy(auth, withholdAuth(auth));
+}
+
 function memberMarkers(block: Record<string, unknown>): string[] {
 	return [...CREDENTIAL_AUTH_MEMBERS]
 		.map(withheldMarker)
@@ -286,11 +336,78 @@ export function withheldAuthMembers(auth: Record<string, unknown>): string[] {
 	];
 }
 
+// --- Headers ------------------------------------------------------------------
+
+/**
+ * The header names that hold a credential whatever their value is: a header
+ * typed straight into a request is no variable, so the name is the only signal.
+ * `app/src/lib/sensitive-headers.ts`'s list, which this module cannot import
+ * (`electron/` may not reach into `src/`); both are pinned to the engine's by
+ * `sensitiveHeaderNames` in `engine/tests/fixtures/log-redaction-conformance.json`
+ * (`withhold.conformance.test.ts`).
+ */
+export const SENSITIVE_HEADER_NAMES: readonly string[] = [
+	"authorization",
+	"proxy-authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"x-csrf-token",
+];
+
+/**
+ * The header name an API-key auth declares, whatever its `in` says: the
+ * engine's `api_key_header_names` (`engine/src/utils/json.cpp`), which reads
+ * the key off any `apikey` block, so the two mask the same header. The one
+ * sensitive name no list can hold.
+ */
+function apiKeyHeaderName(auth: unknown): string | undefined {
+	if (!isRecord(auth) || auth.mode !== "apikey") return undefined;
+	return typeof auth.key === "string" ? auth.key.trim().toLowerCase() : undefined;
+}
+
+/**
+ * Whether a header named @p name carries a credential in @p value: a name on
+ * the shared list or one of @p apiKeyHeaders (lower-cased), and a value that
+ * holds one. One rule for a stored row, a recorded header map and a wire line.
+ */
+function isCredentialHeader(
+	name: unknown,
+	value: unknown,
+	apiKeyHeaders: readonly string[]
+): boolean {
+	if (typeof name !== "string" || !holdsCredential(value)) return false;
+	const folded = name.trim().toLowerCase();
+	if (folded === "") return false;
+	return SENSITIVE_HEADER_NAMES.includes(folded) || apiKeyHeaders.includes(folded);
+}
+
+function isSensitiveHeaderRow(row: unknown, apiKeyHeader: string | undefined): boolean {
+	return (
+		isRecord(row) && isCredentialHeader(row.key, row.value, apiKeyHeader ? [apiKeyHeader] : [])
+	);
+}
+
+/**
+ * `{key, value, enabled}` header rows with each credential-bearing row's value
+ * withheld, disabled rows included: a row switched off is one click from sent.
+ * @p auth is the owning request's, for the API-key header; an example has none.
+ */
+function withholdHeaderRows(headers: unknown, auth: unknown): unknown {
+	if (!Array.isArray(headers)) return headers;
+	const apiKeyHeader = apiKeyHeaderName(auth);
+	return headers.map((row) =>
+		isSensitiveHeaderRow(row, apiKeyHeader) ? withholdRowValue(row) : row
+	);
+}
+
 // --- Rows ---------------------------------------------------------------------
 
 /**
- * One stored row - an environment, the globals, a collection, a saved request -
- * with its `variables` and `auth` withheld. Every other field passes through.
+ * One stored row - an environment, the globals, a collection, a saved request
+ * or one of its examples - with its `variables`, `auth` and credential-bearing
+ * `headers` withheld. Every other field passes through.
  */
 export function withholdRowSecrets(row: unknown): unknown {
 	if (!isRecord(row)) return row;
@@ -298,12 +415,28 @@ export function withholdRowSecrets(row: unknown): unknown {
 		...row,
 		...("variables" in row ? { variables: withholdVariableBag(row.variables) } : {}),
 		...("auth" in row ? { auth: withholdAuth(row.auth) } : {}),
+		...("headers" in row ? { headers: withholdHeaderRows(row.headers, row.auth) } : {}),
 	};
 }
 
 /** {@link withholdRowSecrets} over a list; a non-list answer passes through untouched. */
 export function withholdRowListSecrets(list: unknown): unknown {
 	return Array.isArray(list) ? list.map(withholdRowSecrets) : list;
+}
+
+/**
+ * `POST /reorder`'s answer - `{collections, requests}`, the whole rows a move
+ * renumbered - with each list withheld as the read of its rows is.
+ */
+export function withholdReorderRows(answer: unknown): unknown {
+	if (!isRecord(answer)) return answer;
+	return {
+		...answer,
+		...("collections" in answer
+			? { collections: withholdRowListSecrets(answer.collections) }
+			: {}),
+		...("requests" in answer ? { requests: withholdRowListSecrets(answer.requests) } : {}),
+	};
 }
 
 // --- Cookies ------------------------------------------------------------------
@@ -380,4 +513,395 @@ export function withholdDiagnoseCredentials(answer: unknown): unknown {
 	const stripped = stripUserinfo(answer.proxy.url);
 	if (stripped === null) return answer;
 	return { ...answer, proxy: { ...answer.proxy, url: stripped, credentialsWithheld: true } };
+}
+
+// --- Spec diff ----------------------------------------------------------------
+
+/**
+ * The rows of a `rows_value` display (`engine/src/core/spec_diff.cpp`):
+ * `N: key=value, key=value`, each name before its first `=`.
+ */
+const DISPLAY_ROW = /(?:^\d+: |, )([^=,]+)=([^,]*)/g;
+
+function displaysCredentialHeader(display: unknown): boolean {
+	if (typeof display !== "string") return false;
+	return [...display.matchAll(DISPLAY_ROW)].some(([, name, value]) =>
+		isCredentialHeader(name, value, [])
+	);
+}
+
+function withholdChangedFields(entry: unknown): unknown {
+	if (!isRecord(entry) || !Array.isArray(entry.fields)) return entry;
+	return {
+		...entry,
+		fields: entry.fields.map((field) => {
+			if (!isRecord(field) || field.field !== "headers") return field;
+			if (!displaysCredentialHeader(field.current)) return field;
+			const { current: _current, ...rest } = field;
+			return { ...rest, currentWithheld: true };
+		}),
+	};
+}
+
+/**
+ * `diff_spec`'s changed entries with each `headers` change whose current side -
+ * the stored request's rows, as a display line - names a credential header
+ * withheld whole. The line is the engine's lossy rendering (rows joined with
+ * `, `, cut at 120 characters), so a value cannot be masked inside it without
+ * a `Digest` header's later parameters reading as rows of their own.
+ */
+export function withholdSpecDiffChanges(changed: unknown): unknown {
+	return Array.isArray(changed) ? changed.map(withholdChangedFields) : changed;
+}
+
+// --- Run output ---------------------------------------------------------------
+
+/**
+ * A secret shorter than this many bytes is not masked: the engine's
+ * `kMinMaskedSecretLength`. Two or three characters recur in ordinary URL and
+ * body text, so masking them would shred the record and withhold nothing a
+ * guess could not recover.
+ */
+const MIN_MASKED_SECRET_BYTES = 4;
+
+const utf8 = new TextEncoder();
+
+function percentByte(byte: number): string {
+	return `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+}
+
+/** RFC 3986's unreserved set, the one `url_encode` leaves as written. */
+function isUnreservedByte(byte: number): boolean {
+	return (
+		(byte >= 0x41 && byte <= 0x5a) ||
+		(byte >= 0x61 && byte <= 0x7a) ||
+		(byte >= 0x30 && byte <= 0x39) ||
+		byte === 0x2d ||
+		byte === 0x5f ||
+		byte === 0x2e ||
+		byte === 0x7e
+	);
+}
+
+/** The engine's `vayu::utils::url_encode`: every byte outside the unreserved set as `%XX`. */
+function urlEncode(text: string): string {
+	let out = "";
+	for (const byte of utf8.encode(text)) {
+		out += isUnreservedByte(byte) ? String.fromCharCode(byte) : percentByte(byte);
+	}
+	return out;
+}
+
+/** Postman's query value set: the C0 controls, DEL and above, space `"` `#` `'` `<` `>` and `&`. */
+const QUERY_VALUE_ASCII: ReadonlySet<number> = new Set(
+	[...` "#'<>&`].map((char) => char.charCodeAt(0))
+);
+
+function percentEncodeQueryValue(text: string): string {
+	let out = "";
+	for (const byte of utf8.encode(text)) {
+		out +=
+			byte < 0x20 || byte > 0x7e || QUERY_VALUE_ASCII.has(byte)
+				? percentByte(byte)
+				: String.fromCharCode(byte);
+	}
+	return out;
+}
+
+/** Where a whole `{{...}}` token starting at @p at ends, or -1: the engine's `template_token_end`. */
+function tokenEnd(text: string, at: number): number {
+	if (!text.startsWith("{{", at)) return -1;
+	for (let scan = at + 2; scan < text.length; scan++) {
+		if (text[scan] === "{") return -1;
+		if (text[scan] === "}") return text.startsWith("}}", scan) ? scan + 2 : -1;
+	}
+	return -1;
+}
+
+/**
+ * The engine's `encode_query_component (text, QueryPart::Value)`, which a query
+ * value composition writes goes through: Postman's set, a whole `{{...}}`
+ * token kept. The renderer holds the same rule
+ * (`src/modules/request-builder/utils/query-encoding.ts`), which `electron/`
+ * cannot import; both are pinned to
+ * `engine/tests/fixtures/query-encoding-conformance.json`.
+ */
+export function encodeQueryValue(text: string): string {
+	let out = "";
+	let plain = 0;
+	for (let at = 0; at < text.length;) {
+		const end = tokenEnd(text, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		out += percentEncodeQueryValue(text.slice(plain, at)) + text.slice(at, end);
+		plain = at = end;
+	}
+	return out + percentEncodeQueryValue(text.slice(plain));
+}
+
+/**
+ * The engine's `escape_json_string_content`: only what JSON forbids raw is
+ * rewritten, so `pa"ss` reads `pa\"ss` inside a JSON body's text. A JSON
+ * string literal without its quotes is the same bytes, lowercase `\u00xx`
+ * included.
+ */
+function escapeJsonStringContent(text: string): string {
+	return JSON.stringify(text).slice(1, -1);
+}
+
+/**
+ * The engine's `escape_xml_content`: `&`, `<` and `>` always, and a quote only
+ * when it is @p quote, the delimiter of the attribute the value sits in (`""`
+ * in character data).
+ */
+function escapeXmlContent(text: string, quote: "" | '"' | "'"): string {
+	let out = "";
+	for (const char of text) {
+		if (char === "&") out += "&amp;";
+		else if (char === "<") out += "&lt;";
+		else if (char === ">") out += "&gt;";
+		else if (char === '"' && quote === '"') out += "&quot;";
+		else if (char === "'" && quote === "'") out += "&apos;";
+		else out += char;
+	}
+	return out;
+}
+
+/**
+ * Each secret value as a run's record can hold it - raw, `url_encode`'d,
+ * query-encoded, JSON-escaped, and XML-escaped in character data and in each
+ * attribute delimiter - longest first, so a secret that contains another is
+ * masked whole rather than around the shorter one. The engine's
+ * `masked_secret_forms`, form for form.
+ */
+export function secretForms(values: readonly string[]): string[] {
+	const forms = new Set<string>();
+	for (const value of values) {
+		if (utf8.encode(value).length < MIN_MASKED_SECRET_BYTES) continue;
+		forms.add(value);
+		forms.add(urlEncode(value));
+		forms.add(encodeQueryValue(value));
+		forms.add(escapeJsonStringContent(value));
+		for (const quote of ["", '"', "'"] as const) forms.add(escapeXmlContent(value, quote));
+	}
+	const bytes = (form: string) => utf8.encode(form).length;
+	return [...forms].sort((a, b) => bytes(b) - bytes(a) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** What masks one run's output: the secret forms, and the API-key header names beside the list. */
+export interface RunOutputRule {
+	forms: readonly string[];
+	apiKeyHeaders: readonly string[];
+}
+
+/** @p text with every occurrence of each form replaced, longest form first - the engine's `mask_secret_values`. */
+function maskSecretForms(text: string, forms: readonly string[]): string {
+	return forms.reduce((masked, form) => masked.split(form).join(REDACTED_MARKER), text);
+}
+
+/** The blank line between a wire frame's header block and its body. */
+export const HEADER_BODY_SEPARATOR = "\r\n\r\n";
+
+/** One `name: value` line of a header block, its line ending left outside the match. */
+const WIRE_HEADER_LINE = /^([^:\r\n]+):([ \t]*)([^\r\n]*)(?=\r?$)/gm;
+
+/**
+ * A `rawRequest` wire frame with the value of each credential header line
+ * masked. Only the header block is read - everything before the first blank
+ * line, the split `cap_node_raw_request` makes - so a body line that happens to
+ * read `Cookie: x` is the body's, and the request line has no name to match.
+ */
+function withholdWireHeaders(frame: string, apiKeyHeaders: readonly string[]): string {
+	const end = frame.indexOf(HEADER_BODY_SEPARATOR);
+	const head = end === -1 ? frame : frame.slice(0, end);
+	const masked = head.replace(WIRE_HEADER_LINE, (line, name: string, gap: string, value) =>
+		isCredentialHeader(name, value, apiKeyHeaders) ? `${name}:${gap}${REDACTED_MARKER}` : line
+	);
+	return end === -1 ? masked : masked + frame.slice(end);
+}
+
+/**
+ * A recorded header set - the `{name: value}` map every trace, sample and
+ * capture carries, or `{key, value}` rows - with each credential header's
+ * value masked. Anything else passes through.
+ */
+function withholdHeaderSet(headers: unknown, apiKeyHeaders: readonly string[]): unknown {
+	if (Array.isArray(headers)) {
+		return headers.map((row) =>
+			isRecord(row) && isCredentialHeader(row.key ?? row.name, row.value, apiKeyHeaders)
+				? { ...row, value: REDACTED_MARKER }
+				: row
+		);
+	}
+	if (!isRecord(headers)) return headers;
+	return Object.fromEntries(
+		Object.entries(headers).map(([name, value]) => [
+			name,
+			isCredentialHeader(name, value, apiKeyHeaders) ? REDACTED_MARKER : value,
+		])
+	);
+}
+
+/** A member holding a header set: `headers`, a trace's `sentHeaders`, a response's `requestHeaders`. */
+const HEADER_SET_MEMBER = /headers$/i;
+
+function withholdRunMember(key: string, value: unknown, rule: RunOutputRule): unknown {
+	const masked = withholdRunOutput(value, rule);
+	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, rule.apiKeyHeaders);
+	if (key === "rawRequest" && typeof masked === "string") {
+		return withholdWireHeaders(masked, rule.apiKeyHeaders);
+	}
+	return masked;
+}
+
+/**
+ * Run output with every secret form in every string masked, and every
+ * credential header's value in a header set or a `rawRequest` header block.
+ * Keys are left alone, as the engine leaves them: a header or field *name* is
+ * not a value. Numbers are never touched, so a size the engine reported still
+ * describes what it measured.
+ */
+export function withholdRunOutput(value: unknown, rule: RunOutputRule): unknown {
+	if (typeof value === "string") return maskSecretForms(value, rule.forms);
+	if (Array.isArray(value)) return value.map((item) => withholdRunOutput(item, rule));
+	if (!isRecord(value)) return value;
+	return Object.fromEntries(
+		Object.entries(value).map(([key, member]) => [key, withholdRunMember(key, member, rule)])
+	);
+}
+
+/** The engine reads a run-output projection is built from. */
+type RunOutputClient = Pick<
+	EngineClient,
+	"getGlobals" | "listEnvironments" | "listCollections" | "listAllRequests"
+>;
+
+interface RunOutputContext extends RevealContext {
+	client: RunOutputClient;
+}
+
+/** The secret-flagged values of one `variables` bag: `secret === true` and a non-empty string. */
+function secretValuesOf(row: unknown): string[] {
+	if (!isRecord(row) || !isRecord(row.variables)) return [];
+	return Object.values(row.variables).flatMap((def) =>
+		isRecord(def) && def.secret === true && typeof def.value === "string" && def.value !== ""
+			? [def.value]
+			: []
+	);
+}
+
+function rowsOf(answer: unknown): unknown[] {
+	return Array.isArray(answer) ? answer : [answer];
+}
+
+/** The workspace reads a run-output rule is built from, each by the name a failure reports. */
+const SCOPE_LOOKUPS = {
+	globals: (client: RunOutputClient, signal?: AbortSignal) => client.getGlobals(signal),
+	environments: (client: RunOutputClient, signal?: AbortSignal) =>
+		client.listEnvironments(signal),
+	collections: (client: RunOutputClient, signal?: AbortSignal) => client.listCollections(signal),
+	requests: (client: RunOutputClient, signal?: AbortSignal) => client.listAllRequests(signal),
+};
+
+type ScopeName = keyof typeof SCOPE_LOOKUPS;
+
+/**
+ * A run-output projection that could not be built because a workspace read
+ * failed. Masking with the reads that answered would hand an agent every
+ * secret the failed one holds, so the read it guards answers this instead:
+ * a tool as an error result, a resource or a prompt as a failed request.
+ */
+export class MaskingIncompleteError extends Error {
+	constructor(failed: readonly ScopeName[], reason: unknown) {
+		const detail = reason instanceof Error ? reason.message : String(reason);
+		super(
+			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
+				`With ${REVEAL_SETTING} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
+				`Retry once the engine answers; a call that sent a request has already sent it, so check list_runs before sending it again.`
+		);
+		this.name = "MaskingIncompleteError";
+	}
+}
+
+/** Every scope's rows, or {@link MaskingIncompleteError} naming each read that failed. */
+async function readScopes(
+	client: RunOutputClient,
+	signal?: AbortSignal
+): Promise<Record<ScopeName, unknown[]>> {
+	const names = Object.keys(SCOPE_LOOKUPS) as ScopeName[];
+	// `async` so a read that throws before it returns a promise is a rejection too.
+	const settled = await Promise.allSettled(
+		names.map(async (name) => SCOPE_LOOKUPS[name](client, signal))
+	);
+	const rejected = settled.flatMap((result) => (result.status === "rejected" ? [result] : []));
+	if (rejected.length > 0) {
+		const failed = names.filter((_, at) => settled[at].status === "rejected");
+		throw new MaskingIncompleteError(failed, rejected[0].reason);
+	}
+	const rows = settled.map((result) => rowsOf((result as PromiseFulfilledResult<unknown>).value));
+	return Object.fromEntries(names.map((name, at) => [name, rows[at]])) as Record<
+		ScopeName,
+		unknown[]
+	>;
+}
+
+/**
+ * The run-output projection for @p ctx: the identity when the user chose to
+ * reveal secrets to agents, with no engine call made; otherwise
+ * {@link withholdRunOutput} under the rule read from the workspace now.
+ *
+ * The values are every secret variable the workspace holds - globals, every
+ * environment, every collection - and every literal credential a collection's
+ * or a request's stored auth holds, which the engine writes into a header or
+ * the query on the way out; the API-key header names are every stored block's
+ * plus @p auth (a block the caller sent inline). That is a superset of the
+ * scopes the engine masks a snapshot against (globals, the run's environment,
+ * its collection chain), and it is what a read can know: a run row names its
+ * environment but not the chain an inline send resolved through, a list reads
+ * many runs at once and an inbox capture belongs to no run at all. A secret is
+ * a secret whichever scope a run read it from.
+ *
+ * Every read must answer: one that fails throws {@link MaskingIncompleteError}
+ * rather than masking with what the others read. The values are read now, not
+ * as the run read them: a secret changed since masks under its new value only.
+ */
+export async function runOutputShape(
+	ctx: RunOutputContext,
+	signal?: AbortSignal,
+	auth: readonly unknown[] = []
+): Promise<Projection> {
+	if (ctx.config.revealSecretsToAgents) return (value) => value;
+	const { globals, environments, collections, requests } = await readScopes(ctx.client, signal);
+	const ownerAuth = [...collections, ...requests].map((row) =>
+		isRecord(row) ? row.auth : undefined
+	);
+	const rule: RunOutputRule = {
+		forms: secretForms([
+			...[...globals, ...environments, ...collections].flatMap(secretValuesOf),
+			...ownerAuth.flatMap(authCredentialValues),
+		]),
+		apiKeyHeaders: [...ownerAuth, ...auth].flatMap((block) => apiKeyHeaderName(block) || []),
+	};
+	return (value) => withholdRunOutput(value, rule);
+}
+
+/**
+ * A request about to be sent - `start_load_run`'s planned run, composed with
+ * everything resolved - as an agent may read it, which is as the run will
+ * record it: its `auth` block withheld as a stored row's is, so a literal
+ * token reads as `<member>Withheld`, then every string under
+ * {@link runOutputShape}'s rule. @p request itself with reveal on, with no
+ * engine call made.
+ */
+export async function withholdPlannedRequest(
+	ctx: RunOutputContext,
+	request: Record<string, unknown>,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	if (ctx.config.revealSecretsToAgents) return request;
+	const mask = await runOutputShape(ctx, signal, [request.auth]);
+	const authWithheld = "auth" in request ? { auth: withholdAuth(request.auth) } : {};
+	return mask({ ...request, ...authWithheld }) as Record<string, unknown>;
 }

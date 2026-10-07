@@ -54,17 +54,27 @@ import {
 } from "./collection-shape.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 import {
+	HEADER_BODY_SEPARATOR,
+	MaskingIncompleteError,
+	runOutputShape,
 	secretsShape,
 	withheldAuthMembers,
 	withholdConfigCredentials,
 	withholdCookieValues,
 	withholdDiagnoseCredentials,
+	withholdPlannedRequest,
+	withholdReorderRows,
 	withholdRowListSecrets,
 	withholdRowSecrets,
+	withholdSpecDiffChanges,
 	WITHHELD_AUTH_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
+	WITHHELD_HEADER_DIFF_SENTENCE,
+	WITHHELD_HEADER_SENTENCE,
+	WITHHELD_PLANNED_RUN_SENTENCE,
+	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 
@@ -365,8 +375,6 @@ function boundText(
 	while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
 	return { text: buf.subarray(0, end).toString("utf8"), truncated: true, bytes: buf.byteLength };
 }
-
-const HEADER_BODY_SEPARATOR = "\r\n\r\n";
 
 /**
  * Bound a node's `rawRequest` wire message, cutting the body half only.
@@ -829,6 +837,48 @@ async function callEngine(
 	} catch (err) {
 		return engineErrorResult(err);
 	}
+}
+
+/**
+ * `callEngine`'s `shape` for a write tool that echoes the stored row: withheld
+ * exactly as the read of that row is, because writing does not grant reading
+ * (#1809). A tool whose answer is a collection row also presents it as
+ * `list_collections` does.
+ */
+function echoShape(ctx: ToolContext): (row: unknown) => unknown {
+	return secretsShape(ctx, withholdRowSecrets);
+}
+
+function collectionEchoShape(ctx: ToolContext): (row: unknown) => unknown {
+	return (row) => echoShape(ctx)(presentCollection(row, ctx));
+}
+
+/**
+ * {@link callEngine} for what a run recorded: the answer withheld by
+ * {@link runOutputShape} first and only then bounded, because a cut through an
+ * unmasked secret leaves a prefix no form matches (#1809). The projection is
+ * read once the engine has answered, so a secret the call itself wrote - a
+ * pre-request script's `pm.environment.set` - is among the values masked.
+ */
+async function callEngineForRunOutput(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	options: {
+		bound?: (value: unknown) => unknown;
+		signal?: AbortSignal;
+		/** An auth block sent inline, whose API-key header no stored row names. */
+		auth?: unknown;
+	} = {}
+): Promise<ToolResult> {
+	let answer: unknown;
+	try {
+		answer = await fn();
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
+	const withheld = withhold(answer);
+	return jsonResult(options.bound ? options.bound(withheld) : withheld);
 }
 
 // --- Argument coercion helpers ----------------------------------------------
@@ -1307,7 +1357,7 @@ const VARIABLE_INPUT = z.union([
 			.boolean()
 			.optional()
 			.describe(
-				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP."
+				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP. `true` is always accepted; `false` over a stored secret is refused unless that setting is on, because it would make the value readable."
 			),
 		type: z
 			.enum(["string", "number", "boolean", "json"])
@@ -1326,7 +1376,7 @@ function variablesInput(subject: string) {
 		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on in Vayu Settings → MCP. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
 }
 
@@ -1486,11 +1536,18 @@ interface MergedVariables {
  * typo becomes a variable rather than an error. "New" covers a stored entry
  * that is not usable either (a bare string off disk, `lib/variable-resolution.ts`
  * D17), since there is no value there to keep.
+ *
+ * With `revealSecrets` off, `secret: false` over a stored `secret: true` is
+ * refused (#1809): the call would turn a withheld value into one the next read
+ * returns, which is the switch the user has not thrown. `secret: true` and every
+ * other edit pass, and so does everything once reveal is on. Removing and
+ * re-creating a variable is not covered.
  */
 function mergeVariables(
 	stored: unknown,
 	patch: Record<string, unknown> | undefined,
-	removals: readonly string[]
+	removals: readonly string[],
+	revealSecrets: boolean
 ): MergedVariables {
 	const merged: Record<string, unknown> = isRecord(stored) ? { ...stored } : {};
 	const absentRemovals: string[] = [];
@@ -1531,6 +1588,11 @@ function mergeVariables(
 		if (stated.value === undefined && typeof base.value !== "string") {
 			throw new ToolArgError(
 				`"${name}" has no stored value to keep, so this call has to give it one: pass a string, or an object carrying "value".`
+			);
+		}
+		if (!revealSecrets && stated.secret === false && base.secret === true) {
+			throw new ToolArgError(
+				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - the user can turn it on in Vayu Settings > MCP, or clear the flag in the Variables drawer.`
 			);
 		}
 		merged[name] = { enabled: true, ...base, ...stated };
@@ -1734,7 +1796,8 @@ async function runStreamingRequest(
 		// A payload the engine refused *after* the flag was read, or a buffered
 		// answer to a request we asked to stream. Either way, hand back what it
 		// said rather than reading events for a run that does not exist.
-		return jsonResult(started);
+		const withhold = await runOutputShape(ctx, signal, [payload.auth]);
+		return jsonResult(withhold(started));
 	}
 
 	let consumed;
@@ -1744,6 +1807,7 @@ async function runStreamingRequest(
 		return engineErrorResult(err);
 	}
 
+	const withhold = await runOutputShape(ctx, signal, [payload.auth]);
 	const budgetExhausted = !consumed.completed && !consumed.capReached;
 	return structuredResult({
 		runId,
@@ -1758,7 +1822,7 @@ async function runStreamingRequest(
 		...(consumed.endReason !== undefined && { endReason: consumed.endReason }),
 		...(consumed.totalEvents !== undefined && { totalEvents: consumed.totalEvents }),
 		eventCount: consumed.events.length,
-		events: consumed.events,
+		events: withhold(consumed.events),
 		nextStep: consumed.completed
 			? "The stream has ended. get_run_report has the stored events and any test results."
 			: "The run is still streaming engine-side. Read more with get_run_report, or end it with stop_run.",
@@ -4607,7 +4671,9 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small. " +
-			WITHHELD_AUTH_SENTENCE,
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -4653,7 +4719,8 @@ export const TOOLS: McpTool[] = [
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
 			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
-			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is.",
+			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "List runs",
 			readOnlyHint: true,
@@ -4708,12 +4775,16 @@ export const TOOLS: McpTool[] = [
 					"true lists only runs pinned as a baseline, false only unpinned ones. Omit for both."
 				),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			// Built before the call, not inside it: an argument the caller got
 			// wrong must reach dispatch as a ToolArgError - inside `pagedRead`'s
 			// try it would be reported as an engine failure.
 			const query = runListQuery(args);
-			return pagedRead(() => ctx.client.listRuns(query, signal), "runs");
+			return pagedRead(
+				() => ctx.client.listRuns(query, signal),
+				"runs",
+				await runOutputShape(ctx, signal)
+			);
 		},
 	},
 	{
@@ -4725,7 +4796,8 @@ export const TOOLS: McpTool[] = [
 			"A run may also carry `warnings`: what it did not do, even though it finished and its numbers look fine - a request sent with an unresolved `{{token}}`, or a step whose pre-request script load mode never runs. Each entry carries `code`, a human-readable `message`, and either `count`/`names` or `steps`. Absent for a run with nothing to report. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
 			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history. ` +
-			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history.`,
+			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get run report",
 			readOnlyHint: true,
@@ -4733,11 +4805,13 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
-		handler: (args, ctx, signal) =>
-			callEngine(
-				() => ctx.client.getRunReport(requireStr(args, "runId"), signal),
-				boundRunReport
-			),
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
+				bound: boundRunReport,
+				signal,
+			});
+		},
 	},
 	{
 		name: "get_run_samples",
@@ -4745,7 +4819,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. Only a run started with response capture on has any; a run that captured nothing returns an empty page, not an error. " +
-			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get run samples",
 			readOnlyHint: true,
@@ -4770,7 +4845,7 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many samples to skip, for paging (default 0)."),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = optionalPageLimit(
 				args,
@@ -4781,7 +4856,8 @@ export const TOOLS: McpTool[] = [
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
 				() => ctx.client.getRunSamples(runId, limit, offset, signal),
-				"captured samples"
+				"captured samples",
+				await runOutputShape(ctx, signal)
 			);
 		},
 	},
@@ -4908,7 +4984,8 @@ export const TOOLS: McpTool[] = [
 			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned.`,
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,
@@ -5049,9 +5126,10 @@ export const TOOLS: McpTool[] = [
 			const streaming = args.stream === true;
 			payload.stream = streaming;
 			if (!streaming) {
-				return callEngine(
+				return callEngineForRunOutput(
+					ctx,
 					() => ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal),
-					boundExecuteResponse
+					{ bound: boundExecuteResponse, signal, auth: payload.auth }
 				);
 			}
 			return runStreamingRequest(args, payload, ctx, signal);
@@ -5140,7 +5218,11 @@ export const TOOLS: McpTool[] = [
 			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE,
 		annotations: {
 			title: "Create collection",
 			readOnlyHint: false,
@@ -5177,7 +5259,13 @@ export const TOOLS: McpTool[] = [
 			// Merged against nothing, the way create_environment does it: on a
 			// create every variable is new, which is what turns the string form
 			// into a stored entry and enforces "a new variable carries a value".
-			if (patch !== undefined) payload.variables = mergeVariables({}, patch, []).variables;
+			if (patch !== undefined)
+				payload.variables = mergeVariables(
+					{},
+					patch,
+					[],
+					ctx.config.revealSecretsToAgents
+				).variables;
 			const elementsGiven = elementsArg(args);
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
@@ -5199,7 +5287,7 @@ export const TOOLS: McpTool[] = [
 			}
 			return callEngine(
 				() => ctx.client.createCollection(payload, signal),
-				(row) => presentCollection(row, ctx)
+				collectionEchoShape(ctx)
 			);
 		},
 	},
@@ -5211,7 +5299,11 @@ export const TOOLS: McpTool[] = [
 			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth and elements each replace the stored block/list whole. This is not a move - to re-parent a collection, use move_item. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE,
 		annotations: {
 			title: "Update collection",
 			readOnlyHint: false,
@@ -5284,7 +5376,12 @@ export const TOOLS: McpTool[] = [
 					return engineErrorResult(err);
 				}
 				if (patch !== undefined || removals.length > 0) {
-					const merged = mergeVariables(existing.variables, patch, removals);
+					const merged = mergeVariables(
+						existing.variables,
+						patch,
+						removals,
+						ctx.config.revealSecretsToAgents
+					);
 					payload.variables = merged.variables;
 					absentRemovals = merged.absentRemovals;
 				}
@@ -5301,7 +5398,7 @@ export const TOOLS: McpTool[] = [
 			}
 			const result = await callEngine(
 				() => ctx.client.updateCollection(collectionId, payload, signal),
-				(row) => presentCollection(row, ctx)
+				collectionEchoShape(ctx)
 			);
 			return result.isError
 				? result
@@ -5476,7 +5573,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half.",
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half. " +
+			WITHHELD_HEADER_DIFF_SENTENCE,
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
 			readOnlyHint: true,
@@ -5543,7 +5641,7 @@ export const TOOLS: McpTool[] = [
 					},
 					added: added.entries,
 					removed: removed.entries,
-					changed: changed.entries,
+					changed: secretsShape(ctx, withholdSpecDiffChanges)(changed.entries),
 					entriesTruncated: truncated,
 				}),
 				`\n\n${describeSpecDiff(diff)}${
@@ -5902,7 +6000,11 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document.",
+			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document." +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE,
 		annotations: {
 			title: "Unbind OpenAPI spec",
 			readOnlyHint: false,
@@ -5945,8 +6047,9 @@ export const TOOLS: McpTool[] = [
 			// as "reset to the default", which is unbound. The same value the Spec
 			// tab's Unbind sends, so the two paths cannot come to mean different
 			// things.
-			const result = await callEngine(() =>
-				ctx.client.updateCollection(collectionId, { openapi: null }, signal)
+			const result = await callEngine(
+				() => ctx.client.updateCollection(collectionId, { openapi: null }, signal),
+				collectionEchoShape(ctx)
 			);
 			return result.isError
 				? result
@@ -5961,7 +6064,11 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app\'s builder stores except form-data file parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
+			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app\'s builder stores except form-data file parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.' +
+			" " +
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -6046,7 +6153,7 @@ export const TOOLS: McpTool[] = [
 				}
 				if (elements.length > 0) payload.elements = elements;
 			}
-			return callEngine(() => ctx.client.createRequest(payload, signal));
+			return callEngine(() => ctx.client.createRequest(payload, signal), echoShape(ctx));
 		},
 	},
 	{
@@ -6054,7 +6161,11 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running." +
+			" " +
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -6197,7 +6308,10 @@ export const TOOLS: McpTool[] = [
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));
+			return callEngine(
+				() => ctx.client.updateRequest(requestId, payload, signal),
+				echoShape(ctx)
+			);
 		},
 	},
 	{
@@ -6308,7 +6422,7 @@ export const TOOLS: McpTool[] = [
 				}
 				return engineErrorResult(err);
 			}
-			const result = jsonResult(restored);
+			const result = jsonResult(echoShape(ctx)(restored));
 			// A moved folder is worth telling the caller about - it is not where it
 			// used to be, even though the restore itself succeeded.
 			return restored.reparentedToRoot === true
@@ -6371,7 +6485,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
-			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.`,
+			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured. ` +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "List saved examples",
 			readOnlyHint: true,
@@ -6384,7 +6499,7 @@ export const TOOLS: McpTool[] = [
 			const requestId = requireStr(args, "requestId");
 			return callEngine(
 				() => ctx.client.listRequestExamples(requestId, signal),
-				boundExampleBodies
+				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))
 			);
 		},
 	},
@@ -6393,7 +6508,9 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. GUARDED: requires write access to be enabled in Vayu Settings. Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone.",
+			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. GUARDED: requires write access to be enabled in Vayu Settings. Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "Create saved example",
 			readOnlyHint: false,
@@ -6432,7 +6549,10 @@ export const TOOLS: McpTool[] = [
 			// this row was written by an agent, and the sync that replaces
 			// imported rows must not be handed one it did not write (#588, #722).
 			payload.origin = "user";
-			return callEngine(() => ctx.client.createRequestExample(requestId, payload, signal));
+			return callEngine(
+				() => ctx.client.createRequestExample(requestId, payload, signal),
+				echoShape(ctx)
+			);
 		},
 	},
 	{
@@ -6440,7 +6560,9 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved example: its name, status, headers, body or content type. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart.",
+			"Correct a saved example: its name, status, headers, body or content type. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "Update saved example",
 			readOnlyHint: false,
@@ -6473,8 +6595,9 @@ export const TOOLS: McpTool[] = [
 					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").'
 				);
 			}
-			return callEngine(() =>
-				ctx.client.updateRequestExample(requestId, exampleId, payload, signal)
+			return callEngine(
+				() => ctx.client.updateRequestExample(requestId, exampleId, payload, signal),
+				echoShape(ctx)
 			);
 		},
 	},
@@ -6548,7 +6671,13 @@ export const TOOLS: McpTool[] = [
 		 */
 		invalidates: ["collection", "request"],
 		description:
-			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. GUARDED: requires write access to be enabled in Vayu Settings. It lands at the end of its new parent by default, or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree.",
+			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. GUARDED: requires write access to be enabled in Vayu Settings. It lands at the end of its new parent by default, or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree." +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE +
+			" " +
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE,
 		annotations: {
 			title: "Move an item",
 			readOnlyHint: false,
@@ -6658,7 +6787,10 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
-			return callEngine(() => ctx.client.reorder(batch, signal));
+			return callEngine(
+				() => ctx.client.reorder(batch, signal),
+				secretsShape(ctx, withholdReorderRows)
+			);
 		},
 	},
 	{
@@ -6669,7 +6801,9 @@ export const TOOLS: McpTool[] = [
 			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings. " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: once this one is active they shadow every collection and global of the same name."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE,
 		annotations: {
 			title: "Create environment",
 			readOnlyHint: false,
@@ -6692,14 +6826,14 @@ export const TOOLS: McpTool[] = [
 			// Merged against nothing, which is what turns the string form into a
 			// stored entry and enforces "a new variable carries a value" - on a
 			// create every variable is new.
-			const merged = mergeVariables({}, patch, []);
+			const merged = mergeVariables({}, patch, [], ctx.config.revealSecretsToAgents);
 			// No `id`: the engine assigns every id it stores and answers a body
 			// carrying one with a 400 (issue #97), so the tool does not offer a
 			// field it would only have to refuse.
 			const payload: Record<string, unknown> = { name, variables: merged.variables };
 			const description = str(args, "description");
 			if (description !== undefined) payload.description = description;
-			return callEngine(() => ctx.client.createEnvironment(payload, signal));
+			return callEngine(() => ctx.client.createEnvironment(payload, signal), echoShape(ctx));
 		},
 	},
 	{
@@ -6710,7 +6844,9 @@ export const TOOLS: McpTool[] = [
 			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings. " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: while this environment is active they shadow every collection and global of the same name. Writing here to an inactive environment changes nothing a request resolves until activate_environment makes it current."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE,
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -6747,7 +6883,12 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
-			const merged = mergeVariables(existing.variables, patch, removals);
+			const merged = mergeVariables(
+				existing.variables,
+				patch,
+				removals,
+				ctx.config.revealSecretsToAgents
+			);
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no
 			// default - omitting it would keep the stored name, but sending the
@@ -6756,8 +6897,9 @@ export const TOOLS: McpTool[] = [
 				name: rename ?? (typeof existing.name === "string" ? existing.name : ""),
 				variables: merged.variables,
 			};
-			const result = await callEngine(() =>
-				ctx.client.updateEnvironment(environmentId, payload, signal)
+			const result = await callEngine(
+				() => ctx.client.updateEnvironment(environmentId, payload, signal),
+				echoShape(ctx)
 			);
 			return result.isError
 				? result
@@ -6772,7 +6914,9 @@ export const TOOLS: McpTool[] = [
 			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings. ' +
 			precedenceNote(
 				"This is the one call that changes which tier answers without changing any value: the newly active environment shadows every collection and global of the same name, so a name can start resolving differently with nothing else edited."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE,
 		annotations: {
 			title: "Activate environment",
 			readOnlyHint: false,
@@ -6795,8 +6939,9 @@ export const TOOLS: McpTool[] = [
 				// (`deactivate_other_environments_locked`), so a companion write
 				// would be a second definition of the same rule. No `name` - absent
 				// on a PUT means keep.
-				return callEngine(() =>
-					ctx.client.updateEnvironment(environmentId, { isActive: true }, signal)
+				return callEngine(
+					() => ctx.client.updateEnvironment(environmentId, { isActive: true }, signal),
+					echoShape(ctx)
 				);
 			}
 			// There is no "no environment" row to write true to, so clearing is
@@ -6820,8 +6965,9 @@ export const TOOLS: McpTool[] = [
 					textResult("No environment was active, so there was nothing to deactivate.")
 				);
 			}
-			return callEngine(() =>
-				ctx.client.updateEnvironment(activeId, { isActive: false }, signal)
+			return callEngine(
+				() => ctx.client.updateEnvironment(activeId, { isActive: false }, signal),
+				echoShape(ctx)
 			);
 		},
 	},
@@ -6974,7 +7120,9 @@ export const TOOLS: McpTool[] = [
 			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings. " +
 			precedenceNote(
 				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
-			),
+			) +
+			" " +
+			WITHHELD_VARIABLE_SENTENCE,
 		annotations: {
 			title: "Update global variables",
 			readOnlyHint: false,
@@ -7009,10 +7157,12 @@ export const TOOLS: McpTool[] = [
 			const merged = mergeVariables(
 				isRecord(stored) ? stored.variables : undefined,
 				patch,
-				removals
+				removals,
+				ctx.config.revealSecretsToAgents
 			);
-			const result = await callEngine(() =>
-				ctx.client.saveGlobals({ variables: merged.variables }, signal)
+			const result = await callEngine(
+				() => ctx.client.saveGlobals({ variables: merged.variables }, signal),
+				echoShape(ctx)
 			);
 			return result.isError
 				? result
@@ -7086,7 +7236,9 @@ export const TOOLS: McpTool[] = [
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data. " +
-			ENGINE_DEFAULT_HEADERS_SENTENCE,
+			ENGINE_DEFAULT_HEADERS_SENTENCE +
+			" " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -7229,6 +7381,10 @@ export const TOOLS: McpTool[] = [
 				}
 			}
 
+			// A row's `url`, `reason`, `error` and failing test lines are what the
+			// composed request resolved to, secrets included, so the matrix is run
+			// output (#1809); read after the sends, so a secret a script set is known.
+			const withhold = await runOutputShape(ctx, signal);
 			return withCaveat(
 				structuredResult({
 					collectionId,
@@ -7236,7 +7392,7 @@ export const TOOLS: McpTool[] = [
 					passed,
 					failed,
 					skipped,
-					results,
+					results: withhold(results),
 				}),
 				smokeScopeCaveat(children)
 			);
@@ -7380,6 +7536,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: ["run"],
 		description:
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
+			WITHHELD_PLANNED_RUN_SENTENCE +
+			" " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" A load run reads `loadNegotiateCompression` rather than `negotiateCompression` for the Accept-Encoding decision, because decompressing every response changes what the run measures.",
 		annotations: {
@@ -7817,7 +7975,10 @@ export const TOOLS: McpTool[] = [
 					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - they are not marked to run inline, and this run's own elements.scripts is not "allInline", so anything they sign or rewrite is missing from the requests this run sends.`
 					: "";
 
-			const summary = `Start a load test against ${payload.url} (mode: ${payload.mode})?`;
+			// The composed payload holds every secret the run will send, so the
+			// preview shows it as the run will record it (#1809).
+			const shown = await withholdPlannedRequest(ctx, payload, signal);
+			const summary = `Start a load test against ${shown.url} (mode: ${shown.mode})?`;
 
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
@@ -7827,7 +7988,7 @@ export const TOOLS: McpTool[] = [
 				preview:
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
 					"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
-					`Planned run:\n${JSON.stringify(payload, null, 2)}${caveat}`,
+					`Planned run:\n${JSON.stringify(shown, null, 2)}${caveat}`,
 			});
 			if (unconfirmed) return unconfirmed;
 
@@ -7865,7 +8026,8 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["run"],
 		description:
-			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Pin run as baseline",
 			readOnlyHint: false,
@@ -7888,7 +8050,11 @@ export const TOOLS: McpTool[] = [
 				throw new ToolArgError('"baseline" is required and must be true or false.');
 			}
 			const baseline = args.baseline;
-			return callEngine(() => ctx.client.setRunBaseline(runId, baseline, signal));
+			return callEngineForRunOutput(
+				ctx,
+				() => ctx.client.setRunBaseline(runId, baseline, signal),
+				{ signal }
+			);
 		},
 	},
 	{
@@ -8622,7 +8788,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
-			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender.`,
+			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender. ` +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get inbox captures",
 			readOnlyHint: true,
@@ -8649,7 +8816,7 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many captures to skip, for paging (default 0)."),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			const inboxId = requireStr(args, "inboxId");
 			const limit = optionalPageLimit(
 				args,
@@ -8658,10 +8825,11 @@ export const TOOLS: McpTool[] = [
 				MAX_INBOX_CAPTURE_LIMIT
 			);
 			const offset = optionalOffset(args, "offset");
+			const withhold = await runOutputShape(ctx, signal);
 			return pagedRead(
 				() => ctx.client.getInboxCaptures(inboxId, limit, offset, signal),
 				"captures",
-				boundInboxCaptures
+				(page) => boundInboxCaptures(withhold(page))
 			);
 		},
 	},
@@ -8787,7 +8955,9 @@ export async function dispatchTool(
 	try {
 		result = await tool.handler(args, ctx, signal);
 	} catch (err) {
-		if (err instanceof ToolArgError) return errorResult(err.message);
+		if (err instanceof ToolArgError || err instanceof MaskingIncompleteError) {
+			return errorResult(err.message);
+		}
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	// One record per served call, whichever transport served it (#1558) - the

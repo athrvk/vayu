@@ -106,7 +106,9 @@ const REVEAL_GATE_SENTENCE =
 	"Secret values are withheld in this session: a secret variable or a cookie reads as " +
 	"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
 	"URL's credentials as `credentialsWithheld: true`. A request that references a " +
-	"secret still sends with it, because the engine resolves it. A task that needs the " +
+	"secret still sends with it, because the engine resolves it, and what the run " +
+	"recorded reads `<redacted>` wherever that value or a credential header's value " +
+	"appears. A task that needs the " +
 	"value itself is blocked on the user turning on Reveal secrets to agents in Vayu " +
 	"Settings → MCP. ";
 

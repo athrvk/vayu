@@ -62,19 +62,37 @@ offline, still reads everything.
 
 Tools an MCP client calls receive the same data the UI shows, except your
 secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
-by default), the values of variables marked secret, the credentials in auth
-blocks, cookie values and the password in a proxy URL are withheld wherever an
-agent reads what you stored, each marked as withheld. Requests an agent sends
-still use them; the engine fills them in. That is also why the record of a
-send is not withheld: a request that references a secret sends it, so its run
-history, trace, saved examples and inbox captures show what went over the
-wire, secret included. An agent backed by a hosted model forwards what it reads
-to that model's provider. Treat connecting an agent as granting it read access
-to the rest of your workspace, and keep the server off until you want that.
+by default), an agent reads no secret through any tool. The values of variables
+marked secret, the credentials in auth blocks, the values of credential-bearing
+headers (`Authorization`, `Cookie`, `X-Api-Key` and the like), cookie values and
+the password in a proxy URL are withheld wherever an agent reads what you
+stored, and what a write tool echoes back is withheld the same way. What a run
+recorded - a trace, a report, a sample, a run row, an inbox capture, a smoke
+run's rows, a load run's confirmation preview - reads `<redacted>` wherever a
+secret variable's value, a credential typed into a saved auth block or a
+credential header's value appears, whatever encoding it went out in. If Vayu
+cannot read the values it masks against, the agent gets an error in place of
+the record, never a partly masked one. Requests an agent sends still use the
+real values; the engine fills them in. Clearing a variable's secret flag, the
+one write that would hand the value back on the next read, is refused while
+reveal is off.
 
-Withholding is a read rule, not a boundary against an agent with write access:
-a write tool echoes the row it changed, and an agent can clear a variable's
-secret flag and then read it. Keep write access off where that matters.
+This is not a sandbox, and three paths remain open with reveal off. A
+pre-request script the agent sends with `run_request` runs with your
+environment's secrets and can copy one into a variable not marked secret, or
+into its own output (tracked in #1834). A credential the engine writes itself,
+such as an OAuth 2.0 token it placed in the URL's query, or an API key sent
+inline with one request and read back later, is not recognised as a secret in
+a trace (#1835). A password written into a saved request's URL, or a query
+parameter row that holds a key, is returned as stored (#1781).
+
+An agent backed by a hosted model forwards what it reads to that model's
+provider. Treat connecting an agent as granting it read access to the rest of
+your workspace, and keep the server off until you want that.
+
+The run history in Vayu's own screens is not masked: a request that references a
+secret sends it, so the stored trace and inbox captures keep what went over the
+wire, and your own screens show it. Only the agent's view of them is masked.
 
 ### MCP server threat model
 
@@ -117,10 +135,17 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   Settings. The allowlist checks the host a request names, not the proxy it
   passes through, so an agent that could repoint the proxy or add a trusted CA
   could route and read every request.
-- **Secrets withheld by default.** Read tools and resources return secret
+- **Secrets withheld by default.** With reveal off, an agent reads no secret
+  through any tool or resource. Read tools and resources return secret
   variables as `valueWithheld: true`, auth credentials as
-  `<member>Withheld: true`, cookie values as `valueWithheld: true` and proxy URL
-  credentials stripped, unless the user enables reveal in Settings.
+  `<member>Withheld: true`, the values of credential-bearing headers on saved
+  requests and examples as `valueWithheld: true`, cookie values as
+  `valueWithheld: true` and proxy URL credentials stripped; write tools answer
+  with the same projection of the row they changed; run output (reports,
+  samples, run rows, inbox captures, the run resources and prompts) reads
+  `<redacted>` in place of a secret variable's value and a credential header's
+  value; and `secret: false` over a stored secret is refused. Reveal in Settings
+  lifts all of it.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.

@@ -23,9 +23,9 @@ const app = run("app", { origin: { kind: "app", client: null } });
 const other = run("other", { origin: { kind: "other", client: null } });
 const legacy = run("legacy");
 const cursor = run("cursor", { origin: { kind: "mcp", client: "cursor-vscode" }, startTime: 5 });
-const claude = run("claude", { origin: { kind: "mcp", client: "claude-code" }, startTime: 4 });
+const claude = run("claude", { origin: { kind: "mcp", client: "windsurf-client" }, startTime: 4 });
 const claudeAgain = run("claude2", {
-	origin: { kind: "mcp", client: "Claude Code" },
+	origin: { kind: "mcp", client: "Windsurf" },
 	startTime: 3,
 });
 const unnamed = run("unnamed", { origin: { kind: "mcp", client: null }, startTime: 2 });
@@ -91,7 +91,7 @@ describe("filterRuns by origin", () => {
 		const claudeOnly = filterRuns(all, {
 			...base,
 			filterOrigin: "mcp",
-			filterClient: "Claude Code",
+			filterClient: "Windsurf",
 		});
 		expect(ids(claudeOnly)).toEqual(["claude", "claude2"]);
 
@@ -106,7 +106,7 @@ describe("filterRuns by origin", () => {
 
 describe("mcpClientNames", () => {
 	it("lists one sorted display name per client, from agent runs only", () => {
-		expect(mcpClientNames(all, null)).toEqual(["Claude Code", "Cursor", "MCP client"]);
+		expect(mcpClientNames(all, null)).toEqual(["Cursor", "MCP client", "Windsurf"]);
 	});
 
 	it("keeps a selected client listed after its runs left the loaded pages", () => {

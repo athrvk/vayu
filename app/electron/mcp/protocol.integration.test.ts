@@ -47,6 +47,8 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		listCollections: async () => [{ id: "col_1", name: "API" }],
 		listEnvironments: async () => [],
+		listAllRequests: async () => [],
+		getGlobals: async () => ({ variables: {} }),
 		// The engine's completions shape, Monaco fields included - the resource is
 		// expected to hand the agent the names and drop the editor scaffolding.
 		getScriptCompletions: async () => ({
@@ -487,12 +489,17 @@ describe("resources", () => {
 	/*
 	 * The resources are a second read path to the same rows, so they withhold
 	 * what the tools withhold (#1805) - otherwise `vayu://environments` is the
-	 * bypass around `list_environments`.
+	 * bypass around `list_environments`. A stored row says so with a
+	 * `...Withheld` marker; what a run recorded is masked in place (#1809).
 	 */
+	const RUN_SCOPE = {
+		getGlobals: async () => ({ variables: { t: { value: "run-secret-7", secret: true } } }),
+	};
 	it.each([
 		{
 			uri: "vayu://environments",
 			secret: "sk-live-123",
+			marker: /Withheld/,
 			overrides: {
 				listEnvironments: async () => [
 					{ id: "e", variables: { k: { value: "sk-live-123", secret: true } } },
@@ -502,6 +509,7 @@ describe("resources", () => {
 		{
 			uri: "vayu://collections",
 			secret: "hunter2",
+			marker: /Withheld/,
 			overrides: {
 				listCollections: async () => [
 					{ id: "c", auth: { mode: "basic", username: "me", password: "hunter2" } },
@@ -511,13 +519,51 @@ describe("resources", () => {
 		{
 			uri: "vayu://config",
 			secret: "alice:pw",
+			marker: /Withheld/,
 			overrides: {
 				getConfig: async () => ({
 					entries: [{ key: "proxyUrl", value: "http://alice:pw@proxy.corp:8080" }],
 				}),
 			},
 		},
-	])("$uri withholds a secret unless revealed", async ({ uri, secret, overrides }) => {
+		{
+			uri: "vayu://runs",
+			secret: "run-secret-7",
+			marker: /<redacted>/,
+			overrides: {
+				...RUN_SCOPE,
+				listRuns: async () => ({
+					data: [{ id: "run_1", summary: { url: "https://x.test/?k=run-secret-7" } }],
+					pagination: { total: 1, limit: 100, offset: 0, hasMore: false, returned: 1 },
+				}),
+			},
+		},
+		{
+			uri: "vayu://run/run_1/report",
+			secret: "run-secret-7",
+			marker: /<redacted>/,
+			overrides: {
+				...RUN_SCOPE,
+				getRunReport: async () => ({
+					...REPORT,
+					results: [
+						{
+							id: 1,
+							trace: {
+								request: {
+									url: "https://x.test/?k=run-secret-7",
+									headers: { Authorization: "Bearer run-secret-7" },
+									rawRequest:
+										"GET /?k=run-secret-7 HTTP/1.1\r\nCookie: sid=run-secret-7",
+								},
+								response: { headers: { "Set-Cookie": "sid=run-secret-7" } },
+							},
+						},
+					],
+				}),
+			},
+		},
+	])("$uri withholds a secret unless revealed", async ({ uri, secret, marker, overrides }) => {
 		const text = async (safety?: Partial<McpSafetyConfig>) => {
 			const { client, server } = await connectClient({
 				safety,
@@ -528,10 +574,27 @@ describe("resources", () => {
 			return String((res.contents[0] as { text?: string }).text);
 		};
 		const withheld = await text();
-		expect(withheld).toMatch(/Withheld/);
+		expect(withheld).toMatch(marker);
 		expect(withheld).not.toContain(secret);
 		expect(await text({ revealSecretsToAgents: true })).toContain(secret);
 	});
+
+	it.each(["vayu://runs", "vayu://run/run_1/report"])(
+		"%s fails the read when a secret lookup fails, rather than answer it partly masked",
+		async (uri) => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					getGlobals: async () => {
+						throw new Error("engine hiccup");
+					},
+				}),
+			});
+			await expect(client.readResource({ uri })).rejects.toThrow(
+				/the globals lookup .*failed \(engine hiccup\)/
+			);
+			await server.close();
+		}
+	);
 
 	it("exposes the run-report template and enumerates concrete runs", async () => {
 		const { client, server } = await connectClient();

@@ -26,11 +26,13 @@
 
 import { DATA_CONTRACT_SENTENCE, presentCollections } from "./collection-shape.js";
 import {
+	runOutputShape,
 	secretsShape,
 	withholdConfigCredentials,
 	withholdRowListSecrets,
 	WITHHELD_AUTH_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
+	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 import type { ToolContext } from "./tools.js";
@@ -65,8 +67,9 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 			"The most recent 100 runs (single requests and load tests), newest first. " +
 			"Read `pagination.total` / `pagination.hasMore` in the content for the full count, " +
 			"and use the `list_runs` tool to filter (by request, collection, type, status, text) " +
-			"or page beyond this first block.",
-		read: (ctx, signal) => ctx.client.listRuns({}, signal),
+			"or page beyond this first block. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
+		read: (ctx, signal) => withheldRunOutput(ctx, ctx.client.listRuns({}, signal), signal),
 	},
 	{
 		name: "collections",
@@ -310,15 +313,30 @@ export function projectElementKinds(payload: unknown): ElementKindEntry[] {
 	return kinds;
 }
 
+/**
+ * What a run recorded, through the projection the run tools apply (#1809):
+ * the resources and the prompts are a second read path to the same records.
+ * The engine read and the secret lookups go out together.
+ */
+export async function withheldRunOutput(
+	ctx: ToolContext,
+	answer: Promise<unknown>,
+	signal?: AbortSignal
+): Promise<unknown> {
+	const [value, withhold] = await Promise.all([answer, runOutputShape(ctx, signal)]);
+	return withhold(value);
+}
+
 /** Templated per-run report resource. */
 export const RUN_REPORT_RESOURCE = {
 	name: "run-report",
 	uriTemplate: "vayu://run/{runId}/report",
 	title: "Run report",
 	description:
-		"Full report for a run: latency percentiles, throughput, error rate, and status-code mix. Attach as context for analysis.",
+		"Full report for a run: latency percentiles, throughput, error rate, and status-code mix. Attach as context for analysis. " +
+		WITHHELD_RUN_OUTPUT_SENTENCE,
 	read: (ctx: ToolContext, runId: string, signal?: AbortSignal) =>
-		ctx.client.getRunReport(runId, signal),
+		withheldRunOutput(ctx, ctx.client.getRunReport(runId, signal), signal),
 	listRuns: (ctx: ToolContext, signal?: AbortSignal) => ctx.client.listRuns({}, signal),
 };
 

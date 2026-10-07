@@ -411,7 +411,9 @@ describe("McpSettingsPanel secret and network gates", () => {
 		expandCardDescription("Reveal secrets to agents");
 
 		expect(screen.getByText(/requests an agent sends still use them/i)).toBeInTheDocument();
-		expect(screen.getByText(/can still unmark a secret and then read it/i)).toBeInTheDocument();
+		expect(screen.getByText(/never receive secret values/i)).toBeInTheDocument();
+		expect(screen.getByText(/run output or write results/i)).toBeInTheDocument();
+		expect(screen.queryByText(/still unmark a secret/i)).not.toBeInTheDocument();
 	});
 });
 
