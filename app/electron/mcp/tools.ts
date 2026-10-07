@@ -73,11 +73,11 @@ import {
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
-	WITHHELD_HEADER_DIFF_SENTENCE,
 	WITHHELD_HEADER_SENTENCE,
 	WITHHELD_MOCK_ACTIVITY_SENTENCE,
 	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
+	WITHHELD_SPEC_DIFF_SENTENCE,
 	WITHHELD_URL_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
@@ -5580,7 +5580,7 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half. " +
-			WITHHELD_HEADER_DIFF_SENTENCE,
+			WITHHELD_SPEC_DIFF_SENTENCE,
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
 			readOnlyHint: true,

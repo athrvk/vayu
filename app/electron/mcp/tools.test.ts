@@ -11153,6 +11153,79 @@ describe("secret withholding", () => {
 		);
 	});
 
+	test("diff_spec withholds a stored URL and params line that could hold a credential unless revealed", async () => {
+		const diff = {
+			...SPEC_DIFF,
+			changed: [
+				{
+					requestId: "req_1",
+					name: "Credentialed",
+					fields: [
+						{
+							field: "url",
+							current: "https://u:p4ssw0rd@h/x?api_key=S3CRET",
+							next: "{{baseUrl}}/x",
+						},
+						{ field: "params", current: "2: page=2, token=T0KEN", next: "1: page=2" },
+					],
+				},
+				{
+					requestId: "req_2",
+					name: "Cut in the userinfo",
+					fields: [
+						{
+							field: "url",
+							current: "https://admin:hunt\u2026",
+							next: "{{baseUrl}}/y",
+						},
+					],
+				},
+				{
+					requestId: "req_3",
+					name: "Benign",
+					fields: [
+						{
+							field: "url",
+							current: "{{baseUrl}}/z?page=2",
+							next: "{{baseUrl}}/z?page=3",
+						},
+						{ field: "params", current: "1: page=2", next: "1: page=3" },
+					],
+				},
+			],
+		};
+		const client = fakeClient({ diffSpec: vi.fn().mockResolvedValue(diff) });
+		const args = { collectionId: "c1", content: "{}" };
+		const withheld = await read("diff_spec", client, undefined, args);
+		for (const leak of ["p4ssw0rd", "S3CRET", "T0KEN", "hunt"]) {
+			expect(withheld.text).not.toContain(leak);
+		}
+		const [credentialed, cut, benign] = withheld.body.changed;
+		expect(credentialed.fields).toEqual([
+			{ field: "url", next: "{{baseUrl}}/x", userTouched: false, currentWithheld: true },
+			{ field: "params", next: "1: page=2", userTouched: false, currentWithheld: true },
+		]);
+		expect(cut.fields).toEqual([
+			{ field: "url", next: "{{baseUrl}}/y", userTouched: false, currentWithheld: true },
+		]);
+		expect(benign.fields).toEqual([
+			{
+				field: "url",
+				current: "{{baseUrl}}/z?page=2",
+				next: "{{baseUrl}}/z?page=3",
+				userTouched: false,
+			},
+			{ field: "params", current: "1: page=2", next: "1: page=3", userTouched: false },
+		]);
+
+		const revealed = await read("diff_spec", client, REVEAL, args);
+		expect(revealed.body.changed[0].fields[0].current).toBe(
+			"https://u:p4ssw0rd@h/x?api_key=S3CRET"
+		);
+		expect(revealed.body.changed[0].fields[1].current).toBe("2: page=2, token=T0KEN");
+		expect(revealed.body.changed[1].fields[0].current).toBe("https://admin:hunt\u2026");
+	});
+
 	test.each([
 		"run_request",
 		"get_run_report",

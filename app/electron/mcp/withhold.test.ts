@@ -27,6 +27,7 @@ import {
 	withholdRequestUrl,
 	withholdRowSecrets,
 	withholdRunOutput,
+	withholdSpecDiffChanges,
 	type RunOutputRule,
 } from "./withhold.js";
 
@@ -262,6 +263,84 @@ describe("withholdRequestUrl", () => {
 			expect(withholdRequestUrl(url, undefined)).toBe(url);
 		}
 	);
+});
+
+describe("withholdSpecDiffChanges", () => {
+	/** One changed entry holding one field change, the way `diff_spec` hands them over. */
+	const change = (field: string, current: unknown) => [
+		{ requestId: "r", fields: [{ field, current, next: "the document's value" }] },
+	];
+	const withheld = (field: string) => [
+		{
+			requestId: "r",
+			fields: [{ field, next: "the document's value", currentWithheld: true }],
+		},
+	];
+
+	test.each([
+		["a url password", "https://u:p@h/x"],
+		["a url credential query value", "https://h/x?api_key=S&page=2"],
+		["a url credential fragment value", "https://h/cb#access_token=S"],
+		["a url cut inside its userinfo", "https://user:pas\u2026"],
+		["a url cut inside its host", "https://api.exam\u2026"],
+		["a scheme-less url cut inside its authority", "user:pas\u2026"],
+	])("withholds %s from a url change", (_name, current) => {
+		expect(withholdSpecDiffChanges(change("url", current))).toEqual(withheld("url"));
+	});
+
+	test.each([
+		["a template base", "{{baseUrl}}/me"],
+		["an ordinary query", "https://h/x?page=2&code=US"],
+		["a user with no password", "https://u@h/x"],
+		["a {{variable}} password", "https://u:{{pw}}@h/x"],
+		["a url cut past its authority", "https://api.example.com/v1/pets/by-owner/long\u2026"],
+		["a url cut inside its query", "https://api.example.com?page=\u2026"],
+		["an empty url", ""],
+	])("keeps %s in a url change", (_name, current) => {
+		expect(withholdSpecDiffChanges(change("url", current))).toEqual(change("url", current));
+	});
+
+	test.each([
+		["a credential row", "2: page=2, api_key=S"],
+		["a credential row in any case", "1: Access_Token=S"],
+		["a disabled credential row", "1: sig=S [off]"],
+		["a credential row cut inside its value", "2: page=2, api_key=SEC\u2026"],
+	])("withholds %s from a params change", (_name, current) => {
+		expect(withholdSpecDiffChanges(change("params", current))).toEqual(withheld("params"));
+	});
+
+	test.each([
+		["ordinary rows", "2: page=2, code=US"],
+		["a {{variable}} value", "1: api_key={{key}}"],
+		["a credential name with no value", "1: api_key"],
+		["a credential name cut before its value", "2: page=2, api_key\u2026"],
+		["no rows", "none"],
+	])("keeps %s in a params change", (_name, current) => {
+		expect(withholdSpecDiffChanges(change("params", current))).toEqual(
+			change("params", current)
+		);
+	});
+
+	test("still withholds a credential header, and leaves fields it does not judge", () => {
+		expect(withholdSpecDiffChanges(change("headers", "1: Authorization=Bearer t"))).toEqual(
+			withheld("headers")
+		);
+		expect(withholdSpecDiffChanges(change("body", "json: api_key=S"))).toEqual(
+			change("body", "json: api_key=S")
+		);
+		expect(withholdSpecDiffChanges(change("constructor", "https://u:p@h"))).toEqual(
+			change("constructor", "https://u:p@h")
+		);
+	});
+
+	test.each([
+		["a current that is not text", change("url", 7)],
+		["a field with no name", [{ fields: [{ current: "https://u:p@h" }] }]],
+		["an entry with no fields", [{ requestId: "r" }]],
+		["a non-list", "none"],
+	])("passes %s through", (_name, changed) => {
+		expect(withholdSpecDiffChanges(changed)).toEqual(changed);
+	});
 });
 
 describe("withholdReorderRows", () => {

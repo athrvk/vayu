@@ -77,8 +77,8 @@ export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${
 /** What `start_load_run` says about its confirmation preview's planned run. */
 export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
 
-/** What `diff_spec` says about a stored request's credential headers. */
-export const WITHHELD_HEADER_DIFF_SENTENCE = `A \`headers\` change whose current value names a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
+/** What `diff_spec` says about the current side of a stored request's headers, url and params. */
+export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
 
 /** What `run_collection_smoke` says about the row of a request that could not be composed. */
 export const WITHHELD_COMPOSE_FAILURE_URL_SENTENCE = `A row for a request that could not be composed carries its stored \`url\` (nothing resolved it), with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
@@ -707,25 +707,59 @@ function displaysCredentialHeader(display: unknown): boolean {
 	);
 }
 
-function withholdChangedFields(entry: unknown): unknown {
-	if (!isRecord(entry) || !Array.isArray(entry.fields)) return entry;
-	return {
-		...entry,
-		fields: entry.fields.map((field) => {
-			if (!isRecord(field) || field.field !== "headers") return field;
-			if (!displaysCredentialHeader(field.current)) return field;
-			const { current: _current, ...rest } = field;
-			return { ...rest, currentWithheld: true };
-		}),
-	};
+/**
+ * Whether a `params` display names a credential parameter with a value. The
+ * API-key name an auth block places in the query is not known here, so only
+ * {@link SENSITIVE_PARAM_NAMES} is tested.
+ */
+function displaysCredentialParam(display: unknown): boolean {
+	if (typeof display !== "string") return false;
+	return [...display.matchAll(DISPLAY_ROW)].some(
+		([, name, value]) => isSecretParamName(name, undefined) && holdsCredential(value)
+	);
 }
 
 /**
- * `diff_spec`'s changed entries with each `headers` change whose current side -
- * the stored request's rows, as a display line - names a credential header
- * withheld whole. The line is the engine's lossy rendering (rows joined with
- * `, `, cut at 120 characters), so a value cannot be masked inside it without
- * a `Digest` header's later parameters reading as rows of their own.
+ * Whether a `url` display could carry a credential: one {@link withholdRequestUrl}
+ * would change, or one the engine's 120-unit cut ended before the authority did
+ * (`https://u:pas...`). Cut inside the userinfo there is no `@` left for
+ * `withholdRequestUrl` to find, and what remains is a prefix of the password.
+ */
+function displaysCredentialUrl(display: unknown): boolean {
+	if (typeof display !== "string") return false;
+	if (withholdRequestUrl(display, undefined) !== display) return true;
+	if (!display.endsWith("\u2026")) return false;
+	const schemeEnd = display.indexOf("://");
+	const afterScheme = schemeEnd === -1 ? display : display.slice(schemeEnd + 3);
+	return !/[/?#]/.test(afterScheme);
+}
+
+/** The `diff_spec` fields whose current side can show a stored credential, and the test for each. */
+const CREDENTIAL_DISPLAY_TESTS: ReadonlyMap<string, (display: unknown) => boolean> = new Map([
+	["headers", displaysCredentialHeader],
+	["params", displaysCredentialParam],
+	["url", displaysCredentialUrl],
+]);
+
+function withholdChangedField(field: unknown): unknown {
+	if (!isRecord(field) || typeof field.field !== "string") return field;
+	if (!CREDENTIAL_DISPLAY_TESTS.get(field.field)?.(field.current)) return field;
+	const { current: _current, ...rest } = field;
+	return { ...rest, currentWithheld: true };
+}
+
+function withholdChangedFields(entry: unknown): unknown {
+	if (!isRecord(entry) || !Array.isArray(entry.fields)) return entry;
+	return { ...entry, fields: entry.fields.map(withholdChangedField) };
+}
+
+/**
+ * `diff_spec`'s changed entries with each `headers`, `url` or `params` change
+ * whose current side - the stored request's value, as a display line - could
+ * carry a credential withheld whole. The line is the engine's lossy rendering
+ * (rows joined with `, `, cut at 120 characters), so a value cannot be masked
+ * inside it without a `Digest` header's later parameters reading as rows of
+ * their own or a cut password passing for a host.
  */
 export function withholdSpecDiffChanges(changed: unknown): unknown {
 	return Array.isArray(changed) ? changed.map(withholdChangedFields) : changed;
