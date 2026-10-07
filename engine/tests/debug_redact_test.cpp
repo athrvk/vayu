@@ -11,9 +11,13 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/debug_redact.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/log_redact.hpp"
 
+using vayu::core::vayu_ext::blank_credential_param_rows;
+using vayu::core::vayu_ext::redact_url_credentials;
 using vayu::http::detail::collect_debug_frame;
 using vayu::http::detail::redact_header_line;
 using vayu::utils::is_secret_field_name;
@@ -56,6 +60,60 @@ TEST (LogRedactionConformance, SecretFieldNamesAndStripUrlSecretsFollowTheShared
         EXPECT_EQ (strip_url_secrets (c.at ("in").get<std::string> ()),
         c.at ("out").get<std::string> ())
         << c.at ("name");
+    }
+}
+
+namespace {
+
+/// Whether a Params row and a URL query parameter, both named @p name and
+/// carrying a real value, are blanked: each answer, so a disagreement between
+/// the two paths is reported on its own.
+struct ParamBlanking {
+    bool row = false;
+    bool url = false;
+};
+
+ParamBlanking param_blanking (const std::string& name) {
+    vayu::core::vayu_ext::Json rows = vayu::core::vayu_ext::Json::array (
+    { { { "key", name }, { "value", "S3cret" }, { "enabled", true } } });
+    int in_rows = 0;
+    blank_credential_param_rows (rows, {}, in_rows);
+    int in_url = 0;
+    const std::string url =
+    redact_url_credentials ("https://h/p?" + name + "=S3cret&page=2", {}, in_url);
+    return { rows.at (0).at ("value").get<std::string> ().empty () && in_rows == 1,
+        url == "https://h/p?" + name + "=&page=2" && in_url == 1 };
+}
+
+} // namespace
+
+// `sensitiveParamNames` is what the MCP server's `SENSITIVE_PARAM_NAMES`
+// (app/electron/mcp/withhold.ts, #1837) must equal; the app suite pins the
+// equality, this pins that each name is one the engine blanks.
+TEST (LogRedactionConformance, SensitiveParamNamesAreTheNamesTheEngineBlanks) {
+    const auto fixture = load_redaction_fixture ();
+    ASSERT_FALSE (fixture.at ("sensitiveParamNames").empty ());
+    for (const auto& entry : fixture.at ("sensitiveParamNames")) {
+        const auto name = entry.get<std::string> ();
+        for (const std::string& spelled : { name, vayu::utils::ascii_upper (name) }) {
+            const auto blanking = param_blanking (spelled);
+            EXPECT_TRUE (blanking.row) << spelled << " as a Params row";
+            EXPECT_TRUE (blanking.url) << spelled << " as a query parameter";
+        }
+    }
+}
+
+TEST (LogRedactionConformance, ParamNamesOutsideTheSetAreData) {
+    // `code` is in the shared field set and `key` is a cache or sort key: the
+    // two a reader most expects to find on the list.
+    for (const std::string name : { "code", "key", "page", "sort" }) {
+        const auto blanking = param_blanking (name);
+        EXPECT_FALSE (blanking.row) << name << " as a Params row";
+        EXPECT_FALSE (blanking.url) << name << " as a query parameter";
+    }
+    const auto fixture = load_redaction_fixture ();
+    for (const auto& entry : fixture.at ("sensitiveParamNames")) {
+        EXPECT_FALSE (param_blanking (entry.get<std::string> () + "_x").row) << entry;
     }
 }
 

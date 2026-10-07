@@ -8,8 +8,9 @@
 /**
  * @file withhold.test.ts
  * @brief The shapes `withholdDiagnoseCredentials` leaves alone (#1805): an
- *        answer with nothing to strip is returned as it came; the header rows
- *        `withholdRowSecrets` masks and the lists `withholdReorderRows` walks;
+ *        answer with nothing to strip is returned as it came; the header rows,
+ *        URL and Params rows `withholdRowSecrets` masks (#1837) and the lists
+ *        `withholdReorderRows` walks;
  *        and the run-output mask: its forms, its header rule and how it reads
  *        the workspace (#1809).
  */
@@ -23,6 +24,7 @@ import {
 	secretForms,
 	withholdDiagnoseCredentials,
 	withholdReorderRows,
+	withholdRequestUrl,
 	withholdRowSecrets,
 	withholdRunOutput,
 	type RunOutputRule,
@@ -111,6 +113,155 @@ describe("withholdRowSecrets headers", () => {
 		];
 		expect(withholdRowSecrets(row(headers))).toEqual(row(headers));
 	});
+});
+
+describe("withholdRowSecrets url and params", () => {
+	const url = "https://u:p@h/x?api_key=S&page=2";
+	const params = [
+		{ key: "api_key", value: "S", enabled: true },
+		{ key: "page", value: "2", enabled: true },
+	];
+
+	test("a saved request keeps its user, loses the password and the credential values", () => {
+		expect(withholdRowSecrets({ id: "r", url, params })).toEqual({
+			id: "r",
+			url: "https://u@h/x?api_key=&page=2",
+			params: [
+				{ key: "api_key", enabled: true, valueWithheld: true },
+				{ key: "page", value: "2", enabled: true },
+			],
+		});
+	});
+
+	test("a row without a url or params gains neither", () => {
+		expect(withholdRowSecrets({ id: "r", name: "n" })).toEqual({ id: "r", name: "n" });
+	});
+
+	test("a {{variable}} reference, an empty value and a disabled row are handled as headers are", () => {
+		const rows = [
+			{ key: "api_key", value: "{{API_KEY}}", enabled: true },
+			{ key: "token", value: "", enabled: true },
+			{ key: "password", value: "hunter2", enabled: false },
+		];
+		expect(withholdRowSecrets({ params: rows })).toEqual({
+			params: [rows[0], rows[1], { key: "password", enabled: false, valueWithheld: true }],
+		});
+	});
+
+	test("the name is matched whole and by ASCII fold, with no trimming or decoding", () => {
+		const rows = [
+			{ key: "API_KEY", value: "S", enabled: true },
+			{ key: " api_key", value: "S", enabled: true },
+			{ key: "api%5Fkey", value: "S", enabled: true },
+			{ key: "api_keys", value: "S", enabled: true },
+			// U+212A lowercases to `k` under `toLowerCase`, which the engine's fold does not.
+			{ key: "\u212Aey", value: "S", enabled: true },
+			{ key: "ap\u0130_key", value: "S", enabled: true },
+		];
+		expect(withholdRowSecrets({ params: rows })).toEqual({
+			params: [{ key: "API_KEY", enabled: true, valueWithheld: true }, ...rows.slice(1)],
+		});
+	});
+
+	test("`code` and `key` are data, not credentials", () => {
+		const rows = [
+			{ key: "code", value: "US", enabled: true },
+			{ key: "key", value: "k1", enabled: true },
+		];
+		expect(withholdRowSecrets({ url: "/p?code=US&key=k1", params: rows })).toEqual({
+			url: "/p?code=US&key=k1",
+			params: rows,
+		});
+	});
+
+	test("an API-key auth in the query names its own parameter, matched as written", () => {
+		const auth = { mode: "apikey", key: "Tenant", in: "query" };
+		const rows = [
+			{ key: "tenant", value: "S", enabled: true },
+			{ key: "tenant ", value: "S", enabled: true },
+		];
+		expect(
+			withholdRowSecrets({ auth, url: "/p?tenant=S&Tenant =S", params: rows })
+		).toMatchObject({
+			url: "/p?tenant=&Tenant =S",
+			params: [{ key: "tenant", enabled: true, valueWithheld: true }, rows[1]],
+		});
+	});
+
+	test.each([
+		["a header placement", { mode: "apikey", key: "Tenant", in: "header" }],
+		["no placement", { mode: "apikey", key: "Tenant" }],
+		["another mode", { mode: "bearer", key: "Tenant", in: "query" }],
+		["an empty key", { mode: "apikey", key: "", in: "query" }],
+		["a non-string key", { mode: "apikey", key: 7, in: "query" }],
+	])("an API-key auth with %s names no query parameter", (_name, auth) => {
+		const row = { url: "/p?tenant=S", params: [{ key: "tenant", value: "S" }] };
+		expect(withholdRowSecrets({ ...row, auth })).toMatchObject(row);
+	});
+
+	test.each([
+		["not a list", "none"],
+		["null", null],
+		[
+			"a malformed row, or one with no key or a non-string value",
+			["api_key=S", { value: "S" }, { key: "api_key", value: 5 }, { key: 7, value: "S" }],
+		],
+	])("params that are %s pass through", (_name, params) => {
+		expect(withholdRowSecrets({ params })).toEqual({ params });
+	});
+});
+
+describe("withholdRequestUrl", () => {
+	test.each([
+		["a password", "https://u:p@h/x", "https://u@h/x"],
+		["no scheme", "u:p@h:80/x", "u@h:80/x"],
+		["an at sign inside the password", "http://u:p@ss@h/x", "http://u@h/x"],
+		["a colon inside the password", "http://u:p:q@h", "http://u@h"],
+		["a user with no password", "https://u@h/x", "https://u@h/x"],
+		["an empty password", "https://u:@h/x", "https://u:@h/x"],
+		["a {{variable}} password", "https://u:{{pw}}@h/x", "https://u:{{pw}}@h/x"],
+		["a template host", "{{baseUrl}}/x?a=1", "{{baseUrl}}/x?a=1"],
+		["a template user", "https://{{user}}:p@h/x", "https://{{user}}@h/x"],
+		["an at sign past the authority", "https://h/p:q@r", "https://h/p:q@r"],
+		["whitespace in a scheme-less authority", "a b:c@d", "a b:c@d"],
+		["a slash before the ://", "/p/x://u:p@h", "/p/x://u:p@h"],
+		["an at sign only in the query", "https://h/p?e=a@b.c", "https://h/p?e=a@b.c"],
+		["a query credential", "https://h/p?api_key=S&page=2", "https://h/p?api_key=&page=2"],
+		["a query credential name in any case", "/p?Access_Token=S", "/p?Access_Token="],
+		["a bare name and an empty value", "/p?token&api_key=&x", "/p?token&api_key=&x"],
+		["a {{variable}} value", "/p?api_key={{k}}&token=S", "/p?api_key={{k}}&token="],
+		[
+			"a fragment credential",
+			"https://h/cb#access_token=S&state=1",
+			"https://h/cb#access_token=&state=1",
+		],
+		[
+			"a query and a fragment",
+			"https://h/cb?a=1&sig=S#id_token=T",
+			"https://h/cb?a=1&sig=#id_token=",
+		],
+		["a ? inside the fragment", "https://h/cb#a?token=S", "https://h/cb#a?token=S"],
+		["a value holding =", "/p?token=a=b", "/p?token="],
+		["nothing to hide", "https://h/p?page=2&code=US", "https://h/p?page=2&code=US"],
+		["an empty string", "", ""],
+	])("%s", (_name, input, expected) => {
+		expect(withholdRequestUrl(input, undefined)).toBe(expected);
+	});
+
+	test("an API-key auth in the query adds its key to the names", () => {
+		const auth = { mode: "apikey", key: "tenant", in: "query" };
+		expect(withholdRequestUrl("/p?Tenant=S&page=2", auth)).toBe("/p?Tenant=&page=2");
+		expect(withholdRequestUrl("/p?Tenant=S&page=2", { ...auth, in: "header" })).toBe(
+			"/p?Tenant=S&page=2"
+		);
+	});
+
+	test.each([[null], [undefined], [7], [{ href: "u:p@h" }], [["u:p@h"]]])(
+		"%j is not a string and passes through",
+		(url) => {
+			expect(withholdRequestUrl(url, undefined)).toBe(url);
+		}
+	);
 });
 
 describe("withholdReorderRows", () => {

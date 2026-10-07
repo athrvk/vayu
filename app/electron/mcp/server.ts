@@ -105,7 +105,9 @@ const INSTRUCTIONS_TAIL =
 const REVEAL_GATE_SENTENCE =
 	"Secret values are withheld in this session: a secret variable or a cookie reads as " +
 	"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
-	"URL's credentials as `credentialsWithheld: true`. A request that references a " +
+	"URL's credentials as `credentialsWithheld: true`. A saved request's `url` loses " +
+	"its password and its credential query values, and a Params row naming one reads " +
+	"`valueWithheld: true`. A request that references a " +
 	"secret still sends with it, because the engine resolves it, and what the run " +
 	"recorded reads `<redacted>` wherever that value or a credential header's value " +
 	"appears. A task that needs the " +
