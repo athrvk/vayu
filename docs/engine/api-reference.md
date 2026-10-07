@@ -5912,7 +5912,7 @@ the name. In the trace they sit on `trace_data.request`; in this answer they sit
 at the top level, beside `rawRequest`, written by the same function
 (`record_auth_provenance`) so the two cannot disagree. Each key is **absent**
 when auth wrote none of that kind, never an empty string or array - unlike the
-always-present `serialize(Response)` fields above - and absent on rows written
+response fields above, which are always present - and absent on rows written
 before the field; the values beside them stay raw. A streaming send answers
 `202` before any of this exists, so only its stored trace carries them. A
 pre-request script that retargets the URL can leave `authQueryParam` naming a

@@ -156,9 +156,8 @@ const vayu::Response& response) {
     // unchanged); the MCP server masks it on the way to an agent instead
     // (#1809), and `authQueryParam` / `authHeaders` below are what it masks by:
     // the URL cannot say which query parameter auth wrote (#1835). Additive
-    // metadata, omitted when auth wrote none; the stored values stay raw. The
-    // live `/execute` answer carries the same two keys through the same writer
-    // (#1845), so `run_request` masks what it returns by the same rule.
+    // metadata, omitted when auth wrote none; the stored values stay raw (#1845
+    // puts the same keys on the live answer).
     // The redaction that does apply to run rows is `sanitize_config_snapshot`,
     // which guards `runs.config_snapshot` - the request as *composed, with its
     // credentials withheld* (#1803). A trace is the record of what was *sent*,
