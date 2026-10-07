@@ -78,7 +78,7 @@ export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${
 export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
 
 /** What `diff_spec` says about the current side of a stored request's headers, url and params. */
-export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`, or the name the request's API-key auth sends its key under) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list, or the name the request's API-key auth sends its key under) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`, or the name the request's API-key auth sends its key under in the query) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
 
 /** What `run_collection_smoke` says about the `url` every row echoes. */
 export const WITHHELD_SMOKE_ROW_URL_SENTENCE = `Every row's \`url\` - the composed one, or for a request that could not be composed the stored one - has the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
@@ -704,10 +704,16 @@ export function withholdDiagnoseCredentials(answer: unknown): unknown {
  */
 const DISPLAY_ROW = /(?:^\d+: |, )([^=,]+)=([^,]*)/g;
 
-function displaysCredentialHeader(display: unknown): boolean {
+/**
+ * Whether a `headers` display holds a credential row: a name on the shared
+ * list or @p apiKeyHeader, the one the owning request's API-key auth sends its
+ * key under (#1842), with a value.
+ */
+function displaysCredentialHeader(display: unknown, apiKeyHeader: string | undefined): boolean {
 	if (typeof display !== "string") return false;
+	const apiKeyHeaders = apiKeyHeader ? [apiKeyHeader] : [];
 	return [...display.matchAll(DISPLAY_ROW)].some(([, name, value]) =>
-		isCredentialHeader(name, value, [])
+		isCredentialHeader(name, value, apiKeyHeaders)
 	);
 }
 
@@ -738,18 +744,19 @@ function displaysCredentialUrl(display: unknown, apiKeyParam: string | undefined
 	return !/[/?#]/.test(afterScheme);
 }
 
-/** The `diff_spec` fields whose current side can show a stored credential, and the test for each. */
+/**
+ * The `diff_spec` fields whose current side can show a stored credential, and
+ * the test for each. Every test needs the owning request's API-key name, which
+ * the engine's display line does not carry.
+ */
 const CREDENTIAL_DISPLAY_TESTS: ReadonlyMap<
 	string,
-	(display: unknown, apiKeyParam: string | undefined) => boolean
+	(display: unknown, auth: EntryAuth) => boolean
 > = new Map([
-	["headers", displaysCredentialHeader],
-	["params", displaysCredentialParam],
-	["url", displaysCredentialUrl],
+	["headers", (display, auth) => displaysCredentialHeader(display, auth.apiKeyHeader)],
+	["params", (display, auth) => displaysCredentialParam(display, auth.apiKeyParam)],
+	["url", (display, auth) => displaysCredentialUrl(display, auth.apiKeyParam)],
 ]);
-
-/** The fields whose test needs the owning request's API-key query name. */
-const QUERY_DISPLAY_FIELDS: ReadonlySet<string> = new Set(["params", "url"]);
 
 /**
  * The stored `auth` of each request a `diff_spec` entry names, by request id.
@@ -759,54 +766,61 @@ export type StoredAuthByRequest = ReadonlyMap<string, unknown>;
 
 /**
  * The ids of the requests whose stored `auth` {@link withholdSpecDiffChanges}
- * needs: those with a `url` or `params` change, whose API-key query name the
- * engine's display line does not carry.
+ * needs: those with a `headers`, `url` or `params` change, whose API-key name
+ * the engine's display line does not carry.
  */
 export function specDiffRequestsToRead(changed: unknown): string[] {
 	if (!Array.isArray(changed)) return [];
 	const ids = changed.flatMap((entry) =>
-		isRecord(entry) && typeof entry.requestId === "string" && hasQueryDisplayField(entry)
+		isRecord(entry) && typeof entry.requestId === "string" && hasJudgedField(entry)
 			? [entry.requestId]
 			: []
 	);
 	return [...new Set(ids)];
 }
 
-function hasQueryDisplayField(entry: Record<string, unknown>): boolean {
+function hasJudgedField(entry: Record<string, unknown>): boolean {
 	return (
 		Array.isArray(entry.fields) &&
 		entry.fields.some(
 			(field) =>
 				isRecord(field) &&
 				typeof field.field === "string" &&
-				QUERY_DISPLAY_FIELDS.has(field.field)
+				CREDENTIAL_DISPLAY_TESTS.has(field.field)
 		)
 	);
 }
 
-/** What a changed entry's fields are judged against: its request's API-key query name, or that it is unknown. */
+/** What a changed entry's fields are judged against: its request's API-key names, or that they are unknown. */
 interface EntryAuth {
 	readable: boolean;
 	apiKeyParam: string | undefined;
+	apiKeyHeader: string | undefined;
 }
 
 function entryAuth(entry: Record<string, unknown>, storedAuth: StoredAuthByRequest): EntryAuth {
 	const id = entry.requestId;
 	if (typeof id !== "string" || !storedAuth.has(id)) {
-		return { readable: false, apiKeyParam: undefined };
+		return { readable: false, apiKeyParam: undefined, apiKeyHeader: undefined };
 	}
-	return { readable: true, apiKeyParam: apiKeyParamName(storedAuth.get(id)) };
+	const stored = storedAuth.get(id);
+	return {
+		readable: true,
+		apiKeyParam: apiKeyParamName(stored),
+		apiKeyHeader: apiKeyHeaderName(stored),
+	};
 }
 
 /**
- * Whether @p field's current side must go. A `url` or `params` display of a
- * request whose auth is unknown is withheld whenever it says anything, since a
- * custom API-key name could be in it.
+ * Whether @p field's current side must go. A `headers`, `url` or `params`
+ * display of a request whose auth is unknown is withheld whenever it says
+ * anything, since a custom API-key name could be in it (#1840, #1842).
  */
 function withholdsCurrent(field: Record<string, unknown>, name: string, auth: EntryAuth): boolean {
-	const unreadable = !auth.readable && QUERY_DISPLAY_FIELDS.has(name);
-	if (unreadable) return typeof field.current === "string" && field.current !== "";
-	return CREDENTIAL_DISPLAY_TESTS.get(name)?.(field.current, auth.apiKeyParam) === true;
+	const credentialTest = CREDENTIAL_DISPLAY_TESTS.get(name);
+	if (!credentialTest) return false;
+	if (!auth.readable) return typeof field.current === "string" && field.current !== "";
+	return credentialTest(field.current, auth);
 }
 
 function withholdChangedField(field: unknown, auth: EntryAuth): unknown {
@@ -831,9 +845,9 @@ function withholdChangedFields(entry: unknown, storedAuth: StoredAuthByRequest):
  * their own or a cut password passing for a host.
  *
  * @p storedAuth is read by the caller ({@link specDiffRequestsToRead} names
- * what to read) so this stays synchronous. A `url` or `params` change of a
- * request it does not hold is withheld, not passed: its API-key query name is
- * unknown, and a credential under it would read as an ordinary row.
+ * what to read) so this stays synchronous. A change of a request it does not
+ * hold is withheld, not passed: its API-key name is unknown, and a credential
+ * under it would read as an ordinary row.
  */
 export function withholdSpecDiffChanges(
 	changed: unknown,

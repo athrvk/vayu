@@ -11558,7 +11558,7 @@ describe("secret withholding", () => {
 			const [url, params, plain] = withheld.body.changed;
 			expect(url.fields[0].currentWithheld).toBe(true);
 			expect(params.fields[0].currentWithheld).toBe(true);
-			expect(params.fields[1].current).toBe("1: Accept=json");
+			expect(params.fields[1].currentWithheld).toBe(true);
 			expect(plain.fields[0].current).toBe("1: tenant=acme");
 		});
 
@@ -11571,6 +11571,73 @@ describe("secret withholding", () => {
 			);
 			expect(withheld.text).not.toContain("ACME-URL-SECRET");
 			expect(withheld.body.changed[0].fields[0].currentWithheld).toBe(true);
+		});
+	});
+
+	describe("diff_spec reads the stored auth for a custom API-key header name", () => {
+		const HEADER_DIFF = {
+			...SPEC_DIFF,
+			changed: [
+				{
+					requestId: "req_key",
+					name: "Key in a header",
+					fields: [
+						{
+							field: "headers",
+							current: "2: Accept=json, X-Tenant=ACME-HEADER-SECRET",
+							next: "1: Accept=json",
+						},
+					],
+				},
+				{
+					requestId: "req_plain",
+					name: "No key",
+					fields: [
+						{
+							field: "headers",
+							current: "2: Accept=json, X-Tenant=acme",
+							next: "1: Accept=json",
+						},
+					],
+				},
+			],
+		};
+		const AUTH_BY_ID: Record<string, unknown> = {
+			req_key: { mode: "apikey", in: "header", key: "X-Tenant", value: "ACME-HEADER-SECRET" },
+			req_plain: { mode: "none" },
+		};
+		const clientWith = (getRequest: unknown) =>
+			fakeClient({ diffSpec: vi.fn().mockResolvedValue(HEADER_DIFF), getRequest });
+		const args = { collectionId: "c1", content: "{}" };
+
+		test("withholds the key's row from a headers line unless revealed", async () => {
+			const getRequest = vi.fn(async (id: string) => ({ id, auth: AUTH_BY_ID[id] }));
+			const withheld = await read("diff_spec", clientWith(getRequest), undefined, args);
+			expect(withheld.text).not.toContain("ACME-HEADER-SECRET");
+			const [key, plain] = withheld.body.changed;
+			expect(key.fields[0]).toMatchObject({ field: "headers", currentWithheld: true });
+			expect(key.fields[0]).not.toHaveProperty("current");
+			// `X-Tenant` is only a credential under a request that names it as its key.
+			expect(plain.fields[0].current).toBe("2: Accept=json, X-Tenant=acme");
+
+			getRequest.mockClear();
+			const revealed = await read("diff_spec", clientWith(getRequest), REVEAL, args);
+			expect(getRequest).not.toHaveBeenCalled();
+			expect(revealed.body.changed[0].fields[0].current).toBe(
+				"2: Accept=json, X-Tenant=ACME-HEADER-SECRET"
+			);
+		});
+
+		test("withholds a headers line it could not read the auth for", async () => {
+			const getRequest = vi.fn(async (id: string) => {
+				if (id === "req_plain") return { id, auth: AUTH_BY_ID[id] };
+				throw new Error("engine unreachable");
+			});
+			const withheld = await read("diff_spec", clientWith(getRequest), undefined, args);
+			expect(withheld.text).not.toContain("ACME-HEADER-SECRET");
+			const [key, plain] = withheld.body.changed;
+			expect(key.fields[0].currentWithheld).toBe(true);
+			expect(plain.fields[0].current).toBe("2: Accept=json, X-Tenant=acme");
 		});
 	});
 
