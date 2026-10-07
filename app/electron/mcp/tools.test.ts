@@ -11096,6 +11096,38 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(report);
 	});
 
+	test("get_run_report masks the query value and headers the trace says auth wrote (#1835)", async () => {
+		const TOKEN = "oauth-token-from-the-store-88";
+		const SESSION = "session-header-value-99";
+		const request = {
+			authQueryParam: "access_token",
+			authHeaders: ["X-Session"],
+			url: `https://api.example.com/v1?page=2&access_token=${TOKEN}`,
+			headers: { "X-Session": SESSION },
+			sentHeaders: { "X-Session": SESSION },
+			rawRequest:
+				`GET /v1?page=2&access_token=${TOKEN} HTTP/1.1\r\nHost: api.example.com\r\n` +
+				`X-Session: ${SESSION}\r\n\r\n`,
+		};
+		const report = { results: [{ id: 1, trace: { request } }] };
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(report) });
+		const withheld = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expect(withheld.text).not.toContain(TOKEN);
+		expect(withheld.text).not.toContain(SESSION);
+		expect(withheld.body.results[0].trace.request).toEqual({
+			authQueryParam: "access_token",
+			authHeaders: ["X-Session"],
+			url: "https://api.example.com/v1?page=2&access_token=<redacted>",
+			headers: { "X-Session": "<redacted>" },
+			sentHeaders: { "X-Session": "<redacted>" },
+			rawRequest:
+				"GET /v1?page=2&access_token=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"X-Session: <redacted>\r\n\r\n",
+		});
+		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(report);
+	});
+
 	/** Three saved requests: one that runs and fails a test, one off the allowlist, one that errors. */
 	const smokeClient = () =>
 		runClient({

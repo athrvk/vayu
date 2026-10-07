@@ -88,6 +88,21 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request) {
     return std::optional<nlohmann::json> (std::in_place, std::move (node));
 }
 
+namespace {
+
+/// Which parts of the request `apply_auth` wrote, each key omitted when auth
+/// wrote none of that kind.
+void record_auth_provenance (nlohmann::json& request_node, const vayu::Request& request) {
+    if (!request.auth_query_param.empty ()) {
+        request_node["authQueryParam"] = request.auth_query_param;
+    }
+    if (!request.secret_header_names.empty ()) {
+        request_node["authHeaders"] = request.secret_header_names;
+    }
+}
+
+} // namespace
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -145,7 +160,9 @@ const vayu::Response& response) {
     // node that already stores the resolved `Authorization` header beside it.
     // The stored trace stays raw by decision (History and every engine read are
     // unchanged); the MCP server masks it on the way to an agent instead
-    // (#1809).
+    // (#1809), and `authQueryParam` / `authHeaders` below are what it masks by:
+    // the URL cannot say which query parameter auth wrote (#1835). Additive
+    // metadata, omitted when auth wrote none; the stored values stay raw.
     // The redaction that does apply to run rows is `sanitize_config_snapshot`,
     // which guards `runs.config_snapshot` - the request as *composed, with its
     // credentials withheld* (#1803). A trace is the record of what was *sent*,
@@ -154,6 +171,7 @@ const vayu::Response& response) {
     if (!response.raw_request.empty ()) {
         trace["request"]["rawRequest"] = response.raw_request;
     }
+    record_auth_provenance (trace["request"], request);
 
     if (!response.has_error ()) {
         // "" when nothing was negotiated, not omitted - same convention as

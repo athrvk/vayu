@@ -5,11 +5,16 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <memory>
 #include <variant>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
+#include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/types.hpp"
 
 using nlohmann::json;
@@ -66,6 +71,7 @@ TEST (AuthResolver, ApiKeyInHeader) {
     EXPECT_EQ (req.headers.at ("X-Api-Key"), "secret");
     // The transfer log redacts by this name (issue #1781).
     EXPECT_EQ (req.secret_header_names, std::vector<std::string>{ "X-Api-Key" });
+    EXPECT_TRUE (req.auth_query_param.empty ());
 }
 
 TEST (AuthResolver, ApiKeyInQueryAppendsToUrl) {
@@ -75,6 +81,10 @@ TEST (AuthResolver, ApiKeyInQueryAppendsToUrl) {
     nullptr);
     EXPECT_TRUE (result.ok);
     EXPECT_EQ (req.url, "https://api.example.com/v1?api%20key=a%20b");
+    // The raw name, not the encoded one: the trace records it (#1835) for a
+    // reader that masks the parameter by name.
+    EXPECT_EQ (req.auth_query_param, "api key");
+    EXPECT_TRUE (req.secret_header_names.empty ());
 }
 
 // Issue #1771: Postman adds an API key as a query param, so it is written by
@@ -139,6 +149,75 @@ TEST (AuthResolver, Oauth2WithoutDatabaseFailsCleanly) {
     EXPECT_FALSE (result.ok);
     EXPECT_EQ (result.code, vayu::ErrorCode::AuthFailed);
     EXPECT_TRUE (req.headers.empty ());
+}
+
+// Issue #1835: the OAuth 2.0 token placed in the query is recorded by name too.
+// Mutation check: drop the `auth_query_param` assignment in `resolve_oauth2`
+// and the first two reds.
+class AuthResolverOAuth2Test : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_auth_resolver_oauth2.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db = std::make_unique<vayu::db::Database> (DB_PATH);
+        db->init ();
+    }
+    void TearDown () override {
+        db.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// A config whose token is already cached, so no identity provider is asked.
+    json cached_config (const json& placement) {
+        json config = { { "grantType", "client_credentials" },
+            { "accessTokenUrl", "https://idp.test/token" },
+            { "clientId", "cid" }, { "clientSecret", "secret" } };
+        config.update (placement);
+
+        vayu::db::OAuthToken token;
+        token.cache_key    = vayu::http::oauth::cache_key (config);
+        token.access_token = "AT1";
+        token.token_type   = "Bearer";
+        token.expires_in   = 3600;
+        token.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                           .count ();
+        db->save_oauth_token (token);
+        return config;
+    }
+
+    std::unique_ptr<vayu::db::Database> db;
+};
+
+TEST_F (AuthResolverOAuth2Test, QueryPlacementRecordsTheConfiguredParameter) {
+    auto req = make_request ();
+    const json config =
+    cached_config ({ { "tokenPlacement", "query" }, { "queryParamName", "tok" } });
+    auto result = vayu::http::apply_auth (
+    req, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.url, "https://api.example.com/v1?tok=AT1");
+    EXPECT_EQ (req.auth_query_param, "tok");
+}
+
+TEST_F (AuthResolverOAuth2Test, QueryPlacementDefaultsTheParameterToAccessToken) {
+    auto req          = make_request ();
+    const json config = cached_config ({ { "tokenPlacement", "query" } });
+    vayu::http::apply_auth (
+    req, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    EXPECT_EQ (req.url, "https://api.example.com/v1?access_token=AT1");
+    EXPECT_EQ (req.auth_query_param, "access_token");
+}
+
+TEST_F (AuthResolverOAuth2Test, HeaderPlacementLeavesTheQueryParameterEmpty) {
+    auto req          = make_request ();
+    const json config = cached_config (json::object ());
+    auto result       = vayu::http::apply_auth (
+    req, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer AT1");
+    EXPECT_TRUE (req.auth_query_param.empty ());
 }
 
 TEST (ParseAuth, MapsModesToVariantAlternatives) {

@@ -1559,6 +1559,14 @@ written before #664, so a reader falls back to `headers`. The load-run writers s
 record at all - the load driver passes `nullptr` for it, to keep an allocation off the hot path -
 so a sampled capture's replay reads the composed map either way.
 
+The `request` node also names what auth wrote (#1835): **`authQueryParam`** (string), the raw
+unencoded name of the query parameter `apply_auth` appended to `url` for an API key with
+`in: "query"` or an OAuth 2.0 token placed in the query, and **`authHeaders`** (array of strings),
+the header names an API-key block filled. They exist because the URL and `rawRequest` cannot say
+which query parameter is a credential, so a reader that masks one (the MCP server) has nothing to
+go on without them. Each is **absent**, never empty, when auth wrote none of that kind and on every
+row written before #1835; the stored `url` and `rawRequest` stay raw beside them.
+
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `data_retention`, default 5 MiB) before storage, so downloading one 50 MB response does
 not live in SQLite forever. `request.rawRequest` ends with that same body and is capped to the

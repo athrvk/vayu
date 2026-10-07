@@ -1750,6 +1750,7 @@ whatever encoding it went out in; an agent reads `<redacted>` there instead:
 | ---- | --------- | ------- |
 | The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run_samples`, `list_runs`, `get_inbox_captures`, `get_mock_activity` (each entry's `path`), `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines; every row's `url` is also withheld as a saved request's is, in the table above, so a credential typed literally into it does not pass), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
 | The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
+| The value of the query parameter auth wrote into the request at send time, named by the trace's `request.authQueryParam` (an OAuth 2.0 token or an API key placed in the query; the engine's raw, unencoded name), in the sibling `url` and in the request line of the sibling `rawRequest`; and the headers named by `request.authHeaders`, in the sibling `headers`, `sentHeaders` and `rawRequest` header block, beside the names above (#1835) | `<redacted>` after the name | the same, except `run_request`'s own answer, which carries no such record: an engine-fetched OAuth 2.0 token placed in the query reads back in its `rawRequest` (#1845) |
 | The planned run's `auth` block, composed with the stored or inherited credential in it | as a stored row's: the member dropped, `<member>Withheld: true` | `start_load_run`'s confirmation preview |
 
 The masking is the engine's own rule for a run's config snapshot (#1803),
@@ -1759,7 +1760,18 @@ an inline send resolved through, a list reads many runs at once and an inbox
 capture belongs to no run. A literal credential typed into a stored auth block
 is no variable, but the engine writes it onto the wire after composing (an
 API key `in: "query"` lands in the trace URL and `rawRequest`), so it is masked
-as a value too. The values are read when the tool is called, so a
+as a value too. A credential no stored row holds, such as an OAuth 2.0 token the
+engine fetched, is masked by *where* it went instead: the stored trace names the
+query parameter (`request.authQueryParam`) and the headers
+(`request.authHeaders`) auth wrote, and the masking reads them per record. The
+parameter is matched on its whole name, case-sensitively, in the URL's query
+(between the first `?` and the first `#`) and in the request line only, as the
+engine wrote it: raw, or percent-encoded as `encode_query_component` writes a
+key unless the request disabled URL encoding. A pair of that name is masked
+wherever it appears in the query, the user's own included; `api_key` leaves
+`api_key2` alone, a body is untouched, and an empty value or a lone
+`{{variable}}` is shown as written. With URL encoding disabled, a value
+holding a raw `&` ends at it. The values are read when the tool is called, so a
 secret rotated since masks under its new value only. Keys are not touched, nor
 numbers, so a size the engine reported still describes what it measured. A tool
 that cuts a body to a byte cap (`run_request`, `get_run_report`,
@@ -1799,14 +1811,6 @@ authenticate with nothing. The server instructions state the withholding in
 every session where reveal is off, beside the write gate's sentence and for the
 same reason, and each tool that carries one of the rows above says so in its
 own description. The projection lives in `withhold.ts`.
-
-**What this does not cover.** The masking withholds what Vayu can recognise as
-a secret in what an agent reads; one path is still open with reveal off:
-
-- A credential the engine writes itself is not a masked value. An OAuth 2.0
-  access token the engine fetched and placed in the query is in no stored row,
-  and nor is an API key sent inline with a request and read back later through
-  `get_run_report`; both reach a trace as plain text. Tracked in #1835.
 
 A script an agent sends is not a path: it is refused while reveal is off
 (see *Scripts an agent supplies are refused*, above). A script an agent
