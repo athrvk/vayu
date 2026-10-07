@@ -430,6 +430,7 @@ export default function VariablesCategoryTree() {
 								{creatingEnvironment && (
 									<div className={cn("px-3 py-1", GROUP_CHILD_INSET)}>
 										<Input
+											size="sm"
 											value={newEnvName}
 											onChange={(e) => setNewEnvName(e.target.value)}
 											onKeyDown={(e) => {
@@ -448,7 +449,7 @@ export default function VariablesCategoryTree() {
 												}
 											}}
 											autoFocus
-											className="h-control-sm text-sm"
+											className="text-sm"
 											placeholder="Environment name"
 										/>
 									</div>
@@ -586,7 +587,8 @@ export default function VariablesCategoryTree() {
 															autoFocus
 															{...rename.inputProps}
 															onClick={(e) => e.stopPropagation()}
-															className="h-full flex-1 text-sm"
+															size="xs"
+															className="flex-1 text-sm"
 														/>
 													) : (
 														<button

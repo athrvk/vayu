@@ -206,6 +206,7 @@ describe("NumberSettingRow", () => {
 			render(<NumberSettingRow label="A" value="5" />);
 
 			expect(field("A").className).toContain("max-w-[12rem]");
+			expect(field("A").className).not.toContain("h-control-sm");
 			expect(screen.getByText("A").className).toContain("text-sm");
 		});
 

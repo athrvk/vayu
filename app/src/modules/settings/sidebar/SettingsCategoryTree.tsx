@@ -149,11 +149,12 @@ export default function SettingsCategoryTree() {
 					<div className="relative">
 						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
+							size="sm"
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
 							placeholder="Search settings"
 							aria-label="Search settings"
-							className="h-control-sm pl-8 pr-8 text-sm"
+							className="pl-8 pr-8 text-sm"
 						/>
 						{query !== "" && (
 							<Button

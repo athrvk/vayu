@@ -114,13 +114,14 @@ function VariableRow({
 			</td>
 			<td className="py-1 px-2">
 				<Input
+					size="sm"
 					type="text"
 					value={variable.key}
 					onChange={(e) => onUpdate(variable.id, "key", e.target.value)}
 					onBlur={onBlur}
 					placeholder="variable_name"
 					className={cn(
-						"h-control-sm text-primary",
+						"text-primary",
 						!variable.enabled && !variable.isNew && "text-muted-foreground bg-muted"
 					)}
 				/>
@@ -140,27 +141,25 @@ function VariableRow({
 				 */}
 				{isSecretField ? (
 					<SecretInput
+						size="sm"
 						value={variable.value}
 						onChange={(v) => onUpdate(variable.id, "value", v)}
 						onBlur={onBlur}
 						placeholder="value"
-						className={cn(
-							"h-control-sm",
-							!variable.enabled && "text-muted-foreground bg-muted"
-						)}
+						className={cn(!variable.enabled && "text-muted-foreground bg-muted")}
 					/>
 				) : (
 					// The time marker sits inside the field the way `SecretInput`'s eye
 					// does, so a value turning into a time moves no column.
 					<div className="relative">
 						<Input
+							size="sm"
 							type="text"
 							value={variable.value}
 							onChange={(e) => onUpdate(variable.id, "value", e.target.value)}
 							onBlur={onBlur}
 							placeholder="value"
 							className={cn(
-								"h-control-sm",
 								!variable.enabled &&
 									!variable.isNew &&
 									"text-muted-foreground bg-muted",

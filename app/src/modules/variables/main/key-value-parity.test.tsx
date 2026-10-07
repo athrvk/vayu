@@ -177,8 +177,8 @@ function underPanelClip(el: Element): boolean {
  * it finds the element that declares a height. Comparing the *value* is the
  * point; which element carries it is each table's business. `h-control-sm`
  * is the named step for `h-8` (24px at Default and 32px at Comfortable, both
- * of them), and the variables table writes it because an `Input` may not
- * state a numeric height (`chrome-floors.test.ts`).
+ * of them), and the variables table's `Input` gets it from `size="sm"`
+ * because an `Input` may not state a height class (`chrome-floors.test.ts`).
  */
 function declaredHeight(input: Element): string {
 	let node: Element | null = input;

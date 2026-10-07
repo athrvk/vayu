@@ -116,6 +116,7 @@ export default function FilesPanel() {
 
 				<div className="flex items-center gap-2">
 					<Input
+						size="sm"
 						value={typed}
 						onChange={(e) => setTyped(e.target.value)}
 						onKeyDown={(e) => {
@@ -126,7 +127,7 @@ export default function FilesPanel() {
 						}}
 						placeholder="/path/to/folder"
 						aria-label="Folder to allow"
-						className="h-control-sm font-mono text-xs"
+						className="font-mono text-xs"
 					/>
 					<Button
 						variant="outline"

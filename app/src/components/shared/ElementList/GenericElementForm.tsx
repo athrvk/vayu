@@ -249,8 +249,8 @@ function PropertyRow({
 				</Label>
 				{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
 				<Input
+					size="sm"
 					id={inputId}
-					className="h-control-sm"
 					value={items.join(", ")}
 					placeholder="Comma-separated values"
 					onChange={(e) => {
@@ -294,8 +294,8 @@ function PropertyRow({
 			</Label>
 			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
 			<Input
+				size="sm"
 				id={inputId}
-				className="h-control-sm"
 				value={asString(value)}
 				onChange={(e) => onChange(e.target.value)}
 			/>

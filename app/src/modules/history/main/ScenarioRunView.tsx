@@ -332,6 +332,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				<div className="relative w-full sm:w-44">
 					<Search className="pointer-events-none absolute left-2 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 					<Input
+						size="sm"
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
 						placeholder="Search step names"
@@ -340,7 +341,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						// carries `md:text-sm`, and tailwind-merge keeps a
 						// responsive variant in its own group - so an unqualified
 						// `text-xs` loses to it above 768px.
-						className="h-control-sm pl-7 text-xs md:text-xs"
+						className="pl-7 text-xs md:text-xs"
 					/>
 				</div>
 

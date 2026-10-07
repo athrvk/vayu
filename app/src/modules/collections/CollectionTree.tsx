@@ -289,6 +289,7 @@ export default function CollectionTree() {
 				{panel.creatingCollection && (
 					<div className="flex gap-2 mb-2 px-3 pt-2">
 						<Input
+							size="sm"
 							type="text"
 							value={panel.newCollectionName}
 							onChange={(e) => panel.setNewCollectionName(e.target.value)}
@@ -300,7 +301,7 @@ export default function CollectionTree() {
 								if (e.key === "Escape") panel.cancelNewCollectionForm();
 							}}
 							placeholder="Collection name"
-							className="flex-1 h-control-sm text-sm"
+							className="flex-1 text-sm"
 							disabled={panel.isCreatingCollection}
 							autoFocus
 						/>

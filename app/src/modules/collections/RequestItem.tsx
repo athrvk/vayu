@@ -221,7 +221,8 @@ export default function RequestItem({
 						<Input
 							type="text"
 							{...rename.inputProps}
-							className="flex-1 h-full text-sm"
+							size="xs"
+							className="flex-1 text-sm"
 							autoFocus
 							onClick={(e) => e.stopPropagation()}
 						/>

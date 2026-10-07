@@ -476,11 +476,12 @@ export default function SendWithRowDialog({
 									Filter rows
 								</span>
 								<Input
+									size="sm"
 									value={filter}
 									onChange={(e) => setFilter(e.target.value)}
 									placeholder="Any value in any column"
 									aria-label="Filter rows"
-									className="h-control-sm text-xs"
+									className="text-xs"
 								/>
 							</label>
 							{/* The absolute address, kept from the popover and demoted:
@@ -489,6 +490,7 @@ export default function SendWithRowDialog({
 							<label className="space-y-1">
 								<span className="text-label text-muted-foreground">Row</span>
 								<Input
+									size="sm"
 									value={entry}
 									onChange={(e) => setEntry(e.target.value)}
 									onKeyDown={(e) => {
@@ -504,7 +506,7 @@ export default function SendWithRowDialog({
 									// (the placeholder reads e.g. "1 - 500"), a text measure
 									// that should not narrow at the Default density the way
 									// `w-28`'s `--spacing` unit does.
-									className="h-control-sm w-[7rem] font-mono text-xs"
+									className="w-[7rem] font-mono text-xs"
 								/>
 							</label>
 						</div>

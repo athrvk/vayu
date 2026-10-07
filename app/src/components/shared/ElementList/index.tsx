@@ -324,7 +324,8 @@ function ElementRow({
 							autoFocus
 							{...rename.inputProps}
 							placeholder={label}
-							className="h-full flex-1"
+							size="xs"
+							className="flex-1"
 						/>
 					) : (
 						<button

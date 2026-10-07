@@ -10,7 +10,7 @@
  * density must not carry them below it (issue #1679). `--spacing` scales
  * rhythm - row heights, paddings, gaps - and these three classes of thing are
  * exactly the ones that do not ride it: see the "Chrome, Target and Icon
- * Floors" table in docs/design-system.md and the nine steps `density.test.ts`
+ * Floors" table in docs/design-system.md and the ten steps `density.test.ts`
  * checks against `index.css`.
  *
  * This is a source scan, not a render: vitest stubs CSS imports to `""`, and
@@ -297,19 +297,21 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	});
 });
 
-describe("a text input is the height of its row, or the compact control height alone", () => {
-	// `Input`'s own base is `h-control` (28px). Inside a 24px list row that
-	// overflows it, and a hand-picked `h-6` / `h-7` is a third height the row
-	// never agreed to (#1830). The rule has two states: an input in a row
-	// states `h-full` and takes the row's height whatever the density; one that
-	// stands alone states `h-control-sm`, or nothing and keeps `h-control`.
-	// Any numeric step or arbitrary height is a mixed height and fails.
+describe("an input states its size, never its height", () => {
+	// `Input` takes `size="sm" | "xs"` (the `control-sm` and `control-xs`
+	// tokens) or nothing (`control`), and that is the whole vocabulary: an
+	// `h-6` is a third height the row never agreed to, and `h-full` makes the
+	// input's height whatever its row happens to be (#1830). So no `<Input` tag carries a height class of any kind in its
+	// className - a step, a fraction, an arbitrary value, `h-full`, a floor
+	// token or a `size-*` - and `min-h` / `max-h` stay fine. Whether `size="xs"`
+	// is on an input that sits in a `target` row rather than standing alone is
+	// a review matter: the scan cannot see the row.
 	const OPEN = /<Input\b/g;
-	const FIXED_HEIGHT = /(?<![\w-])(?:h|size)-(?:\d|\[)[^\s"'`]*/;
+	const HEIGHT_CLASS = /(?<![\w-])(?:h|size)-[^\s"'`]+/;
 
-	/** The first class in `tag` that pins a numeric or arbitrary height. */
-	function fixedHeightClass(tag: string): string | undefined {
-		return tag.match(FIXED_HEIGHT)?.[0];
+	/** The first class in `tag` that pins a height, of whatever kind. */
+	function heightClass(tag: string): string | undefined {
+		return tag.match(HEIGHT_CLASS)?.[0];
 	}
 
 	it.each([
@@ -319,26 +321,30 @@ describe("a text input is the height of its row, or the compact control height a
 		["an arbitrary height", "h-[26px]", "h-[26px]"],
 		["a size- step", "size-7", "size-7"],
 		["a fraction of the parent", "h-1/2", "h-1/2"],
+		["filling its row", "flex-1 h-full text-sm", "h-full"],
+		["the compact control token", "h-control-sm w-24", "h-control-sm"],
+		["the default control token", "h-control", "h-control"],
+		["the row-field control token", "h-control-xs", "h-control-xs"],
+		["a variant-prefixed height", "md:h-6", "h-6"],
 	])("flags %s", (_label, classes, expected) => {
-		expect(fixedHeightClass(`<Input className="${classes}"`)).toBe(expected);
+		expect(heightClass(`<Input className="${classes}"`)).toBe(expected);
 	});
 
 	it.each([
-		["filling its row", "flex-1 h-full text-sm"],
-		["the compact control height", "h-control-sm w-24"],
-		["no height at all", "font-mono text-xs"],
-		["a min-height floor", "min-h-6"],
-		["a max-height cap", "max-h-8"],
-		["a width", "w-24 w-1/2"],
-	])("does not flag %s", (_label, classes) => {
-		expect(fixedHeightClass(`<Input className="${classes}"`)).toBeUndefined();
+		["a size prop and no height", 'size="xs" className="flex-1 text-sm"'],
+		["no height at all", 'className="font-mono text-xs"'],
+		["a min-height floor", 'className="min-h-6"'],
+		["a max-height cap", 'className="max-h-8"'],
+		["a width", 'className="w-24 w-1/2"'],
+	])("does not flag %s", (_label, attrs) => {
+		expect(heightClass(`<Input ${attrs}`)).toBeUndefined();
 	});
 
 	it("reads past a URL in a string to the end of the tag", () => {
 		const code = stripComments(
 			'<Input placeholder="https://example.test/spec.json" className="flex-1" /><div className="h-4" />'
 		);
-		expect(fixedHeightClass(openingTag(code, 0))).toBeUndefined();
+		expect(heightClass(openingTag(code, 0))).toBeUndefined();
 	});
 
 	it("scans a non-empty set of Input tags", () => {
@@ -348,12 +354,12 @@ describe("a text input is the height of its row, or the compact control height a
 		expect(tags.length).toBeGreaterThan(50);
 	});
 
-	it("finds no numeric or arbitrary height on an Input", () => {
+	it("finds no height class on an Input", () => {
 		const offences: string[] = [];
 		for (const file of files()) {
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
-				const hit = fixedHeightClass(openingTag(code, m.index));
+				const hit = heightClass(openingTag(code, m.index));
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}

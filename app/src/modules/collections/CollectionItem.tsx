@@ -314,7 +314,8 @@ export default function CollectionItem({
 							<Input
 								type="text"
 								{...rename.inputProps}
-								className="flex-1 h-full text-sm"
+								size="xs"
+								className="flex-1 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
 							/>
@@ -398,6 +399,7 @@ export default function CollectionItem({
 							style={{ paddingLeft: childIndentPx }}
 						>
 							<Input
+								size="sm"
 								type="text"
 								value={newFolderName}
 								onChange={(e) => onFolderNameChange(e.target.value)}
@@ -410,7 +412,7 @@ export default function CollectionItem({
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
 								placeholder="Collection name"
-								className="flex-1 h-control-sm text-sm"
+								className="flex-1 text-sm"
 								disabled={isCreatingSubfolder}
 								autoFocus
 							/>

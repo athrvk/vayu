@@ -94,6 +94,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					<div className="relative">
 						<Search className="pointer-events-none absolute left-2 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
+							size="sm"
 							value={filter}
 							onChange={(e) => setFilter(e.target.value)}
 							placeholder="Filter logs"
@@ -103,7 +104,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 							// responsive variant in its own group - so an unqualified
 							// `text-xs` loses to it above 768px and the field renders a
 							// step larger than everything around it.
-							className="h-control-sm pl-7 text-xs md:text-xs"
+							className="pl-7 text-xs md:text-xs"
 						/>
 					</div>
 
