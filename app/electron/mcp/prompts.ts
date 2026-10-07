@@ -17,6 +17,7 @@ import { z } from "zod";
 import type { ToolContext } from "./tools.js";
 import { resolveBaseline } from "./tools.js";
 import { compareReports } from "./compare.js";
+import { withheldRunOutput } from "./resources.js";
 
 export interface PromptMessage {
 	role: "user" | "assistant";
@@ -57,7 +58,11 @@ export const PROMPTS: McpPromptDef[] = [
 		argsSchema: { runId: z.string().describe("Run ID to summarize.") },
 		build: async (args, ctx, signal) => {
 			const runId = arg(args, "runId");
-			const report = await ctx.client.getRunReport(runId, signal);
+			const report = await withheldRunOutput(
+				ctx,
+				ctx.client.getRunReport(runId, signal),
+				signal
+			);
 			return {
 				messages: [
 					userText(
@@ -122,7 +127,11 @@ export const PROMPTS: McpPromptDef[] = [
 		argsSchema: { runId: z.string().describe("Run ID to diagnose.") },
 		build: async (args, ctx, signal) => {
 			const runId = arg(args, "runId");
-			const report = await ctx.client.getRunReport(runId, signal);
+			const report = await withheldRunOutput(
+				ctx,
+				ctx.client.getRunReport(runId, signal),
+				signal
+			);
 			return {
 				messages: [
 					userText(

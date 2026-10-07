@@ -274,6 +274,14 @@ export class EngineClient {
 		);
 	}
 
+	/**
+	 * Every live request of every live collection, in one call (`GET /requests`
+	 * with no `collectionId`) - the read the app builds its tree from at launch.
+	 */
+	listAllRequests(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/requests", undefined, signal);
+	}
+
 	listEnvironments(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/environments", undefined, signal);
 	}

@@ -1380,7 +1380,11 @@ record shape, the category list, the redaction rule and the file layout
   composed and, since issue #664, as the transfer issued them
   (`request.sentHeaders`) - and since issue #348 the wire message itself
   (`request.rawRequest`, the `Cookie` line included). Both are credential-grade, both are plaintext under the v1 posture
-  above, and a trace that hid what went out would have no reason to exist. What
+  above, and a trace that hid what went out would have no reason to exist, so the
+  engine and History keep them raw by decision; the MCP server masks a secret
+  variable's value and a credential header's value in them on the way to an
+  agent (`<redacted>`, unless the user turned on Reveal secrets to agents,
+  [mcp.md](mcp.md#secret-values), #1809). What
   bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.
 

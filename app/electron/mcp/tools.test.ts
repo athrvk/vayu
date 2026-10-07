@@ -38,6 +38,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type EngineClient,
 } from "./engine-client.js";
+import { WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
 /**
@@ -103,6 +104,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		health: vi.fn().mockResolvedValue({ status: "ok", version: "1.2.3" }),
 		listCollections: vi.fn().mockResolvedValue([]),
 		listRequests: vi.fn().mockResolvedValue([]),
+		listAllRequests: vi.fn().mockResolvedValue([]),
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue(emptyPage()),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
@@ -1500,6 +1502,102 @@ describe("environments, globals and the cookie jar", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(client.saveGlobals).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * With Reveal secrets to agents off, an agent may not turn a stored secret
+	 * into a readable one by writing `secret: false` (#1809). The three tools that
+	 * merge variables share one gate, so each is driven through the same cases.
+	 */
+	describe("clearing a stored secret flag (#1809)", () => {
+		const stored = { token: { value: "t0k", enabled: true, secret: true, type: "string" } };
+		const cases = [
+			{
+				tool: "update_environment",
+				args: { environmentId: "env_1" },
+				seed: () => ({
+					getEnvironment: vi
+						.fn()
+						.mockResolvedValue({ id: "env_1", name: "Dev", variables: stored }),
+				}),
+				write: (c: EngineClient) => c.updateEnvironment,
+				sent: (call: unknown[]) => varsOf(call[1]),
+			},
+			{
+				tool: "update_globals",
+				args: {},
+				seed: () => ({ getGlobals: vi.fn().mockResolvedValue({ variables: stored }) }),
+				write: (c: EngineClient) => c.saveGlobals,
+				sent: (call: unknown[]) => varsOf(call[0]),
+			},
+			{
+				tool: "update_collection",
+				args: { collectionId: "col_1" },
+				seed: () => ({
+					getCollection: vi
+						.fn()
+						.mockResolvedValue({ id: "col_1", name: "API", variables: stored }),
+				}),
+				write: (c: EngineClient) => c.updateCollection,
+				sent: (call: unknown[]) => varsOf(call[1]),
+			},
+		];
+
+		describe.each(cases)("$tool", ({ tool, args, seed, write, sent }) => {
+			const run = (variables: Record<string, unknown>, safety: Partial<McpSafetyConfig>) => {
+				const client = fakeClient(seed());
+				return dispatchTool(tool, { ...args, variables }, ctxWith(client, safety)).then(
+					(res) => ({ res, client })
+				);
+			};
+
+			test("refuses secret:false over a stored secret, naming the setting", async () => {
+				const { res, client } = await run({ token: { secret: false } }, WRITES);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).toContain("token");
+				expect(firstText(res)).toContain("Reveal secrets to agents");
+				expect(firstText(res)).toContain("Settings > MCP");
+				expect(write(client)).not.toHaveBeenCalled();
+			});
+
+			test("refuses it when a value rides along, too", async () => {
+				const { res, client } = await run(
+					{ token: { value: "new", secret: false } },
+					WRITES
+				);
+				expect(res.isError).toBe(true);
+				expect(write(client)).not.toHaveBeenCalled();
+			});
+
+			test("allows it once reveal is on", async () => {
+				const { res, client } = await run(
+					{ token: { secret: false } },
+					{ ...WRITES, revealSecretsToAgents: true }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(sent(lastCall(write(client))).token).toMatchObject({ secret: false });
+			});
+
+			test("leaves secret:true and unrelated edits alone with reveal off", async () => {
+				const keep = await run({ token: { secret: true, enabled: false } }, WRITES);
+				expect(keep.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(keep.client))).token).toMatchObject({
+					secret: true,
+					enabled: false,
+				});
+
+				const rotate = await run({ token: "rotated" }, WRITES);
+				expect(rotate.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(rotate.client))).token).toMatchObject({
+					value: "rotated",
+					secret: true,
+				});
+
+				const fresh = await run({ other: { value: "o", secret: false } }, WRITES);
+				expect(fresh.res.isError).toBeFalsy();
+				expect(sent(lastCall(write(fresh.client))).other).toMatchObject({ secret: false });
+			});
+		});
 	});
 
 	test("clear_cookies distinguishes every jar, one environment's, and the unnamed one", async () => {
@@ -3348,10 +3446,12 @@ describe("run_collection_smoke", () => {
 				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
 			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
 		});
+		// Revealed, because with secrets withheld the same failed read leaves the
+		// matrix unmaskable and the call fails closed (`secret withholding`).
 		const res = await dispatchTool(
 			"run_collection_smoke",
 			{ collectionId: "c1" },
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 		// The run itself still succeeds - the lookup is a disclosure, not a gate.
 		expect(res.isError).toBeFalsy();
@@ -4215,12 +4315,12 @@ describe("inline body bounds", () => {
 	});
 
 	test("run_request cuts a large rawRequest but keeps its headers whole", async () => {
-		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\nCookie: session=abc\r\n\r\n";
+		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\nX-Trace: abc\r\n\r\n";
 		const out = await runRequest(executed(executeAnswer({ rawRequest: head + huge })));
 
 		const raw = out.rawRequest as string;
 		expect(raw.startsWith(head)).toBe(true);
-		expect(raw).toContain("Cookie: session=abc");
+		expect(raw).toContain("X-Trace: abc");
 		expect(Buffer.byteLength(raw, "utf8")).toBe(head.length + MAX_INLINE_BODY_BYTES);
 		expect(out.rawRequestTruncated).toBe(true);
 		expect(out.rawRequestBytes).toBe(head.length + huge.length);
@@ -9931,6 +10031,943 @@ describe("secret withholding", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toContain("postman.bearer.tokenWithheld");
 		expect(client.createCollection).not.toHaveBeenCalled();
+	});
+
+	// A header typed straight into the Headers tab is no variable: its name is
+	// the only signal, and the shared list plus the request's API-key header
+	// decide (#1809).
+	const HEADER_REQUESTS = [
+		{
+			id: "req_h1",
+			name: "Typed credentials",
+			auth: { mode: "none" },
+			headers: [
+				{ key: "Authorization", value: "Bearer typed-live-token", enabled: true },
+				{ key: "cookie", value: "sid=typed-cookie", enabled: false },
+				{ key: "X-Api-Key", value: "{{apiKey}}", enabled: true },
+				{ key: "X-Auth-Token", value: "", enabled: true },
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			],
+		},
+		{
+			id: "req_h2",
+			name: "API-key auth names its header",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "header" },
+			headers: [{ key: "x-tenant-key", value: "typed-tenant-key", enabled: true }],
+		},
+		{
+			id: "req_h3",
+			name: "API-key auth in the query",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "query" },
+			headers: [{ key: "X-Tenant-Key", value: "typed-query-tenant", enabled: true }],
+		},
+	];
+
+	test("list_requests withholds a credential-bearing header's value and keeps the row", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of [
+			"typed-live-token",
+			"typed-cookie",
+			"typed-tenant-key",
+			"typed-query-tenant",
+		]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].headers).toEqual([
+			{ key: "Authorization", enabled: true, valueWithheld: true },
+			{ key: "cookie", enabled: false, valueWithheld: true },
+			// A reference names where the secret lives without being it, and an
+			// empty value holds none.
+			{ key: "X-Api-Key", value: "{{apiKey}}", enabled: true },
+			{ key: "X-Auth-Token", value: "", enabled: true },
+			{ key: "Content-Type", value: "application/json", enabled: true },
+		]);
+		expect(body[1].headers).toEqual([
+			{ key: "x-tenant-key", enabled: true, valueWithheld: true },
+		]);
+		// The engine names the API-key header whatever `in` says, so a header row
+		// under that name is withheld beside a query-placed key too.
+		expect(body[2].headers).toEqual([
+			{ key: "X-Tenant-Key", enabled: true, valueWithheld: true },
+		]);
+	});
+
+	test("list_requests returns every header whole with reveal on", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual(HEADER_REQUESTS);
+	});
+
+	const EXAMPLES = [
+		{
+			id: "exa_1",
+			requestId: "req_1",
+			name: "200 OK",
+			status: 200,
+			headers: [
+				{ key: "Set-Cookie", value: "session=example-session; HttpOnly", enabled: true },
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			],
+			body: "{}",
+			contentType: "application/json",
+			order: 0,
+			origin: "user",
+			bodyTruncated: false,
+		},
+	];
+
+	test("list_request_examples withholds a Set-Cookie value and keeps the rest of the row", async () => {
+		const client = fakeClient({ listRequestExamples: vi.fn().mockResolvedValue(EXAMPLES) });
+		const { text, body } = await read("list_request_examples", client, undefined, {
+			requestId: "req_1",
+		});
+		expect(text).not.toContain("example-session");
+		expect(body.examples[0].headers).toEqual([
+			{ key: "Set-Cookie", enabled: true, valueWithheld: true },
+			{ key: "Content-Type", value: "application/json", enabled: true },
+		]);
+		expect(body.examples[0].body).toBe("{}");
+		expect(body.examples[0].name).toBe("200 OK");
+	});
+
+	test("list_request_examples returns the headers as stored with reveal on", async () => {
+		const client = fakeClient({ listRequestExamples: vi.fn().mockResolvedValue(EXAMPLES) });
+		const { body } = await read("list_request_examples", client, REVEAL, {
+			requestId: "req_1",
+		});
+		expect(body.examples).toEqual(EXAMPLES);
+	});
+
+	// Writing does not grant reading: a write tool's answer echoes the stored
+	// row, so it is withheld exactly as the read of that row is (#1809).
+	const ECHO_ENVIRONMENT = {
+		id: "env_1",
+		name: "Staging",
+		isActive: true,
+		variables: { apiKey: { value: "echo-env-secret", secret: true, enabled: true } },
+	};
+	const ECHO_COLLECTION = {
+		id: "c1",
+		name: "API",
+		variables: { pass: { value: "echo-collection-secret", secret: true, enabled: true } },
+		auth: { mode: "bearer", token: "echo-collection-token" },
+		openapi: { specId: "spec_1" },
+	};
+	const ECHO_REQUEST = {
+		id: "req_1",
+		collectionId: "c1",
+		name: "Me",
+		auth: { mode: "bearer", token: "echo-request-token" },
+		headers: [{ key: "Authorization", value: "Bearer echo-request-header", enabled: true }],
+	};
+	const ECHO_EXAMPLE = {
+		id: "exa_1",
+		requestId: "req_1",
+		name: "200 OK",
+		headers: [{ key: "Set-Cookie", value: "echo-example-cookie", enabled: true }],
+	};
+	const ECHO_GLOBALS = {
+		id: "globals",
+		variables: { token: { value: "echo-globals-secret", secret: true, enabled: true } },
+	};
+
+	interface WriteEcho {
+		tool: string;
+		args: Record<string, unknown>;
+		/** The client method whose answer the tool hands back. */
+		method: keyof EngineClient;
+		answer: unknown;
+		secrets: string[];
+		/** Reads the tool makes before it writes. */
+		reads?: Partial<EngineClient>;
+	}
+
+	const WRITE_ECHOES: WriteEcho[] = [
+		{
+			tool: "create_collection",
+			args: { name: "API" },
+			method: "createCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+		},
+		{
+			tool: "update_collection",
+			args: { collectionId: "c1", name: "API" },
+			method: "updateCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+		},
+		{
+			tool: "unbind_spec",
+			args: { collectionId: "c1" },
+			method: "updateCollection",
+			answer: ECHO_COLLECTION,
+			secrets: ["echo-collection-secret", "echo-collection-token"],
+			reads: { getCollection: vi.fn().mockResolvedValue(ECHO_COLLECTION) },
+		},
+		{
+			tool: "create_request",
+			args: { collectionId: "c1", name: "Me", url: "https://api.example.com" },
+			method: "createRequest",
+			answer: ECHO_REQUEST,
+			secrets: ["echo-request-token", "echo-request-header"],
+		},
+		{
+			tool: "update_request",
+			args: { requestId: "req_1", name: "Me" },
+			method: "updateRequest",
+			answer: ECHO_REQUEST,
+			secrets: ["echo-request-token", "echo-request-header"],
+		},
+		{
+			tool: "create_request_example",
+			args: { requestId: "req_1", name: "200 OK" },
+			method: "createRequestExample",
+			answer: ECHO_EXAMPLE,
+			secrets: ["echo-example-cookie"],
+		},
+		{
+			tool: "update_request_example",
+			args: { requestId: "req_1", exampleId: "exa_1", name: "200 OK" },
+			method: "updateRequestExample",
+			answer: ECHO_EXAMPLE,
+			secrets: ["echo-example-cookie"],
+		},
+		{
+			tool: "create_environment",
+			args: { name: "Staging" },
+			method: "createEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "update_environment",
+			args: { environmentId: "env_1", name: "Staging" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "activate_environment",
+			args: { environmentId: "env_1" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+		},
+		{
+			tool: "activate_environment (none)",
+			args: { environmentId: "none" },
+			method: "updateEnvironment",
+			answer: ECHO_ENVIRONMENT,
+			secrets: ["echo-env-secret"],
+			reads: { listEnvironments: vi.fn().mockResolvedValue([ECHO_ENVIRONMENT]) },
+		},
+		{
+			tool: "update_globals",
+			args: { variables: { region: "eu" } },
+			method: "saveGlobals",
+			answer: ECHO_GLOBALS,
+			secrets: ["echo-globals-secret"],
+		},
+		{
+			// The engine answers a restore with the trash entry alone; the
+			// projection is what keeps a row it ever added from being echoed.
+			tool: "restore_trash_entry",
+			args: { id: "c1" },
+			method: "restoreTrashEntry",
+			answer: { id: "c1", kind: "collection", restored: true, auth: ECHO_COLLECTION.auth },
+			secrets: ["echo-collection-token"],
+		},
+		{
+			tool: "move_item",
+			args: { type: "request", id: "req_1", collectionId: "c1" },
+			method: "reorder",
+			answer: { collections: [ECHO_COLLECTION], requests: [ECHO_REQUEST] },
+			secrets: [
+				"echo-collection-secret",
+				"echo-collection-token",
+				"echo-request-token",
+				"echo-request-header",
+			],
+			reads: {
+				listCollections: vi
+					.fn()
+					.mockResolvedValue([{ id: "c1", name: "API", parentId: "" }]),
+				listRequests: vi.fn().mockResolvedValue([]),
+			},
+		},
+	];
+
+	const echoClient = ({ method, answer, reads }: WriteEcho) =>
+		fakeClient({ ...reads, [method]: vi.fn().mockResolvedValue(answer) });
+
+	const echoOf = async (echo: WriteEcho, safety: Partial<McpSafetyConfig>) => {
+		const name = echo.tool.replace(/ \(none\)$/, "");
+		const res = await dispatchTool(name, echo.args, ctxWith(echoClient(echo), safety));
+		expect(res.isError).toBeFalsy();
+		return { text: firstText(res), body: JSON.parse(firstText(res)) };
+	};
+
+	test.each(WRITE_ECHOES)("$tool withholds the echoed row's secrets by default", async (echo) => {
+		const { text } = await echoOf(echo, { allowWrites: true });
+		for (const secret of echo.secrets) expect(text).not.toContain(secret);
+		expect(text).toMatch(/Withheld": true/);
+	});
+
+	test.each(WRITE_ECHOES)("$tool echoes the stored row whole with reveal on", async (echo) => {
+		const { body } = await echoOf(echo, { allowWrites: true, ...REVEAL });
+		expect(body).toEqual(echo.answer);
+	});
+
+	test("update_collection keeps the row's structure around what it withholds", async () => {
+		const { body } = await echoOf(WRITE_ECHOES[1], { allowWrites: true });
+		expect(body).toEqual({
+			...ECHO_COLLECTION,
+			variables: { pass: { enabled: true, secret: true, valueWithheld: true } },
+			auth: { mode: "bearer", tokenWithheld: true },
+		});
+	});
+
+	test("every write tool that answers a stored row is covered here", () => {
+		const covered = new Set(WRITE_ECHOES.map((echo) => echo.tool.replace(/ \(none\)$/, "")));
+		for (const name of [
+			"create_collection",
+			"update_collection",
+			"create_request",
+			"update_request",
+			"create_request_example",
+			"update_request_example",
+			"create_environment",
+			"update_environment",
+			"activate_environment",
+			"update_globals",
+			"restore_trash_entry",
+			"move_item",
+			"unbind_spec",
+		]) {
+			expect(covered.has(name), name).toBe(true);
+			expect(TOOLS.some((tool) => tool.name === name && tool.category === "write")).toBe(
+				true
+			);
+		}
+	});
+
+	// What a run recorded carries the secrets it sent, in whatever encoding they
+	// went out in, and the credential headers on both sides of the exchange: the
+	// engine's snapshot rule masks them in place (#1809).
+	const RUN_SECRET = 'p@ss "w/rd"&x';
+	/** Each of `RUN_SECRET`'s forms holds one of these, so their absence is every form's. */
+	const RUN_SECRET_CORES = ["p@ss", "p%40ss"];
+	const RUN_LEAKS = [
+		...RUN_SECRET_CORES,
+		"glob-secret-1",
+		"col-secret-9",
+		"typed-bearer-token",
+		"resp-cookie-value",
+		"req-typed-key",
+		"tenant-typed-key",
+	];
+	const PERCENT_FORM = "p%40ss%20%22w%2Frd%22%26x";
+	const QUERY_FORM = "p@ss%20%22w/rd%22%26x";
+	const XML_FORM = 'p@ss "w/rd"&amp;x';
+
+	/** The reads `runOutputShape` makes, holding one secret per scope. */
+	const runScopes = () => ({
+		getGlobals: vi.fn().mockResolvedValue({
+			id: "globals",
+			variables: { gtok: { value: "glob-secret-1", secret: true, enabled: true } },
+		}),
+		listEnvironments: vi.fn().mockResolvedValue([
+			{
+				id: "env_1",
+				variables: {
+					pass: { value: RUN_SECRET, secret: true, enabled: true },
+					// Under the engine's four-byte floor: masked nowhere.
+					short: { value: "abc", secret: true, enabled: true },
+					plain: { value: "visible-value", enabled: true },
+				},
+			},
+		]),
+		listCollections: vi.fn().mockResolvedValue([
+			{
+				id: "c1",
+				variables: { ck: { value: "col-secret-9", secret: true } },
+				auth: { mode: "apikey", key: "X-Tenant-Key", in: "header" },
+			},
+		]),
+		listAllRequests: vi
+			.fn()
+			.mockResolvedValue([
+				{ id: "r1", auth: { mode: "apikey", key: "X-Req-Key", value: "v", in: "header" } },
+			]),
+	});
+
+	/** One trace node pair as `build_result_trace` stores it, every form of every secret on it. */
+	const RUN_TRACE = {
+		request: {
+			method: "POST",
+			url: `https://api.example.com/v1?key=${QUERY_FORM}&abc=1&plain=visible-value`,
+			headers: {
+				Authorization: "Bearer typed-bearer-token",
+				"X-Tenant-Key": "tenant-typed-key",
+				"X-Echo": "glob-secret-1",
+				Accept: "*/*",
+			},
+			body: JSON.stringify({ password: RUN_SECRET, region: "eu" }),
+			rawRequest:
+				`POST /v1?key=${PERCENT_FORM} HTTP/1.1\r\nHost: api.example.com\r\n` +
+				"Authorization: Bearer typed-bearer-token\r\nX-Req-Key: req-typed-key\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				`<login pw="${XML_FORM}">col-secret-9</login>`,
+		},
+		response: {
+			headers: {
+				"Set-Cookie": "sid=resp-cookie-value; HttpOnly",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ echo: RUN_SECRET }),
+			bodyBytes: 4321,
+		},
+	};
+
+	const runClient = (overrides: Partial<Record<keyof EngineClient, unknown>>) =>
+		fakeClient({ ...runScopes(), ...overrides });
+
+	function expectRunOutputWithheld(text: string) {
+		for (const leak of RUN_LEAKS) expect(text, leak).not.toContain(leak);
+		expect(text).toContain("<redacted>");
+	}
+
+	/** A trace node pair after the mask: every value gone, every name, order and size kept. */
+	function expectTraceMasked(trace: typeof RUN_TRACE) {
+		expect(trace.request.url).toBe(
+			"https://api.example.com/v1?key=<redacted>&abc=1&plain=visible-value"
+		);
+		expect(trace.request.headers).toEqual({
+			Authorization: "<redacted>",
+			"X-Tenant-Key": "<redacted>",
+			"X-Echo": "<redacted>",
+			Accept: "*/*",
+		});
+		expect(JSON.parse(trace.request.body)).toEqual({ password: "<redacted>", region: "eu" });
+		expect(trace.request.rawRequest).toBe(
+			"POST /v1?key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"Authorization: <redacted>\r\nX-Req-Key: <redacted>\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				'<login pw="<redacted>"><redacted></login>'
+		);
+		expect(trace.response.headers).toEqual({
+			"Set-Cookie": "<redacted>",
+			"Content-Type": "application/json",
+		});
+		expect(JSON.parse(trace.response.body)).toEqual({ echo: "<redacted>" });
+		expect(trace.response.bodyBytes).toBe(4321);
+	}
+
+	const EXECUTE_ANSWER = {
+		status: 200,
+		headers: RUN_TRACE.response.headers,
+		requestHeaders: RUN_TRACE.request.headers,
+		rawRequest: RUN_TRACE.request.rawRequest,
+		body: { echo: RUN_SECRET },
+		bodyRaw: RUN_TRACE.response.body,
+		bodySize: 4321,
+		bodyCapped: false,
+	};
+
+	const sendRequest = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) =>
+		read(
+			"run_request",
+			client,
+			{ ...ALLOW_API, ...safety },
+			{
+				url: "https://api.example.com/v1",
+			}
+		);
+
+	test("run_request masks every secret form and credential header in the exchange", async () => {
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		const { text, body } = await sendRequest(client);
+		expectRunOutputWithheld(text);
+		expect(body).toEqual({
+			status: 200,
+			headers: { "Set-Cookie": "<redacted>", "Content-Type": "application/json" },
+			requestHeaders: {
+				Authorization: "<redacted>",
+				"X-Tenant-Key": "<redacted>",
+				"X-Echo": "<redacted>",
+				Accept: "*/*",
+			},
+			rawRequest:
+				"POST /v1?key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"Authorization: <redacted>\r\nX-Req-Key: <redacted>\r\n" +
+				"Cookie: {{session}}\r\nAccept: */*\r\n\r\n" +
+				'<login pw="<redacted>"><redacted></login>',
+			body: { echo: "<redacted>" },
+			bodyRaw: '{"echo":"<redacted>"}',
+			bodySize: 4321,
+			bodyCapped: false,
+		});
+	});
+
+	test("run_request returns the exchange as the engine answered it with reveal on", async () => {
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		const { body } = await sendRequest(client, REVEAL);
+		expect(body).toEqual(EXECUTE_ANSWER);
+		// The identity costs nothing: no secret is read to build it.
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
+	});
+
+	test("run_request masks the header an inline API-key auth names", async () => {
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				...EXECUTE_ANSWER,
+				requestHeaders: { "X-Inline-Key": "inline-typed-key" },
+			}),
+		});
+		const { text, body } = await read("run_request", client, ALLOW_API, {
+			url: "https://api.example.com/v1",
+			auth: { mode: "apikey", key: "X-Inline-Key", value: "inline-typed-key", in: "header" },
+		});
+		expect(text).not.toContain("inline-typed-key");
+		expect(body.requestHeaders).toEqual({ "X-Inline-Key": "<redacted>" });
+	});
+
+	test("run_request masks a streamed run's events unless revealed", async () => {
+		const events = [{ event: "token", data: `{"t":"glob-secret-1","u":"${PERCENT_FORM}"}` }];
+		const client = runClient({
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+			consumeStreamEvents: vi
+				.fn()
+				.mockResolvedValue({ events, completed: true, capReached: false }),
+		});
+		const args = { url: "https://api.example.com/v1", stream: true };
+		const withheld = await read("run_request", client, ALLOW_API, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.events).toEqual([
+			{ event: "token", data: '{"t":"<redacted>","u":"<redacted>"}' },
+		]);
+		const revealed = await read("run_request", client, { ...ALLOW_API, ...REVEAL }, args);
+		expect(revealed.body.events).toEqual(events);
+	});
+
+	const RUN_REPORT = {
+		metadata: { runId: "run_1", requestUrl: `https://api.example.com/v1?key=${QUERY_FORM}` },
+		summary: { totalRequests: 1 },
+		results: [{ id: 1, statusCode: 200, trace: RUN_TRACE }],
+	};
+
+	test("get_run_report masks the stored trace and keeps its shape", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const { text, body } = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expectRunOutputWithheld(text);
+		expectTraceMasked(body.results[0].trace);
+		expect(body.metadata.requestUrl).toBe("https://api.example.com/v1?key=<redacted>");
+		expect(body.summary).toEqual(RUN_REPORT.summary);
+	});
+
+	test("get_run_report returns the stored trace whole with reveal on", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const { body } = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(body).toEqual(RUN_REPORT);
+	});
+
+	test("get_run_report masks before it cuts, so no prefix of a secret survives the cut", async () => {
+		// The secret straddles the per-body cut: bounded first, its first three
+		// bytes would be left behind where no form can match them.
+		const body = "x".repeat(MAX_INLINE_BODY_BYTES - 3) + "col-secret-9" + "y".repeat(100);
+		const report = { results: [{ id: 1, trace: { response: { body } } }] };
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(report) });
+		const out = await read("get_run_report", client, undefined, { runId: "run_1" });
+		const cut = out.body.results[0].trace.response;
+		expect(cut.bodyTruncated).toBe(true);
+		expect(cut.body.endsWith("<re")).toBe(true);
+		expect(cut.body).not.toContain("col");
+	});
+
+	test("get_run_samples masks a sample's Set-Cookie and body unless revealed", async () => {
+		const samples = page([
+			{
+				resultId: 1,
+				response: {
+					headers: {
+						"set-cookie": "sid=resp-cookie-value",
+						"content-type": "text/plain",
+					},
+					body: `token=glob-secret-1&p=${PERCENT_FORM}`,
+					bodyBytes: 40,
+				},
+			},
+		]);
+		const client = runClient({ getRunSamples: vi.fn().mockResolvedValue(samples) });
+		const withheld = await read("get_run_samples", client, undefined, { runId: "run_1" });
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0].response).toEqual({
+			headers: { "set-cookie": "<redacted>", "content-type": "text/plain" },
+			body: "token=<redacted>&p=<redacted>",
+			bodyBytes: 40,
+		});
+		expect(withheld.body.pagination).toEqual(samples.pagination);
+		const revealed = await read("get_run_samples", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(samples);
+	});
+
+	const RUN_ROW = {
+		id: "run_1",
+		type: "design",
+		baseline: true,
+		summary: {
+			url: `https://api.example.com/v1?key=${PERCENT_FORM}`,
+			comment: "after rotating col-secret-9",
+		},
+	};
+
+	test("list_runs masks a run row's summary unless revealed", async () => {
+		const runs = page([RUN_ROW]);
+		const client = runClient({ listRuns: vi.fn().mockResolvedValue(runs) });
+		const withheld = await read("list_runs", client);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0].summary).toEqual({
+			url: "https://api.example.com/v1?key=<redacted>",
+			comment: "after rotating <redacted>",
+		});
+		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
+	});
+
+	test("set_run_baseline masks the run row it echoes unless revealed", async () => {
+		const client = runClient({ setRunBaseline: vi.fn().mockResolvedValue(RUN_ROW) });
+		const args = { runId: "run_1", baseline: true };
+		const withheld = await read("set_run_baseline", client, { allowWrites: true }, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.summary.url).toBe("https://api.example.com/v1?key=<redacted>");
+		const revealed = await read(
+			"set_run_baseline",
+			client,
+			{ allowWrites: true, ...REVEAL },
+			args
+		);
+		expect(revealed.body).toEqual(RUN_ROW);
+	});
+
+	test("get_inbox_captures masks a capture's credential headers and secrets unless revealed", async () => {
+		const captures = page([
+			{
+				id: 1,
+				method: "POST",
+				path: "/hook",
+				query: `token=${QUERY_FORM}`,
+				headers: { Authorization: "Bearer typed-bearer-token", "User-Agent": "sender/1" },
+				body: JSON.stringify({ key: RUN_SECRET }),
+				bodyBytes: 30,
+				bodyTruncated: false,
+			},
+		]);
+		const client = runClient({ getInboxCaptures: vi.fn().mockResolvedValue(captures) });
+		const withheld = await read("get_inbox_captures", client, undefined, {
+			inboxId: "inbox_1",
+		});
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.data[0]).toMatchObject({
+			query: "token=<redacted>",
+			headers: { Authorization: "<redacted>", "User-Agent": "sender/1" },
+			body: '{"key":"<redacted>"}',
+			bodyBytes: 30,
+		});
+		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
+		expect(revealed.body).toEqual(captures);
+	});
+
+	test("a failed secret lookup fails the read closed, naming the lookup and returning nothing", async () => {
+		const client = runClient({
+			getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			getRunReport: vi.fn().mockResolvedValue(RUN_REPORT),
+		});
+		const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toMatch(/masking .* could not complete, because the globals lookup/);
+		expect(text).toContain("engine hiccup");
+		// None of the report, masked or not: the other reads answered, but a
+		// partly masked record is the leak this refuses.
+		expect(text).not.toContain("api.example.com");
+		for (const leak of RUN_LEAKS) expect(text, leak).not.toContain(leak);
+		expect(res.content).toHaveLength(1);
+
+		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(RUN_REPORT);
+	});
+
+	test.each([
+		["list_runs", {}],
+		["get_run_samples", { runId: "run_1" }],
+		["get_inbox_captures", { inboxId: "inbox_1" }],
+		["run_request", { url: "https://api.example.com/v1" }],
+	])("%s fails closed on a failed secret lookup too", async (tool, args) => {
+		const client = runClient({
+			listAllRequests: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+			executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER),
+		});
+		const res = await dispatchTool(tool, args, ctxWith(client, ALLOW_API));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/the requests lookup .*failed \(engine hiccup\)/);
+	});
+
+	test("get_run_report masks a stored auth's literal key the engine wrote into the URL", async () => {
+		const STORED_KEY = "stored-query-key-77";
+		const report = {
+			results: [
+				{
+					id: 1,
+					trace: {
+						request: {
+							url: `https://api.example.com/v1?api_key=${STORED_KEY}`,
+							rawRequest: `GET /v1?api_key=${STORED_KEY} HTTP/1.1\r\nHost: api.example.com\r\n\r\n`,
+						},
+					},
+				},
+			],
+		};
+		const client = runClient({
+			listAllRequests: vi.fn().mockResolvedValue([
+				{
+					id: "r9",
+					auth: { mode: "apikey", key: "api_key", value: STORED_KEY, in: "query" },
+				},
+			]),
+			getRunReport: vi.fn().mockResolvedValue(report),
+		});
+		const withheld = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expect(withheld.text).not.toContain(STORED_KEY);
+		expect(withheld.body.results[0].trace.request).toEqual({
+			url: "https://api.example.com/v1?api_key=<redacted>",
+			rawRequest: "GET /v1?api_key=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n\r\n",
+		});
+		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(report);
+	});
+
+	/** Three saved requests: one that runs and fails a test, one off the allowlist, one that errors. */
+	const smokeClient = () =>
+		runClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r_ok", name: "Runs" },
+				{ id: "r_off", name: "Off the list" },
+				{ id: "r_err", name: "Errors" },
+			]),
+			composeRequest: vi.fn().mockImplementation((body: { requestId?: string }) =>
+				Promise.resolve(
+					body.requestId === "r_off"
+						? { method: "GET", url: "https://elsewhere.test/?k=glob-secret-1" }
+						: {
+								method: "GET",
+								url: `https://api.example.com/v1?key=${QUERY_FORM}&id=${body.requestId}`,
+							}
+				)
+			),
+			executeRequest: vi.fn().mockImplementation((payload: { url: string }) =>
+				payload.url.endsWith("r_err")
+					? Promise.reject(new Error(`connect failed for ${payload.url}`))
+					: Promise.resolve({
+							status: 200,
+							testResults: [
+								{ name: "token echoed", passed: false, error: "got col-secret-9" },
+							],
+						})
+			),
+		});
+
+	test("run_collection_smoke masks each row's URL, test lines and error unless revealed", async () => {
+		const client = smokeClient();
+		const args = { collectionId: "c1" };
+		const withheld = await read("run_collection_smoke", client, ALLOW_API, args);
+		expectRunOutputWithheld(withheld.text);
+		expect(withheld.body.results).toEqual([
+			{
+				name: "Runs",
+				method: "GET",
+				url: "https://api.example.com/v1?key=<redacted>&id=r_ok",
+				ok: false,
+				statusCode: 200,
+				tests: { total: 1, failed: 1, failures: ["token echoed: got <redacted>"] },
+			},
+			{
+				name: "Off the list",
+				method: "GET",
+				url: "https://elsewhere.test/?k=<redacted>",
+				ok: false,
+				skipped: true,
+				reason: expect.stringContaining("elsewhere.test"),
+			},
+			{
+				name: "Errors",
+				method: "GET",
+				url: "https://api.example.com/v1?key=<redacted>&id=r_err",
+				ok: false,
+				error: "connect failed for https://api.example.com/v1?key=<redacted>&id=r_err",
+			},
+		]);
+
+		const revealed = await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			args
+		);
+		expect(revealed.text).toContain(QUERY_FORM);
+		expect(revealed.body.results[1].url).toBe("https://elsewhere.test/?k=glob-secret-1");
+		expect(revealed.body.results[2].error).toContain(QUERY_FORM);
+	});
+
+	test("run_collection_smoke reads no secret to return its matrix with reveal on", async () => {
+		const client = smokeClient();
+		await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			{ collectionId: "c1" }
+		);
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
+	});
+
+	/** A composed load target carrying a secret in its query, a header and its auth block. */
+	const LOAD_TARGET = {
+		method: "GET",
+		url: `https://api.example.com/v1?key=${QUERY_FORM}`,
+		headers: { Authorization: "Bearer typed-bearer-token", "X-Echo": "glob-secret-1" },
+		auth: { mode: "bearer", token: "typed-bearer-token" },
+	};
+
+	const planLoadRun = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) => {
+		const elicit = vi.fn().mockRejectedValue(new Error("client does not support elicitation"));
+		const ctx = { ...ctxWith(client, { ...ALLOW_API, ...safety }), elicit };
+		return dispatchTool("start_load_run", { requestId: "req_1", duration: "10s" }, ctx);
+	};
+
+	test("start_load_run's preview shows the planned run masked, its auth withheld", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const preview = firstText(await planLoadRun(client));
+		expect(preview).toMatch(/AWAITING CONFIRMATION/);
+		expectRunOutputWithheld(preview);
+		const planned = JSON.parse(
+			preview.slice(preview.indexOf("{"), preview.lastIndexOf("}") + 1)
+		);
+		expect(planned).toMatchObject({
+			url: "https://api.example.com/v1?key=<redacted>",
+			headers: { Authorization: "<redacted>", "X-Echo": "<redacted>" },
+			auth: { mode: "bearer", tokenWithheld: true },
+		});
+		expect(planned.auth).not.toHaveProperty("token");
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run's confirmation question names the masked target", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const elicit = vi.fn().mockResolvedValue({ action: "decline" });
+		await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "10s" },
+			{ ...ctxWith(client, ALLOW_API), elicit }
+		);
+		const { message } = elicit.mock.calls[0][0] as { message: string };
+		expect(message).toContain("https://api.example.com/v1?key=<redacted>");
+		expect(message).not.toContain("p@ss");
+	});
+
+	test("start_load_run's preview is the planned run as composed with reveal on, with no secret read", async () => {
+		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
+		const preview = firstText(await planLoadRun(client, REVEAL));
+		expect(preview).toContain(QUERY_FORM);
+		expect(preview).toContain('"token": "typed-bearer-token"');
+		expect(client.getGlobals).not.toHaveBeenCalled();
+		expect(client.listAllRequests).not.toHaveBeenCalled();
+	});
+
+	test("compare_runs forwards no recorded string, so there is nothing for it to mask", async () => {
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_0", targetRunId: "run_1" },
+			ctxWith(client, REVEAL)
+		);
+		expect(res.isError).toBeFalsy();
+		for (const leak of RUN_LEAKS) expect(JSON.stringify(res), leak).not.toContain(leak);
+	});
+
+	const SPEC_DIFF = {
+		identical: false,
+		added: [],
+		removed: [],
+		unchanged: 0,
+		unmapped: 0,
+		changed: [
+			{
+				requestId: "req_1",
+				name: "Me",
+				fields: [
+					{
+						field: "headers",
+						current: "2: Authorization=Bearer typed-bearer-token, Accept=json",
+						next: "1: Accept=json",
+						userTouched: false,
+					},
+					{ field: "url", current: "{{baseUrl}}/me", next: "{{baseUrl}}/v2/me" },
+				],
+			},
+			{
+				requestId: "req_2",
+				name: "Referenced",
+				fields: [
+					{
+						field: "headers",
+						current: "1: Authorization={{token}}",
+						next: "0: none",
+						userTouched: true,
+					},
+				],
+			},
+		],
+	};
+
+	test("diff_spec withholds a stored header line that names a credential unless revealed", async () => {
+		const client = fakeClient({ diffSpec: vi.fn().mockResolvedValue(SPEC_DIFF) });
+		const args = { collectionId: "c1", content: "{}" };
+		const withheld = await read("diff_spec", client, undefined, args);
+		expect(withheld.text).not.toContain("typed-bearer-token");
+		expect(withheld.body.changed[0].fields).toEqual([
+			{ field: "headers", next: "1: Accept=json", userTouched: false, currentWithheld: true },
+			{
+				field: "url",
+				current: "{{baseUrl}}/me",
+				next: "{{baseUrl}}/v2/me",
+				userTouched: false,
+			},
+		]);
+		// A pure reference names where the secret lives without being it.
+		expect(withheld.body.changed[1].fields[0].current).toBe("1: Authorization={{token}}");
+		const revealed = await read("diff_spec", client, REVEAL, args);
+		expect(revealed.body.changed[0].fields[0].current).toBe(
+			"2: Authorization=Bearer typed-bearer-token, Accept=json"
+		);
+	});
+
+	test.each([
+		"run_request",
+		"get_run_report",
+		"get_run_samples",
+		"list_runs",
+		"set_run_baseline",
+		"get_inbox_captures",
+	])("%s says what it withholds from run output", (name) => {
+		expect(TOOLS.find((tool) => tool.name === name)?.description).toContain(
+			WITHHELD_RUN_OUTPUT_SENTENCE
+		);
 	});
 });
 
