@@ -88,6 +88,10 @@ request or collection, which the write tools can create, is not covered and
 still runs with your secrets, so leave write access off unless you want an
 agent to author them.
 
+This is not a sandbox, and one path remains open with reveal off: the answer
+`run_request` returns for a request sent with an OAuth 2.0 token the engine
+placed in the URL's query carries that token in `rawRequest` (#1845).
+
 An agent backed by a hosted model forwards what it reads to that model's
 provider. Treat connecting an agent as granting it read access to the rest of
 your workspace, and keep the server off until you want that.

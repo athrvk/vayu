@@ -1074,7 +1074,7 @@ function maskQueryPair(query: string, name: string): string {
  */
 function maskAuthQueryValue(url: string, names: readonly string[]): string {
 	const queryAt = url.indexOf("?");
-	if (queryAt === -1 || names.length === 0) return url;
+	if (queryAt === -1) return url;
 	const fragmentAt = url.indexOf("#");
 	if (fragmentAt !== -1 && fragmentAt < queryAt) return url;
 	const end = fragmentAt === -1 ? url.length : fragmentAt;
@@ -1094,6 +1094,11 @@ function maskRequestLine(frame: string, names: readonly string[]): string {
 	return target + version + (end === -1 ? "" : frame.slice(end));
 }
 
+interface RecordMasking {
+	apiKeyHeaders: readonly string[];
+	authQueryNames: readonly string[];
+}
+
 /**
  * What the engine's trace says auth wrote into one request record (#1835): the
  * query parameter's raw name (`authQueryParam`) and the header names
@@ -1102,11 +1107,6 @@ function maskRequestLine(frame: string, names: readonly string[]): string {
  * `encode_query_component` wrote it unless `disableUrlEncoding` was set, so both
  * spellings are matched. Anything of another type reads as nothing written.
  */
-interface RecordMasking {
-	apiKeyHeaders: readonly string[];
-	authQueryNames: readonly string[];
-}
-
 function recordMasking(record: Record<string, unknown>, rule: RunOutputRule): RecordMasking {
 	const param = record.authQueryParam;
 	const written = Array.isArray(record.authHeaders) ? record.authHeaders : [];
