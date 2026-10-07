@@ -359,6 +359,16 @@ struct Request {
      *        transfer log on top of the shared field list.
      */
     std::vector<std::string> secret_header_names;
+    /**
+     * @brief The raw (unencoded) name of the query parameter `apply_auth`
+     *        appended to `url` for a credential (API-key-in-query, or an OAuth
+     *        2.0 token placed in the query), empty when auth wrote none.
+     *
+     * The stored trace records it (`request.authQueryParam`, #1835) because the
+     * URL alone cannot say which parameter auth wrote: a reader that masks
+     * credentials needs the name, and guessing from the value is not possible.
+     */
+    std::string auth_query_param;
     Body body;
 
     // Options

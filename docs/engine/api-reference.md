@@ -5901,6 +5901,17 @@ on a step that sent nothing and on rows written before the field existed; see
 for the reason [Security](architecture.md#security) records: a trace is the
 record of what was sent.
 
+**The stored trace also names what auth wrote** (#1835), as two additive keys on
+`trace_data.request`: `authQueryParam`, the raw (unencoded) name of the query
+parameter `apply_auth` appended to the URL for an API key with `in: "query"` or
+an OAuth 2.0 token with `tokenPlacement: "query"`, and `authHeaders`, the array
+of header names an API-key block filled. The URL alone cannot say which query
+parameter is a credential, and a reader that masks one (the MCP server) needs
+the name. Each key is **absent** when auth wrote none of that kind, never an
+empty string or array, and absent on rows written before the field; the values
+beside them stay raw. A pre-request script that retargets the URL can leave
+`authQueryParam` naming a parameter the final URL no longer carries.
+
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
 `"test"` for the post-request one) and `level` is the `console.*` method that was

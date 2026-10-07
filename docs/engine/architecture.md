@@ -1384,7 +1384,10 @@ record shape, the category list, the redaction rule and the file layout
   engine and History keep them raw by decision; the MCP server masks a secret
   variable's value and a credential header's value in them on the way to an
   agent (`<redacted>`, unless the user turned on Reveal secrets to agents,
-  [mcp.md](mcp.md#secret-values), #1809). What
+  [mcp.md](mcp.md#secret-values), #1809). The trace names what auth wrote so
+  that masking has something to go on - `request.authQueryParam` (the raw name
+  of the query parameter auth appended) and `request.authHeaders`, each absent
+  when auth wrote none (#1835). What
   bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.
 

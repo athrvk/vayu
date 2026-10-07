@@ -280,6 +280,45 @@ TEST (ExecutionTrace, OmitsRawRequestWhenNothingWasSent) {
     EXPECT_FALSE (trace["request"].contains ("rawRequest"));
 }
 
+// Which parameter and headers `apply_auth` wrote (#1835): the URL and the
+// composed map cannot say, and a reader that masks credentials needs the names.
+TEST (ExecutionTrace, RecordsTheAuthWrittenQueryParamAndHeaders) {
+    auto request                = make_request ();
+    request.url                 = "http://127.0.0.1/health?api%20key=s3cret";
+    request.auth_query_param    = "api key";
+    request.secret_header_names = { "X-Api-Key", "X-Other" };
+
+    auto trace = build_result_trace (request, make_response ());
+
+    EXPECT_EQ (trace["request"]["authQueryParam"], "api key");
+    EXPECT_EQ (trace["request"]["authHeaders"],
+    (nlohmann::json::array ({ "X-Api-Key", "X-Other" })));
+}
+
+// Omitted, never stored empty: a reader tells "auth wrote nothing" from "auth
+// wrote this" by the key, and every row stored before the field has neither.
+TEST (ExecutionTrace, OmitsTheAuthProvenanceWhenAuthWroteNone) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace["request"].contains ("authQueryParam"));
+    EXPECT_FALSE (trace["request"].contains ("authHeaders"));
+}
+
+// The two keys are independent: a header-placed key says nothing about a query.
+TEST (ExecutionTrace, RecordsOnlyTheAuthKindThatWasWritten) {
+    auto request                = make_request ();
+    request.secret_header_names = { "X-Api-Key" };
+    auto trace = build_result_trace (request, make_response ());
+    EXPECT_TRUE (trace["request"].contains ("authHeaders"));
+    EXPECT_FALSE (trace["request"].contains ("authQueryParam"));
+
+    auto query_only             = make_request ();
+    query_only.auth_query_param = "token";
+    trace = build_result_trace (query_only, make_response ());
+    EXPECT_TRUE (trace["request"].contains ("authQueryParam"));
+    EXPECT_FALSE (trace["request"].contains ("authHeaders"));
+}
+
 // A transfer that failed before sending has no frame to read, but `Client::send`
 // synthesizes one from the composed request - so an unreachable host still
 // stores the request it attempted, on the branch that writes no response node.

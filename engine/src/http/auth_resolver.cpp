@@ -110,6 +110,7 @@ resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Data
                 param = "access_token";
             }
             append_query_param (req->url, param, token.access_token, !req->disable_url_encoding);
+            req->auth_query_param = param;
         } else if (req->headers.count ("Authorization") == 0) {
             req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
         }
@@ -237,6 +238,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
             }
             if (a.in_query) {
                 append_query_param (req.url, a.key, a.value, !req.disable_url_encoding);
+                req.auth_query_param = a.key;
             } else if (req.headers.count (a.key) == 0) {
                 req.headers[a.key] = a.value;
                 req.secret_header_names.push_back (a.key);

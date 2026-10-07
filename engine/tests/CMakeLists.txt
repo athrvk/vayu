@@ -339,6 +339,7 @@ vayu_embed_windows_manifest(vayu_tests)
 # false positive. Re-derive it the same way rather than by eye.
 set(vayu_scratch_database_suites
     AuthRefreshTuningTest
+    AuthResolverOAuth2Test
     ClientCertificateDbTest
     CollectMetrics
     BinaryBodyLoadRun
