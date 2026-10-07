@@ -63,6 +63,9 @@ export const REDACTED_MARKER = "<redacted>";
 /** What a read of run output says about the secrets the run sent. */
 export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
+/** What `get_mock_activity` says about the paths a mock server logged. */
+export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
+
 /** What `start_load_run` says about its confirmation preview's planned run. */
 export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
 

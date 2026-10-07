@@ -73,6 +73,7 @@ import {
 	WITHHELD_DIAGNOSE_SENTENCE,
 	WITHHELD_HEADER_DIFF_SENTENCE,
 	WITHHELD_HEADER_SENTENCE,
+	WITHHELD_MOCK_ACTIVITY_SENTENCE,
 	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
@@ -8594,7 +8595,8 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty.",
+			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty. " +
+			WITHHELD_MOCK_ACTIVITY_SENTENCE,
 		annotations: {
 			title: "Get mock server activity",
 			readOnlyHint: true,
@@ -8611,10 +8613,12 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("At most this many entries (default 50, max 200)."),
 		},
-		handler: (args, ctx, signal) => {
+		handler: async (args, ctx, signal) => {
 			const limit = args.limit as number | undefined;
-			return callEngine(() =>
-				ctx.client.getMockServerActivity(requireStr(args, "mockId"), limit ?? 50, signal)
+			const mockId = requireStr(args, "mockId");
+			return callEngine(
+				() => ctx.client.getMockServerActivity(mockId, limit ?? 50, signal),
+				await runOutputShape(ctx, signal)
 			);
 		},
 	},

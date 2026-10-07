@@ -38,7 +38,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type EngineClient,
 } from "./engine-client.js";
-import { WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
+import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
 /**
@@ -10683,6 +10683,36 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(captures);
 	});
 
+	test("get_mock_activity masks a secret in a logged path unless revealed", async () => {
+		// The engine logs `req.path`, which cpp-httplib splits from the query, so a
+		// query never reaches the log today; the by-value mask covers it all the same.
+		const activity = {
+			data: [
+				{
+					at_ms: 3,
+					method: "GET",
+					path: `/db/${PERCENT_FORM}`,
+					status: 200,
+					request_id: "r1",
+				},
+				{ at_ms: 2, method: "GET", path: `/x?token=${QUERY_FORM}`, status: 404 },
+				{ at_ms: 1, method: "GET", path: "/db/glob-secret-1/ping", status: 501 },
+				{ at_ms: 0, method: "POST", path: "/health", status: 200, injected_error: false },
+			],
+		};
+		const client = runClient({ getMockServerActivity: vi.fn().mockResolvedValue(activity) });
+		const withheld = await read("get_mock_activity", client, undefined, { mockId: "mock_1" });
+		for (const leak of RUN_LEAKS) expect(withheld.text, leak).not.toContain(leak);
+		expect(withheld.body.data).toEqual([
+			{ ...activity.data[0], path: "/db/<redacted>" },
+			{ ...activity.data[1], path: "/x?token=<redacted>" },
+			{ ...activity.data[2], path: "/db/<redacted>/ping" },
+			activity.data[3],
+		]);
+		const revealed = await read("get_mock_activity", client, REVEAL, { mockId: "mock_1" });
+		expect(revealed.body).toEqual(activity);
+	});
+
 	test("a failed secret lookup fails the read closed, naming the lookup and returning nothing", async () => {
 		const client = runClient({
 			getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
@@ -10707,6 +10737,7 @@ describe("secret withholding", () => {
 		["list_runs", {}],
 		["get_run_samples", { runId: "run_1" }],
 		["get_inbox_captures", { inboxId: "inbox_1" }],
+		["get_mock_activity", { mockId: "mock_1" }],
 		["run_request", { url: "https://api.example.com/v1" }],
 	])("%s fails closed on a failed secret lookup too", async (tool, args) => {
 		const client = runClient({
@@ -10967,6 +10998,12 @@ describe("secret withholding", () => {
 	])("%s says what it withholds from run output", (name) => {
 		expect(TOOLS.find((tool) => tool.name === name)?.description).toContain(
 			WITHHELD_RUN_OUTPUT_SENTENCE
+		);
+	});
+
+	test("get_mock_activity says what it withholds", () => {
+		expect(TOOLS.find((tool) => tool.name === "get_mock_activity")?.description).toContain(
+			WITHHELD_MOCK_ACTIVITY_SENTENCE
 		);
 	});
 });
