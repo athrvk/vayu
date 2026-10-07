@@ -1240,7 +1240,7 @@ constant no density setting should move.
 targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
 must not carry below it: a chrome band is an anchor, not a list row; an
 interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
-legibility floor. Nine named steps, outside the `--spacing` multiplier,
+legibility floor. Ten named steps, outside the `--spacing` multiplier,
 generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
 these. They live in a plain `@theme` block in `index.css`, deliberately not
 `@theme inline`: `inline` bakes a literal into each generated utility instead
@@ -1253,8 +1253,9 @@ below.
 | `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
 | `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
-| `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
-| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
+| `--spacing-control` | `h-control` | 28px | 36px | `Input` default, `Select`, `Button` default, the URL bar's controls |
+| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs, `Input` `size="sm"` |
+| `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
@@ -1268,11 +1269,11 @@ piece of chrome in the app that could follow no token at all, and the rows still
 breathe with the density setting because their own padding and gaps ride
 `--spacing`. `header-band.test.ts` fails on any element that paints a band (a
 bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
-`control-sm` and `target` scale on their own schedule under
+`control-sm`, `control-xs` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at
 either density. `density.test.ts` and `chrome-floors.test.ts` guard both
-halves of this: the former that the nine steps are declared with these
+halves of this: the former that the ten steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them. The latter also scans every non-test file for a
@@ -1281,15 +1282,24 @@ latter that the chrome bands, interactive targets and icon classes across
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
 under 24px: such an override outranks the size variant in emission order. A
 compact text button or select trigger states `h-control-sm`, an icon button
-`size-target`. `Input` is scanned too, by a rule of its own (#1830): a text
-input is the height of its row, or the compact control height when it stands
-alone. An input in a fixed-height list row (a tree row's inline rename) states
-`h-full` and takes the row's height at either density; one that stands alone, or
-sits in a row whose height it sets itself (a table cell, a label beside its
-field), states `h-control-sm` or nothing and keeps `h-control`. A numeric
-`h-N`, an arbitrary `h-[...]` or a fractional height on an `Input` fails the
-sweep, because each is a third height the row never agreed to. Small inputs are
-fine; mixed heights are not. The tree-row controls are 24px at Default inside
+`size-target`. `Input` is scanned too, by a rule of its own (#1830): **an input
+states its size, never its height.** It takes `size` from three of these tokens,
+and its `className` carries no height class of any kind (`h-N`, `h-[...]`, a
+fraction, `h-full`, `h-control*`, `size-N`; `min-h` and `max-h` are fine):
+
+| `size` | Token | Default | Comfortable | Use |
+|--------|-------|---------|-------------|-----|
+| (none) | `control` | 28px | 36px | A standalone input |
+| `"sm"` | `control-sm` | 24px | 32px | A dense standalone input: dialog rows, filters, the console filter, the schema explorer search, a table-cell editor, a label beside its field |
+| `"xs"` | `control-xs` | 20px | 24px | A field inside a `target` row: the inline renames |
+
+A numeric step is a height the row never agreed to, and `h-full` makes the
+input's height whatever its row happens to be; a size names a token, so every
+input is one of three heights and Comfortable follows. `size="xs"` on an input that stands alone is a
+review matter, since the scan cannot know the row. The `xs` field is pulled
+back by exactly its own padding (`-ml-1.5` with `px-1.5`) so the text does not
+move when rename begins, and takes the focus colour on its border in place of
+the ring. The tree-row controls are 24px at Default inside
 24px rows, so they carry `size-target` rather than an exemption.
 
 ---

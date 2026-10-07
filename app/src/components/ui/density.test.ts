@@ -63,7 +63,8 @@ describe("interface density", () => {
 	});
 
 	// Issue #1679: named floor steps, outside the --spacing multiplier -
-	// nine of them since #1688 added the two wider chrome bands -
+	// ten of them since #1688 added the two wider chrome bands and #1830
+	// `control-xs` -
 	// see the "Chrome, Target and Icon Floors" table in docs/design-system.md
 	// and design-system-doc.test.ts, which checks that doc's numbers against
 	// these same declarations.
@@ -78,7 +79,7 @@ describe("interface density", () => {
 		const themeClose = css.indexOf("\n}", themeOpen);
 		const theme = css.slice(themeOpen, themeClose);
 
-		it("declares all nine steps in a plain @theme block, as literal px", () => {
+		it("declares all ten steps in a plain @theme block, as literal px", () => {
 			expect(themeOpen).toBeGreaterThan(-1);
 			for (const [name, px] of [
 				["--spacing-band", 32],
@@ -87,6 +88,7 @@ describe("interface density", () => {
 				["--spacing-banner", 36],
 				["--spacing-control", 28],
 				["--spacing-control-sm", 24],
+				["--spacing-control-xs", 20],
 				["--spacing-target", 24],
 				["--spacing-icon", 16],
 				["--spacing-icon-sm", 12],
@@ -121,6 +123,7 @@ describe("interface density", () => {
 				"--spacing-banner",
 				"--spacing-control",
 				"--spacing-control-sm",
+				"--spacing-control-xs",
 				"--spacing-target",
 				"--spacing-icon",
 				"--spacing-icon-sm",

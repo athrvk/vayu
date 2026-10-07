@@ -160,7 +160,7 @@
  * utility for every `--spacing-*` theme key) rather than one-off arbitrary
  * values. `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
  * theme-independent;
- * `control`, `control-sm` and `target` are the three density scales on its
+ * `control`, `control-sm`, `control-xs` and `target` are the four density scales on its
  * own scale, under `[data-density="comfortable"]` below - the same
  * mechanism `--spacing` itself uses.
  *
@@ -203,6 +203,7 @@
 	--spacing-banner: 36px;
 	--spacing-control: 28px;
 	--spacing-control-sm: 24px;
+	--spacing-control-xs: 20px;
 	--spacing-target: 24px;
 	--spacing-icon: 16px;
 	--spacing-icon-sm: 12px;
@@ -557,14 +558,16 @@
 	[data-density="comfortable"] {
 		--spacing: 0.25rem;
 		/*
-		 * The three floors that scale with density (issue #1679): `control`,
-		 * `control-sm` and `target`, set here to their Comfortable values.
+		 * The four floors that scale with density (issue #1679, `control-xs` from
+		 * #1830): `control`, `control-sm`, `control-xs` and `target`, set here to
+		 * their Comfortable values.
 		 * `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` stay put
 		 * at every density - no override for them exists in this block - per the
 		 * table in docs/design-system.md.
 		 */
 		--spacing-control: 36px;
 		--spacing-control-sm: 32px;
+		--spacing-control-xs: 24px;
 		--spacing-target: 28px;
 	}
 

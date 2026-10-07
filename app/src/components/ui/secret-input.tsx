@@ -18,13 +18,15 @@ import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconSwap } from "./icon-swap";
 import { TooltipIconButton } from "./tooltip-icon-button";
-import { Input } from "./input";
+import { Input, type InputProps } from "./input";
 
 interface SecretInputProps {
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;
 	className?: string;
+	/** Forwarded to the `Input`: a dense host (a table cell) states `sm`. */
+	size?: InputProps["size"];
 	disabled?: boolean;
 	/**
 	 * Read-only display: the value can be revealed but not edited. The eye toggle
@@ -49,6 +51,7 @@ export function SecretInput({
 	onChange,
 	placeholder,
 	className,
+	size,
 	disabled,
 	readOnly,
 	"aria-label": ariaLabel,
@@ -62,6 +65,7 @@ export function SecretInput({
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
 				onBlur={onBlur}
+				size={size}
 				placeholder={placeholder}
 				disabled={disabled}
 				readOnly={readOnly}
