@@ -621,6 +621,173 @@ describe("withholdRunOutput", () => {
 	});
 });
 
+describe("withholdRunOutput: what auth wrote into a request record (#1835)", () => {
+	const rule: RunOutputRule = { forms: secretForms(["s3cret-value"]), apiKeyHeaders: [] };
+	const TOKEN = "tok-from-oauth-77";
+	const frame = (target: string, body = "") =>
+		`GET ${target} HTTP/1.1\r\nHost: x.test\r\n\r\n${body}`;
+
+	test("masks the named parameter's value in the url and the request line, and only there", () => {
+		const request = {
+			authQueryParam: "access_token",
+			url: `https://x.test/v1?page=2&access_token=${TOKEN}&sort=asc`,
+			rawRequest: frame(`/v1?page=2&access_token=${TOKEN}&sort=asc`, `access_token=${TOKEN}`),
+			body: `{"access_token":"${TOKEN}"}`,
+		};
+		expect(withholdRunOutput(request, rule)).toEqual({
+			authQueryParam: "access_token",
+			url: "https://x.test/v1?page=2&access_token=<redacted>&sort=asc",
+			rawRequest: frame(
+				"/v1?page=2&access_token=<redacted>&sort=asc",
+				`access_token=${TOKEN}`
+			),
+			body: `{"access_token":"${TOKEN}"}`,
+		});
+	});
+
+	test("reads the request line only, so a header line that looks like one is left", () => {
+		const request = {
+			authQueryParam: "k",
+			rawRequest: `GET /p?k=${TOKEN} HTTP/1.1\r\nReferer: https://x.test/?k=${TOKEN}\r\n\r\n`,
+		};
+		expect(withholdRunOutput(request, rule)).toEqual({
+			authQueryParam: "k",
+			rawRequest: `GET /p?k=<redacted> HTTP/1.1\r\nReferer: https://x.test/?k=${TOKEN}\r\n\r\n`,
+		});
+	});
+
+	test("masks every pair of that name, the one the user typed included", () => {
+		const request = {
+			authQueryParam: "api_key",
+			url: "https://x.test/?api_key=typed&api_key=sent",
+		};
+		expect(withholdRunOutput(request, rule)).toEqual({
+			...request,
+			url: "https://x.test/?api_key=<redacted>&api_key=<redacted>",
+		});
+	});
+
+	test("matches the whole name: api_key leaves api_key2 and xapi_key alone", () => {
+		const url = "https://x.test/?api_key2=a&xapi_key=b&API_KEY=c&api_key=d";
+		expect(withholdRunOutput({ authQueryParam: "api_key", url }, rule)).toEqual({
+			authQueryParam: "api_key",
+			url: "https://x.test/?api_key2=a&xapi_key=b&API_KEY=c&api_key=<redacted>",
+		});
+	});
+
+	test("keeps a lone {{variable}} and an empty value as written", () => {
+		const request = { authQueryParam: "k", url: "https://x.test/?k={{apiKey}}&k=" };
+		expect(withholdRunOutput(request, rule)).toEqual(request);
+	});
+
+	test("does not read the fragment as the query, and masks neither a fragment nor a query-less url", () => {
+		const request = {
+			authQueryParam: "k",
+			url: `https://x.test/?k=${TOKEN}#k=${TOKEN}`,
+		};
+		expect(withholdRunOutput(request, rule)).toEqual({
+			...request,
+			url: `https://x.test/?k=<redacted>#k=${TOKEN}`,
+		});
+		const bare = { authQueryParam: "k", url: `https://x.test/path#k=${TOKEN}` };
+		expect(withholdRunOutput(bare, rule)).toEqual(bare);
+	});
+
+	test("finds a name the engine percent-encoded as well as one it wrote raw", () => {
+		const name = "api key=1";
+		const encoded = `https://x.test/?page=1&api%20key%3D1=${TOKEN}`;
+		const raw = `https://x.test/?page=1&${name}=${TOKEN}`;
+		expect(withholdRunOutput({ authQueryParam: name, url: encoded }, rule)).toEqual({
+			authQueryParam: name,
+			url: "https://x.test/?page=1&api%20key%3D1=<redacted>",
+		});
+		expect(withholdRunOutput({ authQueryParam: name, url: raw }, rule)).toEqual({
+			authQueryParam: name,
+			url: `https://x.test/?page=1&${name}=<redacted>`,
+		});
+	});
+
+	test("treats a name holding regex syntax as the literal text", () => {
+		const request = {
+			authQueryParam: "a.b[0]+",
+			url: "https://x.test/?aXb[0]+=keep&a.b[0]+=drop",
+		};
+		expect(withholdRunOutput(request, rule)).toEqual({
+			...request,
+			url: "https://x.test/?aXb[0]+=keep&a.b[0]+=<redacted>",
+		});
+	});
+
+	test("masks the headers authHeaders names, in every header set and the wire block, by any case", () => {
+		const record = {
+			authHeaders: ["X-Session", " X-Tenant "],
+			headers: { "X-Session": "abc", "x-tenant": "t-1", Accept: "*/*" },
+			sentHeaders: { "X-SESSION": "abc" },
+			rawRequest: "GET / HTTP/1.1\r\nx-session: abc\r\nX-Tenant: t-1\r\nAccept: */*\r\n\r\n",
+		};
+		expect(withholdRunOutput(record, rule)).toEqual({
+			authHeaders: ["X-Session", " X-Tenant "],
+			headers: { "X-Session": "<redacted>", "x-tenant": "<redacted>", Accept: "*/*" },
+			sentHeaders: { "X-SESSION": "<redacted>" },
+			rawRequest:
+				"GET / HTTP/1.1\r\nx-session: <redacted>\r\nX-Tenant: <redacted>\r\nAccept: */*\r\n\r\n",
+		});
+	});
+
+	test("applies the names to their own record only", () => {
+		const trace = {
+			request: { authHeaders: ["X-Session"], headers: { "X-Session": "abc" } },
+			response: { headers: { "X-Session": "echoed" } },
+			sibling: { headers: { "X-Session": "other" } },
+		};
+		expect(withholdRunOutput(trace, rule)).toEqual({
+			request: { authHeaders: ["X-Session"], headers: { "X-Session": "<redacted>" } },
+			response: { headers: { "X-Session": "echoed" } },
+			sibling: { headers: { "X-Session": "other" } },
+		});
+	});
+
+	test.each([
+		["a number", 7],
+		["null", null],
+		["a list", ["k"]],
+		["an object", { name: "k" }],
+		["an empty string", ""],
+	])("reads %s as an authQueryParam as nothing written", (_, authQueryParam) => {
+		const request = {
+			authQueryParam,
+			url: `https://x.test/?k=${TOKEN}`,
+			rawRequest: frame(`/?k=${TOKEN}`),
+		};
+		expect(withholdRunOutput(request, rule)).toEqual(request);
+	});
+
+	test.each([
+		["a string", "X-Session"],
+		["an object", { "X-Session": true }],
+		["a list of non-strings", [1, null, "", "  "]],
+	])("reads %s as authHeaders as nothing written", (_, authHeaders) => {
+		const request = { authHeaders, headers: { "X-Session": "abc" } };
+		expect(withholdRunOutput(request, rule)).toEqual(request);
+	});
+
+	test("passes a non-string url and rawRequest through", () => {
+		const request = { authQueryParam: "k", url: 5, rawRequest: ["GET /?k=v HTTP/1.1"] };
+		expect(withholdRunOutput(request, rule)).toEqual(request);
+	});
+
+	test("keeps the header names the rule already holds, beside the record's", () => {
+		const record = {
+			authHeaders: ["X-Session"],
+			headers: { "X-Session": "a", "X-Tenant": "t" },
+		};
+		expect(withholdRunOutput(record, { ...rule, apiKeyHeaders: ["x-tenant"] })).toEqual({
+			authHeaders: ["X-Session"],
+			headers: { "X-Session": "<redacted>", "X-Tenant": "<redacted>" },
+		});
+	});
+});
+
 describe("runOutputShape", () => {
 	const scopes = () => ({
 		getGlobals: vi.fn().mockResolvedValue({

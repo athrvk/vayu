@@ -71,8 +71,9 @@ proxy URL are withheld wherever an agent reads what you
 stored, and what a write tool echoes back is withheld the same way. What a run
 recorded - a trace, a report, a sample, a run row, an inbox capture, a smoke
 run's rows, a load run's confirmation preview - reads `<redacted>` wherever a
-secret variable's value, a credential typed into a saved auth block or a
-credential header's value appears, whatever encoding it went out in. If Vayu
+secret variable's value, a credential typed into a saved auth block, a
+credential header's value or the token or key Vayu itself placed in the URL's
+query or a header appears, whatever encoding it went out in. If Vayu
 cannot read the values it masks against, the agent gets an error in place of
 the record, never a partly masked one. Requests an agent sends still use the
 real values; the engine fills them in. Clearing a variable's secret flag, the
@@ -86,11 +87,6 @@ included, so the call is refused before anything is sent. A script stored on a
 request or collection, which the write tools can create, is not covered and
 still runs with your secrets, so leave write access off unless you want an
 agent to author them.
-
-This is not a sandbox, and one path remains open with reveal off. A credential
-the engine writes itself, such as an OAuth 2.0 token it placed in the URL's
-query, or an API key sent inline with one request and read back later, is not
-recognised as a secret in a trace (#1835).
 
 An agent backed by a hosted model forwards what it reads to that model's
 provider. Treat connecting an agent as granting it read access to the rest of

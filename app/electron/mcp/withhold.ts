@@ -36,7 +36,9 @@
  * that references a secret still sends it, so the record of what was sent
  * carries the resolved value in whatever encoding it went out in; that value
  * is masked in place with the engine's `<redacted>` marker, the rule the engine
- * applies to a run's config snapshot (#1803), so the record keeps its shape.
+ * applies to a run's config snapshot (#1803), so the record keeps its shape. A
+ * credential no stored row holds - an OAuth 2.0 token the engine fetched - is
+ * masked by where the trace says auth wrote it (#1835).
  */
 
 import type { McpSafetyConfig } from "./config.js";
@@ -69,7 +71,7 @@ export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password
 export const REDACTED_MARKER = "<redacted>";
 
 /** What a read of run output says about the secrets the run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
 /** What `get_mock_activity` says about the paths a mock server logged. */
 export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
@@ -886,11 +888,14 @@ const QUERY_VALUE_ASCII: ReadonlySet<number> = new Set(
 	[...` "#'<>&`].map((char) => char.charCodeAt(0))
 );
 
-function percentEncodeQueryValue(text: string): string {
+/** A key encodes `=` as well; a value cannot split a pair, because a parser splits on the first `=`. */
+const QUERY_KEY_ASCII: ReadonlySet<number> = new Set([...QUERY_VALUE_ASCII, "=".charCodeAt(0)]);
+
+function percentEncodeQuery(text: string, ascii: ReadonlySet<number>): string {
 	let out = "";
 	for (const byte of utf8.encode(text)) {
 		out +=
-			byte < 0x20 || byte > 0x7e || QUERY_VALUE_ASCII.has(byte)
+			byte < 0x20 || byte > 0x7e || ascii.has(byte)
 				? percentByte(byte)
 				: String.fromCharCode(byte);
 	}
@@ -907,6 +912,21 @@ function tokenEnd(text: string, at: number): number {
 	return -1;
 }
 
+function encodeQueryComponent(text: string, ascii: ReadonlySet<number>): string {
+	let out = "";
+	let plain = 0;
+	for (let at = 0; at < text.length;) {
+		const end = tokenEnd(text, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		out += percentEncodeQuery(text.slice(plain, at), ascii) + text.slice(at, end);
+		plain = at = end;
+	}
+	return out + percentEncodeQuery(text.slice(plain), ascii);
+}
+
 /**
  * The engine's `encode_query_component (text, QueryPart::Value)`, which a query
  * value composition writes goes through: Postman's set, a whole `{{...}}`
@@ -916,18 +936,12 @@ function tokenEnd(text: string, at: number): number {
  * `engine/tests/fixtures/query-encoding-conformance.json`.
  */
 export function encodeQueryValue(text: string): string {
-	let out = "";
-	let plain = 0;
-	for (let at = 0; at < text.length;) {
-		const end = tokenEnd(text, at);
-		if (end === -1) {
-			at++;
-			continue;
-		}
-		out += percentEncodeQueryValue(text.slice(plain, at)) + text.slice(at, end);
-		plain = at = end;
-	}
-	return out + percentEncodeQueryValue(text.slice(plain));
+	return encodeQueryComponent(text, QUERY_VALUE_ASCII);
+}
+
+/** {@link encodeQueryValue} for `QueryPart::Key`, the form of a name auth appended (#1835). */
+export function encodeQueryKey(text: string): string {
+	return encodeQueryComponent(text, QUERY_KEY_ASCII);
 }
 
 /**
@@ -1036,18 +1050,100 @@ function withholdHeaderSet(headers: unknown, apiKeyHeaders: readonly string[]): 
 /** A member holding a header set: `headers`, a trace's `sentHeaders`, a response's `requestHeaders`. */
 const HEADER_SET_MEMBER = /headers$/i;
 
-function withholdRunMember(key: string, value: unknown, rule: RunOutputRule): unknown {
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** One `name=value` pair of a query, found at its start or after a `&`, up to the next `&`. */
+function queryPairOf(name: string): RegExp {
+	return new RegExp(`(^|&)(${escapeRegExp(name)})=([^&]*)`, "g");
+}
+
+/** @p query with the value of each pair named @p name masked; an empty value or a lone `{{variable}}` is kept. */
+function maskQueryPair(query: string, name: string): string {
+	return query.replace(queryPairOf(name), (pair, lead: string, written: string, value: string) =>
+		value === "" || isVariableReference(value) ? pair : `${lead}${written}=${REDACTED_MARKER}`
+	);
+}
+
+/**
+ * @p url with the value of each query pair named in @p names masked. The query
+ * is what sits between the first `?` and the first `#`, as the engine's
+ * `append_query_param` reads it; a pair is matched on its whole name, so
+ * `api_key` leaves `api_key2` alone, and the body of a request is never a URL.
+ */
+function maskAuthQueryValue(url: string, names: readonly string[]): string {
+	const queryAt = url.indexOf("?");
+	if (queryAt === -1 || names.length === 0) return url;
+	const fragmentAt = url.indexOf("#");
+	if (fragmentAt !== -1 && fragmentAt < queryAt) return url;
+	const end = fragmentAt === -1 ? url.length : fragmentAt;
+	const query = names.reduce(maskQueryPair, url.slice(queryAt + 1, end));
+	return `${url.slice(0, queryAt + 1)}${query}${url.slice(end)}`;
+}
+
+/** The ` HTTP/1.1` a request line ends with, which is not part of its target. */
+const REQUEST_LINE_VERSION = / HTTP\/[\d.]+$/;
+
+/** A `rawRequest` frame whose request line (the first line only) has the auth query value masked. */
+function maskRequestLine(frame: string, names: readonly string[]): string {
+	const end = frame.search(/\r?\n/);
+	const line = end === -1 ? frame : frame.slice(0, end);
+	const version = REQUEST_LINE_VERSION.exec(line)?.[0] ?? "";
+	const target = maskAuthQueryValue(line.slice(0, line.length - version.length), names);
+	return target + version + (end === -1 ? "" : frame.slice(end));
+}
+
+/**
+ * What the engine's trace says auth wrote into one request record (#1835): the
+ * query parameter's raw name (`authQueryParam`) and the header names
+ * (`authHeaders`), neither of which the URL or a header set can show on their
+ * own. The stored value is raw, but the URL carries the name as
+ * `encode_query_component` wrote it unless `disableUrlEncoding` was set, so both
+ * spellings are matched. Anything of another type reads as nothing written.
+ */
+interface RecordMasking {
+	apiKeyHeaders: readonly string[];
+	authQueryNames: readonly string[];
+}
+
+function recordMasking(record: Record<string, unknown>, rule: RunOutputRule): RecordMasking {
+	const param = record.authQueryParam;
+	const written = Array.isArray(record.authHeaders) ? record.authHeaders : [];
+	return {
+		apiKeyHeaders: [
+			...rule.apiKeyHeaders,
+			...written.flatMap((name) =>
+				typeof name === "string" && name.trim() !== "" ? [name.trim().toLowerCase()] : []
+			),
+		],
+		authQueryNames:
+			typeof param === "string" && param !== ""
+				? [...new Set([param, encodeQueryKey(param)])]
+				: [],
+	};
+}
+
+function withholdRunMember(
+	key: string,
+	value: unknown,
+	rule: RunOutputRule,
+	here: RecordMasking
+): unknown {
 	const masked = withholdRunOutput(value, rule);
-	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, rule.apiKeyHeaders);
-	if (key === "rawRequest" && typeof masked === "string") {
-		return withholdWireHeaders(masked, rule.apiKeyHeaders);
-	}
-	return masked;
+	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, here.apiKeyHeaders);
+	if (typeof masked !== "string") return masked;
+	if (key === "url") return maskAuthQueryValue(masked, here.authQueryNames);
+	if (key !== "rawRequest") return masked;
+	return withholdWireHeaders(maskRequestLine(masked, here.authQueryNames), here.apiKeyHeaders);
 }
 
 /**
  * Run output with every secret form in every string masked, and every
  * credential header's value in a header set or a `rawRequest` header block.
+ * A record that names what auth wrote into it (`authQueryParam`,
+ * `authHeaders`) also has that query value masked in its sibling `url` and
+ * `rawRequest` request line, and those headers masked in its siblings.
  * Keys are left alone, as the engine leaves them: a header or field *name* is
  * not a value. Numbers are never touched, so a size the engine reported still
  * describes what it measured.
@@ -1056,8 +1152,12 @@ export function withholdRunOutput(value: unknown, rule: RunOutputRule): unknown 
 	if (typeof value === "string") return maskSecretForms(value, rule.forms);
 	if (Array.isArray(value)) return value.map((item) => withholdRunOutput(item, rule));
 	if (!isRecord(value)) return value;
+	const here = recordMasking(value, rule);
 	return Object.fromEntries(
-		Object.entries(value).map(([key, member]) => [key, withholdRunMember(key, member, rule)])
+		Object.entries(value).map(([key, member]) => [
+			key,
+			withholdRunMember(key, member, rule, here),
+		])
 	);
 }
 

@@ -27,6 +27,7 @@ import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { SENSITIVE_HEADER_NAMES } from "@/lib/sensitive-headers";
 import {
+	encodeQueryKey,
 	encodeQueryValue,
 	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
 	SENSITIVE_PARAM_NAMES,
@@ -109,7 +110,7 @@ describe("MCP sensitive parameter name conformance", () => {
 
 const [queryFixturePath] = ENGINE_READING_GUARDS.mcpQueryEncoding.paths.map(fromRepoRoot);
 const queryFixture = JSON.parse(readFileSync(queryFixturePath, "utf8")) as {
-	components: { name: string; text: string; value: string }[];
+	components: { name: string; text: string; key: string; value: string }[];
 };
 
 describe("MCP query value encoding conformance", () => {
@@ -119,5 +120,9 @@ describe("MCP query value encoding conformance", () => {
 
 	it.each(queryFixture.components)("encodes $name as the engine writes a value", (row) => {
 		expect(encodeQueryValue(row.text)).toBe(row.value);
+	});
+
+	it.each(queryFixture.components)("encodes $name as the engine writes a key", (row) => {
+		expect(encodeQueryKey(row.text)).toBe(row.key);
 	});
 });
