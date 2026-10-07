@@ -3119,9 +3119,11 @@ Every tree that renames a row in place does it through one hook,
 sidebar's environments and the element list. The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
 label's position on both axes. `xs` pulls its border back over the row's gap
-by its padding plus 1px; where that gap is the element list's `gap-1.5`, the
-field takes `px-0.5` with the matching one-step pull-back so the border clears
-the kind icon. The hook owns the behaviour:
+by its padding plus 1px; where an icon sits across that gap (the element
+list's kind icon across `gap-1.5`, the collection tree's folder across
+`gap-2`), the field takes `px-0.5` with the matching one-step pull-back so the
+border clears the icon by at least 2px and the text does not move. The hook
+owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
   bare `e.key === "Enter"`. An IME commits its composition buffer with an

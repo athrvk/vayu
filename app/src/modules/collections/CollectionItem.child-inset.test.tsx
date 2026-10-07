@@ -139,6 +139,27 @@ describe.each([0, 2])("a folder at depth %i", (depth) => {
 	});
 });
 
+describe("a folder's rename field", () => {
+	// xs pulls its border back by its padding plus 1px, which left the border
+	// half a pixel from the folder across the row's gap-2. The field takes a
+	// one-step padding with the matching pull-back: the border clears the icon
+	// and the text keeps the label's x. Only the pair is asserted - one
+	// without the other moves the text.
+	it("keeps its border clear of the folder without moving its text", () => {
+		render(
+			withCollectionTreeContext(
+				<CollectionItem collection={COLLECTION} depth={0} posInSet={1} setSize={1} />,
+				{ allCollections: [COLLECTION], renamingId: COLLECTION.id }
+			)
+		);
+
+		const list = screen.getByDisplayValue(COLLECTION.name).className.split(/\s+/);
+		expect(list).toContain("px-0.5");
+		expect(list).toContain("-ml-[calc(var(--spacing)*0.5+1px)]");
+		expect(list).not.toContain("px-1.5");
+	});
+});
+
 describe("an empty folder's row", () => {
 	it("describes itself as empty, since its group holds no treeitem to find", () => {
 		const { container } = renderEmptyFolder(1);
