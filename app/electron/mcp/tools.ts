@@ -71,7 +71,6 @@ import {
 	withholdRowSecrets,
 	withholdSpecDiffChanges,
 	WITHHELD_AUTH_SENTENCE,
-	WITHHELD_COMPOSE_FAILURE_URL_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
@@ -79,6 +78,7 @@ import {
 	WITHHELD_MOCK_ACTIVITY_SENTENCE,
 	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
+	WITHHELD_SMOKE_ROW_URL_SENTENCE,
 	WITHHELD_SPEC_DIFF_SENTENCE,
 	WITHHELD_URL_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
@@ -3072,6 +3072,17 @@ function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): s
 	const entries = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
 	const byKey = new Map(entries.map((e) => [String(e.key), e]));
 	return changedKeys.filter((key) => byKey.get(key)?.requiresRestart === true);
+}
+
+/**
+ * The `url` a `run_collection_smoke` row echoes: credentials blanked as in a
+ * saved-request read, unless the user reveals secrets (#1840). `runOutputShape`
+ * masks only the values it knows to be secret, so a literal typed into the URL
+ * would pass it. @p auth names the API-key query parameter.
+ */
+function smokeRowUrl(ctx: ToolContext, url: unknown, auth: unknown): string {
+	const shown = secretsShape(ctx, (value) => withholdRequestUrl(value, auth))(url);
+	return String(shown ?? "");
 }
 
 /**
@@ -7287,7 +7298,7 @@ export const TOOLS: McpTool[] = [
 			" " +
 			WITHHELD_RUN_OUTPUT_SENTENCE +
 			" " +
-			WITHHELD_COMPOSE_FAILURE_URL_SENTENCE,
+			WITHHELD_SMOKE_ROW_URL_SENTENCE,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -7351,15 +7362,10 @@ export const TOOLS: McpTool[] = [
 						signal
 					);
 				} catch (err) {
-					// Nothing composed, so this is the stored URL as written; the
-					// composed rows below are masked by `runOutputShape` instead (#1840).
-					const storedUrl = secretsShape(ctx, (url) => withholdRequestUrl(url, req.auth))(
-						req.url
-					);
 					results.push({
 						name,
 						method: String(req.method ?? "GET"),
-						url: String(storedUrl ?? ""),
+						url: smokeRowUrl(ctx, req.url, req.auth),
 						ok: false,
 						error: err instanceof Error ? err.message : String(err),
 					});
@@ -7368,13 +7374,15 @@ export const TOOLS: McpTool[] = [
 				}
 				const method = String(outgoing.method ?? "GET");
 				const url = String(outgoing.url ?? "");
+				// Only what the row echoes is projected; the gate and the send read `url`.
+				const shownUrl = smokeRowUrl(ctx, url, outgoing.auth ?? req.auth);
 
 				const gate = checkAllowlist(url, ctx.config);
 				if (!gate.ok) {
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok: false,
 						skipped: true,
 						reason: gate.error,
@@ -7416,7 +7424,7 @@ export const TOOLS: McpTool[] = [
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok,
 						statusCode: code,
 						...(schema ? { schema } : {}),
@@ -7428,7 +7436,7 @@ export const TOOLS: McpTool[] = [
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok: false,
 						error: err instanceof Error ? err.message : String(err),
 					});

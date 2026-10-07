@@ -11032,6 +11032,66 @@ describe("secret withholding", () => {
 		expect(revealed.body.results[0].url).toBe(stored);
 	});
 
+	test("run_collection_smoke withholds a literal URL credential on every composed row kind", async () => {
+		const typed = "https://u:S3cret@api.example.com/x?api_key=LIT&tenant=T3NANT";
+		const client = runClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r_ok", name: "Runs" },
+				{ id: "r_off", name: "Off the list" },
+				{ id: "r_err", name: "Errors" },
+			]),
+			composeRequest: vi.fn().mockImplementation((body: { requestId?: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url: {
+						r_ok: typed,
+						r_off: "https://elsewhere.test/x?api_key=LIT",
+						r_err: `${typed}&id=err`,
+					}[body.requestId ?? ""],
+					// An inherited API-key auth the stored row does not carry.
+					auth: { mode: "apikey", key: "tenant", value: "x", in: "query" },
+				})
+			),
+			executeRequest: vi
+				.fn()
+				.mockImplementation((payload: { url: string }) =>
+					payload.url.endsWith("id=err")
+						? Promise.reject(new Error("connect failed"))
+						: Promise.resolve({ status: 200 })
+				),
+		});
+		const args = { collectionId: "c1" };
+		const withheld = await read("run_collection_smoke", client, ALLOW_API, args);
+		for (const leak of ["S3cret", "LIT", "T3NANT"]) expect(withheld.text).not.toContain(leak);
+		expect(withheld.body.results.map((row: { url: string }) => row.url)).toEqual([
+			"https://u@api.example.com/x?api_key=&tenant=",
+			"https://elsewhere.test/x?api_key=",
+			"https://u@api.example.com/x?api_key=&tenant=&id=err",
+		]);
+		expect(
+			withheld.body.results.map((row: Record<string, unknown>) => row.skipped ?? false)
+		).toEqual([false, true, false]);
+		expect(withheld.body.results[2].error).toBe("connect failed");
+		// The send and the allowlist read the real URL, not the projection.
+		expect(client.executeRequest).toHaveBeenCalledTimes(2);
+		expect(client.executeRequest).toHaveBeenCalledWith(
+			expect.objectContaining({ url: typed }),
+			undefined
+		);
+
+		const revealed = await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			args
+		);
+		expect(revealed.body.results.map((row: { url: string }) => row.url)).toEqual([
+			typed,
+			"https://elsewhere.test/x?api_key=LIT",
+			`${typed}&id=err`,
+		]);
+	});
+
 	/** A composed load target carrying a secret in its query, a header and its auth block. */
 	const LOAD_TARGET = {
 		method: "GET",

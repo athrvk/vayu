@@ -80,8 +80,8 @@ export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${RE
 /** What `diff_spec` says about the current side of a stored request's headers, url and params. */
 export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`, or the name the request's API-key auth sends its key under) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
 
-/** What `run_collection_smoke` says about the row of a request that could not be composed. */
-export const WITHHELD_COMPOSE_FAILURE_URL_SENTENCE = `A row for a request that could not be composed carries its stored \`url\` (nothing resolved it), with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
+/** What `run_collection_smoke` says about the `url` every row echoes. */
+export const WITHHELD_SMOKE_ROW_URL_SENTENCE = `Every row's \`url\` - the composed one, or for a request that could not be composed the stored one - has the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
 
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
