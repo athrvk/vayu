@@ -64,8 +64,10 @@ Tools an MCP client calls receive the same data the UI shows, except your
 secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
 by default), an agent reads no secret through any tool. The values of variables
 marked secret, the credentials in auth blocks, the values of credential-bearing
-headers (`Authorization`, `Cookie`, `X-Api-Key` and the like), cookie values and
-the password in a proxy URL are withheld wherever an agent reads what you
+headers (`Authorization`, `Cookie`, `X-Api-Key` and the like), the password and
+credential query values in a saved request's URL and its credential parameter
+rows (`api_key`, `token` and the like), cookie values and the password in a
+proxy URL are withheld wherever an agent reads what you
 stored, and what a write tool echoes back is withheld the same way. What a run
 recorded - a trace, a report, a sample, a run row, an inbox capture, a smoke
 run's rows, a load run's confirmation preview - reads `<redacted>` wherever a
@@ -85,12 +87,10 @@ request or collection, which the write tools can create, is not covered and
 still runs with your secrets, so leave write access off unless you want an
 agent to author them.
 
-This is not a sandbox, and two paths remain open with reveal off. A credential
+This is not a sandbox, and one path remains open with reveal off. A credential
 the engine writes itself, such as an OAuth 2.0 token it placed in the URL's
 query, or an API key sent inline with one request and read back later, is not
-recognised as a secret in a trace (#1835). A password written into a saved
-request's URL, or a query parameter row that holds a key, is returned as stored
-(#1781).
+recognised as a secret in a trace (#1835).
 
 An agent backed by a hosted model forwards what it reads to that model's
 provider. Treat connecting an agent as granting it read access to the rest of
@@ -145,7 +145,9 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   through any tool or resource. Read tools and resources return secret
   variables as `valueWithheld: true`, auth credentials as
   `<member>Withheld: true`, the values of credential-bearing headers on saved
-  requests and examples as `valueWithheld: true`, cookie values as
+  requests and examples as `valueWithheld: true`, a saved request's URL with its
+  password dropped and its credential query values emptied, credential
+  `params` rows as `valueWithheld: true`, cookie values as
   `valueWithheld: true` and proxy URL credentials stripped; write tools answer
   with the same projection of the row they changed; run output (reports,
   samples, run rows, inbox captures, the run resources and prompts) reads

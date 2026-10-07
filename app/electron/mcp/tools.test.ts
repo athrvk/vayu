@@ -10283,6 +10283,123 @@ describe("secret withholding", () => {
 		expect(body).toEqual(HEADER_REQUESTS);
 	});
 
+	// A credential written into the URL or the Params table is no variable
+	// either: the name decides, in the URL as in the rows (#1837).
+	const URL_REQUESTS = [
+		{
+			id: "req_u1",
+			name: "Credentials in the URL",
+			auth: { mode: "none" },
+			url: "https://typed-user:typed-password@api.example.com/x?api_key=typed-api-key&page=2&token={{token}}#access_token=typed-fragment-token",
+			params: [
+				{ key: "api_key", value: "typed-api-key", enabled: true },
+				{ key: "page", value: "2", enabled: true },
+				{ key: "TOKEN", value: "typed-disabled-token", enabled: false },
+				{ key: "signature", value: "{{signature}}", enabled: true },
+				{ key: "code", value: "US", enabled: true },
+			],
+		},
+		{
+			id: "req_u2",
+			name: "API-key auth in the query",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "query" },
+			url: "https://api.example.com/x?x-tenant-key=typed-tenant-key&code=US",
+			params: [{ key: "x-tenant-KEY", value: "typed-tenant-key", enabled: true }],
+		},
+		{
+			id: "req_u3",
+			name: "API-key auth in a header does not name a query parameter",
+			auth: { mode: "apikey", key: "X-Tenant-Key", value: "{{tenantKey}}", in: "header" },
+			url: "https://api.example.com/x?x-tenant-key=kept",
+			params: [{ key: "x-tenant-key", value: "kept", enabled: true }],
+		},
+		{ id: "req_u4", name: "Not a string", auth: { mode: "none" }, url: null, params: "none" },
+	];
+
+	test("list_requests drops a URL's password and credential query values and withholds the Params rows", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(URL_REQUESTS) });
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of [
+			"typed-password",
+			"typed-api-key",
+			"typed-fragment-token",
+			"typed-disabled-token",
+			"typed-tenant-key",
+		]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].url).toBe(
+			"https://typed-user@api.example.com/x?api_key=&page=2&token={{token}}#access_token="
+		);
+		expect(body[0].params).toEqual([
+			{ key: "api_key", enabled: true, valueWithheld: true },
+			{ key: "page", value: "2", enabled: true },
+			{ key: "TOKEN", enabled: false, valueWithheld: true },
+			{ key: "signature", value: "{{signature}}", enabled: true },
+			{ key: "code", value: "US", enabled: true },
+		]);
+		expect(body[1].url).toBe("https://api.example.com/x?x-tenant-key=&code=US");
+		expect(body[1].params).toEqual([
+			{ key: "x-tenant-KEY", enabled: true, valueWithheld: true },
+		]);
+		expect(body[2].url).toBe(URL_REQUESTS[2].url);
+		expect(body[2].params).toEqual(URL_REQUESTS[2].params);
+		expect(body[3]).toEqual(URL_REQUESTS[3]);
+	});
+
+	test("list_requests returns every URL and Params row whole with reveal on", async () => {
+		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(URL_REQUESTS) });
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual(URL_REQUESTS);
+	});
+
+	// The preview is read by the agent and the prompt by a person, and the URL
+	// is in both.
+	const deletePreview = async (safety: Partial<McpSafetyConfig>) => {
+		const client = fakeClient({
+			getRequest: vi.fn().mockResolvedValue({
+				id: "req_1",
+				name: "Get users",
+				method: "GET",
+				url: "https://typed-user:typed-password@api.example.com/users?api_key=typed-api-key&page=2",
+				auth: { mode: "none" },
+			}),
+		});
+		const elicit = vi.fn().mockResolvedValue({ action: "decline" });
+		const ctx = { ...ctxWith(client, { allowWrites: true, ...safety }), elicit };
+		const unprompted = await dispatchTool(
+			"delete_request",
+			{ requestId: "req_1" },
+			{
+				...ctx,
+				elicit: undefined,
+			}
+		);
+		await dispatchTool("delete_request", { requestId: "req_1" }, ctx);
+		const prompt = (elicit.mock.calls[0][0] as { message: string }).message;
+		return { preview: firstText(unprompted), prompt };
+	};
+
+	test("delete_request names the URL in its preview and prompt without the password or the credential values", async () => {
+		const { preview, prompt } = await deletePreview({});
+		for (const text of [preview, prompt]) {
+			expect(text).toContain("GET https://typed-user@api.example.com/users?api_key=&page=2");
+			expect(text).not.toContain("typed-password");
+			expect(text).not.toContain("typed-api-key");
+		}
+	});
+
+	test("delete_request names the URL as stored with reveal on", async () => {
+		const { preview, prompt } = await deletePreview(REVEAL);
+		for (const text of [preview, prompt]) {
+			expect(text).toContain(
+				"https://typed-user:typed-password@api.example.com/users?api_key=typed-api-key&page=2"
+			);
+		}
+	});
+
 	const EXAMPLES = [
 		{
 			id: "exa_1",
@@ -10344,6 +10461,8 @@ describe("secret withholding", () => {
 		name: "Me",
 		auth: { mode: "bearer", token: "echo-request-token" },
 		headers: [{ key: "Authorization", value: "Bearer echo-request-header", enabled: true }],
+		url: "https://echo-user:echo-request-password@api.example.com/x?api_key=echo-request-query",
+		params: [{ key: "api_key", value: "echo-request-query", enabled: true }],
 	};
 	const ECHO_EXAMPLE = {
 		id: "exa_1",
@@ -10395,14 +10514,24 @@ describe("secret withholding", () => {
 			args: { collectionId: "c1", name: "Me", url: "https://api.example.com" },
 			method: "createRequest",
 			answer: ECHO_REQUEST,
-			secrets: ["echo-request-token", "echo-request-header"],
+			secrets: [
+				"echo-request-token",
+				"echo-request-header",
+				"echo-request-password",
+				"echo-request-query",
+			],
 		},
 		{
 			tool: "update_request",
 			args: { requestId: "req_1", name: "Me" },
 			method: "updateRequest",
 			answer: ECHO_REQUEST,
-			secrets: ["echo-request-token", "echo-request-header"],
+			secrets: [
+				"echo-request-token",
+				"echo-request-header",
+				"echo-request-password",
+				"echo-request-query",
+			],
 		},
 		{
 			tool: "create_request_example",
@@ -10473,6 +10602,8 @@ describe("secret withholding", () => {
 				"echo-collection-token",
 				"echo-request-token",
 				"echo-request-header",
+				"echo-request-password",
+				"echo-request-query",
 			],
 			reads: {
 				listCollections: vi

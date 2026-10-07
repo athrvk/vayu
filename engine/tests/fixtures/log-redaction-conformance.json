@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for log redaction (issue #1781). Read by BOTH the engine gtest suite (engine/tests/debug_redact_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/electron/log-redaction.conformance.test.ts). `secretFieldNames` is every name `is_secret_field_name` / `isSecretFieldName` must redact; `notSecretFieldNames` must pass through; `sensitiveHeaderNames` is the header list the app's snippet generator masks by name (app/src/lib/sensitive-headers.ts, issue #1806), each of which must also be a secret field name here, and the app's list must equal it; `stripUrlSecrets` maps an input to what both `strip_url_secrets` and `stripUrlSecrets` must return.",
+  "$comment": "Cross-language conformance fixture for log redaction (issue #1781). Read by BOTH the engine gtest suite (engine/tests/debug_redact_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/electron/log-redaction.conformance.test.ts). `secretFieldNames` is every name `is_secret_field_name` / `isSecretFieldName` must redact; `notSecretFieldNames` must pass through; `sensitiveHeaderNames` is the header list the app's snippet generator masks by name (app/src/lib/sensitive-headers.ts, issue #1806), each of which must also be a secret field name here, and the app's list must equal it; `sensitiveParamNames` is the query-parameter and Params-row name set `vayu_ext::blank_credential_param_rows` / `redact_url_credentials` blank (the shared secret field names less `code`, plus `EXTRA_SECRET_PARAM_NAMES`), which the MCP server's `SENSITIVE_PARAM_NAMES` (app/electron/mcp/withhold.ts, issue #1837) must equal, and `code` and `key` are deliberately not in it; `stripUrlSecrets` maps an input to what both `strip_url_secrets` and `stripUrlSecrets` must return.",
   "secretFieldNames": [
     "authorization", "Proxy-Authorization", "cookie", "Set-Cookie", "www-authenticate",
     "proxy-authenticate", "authentication-info", "token", "access_token", "refresh_token",
@@ -10,6 +10,14 @@
   "sensitiveHeaderNames": [
     "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token",
     "x-csrf-token"
+  ],
+  "sensitiveParamNames": [
+    "authorization", "proxy-authorization", "cookie", "set-cookie", "www-authenticate",
+    "proxy-authenticate", "authentication-info", "token", "access_token", "refresh_token",
+    "client_secret", "password", "apikey", "x-api-key", "x-auth-token", "x-csrf-token",
+    "passphrase", "api_key", "id_token", "code_verifier", "private_key", "secret_access_key",
+    "secretaccesskey", "session_token", "api-key", "secret", "auth_token", "signature", "sig",
+    "x-amz-signature", "x-amz-security-token", "client_assertion", "assertion"
   ],
   "stripUrlSecrets": [
     { "name": "userinfo and query", "in": "https://u:p@host/path?api_key=SECRET", "out": "https://host/path" },

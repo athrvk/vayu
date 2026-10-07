@@ -9,15 +9,20 @@
  * @file withhold.ts
  * @brief What an MCP read hands an agent in place of a secret (#1805): a
  *        variable flagged `secret`, an auth credential, a cookie value, the
- *        credentials in a proxy URL. Withheld unless the user turns on
+ *        credentials in a proxy URL, the credentials a saved request carries in
+ *        its URL and Params rows (#1837). Withheld unless the user turns on
  *        `revealSecretsToAgents`.
  *
  * Withheld is stated, never silent - the `projectOAuth2Token` precedent. An
  * agent that finds no value and is not told why concludes the data is empty or
  * broken, and acts on that. So a withheld variable or cookie carries
  * `valueWithheld: true`, an auth member `<member>Withheld: true`, a credential
- * row (a Postman attribute or parameter row) `valueWithheld: true` on the row,
- * and a config or proxy URL `credentialsWithheld: true`.
+ * row (a Postman attribute, a header or a saved request's Params row)
+ * `valueWithheld: true` on the row, and a config or proxy URL
+ * `credentialsWithheld: true`. A saved request's own `url` is the one value
+ * with no room for a marker: its userinfo password is dropped and a credential
+ * query or fragment value is emptied in place (`api_key=`), as the engine's
+ * `redact_url_credentials` does for an export, and its Params row says which.
  *
  * What goes through the row projections is what is *stored*: environments,
  * globals, collections, requests and saved examples as the read tools and the
@@ -56,6 +61,9 @@ export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, cl
 
 /** What a read carrying header rows says about the credential-bearing ones. */
 export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a credential (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or the header the request's API-key auth names) comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
+
+/** What a read carrying saved requests says about the credentials in a URL and in Params rows. */
+export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password of \`user:password@\` dropped and the value of a credential query or fragment parameter (\`api_key\`, \`token\`, \`signature\`, or the one the request's API-key auth places in the query) emptied in place (\`?api_key=&page=2\`), and a \`params\` row naming one comes back with \`valueWithheld: true\` in place of its value, unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
 
 /** The marker a masked value reads as in run output: the engine's `kRedactedMarker`. */
 export const REDACTED_MARKER = "<redacted>";
@@ -405,12 +413,173 @@ function withholdHeaderRows(headers: unknown, auth: unknown): unknown {
 	);
 }
 
+// --- Request URL and Params --------------------------------------------------
+
+/**
+ * The query-parameter and Params-row names that hold a credential whatever
+ * their value is: the engine's `is_secret_param_name`
+ * (`engine/src/core/vayu_extensions.cpp`), which is the shared secret-field set
+ * (`engine/include/vayu/utils/log_redact.hpp`) less `code`, plus
+ * `EXTRA_SECRET_PARAM_NAMES`. `code` (`?code=US`) and `key` (a cache or sort
+ * key) are data far more often than a credential, so neither is on it; the key
+ * an API-key auth places in the query is added per request. Pinned to
+ * `sensitiveParamNames` in `engine/tests/fixtures/log-redaction-conformance.json`
+ * (`withhold.conformance.test.ts`).
+ */
+export const SENSITIVE_PARAM_NAMES: readonly string[] = [
+	"authorization",
+	"proxy-authorization",
+	"cookie",
+	"set-cookie",
+	"www-authenticate",
+	"proxy-authenticate",
+	"authentication-info",
+	"token",
+	"access_token",
+	"refresh_token",
+	"client_secret",
+	"password",
+	"apikey",
+	"x-api-key",
+	"x-auth-token",
+	"x-csrf-token",
+	"passphrase",
+	"api_key",
+	"id_token",
+	"code_verifier",
+	"private_key",
+	"secret_access_key",
+	"secretaccesskey",
+	"session_token",
+	"api-key",
+	"secret",
+	"auth_token",
+	"signature",
+	"sig",
+	"x-amz-signature",
+	"x-amz-security-token",
+	"client_assertion",
+	"assertion",
+];
+
+const SENSITIVE_PARAM_NAME_SET: ReadonlySet<string> = new Set(SENSITIVE_PARAM_NAMES);
+
+/** ASCII-only fold, the engine's `ascii_lower`: `toLowerCase` would also fold the Kelvin sign into `k`. */
+function asciiLower(text: string): string {
+	return text.replace(/[A-Z]/g, (char) => char.toLowerCase());
+}
+
+/**
+ * The query-parameter name an API-key auth placed `in: "query"` sends its key
+ * under: the engine's `apikey_names (auth, true)`. As written, not trimmed, as
+ * the engine matches it; the header counterpart is {@link apiKeyHeaderName}.
+ */
+function apiKeyParamName(auth: unknown): string | undefined {
+	if (!isRecord(auth) || auth.mode !== "apikey" || auth.in !== "query") return undefined;
+	return typeof auth.key === "string" && auth.key !== "" ? auth.key : undefined;
+}
+
+/**
+ * Whether a parameter named @p name carries a credential: the request's own
+ * API-key name, or one on {@link SENSITIVE_PARAM_NAMES}. Whole name, no
+ * trimming and no percent-decoding, as the engine matches it.
+ */
+function isSecretParamName(name: string, apiKeyParam: string | undefined): boolean {
+	const folded = asciiLower(name);
+	if (apiKeyParam !== undefined && folded === asciiLower(apiKeyParam)) return true;
+	return SENSITIVE_PARAM_NAME_SET.has(folded);
+}
+
+/**
+ * `{key, value, enabled}` Params rows with each credential's value withheld,
+ * disabled rows included. @p auth is the owning request's, for the API-key
+ * name placed in the query.
+ */
+function withholdRequestParamRows(params: unknown, auth: unknown): unknown {
+	if (!Array.isArray(params)) return params;
+	const apiKeyParam = apiKeyParamName(auth);
+	return params.map((row) =>
+		isRecord(row) &&
+		typeof row.key === "string" &&
+		isSecretParamName(row.key, apiKeyParam) &&
+		holdsCredential(row.value)
+			? withholdRowValue(row)
+			: row
+	);
+}
+
+/** `name=value` with the value emptied, or @p pair as written when there is nothing to hide. */
+function withholdQueryPair(pair: string, apiKeyParam: string | undefined): string {
+	const equals = pair.indexOf("=");
+	if (equals === -1 || equals + 1 === pair.length) return pair;
+	if (!isSecretParamName(pair.slice(0, equals), apiKeyParam)) return pair;
+	if (isVariableReference(pair.slice(equals + 1))) return pair;
+	return pair.slice(0, equals + 1);
+}
+
+/** A `&`-separated query, or a fragment written as one, with each credential pair emptied. */
+function withholdQuery(query: string, apiKeyParam: string | undefined): string {
+	return query
+		.split("&")
+		.map((pair) => withholdQueryPair(pair, apiKeyParam))
+		.join("&");
+}
+
+/**
+ * The scheme-and-authority-and-path part of a URL with the password of its
+ * userinfo dropped (`user:pass@host` becomes `user@host`). The engine's
+ * `drop_userinfo_password`: a first segment holding spaces is a path, not an
+ * authority, and the userinfo ends at the *last* `@`, so a password containing
+ * one is still wholly dropped. Not {@link stripUserinfo}, which removes the user
+ * too and takes any `@` in a path for one.
+ */
+function dropUserinfoPassword(head: string): string {
+	const schemeEnd = head.indexOf("://");
+	const hasScheme = schemeEnd !== -1 && !/[/ \t]/.test(head.slice(0, schemeEnd));
+	const authorityStart = hasScheme ? schemeEnd + 3 : 0;
+	const authorityEnd = head.indexOf("/", authorityStart);
+	const authority = head.slice(authorityStart, authorityEnd === -1 ? undefined : authorityEnd);
+	const at = authority.lastIndexOf("@");
+	if (at === -1 || (!hasScheme && /[ \t]/.test(authority))) return head;
+	const userinfo = authority.slice(0, at);
+	const colon = userinfo.indexOf(":");
+	if (colon === -1 || colon + 1 === userinfo.length) return head;
+	if (isVariableReference(userinfo.slice(colon + 1))) return head;
+	return (
+		head.slice(0, authorityStart) + userinfo.slice(0, colon) + head.slice(authorityStart + at)
+	);
+}
+
+/**
+ * A saved request's `url` with its credentials blanked and every other byte
+ * kept: the engine's `redact_url_credentials`, which an export applies to the
+ * same field. The password of `user:password@host` is dropped (the user name
+ * stays) and the value of a credential query or fragment parameter is emptied
+ * (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `{{variable}}` standing
+ * alone is kept wherever it is. @p auth is the owning request's, for the API-key
+ * name placed in the query. Anything but a string passes through.
+ */
+export function withholdRequestUrl(url: unknown, auth: unknown): unknown {
+	if (typeof url !== "string") return url;
+	const apiKeyParam = apiKeyParamName(auth);
+	const fragmentAt = url.indexOf("#");
+	const beforeFragment = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
+	const queryAt = beforeFragment.indexOf("?");
+	let out = dropUserinfoPassword(
+		queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt)
+	);
+	if (queryAt !== -1) out += `?${withholdQuery(beforeFragment.slice(queryAt + 1), apiKeyParam)}`;
+	if (fragmentAt !== -1) out += `#${withholdQuery(url.slice(fragmentAt + 1), apiKeyParam)}`;
+	return out;
+}
+
 // --- Rows ---------------------------------------------------------------------
 
 /**
  * One stored row - an environment, the globals, a collection, a saved request
- * or one of its examples - with its `variables`, `auth` and credential-bearing
- * `headers` withheld. Every other field passes through.
+ * or one of its examples - with its `variables`, `auth`, credential-bearing
+ * `headers`, and a request's credential-bearing `url` and `params` withheld.
+ * Every other field passes through.
  */
 export function withholdRowSecrets(row: unknown): unknown {
 	if (!isRecord(row)) return row;
@@ -419,6 +588,8 @@ export function withholdRowSecrets(row: unknown): unknown {
 		...("variables" in row ? { variables: withholdVariableBag(row.variables) } : {}),
 		...("auth" in row ? { auth: withholdAuth(row.auth) } : {}),
 		...("headers" in row ? { headers: withholdHeaderRows(row.headers, row.auth) } : {}),
+		...("url" in row ? { url: withholdRequestUrl(row.url, row.auth) } : {}),
+		...("params" in row ? { params: withholdRequestParamRows(row.params, row.auth) } : {}),
 	};
 }
 

@@ -203,7 +203,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
-| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials and credential-header values withheld unless revealed) |
+| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
@@ -1721,6 +1721,7 @@ cannot read a missing value as an empty one.
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
 | A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `list_collections`, `vayu://collections` |
 | The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `list_request_examples` |
+| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `delete_request`'s preview and prompt |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
@@ -1783,8 +1784,10 @@ the wire, and the engine's rows are unchanged. Only the MCP read is masked.
 The credential lists are the engine's own `SECRET_AUTH_KEYS` and
 `SECRET_PARAM_KEYS` (`core/vayu_extensions.cpp`), the sets a collection export
 blanks, and the `postman` walk is its `redact_postman_auth`; the header names
-are the shared sensitive-header list, pinned to the engine's by
-`withhold.conformance.test.ts`. An auth
+are the shared sensitive-header list and the parameter names are the engine's
+`is_secret_param_name` set, both pinned to the engine's by
+`withhold.conformance.test.ts` (`sensitiveHeaderNames` and `sensitiveParamNames`
+in `log-redaction-conformance.json`). An auth
 member or row holding one `{{variable}}` reference and nothing else is shown as
 written, the way the export keeps it: it names where the secret lives without
 being it, and the variable it names is withheld on its own terms. An auth block
@@ -1798,18 +1801,14 @@ same reason, and each tool that carries one of the rows above says so in its
 own description. The projection lives in `withhold.ts`.
 
 **What this does not cover.** The masking withholds what Vayu can recognise as
-a secret in what an agent reads; two paths are still open with reveal off:
+a secret in what an agent reads; one path is still open with reveal off:
 
 - A credential the engine writes itself is not a masked value. An OAuth 2.0
   access token the engine fetched and placed in the query is in no stored row,
   and nor is an API key sent inline with a request and read back later through
   `get_run_report`; both reach a trace as plain text. Tracked in #1835.
-- A saved request's own URL and parameter rows are not projected:
-  `user:password@` userinfo in its `url`, and a `params` row whose name says it
-  carries a credential (`api_key`, `token`), read back as stored through
-  `list_requests` and `vayu://collections`. Tracked under #1781.
 
-A script an agent sends is not among them: it is refused while reveal is off
+A script an agent sends is not a path: it is refused while reveal is off
 (see *Scripts an agent supplies are refused*, above). A script an agent
 *stores* through a write tool is outside that refusal and still runs with the
 secrets; see the write toggle.
