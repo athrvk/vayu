@@ -59,6 +59,8 @@ import {
 	REVEAL_SETTING,
 	runOutputShape,
 	secretsShape,
+	specDiffRequestsToRead,
+	type StoredAuthByRequest,
 	withheldAuthMembers,
 	withholdConfigCredentials,
 	withholdCookieValues,
@@ -73,11 +75,12 @@ import {
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
-	WITHHELD_HEADER_DIFF_SENTENCE,
 	WITHHELD_HEADER_SENTENCE,
 	WITHHELD_MOCK_ACTIVITY_SENTENCE,
 	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
+	WITHHELD_SMOKE_ROW_URL_SENTENCE,
+	WITHHELD_SPEC_DIFF_SENTENCE,
 	WITHHELD_URL_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
@@ -3150,6 +3153,17 @@ function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): s
 }
 
 /**
+ * The `url` a `run_collection_smoke` row echoes: credentials blanked as in a
+ * saved-request read, unless the user reveals secrets (#1840). `runOutputShape`
+ * masks only the values it knows to be secret, so a literal typed into the URL
+ * would pass it. @p auth names the API-key query parameter.
+ */
+function smokeRowUrl(ctx: ToolContext, url: unknown, auth: unknown): string {
+	const shown = secretsShape(ctx, (value) => withholdRequestUrl(value, auth))(url);
+	return String(shown ?? "");
+}
+
+/**
  * The direct sub-collections of `collectionId`, by name.
  *
  * `GET /requests?collectionId=` returns a collection's *direct* requests only
@@ -4345,6 +4359,33 @@ function changedEntry(item: Record<string, unknown>): Record<string, unknown> {
 			};
 		}),
 	};
+}
+
+/**
+ * The stored `auth` of the requests a spec diff's `url` and `params` changes
+ * belong to, for the API-key query name their display lines do not carry. Empty
+ * when the user reveals secrets: nothing is withheld, so nothing is read. A
+ * request that cannot be read is left out, and the projection withholds its
+ * display rather than guess (#1840).
+ */
+async function readSpecDiffAuth(
+	ctx: ToolContext,
+	changed: unknown,
+	signal: AbortSignal | undefined
+): Promise<StoredAuthByRequest> {
+	const auth = new Map<string, unknown>();
+	if (ctx.config.revealSecretsToAgents) return auth;
+	await Promise.all(
+		specDiffRequestsToRead(changed).map(async (requestId) => {
+			try {
+				const stored = await ctx.client.getRequest(requestId, signal);
+				if (isRecord(stored)) auth.set(requestId, stored.auth);
+			} catch {
+				// Left out on purpose: see above.
+			}
+		})
+	);
+	return auth;
 }
 
 /** Whether any field of @p item is one a person edited by hand. */
@@ -5664,7 +5705,7 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half. " +
-			WITHHELD_HEADER_DIFF_SENTENCE,
+			WITHHELD_SPEC_DIFF_SENTENCE,
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
 			readOnlyHint: true,
@@ -5713,6 +5754,7 @@ export const TOOLS: McpTool[] = [
 				operation: entry.operation ?? null,
 			}));
 			const changed = boundedBucket(diff.changed, changedEntry);
+			const storedAuth = await readSpecDiffAuth(ctx, changed.entries, signal);
 			const truncated = [added, removed, changed].some(
 				(bucket) => bucket.entries.length < bucket.total
 			);
@@ -5731,7 +5773,9 @@ export const TOOLS: McpTool[] = [
 					},
 					added: added.entries,
 					removed: removed.entries,
-					changed: secretsShape(ctx, withholdSpecDiffChanges)(changed.entries),
+					changed: secretsShape(ctx, (entries) =>
+						withholdSpecDiffChanges(entries, storedAuth)
+					)(changed.entries),
 					entriesTruncated: truncated,
 				}),
 				`\n\n${describeSpecDiff(diff)}${
@@ -7337,7 +7381,9 @@ export const TOOLS: McpTool[] = [
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			WITHHELD_RUN_OUTPUT_SENTENCE,
+			WITHHELD_RUN_OUTPUT_SENTENCE +
+			" " +
+			WITHHELD_SMOKE_ROW_URL_SENTENCE,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -7387,6 +7433,7 @@ export const TOOLS: McpTool[] = [
 					name?: string;
 					method?: string;
 					url?: string;
+					auth?: unknown;
 				};
 				const name = String(req.name ?? req.id ?? "request");
 				// Compose the request the same way the app's Send does - engine-side
@@ -7403,7 +7450,7 @@ export const TOOLS: McpTool[] = [
 					results.push({
 						name,
 						method: String(req.method ?? "GET"),
-						url: String(req.url ?? ""),
+						url: smokeRowUrl(ctx, req.url, req.auth),
 						ok: false,
 						error: err instanceof Error ? err.message : String(err),
 					});
@@ -7412,13 +7459,15 @@ export const TOOLS: McpTool[] = [
 				}
 				const method = String(outgoing.method ?? "GET");
 				const url = String(outgoing.url ?? "");
+				// Only what the row echoes is projected; the gate and the send read `url`.
+				const shownUrl = smokeRowUrl(ctx, url, outgoing.auth ?? req.auth);
 
 				const gate = checkAllowlist(url, ctx.config);
 				if (!gate.ok) {
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok: false,
 						skipped: true,
 						reason: gate.error,
@@ -7460,7 +7509,7 @@ export const TOOLS: McpTool[] = [
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok,
 						statusCode: code,
 						...(schema ? { schema } : {}),
@@ -7472,7 +7521,7 @@ export const TOOLS: McpTool[] = [
 					results.push({
 						name,
 						method,
-						url,
+						url: shownUrl,
 						ok: false,
 						error: err instanceof Error ? err.message : String(err),
 					});
