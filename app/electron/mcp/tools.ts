@@ -69,6 +69,7 @@ import {
 	withholdRowSecrets,
 	withholdSpecDiffChanges,
 	WITHHELD_AUTH_SENTENCE,
+	WITHHELD_COMPOSE_FAILURE_URL_SENTENCE,
 	WITHHELD_CONFIG_SENTENCE,
 	WITHHELD_COOKIE_SENTENCE,
 	WITHHELD_DIAGNOSE_SENTENCE,
@@ -7252,7 +7253,9 @@ export const TOOLS: McpTool[] = [
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			WITHHELD_RUN_OUTPUT_SENTENCE,
+			WITHHELD_RUN_OUTPUT_SENTENCE +
+			" " +
+			WITHHELD_COMPOSE_FAILURE_URL_SENTENCE,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -7302,6 +7305,7 @@ export const TOOLS: McpTool[] = [
 					name?: string;
 					method?: string;
 					url?: string;
+					auth?: unknown;
 				};
 				const name = String(req.name ?? req.id ?? "request");
 				// Compose the request the same way the app's Send does - engine-side
@@ -7315,10 +7319,15 @@ export const TOOLS: McpTool[] = [
 						signal
 					);
 				} catch (err) {
+					// Nothing composed, so this is the stored URL as written; the
+					// composed rows below are masked by `runOutputShape` instead (#1840).
+					const storedUrl = secretsShape(ctx, (url) => withholdRequestUrl(url, req.auth))(
+						req.url
+					);
 					results.push({
 						name,
 						method: String(req.method ?? "GET"),
-						url: String(req.url ?? ""),
+						url: String(storedUrl ?? ""),
 						ok: false,
 						error: err instanceof Error ? err.message : String(err),
 					});

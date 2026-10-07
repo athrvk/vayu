@@ -80,6 +80,9 @@ export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${RE
 /** What `diff_spec` says about a stored request's credential headers. */
 export const WITHHELD_HEADER_DIFF_SENTENCE = `A \`headers\` change whose current value names a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list) with a value comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
 
+/** What `run_collection_smoke` says about the row of a request that could not be composed. */
+export const WITHHELD_COMPOSE_FAILURE_URL_SENTENCE = `A row for a request that could not be composed carries its stored \`url\` (nothing resolved it), with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
+
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
 

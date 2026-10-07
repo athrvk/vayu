@@ -10998,6 +10998,40 @@ describe("secret withholding", () => {
 		expect(client.listAllRequests).not.toHaveBeenCalled();
 	});
 
+	test("run_collection_smoke withholds a stored URL's credentials on a request that fails to compose", async () => {
+		const stored = "https://u:p4ssw0rd@api.example.com/x?api_key=S3CRET&page=2&tenant=T3NANT";
+		const client = runClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{
+					id: "r_bad",
+					name: "Unresolvable",
+					method: "GET",
+					url: stored,
+					auth: { mode: "apikey", key: "tenant", value: "x", in: "query" },
+				},
+			]),
+			composeRequest: vi
+				.fn()
+				.mockRejectedValue(new Error("variable {{missing}} is undefined")),
+		});
+		const args = { collectionId: "c1" };
+		const withheld = await read("run_collection_smoke", client, ALLOW_API, args);
+		for (const leak of ["p4ssw0rd", "S3CRET", "T3NANT"])
+			expect(withheld.text).not.toContain(leak);
+		expect(withheld.body.results[0]).toMatchObject({
+			ok: false,
+			url: "https://u@api.example.com/x?api_key=&page=2&tenant=",
+		});
+
+		const revealed = await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			args
+		);
+		expect(revealed.body.results[0].url).toBe(stored);
+	});
+
 	/** A composed load target carrying a secret in its query, a header and its auth block. */
 	const LOAD_TARGET = {
 		method: "GET",
