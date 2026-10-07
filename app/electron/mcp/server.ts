@@ -110,7 +110,9 @@ const REVEAL_GATE_SENTENCE =
 	"`valueWithheld: true`. A request that references a " +
 	"secret still sends with it, because the engine resolves it, and what the run " +
 	"recorded reads `<redacted>` wherever that value or a credential header's value " +
-	"appears. A task that needs the " +
+	"appears. A script you supply when sending a request or starting a load run " +
+	"(preRequestScript, postRequestScript, tests, or a script.* element) is refused, " +
+	"because a script reads every variable. A task that needs the " +
 	"value itself is blocked on the user turning on Reveal secrets to agents in Vayu " +
 	"Settings → MCP. ";
 

@@ -56,6 +56,7 @@ import { HTTP_VERSIONS } from "./http-versions.js";
 import {
 	HEADER_BODY_SEPARATOR,
 	MaskingIncompleteError,
+	REVEAL_SETTING,
 	runOutputShape,
 	secretsShape,
 	withheldAuthMembers,
@@ -1858,6 +1859,82 @@ function readValidationScript(args: Record<string, unknown>): string | undefined
 }
 
 /**
+ * The element kinds the engine compiles into a script runner
+ * (`engine/src/core/elements/script_kinds.cpp`). `script.setup` and
+ * `script.teardown` are not a phase this surface writes, but an `elements`
+ * entry of either kind runs the same sandbox, so the refusal covers all four.
+ */
+const SCRIPT_KINDS: ReadonlySet<string> = new Set([
+	"script.pre",
+	"script.post",
+	"script.setup",
+	"script.teardown",
+]);
+
+/**
+ * Whitespace-only, by the engine's own definition (`is_blank_script_text`):
+ * such a script is inert there, composed nowhere and compiled to nothing, so
+ * refusing it would turn away a call that grants no capability.
+ */
+const BLANK_SCRIPT = /^[ \t\r\n]*$/;
+
+/**
+ * An `elements` entry that would run script text. The kind is folded and
+ * trimmed although the engine matches it exactly (`Registry::find`): a
+ * refusal that tracked the engine's current spelling would be one normalising
+ * change away from a bypass, and a variant the engine rejects is refused here
+ * for the right reason anyway.
+ */
+function carriesScript(entry: unknown): boolean {
+	if (!isRecord(entry) || typeof entry.kind !== "string") return false;
+	if (!SCRIPT_KINDS.has(entry.kind.trim().toLowerCase())) return false;
+	const script = isRecord(entry.config) ? entry.config.script : undefined;
+	return script !== undefined && !(typeof script === "string" && BLANK_SCRIPT.test(script));
+}
+
+/**
+ * What a send or load tool says about the scripts it takes, for the
+ * description of each: an agent that reads only the parameter would otherwise
+ * meet the refusal as a surprise. @p carriers names what counts as a script on
+ * that tool.
+ */
+function agentScriptGateSentence(carriers: string): string {
+	return `Unless the user has turned on ${REVEAL_SETTING}, a script you supply here (${carriers}) is refused before anything is sent, because a script reads every variable, secret ones included; a blank script is not refused.`;
+}
+
+/**
+ * Refuse a script the agent wrote while Reveal secrets to agents is off (#1834).
+ *
+ * A script runs in a sandbox that reads every variable the request resolves
+ * against, secret ones included, and can write one into a test result, a
+ * variable or the request it sends - so an agent that may not read a secret
+ * could read it by sending a script. Called before anything is composed, so
+ * nothing has been sent when the refusal arrives. Scripts stored on a request
+ * or collection are not covered: that is a write-tool residual
+ * (`docs/engine/mcp.md`), and `requestId` on `run_request` links History only
+ * and composes nothing stored.
+ *
+ * @p elements is the call's `elements` entries, for a tool that takes them as
+ * a list (`start_load_run`'s `elements` is a different, run-level object).
+ */
+function refuseAgentScripts(
+	args: Record<string, unknown>,
+	revealSecrets: boolean,
+	elements: readonly unknown[] = []
+): void {
+	if (revealSecrets) return;
+	const named: string[] = ["preRequestScript", "postRequestScript", "tests"].filter((key) => {
+		const text = str(args, key);
+		return text !== undefined && !BLANK_SCRIPT.test(text);
+	});
+	if (elements.some(carriesScript)) named.push("elements");
+	if (named.length === 0) return;
+	throw new ToolArgError(
+		`${named.map((key) => `"${key}"`).join(", ")} carries a script, and agents cannot send one while ${REVEAL_SETTING} is off: a script reads every variable, secret ones included, and could write the value into its output or the request it sends. Nothing was sent. Leave the script out, or the user can turn the setting on in Vayu Settings > MCP.`
+	);
+}
+
+/**
  * The element kind a script of each phase becomes on the wire (issue #1512).
  *
  * Since #1514's clean cut, `elements` is the only script field `/requests`,
@@ -2020,6 +2097,7 @@ async function composeLoadRunRequest(
 	ctx: ToolContext,
 	signal?: AbortSignal
 ): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
+	refuseAgentScripts(args, ctx.config.revealSecretsToAgents);
 	const savedId = str(args, "requestId");
 	const overrides = readRequestOverrides(args);
 	const authArg = readAuthArg(args);
@@ -2308,7 +2386,7 @@ const validationScriptInput = z
 	.string()
 	.optional()
 	.describe(
-		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one. Read the `vayu://scripting/completions` resource for the sandbox's full surface (pm.expect chains, pm.response.to.*, the variable scopes) rather than assuming what exists."
+		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one. Read the `vayu://scripting/completions` resource for the sandbox's full surface (pm.expect chains, pm.response.to.*, the variable scopes) rather than assuming what exists. Refused while Reveal secrets to agents is off."
 	);
 
 const validationScriptAliasInput = z
@@ -4986,7 +5064,11 @@ export const TOOLS: McpTool[] = [
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` See ${VARIABLE_RESOLUTION_URI}.` +
-			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
+			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. " +
+			agentScriptGateSentence(
+				"`preRequestScript`, `postRequestScript`, `tests`, or an `elements` entry of a `script.*` kind"
+			) +
+			" Extractors, assertions and timers in `elements` are not scripts and pass. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
 			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. ` +
@@ -5029,7 +5111,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Sent to the engine as an ad-hoc `script.pre` element (issue #1514 refuses the raw field). Read the `vayu://scripting/completions` resource for the full surface."
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Sent to the engine as an ad-hoc `script.pre` element (issue #1514 refuses the raw field). Read the `vayu://scripting/completions` resource for the full surface. Refused while Reveal secrets to agents is off."
 				),
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
@@ -5037,7 +5119,7 @@ export const TOOLS: McpTool[] = [
 				.array(elementSchema)
 				.optional()
 				.describe(
-					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere, and alongside any preRequestScript/postRequestScript given on the same call rather than replacing them. Read the `vayu://elements/kinds` resource for the catalogue."
+					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere, and alongside any preRequestScript/postRequestScript given on the same call rather than replacing them. A `script.*` entry is a script, and is refused while Reveal secrets to agents is off. Read the `vayu://elements/kinds` resource for the catalogue."
 				),
 			stream: streamInput,
 			maxStreamEvents: maxStreamEventsInput,
@@ -5048,6 +5130,9 @@ export const TOOLS: McpTool[] = [
 			// after the exchange would be a request already made insecurely. `true`
 			// falls through - it restates the composed default (issue #795).
 			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL);
+			// The same posture for the same reason: a script is refused before the
+			// compose that would carry it, not after an exchange that ran it (#1834).
+			refuseAgentScripts(args, ctx.config.revealSecretsToAgents, elementsArg(args));
 			const request: Record<string, unknown> = {
 				...readRequestOverrides(args),
 				url: requireStr(args, "url"),
@@ -7549,7 +7634,9 @@ export const TOOLS: McpTool[] = [
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
+			agentScriptGateSentence("`postRequestScript` or `tests`") +
+			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
 			WITHHELD_PLANNED_RUN_SENTENCE +
 			" " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +

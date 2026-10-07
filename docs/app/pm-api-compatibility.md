@@ -1199,7 +1199,8 @@ its methods throw outside a collection run, which no type can express.
 The completion set is no longer only an editor concern. An MCP agent writes scripts too -
 `run_request` takes a `preRequestScript` and both it and `start_load_run` take a
 `postRequestScript` - and it reaches the same sandbox, since the sandbox belongs to the
-engine and has no per-client gate.
+engine and has no per-client gate. What gates it is the user's reveal setting: with Reveal
+secrets to agents off, those two tools refuse a script the agent supplies (#1834).
 
 So the MCP server re-serves this endpoint as the `vayu://scripting/completions` resource
 (`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation` - see
