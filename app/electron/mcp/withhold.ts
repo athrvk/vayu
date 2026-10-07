@@ -46,7 +46,7 @@ interface RevealContext {
 type Projection = (value: unknown) => unknown;
 
 /** Where the setting lives, in the words every withholding description uses. */
-const REVEAL_SETTING = "Reveal secrets to agents (Vayu Settings → MCP)";
+export const REVEAL_SETTING = "Reveal secrets to agents (Vayu Settings → MCP)";
 
 /** What a read carrying variables says about the secret ones. */
 export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; a request that references it still sends with it, because the engine resolves it.`;

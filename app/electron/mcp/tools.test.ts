@@ -5156,7 +5156,7 @@ describe("dispatchTool", () => {
 		const res = await dispatchTool(
 			"run_request",
 			args,
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
 		expect(res.isError).toBeFalsy();
@@ -5192,7 +5192,7 @@ describe("dispatchTool", () => {
 				postRequestScript: "pm.test('ok', function () {});",
 				elements: [{ kind: "assert.duration", config: { maxMs: 500 } }],
 			},
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 		expect(res.isError).toBeFalsy();
 		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock
@@ -5235,7 +5235,7 @@ describe("dispatchTool", () => {
 		const res = await dispatchTool(
 			"run_request",
 			args,
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
 		expect(res.isError).toBeFalsy();
@@ -5304,7 +5304,7 @@ describe("dispatchTool", () => {
 				confirmed: true,
 				postRequestScript: "pm.test('ok', function () {});",
 			}),
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
 		expect(res.isError).toBeFalsy();
@@ -5511,7 +5511,7 @@ describe("dispatchTool", () => {
 				confirmed: true,
 				tests: "pm.test('a', () => {});",
 			}),
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
 		expect(res.isError).toBeFalsy();
@@ -5535,7 +5535,7 @@ describe("dispatchTool", () => {
 				url: "https://api.example.com/users",
 				tests: "pm.test('b', () => {});",
 			}),
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
 		expect(res.isError).toBeFalsy();
@@ -5566,7 +5566,7 @@ describe("dispatchTool", () => {
 					postRequestScript: "pm.test('a', () => {});",
 					tests: "pm.test('b', () => {});",
 				}),
-				ctxWith(client, { allowlist: ["api.example.com"] })
+				ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 			);
 
 			expect(res.isError).toBe(true);
@@ -5575,6 +5575,188 @@ describe("dispatchTool", () => {
 			expect(client.executeRequest).not.toHaveBeenCalled();
 		}
 	);
+
+	/*
+	 * #1834: with Reveal secrets to agents off, an agent-written script is
+	 * refused before anything is composed or sent, because a script reads every
+	 * variable the request resolves against, secret ones included.
+	 */
+	describe("agent-supplied scripts while Reveal secrets to agents is off", () => {
+		const target = { url: "https://api.example.com/users", confirmed: true };
+		const OFF = { allowlist: ["api.example.com"] };
+		const ON = { allowlist: ["api.example.com"], revealSecretsToAgents: true };
+		const script = (kind: string, text = "pm.environment.get('token');") => ({
+			kind,
+			config: { script: text },
+		});
+
+		const expectRefusedUntouched = (
+			res: { isError?: boolean; content: Array<{ text: string }> },
+			client: EngineClient,
+			named: string
+		) => {
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain(named);
+			expect(firstText(res)).toContain("Reveal secrets to agents");
+			expect(client.composeRequest).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+			expect(client.startRun).not.toHaveBeenCalled();
+		};
+
+		test.each([
+			["preRequestScript", { preRequestScript: "pm.request.headers.add('a', 'b')" }],
+			["postRequestScript", { postRequestScript: "pm.test('ok', () => {})" }],
+			["tests", { tests: "pm.test('ok', () => {})" }],
+			["elements", { elements: [script("script.pre")] }],
+			["elements", { elements: [script("script.post")] }],
+			["elements", { elements: [script("script.setup")] }],
+			["elements", { elements: [script("script.teardown")] }],
+			["elements", { elements: [script("SCRIPT.Pre")] }],
+			["elements", { elements: [script("  script.post ")] }],
+			[
+				"elements",
+				{
+					elements: [
+						{ kind: "assert.duration", config: { maxMs: 5 } },
+						script("script.pre"),
+					],
+				},
+			],
+			["elements", { elements: [{ ...script("script.pre"), enabled: false }] }],
+		])("run_request refuses %s", async (named, extra) => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ ...target, ...extra },
+				ctxWith(client, OFF)
+			);
+			expectRefusedUntouched(res, client, `"${named}"`);
+		});
+
+		test("run_request names every offending argument", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{
+					...target,
+					preRequestScript: "a();",
+					postRequestScript: "b();",
+					elements: [script("script.post")],
+				},
+				ctxWith(client, OFF)
+			);
+			expectRefusedUntouched(
+				res,
+				client,
+				'"preRequestScript", "postRequestScript", "elements"'
+			);
+		});
+
+		test.each([
+			["postRequestScript", { postRequestScript: "pm.test('ok', () => {})" }],
+			["tests", { tests: "pm.test('ok', () => {})" }],
+		])("start_load_run refuses %s", async (named, extra) => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{ ...target, ...extra },
+				ctxWith(client, OFF)
+			);
+			expectRefusedUntouched(res, client, `"${named}"`);
+		});
+
+		test("start_load_run refuses a script override of a saved request, too", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{
+					requestId: "req_1",
+					postRequestScript: "pm.test('ok', () => {})",
+					confirmed: true,
+				},
+				ctxWith(client, OFF)
+			);
+			expectRefusedUntouched(res, client, '"postRequestScript"');
+		});
+
+		test.each([
+			["run_request", { preRequestScript: "a();", postRequestScript: "b();" }],
+			["start_load_run", { postRequestScript: "b();" }],
+		])("%s sends the same scripts once reveal is on", async (name, scripts) => {
+			const client = fakeClient();
+			const res = await dispatchTool(name, { ...target, ...scripts }, ctxWith(client, ON));
+			expect(res.isError).toBeFalsy();
+			expect(client.composeRequest).toHaveBeenCalled();
+		});
+
+		test("run_request passes extractors, assertions and timers with reveal off", async () => {
+			const client = fakeClient();
+			const elements = [
+				{ kind: "extract.jsonpath", config: { path: "$.id", variable: "id" } },
+				{ kind: "assert.duration", config: { maxMs: 500 } },
+				{ kind: "timer.think", config: { ms: 10 } },
+			];
+			const res = await dispatchTool(
+				"run_request",
+				{ ...target, elements },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload.elements).toEqual(elements);
+		});
+
+		test.each([
+			["empty", ""],
+			["whitespace-only", " \t\r\n "],
+		])("a %s script is inert in the engine and is not refused", async (_label, blank) => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{
+					...target,
+					preRequestScript: blank,
+					postRequestScript: blank,
+					elements: [script("script.setup", blank), { kind: "script.teardown" }],
+				},
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.executeRequest).toHaveBeenCalled();
+		});
+
+		test("run_request with only a requestId link sends with reveal off", async () => {
+			// `requestId` links History; it composes nothing stored, so no script rides it.
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ ...target, requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload.requestId).toBe("req_1");
+		});
+
+		test("start_load_run of a saved request that stores scripts still runs with reveal off", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.startRun).toHaveBeenCalled();
+		});
+
+		test("the descriptions say what is refused and where the setting lives", () => {
+			for (const name of ["run_request", "start_load_run"]) {
+				const description = TOOLS.find((t) => t.name === name)!.description;
+				expect(description).toContain("Reveal secrets to agents");
+				expect(description).toMatch(/script you supply here .* is refused/);
+			}
+		});
+	});
 
 	test("run_request hands /compose the raw request and executes what it returns", async () => {
 		// The engine resolves {{host}}; MCP must send it raw (never pre-resolved -
@@ -6118,7 +6300,7 @@ describe("dispatchTool", () => {
 					duration: "30s",
 					confirmed: true,
 				},
-				ctxWith(client, { allowlist: ["api.example.com"] })
+				ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 			);
 
 			expect(res.isError).toBeFalsy();

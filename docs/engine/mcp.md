@@ -920,6 +920,24 @@ composed chain rides under that key too - `composeLoadRunRequest` renames the
 compose response's `elements` onto `requestElements` rather than folding it
 into a flat `tests` string.
 
+**Scripts an agent supplies are refused while reveal is off** (#1834). A script
+reads every variable the request resolves against, secret ones included, so one
+the agent wrote could copy a secret into its own output, a variable not flagged
+`secret` or the request it sends. With Reveal secrets to agents off, `run_request`
+refuses `preRequestScript`, `postRequestScript`, `tests` and any `elements` entry
+of a script kind (`script.pre`, `script.post`, `script.setup`, `script.teardown`,
+matched case- and whitespace-insensitively), and `start_load_run` refuses
+`postRequestScript` and `tests` (it has no pre-request script; its run-level
+`elements` object carries no script text). The refusal is a `ToolArgError` from
+`tools.ts::refuseAgentScripts`, raised before the call is composed or sent, and
+names every offending argument and the setting. Nothing else changes: a blank
+script (empty or whitespace-only) is not refused, because the engine composes
+and compiles none (`is_blank_script_element`); extractors, assertions and
+timers in `elements` pass; `requestId` on `run_request` only links History and
+composes nothing stored, so it carries no script; and with reveal on every
+call is as it was. Scripts stored on a request or collection are not affected
+(see the write toggle below).
+
 **One validation script, one name - except where the engine still keeps two.**
 The post-response script is one field in the app - the request builder's
 **Tests** tab - and MCP declares it identically on `run_request` and
@@ -966,7 +984,8 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
   call has no chain to compose from; `start_load_run` takes the same
   `postRequestScript` for a URL-only run, folded into `requestElements` the
-  same way, as described above. Those two are supplied per call and are not
+  same way, as described above. Those two are supplied per call, are refused while
+  reveal is off (above), and are not
   stored - `create_request` and `update_request` take the same two names as
   sugar for a `script.pre` / `script.post` element stored on the request
   itself, which is what lets an agent-authored script outlive the call that
@@ -1262,7 +1281,8 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     that nothing on this path reads.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
-  request or override the engine-applied auth from `run_request`, and a saved
+  request or override the engine-applied auth from `run_request` (with reveal
+  on; the script itself is refused while it is off), and a saved
   request's stored pre-request script does the same under
   `run_collection_smoke`. The write-back is engine-side
   ([scripting.md](scripting.md#mutating-the-request-pre-request-scripts)), so
@@ -1410,8 +1430,11 @@ IDs).
 
 `preRequestScript` and `postRequestScript` run in the engine's QuickJS sandbox,
 which is the same sandbox the app's editors target. There is exactly one
-per-client capability gate - `pm.sendRequest`, below - and an agent can do
-anything else a script in the app can. What an agent lacked was any way to
+per-client capability gate inside the sandbox - `pm.sendRequest`, below - and,
+with reveal on, an agent can do anything else a script in the app can. With
+reveal off the agent cannot supply a script to a send or a load run at all
+(see *Scripts an agent supplies are refused*, above), though it can still read
+this surface to understand the scripts it reads. What an agent lacked was any way to
 *know* that: until issue #233 the entire script surface it could see was the two
 sentences in those fields' descriptions, so `pm.expect` chains,
 `pm.response.to.*`, the variable scopes and `pm.crypto` were invisible and
@@ -1596,6 +1619,12 @@ configurable in **Settings → MCP** and persisted.
   toggle is off. Withholding the schema rather than only the call is what makes
   the toggle free: those tools are ~40% of the tool payload
   an agent is sent, and on a default install none of them could have succeeded.
+  Write access is a separate grant from reveal: a script stored by a write tool
+  (`create_request` / `update_request` / `create_collection` /
+  `update_collection`, or an import) is not refused while reveal is off, and
+  runs with the secrets under `run_collection_smoke`, `run_collection` and
+  `start_load_run`. That is a residual of write access,
+  not a gate.
   Because the tool set is recomputed per built server (a fresh one per HTTP
   request), flipping the toggle takes effect on the client's next `tools/list` -
   the same timing the per-tool switch below already has. The category covers:
@@ -1769,13 +1798,8 @@ same reason, and each tool that carries one of the rows above says so in its
 own description. The projection lives in `withhold.ts`.
 
 **What this does not cover.** The masking withholds what Vayu can recognise as
-a secret in what an agent reads; three paths are still open with reveal off:
+a secret in what an agent reads; two paths are still open with reveal off:
 
-- A script the agent runs runs with the secrets. `run_request` takes an inline
-  `preRequestScript`, and the engine executes it with the environment's
-  variables, secret ones included, so it can copy a secret into a variable not
-  flagged `secret` or into its own console output, and the next read returns
-  that copy as an ordinary value. Tracked in #1834.
 - A credential the engine writes itself is not a masked value. An OAuth 2.0
   access token the engine fetched and placed in the query is in no stored row,
   and nor is an API key sent inline with a request and read back later through
@@ -1784,6 +1808,11 @@ a secret in what an agent reads; three paths are still open with reveal off:
   `user:password@` userinfo in its `url`, and a `params` row whose name says it
   carries a credential (`api_key`, `token`), read back as stored through
   `list_requests` and `vayu://collections`. Tracked under #1781.
+
+A script an agent sends is not among them: it is refused while reveal is off
+(see *Scripts an agent supplies are refused*, above). A script an agent
+*stores* through a write tool is outside that refusal and still runs with the
+secrets; see the write toggle.
 
 ### Safety config
 
