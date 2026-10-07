@@ -1434,7 +1434,7 @@ per-client capability gate inside the sandbox - `pm.sendRequest`, below - and,
 with reveal on, an agent can do anything else a script in the app can. With
 reveal off the agent cannot supply a script to a send or a load run at all
 (see *Scripts an agent supplies are refused*, above), though it can still read
-this surface to understand the scripts it reads. What an agent lacked was any way to
+this surface to understand the scripts stored in the app. What an agent lacked was any way to
 *know* that: until issue #233 the entire script surface it could see was the two
 sentences in those fields' descriptions, so `pm.expect` chains,
 `pm.response.to.*`, the variable scopes and `pm.crypto` were invisible and
