@@ -376,6 +376,39 @@ describe("withholdSpecDiffChanges", () => {
 			).toEqual(change("params", "1: tenant={{tenant}}"));
 		});
 
+		test.each([
+			["a header-placed key", apiKeyIn("header", "X-Tenant")],
+			["a key whose `in` is query", apiKeyIn("query", " x-tenant ")],
+		])("withholds a headers change holding the custom API-key name under %s", (_name, auth) => {
+			const current = "2: Accept=json, x-TENANT=ACME-SECRET";
+			expect(
+				withholdSpecDiffChanges(change("headers", current), new Map([["r", auth]]))
+			).toEqual(withheld("headers"));
+			// Without the auth the same line is an ordinary one: the gap #1842 closes.
+			expect(withholdSpecDiffChanges(change("headers", current), NO_AUTH)).toEqual(
+				change("headers", current)
+			);
+		});
+
+		test.each([
+			["an API key with no name", apiKeyIn("header", "")],
+			["a bearer token", { mode: "bearer", token: "t" }],
+			["no auth", undefined],
+		])("keeps the name `X-Tenant` as an ordinary header under %s", (_name, auth) => {
+			const current = "1: X-Tenant=acme";
+			expect(
+				withholdSpecDiffChanges(change("headers", current), new Map([["r", auth]]))
+			).toEqual(change("headers", current));
+		});
+
+		test("keeps a {{variable}} under the API-key header name", () => {
+			const current = "1: X-Tenant={{tenant}}";
+			const auths = new Map([["r", apiKeyIn("header", "X-Tenant")]]);
+			expect(withholdSpecDiffChanges(change("headers", current), auths)).toEqual(
+				change("headers", current)
+			);
+		});
+
 		test("judges each entry by its own request's auth", () => {
 			const changed = [
 				{ requestId: "a", fields: [{ field: "params", current: "1: tenant=S" }] },
@@ -398,6 +431,7 @@ describe("withholdSpecDiffChanges", () => {
 		test.each([
 			["url", "https://h/x?page=2"],
 			["params", "1: page=2"],
+			["headers", "1: Accept=json"],
 		])("withholds a %s change whatever it reads", (field, current) => {
 			expect(withholdSpecDiffChanges(change(field, current), nothingRead)).toEqual(
 				withheld(field)
@@ -440,15 +474,16 @@ describe("specDiffRequestsToRead", () => {
 		fields: fields.map((field) => ({ field })),
 	});
 
-	test("names each request with a url or params change once", () => {
+	test("names each request with a headers, url or params change once", () => {
 		expect(
 			specDiffRequestsToRead([
 				entry("a", "url"),
 				entry("b", "headers", "params"),
 				entry("a", "params"),
-				entry("c", "headers", "body"),
+				entry("c", "body", "method"),
+				entry("d", "headers"),
 			])
-		).toEqual(["a", "b"]);
+		).toEqual(["a", "b", "d"]);
 	});
 
 	test.each([

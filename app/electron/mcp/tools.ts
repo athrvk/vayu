@@ -4362,11 +4362,11 @@ function changedEntry(item: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * The stored `auth` of the requests a spec diff's `url` and `params` changes
- * belong to, for the API-key query name their display lines do not carry. Empty
- * when the user reveals secrets: nothing is withheld, so nothing is read. A
- * request that cannot be read is left out, and the projection withholds its
- * display rather than guess (#1840).
+ * The stored `auth` of the requests a spec diff's `headers`, `url` and `params`
+ * changes belong to, for the API-key name their display lines do not carry.
+ * Empty when the user reveals secrets: nothing is withheld, so nothing is read.
+ * A request that cannot be read is left out, and the projection withholds its
+ * display rather than guess (#1840, #1842).
  */
 async function readSpecDiffAuth(
 	ctx: ToolContext,
