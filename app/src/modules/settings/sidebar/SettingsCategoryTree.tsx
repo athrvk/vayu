@@ -137,7 +137,7 @@ export default function SettingsCategoryTree() {
 				)}
 			>
 				<Icon className="size-icon shrink-0" data-icon-motion={motion} />
-				<span className="flex-1 truncate">{label}</span>
+				<span className="cap-centred flex-1 truncate">{label}</span>
 			</button>
 		);
 	};

@@ -2699,6 +2699,28 @@
 		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	}
 
+	/*
+	 * A line of text whose cap band, not its line box, sits on the box's centre:
+	 * the label beside an icon in an `items-center` row (#1830).
+	 *
+	 * `items-center` centres the text's line box, and where the glyphs land in
+	 * that box is the font's business: Chromium rounds the ascent and descent
+	 * to whole pixels and gives an odd leading pixel to the bottom, so Space
+	 * Grotesk's caps sit 0.57px above the centre an icon beside them is drawn
+	 * on at `text-sm`, and by a different amount per face, size and platform.
+	 * Trimming to the cap height and the alphabetic baseline makes the box the
+	 * cap band itself, and the padding gives back exactly what the trim took
+	 * (1lh in all), so a row sized by its text keeps its height; the floor
+	 * takes back the 1/32px the padding loses to layout rounding. Not for an
+	 * element that sets its own `py-*`: the two fight over the same padding.
+	 * `Input` carries the trim alone, because its box is its own height.
+	 */
+	.cap-centred {
+		text-box: trim-both cap alphabetic;
+		padding-block: calc((1lh - 1cap) / 2);
+		min-height: 1lh;
+	}
+
 	.truncate-2-lines {
 		display: -webkit-box;
 		-webkit-line-clamp: 2;

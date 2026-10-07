@@ -72,6 +72,18 @@ describe("Input size", () => {
 		expect(screen.getByLabelText("f").hasAttribute("size")).toBe(false);
 	});
 
+	it("centres the cap band of its text at every size, the way a cap-centred label does", () => {
+		// The rename field replaces a `cap-centred` label in place; without the
+		// trim its text sat on its line box and jumped 1px down as rename began.
+		for (const size of [undefined, "sm", "xs"] as const) {
+			const { unmount } = render(<Input aria-label="f" size={size} className="text-sm" />);
+			expect(classes(screen.getByLabelText("f"))).toContain(
+				"[text-box:trim-both_cap_alphabetic]"
+			);
+			unmount();
+		}
+	});
+
 	it("lets a caller class override the primitive's width", () => {
 		render(<Input aria-label="f" size="sm" className="w-24" />);
 		const list = classes(screen.getByLabelText("f"));

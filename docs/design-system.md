@@ -1200,6 +1200,28 @@ The owner's report on 0.32.0 reversed it: 12px and 9px glyphs read as small,
 not as dense, which is what sent `size-icon`/`size-icon-sm` back to a fixed
 floor.*
 
+**Text beside an icon is `cap-centred`** (`index.css`, #1830). An
+`items-center` row centres an icon's box and a label's *line box*, and the
+glyphs do not sit in the middle of their line box: the browser rounds the
+face's ascent and descent to whole pixels and gives an odd leading pixel to the
+bottom, so the cap band lands off centre by an amount that changes with the
+face, the size and the platform. Space Grotesk at `text-sm` puts its caps
+0.57px above the centre of every drawer row, which is the chevron and folder
+reading low beside the name. `cap-centred` trims the label's box to the cap
+band (`text-box: trim-both cap alphabetic`) and pads it back out to one line
+(`padding-block: calc((1lh - 1cap) / 2)`), so the box keeps its height and its
+centre is the cap band's, for any face the user picks. What remains is the
+renderer snapping the baseline to a pixel, never more than half of one.
+
+Put it on every bare text item in the row, not only the one next to the icon:
+an item left on its line box sits half a pixel off the others. Two sizes in one
+row then share a cap centre rather than a baseline (13px and 12px differ by
+0.35px). Not on an element that sets its own `py-*` (the two fight over the
+padding), and it cannot reach a `Button` or `SelectTrigger` label: the first
+is an anonymous box, the second a line-clamped one the trim does not apply to.
+`Input` carries the trim alone, because the field's box is its own height;
+that is what keeps a rename field's text on the line of the label it replaces.
+
 ### Spacing Scale Conventions
 
 Every `p-*`, `m-*`, `gap-*`, `space-*` and `h-*`/`w-*` utility resolves to
@@ -2042,7 +2064,9 @@ same panel. Collection and request rows differed by 4px inside a *single* tree.
 
 Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and
 `VariablesCategoryTree` rows. Put `h-8 items-center` on the row and let content
-centre; do not re-add vertical padding, which is what caused the drift.
+centre; do not re-add vertical padding, which is what caused the drift. The
+row's text carries `cap-centred` (see Type Scale Conventions), or its caps sit
+above the chevron and the folder beside them.
 
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
@@ -3077,8 +3101,8 @@ for, so interrupting what they are reading is the wrong trade.
 Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
 sidebar's environments and the element list. The field is an ordinary `Input`
-at the row's height (`h-6 flex-1 text-sm`) replacing the row's label; the hook
-owns the behaviour:
+at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
+label's position on both axes; the hook owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
   bare `e.key === "Enter"`. An IME commits its composition buffer with an

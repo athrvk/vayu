@@ -372,7 +372,7 @@ export default function VariablesCategoryTree() {
 								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
 							>
 								<Globe className="size-icon-sm" />
-								<span>Globals</span>
+								<span className="cap-centred">Globals</span>
 							</button>
 						</div>
 					</div>
@@ -611,7 +611,7 @@ export default function VariablesCategoryTree() {
 															// collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
-															<TruncatedText className="flex-1">
+															<TruncatedText className="cap-centred flex-1">
 																{environment.name}
 															</TruncatedText>
 															{/* `chip`: `secondary` brings

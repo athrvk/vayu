@@ -215,7 +215,7 @@ export default function RequestItem({
 						method={request.method}
 						variant="text"
 						size="sm"
-						className="w-[5ch] text-center"
+						className="cap-centred w-[5ch] text-center"
 					/>
 					{isRenaming ? (
 						<Input
@@ -227,7 +227,7 @@ export default function RequestItem({
 							onClick={(e) => e.stopPropagation()}
 						/>
 					) : (
-						<TruncatedText className="text-sm text-foreground cursor-pointer">
+						<TruncatedText className="cap-centred text-sm text-foreground cursor-pointer">
 							{request.name}
 						</TruncatedText>
 					)}

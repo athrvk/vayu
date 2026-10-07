@@ -359,7 +359,7 @@ function ElementRow({
 							 * touching the common short-title case (`shrink-0` still
 							 * wins there, well under the cap).
 							 */}
-							<span className="max-w-[55%] shrink-0 truncate text-sm">
+							<span className="cap-centred max-w-[55%] shrink-0 truncate text-sm">
 								<span className="font-medium">{title}</span>
 								{element.name && (
 									<span className="ml-1.5 text-muted-foreground">{label}</span>
@@ -384,12 +384,12 @@ function ElementRow({
 										className="h-2 w-2 shrink-0 rounded-full bg-warning"
 										aria-hidden
 									/>
-									<TruncatedText>{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
+									<TruncatedText className="cap-centred">{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
 								</span>
 							) : (
 								!open &&
 								summary && (
-									<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
+									<TruncatedText className="cap-centred min-w-0 flex-1 text-xs text-muted-foreground">
 										{summary}
 									</TruncatedText>
 								)

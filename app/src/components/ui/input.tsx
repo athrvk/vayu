@@ -27,7 +27,12 @@ const inputVariants = cva(
 	// The responsive form rendered every input at 16px whenever the
 	// window was narrower than `md` - a split window, a narrow pane -
 	// which is the one size the type scale does not contain.
-	"flex border border-input bg-transparent text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+	//
+	// The trim centres the field's cap band rather than its line box, the
+	// same as a `.cap-centred` label (`index.css`): a rename field's text
+	// lands where the label it replaces sat, and a placeholder sits level
+	// with a search icon drawn inside the field.
+	"flex border [text-box:trim-both_cap_alphabetic] border-input bg-transparent text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
 	{
 		variants: {
 			size: {

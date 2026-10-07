@@ -63,7 +63,12 @@ export function DrawerSectionCount({
 	className?: string;
 }) {
 	return (
-		<span className={cn("shrink-0 text-xs tabular-nums text-muted-foreground", className)}>
+		<span
+			className={cn(
+				"cap-centred shrink-0 text-xs tabular-nums text-muted-foreground",
+				className
+			)}
+		>
 			({value})
 		</span>
 	);
@@ -127,13 +132,13 @@ export function DrawerSection({
 		>
 			<Chevron className="size-icon-sm shrink-0" aria-hidden="true" />
 			{Icon && <Icon className="size-icon-sm shrink-0" aria-hidden="true" />}
-			<span className="truncate">{title}</span>
+			<span className="cap-centred truncate">{title}</span>
 			{count !== undefined && <DrawerSectionCount value={count} className="ml-auto" />}
 		</button>
 	) : (
 		<h3 className={cn("flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5", HEADER_TEXT)}>
 			{Icon && <Icon className="size-icon-sm shrink-0" aria-hidden="true" />}
-			<span className="truncate">{title}</span>
+			<span className="cap-centred truncate">{title}</span>
 			{count !== undefined && <DrawerSectionCount value={count} className="ml-auto" />}
 		</h3>
 	);

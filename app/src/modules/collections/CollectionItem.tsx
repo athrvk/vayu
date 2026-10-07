@@ -329,7 +329,7 @@ export default function CollectionItem({
 								 */}
 								<TruncatedText
 									className={cn(
-										"text-sm text-foreground cursor-pointer",
+										"cap-centred text-sm text-foreground cursor-pointer",
 										depth === 0 && "font-medium"
 									)}
 								>
