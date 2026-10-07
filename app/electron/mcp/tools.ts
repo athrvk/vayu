@@ -64,6 +64,7 @@ import {
 	withholdDiagnoseCredentials,
 	withholdPlannedRequest,
 	withholdReorderRows,
+	withholdRequestUrl,
 	withholdRowListSecrets,
 	withholdRowSecrets,
 	withholdSpecDiffChanges,
@@ -76,6 +77,7 @@ import {
 	WITHHELD_MOCK_ACTIVITY_SENTENCE,
 	WITHHELD_PLANNED_RUN_SENTENCE,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
+	WITHHELD_URL_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 
@@ -4674,7 +4676,9 @@ export const TOOLS: McpTool[] = [
 			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small. " +
 			WITHHELD_AUTH_SENTENCE +
 			" " +
-			WITHHELD_HEADER_SENTENCE,
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -6069,7 +6073,9 @@ export const TOOLS: McpTool[] = [
 			" " +
 			WITHHELD_AUTH_SENTENCE +
 			" " +
-			WITHHELD_HEADER_SENTENCE,
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -6166,7 +6172,9 @@ export const TOOLS: McpTool[] = [
 			" " +
 			WITHHELD_AUTH_SENTENCE +
 			" " +
-			WITHHELD_HEADER_SENTENCE,
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -6351,9 +6359,12 @@ export const TOOLS: McpTool[] = [
 			}
 			const name =
 				typeof stored.name === "string" && stored.name !== "" ? stored.name : requestId;
-			const target = [stored.method, stored.url]
-				.filter((v) => typeof v === "string")
-				.join(" ");
+			// The URL is shown to whoever reads the prompt or the preview, and it can
+			// carry a password or a credential query value (#1837).
+			const shownUrl = secretsShape(ctx, (url) => withholdRequestUrl(url, stored.auth))(
+				stored.url
+			);
+			const target = [stored.method, shownUrl].filter((v) => typeof v === "string").join(" ");
 			const subject = target ? `"${name}" (${target})` : `"${name}"`;
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `Delete the saved request ${subject}?\n\nIt goes to Vayu's Trash, where it can be restored.`,
@@ -6678,7 +6689,9 @@ export const TOOLS: McpTool[] = [
 			" " +
 			WITHHELD_AUTH_SENTENCE +
 			" " +
-			WITHHELD_HEADER_SENTENCE,
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
 		annotations: {
 			title: "Move an item",
 			readOnlyHint: false,

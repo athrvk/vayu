@@ -88,7 +88,11 @@ The app's `log.ts` ports both rules, and
 `engine/tests/fixtures/log-redaction-conformance.json` pins the field list and
 the URL cases for the two languages. Its `sensitiveHeaderNames` is the header
 subset the app's code snippets mask by name (`app/src/lib/sensitive-headers.ts`,
-#1806); each must also be a secret field name here.
+#1806); each must also be a secret field name here. Its `sensitiveParamNames`
+is the query-parameter and Params-row set the engine blanks in an export
+(`is_secret_param_name` in `vayu_extensions.cpp`: the secret field names less `code`, plus
+`EXTRA_SECRET_PARAM_NAMES`), which the MCP server's `SENSITIVE_PARAM_NAMES`
+(`app/electron/mcp/withhold.ts`, #1837) must equal.
 
 A curl verbose exchange (`vayu-engine --verbose 2`, or a run with its own
 `verbose` override) is one `cat=client` record per transfer rather than one
