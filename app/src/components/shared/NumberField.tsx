@@ -64,7 +64,7 @@ export function NumberField({
 					max={max}
 					placeholder={placeholder}
 					aria-describedby={hintId}
-					className={cn("h-9 text-sm", unit && "pr-14")}
+					className={cn("text-sm", unit && "pr-14")}
 				/>
 				{unit && (
 					<span

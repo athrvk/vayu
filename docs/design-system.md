@@ -1200,6 +1200,44 @@ The owner's report on 0.32.0 reversed it: 12px and 9px glyphs read as small,
 not as dense, which is what sent `size-icon`/`size-icon-sm` back to a fixed
 floor.*
 
+**Text beside an icon is `cap-centred`** (`index.css`, #1830). An
+`items-center` row centres an icon's box and a label's *line box*, and the
+glyphs do not sit in the middle of their line box: the browser rounds the
+face's ascent and descent to whole pixels and gives an odd leading pixel to the
+bottom, so the cap band lands off centre by an amount that changes with the
+face, the size and the platform. Space Grotesk at `text-sm` puts its caps
+0.57px above the centre of every drawer row, which is the chevron reading low
+beside the name. `cap-centred` trims the label's box to the cap band
+(`text-box: trim-both cap alphabetic`) and pads it back out to one line
+(`padding-block: calc((1lh - 1cap) / 2)`, floored at `1lh`), so the box keeps
+its height and its centre is the cap band's, for any face the user picks.
+
+What remains is the renderer snapping the baseline to a pixel. Measured at 2x
+in the collections tree, settings categories and element headers: the worst
+icon-to-caps offset went from 0.57px to 0.43px (a row on a whole pixel can
+only put its caps 0.57px above centre or 0.43px below it, and the trim picks
+the nearer), and rows on a half pixel stay at 0.07px.
+
+Lucide draws three glyphs on these rows from y=3 to y=20 of its 24-unit grid,
+half a unit above every other glyph: `folder`, `folder-open` and `gauge`. In a
+row whose text is `cap-centred` they come down by that half unit (1/48 of the
+box, a `transform` because the icon motions own `translate`), so the folder
+and the chevron sit on one line with the name. The rule is scoped to those
+rows: beside a label still on its line box the high glyph happens to match the
+text, and centring it there would leave it the lower of the two.
+
+Put it on every bare text item in the row, not only the one next to the icon:
+an item left on its line box sits half a pixel off the others. Two sizes in one
+row then share a cap centre rather than a baseline (13px and 12px differ by
+0.35px). Not on an element that sets its own `py-*` (the two fight over the
+padding), and it cannot reach a `Button` or `SelectTrigger` label: the first
+is an anonymous box, the second a line-clamped one the trim does not apply to.
+**Never on an `Input`, as a class or a `text-box`:** a field with no vertical
+padding (`size="xs"`) clips every descender and underscore at its own edge
+("Create charae", "base url"); `input.test.tsx` fails on one. The field needs
+nothing: its text already lands on a `cap-centred` label's line, so a rename
+moves no text at either density.
+
 ### Spacing Scale Conventions
 
 Every `p-*`, `m-*`, `gap-*`, `space-*` and `h-*`/`w-*` utility resolves to
@@ -1240,7 +1278,7 @@ constant no density setting should move.
 targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
 must not carry below it: a chrome band is an anchor, not a list row; an
 interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
-legibility floor. Nine named steps, outside the `--spacing` multiplier,
+legibility floor. Ten named steps, outside the `--spacing` multiplier,
 generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
 these. They live in a plain `@theme` block in `index.css`, deliberately not
 `@theme inline`: `inline` bakes a literal into each generated utility instead
@@ -1253,8 +1291,9 @@ below.
 | `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
 | `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
-| `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
-| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
+| `--spacing-control` | `h-control` | 28px | 36px | `Input` default, `Select`, `Button` default, the URL bar's controls |
+| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs, `Input` / `VariableInput` `size="sm"` |
+| `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
@@ -1268,11 +1307,11 @@ piece of chrome in the app that could follow no token at all, and the rows still
 breathe with the density setting because their own padding and gaps ride
 `--spacing`. `header-band.test.ts` fails on any element that paints a band (a
 bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
-`control-sm` and `target` scale on their own schedule under
+`control-sm`, `control-xs` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at
 either density. `density.test.ts` and `chrome-floors.test.ts` guard both
-halves of this: the former that the nine steps are declared with these
+halves of this: the former that the ten steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them. The latter also scans every non-test file for a
@@ -1281,9 +1320,34 @@ latter that the chrome bands, interactive targets and icon classes across
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
 under 24px: such an override outranks the size variant in emission order. A
 compact text button or select trigger states `h-control-sm`, an icon button
-`size-target`. `Input` is not scanned, and a dense-row input at `h-6` / `h-7`
-is still under the floor. The tree-row controls are 24px at Default inside 24px rows, so
-they carry `size-target` rather than an exemption.
+`size-target`. The text fields are scanned too, by a rule of their own
+(#1830): **a text field states its size, never its height.** `Input`,
+`VariableInput` and `SecretInput` take `size` from three of these tokens (the
+map is `input-size.ts`, shared so the two kinds of field cannot drift), and
+their `className` carries no height class of any kind (`h-N`, `h-[...]`, a
+fraction, `h-full`, `h-control*`, `size-N`; `min-h` and `max-h` are fine).
+UrlInput is the one text field that is a band component, not a control: it
+fills the min-h-band-md URL bar, so its h-full is correct.
+
+| `size` | Token | Default | Comfortable | Use |
+|--------|-------|---------|-------------|-----|
+| (none) | `control` | 28px | 36px | A standalone input |
+| `"sm"` | `control-sm` | 24px | 32px | A dense standalone input: dialog rows, filters, the console filter, the schema explorer search, a table-cell editor, the key-value rows, a label beside its field |
+| `"xs"` | `control-xs` | 20px | 24px | A field inside a `target` row: the inline renames |
+
+A numeric step is a height the row never agreed to, and `h-full` makes the
+input's height whatever its row happens to be; a size names a token, so every
+input is one of three heights and Comfortable follows. `size="xs"` on an input
+that stands alone is a review matter, since the scan cannot know the row. The
+`xs` field is drawn for a label a `gap-2` from the icon or badge before it: it
+is pulled back by its padding plus its 1px border (`px-1`, and a margin of
+`calc(var(--spacing) * 1 + 1px)`, the width giving it back on the right), so
+its text lands on the label's x and its border clears the icon by a step (2px
+at Default, 3px at Comfortable). Every rename site writes `size="xs"` and
+nothing else: the same scan fails a `px-`, `-ml-` or `w-` beside it. The
+field takes the focus colour on its border in place of the ring. The tree-row
+controls are 24px at Default inside 24px rows, so they carry `size-target`
+rather than an exemption.
 
 ---
 
@@ -2024,7 +2088,9 @@ same panel. Collection and request rows differed by 4px inside a *single* tree.
 
 Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and
 `VariablesCategoryTree` rows. Put `h-8 items-center` on the row and let content
-centre; do not re-add vertical padding, which is what caused the drift.
+centre; do not re-add vertical padding, which is what caused the drift. The
+row's text carries `cap-centred` (see Type Scale Conventions), or its caps sit
+above the chevron beside them.
 
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
@@ -3059,7 +3125,10 @@ for, so interrupting what they are reading is the wrong trade.
 Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
 sidebar's environments and the element list. The field is an ordinary `Input`
-at the row's height (`h-6 flex-1 text-sm`) replacing the row's label; the hook
+at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
+label's position on both axes: every renaming row puts its label a `gap-2`
+from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
+the floors table), and the field states `size="xs"` and nothing else. The hook
 owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a

@@ -245,8 +245,9 @@ export function CannedResponseControls({
 							Reply status
 						</Label>
 						<Input
+							size="sm"
 							id="inbox-status"
-							className="h-control-sm w-24 font-mono text-xs"
+							className="w-24 font-mono text-xs"
 							value={statusDraft}
 							disabled={disabled}
 							onChange={(e) => setStatusDraft(e.target.value)}
@@ -257,8 +258,9 @@ export function CannedResponseControls({
 							Reply delay (ms)
 						</Label>
 						<Input
+							size="sm"
 							id="inbox-delay"
-							className="h-control-sm w-24 font-mono text-xs"
+							className="w-24 font-mono text-xs"
 							value={delayDraft}
 							disabled={disabled}
 							onChange={(e) => setDelayDraft(e.target.value)}

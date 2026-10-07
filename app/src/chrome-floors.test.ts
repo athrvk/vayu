@@ -10,7 +10,7 @@
  * density must not carry them below it (issue #1679). `--spacing` scales
  * rhythm - row heights, paddings, gaps - and these three classes of thing are
  * exactly the ones that do not ride it: see the "Chrome, Target and Icon
- * Floors" table in docs/design-system.md and the nine steps `density.test.ts`
+ * Floors" table in docs/design-system.md and the ten steps `density.test.ts`
  * checks against `index.css`.
  *
  * This is a source scan, not a render: vitest stubs CSS imports to `""`, and
@@ -29,6 +29,28 @@ const srcRoot = here;
 
 function read(relPath: string): string {
 	return readFileSync(join(srcRoot, relPath), "utf8");
+}
+
+/** The opening tag's text: up to the first `>` outside quotes and braces. */
+function openingTag(code: string, start: number): string {
+	let depth = 0;
+	let quote = "";
+	for (let i = start; i < code.length; i++) {
+		const c = code[i];
+		if (quote) {
+			if (c === quote) quote = "";
+		} else if (c === '"' || c === "'" || c === "`") quote = c;
+		else if (c === "{") depth++;
+		else if (c === "}") depth--;
+		else if (c === ">" && depth === 0) return code.slice(start, i);
+	}
+	return code.slice(start);
+}
+
+function files(): string[] {
+	return globSync("**/*.tsx", { cwd: srcRoot })
+		.filter((f) => !f.includes(".test."))
+		.map((f) => join(srcRoot, f));
 }
 
 describe("chrome bands carry their own floor, not a list-row height", () => {
@@ -118,9 +140,8 @@ describe('interactive elements keep no undersized override on Button\'s size="ic
 	// `size-N` overrides (N 4-7); the check below is scoped to exactly that
 	// shape rather than a blanket "no h-N or w-N anywhere in the file" scan,
 	// since several of these files also carry legitimately different-sized
-	// Select/Input controls that would false-positive on a bare single-axis
-	// scan (VariablesCategoryTree.tsx's `h-6` Input is a single-axis override,
-	// not a same-size pair, so it does not match).
+	// Select controls that would false-positive on a bare single-axis scan.
+	// An `Input`'s height has its own rule, in the last block of this file.
 	const cases: [label: string, path: string][] = [
 		["UpdateBanner", "components/shared/UpdateBanner.tsx"],
 		["RecoveryBanner", "components/shared/RecoveryBanner.tsx"],
@@ -199,12 +220,14 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// gap #1679 was reopened for). A plain `<button>` and `TimeMarker` (which
 	// forwards `className` to its Button) are in scope too: a hand-rolled
 	// trigger is where the floor slipped before. So is `SelectTrigger`, whose
-	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. `Input`
-	// is not scanned; a dozen dense-row inputs state `h-6` / `h-7`. At the 3px unit h-N / w-N /
+	// own base is `h-control` (28px): an `h-7` on it is 21px at Default. So is
+	// `DialogCancelButton`, a `Button` under another name: an `h-7` on one sat
+	// 3px short of the `Input` and Add button beside it (#1830). At the 3px unit h-N / w-N /
 	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
-	const OPEN = /<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger)\b/g;
+	const OPEN =
+		/<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger|DialogCancelButton)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
 	// the box) while still catching a variant-prefixed `sm:w-5` or
 	// `[&_svg]:size-3`. Bare `0` is not matched: `w-0` hides a box rather than
@@ -222,28 +245,6 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 			if (px < TARGET_FLOOR_PX) return m[0];
 		}
 		return undefined;
-	}
-
-	/** The opening tag's text: up to the first `>` outside quotes and braces. */
-	function openingTag(code: string, start: number): string {
-		let depth = 0;
-		let quote = "";
-		for (let i = start; i < code.length; i++) {
-			const c = code[i];
-			if (quote) {
-				if (c === quote) quote = "";
-			} else if (c === '"' || c === "'" || c === "`") quote = c;
-			else if (c === "{") depth++;
-			else if (c === "}") depth--;
-			else if (c === ">" && depth === 0) return code.slice(start, i);
-		}
-		return code.slice(start);
-	}
-
-	function files(): string[] {
-		return globSync("**/*.tsx", { cwd: srcRoot })
-			.filter((f) => !f.includes(".test."))
-			.map((f) => join(srcRoot, f));
 	}
 
 	it.each([
@@ -284,6 +285,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(tags).toContain("<button");
 		expect(tags).toContain("<TimeMarker");
 		expect(tags).toContain("<SelectTrigger");
+		expect(tags).toContain("<DialogCancelButton");
 	});
 
 	it("finds no undersized h / w / size in an interactive element's own tag", () => {
@@ -295,6 +297,142 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}
+		expect(offences.join("\n")).toBe("");
+	});
+});
+
+describe("a text field states its size, never its height", () => {
+	// `Input`, `VariableInput` and `SecretInput` take `size="sm" | "xs"` (the
+	// `control-sm` and `control-xs` tokens, `input-size.ts`) or nothing
+	// (`control`), and that is the whole vocabulary: an `h-6` is a third height
+	// the row never agreed to, and `h-full` makes the field's height whatever
+	// its row happens to be (#1830). So none of these tags carries a height
+	// class of any kind in its className - a step, a fraction, an arbitrary
+	// value, `h-full`, a floor token or a `size-*` - and `min-h` / `max-h` stay
+	// fine. Whether `size="xs"` is on a field that sits in a `target` row
+	// rather than standing alone is a review matter: the scan cannot see the
+	// row.
+	//
+	// UrlInput is the one text field that is a band component, not a control:
+	// it fills the min-h-band-md URL bar, so its h-full is correct.
+	const FIELDS = ["Input", "VariableInput", "SecretInput"] as const;
+	const EXCLUDED = ["UrlInput"] as const;
+	const OPEN = new RegExp(`<(?:${FIELDS.join("|")})\\b`, "g");
+	const HEIGHT_CLASS = /(?<![\w-])(?:h|size)-[^\s"'`]+/;
+	// `xs` is the rename field, and its pull-back and width are drawn for a
+	// `gap-2` sibling (`input.tsx`): a padding, margin or width beside it is a
+	// second geometry for one field, and the text stops landing on the label.
+	const XS_GEOMETRY_CLASS = /(?<![\w-])(?:-?m[lrx]?-|p[lrx]?-|w-)[^\s"'`]+/;
+
+	/** The first class in `tag` that pins a height, of whatever kind. */
+	function heightClass(tag: string): string | undefined {
+		return tag.match(HEIGHT_CLASS)?.[0];
+	}
+
+	/** The first horizontal padding, margin or width class on an `xs` field. */
+	function xsOverride(tag: string): string | undefined {
+		if (!/\bsize="xs"/.test(tag)) return undefined;
+		const className = tag.match(/className=(?:"([^"]*)"|\{[^}]*\})/)?.[0] ?? "";
+		return className.match(XS_GEOMETRY_CLASS)?.[0];
+	}
+
+	it.each([
+		["a whole step", "h-6", "h-6"],
+		["a larger whole step", "h-8", "h-8"],
+		["a fractional step", "h-7.5", "h-7.5"],
+		["an arbitrary height", "h-[26px]", "h-[26px]"],
+		["a size- step", "size-7", "size-7"],
+		["a fraction of the parent", "h-1/2", "h-1/2"],
+		["filling its row", "flex-1 h-full text-sm", "h-full"],
+		["the compact control token", "h-control-sm w-24", "h-control-sm"],
+		["the default control token", "h-control", "h-control"],
+		["the row-field control token", "h-control-xs", "h-control-xs"],
+		["a variant-prefixed height", "md:h-6", "h-6"],
+	])("flags %s", (_label, classes, expected) => {
+		for (const field of FIELDS) {
+			expect(heightClass(`<${field} className="${classes}"`)).toBe(expected);
+		}
+	});
+
+	it.each([
+		["a size prop and no height", 'size="xs" className="flex-1 text-sm"'],
+		["no height at all", 'className="font-mono text-xs"'],
+		["a min-height floor", 'className="min-h-6"'],
+		["a max-height cap", 'className="max-h-8"'],
+		["a width", 'className="w-24 w-1/2"'],
+	])("does not flag %s", (_label, attrs) => {
+		expect(heightClass(`<Input ${attrs}`)).toBeUndefined();
+	});
+
+	it.each([
+		["a padding", 'size="xs" className="flex-1 px-2"', "px-2"],
+		["a one-step padding", 'className="px-0.5" size="xs"', "px-0.5"],
+		[
+			"a pull-back",
+			'size="xs" className="-ml-[calc(var(--spacing)*0.5+1px)]"',
+			"-ml-[calc(var(--spacing)*0.5+1px)]",
+		],
+		["a width", 'size="xs" className="w-[calc(100%+4px)] flex-1"', "w-[calc(100%+4px)]"],
+		["a left padding", 'size="xs" className="pl-1"', "pl-1"],
+	])("flags an xs field carrying %s", (_label, attrs, expected) => {
+		expect(xsOverride(`<Input ${attrs}`)).toBe(expected);
+	});
+
+	it.each([
+		["the size alone", 'size="xs"'],
+		["flex and text classes", 'size="xs" className="flex-1 text-sm"'],
+		["a shrink floor", 'size="xs" className="min-w-0 flex-1"'],
+		["a padding on another size", 'size="sm" className="px-2 w-24"'],
+		["a padding with no size", 'className="pl-8 pr-8 text-sm"'],
+	])("does not flag %s", (_label, attrs) => {
+		expect(xsOverride(`<Input ${attrs}`)).toBeUndefined();
+	});
+
+	it("reads past a URL in a string to the end of the tag", () => {
+		const code = stripComments(
+			'<Input placeholder="https://example.test/spec.json" className="flex-1" /><div className="h-4" />'
+		);
+		expect(heightClass(openingTag(code, 0))).toBeUndefined();
+	});
+
+	it("scans a non-empty set of text-field tags, every kind, and leaves UrlInput out", () => {
+		const tags = files().flatMap((f) =>
+			[...stripComments(readFileSync(f, "utf8")).matchAll(OPEN)].map((m) => m[0])
+		);
+		expect(tags.length).toBeGreaterThan(50);
+		for (const field of FIELDS) expect(tags).toContain(`<${field}`);
+		for (const name of EXCLUDED) expect(tags).not.toContain(`<${name}`);
+		// The exclusion is real: the URL bar's field is in the tree, filling its band.
+		const urlBar = read("modules/request-builder/components/UrlBar/index.tsx");
+		expect(urlBar).toMatch(/<UrlInput\b[^>]*\bh-full\b/);
+	});
+
+	it("finds no height class on a text field", () => {
+		const offences: string[] = [];
+		for (const file of files()) {
+			const code = stripComments(readFileSync(file, "utf8"));
+			for (const m of code.matchAll(OPEN)) {
+				const hit = heightClass(openingTag(code, m.index));
+				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
+			}
+		}
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it('finds no padding, margin or width beside size="xs"', () => {
+		const offences: string[] = [];
+		let xsFields = 0;
+		for (const file of files()) {
+			const code = stripComments(readFileSync(file, "utf8"));
+			for (const m of code.matchAll(OPEN)) {
+				const tag = openingTag(code, m.index);
+				if (/\bsize="xs"/.test(tag)) xsFields++;
+				const hit = xsOverride(tag);
+				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} size="xs" ${hit}`);
+			}
+		}
+		// The four rename fields: collection, request, environment, element.
+		expect(xsFields).toBeGreaterThanOrEqual(4);
 		expect(offences.join("\n")).toBe("");
 	});
 });

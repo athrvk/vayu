@@ -535,6 +535,41 @@ describe("ElementList - rename", () => {
 		expect(onChange).toHaveBeenCalledWith([{ ...extractElement("e1"), name: "Token lookup" }]);
 	});
 
+	// The field replaces the title button, not the icon beside the title:
+	// dropping the icon moved the title text left by the icon and its gap, and
+	// the field's pull-back then reached into the chevron button.
+	//
+	// Mutation check: drop `{titleIcon}` from the rename branch in `index.tsx`
+	// and this reddens.
+	it("keeps the kind icon beside the field while renaming", async () => {
+		renderList([extractElement("e1")]);
+		await chooseRowAction("Extract JSON", "Rename");
+		const input = await screen.findByPlaceholderText("Extract JSON");
+
+		const icon = input.parentElement?.querySelector("svg.size-icon-sm");
+		expect(icon, "the kind icon was dropped while renaming").not.toBeNull();
+		expect(icon?.nextElementSibling).toBe(input);
+		expect(input.parentElement?.className).toMatch(/\bgap-2\b/);
+	});
+
+	// `Input`'s xs pull-back is drawn for a `gap-2` sibling: the field's text
+	// lands on the title's x and its border clears the icon by a step. So the
+	// field states its size and nothing else, and both the rename wrapper and
+	// the idle title button keep `gap-2`; a different gap on either moves the
+	// text as rename starts.
+	it("states xs and nothing else, beside the icon at the gap xs is drawn for", async () => {
+		renderList([extractElement("e1")]);
+		const idle = screen.getByText("Extract JSON").closest("button");
+		expect(idle?.className).toMatch(/\bgap-2\b/);
+
+		await chooseRowAction("Extract JSON", "Rename");
+		const input = await screen.findByPlaceholderText("Extract JSON");
+		const list = input.className.split(/\s+/);
+		expect(list).toContain("px-1");
+		expect(list).toContain("-ml-[calc(var(--spacing)*1+1px)]");
+		expect(input.parentElement?.className).toMatch(/\bgap-2\b/);
+	});
+
 	it("reverts on Escape without committing", async () => {
 		const onChange = renderList([extractElement("e1")]);
 

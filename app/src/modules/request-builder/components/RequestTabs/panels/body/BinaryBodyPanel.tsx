@@ -259,7 +259,8 @@ export default function BinaryBodyPanel() {
 					onChange={onTypePath}
 					placeholder="/path/to/file.bin or {{fixturesDir}}/file.bin"
 					variables={variables}
-					className="h-8 font-mono"
+					size="sm"
+					className="font-mono"
 				/>
 			</div>
 
@@ -272,7 +273,8 @@ export default function BinaryBodyPanel() {
 					onChange={onContentType}
 					placeholder="From the file extension"
 					variables={variables}
-					className="h-8 font-mono"
+					size="sm"
+					className="font-mono"
 				/>
 				<p className="text-xs text-muted-foreground">
 					{contentType.from === "header" ? (

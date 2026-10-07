@@ -137,7 +137,7 @@ export default function SettingsCategoryTree() {
 				)}
 			>
 				<Icon className="size-icon shrink-0" data-icon-motion={motion} />
-				<span className="flex-1 truncate">{label}</span>
+				<span className="cap-centred flex-1 truncate">{label}</span>
 			</button>
 		);
 	};
@@ -149,11 +149,12 @@ export default function SettingsCategoryTree() {
 					<div className="relative">
 						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
+							size="sm"
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
 							placeholder="Search settings"
 							aria-label="Search settings"
-							className="h-8 pl-8 pr-8 text-sm"
+							className="pl-8 pr-8 text-sm"
 						/>
 						{query !== "" && (
 							<Button

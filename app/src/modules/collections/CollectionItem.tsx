@@ -314,7 +314,8 @@ export default function CollectionItem({
 							<Input
 								type="text"
 								{...rename.inputProps}
-								className="flex-1 h-6 text-sm"
+								size="xs"
+								className="flex-1 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
 							/>
@@ -328,7 +329,7 @@ export default function CollectionItem({
 								 */}
 								<TruncatedText
 									className={cn(
-										"text-sm text-foreground cursor-pointer",
+										"cap-centred text-sm text-foreground cursor-pointer",
 										depth === 0 && "font-medium"
 									)}
 								>
@@ -398,6 +399,7 @@ export default function CollectionItem({
 							style={{ paddingLeft: childIndentPx }}
 						>
 							<Input
+								size="sm"
 								type="text"
 								value={newFolderName}
 								onChange={(e) => onFolderNameChange(e.target.value)}
@@ -410,7 +412,7 @@ export default function CollectionItem({
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
 								placeholder="Collection name"
-								className="flex-1 h-7 text-sm"
+								className="flex-1 text-sm"
 								disabled={isCreatingSubfolder}
 								autoFocus
 							/>
@@ -418,7 +420,6 @@ export default function CollectionItem({
 								size="sm"
 								onClick={() => onCreateSubfolder(collection.id)}
 								disabled={isCreatingSubfolder}
-								className="h-control-sm text-xs"
 							>
 								{isCreatingSubfolder && (
 									<Loader2 className="size-icon-sm animate-spin mr-1" />
@@ -429,7 +430,6 @@ export default function CollectionItem({
 								size="sm"
 								onClick={onCancelSubfolder}
 								disabled={isCreatingSubfolder}
-								className="h-7 text-xs"
 							/>
 						</div>
 					)}

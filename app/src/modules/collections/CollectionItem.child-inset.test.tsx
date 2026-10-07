@@ -139,6 +139,27 @@ describe.each([0, 2])("a folder at depth %i", (depth) => {
 	});
 });
 
+describe("a folder's rename field", () => {
+	// `Input`'s xs geometry is drawn for this row's `gap-2`: pulled back by its
+	// padding plus its border, the field's text lands on the label's x and its
+	// border clears the folder by a step. An override here would be a second
+	// geometry for one field.
+	it("takes xs's geometry, beside the folder at the gap xs is drawn for", () => {
+		render(
+			withCollectionTreeContext(
+				<CollectionItem collection={COLLECTION} depth={0} posInSet={1} setSize={1} />,
+				{ allCollections: [COLLECTION], renamingId: COLLECTION.id }
+			)
+		);
+
+		const input = screen.getByDisplayValue(COLLECTION.name);
+		const list = input.className.split(/\s+/);
+		expect(list).toContain("px-1");
+		expect(list).toContain("-ml-[calc(var(--spacing)*1+1px)]");
+		expect(input.parentElement?.className).toMatch(/\bgap-2\b/);
+	});
+});
+
 describe("an empty folder's row", () => {
 	it("describes itself as empty, since its group holds no treeitem to find", () => {
 		const { container } = renderEmptyFolder(1);

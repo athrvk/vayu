@@ -215,18 +215,19 @@ export default function RequestItem({
 						method={request.method}
 						variant="text"
 						size="sm"
-						className="w-[5ch] text-center"
+						className="cap-centred w-[5ch] text-center"
 					/>
 					{isRenaming ? (
 						<Input
 							type="text"
 							{...rename.inputProps}
-							className="flex-1 h-6 text-sm"
+							size="xs"
+							className="flex-1 text-sm"
 							autoFocus
 							onClick={(e) => e.stopPropagation()}
 						/>
 					) : (
-						<TruncatedText className="text-sm text-foreground cursor-pointer">
+						<TruncatedText className="cap-centred text-sm text-foreground cursor-pointer">
 							{request.name}
 						</TruncatedText>
 					)}

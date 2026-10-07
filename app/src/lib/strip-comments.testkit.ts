@@ -21,9 +21,13 @@
  * brace-wrapped block comment (`{/* ... *\/}`), which is neither a `//` line
  * nor a leading-asterisk block line - `palette-tokens.test.ts` flagged its
  * own documentation before this was fixed.
+ *
+ * A `//` right after a `:` is a URL in a string (`"https://..."`), not a
+ * line comment: blanking it eats the closing quote and a scanner that walks
+ * the tag after it runs on into the next element.
  */
 export function stripComments(source: string): string {
 	return source
 		.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-		.replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
+		.replace(/(?<!:)\/\/[^\n]*/g, (m) => " ".repeat(m.length));
 }

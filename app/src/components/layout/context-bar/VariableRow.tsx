@@ -56,15 +56,17 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 				 * names when reveal is keyed by position.
 				 */
 				<SecretInput
+					size="sm"
 					key={`${name}:${resolved.scope}:${resolved.sourceId}`}
 					value={resolved.value}
 					onChange={() => {}}
 					readOnly
 					aria-label={`Value of ${name}`}
-					className="h-7 text-xs"
+					className="text-xs"
 				/>
 			) : (
 				<Input
+					size="sm"
 					/*
 					 * Scope and source belong in the key, not just the
 					 * value. On the value alone, an environment switch
@@ -78,7 +80,7 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 					key={`${name}:${resolved.scope}:${resolved.sourceId}:${resolved.value}`}
 					defaultValue={resolved.value}
 					aria-label={`Value of ${name}`}
-					className="h-7 text-xs font-mono"
+					className="text-xs font-mono"
 					onBlur={(e) => onCommit(e.target)}
 					onKeyDown={(e) => {
 						// `isCommitEnter`, not a bare Enter (#939, #935): the blur below

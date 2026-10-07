@@ -290,7 +290,7 @@ describe("GenericElementForm - two short fields share a line", () => {
 		);
 
 		const input = screen.getByLabelText("Minimum");
-		expect(input.className).toContain("h-8");
+		expect(input.className).toContain("h-control-sm");
 		expect(input.className).not.toContain("max-w-[12rem]");
 	});
 

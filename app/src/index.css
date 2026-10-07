@@ -160,7 +160,7 @@
  * utility for every `--spacing-*` theme key) rather than one-off arbitrary
  * values. `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
  * theme-independent;
- * `control`, `control-sm` and `target` are the three density scales on its
+ * `control`, `control-sm`, `control-xs` and `target` are the four density scales on its
  * own scale, under `[data-density="comfortable"]` below - the same
  * mechanism `--spacing` itself uses.
  *
@@ -203,6 +203,7 @@
 	--spacing-banner: 36px;
 	--spacing-control: 28px;
 	--spacing-control-sm: 24px;
+	--spacing-control-xs: 20px;
 	--spacing-target: 24px;
 	--spacing-icon: 16px;
 	--spacing-icon-sm: 12px;
@@ -557,14 +558,16 @@
 	[data-density="comfortable"] {
 		--spacing: 0.25rem;
 		/*
-		 * The three floors that scale with density (issue #1679): `control`,
-		 * `control-sm` and `target`, set here to their Comfortable values.
+		 * The four floors that scale with density (issue #1679, `control-xs` from
+		 * #1830): `control`, `control-sm`, `control-xs` and `target`, set here to
+		 * their Comfortable values.
 		 * `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` stay put
 		 * at every density - no override for them exists in this block - per the
 		 * table in docs/design-system.md.
 		 */
 		--spacing-control: 36px;
 		--spacing-control-sm: 32px;
+		--spacing-control-xs: 24px;
 		--spacing-target: 28px;
 	}
 
@@ -2694,6 +2697,44 @@
 
 	.font-code {
 		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
+	}
+
+	/*
+	 * A line of text whose cap band, not its line box, sits on the box's centre:
+	 * the label beside an icon in an `items-center` row (#1830).
+	 *
+	 * `items-center` centres the text's line box, and where the glyphs land in
+	 * that box is the font's business: Chromium rounds the ascent and descent
+	 * to whole pixels and gives an odd leading pixel to the bottom, so Space
+	 * Grotesk's caps sit 0.57px above the centre an icon beside them is drawn
+	 * on at `text-sm`, and by a different amount per face, size and platform.
+	 * Trimming to the cap height and the alphabetic baseline makes the box the
+	 * cap band itself, and the padding gives back exactly what the trim took
+	 * (1lh in all), so a row sized by its text keeps its height; the floor
+	 * takes back the 1/32px the padding loses to layout rounding. Not for an
+	 * element that sets its own `py-*`: the two fight over the same padding.
+	 * Never on an `Input`: without the padding the trimmed field clips every
+	 * descender and underscore at its own edge.
+	 */
+	.cap-centred {
+		text-box: trim-both cap alphabetic;
+		padding-block: calc((1lh - 1cap) / 2);
+		min-height: 1lh;
+	}
+
+	/*
+	 * Lucide draws these glyphs from y=3 to y=20 on its 24-unit grid, so their
+	 * ink sits half a unit (1/48 of the box, at any size) above the centre
+	 * every other glyph is drawn on. Beside a `cap-centred` label that reads
+	 * as the folder sitting high, so in those rows (the parent of a
+	 * `cap-centred` item) they come down by that half unit (#1830). Not
+	 * app-wide: beside a label still on its line box the high glyph happens
+	 * to match the text, and centring it there leaves it the lower of the two.
+	 * `transform`, not `translate`: the icon motions animate `translate`.
+	 */
+	:has(> .cap-centred) :is(svg.lucide-folder, svg.lucide-folder-open, svg.lucide-gauge) {
+		transform-box: border-box;
+		transform: translateY(calc(100% / 48));
 	}
 
 	.truncate-2-lines {

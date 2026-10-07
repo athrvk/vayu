@@ -85,7 +85,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 						onChange={(e) => update(row.id, { name: e.target.value })}
 						placeholder="checkout_ttfb"
 						aria-label={`Custom budget ${index + 1} metric name`}
-						className="h-9 min-w-0 flex-1 text-sm"
+						className="min-w-0 flex-1 text-sm"
 						disabled={disabled}
 					/>
 					<Select
@@ -97,7 +97,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 					>
 						<SelectTrigger
 							id={`${idPrefix}-custom-budget-stat-${row.id}`}
-							className="h-9 w-24 shrink-0 text-sm"
+							className="w-24 shrink-0 text-sm"
 							aria-label={`Custom budget ${index + 1} stat`}
 						>
 							<SelectValue />
@@ -119,7 +119,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 						onChange={(e) => update(row.id, { value: e.target.value })}
 						placeholder="No budget"
 						aria-label={`Custom budget ${index + 1} ceiling`}
-						className="h-9 w-24 shrink-0 text-sm"
+						className="w-24 shrink-0 text-sm"
 						disabled={disabled}
 					/>
 					<Button

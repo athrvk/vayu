@@ -43,6 +43,7 @@ import { VariableAutocomplete, SuggestionList, type CommandListboxState } from "
 import { buildVariableSuggestions, variableSuggestionKey } from "@/lib/variable-suggestions";
 import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { INPUT_HEIGHT, type InputSize } from "@/components/ui/input-size";
 import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
 import RuntimeToken from "./RuntimeToken";
@@ -56,6 +57,11 @@ interface VariableInputProps {
 	onChange: (value: string) => void;
 	placeholder?: string;
 	className?: string;
+	/**
+	 * The field's height, the same three steps as `Input`'s (`input-size.ts`).
+	 * A caller states a size, never a height class (`chrome-floors.test.ts`).
+	 */
+	size?: InputSize;
 	disabled?: boolean;
 	suggestions?: string[]; // Optional list of plain text suggestions (e.g., standard headers)
 	onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void; // Raw paste passthrough
@@ -159,6 +165,7 @@ export default function VariableInput({
 	onChange,
 	placeholder = "Value",
 	className,
+	size = "default",
 	disabled = false,
 	suggestions = [],
 	onPaste,
@@ -761,7 +768,8 @@ export default function VariableInput({
 			className={cn(
 				// Default chrome - overridable via className. Wrapper owns border/bg/size
 				// so the inner input can be borderless and fill it.
-				"relative flex items-center h-9 w-full bg-background rounded-md border border-input px-3 text-sm font-mono shadow-sm transition-colors",
+				"relative flex items-center w-full bg-background rounded-md border border-input px-3 text-sm font-mono shadow-sm transition-colors",
+				INPUT_HEIGHT[size],
 				"focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",
 				disabled && "opacity-50 cursor-not-allowed",
 				className

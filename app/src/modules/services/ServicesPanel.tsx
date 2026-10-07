@@ -567,6 +567,7 @@ function IssuerDelayControl({
 			<label className="flex items-center gap-2">
 				<span className="text-xs text-muted-foreground">Delay</span>
 				<Input
+					size="sm"
 					type="number"
 					min={0}
 					max={MAX_SLOW_MS}
@@ -582,7 +583,7 @@ function IssuerDelayControl({
 					disabled={pending}
 					aria-invalid={!valid}
 					aria-describedby={valid ? undefined : errorId}
-					className="h-7 flex-1 text-xs"
+					className="flex-1 text-xs"
 				/>
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>

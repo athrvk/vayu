@@ -319,6 +319,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				<div className="relative flex-1 min-w-0">
 					<Search className="absolute left-2 top-1/2 -translate-y-1/2 size-icon-sm text-muted-foreground pointer-events-none" />
 					<Input
+						size="sm"
 						ref={searchRef}
 						value={search}
 						onChange={(e) => {
@@ -329,7 +330,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 						}}
 						placeholder="Search schema"
 						aria-label="Search schema"
-						className="h-6 pl-6 text-label"
+						className="pl-6 text-label"
 					/>
 				</div>
 				{/*

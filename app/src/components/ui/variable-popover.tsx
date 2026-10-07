@@ -704,6 +704,7 @@ export function VariablePopover({
 								isSecret && !isSecretRevealed ? (
 									<div className="relative">
 										<Input
+											size="sm"
 											/*
 											 * Keyed against the revealed field below,
 											 * which is otherwise the same `<Input>` in
@@ -718,7 +719,7 @@ export function VariablePopover({
 											value={varInfo.value ? SECRET_MASK : ""}
 											placeholder="not set"
 											aria-label={`Value of ${name} (hidden)`}
-											className="h-8 select-none pr-8 font-mono text-sm"
+											className="select-none pr-8 font-mono text-sm"
 										/>
 										<RevealButton
 											revealed={false}
@@ -746,14 +747,12 @@ export function VariablePopover({
 								) : (
 									<div className="relative">
 										<Input
+											size="sm"
 											key="secret-revealed"
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}
-											className={cn(
-												"h-8 font-mono text-sm",
-												isSecret && "pr-8"
-											)}
+											className={cn("font-mono text-sm", isSecret && "pr-8")}
 											aria-label={`Value of ${name}`}
 											// See the masked branch above: a real DOM attribute,
 											// gated the same way for the same reason.
@@ -811,6 +810,7 @@ export function VariablePopover({
 					) : canCreate ? (
 						<>
 							<Input
+								size="sm"
 								ref={createValueRef}
 								value={editValue}
 								onChange={(e) => setEditValue(e.target.value)}
@@ -824,7 +824,7 @@ export function VariablePopover({
 									}
 								}}
 								placeholder="value…"
-								className="h-8 font-mono text-sm"
+								className="font-mono text-sm"
 								aria-label={`Value for new variable ${name}`}
 								// See the resolved branch's own `autoFocus={focusOnOpen}`: a
 								// real DOM attribute fires on mount regardless of Radix's own

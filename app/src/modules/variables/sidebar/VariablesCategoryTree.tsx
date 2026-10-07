@@ -372,7 +372,7 @@ export default function VariablesCategoryTree() {
 								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
 							>
 								<Globe className="size-icon-sm" />
-								<span>Globals</span>
+								<span className="cap-centred">Globals</span>
 							</button>
 						</div>
 					</div>
@@ -430,6 +430,7 @@ export default function VariablesCategoryTree() {
 								{creatingEnvironment && (
 									<div className={cn("px-3 py-1", GROUP_CHILD_INSET)}>
 										<Input
+											size="sm"
 											value={newEnvName}
 											onChange={(e) => setNewEnvName(e.target.value)}
 											onKeyDown={(e) => {
@@ -448,7 +449,7 @@ export default function VariablesCategoryTree() {
 												}
 											}}
 											autoFocus
-											className="h-8 text-sm"
+											className="text-sm"
 											placeholder="Environment name"
 										/>
 									</div>
@@ -586,7 +587,8 @@ export default function VariablesCategoryTree() {
 															autoFocus
 															{...rename.inputProps}
 															onClick={(e) => e.stopPropagation()}
-															className="h-6 flex-1 text-sm"
+															size="xs"
+															className="flex-1 text-sm"
 														/>
 													) : (
 														<button
@@ -609,7 +611,7 @@ export default function VariablesCategoryTree() {
 															// collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
-															<TruncatedText className="flex-1">
+															<TruncatedText className="cap-centred flex-1">
 																{environment.name}
 															</TruncatedText>
 															{/* `chip`: `secondary` brings

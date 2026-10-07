@@ -197,6 +197,10 @@ function ElementRow({
 	const label = kindLabel(element.kind, kinds);
 	const title = element.name ?? label;
 	const Icon = kindIcon(schema);
+	const titleIcon = Icon && (
+		// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
+		<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
+	);
 	const summary = summarizeElement(element, schema);
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
@@ -320,23 +324,27 @@ function ElementRow({
 						/>
 					</button>
 					{renaming ? (
-						<Input
-							autoFocus
-							{...rename.inputProps}
-							placeholder={label}
-							className="h-6 flex-1"
-						/>
+						// The title button's own box without the button: the same icon
+						// and `gap-2`, the gap `Input`'s xs pull-back is drawn for, so
+						// the field's text lands where the title's did.
+						<div className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+							{titleIcon}
+							<Input
+								autoFocus
+								{...rename.inputProps}
+								placeholder={label}
+								size="xs"
+								className="min-w-0 flex-1"
+							/>
+						</div>
 					) : (
 						<button
 							type="button"
 							onClick={() => setOpen((o) => !o)}
 							onKeyDown={handleRowKeyDown}
-							className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+							className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left"
 						>
-							{Icon && (
-								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
-								<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
-							)}
+							{titleIcon}
 							{/*
 							 * `shrink-0` keeps a title at its natural width instead of
 							 * ceding space in the flex distribution - the summary
@@ -352,7 +360,7 @@ function ElementRow({
 							 * touching the common short-title case (`shrink-0` still
 							 * wins there, well under the cap).
 							 */}
-							<span className="max-w-[55%] shrink-0 truncate text-sm">
+							<span className="cap-centred max-w-[55%] shrink-0 truncate text-sm">
 								<span className="font-medium">{title}</span>
 								{element.name && (
 									<span className="ml-1.5 text-muted-foreground">{label}</span>
@@ -377,12 +385,12 @@ function ElementRow({
 										className="h-2 w-2 shrink-0 rounded-full bg-warning"
 										aria-hidden
 									/>
-									<TruncatedText>{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
+									<TruncatedText className="cap-centred">{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
 								</span>
 							) : (
 								!open &&
 								summary && (
-									<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
+									<TruncatedText className="cap-centred min-w-0 flex-1 text-xs text-muted-foreground">
 										{summary}
 									</TruncatedText>
 								)
