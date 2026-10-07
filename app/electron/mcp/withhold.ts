@@ -38,7 +38,8 @@
  * is masked in place with the engine's `<redacted>` marker, the rule the engine
  * applies to a run's config snapshot (#1803), so the record keeps its shape. A
  * credential no stored row holds - an OAuth 2.0 token the engine fetched - is
- * masked by where the trace says auth wrote it (#1835).
+ * masked by where the record says auth wrote it: the trace's `request` node
+ * (#1835) or the live `/execute` answer's top level (#1845).
  */
 
 import type { McpSafetyConfig } from "./config.js";

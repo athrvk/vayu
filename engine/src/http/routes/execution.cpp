@@ -1912,6 +1912,9 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);
     }
+    // What auth wrote, so a reader that masks the answer (the MCP server) can
+    // tell the credential in `rawRequest` from any other query parameter (#1845).
+    record_auth_provenance (body, exchange.request);
     res.set_content (body.dump (2), "application/json");
 }
 
