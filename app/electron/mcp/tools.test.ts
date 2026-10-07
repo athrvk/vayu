@@ -11226,6 +11226,112 @@ describe("secret withholding", () => {
 		expect(revealed.body.changed[1].fields[0].current).toBe("https://admin:hunt\u2026");
 	});
 
+	describe("diff_spec reads the stored auth for a custom API-key query name", () => {
+		const TENANT_DIFF = {
+			...SPEC_DIFF,
+			changed: [
+				{
+					requestId: "req_url",
+					name: "Key in the url",
+					fields: [
+						{
+							field: "url",
+							current: "https://h/x?tenant=ACME-URL-SECRET&page=2",
+							next: "{{baseUrl}}/x",
+						},
+					],
+				},
+				{
+					requestId: "req_params",
+					name: "Key in the params",
+					fields: [
+						{
+							field: "params",
+							current: "2: page=2, tenant=ACME-ROW-SECRET",
+							next: "1: page=2",
+						},
+						{ field: "headers", current: "1: Accept=json", next: "0: none" },
+					],
+				},
+				{
+					requestId: "req_plain",
+					name: "No key",
+					fields: [
+						{ field: "params", current: "1: tenant=acme", next: "1: tenant=beta" },
+					],
+				},
+			],
+		};
+		const AUTH_BY_ID: Record<string, unknown> = {
+			req_url: { mode: "apikey", in: "query", key: "tenant", value: "ACME-URL-SECRET" },
+			req_params: { mode: "apikey", in: "query", key: "Tenant", value: "ACME-ROW-SECRET" },
+			req_plain: { mode: "none" },
+		};
+		const clientWith = (getRequest: unknown) =>
+			fakeClient({ diffSpec: vi.fn().mockResolvedValue(TENANT_DIFF), getRequest });
+		const args = { collectionId: "c1", content: "{}" };
+
+		test("withholds the key's value from a url and a params line unless revealed", async () => {
+			const getRequest = vi.fn(async (id: string) => ({ id, auth: AUTH_BY_ID[id] }));
+			const client = clientWith(getRequest);
+			const withheld = await read("diff_spec", client, undefined, args);
+			for (const leak of ["ACME-URL-SECRET", "ACME-ROW-SECRET"]) {
+				expect(withheld.text).not.toContain(leak);
+			}
+			const [url, params, plain] = withheld.body.changed;
+			expect(url.fields[0]).toMatchObject({ field: "url", currentWithheld: true });
+			expect(url.fields[0]).not.toHaveProperty("current");
+			expect(params.fields[0]).toMatchObject({ field: "params", currentWithheld: true });
+			expect(params.fields[1].current).toBe("1: Accept=json");
+			// `tenant` is only a credential under a request that names it as its key.
+			expect(plain.fields[0].current).toBe("1: tenant=acme");
+			expect(getRequest.mock.calls.map(([id]) => id).sort()).toEqual([
+				"req_params",
+				"req_plain",
+				"req_url",
+			]);
+		});
+
+		test("reads nothing and returns the lines as written with reveal on", async () => {
+			const getRequest = vi.fn(async (id: string) => ({ id, auth: AUTH_BY_ID[id] }));
+			const revealed = await read("diff_spec", clientWith(getRequest), REVEAL, args);
+			expect(getRequest).not.toHaveBeenCalled();
+			expect(revealed.body.changed[0].fields[0].current).toBe(
+				"https://h/x?tenant=ACME-URL-SECRET&page=2"
+			);
+			expect(revealed.body.changed[1].fields[0].current).toBe(
+				"2: page=2, tenant=ACME-ROW-SECRET"
+			);
+		});
+
+		test("withholds a url and params line it could not read the auth for", async () => {
+			const getRequest = vi.fn(async (id: string) => {
+				if (id === "req_plain") return { id, auth: AUTH_BY_ID[id] };
+				throw new Error("engine unreachable");
+			});
+			const withheld = await read("diff_spec", clientWith(getRequest), undefined, args);
+			for (const leak of ["ACME-URL-SECRET", "ACME-ROW-SECRET"]) {
+				expect(withheld.text).not.toContain(leak);
+			}
+			const [url, params, plain] = withheld.body.changed;
+			expect(url.fields[0].currentWithheld).toBe(true);
+			expect(params.fields[0].currentWithheld).toBe(true);
+			expect(params.fields[1].current).toBe("1: Accept=json");
+			expect(plain.fields[0].current).toBe("1: tenant=acme");
+		});
+
+		test("withholds when the lookup answers with something that is not a request", async () => {
+			const withheld = await read(
+				"diff_spec",
+				clientWith(vi.fn().mockResolvedValue(null)),
+				undefined,
+				args
+			);
+			expect(withheld.text).not.toContain("ACME-URL-SECRET");
+			expect(withheld.body.changed[0].fields[0].currentWithheld).toBe(true);
+		});
+	});
+
 	test.each([
 		"run_request",
 		"get_run_report",

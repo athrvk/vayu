@@ -27,6 +27,7 @@ import {
 	withholdRequestUrl,
 	withholdRowSecrets,
 	withholdRunOutput,
+	specDiffRequestsToRead,
 	withholdSpecDiffChanges,
 	type RunOutputRule,
 } from "./withhold.js";
@@ -270,6 +271,8 @@ describe("withholdSpecDiffChanges", () => {
 	const change = (field: string, current: unknown) => [
 		{ requestId: "r", fields: [{ field, current, next: "the document's value" }] },
 	];
+	/** The stored auth of request `r`: read, and none. */
+	const NO_AUTH = new Map([["r", undefined]]);
 	const withheld = (field: string) => [
 		{
 			requestId: "r",
@@ -285,7 +288,7 @@ describe("withholdSpecDiffChanges", () => {
 		["a url cut inside its host", "https://api.exam\u2026"],
 		["a scheme-less url cut inside its authority", "user:pas\u2026"],
 	])("withholds %s from a url change", (_name, current) => {
-		expect(withholdSpecDiffChanges(change("url", current))).toEqual(withheld("url"));
+		expect(withholdSpecDiffChanges(change("url", current), NO_AUTH)).toEqual(withheld("url"));
 	});
 
 	test.each([
@@ -297,7 +300,9 @@ describe("withholdSpecDiffChanges", () => {
 		["a url cut inside its query", "https://api.example.com?page=\u2026"],
 		["an empty url", ""],
 	])("keeps %s in a url change", (_name, current) => {
-		expect(withholdSpecDiffChanges(change("url", current))).toEqual(change("url", current));
+		expect(withholdSpecDiffChanges(change("url", current), NO_AUTH)).toEqual(
+			change("url", current)
+		);
 	});
 
 	test.each([
@@ -306,7 +311,9 @@ describe("withholdSpecDiffChanges", () => {
 		["a disabled credential row", "1: sig=S [off]"],
 		["a credential row cut inside its value", "2: page=2, api_key=SEC\u2026"],
 	])("withholds %s from a params change", (_name, current) => {
-		expect(withholdSpecDiffChanges(change("params", current))).toEqual(withheld("params"));
+		expect(withholdSpecDiffChanges(change("params", current), NO_AUTH)).toEqual(
+			withheld("params")
+		);
 	});
 
 	test.each([
@@ -316,21 +323,105 @@ describe("withholdSpecDiffChanges", () => {
 		["a credential name cut before its value", "2: page=2, api_key\u2026"],
 		["no rows", "none"],
 	])("keeps %s in a params change", (_name, current) => {
-		expect(withholdSpecDiffChanges(change("params", current))).toEqual(
+		expect(withholdSpecDiffChanges(change("params", current), NO_AUTH)).toEqual(
 			change("params", current)
 		);
 	});
 
 	test("still withholds a credential header, and leaves fields it does not judge", () => {
-		expect(withholdSpecDiffChanges(change("headers", "1: Authorization=Bearer t"))).toEqual(
-			withheld("headers")
-		);
-		expect(withholdSpecDiffChanges(change("body", "json: api_key=S"))).toEqual(
+		expect(
+			withholdSpecDiffChanges(change("headers", "1: Authorization=Bearer t"), NO_AUTH)
+		).toEqual(withheld("headers"));
+		expect(withholdSpecDiffChanges(change("body", "json: api_key=S"), NO_AUTH)).toEqual(
 			change("body", "json: api_key=S")
 		);
-		expect(withholdSpecDiffChanges(change("constructor", "https://u:p@h"))).toEqual(
+		expect(withholdSpecDiffChanges(change("constructor", "https://u:p@h"), NO_AUTH)).toEqual(
 			change("constructor", "https://u:p@h")
 		);
+	});
+
+	describe("with the request's stored auth", () => {
+		const apiKeyIn = (where: string, key: unknown) => ({ mode: "apikey", in: where, key });
+		const tenantAuth = new Map([["r", apiKeyIn("query", "tenant")]]);
+
+		test.each([
+			["url", "https://h/x?tenant=ACME-SECRET&page=2"],
+			["url", "https://h/x#TENANT=ACME-SECRET"],
+			["params", "2: page=2, Tenant=ACME-SECRET"],
+		])("withholds a %s change holding the custom API-key query name", (field, current) => {
+			expect(withholdSpecDiffChanges(change(field, current), tenantAuth)).toEqual(
+				withheld(field)
+			);
+			// Without the auth the same line is an ordinary one: the gap this closes.
+			expect(withholdSpecDiffChanges(change(field, current), NO_AUTH)).toEqual(
+				change(field, current)
+			);
+		});
+
+		test.each([
+			["an API key placed in a header", apiKeyIn("header", "tenant")],
+			["an API key with no name", apiKeyIn("query", "")],
+			["a bearer token", { mode: "bearer", token: "t" }],
+			["no auth", undefined],
+		])("keeps the name `tenant` as an ordinary one under %s", (_name, auth) => {
+			const current = "2: page=2, tenant=acme";
+			expect(
+				withholdSpecDiffChanges(change("params", current), new Map([["r", auth]]))
+			).toEqual(change("params", current));
+		});
+
+		test("keeps a {{variable}} under the API-key name", () => {
+			expect(
+				withholdSpecDiffChanges(change("params", "1: tenant={{tenant}}"), tenantAuth)
+			).toEqual(change("params", "1: tenant={{tenant}}"));
+		});
+
+		test("judges each entry by its own request's auth", () => {
+			const changed = [
+				{ requestId: "a", fields: [{ field: "params", current: "1: tenant=S" }] },
+				{ requestId: "b", fields: [{ field: "params", current: "1: tenant=S" }] },
+			];
+			const auths = new Map([
+				["a", apiKeyIn("query", "tenant")],
+				["b", undefined],
+			]);
+			expect(withholdSpecDiffChanges(changed, auths)).toEqual([
+				{ requestId: "a", fields: [{ field: "params", currentWithheld: true }] },
+				changed[1],
+			]);
+		});
+	});
+
+	describe("when the request's auth could not be read", () => {
+		const nothingRead = new Map<string, unknown>();
+
+		test.each([
+			["url", "https://h/x?page=2"],
+			["params", "1: page=2"],
+		])("withholds a %s change whatever it reads", (field, current) => {
+			expect(withholdSpecDiffChanges(change(field, current), nothingRead)).toEqual(
+				withheld(field)
+			);
+		});
+
+		test("withholds an entry that names no request", () => {
+			const changed = [{ fields: [{ field: "url", current: "https://h/x?page=2" }] }];
+			expect(withholdSpecDiffChanges(changed, new Map([["r", undefined]]))).toEqual([
+				{ fields: [{ field: "url", currentWithheld: true }] },
+			]);
+		});
+
+		test("leaves a field the auth does not bear on, and a current with nothing to hide", () => {
+			expect(withholdSpecDiffChanges(change("body", "json: x=1"), nothingRead)).toEqual(
+				change("body", "json: x=1")
+			);
+			expect(withholdSpecDiffChanges(change("url", ""), nothingRead)).toEqual(
+				change("url", "")
+			);
+			expect(withholdSpecDiffChanges(change("url", null), nothingRead)).toEqual(
+				change("url", null)
+			);
+		});
 	});
 
 	test.each([
@@ -339,7 +430,34 @@ describe("withholdSpecDiffChanges", () => {
 		["an entry with no fields", [{ requestId: "r" }]],
 		["a non-list", "none"],
 	])("passes %s through", (_name, changed) => {
-		expect(withholdSpecDiffChanges(changed)).toEqual(changed);
+		expect(withholdSpecDiffChanges(changed, NO_AUTH)).toEqual(changed);
+	});
+});
+
+describe("specDiffRequestsToRead", () => {
+	const entry = (requestId: unknown, ...fields: string[]) => ({
+		requestId,
+		fields: fields.map((field) => ({ field })),
+	});
+
+	test("names each request with a url or params change once", () => {
+		expect(
+			specDiffRequestsToRead([
+				entry("a", "url"),
+				entry("b", "headers", "params"),
+				entry("a", "params"),
+				entry("c", "headers", "body"),
+			])
+		).toEqual(["a", "b"]);
+	});
+
+	test.each([
+		["a non-list", "none"],
+		["an entry with no request id", [entry(undefined, "url")]],
+		["an entry with no fields", [{ requestId: "a" }]],
+		["a non-entry", [null, 7]],
+	])("names nothing for %s", (_name, changed) => {
+		expect(specDiffRequestsToRead(changed)).toEqual([]);
 	});
 });
 

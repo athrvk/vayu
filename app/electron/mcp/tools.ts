@@ -58,6 +58,8 @@ import {
 	MaskingIncompleteError,
 	runOutputShape,
 	secretsShape,
+	specDiffRequestsToRead,
+	type StoredAuthByRequest,
 	withheldAuthMembers,
 	withholdConfigCredentials,
 	withholdCookieValues,
@@ -4270,6 +4272,33 @@ function changedEntry(item: Record<string, unknown>): Record<string, unknown> {
 	};
 }
 
+/**
+ * The stored `auth` of the requests a spec diff's `url` and `params` changes
+ * belong to, for the API-key query name their display lines do not carry. Empty
+ * when the user reveals secrets: nothing is withheld, so nothing is read. A
+ * request that cannot be read is left out, and the projection withholds its
+ * display rather than guess (#1840).
+ */
+async function readSpecDiffAuth(
+	ctx: ToolContext,
+	changed: unknown,
+	signal: AbortSignal | undefined
+): Promise<StoredAuthByRequest> {
+	const auth = new Map<string, unknown>();
+	if (ctx.config.revealSecretsToAgents) return auth;
+	await Promise.all(
+		specDiffRequestsToRead(changed).map(async (requestId) => {
+			try {
+				const stored = await ctx.client.getRequest(requestId, signal);
+				if (isRecord(stored)) auth.set(requestId, stored.auth);
+			} catch {
+				// Left out on purpose: see above.
+			}
+		})
+	);
+	return auth;
+}
+
 /** Whether any field of @p item is one a person edited by hand. */
 function hasUserEdit(item: Record<string, unknown>): boolean {
 	const fields = Array.isArray(item.fields) ? item.fields : [];
@@ -5629,6 +5658,7 @@ export const TOOLS: McpTool[] = [
 				operation: entry.operation ?? null,
 			}));
 			const changed = boundedBucket(diff.changed, changedEntry);
+			const storedAuth = await readSpecDiffAuth(ctx, changed.entries, signal);
 			const truncated = [added, removed, changed].some(
 				(bucket) => bucket.entries.length < bucket.total
 			);
@@ -5647,7 +5677,9 @@ export const TOOLS: McpTool[] = [
 					},
 					added: added.entries,
 					removed: removed.entries,
-					changed: secretsShape(ctx, withholdSpecDiffChanges)(changed.entries),
+					changed: secretsShape(ctx, (entries) =>
+						withholdSpecDiffChanges(entries, storedAuth)
+					)(changed.entries),
 					entriesTruncated: truncated,
 				}),
 				`\n\n${describeSpecDiff(diff)}${
