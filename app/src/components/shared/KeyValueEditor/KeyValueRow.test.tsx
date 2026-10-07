@@ -195,7 +195,8 @@ describe("row density", () => {
 	 * row, `space-y-1` between. Eight headers cost 384px beside a 24px tab band.
 	 */
 	it("sizes both fields on the app's own step", () => {
-		const fields = row().querySelectorAll<HTMLElement>('[class*="h-8"]');
+		// `size="sm"` on `VariableInput`, which puts `control-sm` on its box.
+		const fields = row().querySelectorAll<HTMLElement>('[class~="h-control-sm"]');
 		expect(fields.length).toBeGreaterThanOrEqual(2);
 	});
 

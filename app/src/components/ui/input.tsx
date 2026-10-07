@@ -9,6 +9,7 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
+import { INPUT_HEIGHT } from "./input-size";
 
 /**
  * An input states its size, never its height (#1830): the three sizes are the
@@ -40,20 +41,21 @@ const inputVariants = cva(
 				// tighter than its siblings - visible on a short numeric value
 				// (`NumberField`'s "5"), which sits close enough to the border to
 				// read as clipped by it once Roundedness curves the corner.
-				default:
-					"h-control w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring",
-				sm: "h-control-sm w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring",
-				// The inline rename field inside a `target` row. The label text sits
-				// at the row's content edge, so the field is pulled back by its
-				// padding plus its 1px border (`px-1.5` + `1px`): the border sits
-				// outside the padding, and pulling back by the padding alone left
-				// the text 1px right of the label it replaces. The width gives the
-				// same offset back on the right, so the box still ends at the
-				// content edge. Keep the margin, the width and the padding in step
-				// (`input.test.tsx` asserts it). The border takes the focus colour
-				// in place of the ring, so one edge draws instead of a ring stacked
-				// on a border inside a row that cannot spare the outset.
-				xs: "h-control-xs w-[calc(100%+var(--spacing)*1.5+1px)] -ml-[calc(var(--spacing)*1.5+1px)] rounded-sm px-1.5 py-0 focus-visible:border-ring focus-visible:ring-0",
+				default: `${INPUT_HEIGHT.default} w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring`,
+				sm: `${INPUT_HEIGHT.sm} w-full rounded-md px-3 py-1 focus-visible:ring-1 focus-visible:ring-ring`,
+				// The inline rename field: replaces a row's label in place. The
+				// label sits a `gap-2` from the icon or badge before it, so the
+				// field is pulled back by its padding plus its 1px border (the
+				// border sits outside the padding) and its text lands on the
+				// label's x; that leaves the border one step clear of the icon.
+				// The width gives the same offset back on the right. Every rename
+				// site writes `size="xs"` and nothing else (`chrome-floors.test.ts`
+				// fails a `px-`, `-ml-` or `w-` beside it, and `input.test.tsx`
+				// keeps the margin, the width and the padding in step). The border
+				// takes the focus colour in place of the ring, so one edge draws
+				// instead of a ring stacked on a border inside a row that cannot
+				// spare the outset.
+				xs: `${INPUT_HEIGHT.xs} w-[calc(100%+var(--spacing)*1+1px)] -ml-[calc(var(--spacing)*1+1px)] rounded-sm px-1 py-0 focus-visible:border-ring focus-visible:ring-0`,
 			},
 		},
 		defaultVariants: { size: "default" },

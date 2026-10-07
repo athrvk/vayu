@@ -311,15 +311,11 @@ export default function CollectionItem({
 							}}
 						/>
 						{isRenaming ? (
-							// xs pulls its border back by its padding plus 1px, which is
-							// all but half a pixel of this row's gap-2, leaving the border
-							// on the folder. A one-step padding with the matching pull-back
-							// (the pair `Input` keeps) clears it with the text unmoved.
 							<Input
 								type="text"
 								{...rename.inputProps}
 								size="xs"
-								className="flex-1 text-sm -ml-[calc(var(--spacing)*0.5+1px)] px-0.5"
+								className="flex-1 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
 							/>

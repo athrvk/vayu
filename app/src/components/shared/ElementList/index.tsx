@@ -325,19 +325,16 @@ function ElementRow({
 					</button>
 					{renaming ? (
 						// The title button's own box without the button: the same icon
-						// and gap-1.5, so the field's text lands where the title's did.
-						// xs pulls its border back over the gap by its padding plus 1px,
-						// which here is the whole gap-1.5 and put the border on the icon.
-						// A one-step padding and pull-back (the pair `Input` keeps) leave
-						// the border a step clear of it with the text where it was.
-						<div className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">
+						// and `gap-2`, the gap `Input`'s xs pull-back is drawn for, so
+						// the field's text lands where the title's did.
+						<div className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
 							{titleIcon}
 							<Input
 								autoFocus
 								{...rename.inputProps}
 								placeholder={label}
 								size="xs"
-								className="min-w-0 flex-1 -ml-[calc(var(--spacing)*0.5+1px)] px-0.5"
+								className="min-w-0 flex-1"
 							/>
 						</div>
 					) : (
@@ -345,7 +342,7 @@ function ElementRow({
 							type="button"
 							onClick={() => setOpen((o) => !o)}
 							onKeyDown={handleRowKeyDown}
-							className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+							className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left"
 						>
 							{titleIcon}
 							{/*

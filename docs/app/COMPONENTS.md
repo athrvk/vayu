@@ -2126,7 +2126,13 @@ same reason - there is deliberately **no re-export shim** in
 `index`, `EditableVariable`, `RuntimeToken` - input with
 `{{variable}}` highlighting + autocomplete. Takes the same optional `variables`
 scope; without one it is a plain text field, since a token would paint a name
-"not defined" and open an editor with nowhere to write.
+"not defined" and open an editor with nowhere to write. Its height is a `size`
+prop, the same `"default" | "sm" | "xs"` as [`Input`](#input) and read from the
+same `input-size.ts`, put on the wrapper that owns the box; a caller states a
+size, never a height class (the key-value rows and the binary body's fields are
+`size="sm"`). The URL bar's `UrlInput` is the exception the sweep names:
+UrlInput is the one text field that is a band component, not a control: it
+fills the min-h-band-md URL bar, so its h-full is correct.
 
 **A token has four states, decided in the order `resolveTemplate` decides
 them** - reserved namespaces first, then the scopes, then the generator table.
@@ -2572,7 +2578,9 @@ Primitives built on Radix UI + cmdk:
 
 `Input` takes a `size` prop, the way `Button` does, and **states its size,
 never its height** (#1830). The three sizes are the density-scaled floor
-tokens, so Comfortable follows without a call site doing anything:
+tokens, so Comfortable follows without a call site doing anything. The
+size-to-token map is `input-size.ts`, which `VariableInput` reads too, so the
+two fields cannot drift:
 
 | `size` | Class | Default | Comfortable | Use |
 |--------|-------|---------|-------------|-----|
@@ -2580,15 +2588,20 @@ tokens, so Comfortable follows without a call site doing anything:
 | `"sm"` | `h-control-sm` | 24px | 32px | A dense standalone input: dialog rows, filters, a table-cell editor, a label beside its field |
 | `"xs"` | `h-control-xs` | 20px | 24px | A field inside a `target` row: the inline renames in the collection, request, variables and element trees |
 
-`xs` is the one size with more than a height. It is `rounded-sm`, has
-`px-1.5`, and sits left of the row's content edge by its padding plus its 1px
-border (`-ml-[calc(var(--spacing)*1.5+1px)]`) - with a width that gives the offset back on the right, so the text
-does not move when a rename begins and the box still ends at the row's edge.
-Its border takes the focus colour in place of the ring, so one edge draws.
-A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`:
-`chrome-floors.test.ts` fails the tag that does. `SecretInput` forwards
-`size`. `size` is the variant, not the native numeric `size` attribute, which
-`Input` omits.
+`xs` is the one size with more than a height. It is `rounded-sm`, has `px-1`,
+and sits left of the row's content edge by its padding plus its 1px border
+(`-ml-[calc(var(--spacing)*1+1px)]`), with a width that gives the offset back
+on the right. That geometry is drawn for a label a `gap-2` from the icon or
+badge before it: the text lands on the label's x, so it does not move when a
+rename begins, and the border clears the icon by a step (2px at Default, 3px at
+Comfortable). Every rename site writes `size="xs"` and nothing else;
+`chrome-floors.test.ts` fails a `px-`, `-ml-` or `w-` beside it. Its border
+takes the focus colour in place of the ring, so one edge draws. No `text-box`
+trim, ever: with `py-0` it clips descenders and underscores (`input.test.tsx`).
+A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`, a
+`VariableInput` or a `SecretInput`: `chrome-floors.test.ts` fails the tag that
+does. `SecretInput` forwards `size`. `size` is the variant, not the native
+numeric `size` attribute, which `Input` omits.
 
 ### `dialog-cancel-button`
 

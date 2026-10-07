@@ -8,8 +8,9 @@
 /**
  * One row of the key/value table.
  *
- * `h-8` fields at a 36px pitch, down from `h-9` in a `p-1` row at 48px. This is
- * the densest table in the app and it was the loosest thing in the panel.
+ * `size="sm"` fields (`control-sm`) at a 36px pitch, down from `h-9` in a `p-1`
+ * row at 48px. This is the densest table in the app and it was the loosest
+ * thing in the panel.
  *
  * The resolved value moved out of a column and into `ResolvedPeek` - see the
  * note there for why, and for how it stays out of the way of the variable
@@ -245,7 +246,7 @@ function KeyValueRow({
 				disabled={keyReadOnly || !item.enabled}
 				suggestions={keySuggestions}
 				variables={variables}
-				className="h-8"
+				size="sm"
 			/>
 
 			{isFileRow ? (
@@ -263,7 +264,7 @@ function KeyValueRow({
 					placeholder={valuePlaceholder}
 					disabled={valueReadOnly || !item.enabled}
 					variables={variables}
-					className="h-8"
+					size="sm"
 				/>
 			)}
 

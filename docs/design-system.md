@@ -1292,7 +1292,7 @@ below.
 | `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
 | `--spacing-control` | `h-control` | 28px | 36px | `Input` default, `Select`, `Button` default, the URL bar's controls |
-| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs, `Input` `size="sm"` |
+| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs, `Input` / `VariableInput` `size="sm"` |
 | `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
@@ -1320,26 +1320,34 @@ latter that the chrome bands, interactive targets and icon classes across
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
 under 24px: such an override outranks the size variant in emission order. A
 compact text button or select trigger states `h-control-sm`, an icon button
-`size-target`. `Input` is scanned too, by a rule of its own (#1830): **an input
-states its size, never its height.** It takes `size` from three of these tokens,
-and its `className` carries no height class of any kind (`h-N`, `h-[...]`, a
-fraction, `h-full`, `h-control*`, `size-N`; `min-h` and `max-h` are fine):
+`size-target`. The text fields are scanned too, by a rule of their own
+(#1830): **a text field states its size, never its height.** `Input`,
+`VariableInput` and `SecretInput` take `size` from three of these tokens (the
+map is `input-size.ts`, shared so the two kinds of field cannot drift), and
+their `className` carries no height class of any kind (`h-N`, `h-[...]`, a
+fraction, `h-full`, `h-control*`, `size-N`; `min-h` and `max-h` are fine).
+UrlInput is the one text field that is a band component, not a control: it
+fills the min-h-band-md URL bar, so its h-full is correct.
 
 | `size` | Token | Default | Comfortable | Use |
 |--------|-------|---------|-------------|-----|
 | (none) | `control` | 28px | 36px | A standalone input |
-| `"sm"` | `control-sm` | 24px | 32px | A dense standalone input: dialog rows, filters, the console filter, the schema explorer search, a table-cell editor, a label beside its field |
+| `"sm"` | `control-sm` | 24px | 32px | A dense standalone input: dialog rows, filters, the console filter, the schema explorer search, a table-cell editor, the key-value rows, a label beside its field |
 | `"xs"` | `control-xs` | 20px | 24px | A field inside a `target` row: the inline renames |
 
 A numeric step is a height the row never agreed to, and `h-full` makes the
 input's height whatever its row happens to be; a size names a token, so every
-input is one of three heights and Comfortable follows. `size="xs"` on an input that stands alone is a
-review matter, since the scan cannot know the row. The `xs` field is pulled
-back by its padding plus its 1px border (`px-1.5`, and a margin of
-`calc(var(--spacing) * 1.5 + 1px)`) so the text does not move when rename
-begins, and takes the focus colour on its border in place of
-the ring. The tree-row controls are 24px at Default inside
-24px rows, so they carry `size-target` rather than an exemption.
+input is one of three heights and Comfortable follows. `size="xs"` on an input
+that stands alone is a review matter, since the scan cannot know the row. The
+`xs` field is drawn for a label a `gap-2` from the icon or badge before it: it
+is pulled back by its padding plus its 1px border (`px-1`, and a margin of
+`calc(var(--spacing) * 1 + 1px)`, the width giving it back on the right), so
+its text lands on the label's x and its border clears the icon by a step (2px
+at Default, 3px at Comfortable). Every rename site writes `size="xs"` and
+nothing else: the same scan fails a `px-`, `-ml-` or `w-` beside it. The
+field takes the focus colour on its border in place of the ring. The tree-row
+controls are 24px at Default inside 24px rows, so they carry `size-target`
+rather than an exemption.
 
 ---
 
@@ -3118,11 +3126,9 @@ Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
 sidebar's environments and the element list. The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
-label's position on both axes. `xs` pulls its border back over the row's gap
-by its padding plus 1px; where an icon sits across that gap (the element
-list's kind icon across `gap-1.5`, the collection tree's folder across
-`gap-2`), the field takes `px-0.5` with the matching one-step pull-back so the
-border clears the icon by at least 2px and the text does not move. The hook
+label's position on both axes: every renaming row puts its label a `gap-2`
+from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
+the floors table), and the field states `size="xs"` and nothing else. The hook
 owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
