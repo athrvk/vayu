@@ -118,7 +118,14 @@ race:crypto/hashtable/hashtable.c
 # under `parse_status_line`. `parse_status_line` is byte-identical to 0.54.1's
 # and the regex is still `thread_local`, so the window is unchanged; 9 rather
 # than 10 is this race's ordinary spread, not a narrowing (0.53.1 read 8 of
-# 10). This is the reading to repeat on the next baseline move; it is not a
-# standing pass, and the entry goes the day a run without it comes back
+# 10).
+#
+# Re-measured again on the move to cpp-httplib 0.59.0 (2026-10-08): 5 of 10
+# runs raced without the line, 10 of 10 passed with it, and the report was the
+# same stack - `narrow` under `_Scanner`, under `basic_regex`, under
+# `parse_status_line`, reached from the test's `MockProxy::forward`.
+# `parse_status_line` and its `thread_local` regex are byte-identical to
+# 0.56.0's. This is the reading to repeat on the next baseline move; it is not
+# a standing pass, and the entry goes the day a run without it comes back
 # clean.
 race:std::ctype<char>::narrow
