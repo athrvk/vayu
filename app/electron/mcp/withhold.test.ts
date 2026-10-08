@@ -769,6 +769,23 @@ describe("withholdRunOutput: what auth wrote into a request record (#1835)", () 
 		});
 	});
 
+	test("masks a live /execute answer, which names what auth wrote beside rawRequest and has no url (#1845)", () => {
+		const wire = (target: string, session: string) =>
+			`GET ${target} HTTP/1.1\r\nHost: x.test\r\nX-Session: ${session}\r\n\r\n`;
+		const answer = {
+			status: 200,
+			authQueryParam: "access_token",
+			authHeaders: ["X-Session"],
+			requestHeaders: { "X-Session": "abc", Accept: "*/*" },
+			rawRequest: wire(`/v1?page=2&access_token=${TOKEN}`, "abc"),
+		};
+		expect(withholdRunOutput(answer, rule)).toEqual({
+			...answer,
+			requestHeaders: { "X-Session": "<redacted>", Accept: "*/*" },
+			rawRequest: wire("/v1?page=2&access_token=<redacted>", "<redacted>"),
+		});
+	});
+
 	test("applies the names to their own record only", () => {
 		const trace = {
 			request: { authHeaders: ["X-Session"], headers: { "X-Session": "abc" } },

@@ -1565,7 +1565,9 @@ unencoded name of the query parameter `apply_auth` appended to `url` for an API 
 the header names an API-key block filled. They exist because the URL and `rawRequest` cannot say
 which query parameter is a credential, so a reader that masks one (the MCP server) has nothing to
 go on without them. Each is **absent**, never empty, when auth wrote none of that kind and on every
-row written before #1835; the stored `url` and `rawRequest` stay raw beside them.
+row written before #1835; the stored `url` and `rawRequest` stay raw beside them. The live
+`POST /execute` answer carries the same two keys at its top level (#1845), written by the same
+function.
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `data_retention`, default 5 MiB) before storage, so downloading one 50 MB response does

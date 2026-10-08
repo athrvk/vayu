@@ -1387,7 +1387,9 @@ record shape, the category list, the redaction rule and the file layout
   [mcp.md](mcp.md#secret-values), #1809). The trace names what auth wrote so
   that masking has something to go on - `request.authQueryParam` (the raw name
   of the query parameter auth appended) and `request.authHeaders`, each absent
-  when auth wrote none (#1835). What
+  when auth wrote none (#1835); the live `POST /execute` answer carries the
+  same two keys at its top level, so `run_request` masks what it returns by the
+  same rule (#1845). What
   bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.
 

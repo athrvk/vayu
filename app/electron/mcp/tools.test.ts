@@ -10835,6 +10835,34 @@ describe("secret withholding", () => {
 		expect(client.listAllRequests).not.toHaveBeenCalled();
 	});
 
+	test("run_request masks the query value and headers the live answer says auth wrote (#1845)", async () => {
+		const TOKEN = "oauth-token-placed-by-the-engine-55";
+		const SESSION = "session-header-value-66";
+		const answer = {
+			...EXECUTE_ANSWER,
+			// The engine's `/execute` answer has no `url`: the request line in
+			// `rawRequest` is the only place the placed token appears.
+			authQueryParam: "access_token",
+			authHeaders: ["X-Session"],
+			requestHeaders: { "X-Session": SESSION, Accept: "*/*" },
+			rawRequest:
+				`GET /v1?page=2&access_token=${TOKEN} HTTP/1.1\r\nHost: api.example.com\r\n` +
+				`X-Session: ${SESSION}\r\n\r\n`,
+		};
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(answer) });
+		const withheld = await sendRequest(client);
+		expect(withheld.text).not.toContain(TOKEN);
+		expect(withheld.text).not.toContain(SESSION);
+		expect(withheld.body.authQueryParam).toBe("access_token");
+		expect(withheld.body.requestHeaders).toEqual({ "X-Session": "<redacted>", Accept: "*/*" });
+		expect(withheld.body.rawRequest).toBe(
+			"GET /v1?page=2&access_token=<redacted> HTTP/1.1\r\nHost: api.example.com\r\n" +
+				"X-Session: <redacted>\r\n\r\n"
+		);
+		const revealed = await sendRequest(client, REVEAL);
+		expect(revealed.body).toEqual(answer);
+	});
+
 	test("run_request masks the header an inline API-key auth names", async () => {
 		const client = runClient({
 			executeRequest: vi.fn().mockResolvedValue({

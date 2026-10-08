@@ -364,9 +364,9 @@ struct Request {
      *        appended to `url` for a credential (API-key-in-query, or an OAuth
      *        2.0 token placed in the query), empty when auth wrote none.
      *
-     * The stored trace records it (`request.authQueryParam`, #1835) because the
-     * URL alone cannot say which parameter auth wrote: a reader that masks
-     * credentials needs the name, and guessing from the value is not possible.
+     * Recorded as `authQueryParam` on the stored trace (#1835) and the live
+     * answer (#1845), because the URL alone cannot say which parameter auth
+     * wrote: a reader that masks credentials needs the name.
      */
     std::string auth_query_param;
     Body body;
