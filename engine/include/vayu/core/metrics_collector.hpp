@@ -274,10 +274,11 @@ inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS =
  *
  * `type` decides which of the fields beside `count` mean anything: a Trend
  * carries the percentiles and `max`, a Counter and a Rate carry only
- * `value` (a running total, or a 0-100 percentage) - the unused fields stay
- * at their default rather than the struct branching into three shapes,
- * which would cost every reader a variant visit for what is, in the end,
- * five doubles.
+ * `value` (a running total, or a 0-100 percentage) beside `count` (samples
+ * for a Trend, records for a Counter, evaluations for a Rate) - the unused
+ * fields stay at their default rather than the struct branching into three
+ * shapes, which would cost every reader a variant visit for what is, in the
+ * end, five doubles.
  */
 struct CustomMetricSummary {
     CustomMetricType type = CustomMetricType::Trend;
@@ -651,9 +652,9 @@ class MetricsCollector {
      *
      * A Trend value is clamped to zero before scaling into the histogram's
      * fixed-point range (see `constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE`);
-     * a Counter's value is added to the running total; a Rate's value is
-     * read as a boolean (non-zero is true) and counted toward the share
-     * that were true.
+     * a Counter's value is added to the running total and its record
+     * count goes up by one; a Rate's value is read as a boolean (non-zero is
+     * true) and counted toward the share that were true.
      */
     void record_custom_metric (const std::string& name, CustomMetricType type, double value);
 

@@ -8352,7 +8352,8 @@ absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count
 percentage). `count` is always how many times the name was recorded: a trend's samples, a
 counter's records (four increments of 1024 are `count: 4, value: 4096`, never the total; #1937),
 a rate's evaluations. A counter's increments are finite and never negative - see
-[`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets). The same shape rides every [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
+[`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets). The same shape rides every
+[`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
 and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
 
 **`timingBreakdown` holds two independently-present halves.** The `avg*` fields
