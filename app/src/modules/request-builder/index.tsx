@@ -868,6 +868,7 @@ export default function RequestBuilder() {
 						comment: apiRequest.comment,
 						rampUpDuration: apiRequest.rampUpDuration,
 						startConcurrency: apiRequest.startConcurrency,
+						dataRowCount: config.data?.length,
 					},
 					{
 						method: apiRequest.method,

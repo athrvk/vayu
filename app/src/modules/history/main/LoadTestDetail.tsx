@@ -297,6 +297,14 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								</span>
 							</div>
 						)}
+						{config.dataRowCount != null && config.dataRowCount > 0 && (
+							<div className="flex items-center gap-2">
+								<span className="text-muted-foreground">Data:</span>
+								<span className="text-foreground font-mono">
+									{config.dataRowCount} {pluralize(config.dataRowCount, "row")}
+								</span>
+							</div>
+						)}
 						{config.timeout != null && config.timeout > 0 && (
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Timeout:</span>

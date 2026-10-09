@@ -41,6 +41,8 @@ export interface LoadTestRunConfig {
 	comment?: string;
 	rampUpDuration?: string;
 	startConcurrency?: number;
+	/** How many `data` rows the run was started with; absent without a data file. */
+	dataRowCount?: number;
 }
 
 /**

@@ -493,7 +493,10 @@ itself is read fresh every time - whether you pick it or the dialog pre-fills it
 from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
-and nothing else.
+and nothing else, and that count is what a reader sees afterwards: the
+dashboard's header prints "N rows" in its config summary, live from the launch
+config and then from the report, and History's Test config row lists it as
+`Data:`.
 
 **A cell that binds into a request is stored with that request.** A collection
 run keeps one row per step execution, and each holds the exchange as it

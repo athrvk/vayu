@@ -19,6 +19,7 @@ import type { Run } from "@/types";
 import type { DashboardHeaderProps, DashboardMode } from "../types";
 import { MethodBadge, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
+import { pluralize } from "../utils/format";
 
 function formatElapsed(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -88,6 +89,11 @@ function DashboardHeader({
 	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
 	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
+	// The rows are never stored, so this count is the only trace on the
+	// dashboard that a file drove the run (#1940). Nothing for a run without one.
+	const rowCount = configuration?.dataRowCount;
+	if (rowCount != null && rowCount > 0)
+		configParts.push(`${rowCount} ${pluralize(rowCount, "row")}`);
 	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
 	const configSummary = configParts.join(" · ");
 

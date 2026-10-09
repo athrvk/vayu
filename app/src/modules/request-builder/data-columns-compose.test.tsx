@@ -241,6 +241,24 @@ describe("a load run started with a data file", () => {
 		expect(composedBody()).not.toHaveProperty("dataColumns");
 	});
 
+	it("hands the dashboard the row count, never the rows (#1940)", async () => {
+		await startLoadRun({
+			...LOAD_CONFIG,
+			data: [{ username: "ada" }, { username: "grace" }],
+			dataColumns: ["username"],
+		});
+
+		const launched = useDashboardStore.getState().loadTestConfig;
+		expect(launched?.dataRowCount).toBe(2);
+		expect(launched).not.toHaveProperty("data");
+	});
+
+	it("leaves the row count off a run with no file (#1940)", async () => {
+		await startLoadRun(LOAD_CONFIG);
+
+		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBeUndefined();
+	});
+
 	it("defers the {{$guid}} family to per-iteration generation (issue #995)", async () => {
 		await startLoadRun(LOAD_CONFIG);
 
