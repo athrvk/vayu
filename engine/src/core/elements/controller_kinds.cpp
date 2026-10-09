@@ -23,7 +23,10 @@
 
 #include "vayu/core/elements.hpp"
 
+#include <expected>
 #include <regex>
+
+#include "user_regex.hpp"
 
 namespace vayu::core {
 
@@ -51,30 +54,19 @@ std::optional<ParsedCondition> parse_condition (const std::string& condition) {
     return std::nullopt;
 }
 
-bool evaluate_condition (const ParsedCondition& parsed, const std::string& resolved) {
-    if (parsed.op == "exists") {
-        // A token `resolve_template` could not answer keeps its braces
-        // (issue #1009) - still resolved, just to nothing this run knows.
-        return !resolved.empty () && resolved.find ("{{") == std::string::npos;
+/// `matches`' operand is `/pattern/`; the schema's `pattern` admits any
+/// non-blank text there, so a missing delimiter is refused here.
+std::expected<UserRegex, std::string> compile_matches_operand (std::string_view operand) {
+    if (operand.size () < 2 || operand.front () != '/' || operand.back () != '/') {
+        return std::unexpected ("'matches' needs a /pattern/, got " + std::string (operand));
     }
-    if (parsed.op == "matches") {
-        // `/pattern/` - the same slash-delimited form the config schema's
-        // `pattern` requires, so a config that reached here always has both.
-        if (parsed.right.size () >= 2 && parsed.right.front () == '/' &&
-        parsed.right.back () == '/') {
-            try {
-                const std::regex pattern (
-                parsed.right.substr (1, parsed.right.size () - 2));
-                return std::regex_search (resolved, pattern);
-            } catch (const std::regex_error&) {
-                return false;
-            }
-        }
-        return false;
-    }
-    // A bare value or a quoted one - either compares as text, matching
-    // `resolve_template`'s own output, which is always a string.
-    std::string expected = parsed.right;
+    return compile_user_regex (operand.substr (1, operand.size () - 2));
+}
+
+/// `==` / `!=` against a bare value or a quoted one - either compares as
+/// text, matching `resolve_template`'s own output, which is always a string.
+bool compare_condition (const ParsedCondition& parsed, const std::string& resolved) {
+    std::string_view expected = parsed.right;
     if (expected.size () >= 2 && expected.front () == '"' && expected.back () == '"') {
         expected = expected.substr (1, expected.size () - 2);
     }
@@ -93,8 +85,12 @@ void mark_skip (ElementContext& ctx, const std::string& reason) {
 
 class ControlIfElement final : public Element {
     public:
-    explicit ControlIfElement (nlohmann::json config)
-    : config_ (std::move (config)) {
+    explicit ControlIfElement (const nlohmann::json& config)
+    : condition_ (config.value ("condition", "")),
+      parsed_ (parse_condition (condition_)) {
+        if (const auto& parsed = parsed_; parsed && parsed->op == "matches") {
+            pattern_ = compile_matches_operand (parsed->right);
+        }
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -102,8 +98,7 @@ class ControlIfElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        const std::string condition = config_.value ("condition", "");
-        const auto parsed           = parse_condition (condition);
+        const auto& parsed = parsed_;
         if (!parsed) {
             ctx.outcome_status = "error";
             ctx.outcome_message =
@@ -113,15 +108,38 @@ class ControlIfElement final : public Element {
         const std::string resolved = ctx.resolve_template ?
         ctx.resolve_template (parsed->left_template) :
         parsed->left_template;
-        if (!evaluate_condition (*parsed, resolved)) {
-            mark_skip (ctx, "condition '" + condition + "' was false");
+        // A `matches` operand RE2 refuses holds for nothing: the step is
+        // skipped, as a false condition is, and the reason says why.
+        if (const auto& pattern = pattern_; pattern && !*pattern) {
+            mark_skip (ctx,
+            "condition '" + condition_ + "' was false: " + pattern->error ());
+            return;
+        }
+        if (!holds (*parsed, resolved)) {
+            mark_skip (ctx, "condition '" + condition_ + "' was false");
             return;
         }
         ctx.outcome_status = "ok";
     }
 
     private:
-    nlohmann::json config_;
+    [[nodiscard]] bool holds (const ParsedCondition& parsed, const std::string& resolved) const {
+        if (parsed.op == "exists") {
+            // A token `resolve_template` could not answer keeps its braces
+            // (issue #1009) - still resolved, just to nothing this run knows.
+            return !resolved.empty () && resolved.find ("{{") == std::string::npos;
+        }
+        if (const auto& pattern = pattern_; pattern && *pattern) {
+            return (*pattern)->search (resolved);
+        }
+        return compare_condition (parsed, resolved);
+    }
+
+    std::string condition_;
+    std::optional<ParsedCondition> parsed_;
+    /// Set exactly when the operator is `matches`, compiled once here rather
+    /// than on every occurrence.
+    std::optional<std::expected<UserRegex, std::string>> pattern_;
 };
 
 // ---------------------------------------------------------------------------

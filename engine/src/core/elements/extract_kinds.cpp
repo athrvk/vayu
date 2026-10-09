@@ -24,9 +24,10 @@
 #include "vayu/core/elements.hpp"
 
 #include <random>
-#include <regex>
+#include <span>
 
 #include "json_path.hpp"
+#include "user_regex.hpp"
 
 namespace vayu::core {
 
@@ -165,37 +166,15 @@ class ExtractJsonElement final : public Element {
 };
 
 // ---------------------------------------------------------------------------
-// extract.regex - `pattern` compiled once, at compile time; `template` `$1$`
-// style back-references; `field`: body | headers | url | status.
+// extract.regex - `pattern` compiled once, when the element is built, through
+// `compile_user_regex` (RE2, #1874); `template` `$1$` style back-references;
+// `field`: body | headers | url | status.
 // ---------------------------------------------------------------------------
 
-std::string regex_field_text (const ElementContext& ctx, const std::string& field) {
-    if (ctx.response == nullptr) {
-        return "";
-    }
-    if (field == "headers") {
-        std::string joined;
-        for (const auto& [name, value] : ctx.response->headers) {
-            if (!joined.empty ()) {
-                joined += "\n";
-            }
-            joined += name;
-            joined += ": ";
-            joined += value;
-        }
-        return joined;
-    }
-    if (field == "url") {
-        return ctx.request.url;
-    }
-    if (field == "status") {
-        return std::to_string (ctx.response->status_code);
-    }
-    return ctx.response->body;
-}
-
-/// `$1$`-style template: `$N$` becomes capture group N, `$0$` the whole match.
-std::string apply_regex_template (const std::string& tpl, const std::smatch& match) {
+/// `$1$`-style template: `$N$` becomes capture group N, `$0$` the whole match,
+/// and a group the pattern does not have becomes nothing.
+std::string apply_regex_template (const std::string& tpl,
+std::span<const std::string_view> groups) {
     std::string out;
     for (size_t i = 0; i < tpl.size (); ++i) {
         if (tpl[i] == '$' && i + 1 < tpl.size ()) {
@@ -209,8 +188,8 @@ std::string apply_regex_template (const std::string& tpl, const std::smatch& mat
                 has_digits = true;
             }
             if (has_digits && j < tpl.size () && tpl[j] == '$') {
-                if (group < match.size ()) {
-                    out += match[group].str ();
+                if (group < groups.size ()) {
+                    out += groups[group];
                 }
                 i = j;
                 continue;
@@ -224,7 +203,8 @@ std::string apply_regex_template (const std::string& tpl, const std::smatch& mat
 class ExtractRegexElement final : public Element {
     public:
     explicit ExtractRegexElement (nlohmann::json config)
-    : config_ (std::move (config)) {
+    : config_ (std::move (config)),
+      pattern_ (compile_user_regex (config_.value ("pattern", ""))) {
         variable_ = config_.value ("variable", "");
         scope_    = config_.value ("scope", "collection");
         field_    = config_.value ("field", "body");
@@ -233,13 +213,6 @@ class ExtractRegexElement final : public Element {
         required_ = config_.value ("required", false);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
-        }
-        try {
-            pattern_.emplace (config_.value ("pattern", ""));
-        } catch (const std::regex_error&) {
-            // @deliberate `pattern_` stays unset; `apply` reports the compile
-            // failure as this element's own "error" outcome rather than an
-            // exception the pipeline would have to catch generically.
         }
     }
 
@@ -250,15 +223,15 @@ class ExtractRegexElement final : public Element {
     void apply (ElementContext& ctx) override {
         if (!pattern_) {
             ctx.outcome_status  = "error";
-            ctx.outcome_message = "invalid regular expression";
+            ctx.outcome_message = pattern_.error ();
             return;
         }
-        const std::string text = regex_field_text (ctx, field_);
+        std::string storage;
+        const std::string_view text = response_field_text (ctx, field_, storage);
         std::vector<std::string> matches;
-        auto begin = std::sregex_iterator (text.begin (), text.end (), *pattern_);
-        for (auto it = begin; it != std::sregex_iterator (); ++it) {
-            matches.push_back (apply_regex_template (template_, *it));
-        }
+        pattern_->for_each_match (text, [&] (std::span<const std::string_view> groups) {
+            matches.push_back (apply_regex_template (template_, groups));
+        });
         write_matches (ctx, matches, scope_, variable_, match_no_, fallback_,
         required_, "no match for the regular expression",
         [] (const std::string& m) { return m; });
@@ -266,7 +239,7 @@ class ExtractRegexElement final : public Element {
 
     private:
     nlohmann::json config_;
-    std::optional<std::regex> pattern_;
+    std::expected<UserRegex, std::string> pattern_;
     std::string variable_;
     std::string scope_;
     std::string field_;
@@ -470,7 +443,9 @@ ElementKind make_extract_regex_kind () {
         { "properties",
         { { "pattern",
           { { "type", "string" }, { "minLength", 1 }, { "title", "Pattern" },
-          { "description", "The regular expression to run against the response." } } },
+          { "description",
+          "The regular expression to run against the response, in RE2 "
+          "syntax: no backreferences or lookaround." } } },
         { "template",
         { { "type", "string" }, { "title", "Replacement template" },
         { "description",

@@ -115,21 +115,39 @@ shipping silently mismatched.
 | `metric.record` | metric | `step.after` | #1500 |
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
-refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
-writes a `$1$`-style template of the match's groups. `extract.boundary` (issue #1518, JMeter's
-Boundary Extractor) takes everything between the first occurrence of `leftBoundary` and the next
-occurrence of `rightBoundary` on the response body - no `field` selector, unlike `extract.regex`'s
-four, because JMeter's own Boundary Extractor has none either. All four - plus `extract.header` -
-share `variable`, `scope` (`env` | `collection` | `globals`), `default` and the JMeter `matchNo`
-convention: `1`-based picks a match, `0` picks one at random, `-1` writes every match as
-`<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr` count. A miss without a `default`
+refused at validate. `extract.regex` compiles its `pattern` once, when the element is compiled (once
+per run plan, or once per design send), and writes a `$1$`-style template of the match's groups for
+every non-overlapping match, leftmost first (`$N$` past the pattern's last group writes nothing).
+`extract.boundary` (issue #1518, JMeter's Boundary Extractor) takes everything between the first
+occurrence of `leftBoundary` and the next occurrence of `rightBoundary` on the response body - no
+`field` selector, unlike `extract.regex`'s four, because JMeter's own Boundary Extractor has none
+either. All four - plus `extract.header` - share `variable`, `scope` (`env` | `collection` |
+`globals`), `default` and the JMeter `matchNo` convention: `1`-based picks a match, `0` picks one at
+random, `-1` writes every match as `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr`
+count. A miss without a `default`
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
 
+Every pattern a user writes - `extract.regex`'s `pattern`, `assert.jsonpath`'s `regex`,
+`assert.contains`'s `text` in `matches` mode and `control.if`'s `matches /re/` - is compiled once by
+`compile_user_regex` (`core/elements/user_regex.hpp`, issue #1874) and run by
+[RE2](https://github.com/google/re2/wiki/Syntax), never `std::regex`. A match is a search (the pattern
+may match anywhere in the text) and takes time linear in the text, so a greedy group over a
+multi-megabyte body cannot exhaust the stack or stall the run. The dialect is RE2's Perl-like one:
+no backreferences (`\1`) and no lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`); inline flags such as
+`(?i)` (case-insensitive), `(?s)` (`.` matches a newline) and `(?m)` (`^`/`$` at line breaks) are
+available. Text is matched as bytes, as it was before RE2: a body need not be UTF-8, a UTF-8
+literal in the pattern matches the same bytes in the text, and `.` matches one byte rather than one
+character. A pattern RE2 refuses is that element's `"error"` outcome, `invalid regular expression:
+<reason>`, reported when it runs; `control.if` instead treats it as a false condition and skips,
+with the same reason in the message. After an empty match the search resumes one byte later, so
+`-1` over a pattern that can match nothing still ends.
+
 `assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes the same path subset with
-one of `expected`, `regex` or `exists`, plus `negate`; `assert.contains` compares a `field` (`body`
-| `headers` | `url` | `status`) against `text` in `contains` | `equals` | `matches` mode;
+one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate`;
+`assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
+`contains` | `equals` | `matches` (an RE2 search, above) mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
 an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
 {meanMs, deviationMs}` (both required, issue #1498) for a normally-distributed one, drawn from
@@ -177,7 +195,9 @@ identically, same as `timer.pacing`.
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over the
 [`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
-is not parsed, and every such kind on that step reports `skipped` with the reason.
+is not parsed, and every such kind on that step reports `skipped` with the reason. The text-reading
+kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
+body in place, and RE2's linear-time search is what keeps a large one safe.
 
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
 (a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total) or `rate`
@@ -243,8 +263,9 @@ next to a run-wide one that already decides the question.
 
 JMeter's logic controllers, as element kinds rather than a nested sub-flow (issue #1515):
 `control.if` skips this step (or, inherited onto a folder, every member) when a condition against a
-resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/`, or `{{v}} exists`, refused at
-validate outside that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
+resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/` (an RE2 search, compiled once
+with the element; see the pattern paragraph above), or `{{v}} exists`, refused at validate outside
+that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
 runs a share of occurrences by `percent` (an exact integer-carry accumulator, not a random draw) or
 `everyN`, on the producer's own counter - no lock, no body parse. `perUser` (default `true`) keeps that
 counter per virtual user; `perUser: false` (issue #1569, JMeter's "All threads" throughput mode) shares
