@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useElectronTheme } from "./useElectronTheme";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 
@@ -150,5 +150,90 @@ describe("useElectronTheme - restoring the saved theme mode at launch", () => {
 		await waitFor(() => expect(result.current.isLoading).toBe(false));
 		expect(setTheme).not.toHaveBeenCalled();
 		expect(result.current.themeSource).toBe("system");
+	});
+});
+
+describe("useElectronTheme - instances share one theme (#1855)", () => {
+	// Mirrors the main process: one broadcast reaches every registered listener.
+	function stubBridge() {
+		const themeListeners = new Set<
+			(t: { shouldUseDarkColors: boolean; themeSource: string }) => void
+		>();
+		const unsubscribe = vi.fn();
+		const onThemeChanged = vi.fn(
+			(cb: (t: { shouldUseDarkColors: boolean; themeSource: string }) => void) => {
+				themeListeners.add(cb);
+				return () => {
+					unsubscribe();
+					themeListeners.delete(cb);
+				};
+			}
+		);
+		vi.stubGlobal("electronAPI", {
+			getTheme: vi
+				.fn()
+				.mockResolvedValue({ shouldUseDarkColors: false, themeSource: "system" }),
+			setTheme: vi.fn(async (source: string) => ({
+				shouldUseDarkColors: source === "dark",
+				themeSource: source,
+			})),
+			onThemeChanged,
+			getAccentScheme: vi.fn().mockResolvedValue({ accentScheme: null }),
+			onAccentSchemeChanged: vi.fn().mockReturnValue(() => {}),
+		});
+		const broadcast = (shouldUseDarkColors: boolean) =>
+			act(() => {
+				for (const cb of themeListeners) {
+					cb({ shouldUseDarkColors, themeSource: "system" });
+				}
+			});
+		return { onThemeChanged, unsubscribe, broadcast };
+	}
+
+	async function mountTwo() {
+		const first = renderHook(() => useElectronTheme());
+		const second = renderHook(() => useElectronTheme());
+		await waitFor(() => expect(first.result.current.isLoading).toBe(false));
+		return { first, second };
+	}
+
+	it("keeps a scheme picked on one instance when an OS theme change is broadcast", async () => {
+		const { broadcast } = stubBridge();
+		const { first, second } = await mountTwo();
+
+		act(() => second.result.current.setColorScheme("sky"));
+		second.unmount();
+		broadcast(true);
+
+		expect(document.documentElement.dataset.colorScheme).toBe("sky");
+		expect(first.result.current.colorScheme).toBe("sky");
+		expect(first.result.current.isDark).toBe(true);
+	});
+
+	it("keeps a scheme picked on one instance when another instance sets the theme mode", async () => {
+		stubBridge();
+		const { first, second } = await mountTwo();
+
+		act(() => first.result.current.setColorScheme("sky"));
+		await act(() => second.result.current.setTheme("dark"));
+
+		expect(document.documentElement.dataset.colorScheme).toBe("sky");
+		expect(document.documentElement.classList.contains("dark")).toBe(true);
+		expect(first.result.current.isDark).toBe(true);
+		expect(second.result.current.colorScheme).toBe("sky");
+	});
+
+	it("subscribes once however many instances are mounted, and lets go with the last", async () => {
+		const { onThemeChanged, unsubscribe } = stubBridge();
+		const { first, second } = await mountTwo();
+		const third = renderHook(() => useElectronTheme());
+
+		expect(onThemeChanged).toHaveBeenCalledTimes(1);
+
+		first.unmount();
+		second.unmount();
+		expect(unsubscribe).not.toHaveBeenCalled();
+		third.unmount();
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
 	});
 });

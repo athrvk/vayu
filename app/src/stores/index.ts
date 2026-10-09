@@ -38,6 +38,7 @@ export {
 } from "./layout-store";
 export { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 export { useAppearanceStore } from "./appearance-store";
+export { useThemeStore } from "./theme-store";
 export { useToastStore, type Toast, type ToastVariant } from "./toast-store";
 export { useRecoveryNoticeStore } from "./recovery-notice-store";
 export { useInboxNotifyStore, inboxNotifiesOnCapture } from "./inbox-notify-store";

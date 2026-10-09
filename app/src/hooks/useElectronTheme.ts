@@ -8,227 +8,44 @@
 /**
  * useElectronTheme Hook
  *
- * Syncs the app theme with the OS/Electron theme settings.
- * Supports both light/dark mode and color schemes.
+ * React face of {@link useThemeStore} - light/dark mode and the accent colour
+ * scheme, synced with the OS/Electron theme settings. The store owns the
+ * values, the persistence, the OS subscriptions and the one write to `<html>`;
+ * this hook only holds the store attached while a component is mounted.
+ *
+ * Mounted by the app shell, the Appearance panel and the command palette. They
+ * all read the same store, so none of them can re-apply a stale copy (#1855).
  * Falls back gracefully when not running in Electron.
  */
 
-import { useEffect, useCallback, useState } from "react";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { useEffect } from "react";
+import { useThemeStore } from "@/stores";
 import type { ThemeSource } from "@/types/ui";
-import { DEFAULT_COLOR_SCHEME, isColorScheme, type ColorScheme } from "@/constants/color-schemes";
+import type { ColorScheme } from "@/constants/color-schemes";
 
 // Re-exported so existing `@/hooks/useElectronTheme` type imports keep working.
 export type { ThemeSource, ColorScheme };
 
-interface UseElectronThemeOptions {
-	/** Called when theme changes */
-	onThemeChange?: (isDark: boolean) => void;
-}
+export function useElectronTheme() {
+	const themeSource = useThemeStore((s) => s.themeSource);
+	const colorScheme = useThemeStore((s) => s.colorScheme);
+	const isDark = useThemeStore((s) => s.isDark);
+	const isLoading = useThemeStore((s) => s.isLoading);
+	const matchSystemAccent = useThemeStore((s) => s.matchSystemAccent);
+	const supportsAccent = useThemeStore((s) => s.supportsAccent);
+	const setTheme = useThemeStore((s) => s.setTheme);
+	const setColorScheme = useThemeStore((s) => s.setColorScheme);
+	const setMatchAccent = useThemeStore((s) => s.setMatchAccent);
 
-function isThemeSource(value: string | null): value is ThemeSource {
-	return value === "system" || value === "light" || value === "dark";
-}
-
-export function useElectronTheme(options: UseElectronThemeOptions = {}) {
-	const { onThemeChange } = options;
-	const [themeSource, setThemeSource] = useState<ThemeSource>("system");
-	const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
-	const [isDark, setIsDark] = useState(false);
-	const [isLoading, setIsLoading] = useState(true);
-	const [matchSystemAccent, setMatchSystemAccent] = useState(false);
-	const [supportsAccent, setSupportsAccent] = useState(false);
-
-	// Apply theme to document. `scheme` is required (not defaulted from state) so
-	// this callback stays stable across accent changes - otherwise the init
-	// effect below, keyed on it, would re-run (and re-hit Electron) every time
-	// the accent changes.
-	const applyTheme = useCallback(
-		(dark: boolean, scheme: ColorScheme) => {
-			// Apply dark mode class
-			if (dark) {
-				document.documentElement.classList.add("dark");
-			} else {
-				document.documentElement.classList.remove("dark");
-			}
-
-			// Apply color scheme data attribute
-			document.documentElement.setAttribute("data-color-scheme", scheme);
-
-			setIsDark(dark);
-			onThemeChange?.(dark);
-		},
-		[onThemeChange]
-	);
-
-	// Initialize theme
-	useEffect(() => {
-		const initTheme = async () => {
-			let source: ThemeSource = "system";
-			let accentSupported = false;
-
-			// Load from localStorage
-			const savedSource = localStorage.getItem(
-				STORAGE_KEYS.THEME_SOURCE
-			) as ThemeSource | null;
-			const rawScheme = localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME);
-			const scheme: ColorScheme = isColorScheme(rawScheme) ? rawScheme : DEFAULT_COLOR_SCHEME;
-			const savedMatchAccent = localStorage.getItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT);
-			const shouldMatchAccent = savedMatchAccent === "true";
-
-			if (window.electronAPI) {
-				// Both asked at once: neither answer depends on the other, and in
-				// sequence the second round trip to the main process waited out the
-				// first while the window was painting its first frame.
-				//
-				// Check if accent color is supported. The main process answers
-				// `accent:get` on every platform, but only resolves a scheme on
-				// Windows/macOS - Linux has no OS accent color, so accentScheme
-				// comes back null there and the toggle must not appear at all.
-				let [theme, accentInfo] = await Promise.all([
-					window.electronAPI.getTheme(),
-					window.electronAPI.getAccentScheme(),
-				]);
-				// `nativeTheme.themeSource` is process state that starts at "system"
-				// on every launch, so `theme` above is the default, not the user's
-				// choice. Push the stored one back into the main process; it
-				// answers with the resolved colors.
-				if (isThemeSource(savedSource) && savedSource !== theme.themeSource) {
-					theme = await window.electronAPI.setTheme(savedSource);
-				}
-				source = theme.themeSource as ThemeSource;
-				accentSupported = accentInfo.accentScheme !== null;
-
-				// Resolve once: when matching is on and the OS gave us a scheme, it
-				// wins over the stored value for both the DOM write and the state
-				// set below, so the two never disagree on the same async turn.
-				const resolved =
-					shouldMatchAccent && accentInfo.accentScheme ? accentInfo.accentScheme : scheme;
-				applyTheme(theme.shouldUseDarkColors, resolved);
-				setColorScheme(resolved);
-			} else {
-				// Fallback: check localStorage or system preference
-				if (savedSource) {
-					source = savedSource;
-					if (source === "system") {
-						const prefersDark = window.matchMedia(
-							"(prefers-color-scheme: dark)"
-						).matches;
-						applyTheme(prefersDark, scheme);
-					} else {
-						applyTheme(source === "dark", scheme);
-					}
-				} else {
-					const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-					applyTheme(prefersDark, scheme);
-				}
-				setColorScheme(scheme);
-			}
-
-			setThemeSource(source);
-			setMatchSystemAccent(shouldMatchAccent);
-			setSupportsAccent(accentSupported);
-			setIsLoading(false);
-		};
-
-		initTheme();
-	}, [applyTheme]);
-
-	// Listen for theme changes
-	useEffect(() => {
-		if (window.electronAPI) {
-			// Listen for Electron theme changes
-			const themeCleanup = window.electronAPI.onThemeChanged((theme) => {
-				setThemeSource(theme.themeSource as ThemeSource);
-				applyTheme(theme.shouldUseDarkColors, colorScheme);
-			});
-
-			// Listen for accent color changes (if matching is enabled and supported)
-			let accentCleanup: (() => void) | undefined;
-			if (matchSystemAccent && supportsAccent) {
-				accentCleanup = window.electronAPI.onAccentSchemeChanged((data) => {
-					if (data.accentScheme && matchSystemAccent) {
-						setColorScheme(data.accentScheme);
-						applyTheme(
-							document.documentElement.classList.contains("dark"),
-							data.accentScheme
-						);
-					}
-				});
-			}
-
-			return () => {
-				themeCleanup();
-				accentCleanup?.();
-			};
-		} else {
-			// Fallback: listen for system preference changes (only if using system theme)
-			if (themeSource === "system") {
-				const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-				const handler = (e: MediaQueryListEvent) => applyTheme(e.matches, colorScheme);
-				mediaQuery.addEventListener("change", handler);
-				return () => mediaQuery.removeEventListener("change", handler);
-			}
-		}
-	}, [applyTheme, themeSource, colorScheme, matchSystemAccent, supportsAccent]);
-
-	// Function to change theme source (light/dark)
-	const setTheme = useCallback(
-		async (source: ThemeSource) => {
-			setThemeSource(source);
-
-			if (window.electronAPI) {
-				const theme = await window.electronAPI.setTheme(source);
-				applyTheme(theme.shouldUseDarkColors, colorScheme);
-			} else {
-				// Fallback: manually set theme
-				if (source === "system") {
-					const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-					applyTheme(prefersDark, colorScheme);
-				} else {
-					applyTheme(source === "dark", colorScheme);
-				}
-			}
-			// Persist preference
-			localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, source);
-		},
-		[applyTheme, colorScheme]
-	);
-
-	// Function to change color scheme
-	const changeColorScheme = useCallback(
-		(scheme: ColorScheme) => {
-			setColorScheme(scheme);
-			const isDark = document.documentElement.classList.contains("dark");
-			applyTheme(isDark, scheme);
-			localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, scheme);
-		},
-		[applyTheme]
-	);
-
-	// Function to toggle matching system accent color
-	const setMatchAccent = useCallback(
-		(enabled: boolean) => {
-			setMatchSystemAccent(enabled);
-			localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, enabled ? "true" : "false");
-
-			// If enabling, fetch the current accent color
-			if (enabled && window.electronAPI && supportsAccent) {
-				window.electronAPI.getAccentScheme().then((data) => {
-					if (data.accentScheme) {
-						changeColorScheme(data.accentScheme);
-					}
-				});
-			}
-		},
-		[supportsAccent, changeColorScheme]
-	);
+	// Reference-counted in the store: the first mounted instance reads the
+	// persisted and OS state and subscribes, the last to unmount lets go.
+	useEffect(() => useThemeStore.getState().attach(), []);
 
 	return {
 		themeSource,
 		setTheme,
 		colorScheme,
-		setColorScheme: changeColorScheme,
+		setColorScheme,
 		isDark,
 		isLoading,
 		matchSystemAccent,

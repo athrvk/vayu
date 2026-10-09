@@ -909,6 +909,53 @@ pre-paint script duplicates them by necessity - it runs before any module - and
 `appearance.prepaint.test.ts` executes the real script to keep the duplicate
 honest.
 
+#### `theme-store.ts` - Light/Dark Mode and Accent Scheme
+
+The theme source (`system` / `light` / `dark`), the accent colour scheme and
+the "match system accent" preference, with `isDark`, `supportsAccent` and
+`isLoading`. Like `appearance-store.ts` it is written one localStorage key per
+preference by the action (`vayu-theme-source`, `vayu-color-scheme`,
+`vayu-match-system-accent`), not through zustand's `persist`: the pre-paint
+script in `index.html` reads the first two, and `SETTINGS_STORAGE_KEYS` clears
+them; `vayu-match-system-accent` is neither read pre-paint nor cleared yet
+(#1857, #1861).
+
+**State:**
+```typescript
+{
+  themeSource: ThemeSource      // "system" | "light" | "dark"
+  colorScheme: ColorScheme
+  isDark: boolean
+  isLoading: boolean            // until the first persisted + OS read lands
+  matchSystemAccent: boolean
+  supportsAccent: boolean       // Windows/macOS only; Linux resolves no OS accent
+}
+```
+
+**One DOM writer.** Every action and every OS event updates the store and then
+calls `writeDocument` with the store's own state (`dark` class and
+`data-color-scheme` on `<html>`). Nothing passes it a value of its own, so the
+document cannot be set from a copy.
+
+**Why a store and not `useState` in `useElectronTheme` (#1855):** the hook is
+mounted three times - the app shell, the Appearance panel and the command
+palette (`useCommandSurfaces`). With per-instance state each held the scheme it
+read at mount and re-applied it on every `theme:changed` broadcast (an OS
+light/dark flip, or any `setTheme` round trip), so an instance that had not
+seen the panel's pick wrote the stale scheme over it, and the palette's
+"Toggle theme" decided its direction from an `isDark` only its own `setTheme`
+updated. The same rule as `appearance-store.ts` above: state that more than one
+mounted consumer reads or writes belongs in a store.
+
+**Subscriptions are reference-counted.** `useElectronTheme` calls `attach()` in
+an effect and releases on unmount; the first holder reads the persisted and OS
+state and registers `onThemeChanged` / `onAccentSchemeChanged` (or the
+`prefers-color-scheme` listener outside Electron), and the last to release
+removes them. Three hook instances therefore share one set of listeners, and
+no consumer has to know which mount is "the" mount. Listeners are registered
+after the first read, so an event cannot apply the default scheme over the one
+the pre-paint script chose.
+
 #### `client-settings-store.ts` - Renderer Preferences
 
 Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
