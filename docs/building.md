@@ -49,9 +49,10 @@ cd ~/vcpkg
 ./bootstrap-vcpkg.sh
 export VCPKG_ROOT=~/vcpkg
 
-# Install pnpm
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install nodejs
+# Install Node.js (the major is pinned in app/.nvmrc) and pnpm
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+. ~/.nvm/nvm.sh
+(cd <your vayu checkout>/app && nvm install)
 npm install -g pnpm
 ```
 
