@@ -16,7 +16,7 @@
 ;
 ; Lock file handling:
 ;   - Lock file path: %APPDATA%\${APP_DATA_DIR}\vayu.lock
-;   - Cleaned up during install (stale locks) and uninstall
+;   - Cleaned up during install (stale locks, except on an updated launch) and uninstall
 ;   - Also handled automatically in app startup (sidecar.ts)
 
 !define APP_DATA_DIR "Vayu"
@@ -49,6 +49,17 @@
 ; INSTALL: Check for running instances and handle reinstall
 ; ============================================================================
 !macro customInit
+  ; An updated launch (electron-updater's quitAndInstall() passes --updated, not
+  ; /S) starts while the app is still in its before-quit shutdown: the renderer's
+  ; save flush, then the engine's graceful exit. Anything done here races it - the
+  ; prompt would offer to kill it, the taskkill and the lock Delete would cut the
+  ; flush and the engine short (#1882). electron-builder's CHECK_APP_RUNNING
+  ; waits for Vayu.exe to exit and force-kills only after; a lock the engine
+  ; leaves behind is reclaimed by the next launch (sidecar.ts).
+  ${If} ${isUpdated}
+    Goto customInitDone
+  ${EndIf}
+
   ; Check if Vayu is running
   nsExec::ExecToStack 'tasklist /FI "IMAGENAME eq Vayu.exe" /NH'
   Pop $0  ; Exit code
@@ -60,12 +71,11 @@
   ; We check if output starts with "Vayu.exe" (first 8 chars) to avoid locale issues
   StrCpy $2 $1 8  ; Extract first 8 characters
   ${If} $2 == "Vayu.exe"
-    ; Vayu.exe is running. A silent install - winget, or electron-updater's own
-    ; `quitAndInstall()` - has nobody to answer a MessageBox; NSIS does not
-    ; suppress a raw MessageBox under /S on its own, so a silent run would
-    ; otherwise sit blocked on a dialog forever. Silent always proceeds
-    ; (close the app, keep installing): there is no unattended "abort" a
-    ; scripted caller could act on either.
+    ; Vayu.exe is running. A silent install (winget, /S) has nobody to answer a
+    ; MessageBox, and NSIS does not suppress a raw MessageBox under /S on its
+    ; own, so a silent run would otherwise sit blocked on a dialog forever.
+    ; Silent always proceeds (close the app, keep installing): there is no
+    ; unattended "abort" a scripted caller could act on either.
     IfSilent closeApp askToClose
 
     askToClose:
@@ -98,6 +108,8 @@
     ; creates a new one when it starts.
     Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
     !insertmacro restoreShellContext
+
+  customInitDone:
 !macroend
 
 ; ============================================================================

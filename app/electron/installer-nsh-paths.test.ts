@@ -87,13 +87,13 @@ describe("the Windows installer's data directory", () => {
 });
 
 /**
- * A silent install or uninstall (winget, or electron-updater's own
- * `quitAndInstall()`) has nobody to answer a `MessageBox` - NSIS does not
- * suppress a raw `MessageBox` under `/S` on its own, so an unguarded one
- * blocks an unattended update forever on a dialog nobody can see. Every
- * macro that raises one must check `IfSilent` first and skip straight to its
- * default answer (issue #1662): close the running app without asking in
- * `customInit`, and keep the user's data without asking in `customUnInstall`.
+ * A silent install or uninstall (winget, an unattended reinstall) has nobody
+ * to answer a `MessageBox` - NSIS does not suppress a raw `MessageBox` under
+ * `/S` on its own, so an unguarded one blocks an unattended update forever on
+ * a dialog nobody can see. Every macro that raises one must check `IfSilent`
+ * first and skip straight to its default answer (issue #1662): close the
+ * running app without asking in `customInit`, and keep the user's data without
+ * asking in `customUnInstall`.
  *
  * Mutation check: delete either `IfSilent` line and the corresponding case
  * below reds, because the macro body no longer contains it ahead of its
@@ -125,5 +125,52 @@ describe("a silent install or uninstall never blocks on a MessageBox", () => {
 		);
 		const ifSilentLine = body.slice(ifSilentAt, body.indexOf("\n", ifSilentAt));
 		expect(ifSilentLine).toContain(silentTarget);
+	});
+});
+
+/**
+ * electron-updater's `quitAndInstall()` is not silent: it launches the installer
+ * with `--updated` while the app is still in its before-quit shutdown (renderer
+ * save flush, then the engine's graceful exit). `customInit` must not prompt,
+ * kill or delete the lock on that launch, or it cuts the shutdown short
+ * (issue #1882); electron-builder's `CHECK_APP_RUNNING` waits for the app.
+ *
+ * Mutation check: delete the `${If} ${isUpdated}` guard (or point its `Goto`
+ * at a label above the `MessageBox`) and each case below reds.
+ */
+describe("an updated launch leaves the running app to electron-builder", () => {
+	const [, body] = macros().find(([name]) => name === "customInit") ?? ["", ""];
+	const guard = /^\s*\$\{If\} \$\{isUpdated\}\s*\n\s*Goto (\w+)\s*\n\s*\$\{EndIf\}$/m.exec(body);
+	const skipTarget = guard ? body.indexOf(`\n  ${guard[1]}:`) : -1;
+
+	/** The instructions a launch with `--updated` must jump over. */
+	const skipped: [string, RegExp][] = [
+		["the running-app MessageBox", /^\s*MessageBox\s+MB_/m],
+		["the Vayu.exe taskkill", /^\s*nsExec::ExecToStack 'taskkill [^']*Vayu\.exe/m],
+		[
+			"the orphaned-engine taskkill",
+			/^\s*nsExec::ExecToStack 'taskkill [^']*vayu-engine\.exe/m,
+		],
+		["the stale-lock Delete", /^\s*Delete\s+"[^"]*vayu\.lock"/m],
+	];
+
+	it("guards customInit with ${If} ${isUpdated} that jumps to a label ending the macro", () => {
+		expect(body.length, "installer.nsh has no customInit body").toBeGreaterThan(0);
+		expect(
+			guard,
+			"customInit has no `${If} ${isUpdated}` / Goto / `${EndIf}` guard"
+		).not.toBeNull();
+		expect(skipTarget, `customInit never defines the label ${guard?.[1]}`).toBeGreaterThan(-1);
+		expect(body.slice(skipTarget).trim()).toBe(`${guard?.[1]}:`);
+	});
+
+	it.each(skipped)("jumps over %s", (_what, instruction) => {
+		const at = body.search(instruction);
+		expect(
+			at,
+			"the instruction is gone from customInit, so this guard checks nothing"
+		).toBeGreaterThan(-1);
+		expect(guard?.index ?? Infinity, "the guard runs after it").toBeLessThan(at);
+		expect(skipTarget, "the guard's target is above it").toBeGreaterThan(at);
 	});
 });

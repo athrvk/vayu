@@ -29,6 +29,12 @@ naming a directory is a copy that can drift.
 - Checks if Vayu is running and prompts user to close it
 - Kills any orphaned `vayu-engine.exe` processes
 - Removes stale lock files during installation
+- **Not on an updated launch.** "Restart to install" runs the installer with
+  `--updated` (not `/S`) while the app is still shutting down - the renderer's
+  save flush, then the engine's graceful exit. `customInit` does none of the
+  three there: no prompt, no `taskkill`, no lock `Delete`. electron-builder's
+  own running-app check waits for the app to exit and force-kills only after,
+  and a lock left behind is reclaimed by app startup (#1882)
 
 **Uninstallation (`installer.nsh`):**
 - Kills running Vayu and engine processes before uninstall
