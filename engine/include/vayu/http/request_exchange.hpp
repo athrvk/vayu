@@ -50,6 +50,25 @@
 namespace vayu::http::routes {
 
 /**
+ * Which rows a run's three writable scopes were read from, and what each held
+ * at that read: the baseline `persist_script_variables` diffs against, so that
+ * what reaches disk is the run's own change and nothing it merely held a stale
+ * copy of (#1878).
+ *
+ * Filled by `load_script_variable_scopes` and never changed after. Empty on a
+ * hand-built `ScriptVariableScopes`, which therefore persists no environment
+ * or collection and reads every global as new.
+ */
+struct ScriptVariableBaseline {
+    std::optional<std::string> environment_id;
+    /// The leaf collection, empty for none; ancestors are never written.
+    std::string collection_id;
+    vayu::Environment environment;
+    vayu::Environment globals;
+    vayu::Environment collection;
+};
+
+/**
  * The variable scopes a design run hands its pre/post-request scripts.
  *
  * `collection` is the request's immediate parent - the only collection scope a
@@ -62,6 +81,7 @@ struct ScriptVariableScopes {
     vayu::Environment globals;
     vayu::Environment collection;
     std::vector<vayu::Environment> collection_ancestors;
+    ScriptVariableBaseline baseline;
 };
 
 /**
@@ -99,26 +119,23 @@ const std::string& collection_id);
 std::vector<std::string> secret_variable_values (const ScriptVariableScopes& scopes);
 
 /**
- * Persist script-set variables (design mode only; best-effort).
+ * Write what a run's scripts changed in @p scopes back to the rows they were
+ * loaded from (design mode and the sequential collection run; best-effort).
  *
- * A scope is rewritten only when a script actually changed one of its
- * variables - see the definition for why that diff is load-bearing (issue
- * #135). Failures are logged and swallowed: the run's result must not depend on
- * a variable write.
+ * Each scope's delta against `scopes.baseline` is applied onto a fresh read of
+ * its row under one `Database::with_lock`, so a write another client made
+ * while the run was in flight survives (#1878); the definition states the
+ * delta rule. A scope whose delta changes nothing is not written, which keeps
+ * `updated_at` and every field the serializer does not know (#135). A missing
+ * or deleted row is never recreated. Failures are logged and swallowed per
+ * scope: the run's result must not depend on a variable write.
+ *
+ * @param before_write Test seam, invoked inside the lock scope after each
+ *        scope's fresh read and immediately before that scope's write.
  */
 void persist_script_variables (vayu::db::Database& db,
-const vayu::db::Run& run,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables);
-
-/** As above, for a run whose collection scope is named rather than derived. */
-void persist_script_variables (vayu::db::Database& db,
-const std::optional<std::string>& environment_id,
-const std::string& collection_id,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables);
+const ScriptVariableScopes& scopes,
+const std::function<void ()>& before_write = {});
 
 /**
  * Build the `trace_data` JSON one exchange persists (request + response, the

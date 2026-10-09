@@ -1353,8 +1353,7 @@ RunManager& manager) {
         // Once, at the end: per-step persistence would be N x M diff-and-write
         // cycles against the DB mutex for a value only this run's later steps
         // read. Best-effort, exactly as design mode's is.
-        vayu::http::routes::persist_script_variables (db, environment_id,
-        asked.collection_id, scopes.environment, scopes.globals, scopes.collection);
+        vayu::http::routes::persist_script_variables (db, scopes);
 
         summary.steps_dropped = store.dropped ();
         summary.transactions  = transactions.build ();

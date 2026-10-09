@@ -103,7 +103,7 @@ client's write can move the ground. `Database::with_lock` (issue #386) scopes
 the mutex around the whole composite, and because the mutex is recursive the
 lambda calls the same public `get_*` / `save_*` methods everything else does.
 
-Two shapes need it, and both are in the code today:
+These shapes need it, and all of them are in the code today:
 
 - **The validate-then-commit batch** - `POST /reorder`, `POST /import/apply`,
   `POST /specs/sync`, `POST /specs/bind`, `POST /config` (issue #1453). The
@@ -125,6 +125,14 @@ Two shapes need it, and both are in the code today:
   window between that proof and the write, so the create holds the lock across
   both, in a `create_*_locked` core of the same shape as the merge-patch
   update's.
+- **The script-variable write-back** - `persist_script_variables` (issue
+  #1878), which a design send, a stream and a sequential collection run call
+  once when they end. The scopes were loaded when the run started, possibly
+  minutes earlier, so what it writes is the run's delta against that load
+  applied onto a fresh read of each row, and the fresh read, the merge and the
+  write are one lock scope; a snapshot written back would revert every edit
+  another client made while the run was in flight. It takes the same
+  `before_write` test seam.
 
 The same shape holds where the state being merged is not a `Database` row at
 all: **`PUT /inbox/:id`** (issue #1454) merge-patches an inbox's canned

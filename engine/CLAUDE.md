@@ -421,14 +421,14 @@ logged as a warning: it means a client skipped composition.
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
   field added there reaches bulk import too.
 - **A core that reads, decides and writes holds one lock** (#386, #1440,
-  #1453, #1454, #1455). `Database::with_lock` scopes the mutex around the
-  whole composite; a merge-patch is `update_<resource>_locked` called inside
+  #1453, #1454, #1455, #1878). `Database::with_lock` scopes the mutex around
+  the whole composite; a merge-patch is `update_<resource>_locked` called inside
   it, with a `before_write` seam that `tests/competing_writer.hpp` uses to
   drive a second writer into the window. The manager-backed resources (an
   inbox's reply, a mock issuer) hold their own mutex across merge and write
   the same way. A PUT that reads under one acquisition and writes under
   another loses the other writer's fields with no error on either side.
-  `docs/engine/architecture.md` names the two shapes that need it.
+  `docs/engine/architecture.md` names the shapes that need it.
 - **A behaviour attached to a request or collection at a phase of a step is
   an element kind, not a column** (#1512): extractors, assertions, timers,
   controllers, scripts and metrics each register once under

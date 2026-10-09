@@ -108,8 +108,8 @@ struct ScriptContext {
      * but can never delete it.
      *
      * The `const` is the design rather than politeness:
-     * `persist_script_variables` writes a scope back by diffing it against the
-     * leaf collection's stored blob, so a writable ancestor would let one
+     * `persist_script_variables` writes every name the leaf's map holds that
+     * it did not hold when loaded, so an ancestor merged into it would let one
      * `set()` copy every inherited variable down into the leaf collection
      * permanently. Ancestors that cannot be written cannot be copied down.
      */

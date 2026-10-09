@@ -4083,8 +4083,8 @@ TEST_F (ScriptEngineTest, TheLeafShadowsAnAncestorAndUnsetUnShadowsIt) {
 
 // The copy-down hazard #226 kept D2 open for, at the map level: a script that
 // reads an inherited name and then writes must leave the leaf map holding its
-// own variables only. persist_script_variables diffs that map against the leaf
-// collection's stored blob, so anything the walk leaked into it would be
+// own variables only. persist_script_variables writes every name that map
+// gained since it was loaded, so anything the walk leaked into it would be
 // written into the leaf collection permanently.
 TEST_F (ScriptEngineTest, WritingTheCollectionScopeNeverCopiesAnAncestorIntoTheLeaf) {
     std::vector<Environment> ancestors (1);
