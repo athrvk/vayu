@@ -122,6 +122,27 @@ describe("the Events tab", () => {
 		expect(screen.getByText(/Streaming - 2 events/i)).toBeTruthy();
 	});
 
+	it("shows the live rows, not a previous run's, when no response is stored for the stream", () => {
+		state.response = null;
+		state.isExecuting = true;
+		useExecutionEventsStore.getState().startStream({
+			requestId: "req_1",
+			runId: "run_2",
+			eventsUrl: "/runs/run_2/events",
+		});
+		useExecutionEventsStore
+			.getState()
+			.noteOpen("run_2", { statusCode: 200, statusText: "OK", headers: {} });
+		useExecutionEventsStore.getState().addEvents("run_2", [event("fresh", "token")]);
+
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("fresh")).toBeTruthy();
+		expect(screen.getByText(/Streaming - 1 event/i)).toBeTruthy();
+		expect(screen.queryByText(/ended/i)).toBeNull();
+	});
+
 	it("shows no live rows for a stream another request started", () => {
 		state.response = okResponse();
 		useExecutionEventsStore.getState().startStream({

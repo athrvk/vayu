@@ -794,8 +794,13 @@ const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore()
 ```
 
 **Eviction by identity:** `clearResponse` runs from `useDeleteRequestMutation`
-(the delete is what makes the response unreachable) and from `tabs-store`'s
-`closeTabsForEntities` (the collection cascade, which knows every descendant id).
+(the delete is what makes the response unreachable), from `tabs-store`'s
+`closeTabsForEntities` (the collection cascade, which knows every descendant id),
+and from `RequestBuilderProvider`'s stream-flagged Send (#1876). The stream Send
+clears the entry because the provider's mount initialiser and request-switch
+reset read the store back, so a finished stream's stored result would return on
+the next switch and suppress the Events tab's live placeholder, which is only
+built when there is no stored response.
 
 **Eviction by count:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
 Those two delete seams were once the only ones, so the map grew with every
