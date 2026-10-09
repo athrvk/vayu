@@ -1268,7 +1268,10 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     per-request skip: every step is composed by id and gated before the run is
     created, and one step the allowlist does not cover refuses the whole run
     with nothing sent, naming the step the way the engine names it
-    (`step 1 (request 'checkout', id 'r2')`). A step that will not compose
+    (`step 1 (request 'checkout', id 'r2')`). The refusal names the host and
+    withholds the composed URL, which is secret-resolved and so can carry a
+    secret variable's value or a literal credential in its query or userinfo
+    (#1892). A step that will not compose
     refuses it too - the engine resolves the same plan before creating the run
     row and would refuse it for the same reason.
   - Every argument that describes a *single* target (`url`, `requestId`,
