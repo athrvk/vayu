@@ -1014,6 +1014,8 @@ const {
 } = useDashboardStore();
 ```
 
+**`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect.
+
 The load-test dialog seeds its scrape cadence and bounds its metric list from
 the engine's `monitorIntervalMs` / `monitorMaxSeries` settings, through
 `useMonitorSettings` - the same read-the-engine's-copy arrangement
@@ -1740,7 +1742,8 @@ click; refetching either removes it or proves it real.
 - **`useRunReportQuery(runId)`** - Fetch final report for a run. Also written by
   `LoadTestService` at stream end via `queryClient.fetchQuery`, so opening the
   run in History reads the cached copy rather than re-fetching a report that
-  cannot change.
+  cannot change. The one exception is a stream that dropped while the run was
+  still going: that copy says `running`, so the service invalidates it.
 
 - **`useRunTimeSeriesQuery(runId)`** (`@/queries/runs`) - The stored per-tick
   series behind the History charts, as an infinite query over the same
@@ -2681,6 +2684,7 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 8. When the run completes, the engine sends a `complete` event
 9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, so History reuses it) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
 10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll
+11. **A stream that ends without a `complete` frame is not a finished run** (issue #1925). `handleClose(null)` reads the same stored report, and if its `metadata.status` is still `running` or `pending` it sets `dashboard-store.error` instead of the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A collection run taking the shared stream (`handleSuperseded`) sets the error the same way, and fetches nothing. Either way the dashboard stays in its running layout, Stop included, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch keyed on `!isStreaming && !finalReport`, held off while that callout is up, and re-armed by the report callout's Retry
 
 ### Saving a Request with Auto-Save
 

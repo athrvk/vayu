@@ -156,6 +156,89 @@ describe("LoadTestService", () => {
 		expect(mockSetFinalReport).not.toHaveBeenCalled();
 	});
 
+	/*
+	 * A stream can end with no `complete` frame while the engine is still
+	 * running the load test (#1925). The stored report says so, and taking it
+	 * as final painted Completed and removed Stop while the run kept going.
+	 */
+	describe("a stream that drops while the run is still going", () => {
+		type Report = Awaited<ReturnType<typeof apiService.getRunReport>>;
+		const reportWith = (status: string) =>
+			({ summary: {}, latency: {}, metadata: { status } }) as unknown as Report;
+
+		/*
+		 * Mutation check: drop the `isRunInProgress` branch in `handleClose`
+		 * and every assertion here reddens - the report is handed over as
+		 * final, no error is set, and "Load test finished" is posted.
+		 */
+		it("raises the stream error and finalises and announces nothing", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce(reportWith("running"));
+			dashboard.currentRunId = "run_drop_1";
+			loadTestService.startMonitoring("run_drop_1");
+
+			await closeStream(null);
+
+			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(mockSetFinalReport).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		it("lets the same run be watched again", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce(reportWith("pending"));
+			dashboard.currentRunId = "run_drop_2";
+			loadTestService.startMonitoring("run_drop_2");
+			await closeStream(null);
+			expect(loadTestService.isMonitoring("run_drop_2")).toBe(false);
+
+			loadTestService.startMonitoring("run_drop_2");
+
+			expect(sseClient.connect).toHaveBeenCalledTimes(2);
+		});
+
+		/*
+		 * The live copy went into the query cache under the run's report key,
+		 * where the five-minute stale time would hand it back when the
+		 * reconnected run really ends. Mutation check: drop the invalidation in
+		 * `loseStream` and the final report handed over says "running".
+		 */
+		it("reads a fresh report when the reconnected run ends", async () => {
+			vi.mocked(apiService.getRunReport)
+				.mockResolvedValueOnce(reportWith("running"))
+				.mockResolvedValueOnce(reportWith("completed"));
+			dashboard.currentRunId = "run_drop_3";
+			loadTestService.startMonitoring("run_drop_3");
+			await closeStream(null);
+
+			loadTestService.startMonitoring("run_drop_3");
+			await closeStream("completed");
+
+			expect(mockSetFinalReport).toHaveBeenCalledTimes(1);
+			expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+				metadata: { status: "completed" },
+			});
+		});
+
+		/*
+		 * The frame is the engine's word that the run ended; a stored row that
+		 * has not caught up yet does not overrule it. Mutation check: drop the
+		 * `status === null` half of the test and the stream error is raised for
+		 * a run that finished.
+		 */
+		it("believes a completion frame over a report that still says running", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce(reportWith("running"));
+			dashboard.currentRunId = "run_drop_4";
+			loadTestService.startMonitoring("run_drop_4");
+			mockSetError.mockClear();
+
+			await closeStream("completed");
+
+			expect(mockSetError).not.toHaveBeenCalled();
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
+			);
+		});
+	});
+
 	// The guard this replaces asserted `store.reset()` was not called on start -
 	// doing so nulls the currentRunId that startRun just registered and the
 	// dashboard shows "no active tests". The store no longer has a `reset`, so

@@ -26,6 +26,7 @@ import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
 import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
+import { isRunInProgress } from "@/lib/run-status";
 import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
@@ -103,98 +104,75 @@ export default function LoadTestDashboard() {
 		}
 	}, [currentRunId, mode, setFinalReport]);
 
-	// Detect when streaming stops (test completed naturally) and trigger report fetch
+	// Converge on the stored report once the stream has stopped, with a delay
+	// and a capped retry. Keyed on the stream, not on `mode`: a run whose stream
+	// ended is still in `running` until a final report arrives, and that is the
+	// state this has to resolve (#1925). Usually `handleClose` lands the report
+	// inside the first delay and this fetches nothing. A stream error means the
+	// run is still going and Reconnect is the way on, so this waits for that.
+	// `reportError` is a dependency so that Retry, which clears it, re-arms this.
 	useEffect(() => {
-		if (mode !== "running" || isStreaming || !currentRunId || finalReport) return;
-		// Streaming stopped but mode is still "running" - the test completed naturally
-		// Fetch the final report to get the actual completion status
-		// The fetch runs from its own async function, not the effect body: the
-		// loading flag and the result then land as callbacks (what the sibling
-		// report-retry effect below already does), and the cancel flag keeps a
-		// late answer from writing state for a run the user has navigated away from.
-		let cancelled = false;
-		const fetchReport = async () => {
+		if (!currentRunId || isStreaming || finalReport || streamError) return;
+		if (isLoadingReport || reportError) return;
+		// Longer initial delay to allow database writes to complete
+		// This helps avoid "database is locked" issues
+		const delay =
+			loadAttemptRef.current === 0
+				? TIMING.REPORT_INITIAL_DELAY_MS
+				: TIMING.REPORT_RETRY_DELAY_MS;
+
+		const timeoutId = setTimeout(async () => {
 			setIsLoadingReport(true);
 			try {
 				const report = await apiService.getRunReport(currentRunId);
-				if (report && !cancelled) setFinalReport(report);
-			} catch (err: unknown) {
-				console.error("Failed to fetch final report:", err);
-				if (!cancelled) {
+				// Read live, not from the closure: a run started during the fetch
+				// must not be finalised with this one's report.
+				if (useDashboardStore.getState().currentRunId !== currentRunId) return;
+				// Counted against the cap like a failure: the store would refuse it,
+				// and accepting it here would re-fetch on every pass with no end.
+				if (isRunInProgress(report?.metadata?.status)) {
+					throw new Error("Vayu's engine still reports this run as running.");
+				}
+				if (report) {
+					const isValidReport =
+						report.summary?.totalRequests > 0 || historicalMetrics.length === 0;
+
+					if (isValidReport) {
+						setFinalReport(report);
+						loadAttemptRef.current = 0;
+					} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
+						loadAttemptRef.current++;
+						setIsLoadingReport(false);
+					} else {
+						console.warn(
+							"Report still has zero data after retries, using historical metrics"
+						);
+						setFinalReport(report);
+						loadAttemptRef.current = 0;
+					}
+				}
+			} catch (err) {
+				// Count failures against the same cap as empty reports, so a
+				// persistent error stops rather than looping.
+				if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
+					loadAttemptRef.current++;
+				} else {
+					loadAttemptRef.current = 0;
 					setReportError(
 						err instanceof Error ? err.message : "Couldn't load the run report"
 					);
 				}
 			} finally {
-				if (!cancelled) setIsLoadingReport(false);
+				setIsLoadingReport(false);
 			}
-		};
-		void fetchReport();
-		return () => {
-			cancelled = true;
-		};
-	}, [mode, isStreaming, currentRunId, finalReport, setFinalReport]);
+		}, delay);
 
-	// Load final report when test completes (with delay and retry)
-	useEffect(() => {
-		if (
-			(mode === "completed" || mode === "stopped") &&
-			currentRunId &&
-			!finalReport &&
-			!isLoadingReport &&
-			!reportError
-		) {
-			// Longer initial delay to allow database writes to complete
-			// This helps avoid "database is locked" issues
-			const delay =
-				loadAttemptRef.current === 0
-					? TIMING.REPORT_INITIAL_DELAY_MS
-					: TIMING.REPORT_RETRY_DELAY_MS;
-
-			const timeoutId = setTimeout(async () => {
-				setIsLoadingReport(true);
-				try {
-					const report = await apiService.getRunReport(currentRunId);
-					if (report) {
-						const isValidReport =
-							report.summary?.totalRequests > 0 || historicalMetrics.length === 0;
-
-						if (isValidReport) {
-							setFinalReport(report);
-							loadAttemptRef.current = 0;
-						} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
-							loadAttemptRef.current++;
-							setIsLoadingReport(false);
-						} else {
-							console.warn(
-								"Report still has zero data after retries, using historical metrics"
-							);
-							setFinalReport(report);
-							loadAttemptRef.current = 0;
-						}
-					}
-				} catch (err) {
-					// Count failures against the same cap as empty reports, so a
-					// persistent error stops rather than looping.
-					if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
-						loadAttemptRef.current++;
-					} else {
-						loadAttemptRef.current = 0;
-						setReportError(
-							err instanceof Error ? err.message : "Couldn't load the run report"
-						);
-					}
-				} finally {
-					setIsLoadingReport(false);
-				}
-			}, delay);
-
-			return () => clearTimeout(timeoutId);
-		}
+		return () => clearTimeout(timeoutId);
 	}, [
-		mode,
 		currentRunId,
+		isStreaming,
 		finalReport,
+		streamError,
 		isLoadingReport,
 		reportError,
 		setFinalReport,

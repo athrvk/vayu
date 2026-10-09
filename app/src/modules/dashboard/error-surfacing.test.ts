@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Copyright (c) 2026 Atharva Kusumbia
  *
  * This source code is licensed under the Apache 2.0 license found in the
@@ -6,66 +9,159 @@
  */
 
 /**
- * Every failure the dashboard can record has to reach the screen.
+ * Every failure the dashboard can record reaches the screen, with a way out
+ * that works (#1925).
  *
- * Three did not. The report fetch retried forever behind a `console.error`;
- * stopping a run failed silently; and the SSE layer wrote its error into
- * `useDashboardStore.error`, which no component read - so a dead metrics stream
- * looked exactly like a run that produced no data.
- *
- * The last one is what this guards. It is a wiring bug, not a logic bug: the
- * state existed, the writer existed, and the reader was simply missing. A unit
- * test of the store cannot catch that, so this checks the component actually
- * consumes it.
+ * This used to be a source scan that the writer and the reader of the stream
+ * error existed. Both did, and neither was reached: a real drop never set the
+ * error, and the report callout's Retry re-armed no effect. So it is driven
+ * end to end here - the real `LoadTestService` against the real store, and the
+ * real dashboard reading it. Only the engine and the SSE socket are stubbed,
+ * and the dashboard's own children, whose suites cover them.
  */
 
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createElement } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useDashboardStore } from "@/stores";
+import { TIMING } from "@/config/timing";
+import type { RunReport } from "@/types";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const dashboard = readFileSync(join(here, "index.tsx"), "utf8");
-const store = readFileSync(join(here, "..", "..", "stores", "dashboard-store.ts"), "utf8");
-const service = readFileSync(join(here, "..", "..", "services", "load-test-service.ts"), "utf8");
+const { mockGetRunReport, mockStartMonitoring } = vi.hoisted(() => ({
+	mockGetRunReport: vi.fn(),
+	mockStartMonitoring: vi.fn(),
+}));
+// What the real service reaches the engine through.
+vi.mock("@/services/api", () => ({ apiService: { getRunReport: mockGetRunReport } }));
+vi.mock("@/services/sse-client", () => ({
+	sseClient: { connect: vi.fn(), disconnect: vi.fn() },
+}));
+// What the dashboard reaches the service through: Reconnect is asserted on the
+// call it makes, and `isMonitoring` keeps the mount check from reconnecting
+// on its own.
+vi.mock("@/services", () => ({
+	apiService: { getRunReport: mockGetRunReport },
+	loadTestService: {
+		isMonitoring: () => true,
+		startMonitoring: mockStartMonitoring,
+		stopMonitoring: vi.fn(),
+	},
+}));
+vi.mock("./components", () => ({
+	DashboardHeader: () => null,
+	MetricsView: () => null,
+	RequestResponseView: () => null,
+}));
 
-/** Strip comments - several of these files explain the bug in prose. */
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+import { loadTestService } from "@/services/load-test-service";
+import LoadTestDashboard from "./index";
+
+const reportWith = (status: string) =>
+	({ summary: { totalRequests: 10 }, latency: {}, metadata: { status } }) as unknown as RunReport;
+
+/** `handleClose` is private; the SSE client calls it, with `null` for a drop. */
+function dropStream(): Promise<void> {
+	return (
+		loadTestService as unknown as { handleClose: (status: null) => Promise<void> }
+	).handleClose(null);
+}
+
+/** How long a stubbed engine call takes to answer. */
+const ROUND_TRIP_MS = 10;
+
+/** Run every timer the dashboard can arm, and the promises they settle. */
+async function advance(ms: number): Promise<void> {
+	await act(async () => {
+		await vi.advanceTimersByTimeAsync(ms);
+	});
+}
 
 describe("dashboard error surfacing", () => {
-	it("reads the files it is guarding", () => {
-		expect(dashboard.length).toBeGreaterThan(1000);
-		expect(store).toContain("setError");
-		expect(service).toContain("setError");
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockGetRunReport.mockReset();
+		mockStartMonitoring.mockReset();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+	afterEach(() => {
+		cleanup();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
-	it("still has a writer for the stream error", () => {
-		// If this ever stops being written, the reader below is dead weight and
-		// should go too rather than sit there looking like coverage.
-		expect(code(service)).toMatch(/store\.setError\(error\.message\)/);
+	/*
+	 * A stream that ends with no `complete` frame, for a run the engine still
+	 * reports as running. Mutation checks: drop the `isRunInProgress` branch in
+	 * `LoadTestService.handleClose` and the mode flips to "completed" with no
+	 * callout; drop `streamError` from the dashboard's report effect guard and
+	 * that effect fetches the live report anyway.
+	 */
+	it("shows a dropped stream for a live run as lost, not Completed", async () => {
+		mockGetRunReport.mockResolvedValue(reportWith("running"));
+		useDashboardStore.getState().startRun("run_drop");
+		loadTestService.startMonitoring("run_drop");
+		render(createElement(LoadTestDashboard));
+
+		await act(() => dropStream());
+
+		const state = useDashboardStore.getState();
+		expect(state.mode).toBe("running");
+		expect(state.finalReport).toBeNull();
+		expect(state.error).not.toBeNull();
+		expect(screen.getByText("Lost the live metrics stream")).toBeTruthy();
+
+		// The run is live, so the stored report is not what the page waits on.
+		const fetched = mockGetRunReport.mock.calls.length;
+		await advance(TIMING.REPORT_INITIAL_DELAY_MS * 2);
+		expect(mockGetRunReport.mock.calls.length).toBe(fetched);
+
+		fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+		expect(mockStartMonitoring).toHaveBeenCalledWith("run_drop");
+		expect(useDashboardStore.getState().error).toBeNull();
 	});
 
-	it("reads the stream error in the component", () => {
-		// A per-field selector (#1714), not the destructured `error: streamError`
-		// this originally checked for - the store read changed shape, not
-		// whether the value reaches the component.
-		expect(code(dashboard)).toMatch(/useDashboardStore\(\(s\)\s*=>\s*s\.error\)/);
-		expect(code(dashboard)).toContain("streamError");
-	});
+	/*
+	 * The stream stopped, the report could not be read, and the fetch gave up.
+	 * Retry used to clear the error and nothing else: the effect that set it
+	 * did not depend on it, and the retry-capped one was gated on a mode the
+	 * run had not reached, so the callout went away and the page sat with no
+	 * report. Mutation check: drop `reportError` from the effect's
+	 * dependencies and Retry issues no fetch.
+	 */
+	it("fetches the report once more when Retry is pressed", async () => {
+		// Rejected a round trip later, not in the same tick: the effect re-arms
+		// on its loading flag going true and back, and two updates landing
+		// before one render are batched into no change at all. For the same
+		// reason each delay and each round trip below is its own `act`.
+		mockGetRunReport.mockImplementation(
+			() =>
+				new Promise((_, reject) =>
+					setTimeout(
+						() => reject(new Error("Couldn't reach Vayu's engine.")),
+						ROUND_TRIP_MS
+					)
+				)
+		);
+		useDashboardStore.getState().startRun("run_retry");
+		useDashboardStore.getState().setStreaming(false);
+		render(createElement(LoadTestDashboard));
 
-	it("renders a notice for both failure kinds", () => {
-		const body = code(dashboard);
-		expect(body).toMatch(/streamError \|\| reportError/);
-		expect(body).toContain("Lost the live metrics stream");
-		expect(body).toContain("Couldn't load the run report");
-	});
+		// The first attempt and every retry the cap allows.
+		for (let i = 0; i <= TIMING.REPORT_MAX_ATTEMPTS; i++) {
+			await advance(i === 0 ? TIMING.REPORT_INITIAL_DELAY_MS : TIMING.REPORT_RETRY_DELAY_MS);
+			await advance(ROUND_TRIP_MS);
+		}
+		expect(screen.getByText("Couldn't load the run report")).toBeTruthy();
 
-	it("offers a way out of each", () => {
-		// Matched as JSX text nodes, not substrings. `toContain("Reconnect")`
-		// passed against a mutation that renamed the button, because the file
-		// also logs "Reconnecting to run …" - mutation testing caught it.
-		const body = code(dashboard);
-		expect(body).toMatch(/>\s*Reconnect\s*</);
-		expect(body).toMatch(/>\s*Retry\s*</);
+		const fetched = mockGetRunReport.mock.calls.length;
+		mockGetRunReport.mockResolvedValueOnce(reportWith("completed"));
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+		await advance(TIMING.REPORT_INITIAL_DELAY_MS);
+
+		expect(mockGetRunReport.mock.calls.length - fetched).toBe(1);
+		expect(mockGetRunReport).toHaveBeenLastCalledWith("run_retry");
+		expect(useDashboardStore.getState().mode).toBe("completed");
+		expect(screen.queryByText("Couldn't load the run report")).toBeNull();
 	});
 });

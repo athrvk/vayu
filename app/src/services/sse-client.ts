@@ -403,10 +403,10 @@ export class SSEClient {
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
 					// A warn, not chatter: the stream ended without the engine's
 					// `complete`, so the metrics shown are whatever arrived before
-					// the drop and the caller is about to converge on the stored
-					// report. That is the one SSE lifecycle state worth a line in
-					// the console.
-					console.warn("SSE connection closed unexpectedly - treating as terminal");
+					// the drop and the caller is about to read the stored report to
+					// learn whether the run ended at all. That is the one SSE
+					// lifecycle state worth a line in the console.
+					console.warn("SSE connection closed unexpectedly - reading the stored report");
 					this.disconnect();
 					// No frame arrived, so nothing here knows how the run ended.
 					onClose(null);

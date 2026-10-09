@@ -16,6 +16,7 @@ import {
 	liveWindowSeconds as windowSecondsFor,
 	DEFAULT_MAX_RETAINED_TICKS,
 } from "@/constants/live-window";
+import { isRunInProgress } from "@/lib/run-status";
 import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
 /**
@@ -215,6 +216,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		set({
 			mode: "stopped",
 			isStreaming: false,
+			// A stream callout is about a run still going; this one was stopped, and
+			// the report effect holds off while the callout is up (#1925).
+			error: null,
 		}),
 
 	setStreaming: (streaming) => set({ isStreaming: streaming }),
@@ -295,17 +299,22 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		}),
 
 	setFinalReport: (report) =>
-		set((state) => ({
-			finalReport: report,
-			// Set mode based on report status - keep "stopped" if already stopped
-			mode:
-				state.mode === "stopped"
-					? "stopped"
-					: report.metadata?.status === "stopped"
+		set((state) => {
+			// A live run's report is a snapshot, not a final one, whichever caller
+			// fetched it (#1925).
+			if (isRunInProgress(report.metadata?.status)) return state;
+			return {
+				finalReport: report,
+				// Set mode based on report status - keep "stopped" if already stopped
+				mode:
+					state.mode === "stopped"
 						? "stopped"
-						: "completed",
-			isStreaming: false,
-		})),
+						: report.metadata?.status === "stopped"
+							? "stopped"
+							: "completed",
+				isStreaming: false,
+			};
+		}),
 
 	setError: (error) => set({ error }),
 	setActiveView: (view) => set({ activeView: view }),
