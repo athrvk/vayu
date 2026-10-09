@@ -307,6 +307,26 @@ describe("flushAll", () => {
 		});
 	});
 
+	it("still counts a genuine 'pending' when a sibling void context saved first", async () => {
+		registerContext("settings", true);
+		useSaveStore.getState().registerContext({
+			id: "variables",
+			name: "variables",
+			save: async () => {
+				await Promise.resolve();
+				useSaveStore.getState().markPendingSave();
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 1,
+			failed: 0,
+			pending: 1,
+		});
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
 	it("fills in 'saved' for a context that reports it but publishes nothing", async () => {
 		useSaveStore.getState().registerContext({
 			id: "draft",

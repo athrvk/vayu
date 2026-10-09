@@ -34,6 +34,8 @@ export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
  */
 export type SaveOutcome = "saved" | "failed" | "pending";
 
+type FillIn = (context: SaveContext) => void;
+
 /** Save context - represents a saveable entity in the app */
 export interface SaveContext {
 	/** Unique identifier for this save context */
@@ -161,22 +163,16 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// failed Cmd+S into "Saved" - with the failure toast still on screen next to
 	// it. This wrapper only fills in the silence when nothing else has.
 	//
-	// Filling in the silence can itself publish `pending` (`completeSaveThenIdle`
-	// holds another dirty context against a success), and `flushAll` runs every
-	// dirty context at once, so the next void context to resolve would read that
-	// `pending` as its own and the flush would report an edit that saved as
-	// still pending. `fillInLeftPending` marks the status as ours; every
-	// `runSave` clears it as it starts, before any fill-in of the same batch.
-	let fillInLeftPending = false;
-	const fillInSuccess = (context: SaveContext) => {
-		get().completeSaveThenIdle(context.id);
-		fillInLeftPending = get().status === "pending";
-	};
-	const outcomeFromPublishedStatus = (context: SaveContext): SaveOutcome => {
+	// `fillIn` is how a success is published. `flushAll` runs every dirty context
+	// at once and passes a collector instead: filling in per context can itself
+	// publish `pending` (`completeSaveThenIdle` holds another dirty context
+	// against a success), and the next context to resolve would read that as its
+	// own verdict. The batch fills in once, after every verdict is in.
+	const outcomeFromPublishedStatus = (context: SaveContext, fillIn: FillIn): SaveOutcome => {
 		const published = get().status;
 		if (published === "error") return "failed";
-		if (published === "pending" && !fillInLeftPending) return "pending";
-		fillInSuccess(context);
+		if (published === "pending") return "pending";
+		fillIn(context);
 		return "saved";
 	};
 
@@ -185,24 +181,30 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// still fills in the silence, because a context such as `useDraftSaveContext`
 	// publishes nothing on success, but never over another context's "error" or
 	// "pending".
-	const outcomeFromReport = (context: SaveContext, reported: SaveOutcome): SaveOutcome => {
+	const outcomeFromReport = (
+		context: SaveContext,
+		reported: SaveOutcome,
+		fillIn: FillIn
+	): SaveOutcome => {
 		if (reported !== "saved") return reported;
 		const published = get().status;
-		if (published !== "error" && published !== "pending") fillInSuccess(context);
+		if (published !== "error" && published !== "pending") fillIn(context);
 		return "saved";
 	};
 
 	// Internal helper - runs a save for the given context, updates store state,
 	// and reports what became of it. Caller must own the in-progress guard if
 	// needed.
-	const runSave = async (context: SaveContext): Promise<SaveOutcome> => {
-		fillInLeftPending = false;
+	const runSave = async (
+		context: SaveContext,
+		fillIn: FillIn = (c) => get().completeSaveThenIdle(c.id)
+	): Promise<SaveOutcome> => {
 		set({ status: "saving" });
 		try {
 			const reported = await context.save();
 			return reported
-				? outcomeFromReport(context, reported)
-				: outcomeFromPublishedStatus(context);
+				? outcomeFromReport(context, reported, fillIn)
+				: outcomeFromPublishedStatus(context, fillIn);
 		} catch (error) {
 			get().failSave(
 				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
@@ -330,7 +332,16 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 		flushAll: async () => {
 			const dirty = [...get().contexts.values()].filter((c) => c.hasPendingChanges);
-			const outcomes = await Promise.all(dirty.map((c) => runSave(c)));
+			const settled: SaveContext[] = [];
+			const outcomes = await Promise.all(
+				dirty.map((c) => runSave(c, (s) => settled.push(s)))
+			);
+			// Publish the batch's success once; a failure or a pending verdict
+			// published by a context stays on the status as it is.
+			const last = settled[settled.length - 1];
+			if (last && !["error", "pending"].includes(get().status)) {
+				get().completeSaveThenIdle(last.id);
+			}
 			const count = (wanted: SaveOutcome) =>
 				outcomes.filter((outcome) => outcome === wanted).length;
 			// `pending` is a context that settled without persisting its edit (a
