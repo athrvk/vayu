@@ -926,7 +926,9 @@ and they are orders of magnitude larger.
 validation merges the two into one root document. Inlining instead would copy a
 shared `Error` schema into every operation naming it, and a recursive schema - a
 tree node whose child is itself - has no finite expansion at all. Schemas are
-translated out of OpenAPI's dialect as they are derived (3.0's `nullable`, its
+translated out of OpenAPI's dialect as they are derived (3.0's `nullable`, a
+union with `null` on the `type` or, beside `allOf` / `anyOf` / `oneOf` / `$ref` /
+`not` / `enum` with no `type`, `anyOf: [<schema>, {"type":"null"}]`; its
 draft-04 boolean `exclusiveMinimum`, and the OpenAPI-only keywords that constrain
 no body): the column holds JSON Schema and nothing else, because that is what the
 validator reads.
