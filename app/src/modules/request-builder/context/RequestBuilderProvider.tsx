@@ -1130,6 +1130,7 @@ export default function RequestBuilderProvider({
 			if (executingRequest.stream && onExecuteStream) {
 				setIsExecuting(true);
 				setLocalResponse(null);
+				if (executingId) useResponseStore.getState().clearResponse(executingId);
 				// The previous stream's rows belong to the send that is being
 				// replaced. Cleared here rather than on arrival of the first event,
 				// so a stream that never opens does not leave the last one on screen.
@@ -1188,7 +1189,10 @@ export default function RequestBuilderProvider({
 			 *
 			 * The streaming path above still clears, and must: its pane is fed
 			 * by a placeholder built from the relay's `open` frame, and that
-			 * placeholder is only built when there is no stored response.
+			 * placeholder is only built when there is no stored response. It
+			 * clears the stored entry as well as the local copy, because the
+			 * mount initialiser and the request-switch reset read the store
+			 * back, so a stale entry would resurface on the next switch.
 			 */
 			setIsExecuting(true);
 

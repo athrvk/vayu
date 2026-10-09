@@ -262,6 +262,40 @@ describe("the streaming send branch", () => {
 		expect(ctx().isStreaming).toBe(false);
 	});
 
+	it("drops the previous stream's stored response, so a switch back does not resurrect it", async () => {
+		// The mount initialiser and the request-switch reset both read the store
+		// back; clearing only the local copy lets the finished stream's rows
+		// return on the next switch and suppress the live placeholder.
+		const previous: ResponseState = {
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "OLD",
+			bodyType: "text",
+			size: 3,
+			time: 5,
+			events: [{ event: "token", data: "old" }],
+			totalEvents: 1,
+			streamEndReason: "completed",
+		};
+		useResponseStore.getState().setResponse("A", previous);
+
+		const { rerender } = render(renderFor("A", started));
+		expect(ctx().response?.body).toBe("OLD");
+
+		await act(async () => {
+			await ctx().executeRequest();
+		});
+		rerender(renderFor("B", started));
+		rerender(renderFor("A", started));
+
+		// Mutation check: drop the `clearResponse` call in the provider's stream
+		// branch and A comes back showing "OLD" while its new stream is live.
+		expect(ctx().response).toBeNull();
+		expect(useResponseStore.getState().getResponse("A")).toBeNull();
+		expect(ctx().isStreaming).toBe(true);
+	});
+
 	it("does not report another request's stream as this one's", async () => {
 		const { rerender } = render(renderFor("A", started));
 		await act(async () => {
