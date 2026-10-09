@@ -17,10 +17,12 @@ judgment calls below - what's obvious, what's risky, whether concerns are
 mixed - only work if you've actually looked, not inferred from the commit
 message alone.
 
-Use `.github/PULL_REQUEST_TEMPLATE.md`'s sections (`Description`, `Type of
-Change`, `Testing`, `Checklist`, `Related Issues`) as the floor. Add a new
-`##` section only when something doesn't fit any of those and earns its own
-heading - a CI-only fix riding along with the real change, a deliberate
+Use `.github/PULL_REQUEST_TEMPLATE.md`'s sections (`Why`, `What changed and
+why this way`, `Review guide`, `How it was verified`, `Docs and follow-ups`,
+and the optional `Visual changes`) as the floor. The template now encodes this
+skill's own rules, so the bullets below describe how to fill each section. Add
+a new `##` section only when something doesn't fit any of those and earns its
+own heading - a CI-only fix riding along with the real change, a deliberate
 deviation from what a linked issue asked for. Don't invent structure the
 change doesn't need.
 
@@ -50,14 +52,15 @@ change doesn't need.
   description - don't paper over it with more headers.** A description that
   successfully explains two unrelated changes at once is a sign the PR should
   have been two PRs, not a sign the description is thorough.
-- **Testing section states what was run and why that covers the change**,
+- **"How it was verified" states what was run and why that covers the change**,
   not a log dump - the same scale-to-the-change judgment this repo's own
   `CLAUDE.md` already asks for when choosing what to run in the first place.
   If nothing needed to run (a comment or doc-only change), say that plainly
   instead of leaving the section as a stub.
-- **Checklist boxes are claims, not decoration.** Check what's actually true.
-  Leave a box unchecked with a short reason when it doesn't apply ("no tests -
-  doc-only change") rather than checking it to look complete.
+- **The Review guide names what to look at and what to skim, explicitly.**
+  Fill both halves of it. An empty "Safe to skim" on a 30-file diff is itself
+  a signal: either the mechanical part went unexamined or the PR mixes more
+  than it should.
 - **Title: imperative mood, present tense**, matching this repo's own recent
   commit style (`feat(app): ...`, `fix(engine): ...`) - describe what the
   change does, not what was wrong before it.
