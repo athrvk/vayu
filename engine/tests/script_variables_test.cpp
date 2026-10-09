@@ -474,6 +474,26 @@ TEST_P (PersistAgainstAnotherWriterTest, AValueSetKeepsAFlagAnotherClientChanged
     EXPECT_EQ (stored_now["token"]["createdAt"], 1784967810149LL);
 }
 
+// An `extract.*` write replaces the whole variable (`set_scope_variable`), so
+// more than its value changed: the run's variable is written whole, not as a
+// value onto the stored entry, while the variable another client added
+// meanwhile still survives.
+TEST_P (PersistAgainstAnotherWriterTest,
+AWholeVariableReplacementIsWrittenWholeBesideAnotherClientsEdit) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    written (scopes)["token"] = vayu::Variable{ "extracted", false, true, "string" };
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now["token"]["value"], "extracted") << stored_now.dump ();
+    EXPECT_EQ (stored_now["token"]["secret"], false) << stored_now.dump ();
+    EXPECT_EQ (stored_now["token"]["type"], "string") << stored_now.dump ();
+    EXPECT_FALSE (stored_now["token"].contains ("createdAt")) << stored_now.dump ();
+    EXPECT_EQ (stored_now["region"]["value"], "eu") << stored_now.dump ();
+}
+
 // An unset removes the name the run loaded, and only that name: a variable
 // another client added meanwhile is not the run's to remove.
 TEST_P (PersistAgainstAnotherWriterTest, AnUnsetRemovesOnlyTheLoadedName) {
