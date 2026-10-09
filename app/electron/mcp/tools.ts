@@ -8248,7 +8248,10 @@ export const TOOLS: McpTool[] = [
 				}
 				return engineErrorResult(err);
 			}
-			const subject = describeRun(runId, stored);
+			// The run row is run output: its snapshot `url` can carry a credential,
+			// and the preview is read by the model.
+			const withheld = (await runOutputShape(ctx, signal))(stored);
+			const subject = describeRun(runId, isRecord(withheld) ? withheld : {});
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `Delete ${subject}?\n\nIts report, metrics and captured samples go with it. This cannot be undone.`,
 				acceptTitle: "Delete the run",

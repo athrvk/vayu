@@ -72,10 +72,11 @@ stored, and what a write tool echoes back is withheld the same way. What a run
 recorded - a trace, a report, a sample, a run row, an inbox capture, a smoke
 run's rows, a load run's confirmation preview - reads `<redacted>` wherever a
 secret variable's value, a credential typed into a saved auth block, a
-credential header's value or the token or key Vayu itself placed in the URL's
-query or a header appears, whatever encoding it went out in. If Vayu
-cannot read the values it masks against, the agent gets an error in place of
-the record, never a partly masked one. Requests an agent sends still use the
+credential header's value, the token or key Vayu itself placed in the URL's
+query or a header, or the value of a credential query parameter (`api_key`,
+`token` and the like) in a request's URL appears, whatever encoding it went
+out in. If Vayu cannot read the values it masks against, the agent gets an
+error in place of the record, never a partly masked one. Requests an agent sends still use the
 real values; the engine fills them in. Clearing a variable's secret flag, the
 one write that would hand the value back on the next read, is refused while
 reveal is off.

@@ -702,11 +702,11 @@ describe("withholdRunOutput: what auth wrote into a request record (#1835)", () 
 		});
 	});
 
-	test("matches the whole name: api_key leaves api_key2 and xapi_key alone", () => {
-		const url = "https://x.test/?api_key2=a&xapi_key=b&API_KEY=c&api_key=d";
-		expect(withholdRunOutput({ authQueryParam: "api_key", url }, rule)).toEqual({
-			authQueryParam: "api_key",
-			url: "https://x.test/?api_key2=a&xapi_key=b&API_KEY=c&api_key=<redacted>",
+	test("matches the whole name, case-sensitively: sid leaves sid2, xsid and SID alone", () => {
+		const url = "https://x.test/?sid2=a&xsid=b&SID=c&sid=d";
+		expect(withholdRunOutput({ authQueryParam: "sid", url }, rule)).toEqual({
+			authQueryParam: "sid",
+			url: "https://x.test/?sid2=a&xsid=b&SID=c&sid=<redacted>",
 		});
 	});
 
@@ -836,6 +836,71 @@ describe("withholdRunOutput: what auth wrote into a request record (#1835)", () 
 		expect(withholdRunOutput(record, { ...rule, apiKeyHeaders: ["x-tenant"] })).toEqual({
 			authHeaders: ["X-Session"],
 			headers: { "X-Session": "<redacted>", "X-Tenant": "<redacted>" },
+		});
+	});
+});
+
+describe("withholdRunOutput: a credential-named query value (#1909)", () => {
+	// No forms and no authQueryParam: the literal is no secret variable and no
+	// auth credential, so only its name says it is one.
+	const rule: RunOutputRule = { forms: [], apiKeyHeaders: [] };
+	const frame = (target: string, body = "") =>
+		`GET ${target} HTTP/1.1\r\nHost: x.test\r\n\r\n${body}`;
+
+	test("masks a credential-named value in the url and keeps the pair beside it", () => {
+		expect(withholdRunOutput({ url: "https://h/?api_key=LIT&page=2" }, rule)).toEqual({
+			url: "https://h/?api_key=<redacted>&page=2",
+		});
+	});
+
+	test("masks it in the request line of a rawRequest and nowhere else in the frame", () => {
+		const raw = frame("/?token=LIT&x=1", "token=LIT");
+		expect(withholdRunOutput({ rawRequest: raw }, rule)).toEqual({
+			rawRequest: frame("/?token=<redacted>&x=1", "token=LIT"),
+		});
+	});
+
+	test("matches the whole name, in any case: api_key2 is left, API_KEY is not", () => {
+		expect(
+			withholdRunOutput({ url: "https://h/?api_key2=LIT&API_KEY=LIT2&xtoken=LIT" }, rule)
+		).toEqual({
+			url: "https://h/?api_key2=LIT&API_KEY=<redacted>&xtoken=LIT",
+		});
+	});
+
+	test("keeps a lone {{variable}} and an empty value as written", () => {
+		const record = { url: "https://h/?api_key={{k}}&token=&sig={{a}}b" };
+		expect(withholdRunOutput(record, rule)).toEqual({
+			url: "https://h/?api_key={{k}}&token=&sig=<redacted>",
+		});
+	});
+
+	test("reads the query only: a fragment, a query-less url and a body are left", () => {
+		const fragment = { url: "https://h/p#token=LIT" };
+		expect(withholdRunOutput(fragment, rule)).toEqual(fragment);
+		const both = { url: "https://h/?token=LIT#token=LIT2" };
+		expect(withholdRunOutput(both, rule)).toEqual({
+			url: "https://h/?token=<redacted>#token=LIT2",
+		});
+		const body = { body: "token=LIT" };
+		expect(withholdRunOutput(body, rule)).toEqual(body);
+	});
+
+	test("masks every credential pair of one query, the auth-written name beside them", () => {
+		const record = {
+			authQueryParam: "session",
+			url: "https://h/?session=A&password=B&page=2&secret=C",
+		};
+		expect(withholdRunOutput(record, rule)).toEqual({
+			...record,
+			url: "https://h/?session=<redacted>&password=<redacted>&page=2&secret=<redacted>",
+		});
+	});
+
+	test("applies in a nested trace, as it does to the auth-written name", () => {
+		const trace = { request: { url: "https://h/?access_token=LIT", method: "GET" } };
+		expect(withholdRunOutput(trace, rule)).toEqual({
+			request: { url: "https://h/?access_token=<redacted>", method: "GET" },
 		});
 	});
 });
