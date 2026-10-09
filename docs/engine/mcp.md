@@ -1932,7 +1932,7 @@ Each tool declares the data families it changes (`invalidates` in `tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
 (`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`,
-`oauth`)
+`oauth`, `variables`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
 itself named; it carries no engine data, so the
 renderer still reads every row through its query layer. The five hints are read
@@ -1956,7 +1956,12 @@ exists: an agent names the key it clears, but the key a `fetch_oauth2_token`
 writes under is derived engine-side and appears only in the answer, so a hint
 would be present for one tool and absent for the other - the shape that leaves
 a stale row exactly when it matters. The family is invalidated at its prefix
-instead.
+instead. `variables` (issue #1916) is declared by the three design-mode
+runners - `run_request`, `run_collection_smoke` and `run_collection` - because
+a script or extractor that sets a variable has the engine write it back to the
+environment, globals or collection row once the send finishes. It carries no
+hint: the event cannot say which of the three scopes moved. `start_load_run`
+persists nothing and stays `run` alone.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and

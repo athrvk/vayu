@@ -185,11 +185,14 @@ describe("the registry declares its effects", () => {
 			// and clearing one is the same family read from the other end.
 			clear_cookies: ["cookie"],
 			update_engine_config: ["config"],
-			run_request: ["run", "cookie"],
-			run_collection_smoke: ["run", "cookie"],
+			// Scripts and extractors persist environment, globals and collection
+			// variables after a design-mode send (#1916), so the three runners that
+			// execute them declare `variables`; `start_load_run` persists none.
+			run_request: ["run", "cookie", "variables"],
+			run_collection_smoke: ["run", "cookie", "variables"],
 			// The design-mode runner is the one executor handed the cookie jar
 			// (`start_scenario_run`), so its steps refill it the way a Send does.
-			run_collection: ["run", "cookie"],
+			run_collection: ["run", "cookie", "variables"],
 			start_load_run: ["run"],
 			stop_run: ["run"],
 			// Run housekeeping (#755): both rewrite a history row the renderer
@@ -366,7 +369,7 @@ describe("dispatch emits mcp:data-changed", () => {
 		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 
-	test("a tool declaring two entities emits one event each", async () => {
+	test("a tool declaring several entities emits one event each", async () => {
 		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), {
 			allowlist: ["api.example.com"],
 		});
@@ -376,7 +379,11 @@ describe("dispatch emits mcp:data-changed", () => {
 			ctx
 		);
 		expect(res.isError).toBeFalsy();
-		expect(onDataChanged.mock.calls.map(([e]) => e.entity)).toEqual(["run", "cookie"]);
+		expect(onDataChanged.mock.calls.map(([e]) => e.entity)).toEqual([
+			"run",
+			"cookie",
+			"variables",
+		]);
 	});
 
 	test("the call's own arguments become the scope hints", async () => {
