@@ -1496,7 +1496,7 @@ struct RunTotals {
  * A request sent with a `{{token}}` composition never resolved - no mode
  * runs a residual pass under load, so this is the whole of what a caller
  * learns about one - and, for a scenario run, a step whose pre-request
- * script this mode never executes at all. Neither refuses the run: a
+ * script did not run inline (#1938). Neither refuses the run: a
  * literal `{{` can be deliberate in a body, and a run that already sent
  * every request must still be reported as finished. Empty for a run with
  * nothing to say, which is what lets the caller omit the key entirely.
@@ -1523,8 +1523,8 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     if (context->scenario) {
         const auto& steps  = context->scenario->plan.steps;
         const auto skipped = static_cast<size_t> (
-        std::count_if (steps.begin (), steps.end (), [] (const ScenarioStep& step) {
-            return step_has_script (step, "script.pre");
+        std::count_if (steps.begin (), steps.end (), [&] (const ScenarioStep& step) {
+            return step_has_deferred_script (step, "script.pre", context->scripts_override);
         }));
         if (skipped > 0) {
             warnings.push_back ({ { "code", "pre_request_script_skipped" },

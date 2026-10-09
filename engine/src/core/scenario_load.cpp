@@ -358,7 +358,8 @@ AssertionTotals StepElementTallies::assertion_totals (const ScenarioPlan& plan) 
 
 nlohmann::json build_step_breakdown (const ScenarioPlan& plan,
 const StepHistograms& steps,
-const StepElementTallies& elements) {
+const StepElementTallies& elements,
+ScriptsOverrideMode scripts_mode) {
     nlohmann::json array = nlohmann::json::array ();
     const size_t count   = std::min (plan.steps.size (), steps.step_count ());
     for (size_t i = 0; i < count; ++i) {
@@ -378,21 +379,11 @@ const StepElementTallies& elements) {
               { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
               { "max", percentiles.max } } } };
         auto element_outcomes  = elements.build (plan, i);
-        // Whether this step's `script.pre` actually ran this run - inline,
-        // through the hook below - rather than being left to the deferred
-        // replay: a real outcome in `elements` above, not just the pipeline's
-        // own "skipped, deferred" tally. Kept as the field's pre-#1495
-        // meaning for a step that is still deferred, so a reader who only
-        // knew this key keeps reading the same thing; a step that ran inline
-        // reports its real outcome in `elements` instead of this fixed
-        // string, which would otherwise contradict it.
-        const bool pre_script_ran_inline = std::any_of (element_outcomes.begin (),
-        element_outcomes.end (), [] (const nlohmann::json& outcome) {
-            return outcome.value ("kind", "") == "script.pre" &&
-            (outcome.value ("passed", size_t{ 0 }) > 0 ||
-            outcome.value ("failed", size_t{ 0 }) > 0);
-        });
-        if (step_has_script (plan.steps[i], "script.pre") && !pre_script_ran_inline) {
+        // Kept as the field's pre-#1495 meaning for a step whose `script.pre`
+        // is still left behind; one that ran inline reports its real outcome
+        // in `elements` instead of this fixed string, which would otherwise
+        // contradict it. The same rule `build_run_warnings` reads (#1938).
+        if (step_has_deferred_script (plan.steps[i], "script.pre", scripts_mode)) {
             entry["preRequestScript"] = "skipped";
         }
         if (!element_outcomes.empty ()) {
@@ -418,7 +409,8 @@ const ScenarioPlan& plan) {
         // This mode's own.
         { "virtual_users", state.virtual_users },
         { "iterations_abandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
-        { "steps", build_step_breakdown (plan, state.steps, state.element_tallies) }
+        { "steps",
+        build_step_breakdown (plan, state.steps, state.element_tallies, state.scripts_mode) }
     };
     // `control.transaction`'s own percentiles (issue #1515), absent for a
     // run that declared none.
@@ -1312,6 +1304,7 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
                make_coverage_tally (execution), std::move (base_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
+    state->scripts_mode   = context->scripts_override;
     // The same cycle guard the sequential run's own `setNextRequest` walk
     // uses (issue #1569), against a `control.switch`/`control.loop` plan
     // whose jump never reaches an end.

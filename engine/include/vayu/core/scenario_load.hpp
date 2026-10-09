@@ -403,7 +403,8 @@ class StepElementTallies {
  */
 [[nodiscard]] nlohmann::json build_step_breakdown (const ScenarioPlan& plan,
 const StepHistograms& steps,
-const StepElementTallies& elements);
+const StepElementTallies& elements,
+ScriptsOverrideMode scripts_mode);
 
 /**
  * @brief Everything a scenario load run accumulates, shared with its callbacks.
@@ -460,6 +461,10 @@ struct ScenarioLoadState {
     /// and the same `resolve_max_steps_per_iteration` the sequential run
     /// uses - set by `execute_scenario_load` once `db` is in scope.
     size_t max_steps_per_iteration = 0;
+    /// The run's `elements.scripts` mode, copied from `RunContext` by
+    /// `execute_scenario_load` so the summary can tell a `script.pre` that
+    /// ran inline from one left behind (issue #1938) without the context.
+    ScriptsOverrideMode scripts_mode = ScriptsOverrideMode::AsMarked;
     /// One shared counter pair per `control.throughput` element whose config
     /// asked to share it across every virtual user (issue #1569's
     /// `perUser: false`), allocated up front from the same plan scan

@@ -8365,8 +8365,10 @@ completions behind each distribution and is identical across the five.
 finished and its other numbers may look fine: a request sent with a
 `{{token}}` composition never resolved (no mode runs a residual pass under
 load, so a value a pre-request script would have set goes on the wire
-literally), or a step whose pre-request script this mode never executes at
-all. Neither refuses the run - a literal `{{` can be deliberate in a body -
+literally), or a step whose pre-request script this mode never executes -
+one that did not run inline (issue #1938: `elements.scripts: "allInline"`, or
+the element's own `inline: true` under `asMarked`, runs it and raises no
+warning). Neither refuses the run - a literal `{{` can be deliberate in a body -
 they are counted, not fixed. Each entry carries `code` and a human-readable
 `message`; `unresolved_tokens` also carries `count` (requests affected) and
 `names` (a few of the unresolved names, capped); `pre_request_script_skipped`

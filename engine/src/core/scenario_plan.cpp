@@ -17,6 +17,7 @@
 #include <utility>
 #include <variant>
 
+#include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -816,6 +817,20 @@ bool step_has_script (const ScenarioStep& step, std::string_view kind) {
     [&] (const CompiledElement& element) {
         return element.kind == kind &&
         !is_blank_script_element (element.kind, element.config);
+    });
+}
+
+bool step_has_deferred_script (const ScenarioStep& step,
+std::string_view kind,
+ScriptsOverrideMode scripts_mode) {
+    if (!step.elements) {
+        return false;
+    }
+    return std::any_of (step.elements->begin (), step.elements->end (),
+    [&] (const CompiledElement& element) {
+        return element.kind == kind &&
+        !is_blank_script_element (element.kind, element.config) &&
+        !RunContext::script_element_runs_inline (element.config, scripts_mode);
     });
 }
 

@@ -737,10 +737,10 @@ TEST_F (ScenarioLoadTest, AStepWithAnUnresolvedTokenCountsAndWarnsWithoutRefusin
     EXPECT_EQ (summary["errored"], 0);
 }
 
-// A load run never executes a pre-request script at all (see this file's
+// An un-inlined pre-request script never runs under load (see this file's
 // header comment on the executor); the breakdown says so per step instead of
 // leaving the report silent about it, and a step with no script carries no
-// such key. Mutation check: remove the `pre_script.empty()` check in
+// such key. Mutation check: drop the `step_has_deferred_script` check in
 // `build_step_breakdown` and step0's entry loses the field.
 TEST_F (ScenarioLoadTest, AStepCarryingAPreRequestScriptReportsItSkippedInTheBreakdown) {
     ScenarioMockServer server;
@@ -757,6 +757,121 @@ TEST_F (ScenarioLoadTest, AStepCarryingAPreRequestScriptReportsItSkippedInTheBre
     EXPECT_EQ (summary["steps"][0]["preRequestScript"], "skipped");
     EXPECT_FALSE (summary["steps"][1].contains ("preRequestScript"))
     << "a step with no pre-request script must not report one as skipped";
+}
+
+// The run-level `pre_request_script_skipped` warning and the per-step
+// `preRequestScript` marker read one rule (issue #1938): a `script.pre` that ran
+// inline is neither warned about nor marked, one that did not is both. Driven
+// through the real executor so the mode reaches the summary the way production
+// hands it over. Mutation check: make `step_has_deferred_script` ignore its
+// mode (back to `step_has_script`) and the two inline cases red.
+class PreScriptSkippedTest : public ScenarioLoadTest {
+    protected:
+    /// Run a two-step plan whose step 0 carries a non-blank `script.pre`,
+    /// marked inline or not, under @p scripts_mode (an `elements.scripts` value,
+    /// empty for a payload that names none).
+    std::shared_ptr<vayu::core::ScenarioLoadState> run_with_pre_script (
+    ScenarioMockServer& server,
+    bool marked_inline,
+    const std::string& scripts_mode) {
+        auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+        execution.plan.steps[0].elements =
+        vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
+        "el_pre", "script.pre", "pm.environment.set('x', '1');", marked_inline) });
+        execution_ = execution;
+
+        json config = { { "mode", "iterations" }, { "iterations", 1 },
+            { "concurrency", 1 } };
+        if (!scripts_mode.empty ()) {
+            config["elements"] = { { "scripts", scripts_mode } };
+        }
+        return run (config, execution_);
+    }
+
+    /// The `pre_request_script_skipped` entries of the run's `warnings` array.
+    json skipped_warnings () const {
+        json found = json::array ();
+        for (const auto& warning : vayu::core::build_run_warnings (context_)) {
+            if (warning["code"] == "pre_request_script_skipped") {
+                found.push_back (warning);
+            }
+        }
+        return found;
+    }
+
+    json step0_breakdown (const vayu::core::ScenarioLoadState& state) const {
+        return vayu::core::build_scenario_load_summary (
+        state, execution_.plan)["steps"][0];
+    }
+
+    vayu::core::ScenarioExecution execution_;
+};
+
+TEST_F (PreScriptSkippedTest, AnUnmarkedPreScriptUnderAsMarkedIsWarnedAndMarkedSkipped) {
+    ScenarioMockServer server;
+    auto state = run_with_pre_script (server, /*marked_inline=*/false, "asMarked");
+
+    const auto warnings = skipped_warnings ();
+    ASSERT_EQ (warnings.size (), 1u) << warnings.dump ();
+    EXPECT_EQ (warnings[0]["steps"], 1);
+    EXPECT_EQ (step0_breakdown (*state)["preRequestScript"], "skipped");
+}
+
+TEST_F (PreScriptSkippedTest, AllInlineRunsAnUnmarkedPreScriptSoNothingIsWarnedOrMarked) {
+    ScenarioMockServer server;
+    auto state = run_with_pre_script (server, /*marked_inline=*/false, "allInline");
+
+    EXPECT_TRUE (skipped_warnings ().empty ()) << skipped_warnings ().dump ();
+    const auto step0 = step0_breakdown (*state);
+    EXPECT_FALSE (step0.contains ("preRequestScript")) << step0.dump ();
+    ASSERT_TRUE (step0.contains ("elements")) << step0.dump ();
+    EXPECT_EQ (step0["elements"][0]["kind"], "script.pre");
+    EXPECT_EQ (step0["elements"][0]["passed"], 1)
+    << "the script ran, so the breakdown reports its real outcome";
+}
+
+TEST_F (PreScriptSkippedTest, APreScriptMarkedInlineIsNotWarnedWhenTheRunNamesNoOverride) {
+    ScenarioMockServer server;
+    auto state = run_with_pre_script (server, /*marked_inline=*/true, "");
+
+    EXPECT_TRUE (skipped_warnings ().empty ()) << skipped_warnings ().dump ();
+    EXPECT_FALSE (step0_breakdown (*state).contains ("preRequestScript"));
+}
+
+TEST_F (PreScriptSkippedTest, AllDeferredOverridesAnInlineMarkSoItIsWarnedAndMarked) {
+    ScenarioMockServer server;
+    auto state = run_with_pre_script (server, /*marked_inline=*/true, "allDeferred");
+
+    const auto warnings = skipped_warnings ();
+    ASSERT_EQ (warnings.size (), 1u) << warnings.dump ();
+    EXPECT_EQ (warnings[0]["steps"], 1);
+    EXPECT_EQ (step0_breakdown (*state)["preRequestScript"], "skipped");
+}
+
+// A blank script is inert (#1609) and a step without the kind carries nothing
+// to leave behind, so neither counts as deferred whatever the mode.
+TEST (StepHasDeferredScript, CountsOnlyANonBlankScriptOfTheNamedKindThatDidNotRunInline) {
+    using vayu::core::ScriptsOverrideMode;
+    using vayu::core::step_has_deferred_script;
+    vayu::core::ScenarioStep step;
+    step.elements =
+    vayu::tests::step_elements_with_pre_script ("pm.test('t', () => {});");
+    EXPECT_TRUE (
+    step_has_deferred_script (step, "script.pre", ScriptsOverrideMode::AsMarked));
+    EXPECT_TRUE (
+    step_has_deferred_script (step, "script.pre", ScriptsOverrideMode::AllDeferred));
+    EXPECT_FALSE (
+    step_has_deferred_script (step, "script.pre", ScriptsOverrideMode::AllInline));
+    EXPECT_FALSE (step_has_deferred_script (step, "script.post", ScriptsOverrideMode::AsMarked))
+    << "a step carrying only a script.pre has no deferred script.post";
+
+    step.elements = vayu::tests::step_elements_with_pre_script ("   \n");
+    EXPECT_FALSE (step_has_deferred_script (step, "script.pre", ScriptsOverrideMode::AsMarked))
+    << "a blank script carries no behaviour to warn about";
+
+    step.elements.reset ();
+    EXPECT_FALSE (
+    step_has_deferred_script (step, "script.pre", ScriptsOverrideMode::AsMarked));
 }
 
 // Scripts stay deferred: a load-mode scenario runs none of them inline, and the
