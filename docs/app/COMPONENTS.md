@@ -811,8 +811,9 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   `useMcpDataInvalidation`) - the app's answer to a run an MCP agent started (issue #1419). Main
   names the run and which service owns its stream on the `mcp:data-changed` event; this enters the
   same `startMonitoring` path the dashboard does, so the taskbar bar, the wake lock and the finished
-  notification are the same for an agent's run as for the user's. A `run` event that is not a start
-  attaches nothing.
+  notification are the same for an agent's run as for the user's. For a load run it also reads the
+  run's row and sets the dashboard's config and request from its snapshot (issue #1935). A `run`
+  event that is not a start attaches nothing.
 - `useInboxDeletion.ts` / `DeleteInboxDialog.tsx` - deleting an inbox (issue #553), shared with the
   Services drawer so the two surfaces cannot disagree about when the confirmation appears or what it
   says is at stake. An inbox holding captures confirms and names their count; one holding none is

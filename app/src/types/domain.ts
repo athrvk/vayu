@@ -1572,17 +1572,18 @@ export interface RunScenarioSummary {
 
 /**
  * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Mirrors all eleven keys
+ * of the full {@link RunConfigSnapshot}. Mirrors every key
  * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
  * omitted by the engine when absent from the stored snapshot, except
  * `httpVersion` which the engine always normalizes to a value (see
  * `add_http_version`, same file). The full snapshot is still available on
  * `GET /runs/:id`.
  *
- * `followRedirects` / `maxRedirects` are declared but **not rendered
- * anywhere yet** - this type mirrors the wire, so a field the engine sends is
- * declared whether or not a screen reads it, and a reader can trust that what
- * is missing here is missing from the payload too. If you are looking for
+ * `startConcurrency` / `rampUpDuration` / `followRedirects` / `maxRedirects`
+ * are declared but **not rendered anywhere yet** - this type mirrors the wire,
+ * so a field the engine sends is declared whether or not a screen reads it,
+ * and a reader can trust that what is missing here is missing from the payload
+ * too. If you are looking for
  * somewhere to surface them, the history sidebar row and the load test report
  * both already show `httpVersion` and would be the consistent home.
  */
@@ -1603,6 +1604,10 @@ export interface RunSummary {
 	mode?: string;
 	duration?: string;
 	concurrency?: number;
+	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	startConcurrency?: number;
+	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	rampUpDuration?: string;
 	comment?: string;
 	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
 	httpVersion?: HttpVersion;

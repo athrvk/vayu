@@ -114,16 +114,19 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the ten keys the history/dashboard
+// The compact list-row summary: exactly the twelve keys the history/dashboard
 // list UIs read, each omitted when absent from the snapshot (httpVersion
 // excepted - see add_http_version), plus `acceptEncoding` (issue #1488) and
 // `scenario` on a collection run only, both omitted rather than defaulted
-// when the snapshot carries neither. A malformed config_snapshot yields an
-// empty object, never an error - the full snapshot stays available on
-// GET /runs/:id. `hasWarnings` (issue #1527) is not built here and never
-// cached with the rest of this object - it is a completion-time fact, not
-// part of the immutable config_snapshot this function reads, so it is
-// merged into the row by `get_runs_response` after this (possibly cached)
+// when the snapshot carries neither. The ramp-up knobs `startConcurrency` /
+// `rampUpDuration` (issue #1935) are in the list so a row agrees with the
+// report's `configuration` (build_run_report_config). A malformed
+// config_snapshot yields an empty object, never an error. This builds the
+// list rows and the PUT /runs/:id/baseline row; GET /runs/:id does not use
+// it and returns the full snapshot. `hasWarnings` (issue #1527) is not built
+// here and never cached with the rest of this object - it is a completion-time
+// fact, not part of the immutable config_snapshot this function reads, so it
+// is merged into the row by `get_runs_response` after this (possibly cached)
 // object is retrieved.
 //
 // `requestName` is the request's name *as the client sent it*, never
@@ -141,8 +144,9 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     try {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
-            for (const char* key : { "url", "method", "mode", "duration", "concurrency",
-                 "comment", "followRedirects", "maxRedirects", "requestName" }) {
+            for (const char* key : { "url", "method", "mode", "duration",
+                 "concurrency", "startConcurrency", "rampUpDuration", "comment",
+                 "followRedirects", "maxRedirects", "requestName" }) {
                 add_if_present (summary, config, key);
             }
             add_http_version (summary, config);
@@ -1797,9 +1801,9 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
      * first. Rows carry a compact `summary` (url/method/mode/duration/
-     * concurrency/comment/httpVersion/followRedirects/maxRedirects/
-     * requestName) instead of the full config_snapshot, wrapped in the
-     * `{data, pagination}` envelope.
+     * concurrency/startConcurrency/rampUpDuration/comment/httpVersion/
+     * followRedirects/maxRedirects/requestName) instead of the full
+     * config_snapshot, wrapped in the `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
      * with it. A design run's row also carries `resultSummary`
      * (statusCode + latencyMs); see get_runs_response.
