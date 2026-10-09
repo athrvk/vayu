@@ -181,10 +181,11 @@ TEST_F (RunsRouteTest, PaginationHasMoreAndOffset) {
     EXPECT_EQ (page3["pagination"]["hasMore"], false);
 }
 
-TEST_F (RunsRouteTest, SummaryHasExactlyTenKeysAndOmitsAbsent) {
-    seed ({ .id = "run_full", .config_snapshot = R"({"url":"https://a/","method":"POST","mode":"constant_rps",
-    "duration":"60s","concurrency":100,"comment":"nightly","httpVersion":"http2",
-    "followRedirects":false,"maxRedirects":5,"requestName":"List pets","headers":{"X":"1"}})" });
+TEST_F (RunsRouteTest, SummaryHasExactlyTwelveKeysAndOmitsAbsent) {
+    seed ({ .id = "run_full", .config_snapshot = R"({"url":"https://a/","method":"POST","mode":"ramp_up",
+    "duration":"60s","concurrency":100,"startConcurrency":5,"rampUpDuration":"20s",
+    "comment":"nightly","httpVersion":"http2","followRedirects":false,"maxRedirects":5,
+    "requestName":"List pets","headers":{"X":"1"}})" });
     seed ({ .id = "run_sparse", .start_time = 1, .config_snapshot = R"({"url":"https://b/"})" });
 
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
@@ -205,14 +206,17 @@ TEST_F (RunsRouteTest, SummaryHasExactlyTenKeysAndOmitsAbsent) {
     EXPECT_FALSE (sparse.contains ("followRedirects"));
     EXPECT_FALSE (sparse.contains ("maxRedirects"));
     EXPECT_FALSE (sparse.contains ("requestName"));
+    EXPECT_FALSE (sparse.contains ("startConcurrency"));
+    EXPECT_FALSE (sparse.contains ("rampUpDuration"));
 
     const auto& full = body["data"][1]["summary"];
-    // Exactly the ten documented keys, no more (headers must not leak in).
-    EXPECT_EQ (full.size (), 10u);
+    // Exactly the twelve documented keys, no more (headers must not leak in).
+    EXPECT_EQ (full.size (), 12u);
     // ASSERT so a dropped key stops here with a legible failure rather than
     // aborting on the operator[] reads below.
     for (const char* k : { "url", "method", "mode", "duration", "concurrency",
-         "comment", "httpVersion", "followRedirects", "maxRedirects", "requestName" })
+         "startConcurrency", "rampUpDuration", "comment", "httpVersion",
+         "followRedirects", "maxRedirects", "requestName" })
         ASSERT_TRUE (full.contains (k)) << k;
     EXPECT_FALSE (full.contains ("headers"));
     EXPECT_EQ (full["concurrency"], 100);
@@ -220,6 +224,34 @@ TEST_F (RunsRouteTest, SummaryHasExactlyTenKeysAndOmitsAbsent) {
     EXPECT_EQ (full["followRedirects"], false);
     EXPECT_EQ (full["maxRedirects"], 5);
     EXPECT_EQ (full["requestName"], "List pets");
+}
+
+// A ramp-up run's row carries its two ramp knobs (issue #1935), the same ones
+// the report's `configuration` reports, so the list and the baseline comparison
+// read what the run was configured with without opening the full snapshot. A
+// run that is not a ramp-up has neither in its snapshot and its row has
+// neither: absent, not defaulted.
+TEST_F (RunsRouteTest, SummaryCarriesRampUpKnobsOnlyWhenTheSnapshotHasThem) {
+    seed ({ .id = "run_ramp", .config_snapshot = R"({"url":"https://a/","mode":"ramp_up","startConcurrency":2,
+    "rampUpDuration":"10s","concurrency":50})" });
+    seed ({ .id = "run_constant",
+    .start_time = 1,
+    .config_snapshot = R"({"url":"https://b/","mode":"constant","concurrency":50})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    // Newest first: run_constant, then run_ramp.
+    const auto& constant = body["data"][0]["summary"];
+    EXPECT_EQ (body["data"][0]["id"], "run_constant");
+    EXPECT_FALSE (constant.contains ("startConcurrency"));
+    EXPECT_FALSE (constant.contains ("rampUpDuration"));
+
+    const auto& ramp = body["data"][1]["summary"];
+    EXPECT_EQ (body["data"][1]["id"], "run_ramp");
+    ASSERT_TRUE (ramp.contains ("startConcurrency"));
+    ASSERT_TRUE (ramp.contains ("rampUpDuration"));
+    EXPECT_EQ (ramp["startConcurrency"], 2);
+    EXPECT_EQ (ramp["rampUpDuration"], "10s");
+    EXPECT_EQ (ramp["concurrency"], 50);
 }
 
 // `requestName` is the request's name as the client sent it at run start -
@@ -1676,6 +1708,19 @@ TEST_F (RunsRouteTest, BaselinePutPinsTheRunAndAnswersTheUpdatedRow) {
     const auto stored_run2 = db_->get_run ("run_a");
     ASSERT_HAS_VALUE (stored_run2);
     EXPECT_FALSE (stored_run2->baseline);
+}
+
+// The PUT answer is built by the same build_run_summary the list uses, so a
+// pinned ramp-up run's row carries its ramp knobs too (issue #1935).
+TEST_F (RunsRouteTest, BaselinePutRowCarriesTheRampUpKnobs) {
+    seed ({ .id = "run_ramp", .config_snapshot = R"({"url":"https://a/","mode":"ramp_up","startConcurrency":2,
+    "rampUpDuration":"10s","concurrency":50})" });
+
+    auto [status, body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_ramp", R"({"baseline":true})");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"]["startConcurrency"], 2);
+    EXPECT_EQ (body["summary"]["rampUpDuration"], "10s");
 }
 
 TEST_F (RunsRouteTest, BaselinePutOnAMissingRunIs404) {

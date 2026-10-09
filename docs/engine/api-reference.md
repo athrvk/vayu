@@ -7826,12 +7826,16 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these ten keys: `url`, `method`, `mode`,
-`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`,
-`requestName`, and `httpVersion`. The first nine are each **omitted** when
-absent from the snapshot (a malformed snapshot yields an empty `summary`,
-never a `500`); `httpVersion` alone is always present. `requestName` is the
-request's name **as the client sent it when the run started** -
+**`summary`** carries exactly these twelve snapshot keys: `url`, `method`,
+`mode`, `duration`, `concurrency`, `startConcurrency`, `rampUpDuration`,
+`comment`, `followRedirects`, `maxRedirects`, `requestName`, and `httpVersion`.
+The first eleven are each **omitted** when absent from the snapshot (a
+malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
+alone is always present. `startConcurrency` and `rampUpDuration` (issue #1935)
+are the ramp-up knobs, so only a `ramp_up` run has them, e.g.
+`"startConcurrency": 2, "rampUpDuration": "10s"` beside `"concurrency": 50`;
+they are the same two keys the report's `configuration` carries. `requestName`
+is the request's name **as the client sent it when the run started** -
 never re-read from the requests table, the same trust model `url` and
 `method` already have here - so a request renamed or deleted since does not
 change what a past run's row says it invoked, and a run whose client omitted
@@ -7840,8 +7844,8 @@ fabricated name. It reaches `config_snapshot` the same way `url`/`method` do:
 whatever the client's `POST /runs` or `POST /execute` body carried; the
 renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
 [POST /compose](#post-compose)'s `requestId` path already stamps for the
-script sandbox's `pm.info.requestName`. Every run since issue #1488 adds an
-eleventh, `acceptEncoding`: `true` when the run negotiated a compressed response
+script sandbox's `pm.info.requestName`. Every run since issue #1488 adds a
+thirteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -7856,11 +7860,15 @@ than being omitted, which would misrepresent "nothing was recorded" as "we
 lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
-`GET /runs/:runId`.
+`GET /runs/:runId`. That route does not build a `summary` row at all: it returns
+the full `configSnapshot`, which already holds every key above. The same twelve
+keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
+with, since both are built by one function.
 
-A **collection run** (`type: "scenario"`) carries none of the first eight: its
-work is a sequence, so there is no single `url`, `method` or `mode` to report.
-Its row instead carries a twelfth key, `scenario`, present on scenario runs only:
+A **collection run** (`type: "scenario"`) carries none of the single-request
+keys above (`url` through `requestName`): its work is a sequence, so there is no
+single `url`, `method` or `mode` to report. Its row instead carries a
+fourteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -7876,7 +7884,7 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
-**`hasWarnings`** (issue #1527) is `summary`'s thirteenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s fifteenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
