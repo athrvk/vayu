@@ -24,6 +24,7 @@ import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
 import { formatNumber } from "@/lib/format-number";
+import { isRunInProgress } from "@/lib/run-status";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // The batcher throttles UI commits to keep render cost bounded, but every tick
@@ -61,6 +62,15 @@ function runSummaryLine(report: RunReport): string | null {
 	}
 	return `${formatNumber(requests)} requests, p95 ${Math.round(p95)} ms, ${errorRate.toFixed(1)}% errors`;
 }
+
+/**
+ * Bodies for the dashboard's "Lost the live metrics stream" callout (#1925),
+ * for the two ways the stream ends while the engine keeps running the load test.
+ */
+const STREAM_DROPPED_MESSAGE =
+	"The connection to Vayu's engine closed before the load test finished, and it is still running.";
+const STREAM_SUPERSEDED_MESSAGE =
+	"A collection run took over the live stream, and this load test is still running.";
 
 class LoadTestService {
 	private activeRunId: string | null = null;
@@ -212,10 +222,11 @@ class LoadTestService {
 	 * the socket and no terminal path ran, so the wake lock stayed held for the
 	 * rest of the session and the taskbar kept a bar for a run nothing watched.
 	 *
-	 * The run is *not* over - the engine is still running it - so this says so
-	 * to no one: no notification (#1358), no failed-icon mark (#1364), and no
-	 * report fetch. The history row reaches its terminal status on the next
-	 * list read, which is where a run this app is not watching belongs.
+	 * The run is *not* over - the engine is still running it - so nothing
+	 * announces an ending: no notification (#1358), no failed-icon mark
+	 * (#1364), and no report fetch. The history row reaches its terminal status
+	 * on the next list read, which is where a run this app is not watching
+	 * belongs.
 	 *
 	 * The buffered ticks go with it rather than being committed, the same
 	 * choice `stopMonitoring` makes: the dashboard is stale from this moment
@@ -225,10 +236,13 @@ class LoadTestService {
 		const runId = this.activeRunId;
 		if (!runId) return;
 		this.releaseRun(runId);
+		const store = useDashboardStore.getState();
 		// Nothing else will lower it: the spinner is raised in `startMonitoring`
 		// and lowered in `handleClose`, and `handleClose` is exactly what does
 		// not run for a run whose stream was taken.
-		useDashboardStore.getState().setStreaming(false);
+		store.setStreaming(false);
+		// The dashboard's stream callout, whose Reconnect is the way back (#1925).
+		store.setError(STREAM_SUPERSEDED_MESSAGE);
 	}
 
 	/**
@@ -346,6 +360,9 @@ class LoadTestService {
 
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
+		// Lowered so the callout's Reconnect, `startMonitoring` with this same
+		// run, is not turned away as a run already being watched (#1925).
+		this.isConnected = false;
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		this.failProgress(this.activeRunId);
 		// The stream dropped, not the load test - it keeps executing on the
@@ -369,9 +386,9 @@ class LoadTestService {
 		const runId = this.activeRunId;
 		this.flushPending();
 		this.isConnected = false;
-		// Before the awaited report fetch below: the run is over the moment the
-		// stream closed, and the machine must not stay pinned awake through a
-		// slow fetch.
+		// Before the awaited report fetch below: the machine must not stay pinned
+		// awake through a slow fetch. A run that turns out to be still going lost
+		// only its stream, and reconnecting takes the lock again.
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		// A run the engine says failed paints the error state here, before the
 		// clear below and before the awaited fetch: until #1415 the only caller
@@ -388,72 +405,95 @@ class LoadTestService {
 		if (this.progressFailedRunId !== runId) {
 			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
 		}
-		const store = useDashboardStore.getState();
-		store.setStreaming(false);
+		useDashboardStore.getState().setStreaming(false);
+		if (!runId) return;
 
-		// Fetch the canonical final report from the engine and store it so the
-		// dashboard shows definitive completed-view data (final percentiles, reconciled
-		// error rate, setup overhead) - one terminal truth, same as the 404-path.
-		//
-		// Through the query cache, not a bare fetch: opening the same run in
-		// History reads `runs.report(runId)` and would otherwise re-fetch a
-		// report that cannot change.
-		if (runId) {
-			// Stands unless the report arrives with all three numbers in it: a run
-			// that ended is worth saying even when what it did cannot be read.
-			let summary: string | null = null;
-			/** The stored row's own verdict, read only when the frame had none. */
-			let reportStatus: string | null = null;
-			try {
-				const report = await queryClient.fetchQuery({
-					queryKey: queryKeys.runs.report(runId),
-					queryFn: () => apiService.getRunReport(runId),
-					staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
-				});
-				// Re-read the store *after* the await. Finishing run A and
-				// immediately starting run B leaves this continuation holding A's
-				// report while the dashboard shows B; applying it flipped B to
-				// "completed" with A's percentiles. The window is one local round
-				// trip, which is exactly long enough.
-				if (useDashboardStore.getState().currentRunId === runId) {
-					useDashboardStore.getState().setFinalReport(report);
-				}
-				// Last inside the try: the dashboard is the terminal surface that
-				// matters, and nothing done for a notification may come before it.
-				summary = runSummaryLine(report);
-				reportStatus = report.metadata?.status ?? null;
-			} catch (e) {
-				console.warn("[LoadTestService] report fetch failed", e);
-			}
-			// After the fetch, so the body carries the run's own numbers. A run
-			// that already reported a failure has had its one notification.
-			//
-			// A failed run is not a finished one, and until #1415 this said
-			// finished for both: the frame's status is preferred, and the
-			// report's own is the fallback for a stream that ended without one.
-			// The frame first, deliberately - the fetch above can fail, and a
-			// failure that could not be read must still report a failure rather
-			// than quietly report success.
-			const failed = status === "failed" || (status === null && reportStatus === "failed");
-			this.notifyTerminal(
-				runId,
-				failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
-				summary ?? "Couldn't read this run's report."
-			);
-			// The run has reached a terminal state, so the lists that carry its
-			// status are stale until the next 5s poll - and once the user has
-			// paged History, that poll is off.
-			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-			// Only if it is still this run's. Same window as the store read above,
-			// and the same fix: a run started while this fetch was in flight has
-			// already put its own id here, and forgetting it would leave the
-			// service unable to name the run it is watching - so the live run's
-			// reports would be dropped and its bar never cleared, both of which
-			// now turn on naming the run (#1405).
-			if (this.activeRunId === runId) {
-				this.activeRunId = null;
-			}
+		const report = await this.fetchStoredReport(runId);
+		// The frame is the engine's word that the run ended. Without one the
+		// stored row decides, and a run it still calls live lost only its stream.
+		if (status === null && isRunInProgress(report?.metadata?.status)) {
+			this.loseStream(runId);
+		} else {
+			this.finishRun(runId, status, report);
 		}
+		// Only if it is still this run's. A run started while the fetch was in
+		// flight has already put its own id here, and forgetting it would leave
+		// the service unable to name the run it is watching - so the live run's
+		// reports would be dropped and its bar never cleared, both of which turn
+		// on naming the run (#1405).
+		if (this.activeRunId === runId) {
+			this.activeRunId = null;
+		}
+	}
+
+	/**
+	 * The engine's stored report for `runId`, or null when it cannot be read.
+	 *
+	 * Through the query cache, not a bare fetch: opening the same run in
+	 * History reads `runs.report(runId)` and would otherwise re-fetch a report
+	 * that cannot change.
+	 */
+	private async fetchStoredReport(runId: string): Promise<RunReport | null> {
+		try {
+			return await queryClient.fetchQuery({
+				queryKey: queryKeys.runs.report(runId),
+				queryFn: () => apiService.getRunReport(runId),
+				staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+			});
+		} catch (e) {
+			console.warn("[LoadTestService] report fetch failed", e);
+			return null;
+		}
+	}
+
+	/**
+	 * The run ended: hand the dashboard its final report (final percentiles,
+	 * reconciled error rate, setup overhead) and tell the user how it ended.
+	 */
+	private finishRun(runId: string, status: SSETerminalStatus, report: RunReport | null): void {
+		// Re-read the store *after* the await. Finishing run A and immediately
+		// starting run B leaves this continuation holding A's report while the
+		// dashboard shows B; applying it flipped B to "completed" with A's
+		// percentiles. The window is one local round trip, which is exactly long
+		// enough. First, because the dashboard is the terminal surface that
+		// matters and nothing done for a notification may come before it.
+		if (report && useDashboardStore.getState().currentRunId === runId) {
+			useDashboardStore.getState().setFinalReport(report);
+		}
+		// A failed run is not a finished one, and until #1415 this said finished
+		// for both: the frame's status is preferred, and the report's own is the
+		// fallback for a stream that ended without one. The frame first,
+		// deliberately - the fetch can fail, and a failure that could not be read
+		// must still report a failure rather than quietly report success.
+		const failed =
+			status === "failed" || (status === null && report?.metadata?.status === "failed");
+		// The summary stands in only when the report carries all three numbers: a
+		// run that ended is worth saying even when what it did cannot be read. A
+		// run that already reported a failure has had its one notification.
+		this.notifyTerminal(
+			runId,
+			failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
+			(report && runSummaryLine(report)) ?? "Couldn't read this run's report."
+		);
+		// The run has reached a terminal state, so the lists that carry its status
+		// are stale until the next 5s poll - and once the user has paged History,
+		// that poll is off.
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+	}
+
+	/**
+	 * The stream ended with no frame while the engine still runs the load test
+	 * (#1925). Nothing has ended, so nothing is announced and no report is
+	 * final: the dashboard shows its stream callout instead, and Reconnect there
+	 * calls `startMonitoring` again, which takes back the wake lock and the OS
+	 * bar this close already let go of.
+	 */
+	private loseStream(runId: string): void {
+		// The copy just cached says "running"; the read after a reconnect must
+		// not resolve from it.
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.report(runId) });
+		const store = useDashboardStore.getState();
+		if (store.currentRunId === runId) store.setError(STREAM_DROPPED_MESSAGE);
 	}
 }
 

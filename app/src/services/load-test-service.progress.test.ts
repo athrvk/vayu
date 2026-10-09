@@ -141,6 +141,24 @@ describe("LoadTestService - the OS progress indicator", () => {
 	});
 
 	/*
+	 * The dashboard's Reconnect is `startMonitoring` with the same run (#1925).
+	 * An error that left the service believing it was still connected turned
+	 * that away at the "already watching this run" guard, so the button did
+	 * nothing. Mutation check: drop the `isConnected = false` in `handleError`
+	 * and `connect` is called once.
+	 */
+	it("reconnects the same run after a stream error", () => {
+		loadTestService.startMonitoring("run_1");
+		failStream("engine went away");
+
+		loadTestService.startMonitoring("run_1");
+
+		expect(sseClient.connect).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(sseClient.connect).mock.calls[1]?.[0]).toBe("run_1");
+		expect(loadTestService.isMonitoring("run_1")).toBe(true);
+	});
+
+	/*
 	 * The terminal fetch in `handleClose` is awaited, and a run started inside
 	 * that window has already put its own id on the service. Forgetting it there
 	 * would leave the service unable to name the run it is watching, and since

@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useDashboardStore, deriveRunProgress } from "./dashboard-store";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, RunReport } from "@/types";
 
 function tick(elapsed: number, p99 = 10): LoadTestMetrics {
 	return {
@@ -185,5 +185,51 @@ describe("deriveRunProgress", () => {
 			deriveRunProgress({}, { ...tick(30), requests_sent: 1100, requests_expected: 1000 })
 		).toBe(1);
 		expect(deriveRunProgress({ duration: "10s" }, tick(30))).toBe(1);
+	});
+});
+
+/*
+ * The engine answers `GET /runs/:id/report` for a run it is still executing,
+ * so a report in hand is not a finished run (#1925). Taking one as final
+ * painted Completed and removed Stop while the run kept generating load.
+ *
+ * Mutation check: drop the `isRunInProgress` guard in `setFinalReport` and the
+ * first two cases redden - `mode` becomes "completed" and the report lands.
+ */
+describe("dashboard-store setFinalReport", () => {
+	const reportWith = (status?: string) =>
+		({
+			summary: { totalRequests: 10 },
+			latency: {},
+			...(status === undefined ? {} : { metadata: { status } }),
+		}) as unknown as RunReport;
+
+	beforeEach(() => {
+		useDashboardStore.getState().startRun("r");
+		useDashboardStore.getState().setStreaming(false);
+	});
+
+	it.each(["running", "pending"])("leaves the store alone for a %s run", (status) => {
+		useDashboardStore.getState().setFinalReport(reportWith(status));
+		const s = useDashboardStore.getState();
+		expect(s.mode).toBe("running");
+		expect(s.finalReport).toBeNull();
+	});
+
+	it("finalises a completed run", () => {
+		const report = reportWith("completed");
+		useDashboardStore.getState().setFinalReport(report);
+		expect(useDashboardStore.getState().mode).toBe("completed");
+		expect(useDashboardStore.getState().finalReport).toBe(report);
+	});
+
+	it("finalises a stopped run as stopped", () => {
+		useDashboardStore.getState().setFinalReport(reportWith("stopped"));
+		expect(useDashboardStore.getState().mode).toBe("stopped");
+	});
+
+	it("takes a report with no status as final", () => {
+		useDashboardStore.getState().setFinalReport(reportWith());
+		expect(useDashboardStore.getState().mode).toBe("completed");
 	});
 });

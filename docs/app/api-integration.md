@@ -975,10 +975,14 @@ collection run's per-step progress.
 - **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
   topic, so the client connects immediately after `POST /runs` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
-- **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
-  so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
-  browser's built-in `EventSource` retry. At run end the app converges on the stored report
-  (`GET /runs/:id/report`) rather than reconnecting to the stream.
+- **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end.
+  Transient `CONNECTING` errors are left to the browser's built-in `EventSource` retry; a
+  `CLOSED` readyState without a `complete` frame reaches the subscriber as `onClose(null)`, which
+  is not a terminal status. The load-test service then reads the stored report
+  (`GET /runs/:id/report`): a terminal `metadata.status` finishes the run, while `running` or
+  `pending` means only the stream was lost, so the dashboard shows its "Lost the live metrics
+  stream" callout and the user's Reconnect re-attaches (issue #1925). Nothing reconnects on its
+  own.
 - **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
   `complete` event, `error` handling
 - **One client, and a hand-off when it changes hands**: the client is a singleton, so a second
