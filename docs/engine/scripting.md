@@ -1838,10 +1838,11 @@ matching the read half respects.
 made, and the next transfer of that execution carries it:
 
 - A `set` in a **pre-request script** rides the request it was made before, and
-  that request's own cookie capture is what writes it into the jar. It cannot
-  be discarded by that capture, which is the reason for the ordering: the
-  engine replaces a scope's contents with what the finishing transfer held, so
-  a write dropped into the jar beside an in-flight request would vanish with it.
+  that request's own cookie capture is what writes it into the jar, as one of
+  that transfer's own changes. That is the reason for the ordering: a capture
+  folds back only what its transfer changed against what it was seeded with,
+  so a write dropped into the jar beside an in-flight request would be
+  undone by it.
 - A `set` followed by **`pm.sendRequest`** is carried by that auxiliary
   request. A `set` *inside* a `sendRequest` callback is a sequential write -
   `pm.sendRequest` is synchronous, so the callback runs after its transfer

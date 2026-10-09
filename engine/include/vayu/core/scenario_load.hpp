@@ -206,9 +206,10 @@ struct VirtualUser {
     /**
      * libcurl's own lines for this VU alone, replaced wholesale by each
      * completion and cleared at every iteration boundary. Replaced rather than
-     * merged for the reason `CookieJar::store` documents: the captured list is
-     * the whole jar the handle held, so merging would resurrect a cookie the
-     * server deleted by expiring it.
+     * merged because the captured list is the whole jar the handle held, so
+     * merging would resurrect a cookie the server deleted by expiring it. A
+     * VU's steps never overlap, which is why no delta is needed here
+     * (`CookieJar::reconcile` is the shared jar's).
      */
     std::vector<std::string> cookies;
     /**

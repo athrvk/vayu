@@ -677,8 +677,8 @@ struct Response {
      * The *whole* jar, not the `Set-Cookie`s of this exchange - what was seeded
      * plus whatever the response changed - which is why the caller replaces its
      * copy with this rather than merging: merging would resurrect a cookie the
-     * server deleted by expiring it. Same reasoning, and the same
-     * representation, as `CookieJar::store`.
+     * server deleted by expiring it. Same representation as the shared jar's
+     * lines (`CookieJar`).
      */
     std::vector<std::string> cookie_lines;
 
