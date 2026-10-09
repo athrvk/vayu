@@ -219,9 +219,124 @@ describe("flushAll", () => {
 		});
 	});
 
-	it("reports 0 pending - every dirty context is attempted and settled before this resolves", async () => {
-		registerContext("request-1", true);
-		const result = await useSaveStore.getState().flushAll();
-		expect(result.pending).toBe(0);
+	it("counts a context that resolves 'pending' as pending, not saved", async () => {
+		// A save the editor declined to send (`SaveBlockedError`) is neither a
+		// success nor a failure, and the quit prompt must not call it either.
+		useSaveStore.getState().registerContext({
+			id: "request-1",
+			name: "request-1",
+			save: () => {
+				useSaveStore.getState().markPendingSave();
+				return Promise.resolve("pending");
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 0,
+			failed: 0,
+			pending: 1,
+		});
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("counts a context that reports nothing but published 'pending' as pending", async () => {
+		useSaveStore.getState().registerContext({
+			id: "settings",
+			name: "settings",
+			save: () => {
+				useSaveStore.getState().markPendingSave();
+				return Promise.resolve();
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 0,
+			failed: 0,
+			pending: 1,
+		});
+	});
+
+	it("gives each context its own verdict when two save in the same tick", async () => {
+		// The status is one slot: the failing context publishes "error" while the
+		// other is still resolving, and reading the slot back charged the failure
+		// to both.
+		useSaveStore.getState().registerContext({
+			id: "request-1",
+			name: "request-1",
+			save: async () => {
+				await Promise.resolve();
+				return "saved";
+			},
+			hasPendingChanges: true,
+		});
+		useSaveStore.getState().registerContext({
+			id: "settings",
+			name: "settings",
+			save: () => {
+				useSaveStore.getState().failSave("engine down");
+				return Promise.resolve("failed");
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 1,
+			failed: 1,
+			pending: 0,
+		});
+		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	it("does not read one context's invented 'pending' as another's own", async () => {
+		// Each success is held against the other, still-dirty context, so the
+		// first to resolve leaves "pending" behind for the second to find.
+		useSaveStore.getState().registerContext({
+			id: "draft",
+			name: "draft",
+			save: () => Promise.resolve("saved"),
+			hasPendingChanges: true,
+		});
+		registerContext("settings", true);
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 2,
+			failed: 0,
+			pending: 0,
+		});
+	});
+
+	it("still counts a genuine 'pending' when a sibling void context saved first", async () => {
+		registerContext("settings", true);
+		useSaveStore.getState().registerContext({
+			id: "variables",
+			name: "variables",
+			save: async () => {
+				await Promise.resolve();
+				useSaveStore.getState().markPendingSave();
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 1,
+			failed: 0,
+			pending: 1,
+		});
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("fills in 'saved' for a context that reports it but publishes nothing", async () => {
+		useSaveStore.getState().registerContext({
+			id: "draft",
+			name: "draft",
+			save: () => Promise.resolve("saved"),
+			hasPendingChanges: true,
+		});
+
+		await useSaveStore.getState().flushAll();
+
+		expect(useSaveStore.getState().status).toBe("saved");
 	});
 });

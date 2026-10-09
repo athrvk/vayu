@@ -362,11 +362,13 @@ one app instance may drive it:
   (issue #1489). `save-flush.ts`'s coordinator still waits out its round trip
   unconditionally (the renderer's ACK, or a 2 s ceiling if it never comes) -
   what changed is what happens once it settles. The renderer's `flushAll`
-  resolves to how many contexts actually saved versus failed; a ceiling with
-  no ACK at all is read the same as a failure, since nothing is known to have
-  landed. Either case holds the quit or close behind one native dialog - "N
-  edits could not be saved - the engine is not responding", Quit/Close anyway
-  or Keep working - built by `confirmDiscardOnFailedFlush` in `save-flush.ts`
+  resolves to how many contexts saved, failed or stayed pending (a save the
+  editor declined to send); a ceiling with no ACK at all is read the same as
+  a failure, since nothing is known to have landed. Either case holds the
+  quit or close behind one native dialog - "Couldn't save N edits - the
+  engine isn't responding", or "N edits couldn't be saved as they are" when
+  the engine is fine and every loss is a pending edit, Quit/Close anyway or
+  Keep working - built by `confirmDiscardOnFailedFlush` in `save-flush.ts`
   and shown through the same `dialog.showMessageBox` primitive the crash and
   unresponsive-window prompts already use. A clean flush proceeds exactly as
   before, with no dialog. Closing one dirty tab (not the whole window) is the

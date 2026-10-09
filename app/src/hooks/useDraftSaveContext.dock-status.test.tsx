@@ -19,12 +19,20 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { SaveBlockedError } from "@/lib/elements";
+import { useToastStore } from "@/stores/toast-store";
 import { renderHook } from "@testing-library/react";
 import { useSaveStore } from "@/stores/save-store";
 import { useDraftSaveContext } from "./useDraftSaveContext";
 
 beforeEach(() => {
-	useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+	useSaveStore.setState({
+		status: "idle",
+		lastErrorMessage: null,
+		contexts: new Map(),
+		activeContextId: null,
+	});
+	useToastStore.setState({ toasts: [] });
 });
 
 interface Props {
@@ -32,7 +40,7 @@ interface Props {
 	isDirty: boolean;
 }
 
-function mount(initial: Props) {
+function mount(initial: Props, save: () => Promise<void> = () => Promise.resolve()) {
 	return renderHook(
 		(props: Props) =>
 			useDraftSaveContext({
@@ -40,7 +48,7 @@ function mount(initial: Props) {
 				name: "Test editor",
 				isDirty: props.isDirty,
 				isActive: true,
-				save: () => Promise.resolve(),
+				save,
 			}),
 		{ initialProps: initial }
 	);
@@ -88,5 +96,38 @@ describe("useDraftSaveContext's Dock status wiring", () => {
 		rerender({ id: "b", isDirty: false });
 
 		expect(useSaveStore.getState().status).toBe("pending");
+	});
+});
+
+describe("useDraftSaveContext's save verdict", () => {
+	const registeredSave = (id: string) => {
+		const context = useSaveStore.getState().contexts.get(id);
+		if (!context) throw new Error(`no context registered as ${id}`);
+		return context.save;
+	};
+
+	it("reports a save the editor blocked as pending, without a failure", async () => {
+		mount({ id: "a", isDirty: true }, () => Promise.reject(new SaveBlockedError()));
+
+		await expect(registeredSave("a")()).resolves.toBe("pending");
+
+		expect(useSaveStore.getState().status).toBe("pending");
+		expect(useSaveStore.getState().lastErrorMessage).toBeNull();
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+
+	it("reports a rejected save as failed and toasts it", async () => {
+		mount({ id: "a", isDirty: true }, () => Promise.reject(new Error("boom")));
+
+		await expect(registeredSave("a")()).resolves.toBe("failed");
+
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toContain("boom");
+	});
+
+	it("reports a resolved save as saved", async () => {
+		mount({ id: "a", isDirty: true });
+
+		await expect(registeredSave("a")()).resolves.toBe("saved");
 	});
 });

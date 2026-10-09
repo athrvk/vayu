@@ -309,6 +309,31 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 		expect(closePrompt.buttons).toEqual(["Close anyway", "Keep working"]);
 	});
 
+	it("blames the engine for a failed save and for an unanswered ceiling", () => {
+		for (const result of [{ saved: 0, failed: 1, pending: 0 }, null]) {
+			const prompt = buildFlushFailurePrompt("quit", result);
+			expect(prompt.message).toContain("the engine isn't responding");
+			expect(prompt.detail).toContain("once the engine answers");
+		}
+	});
+
+	it("does not blame the engine for an edit that was only blocked", () => {
+		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 0, pending: 1 });
+		expect(prompt.message).toBe("One edit couldn't be saved as it is.");
+		expect(prompt.detail).not.toContain("engine");
+
+		const plural = buildFlushFailurePrompt("window-close", { saved: 0, failed: 0, pending: 3 });
+		expect(plural.message).toBe("3 edits couldn't be saved as they are.");
+		expect(plural.detail).toContain("Closing anyway discards them.");
+		expect(plural.detail).not.toContain("engine");
+	});
+
+	it("blames the engine when a failure sits beside a blocked edit", () => {
+		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 1, pending: 1 });
+		expect(prompt.message).toContain("2 edits");
+		expect(prompt.message).toContain("the engine isn't responding");
+	});
+
 	it("does not ask, and proceeds, when the flush landed clean", async () => {
 		const ask = vi.fn();
 		const proceed = await confirmDiscardOnFailedFlush(ask, "quit", CLEAN);

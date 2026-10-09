@@ -23,14 +23,17 @@
  * A failure on this path toasts through `failSave` rather than resolving
  * quietly. The editors render their own inline `SaveFailed` callout for a
  * button press, but a Cmd+S from another pane - or a quit flush with nothing on
- * screen at all - has no callout to read, and `runSave` in the save store treats
- * a resolved promise as a success. Swallowing here would report "Saved" for a
- * write that failed.
+ * screen at all - has no callout to read, and a resolved promise reads as a
+ * success. Swallowing here would report "Saved" for a write that failed.
+ *
+ * The registered save also resolves with its verdict (`SaveOutcome`), so the
+ * store counts this editor's own result rather than the shared status.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 
-import { useSaveStore } from "@/stores/save-store";
+import { SaveBlockedError } from "@/lib/elements";
+import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
 
 interface DraftSaveContextOptions {
 	/** Unique id for this editor, e.g. `collection-<id>-auth`. */
@@ -46,7 +49,10 @@ interface DraftSaveContextOptions {
 	 * mounted while hidden precisely so their drafts survive a tab switch.
 	 */
 	isActive: boolean;
-	/** Persist the draft. Rejecting is how a failure is reported. */
+	/**
+	 * Persist the draft. Rejecting is how a failure is reported; rejecting with
+	 * `SaveBlockedError` says the edit was deliberately not sent and is still unsaved.
+	 */
 	save: () => Promise<void>;
 }
 
@@ -72,14 +78,23 @@ export function useDraftSaveContext({
 		saveRef.current = save;
 	}, [save]);
 
-	const runSave = useCallback(async () => {
+	const runSave = useCallback(async (): Promise<SaveOutcome> => {
 		try {
 			await saveRef.current();
+			return "saved";
 		} catch (error) {
+			// The editor chose not to send (an incomplete element): not a failure, so
+			// no toast and no "Not saved" - the edit is still unsaved, which is what
+			// `pending` says. Mirrors `useSaveManager`.
+			if (error instanceof SaveBlockedError) {
+				markPendingSave();
+				return "pending";
+			}
 			const fallback = `Couldn't save ${name}`;
 			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+			return "failed";
 		}
-	}, [failSave, name]);
+	}, [failSave, markPendingSave, name]);
 
 	// Registration is deliberately independent of the dirty flag - it is pushed
 	// by the effect below, which runs later in the same commit. Taking `isDirty`

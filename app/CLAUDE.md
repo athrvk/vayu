@@ -77,7 +77,11 @@ everything.
   (`queries/health.ts`), and the Dock renders `error` as **Not saved**. **A
   quit or close never discards a save silently** (#1489): `save-flush.ts`
   answers `{ saved, failed, pending }` and `flushNeedsConfirmation` decides
-  whether the main process asks before the window goes. An editor takes part
+  whether the main process asks before the window goes. Each context reports
+  its own verdict (`SaveOutcome`: saved, failed or pending) rather than the
+  store reading back the one shared status; a save an editor declines to send
+  (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
+  blame the engine for it. An editor takes part
   by registering a save context; one that saves on its own is outside all of
   it, which is the defect #1450 was.
 - **The builder's PUT is a merge-patch of changed fields** (`buildUpdatePayload`,
