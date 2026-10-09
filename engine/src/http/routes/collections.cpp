@@ -78,6 +78,27 @@ const std::optional<std::string>& parent_id) {
 }
 
 /**
+ * Refuses a `parentId` naming a collection in the trash (#1883). Such a parent
+ * reads as missing to `get_collection`, so without this the write lands a live
+ * row under a stamped one: invisible in the sidebar, and destroyed by a purge
+ * of the parent it was never listed under. An id the store has never seen is
+ * still accepted, as `validate_parent_assignment` explains. Same status and
+ * wording `POST /trash/:id/restore` gives the mirror case.
+ *
+ * Only a parent the body states is checked, so a row already stranded under a
+ * trashed one stays editable by a PUT that does not move it.
+ */
+static RouteResult reject_trashed_parent (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::optional<std::string>& parent_id) {
+    if (!json.contains ("parentId") || !parent_id.has_value () ||
+    !db.collection_is_trashed (*parent_id)) {
+        return {};
+    }
+    return route_error (409, "Collection '" + *parent_id + "' is in the trash - restore it first");
+}
+
+/**
  * The `order` a collection takes when the caller states none: one past the
  * highest already held by a sibling under @p parent_id.
  *
@@ -198,7 +219,7 @@ static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
  * between them is `is_create`.
  *
  * Returns an error response when a no-default field (`name`) is missing or
- * null, or when the proposed parent would form a cycle.
+ * null, or when the proposed parent would form a cycle or is in the trash.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every collection in a bulk payload (issue #96).
@@ -287,14 +308,14 @@ bool is_create) {
         }
     }
 
+    if (auto outcome = reject_trashed_parent (db, json, c.parent_id); !outcome) {
+        return outcome;
+    }
     // Reject writes that would put a cycle in the collection tree (self-parent,
     // or reparent into a descendant) before they reach the DB - a cycle makes
     // cascade delete loop forever under the global mutex. Cycle/self checks
     // only; parent existence is not required (import creates in bulk).
-    if (auto outcome = validate_parent_assignment (db, c.id, c.parent_id); !outcome) {
-        return outcome;
-    }
-    return {};
+    return validate_parent_assignment (db, c.id, c.parent_id);
 }
 
 /**
@@ -328,20 +349,22 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     c.created_at = now_ms ();
     c.updated_at = now_ms ();
 
-    if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/true); !outcome) {
-        return as_response (outcome.error ());
-    }
-
-    // The spec check and the write are one composite, so they are one lock
-    // scope (issue #386's rule): the check proves a spec exists, and between
+    // The checks and the write are one composite, so they are one lock scope
+    // (issue #386's rule). The spec check proves a spec exists, and between
     // that read and this write a concurrent `DELETE /specs/:id` would otherwise
     // see no binder, delete the document, and leave this collection bound to
     // nothing - the one state the check exists to prevent. The delete side
-    // holds the lock across its own check-and-remove for the same reason.
+    // holds the lock across its own check-and-remove for the same reason. The
+    // applier's parent checks are the same shape: a parent trashed between
+    // them and the write would strand this row under it (#1883).
     // `reject_unbindable_spec` is here rather than in the shared applier because
     // bulk import binds specs it is about to write - see its declaration.
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
+        if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/true); !outcome) {
+            result = as_response (outcome.error ());
+            return;
+        }
         if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
             result = as_response (outcome.error ());
             return;
@@ -454,8 +477,8 @@ void register_collection_routes (RouteContext& ctx) {
      * the id; a body carrying one is a 400 (issue #97).
      * Body params: name (required string), description, parentId, order,
      * variables, auth, elements.
-     * Returns: The created collection object, or 400 (body `id`, missing
-     * `name`, bad field shape, cycle).
+     * Returns: The created collection object, 400 (body `id`, missing
+     * `name`, bad field shape, cycle), or 409 (`parentId` in the trash).
      */
     ctx.server.Post ("/collections",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -486,7 +509,8 @@ void register_collection_routes (RouteContext& ctx) {
      * value, null resets to the default). Update only - a missing id is a 404,
      * never a silent create (issue #95).
      * Path params: id - The collection ID to update.
-     * Returns: The updated collection object, 404 if it does not exist, or 400.
+     * Returns: The updated collection object, 404 if it does not exist, 400,
+     * or 409 when `parentId` names a collection in the trash.
      */
     ctx.server.Put (R"(/collections/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

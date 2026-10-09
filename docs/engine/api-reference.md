@@ -1217,7 +1217,7 @@ the null-vs-absent rule.
 ```json
 {
   "name": "My API",        // Required, no default (null is a 400)
-  "parentId": null,         // Optional, null for root
+  "parentId": null,         // Optional, null for root; a trashed collection is a 409
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "dataSchema": {},         // Optional, the declared data contract - see below
@@ -1229,7 +1229,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, or on a cycle (below); `413` naming the field, its size and the cap,
+`null`, or on a cycle (below); `409` if `parentId` names a collection in the
+[trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
 engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -1243,7 +1244,7 @@ its value, an explicit `null` resets it to the default.
 ```json
 {
   "name": "Renamed",       // Optional; null is a 400 (no default)
-  "parentId": null,         // Optional, null moves it to the root
+  "parentId": null,         // Optional, null moves it to the root; a trashed collection is a 409
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "dataSchema": null,       // Optional, null clears the declared contract
@@ -1258,7 +1259,8 @@ list it just left. See [Ordering](#ordering).
 **Response:** The updated collection object.
 
 **Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
-on a cycle (below); `413` naming the field, its size and the cap, when a
+on a cycle (below); `409` if `parentId` names a collection in the
+[trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
 engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -1273,6 +1275,13 @@ cycle would make the cascade delete below loop forever. Both cases return `400`:
 Parent *existence* is intentionally not checked: the import orchestrator creates
 collections in bulk, so requiring the parent to exist first would couple to
 import ordering. Only self-parent and descendant cycles are rejected.
+
+**A parent in the trash (both verbs) is a `409`**, message
+`Collection '<id>' is in the trash - restore it first` (issue #1883). That is
+different from a parent the store has never seen: a trashed parent would leave
+the collection live but invisible under it, and a purge of the parent would then
+re-parent it to the root. Only a `parentId` the body states is checked, so a
+`PUT` that does not move the collection is never refused by its stored parent.
 
 **`dataSchema` (both verbs, and `POST /import/apply`):** the data contract the
 collection declares - which columns its data files carry, so `{{data.column}}`
@@ -1618,7 +1627,8 @@ names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
 the engine's field cap (issue #1485, [see below](#a-stored-json-field-has-a-write-time-cap)).
 
-Unlike a collection's `parentId`, a request's `collectionId` **must** resolve to
+Unlike a collection's `parentId` (which may name a collection not written yet,
+though not one in the trash), a request's `collectionId` **must** resolve to
 a stored collection. A request under no collection is unreachable: no
 per-collection `GET` lists it, and no cascade delete ever reaps it. Bulk import
 is unaffected - `POST /import/apply` resolves owners from the payload's own temp
@@ -1849,7 +1859,10 @@ replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
 left inside the subtree goes too, because a request under a removed collection
-is reachable by no read and restorable by nothing.
+is reachable by no read and restorable by nothing. It takes deleted rows only
+(issue #1883): a live collection under the purged one, which no trash entry ever
+listed, is moved to the tree root (`parentId` cleared) with everything under it
+left as it was.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
 `collections` / `requests` are the deleted row's own cohort, so they are a floor

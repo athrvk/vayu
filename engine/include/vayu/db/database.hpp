@@ -315,6 +315,10 @@ class Database {
     /// Live only, like `get_collections` - a deleted row reads as absent, which
     /// is what turns every by-id route into its own 404 (issue #988).
     std::optional<Collection> get_collection (const std::string& id);
+    /// Whether @p id names a collection that is stored *and* stamped - the
+    /// state `get_collection` cannot tell apart from an id never written
+    /// (#1883). An unknown id is `false`, so a forward reference stays legal.
+    bool collection_is_trashed (const std::string& id);
     /// Stamps the collection and its whole subtree as deleted rather than
     /// removing them (issue #988). `GET /trash` lists it, restore puts it back
     /// and purge is what finally destroys it.
@@ -1027,23 +1031,29 @@ class Database {
      *
      * The single definition of "the subtree", shared by the delete cascade, the
      * restore, the purge and the trash's counts, so all four agree about what
-     * one collection owns. Stamped and live rows alike: a walk that skipped
-     * deleted rows could not find what a restore has to put back.
+     * one collection owns. `All` walks stamped and live rows alike: a walk that
+     * skipped deleted rows could not find what a restore has to put back.
+     * `StampedOnly` stops at a live row, which is what a purge destroys (#1883).
      *
      * The visited set is load-bearing rather than defensive - a cycle in
      * `parent_id` written before write-time validation existed would otherwise
      * loop forever while the global DB mutex is held (issue #79). The caller
      * must already hold that mutex.
      */
-    std::vector<std::string> collection_subtree_locked (const std::string& root_id); // db_collections.cpp
+    enum class SubtreeRows : std::uint8_t { All, StampedOnly };
+    std::vector<std::string> collection_subtree_locked (const std::string& root_id,
+    SubtreeRows rows = SubtreeRows::All); // db_collections.cpp
 
     /**
      * @brief Destroy a collection subtree or a single request outright -
      *        examples, requests, then collections, deepest first.
      *
      * The hard cascade soft delete replaced (issue #988), kept as the one
-     * definition purge and retention both reach for. The caller must already
-     * hold the DB mutex.
+     * definition purge and retention both reach for. A collection purge takes
+     * stamped collections only (#1883): a live one under the purged subtree
+     * is re-parented to the tree root rather than destroyed, the rule a
+     * restore applies to a collection whose parent is gone. The caller must
+     * already hold the DB mutex.
      */
     void purge_collection_locked (const std::string& id); // db_collections.cpp
     void purge_request_locked (const std::string& id);    // db_requests.cpp
