@@ -16,10 +16,10 @@
  * original surface renders, driven by the same call, so a run started from here
  * is the run the tree starts.
  *
- * The theme comes from `useElectronTheme`, which keeps its state per instance
- * and syncs instances through Electron's `theme-changed` event - so a toggle
- * from here reaches the Appearance panel's radio group the same way an OS theme
- * change does.
+ * The theme comes from `useElectronTheme`, a thin face over `useThemeStore`:
+ * the mode, the scheme and `isDark` are one value shared with the app shell and
+ * the Appearance panel, so a toggle from here reaches the panel's radio group
+ * directly and the toggle's direction is never read from a stale copy (#1855).
  *
  * Two more surfaces are **not** hosted here, and cannot be: starting a load test
  * and sending both need the request builder's live editor draft, which exists
