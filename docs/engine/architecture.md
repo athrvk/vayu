@@ -478,14 +478,22 @@ makes a session survive from one design-mode request to the next.
   where the line between this and `runs.config_snapshot` falls. It is bounded
   by run retention, not by the process: `DELETE /cookies` empties the jar and
   does not touch stored runs.
+- **A transfer writes back its own changes, not the whole scope** (issue
+  #1888). Transfers in one scope overlap - a stream beside a send,
+  `pm.sendRequest` beside another execute - so `capture_jar_cookies` hands
+  `CookieJar::reconcile` the scope's lines the handle was seeded from beside
+  what it held at the end, and under one lock the jar applies only the
+  difference, keyed by (name, domain, path): a cookie added or changed is
+  written, one seeded but no longer held (the server expired it) is removed,
+  and one the transfer never saw - another transfer's - is kept. Contents are
+  compared parsed, so libcurl re-spelling a line it was given is not a change.
 - **Script writes are staged, not applied in place** (`pm.cookies.jar()`, issue
-  #337). `capture_jar_cookies` *replaces* a scope's contents with what the
-  finishing handle held, so a write dropped into the map beside an in-flight
-  transfer would be discarded by it. Instead a write becomes a `CookieWrite`
-  that the execution's next transfer applies on top of the stored lines when it
-  seeds its handle (`ClientConfig::cookie_writes`) - the request carries it, and
-  that transfer's own capture is what persists it. A write with no transfer left
-  to ride, a post-request script's, is applied by the route through
+  #337). A write becomes a `CookieWrite` that the execution's next transfer
+  applies on top of the stored lines when it seeds its handle
+  (`ClientConfig::cookie_writes`) - the request carries it, and because the
+  seeded-from lines are read *before* the writes, that transfer's capture sees
+  the write as one of its own changes and persists it. A write with no transfer
+  left to ride, a post-request script's, is applied by the route through
   `CookieJar::apply`. Either path applies it exactly once.
 
 `pm.sendRequest` shares the jar of the execute it runs inside, so a pre-request

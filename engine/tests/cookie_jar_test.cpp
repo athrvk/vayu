@@ -20,16 +20,20 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <curl/curl.h>
 #include <httplib.h>
 
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/curl_options.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 
@@ -84,6 +88,13 @@ class CookieServer {
         // isolation assertions are about.
         svr.Get ("/echo", [] (const httplib::Request& req, httplib::Response& res) {
             res.set_content (req.get_header_value ("Cookie"), "text/plain");
+        });
+        // Sets a cookie named after the path, so overlapping transfers can
+        // each store one the other never saw.
+        svr.Get (R"(/set/(\w+))", [] (const httplib::Request& req, httplib::Response& res) {
+            const std::string name = req.matches[1].str ();
+            res.set_header ("Set-Cookie", name + "=" + name + "-value; Path=/");
+            res.set_content ("{}", "application/json");
         });
         // Expires the cookie the way a logout does.
         svr.Get ("/logout", [] (const httplib::Request&, httplib::Response& res) {
@@ -140,6 +151,41 @@ response_in_scope (CookieJar& jar, const std::string& scope, const std::string& 
 /// Send @p url in @p scope through @p jar and return the response body.
 std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
     return response_in_scope (jar, scope, url).body;
+}
+
+size_t discard_body (char* /*data*/, size_t size, size_t count, void* /*user*/) {
+    return size * count;
+}
+
+/// A design-mode transfer split at its seams (issue #1888): seeded now,
+/// performed and captured when the test says, so two handles seeded from one
+/// scope can finish in a chosen order - the overlap a stream beside a send
+/// produces, with no threads to schedule.
+struct SeededTransfer {
+    std::unique_ptr<CURL, decltype (&curl_easy_cleanup)> curl{ curl_easy_init (),
+        &curl_easy_cleanup };
+    std::string scope;
+    std::vector<std::string> seeded_from;
+};
+
+SeededTransfer seed_transfer (CookieJar& jar,
+const std::string& scope,
+const std::string& url,
+const std::vector<vayu::http::CookieWrite>& writes = {}) {
+    SeededTransfer transfer;
+    transfer.scope = scope;
+    vayu::http::set_opt<CURLOPT_URL> (transfer.curl.get (), url.c_str ());
+    vayu::http::set_opt<CURLOPT_WRITEFUNCTION> (transfer.curl.get (), discard_body);
+    transfer.seeded_from =
+    vayu::http::detail::apply_jar_cookies (transfer.curl.get (), jar, scope, writes);
+    return transfer;
+}
+
+/// Perform and capture, in the order `Client::send` does.
+void finish_transfer (SeededTransfer& transfer, CookieJar& jar) {
+    EXPECT_EQ (curl_easy_perform (transfer.curl.get ()), CURLE_OK);
+    vayu::http::detail::capture_jar_cookies (
+    transfer.curl.get (), jar, transfer.scope, transfer.seeded_from);
 }
 
 } // namespace
@@ -316,6 +362,40 @@ TEST (CookieJarStore, ClearReportsWhatItDroppedAndLeavesOtherScopes) {
     EXPECT_TRUE (jar.snapshot ().empty ());
 }
 
+TEST (CookieJarStore, ReconcileReadsAReSpeltButIdenticalLineAsUnchanged) {
+    // Compared as text, the transfer's unchanged cookie would overwrite the
+    // value a concurrent transfer stored meanwhile.
+    CookieJar jar;
+    const auto seeded  = netscape_line ("example.com", "FALSE", "/", "FALSE",
+     std::to_string (FAR_FUTURE), "session", "old");
+    const auto respelt = netscape_line ("example.com", "FALSE", "/", "FALSE",
+    "00" + std::to_string (FAR_FUTURE), "session", "old");
+    jar.store ("env_a",
+    { netscape_line ("example.com", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "session", "concurrent") });
+
+    jar.reconcile ("env_a", { seeded }, { respelt });
+
+    const auto held = jar.matching ("env_a", "http://example.com/");
+    ASSERT_EQ (held.size (), 1u);
+    EXPECT_EQ (held[0].value, "concurrent")
+    << "a line the transfer did not change overwrote a concurrent write";
+}
+
+TEST (CookieJarStore, ReconcileKeysAnUnparseableLineOnItsWholeText) {
+    CookieJar jar;
+    const std::string unparseable = "not a netscape line";
+    const auto kept = netscape_line ("example.com", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "kept", "yes");
+    jar.store ("env_a", { kept });
+
+    jar.reconcile ("env_a", {}, { unparseable });
+    EXPECT_EQ (jar.lines_for ("env_a"), (std::vector<std::string>{ kept, unparseable }));
+
+    jar.reconcile ("env_a", { unparseable }, {});
+    EXPECT_EQ (jar.lines_for ("env_a"), std::vector<std::string>{ kept });
+}
+
 // ============================================================================
 // The wire: what a real transfer sends, and what it must not
 // ============================================================================
@@ -397,10 +477,47 @@ TEST (CookieJarTransfer, AServerExpiringACookieRemovesItFromTheJar) {
     send_in_scope (jar, "env_a", server.url ("/login"));
     ASSERT_FALSE (jar.snapshot ().empty ());
 
-    // A logout expires the cookie. Storing the transfer's whole list rather
-    // than merging into what was there is what makes this stick.
+    // A logout expires the cookie. A cookie the transfer was seeded with and no
+    // longer holds is removed rather than merged back.
     send_in_scope (jar, "env_a", server.url ("/logout"));
     EXPECT_EQ (send_in_scope (jar, "env_a", server.url ("/echo")), "");
+}
+
+TEST (CookieJarTransfer, OverlappingTransfersInOneScopeKeepEachOthersCookies) {
+    // Issue #1888: seeded from one scope, finished in reverse order. A
+    // whole-scope replace by the one finishing last drops the other's cookie.
+    CookieServer server;
+    CookieJar jar;
+    send_in_scope (jar, "env_a", server.url ("/login"));
+
+    auto first  = seed_transfer (jar, "env_a", server.url ("/set/alpha"));
+    auto second = seed_transfer (jar, "env_a", server.url ("/set/beta"));
+    finish_transfer (second, jar);
+    finish_transfer (first, jar);
+
+    const std::string echoed = send_in_scope (jar, "env_a", server.url ("/echo"));
+    EXPECT_NE (echoed.find ("alpha=alpha-value"), std::string::npos) << echoed;
+    EXPECT_NE (echoed.find ("beta=beta-value"), std::string::npos)
+    << "the transfer that finished last dropped the other's cookie: " << echoed;
+    EXPECT_NE (echoed.find ("session=abc123"), std::string::npos) << echoed;
+}
+
+TEST (CookieJarTransfer, ACookieExpiredDuringAnOverlappingTransferStaysRemoved) {
+    // The other transfer still holds the session it was seeded with when it
+    // finishes; holding it unchanged must not bring it back.
+    CookieServer server;
+    CookieJar jar;
+    send_in_scope (jar, "env_a", server.url ("/login"));
+
+    auto logout = seed_transfer (jar, "env_a", server.url ("/logout"));
+    auto other  = seed_transfer (jar, "env_a", server.url ("/set/beta"));
+    finish_transfer (logout, jar);
+    finish_transfer (other, jar);
+
+    const std::string echoed = send_in_scope (jar, "env_a", server.url ("/echo"));
+    EXPECT_EQ (echoed.find ("session="), std::string::npos)
+    << "an overlapping transfer resurrected the expired session: " << echoed;
+    EXPECT_NE (echoed.find ("beta=beta-value"), std::string::npos) << echoed;
 }
 
 // The jar attaches cookies inside libcurl, so the raw-request view had no way
@@ -935,10 +1052,10 @@ TEST (CookieJarWrite, ASecureFlagOnAWrittenCookieIsStoredAndHonouredByTheReadVie
 }
 
 TEST (CookieJarWrite, AWriteSurvivesTheEnclosingTransfersCapture) {
-    // The ordering decision this whole surface turns on. `capture_jar_cookies`
-    // *replaces* the scope with what the finishing handle held, and /logout
-    // rewrites that list by expiring the session - a write applied into the
-    // live map beside the transfer would go with it.
+    // The ordering decision this whole surface turns on. The staged write rides
+    // the transfer, which /logout ends by expiring the session; the capture has
+    // to persist the write as one of that transfer's changes and still drop
+    // the session.
     CookieServer server;
     CookieJar jar;
     vayu::Environment env;
@@ -955,6 +1072,51 @@ TEST (CookieJarWrite, AWriteSurvivesTheEnclosingTransfersCapture) {
     << "the staged write was discarded by the transfer's capture; got: " << after;
     EXPECT_EQ (after.find ("session="), std::string::npos)
     << "the logout's expiry stopped working; got: " << after;
+}
+
+TEST (CookieJarWrite, AStagedWriteAndAnOverlappingTransfersCookieBothSurvive) {
+    // The write rides a transfer that overlaps another in the same scope
+    // (issue #1888): it must persist, the other's cookie must too, and the
+    // logout it rode must still take the session.
+    CookieServer server;
+    CookieJar jar;
+    send_in_scope (jar, "env_a", server.url ("/login"));
+
+    vayu::http::CookieWrite write;
+    write.line = netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "kept", "yes");
+    auto scripted = seed_transfer (jar, "env_a", server.url ("/logout"), { write });
+    auto other = seed_transfer (jar, "env_a", server.url ("/set/beta"));
+    finish_transfer (other, jar);
+    finish_transfer (scripted, jar);
+
+    const std::string echoed = send_in_scope (jar, "env_a", server.url ("/echo"));
+    EXPECT_NE (echoed.find ("kept=yes"), std::string::npos)
+    << "the staged write did not persist: " << echoed;
+    EXPECT_NE (echoed.find ("beta=beta-value"), std::string::npos)
+    << "the overlapping transfer's cookie was dropped: " << echoed;
+    EXPECT_EQ (echoed.find ("session="), std::string::npos) << echoed;
+}
+
+TEST (CookieJarWrite, AStagedClearTakesOnlyWhatItsTransferWasSeededWith) {
+    // `jar.clear()` before a send empties the scope that send saw; a cookie
+    // an overlapping transfer stored meanwhile was never in it.
+    CookieServer server;
+    CookieJar jar;
+    send_in_scope (jar, "env_a", server.url ("/login"));
+
+    vayu::http::CookieWrite clear;
+    clear.kind = vayu::http::CookieWrite::Kind::Clear;
+    auto scripted = seed_transfer (jar, "env_a", server.url ("/echo"), { clear });
+    auto other = seed_transfer (jar, "env_a", server.url ("/set/beta"));
+    finish_transfer (other, jar);
+    finish_transfer (scripted, jar);
+
+    const std::string echoed = send_in_scope (jar, "env_a", server.url ("/echo"));
+    EXPECT_EQ (echoed.find ("session="), std::string::npos)
+    << "the staged clear did not persist: " << echoed;
+    EXPECT_NE (echoed.find ("beta=beta-value"), std::string::npos)
+    << "the clear took a cookie its transfer never saw: " << echoed;
 }
 
 TEST (CookieJarWrite, SendRequestCarriesAWriteStagedBeforeIt) {

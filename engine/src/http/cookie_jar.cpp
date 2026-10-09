@@ -124,6 +124,49 @@ std::optional<std::string_view> name) {
     });
 }
 
+/// One line and what it parsed to, so `reconcile` parses each input once.
+struct ParsedLine {
+    std::string_view line;
+    std::optional<JarCookie> cookie;
+};
+
+std::vector<ParsedLine> parse_lines (const std::vector<std::string>& lines) {
+    std::vector<ParsedLine> out;
+    out.reserve (lines.size ());
+    for (const auto& line : lines) {
+        out.push_back ({ line, parse_cookie_line (line) });
+    }
+    return out;
+}
+
+/// RFC 6265 §5.3 identity. An unparseable line has no fields to key on, so
+/// its whole text is its identity.
+bool same_identity (const ParsedLine& a, const ParsedLine& b) {
+    if (!a.cookie || !b.cookie) {
+        return !a.cookie && !b.cookie && a.line == b.line;
+    }
+    return a.cookie->name == b.cookie->name &&
+    a.cookie->domain == b.cookie->domain && a.cookie->path == b.cookie->path;
+}
+
+bool stored_line_is (std::string_view stored, const ParsedLine& target) {
+    return same_identity (ParsedLine{ stored, parse_cookie_line (stored) }, target);
+}
+
+bool holds_identity (const std::vector<ParsedLine>& lines, const ParsedLine& target) {
+    return std::any_of (lines.begin (), lines.end (),
+    [&target] (const ParsedLine& line) { return same_identity (line, target); });
+}
+
+/// Did the transfer add or change @p held, relative to what it was seeded from?
+bool changed_by_transfer (const std::vector<ParsedLine>& seeded_from, const ParsedLine& held) {
+    const auto was = std::find_if (seeded_from.begin (), seeded_from.end (),
+    [&held] (const ParsedLine& line) { return same_identity (line, held); });
+    // Parsed, so a re-spelt but identical line is no change; two unparseable
+    // lines matched on their whole text and compare equal here as nullopt.
+    return was == seeded_from.end () || was->cookie != held.cookie;
+}
+
 } // namespace
 
 std::optional<JarCookie> parse_cookie_line (std::string_view line) {
@@ -377,6 +420,39 @@ void CookieJar::store (const std::string& scope, std::vector<std::string> lines)
         return;
     }
     scopes_[scope] = std::move (lines);
+}
+
+void CookieJar::reconcile (const std::string& scope,
+const std::vector<std::string>& seeded_from,
+const std::vector<std::string>& held) {
+    const auto before = parse_lines (seeded_from);
+    const auto after  = parse_lines (held);
+
+    const std::lock_guard<std::mutex> lock (mutex_);
+    auto& stored = scopes_[scope];
+    for (const auto& gone : before) {
+        if (holds_identity (after, gone)) {
+            continue;
+        }
+        std::erase_if (stored,
+        [&gone] (const std::string& line) { return stored_line_is (line, gone); });
+    }
+    for (const auto& now : after) {
+        if (!changed_by_transfer (before, now)) {
+            continue;
+        }
+        const auto it = std::find_if (stored.begin (), stored.end (),
+        [&now] (const std::string& line) { return stored_line_is (line, now); });
+        if (it == stored.end ()) {
+            stored.emplace_back (now.line);
+        } else {
+            *it = now.line;
+        }
+    }
+    if (stored.empty ()) {
+        // Same reason store() erases: an emptied scope is not one to list.
+        scopes_.erase (scope);
+    }
 }
 
 std::vector<JarCookie>

@@ -37,12 +37,17 @@
  * the script runs. They stage a `CookieWrite`, and the next transfer of that
  * execution seeds its handle with the scope's lines *plus* the staged writes
  * applied on top (`apply_cookie_writes`) - so the write rides the request it
- * was made for, and the transfer's own capture is what persists it. That
- * ordering is the point: `capture_jar_cookies` **replaces** the scope's list
- * with what the finishing handle held, so a write applied into the live map
- * beside an in-flight transfer would be discarded by it. A write that has no
- * transfer left to ride (a post-request script's) is applied by the route
- * through `CookieJar::apply`.
+ * was made for, and the transfer's own capture is what persists it. A write
+ * that has no transfer left to ride (a post-request script's) is applied by
+ * the route through `CookieJar::apply`.
+ *
+ * ## A transfer's capture is a delta, not a replacement
+ *
+ * Transfers in one scope overlap (a stream beside a send, `pm.sendRequest`
+ * beside another execute), so `capture_jar_cookies` folds back only what *this*
+ * transfer changed (`CookieJar::reconcile`, issue #1888): the handle's held
+ * lines against the scope's lines it was seeded from. A cookie it neither saw
+ * nor holds - another transfer's - is left alone.
  *
  * ## Scope, lifetime, persistence, threading
  *
@@ -114,6 +119,8 @@ struct JarCookie {
     int64_t expires = 0;
     std::string name;
     std::string value;
+
+    bool operator== (const JarCookie&) const = default;
 };
 
 /**
@@ -187,8 +194,8 @@ cookie_for_url (const std::string& url, JarCookie cookie);
 /**
  * @brief One staged jar mutation from a script (issue #337).
  *
- * Staged rather than applied - see the file comment for why the write cannot
- * land in the live map beside a transfer.
+ * Staged rather than applied, so it rides the transfer it was made before -
+ * see the file comment.
  */
 struct CookieWrite {
     enum class Kind : std::uint8_t {
@@ -261,14 +268,34 @@ class CookieJar {
     [[nodiscard]] std::vector<std::string> lines_for (const std::string& scope) const;
 
     /**
-     * @brief Replace the scope's contents with what a transfer left behind.
+     * @brief Replace the scope's contents outright.
      *
-     * Replace rather than merge: `CURLINFO_COOKIELIST` returns the *whole*
-     * jar the handle held, which is what we injected plus whatever the
-     * response changed, so merging would resurrect a cookie the server
-     * deleted by expiring it.
+     * Not how a transfer writes back: a whole-scope replace from one transfer
+     * would drop the cookies an overlapping one stored - see `reconcile`.
      */
     void store (const std::string& scope, std::vector<std::string> lines);
+
+    /**
+     * @brief Fold one finished transfer's cookie changes into @p scope.
+     *
+     * @p seeded_from is the scope's lines as read when the handle was seeded,
+     * *before* any staged script write; @p held is `CURLINFO_COOKIELIST` at the
+     * end. Under one lock, keyed by RFC 6265 §5.3 identity (name, domain,
+     * path):
+     * - held but not seeded, or held with different contents: inserted, or
+     *   replaced in place. A staged write is such a change, so it persists.
+     * - seeded but no longer held: removed - the server expired it, or a
+     *   staged `unset`/`clear` took it.
+     * - neither: kept. That is another transfer's cookie.
+     *
+     * Contents are compared parsed (`JarCookie ==`), not as text, so libcurl
+     * re-spelling a line it was seeded with does not read as a change and
+     * clobber a concurrent write. A line `parse_cookie_line` refuses has no
+     * identity to key on, so its whole text is its identity.
+     */
+    void reconcile (const std::string& scope,
+    const std::vector<std::string>& seeded_from,
+    const std::vector<std::string>& held);
 
     /**
      * @brief The cookies in @p scope that would be sent to @p url.

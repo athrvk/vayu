@@ -520,18 +520,23 @@ void ingest_header_line (std::string_view line, Headers& headers) {
     }
 }
 
-void apply_jar_cookies (CURL* curl,
+std::vector<std::string> apply_jar_cookies (CURL* curl,
 CookieJar& jar,
 const std::string& scope,
 const std::vector<CookieWrite>& writes) {
     set_opt<CURLOPT_COOKIEFILE> (curl, "");
     set_opt<CURLOPT_COOKIELIST> (curl, "ALL");
-    for (const auto& line : apply_cookie_writes (jar.lines_for (scope), writes)) {
+    auto seeded_from = jar.lines_for (scope);
+    for (const auto& line : apply_cookie_writes (seeded_from, writes)) {
         set_opt<CURLOPT_COOKIELIST> (curl, line.c_str ());
     }
+    return seeded_from;
 }
 
-void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope) {
+void capture_jar_cookies (CURL* curl,
+CookieJar& jar,
+const std::string& scope,
+const std::vector<std::string>& seeded_from) {
     struct curl_slist* held = nullptr;
     if (get_info<CURLINFO_COOKIELIST> (curl, &held) != CURLE_OK) {
         return;
@@ -543,7 +548,7 @@ void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope) 
         }
     }
     curl_slist_free_all (held);
-    jar.store (scope, std::move (lines));
+    jar.reconcile (scope, seeded_from, lines);
 }
 
 CurlPhaseTimes read_phase_times (CURL* curl) {
@@ -986,9 +991,9 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     apply_default_header_options (curl, request, config.default_headers);
 
     // Per-transfer cookie state, for the scenario load path's virtual users.
-    // Enable the engine, flush, then seed - the ordering
-    // `client.cpp::apply_jar_cookies` already uses. See cookie_jar.hpp for why
-    // libcurl, not us, decides what actually goes on the wire.
+    // Enable the engine, flush, then seed - the ordering `apply_jar_cookies`
+    // above already uses. See cookie_jar.hpp for why libcurl, not us, decides
+    // what actually goes on the wire.
     //
     // Handles come from a pool and are reused, so a session left on one would
     // reach whichever virtual user acquires it next - the opposite of "1,000
