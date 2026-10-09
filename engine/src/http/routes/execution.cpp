@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <optional>
 #include <regex>
 #include <string>
@@ -840,6 +841,37 @@ check_duration_field (const nlohmann::json& config, const char* key) {
     return std::nullopt;
 }
 
+// `rampUpDuration` is held to what its reader accepts rather than to the rule
+// above: zero is an instant ramp, and a JSON number is seconds. Asked of the
+// reader itself (`duration_value_ms`) so the 400 and the run cannot disagree
+// about a spelling.
+std::optional<std::string> check_ramp_duration_field (const nlohmann::json& config) {
+    const auto ramp = config.find ("rampUpDuration");
+    if (ramp == config.end () || ramp->is_null () ||
+    vayu::core::duration_value_ms (*ramp).has_value ()) {
+        return std::nullopt;
+    }
+    return "'rampUpDuration' must be a non-negative number with an optional "
+           "unit (ms|s|m|h), e.g. \"10s\", or \"0\" for an instant ramp (got " +
+    ramp->dump () + ")";
+}
+
+// `constant_rps` with no positive rate used to run the closed-loop path at the
+// default concurrency while its stored config and report still said
+// `constant_rps` (#1893). Read through `requested_rps`, the executor's own
+// reading of the two fields, after the table has proved both are numbers.
+std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config) {
+    const auto mode = config.find ("mode");
+    if (mode == config.end () || *mode != "constant_rps" ||
+    vayu::core::requested_rps (config) > 0.0) {
+        return std::nullopt;
+    }
+    return "'constant_rps' needs a positive 'rps' or 'targetRps': it is an "
+           "open-loop arrival rate, and without one the run would measure "
+           "closed-loop concurrency instead. Set a rate, or use "
+           "'constant_concurrency' with 'concurrency'.";
+}
+
 } // namespace
 
 /**
@@ -1088,6 +1120,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
             return reason;
         }
     }
+    if (auto reason = check_ramp_duration_field (config)) {
+        return reason;
+    }
 
     namespace limits  = vayu::core::constants::run_config;
     const auto fields = std::to_array<NumericRunField> ({
@@ -1133,11 +1168,19 @@ const vayu::core::MonitorLimits& monitor_limits) {
     "A transfer with no timeout never completes, so the run can never "
     "reach "
     "a terminal status." },
+    { "iterations", 1, limits::MAX_ITERATIONS,
+    "An iterations run stops on its request count alone, read as a size_t, "
+    "so a negative count is ~1.8e19 requests and a run that never ends." },
+    { "rps", 0, limits::MAX_TARGET_RPS, "It is an open-loop arrival rate per second; 0 asks for none." },
+    { "targetRps", 0, limits::MAX_TARGET_RPS, "It is an open-loop arrival rate per second; 0 asks for none." },
     });
     for (const auto& field : fields) {
         if (auto reason = check_numeric_field (config, field)) {
             return reason;
         }
+    }
+    if (auto reason = check_constant_rps_rate (config)) {
+        return reason;
     }
 
     // Each is read as a boolean only after the run row exists - by RunContext's
@@ -1173,6 +1216,43 @@ const vayu::core::MonitorLimits& monitor_limits) {
     }
 
     return std::nullopt;
+}
+
+/**
+ * Start a run whose row `create_run` has already written, and never answer
+ * anything but a 202 while that row is still `pending` (#1893): nothing would
+ * ever move it again. A refusal (the daemon is draining its workers) is a 503
+ * and a throw out of the start (the run context's constructor reads the
+ * config) is a 500 naming it; both fail the row first, guarded the way
+ * `refuse_stream_before_it_opens` guards it.
+ *
+ * Non-static: run_config_validation_test.cpp drives it with a start that
+ * throws, because no payload `validate_run_config` accepts reaches a throw in
+ * that constructor. The catch is the net under the validator, not a path a
+ * client can take.
+ */
+std::optional<RouteError> start_created_run (vayu::db::Database& db,
+const std::string& run_id,
+const std::function<bool ()>& start) {
+    RouteError refusal;
+    try {
+        if (start ()) {
+            return std::nullopt;
+        }
+        refusal = { 503, error_body (503, "Engine is shutting down") };
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("run", "Run failed to start",
+        { { "runId", run_id }, { "error", e.what () } });
+        refusal = { 500,
+            error_body (500, "Run failed to start: " + std::string (e.what ())) };
+    }
+    try {
+        db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("run", "Failed to fail a run that never started",
+        { { "runId", run_id }, { "error", e.what () } });
+    }
+    return refusal;
 }
 
 namespace {
@@ -1978,6 +2058,26 @@ httplib::Response& res) {
 
 
 /**
+ * Drop every top-level member of a run payload that is `null`, so it reads as
+ * absent everywhere downstream (#1893). The validators already treat the two
+ * alike, but the run's own readers go through `json::value (key, default)`,
+ * which returns the default only for an absent key and throws on a `null` -
+ * after the run row exists. Nested objects keep their own rules.
+ */
+void erase_null_members (nlohmann::json& json) {
+    if (!json.is_object ()) {
+        return;
+    }
+    for (auto it = json.begin (); it != json.end ();) {
+        if (it->is_null ()) {
+            it = json.erase (it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+/**
  * POST /runs
  * Starts a load test run (Vayu Mode).
  *
@@ -2083,8 +2183,8 @@ RunOrigin& origin) {
     // Validate/normalize the body's httpVersion, beside the config check
     // above and for the same reason: both run before run.config_snapshot is
     // built, so a rejected request leaves no row behind, and the snapshot
-    // still reflects the client's composed body, credentials withheld
-    // (sanitize_config_snapshot reads req.body, not this normalized `json`).
+    // still reflects the client's composed body, credentials withheld (it is
+    // built from the body as sent less its nulls, not this normalized `json`).
     if (auto outcome = normalize_run_http_version (json); !outcome) {
         vayu::utils::log_warning ("http",
         "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
@@ -2313,6 +2413,14 @@ const std::optional<nlohmann::json>& body_file) {
     return parsed.dump ();
 }
 
+/// What a `POST /runs` 202 says it started, by the run's shape.
+const char* started_message (bool is_scenario, bool is_scenario_load) {
+    if (is_scenario_load) {
+        return "Scenario load test started";
+    }
+    return is_scenario ? "Collection run started" : "Load test started";
+}
+
 void handle_start_load_test (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -2326,6 +2434,10 @@ httplib::Response& res) {
         send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
         return;
     }
+    erase_null_members (json);
+    // What the stored snapshot is built from: the body as sent, less the
+    // nulls, taken before validation normalizes anything in `json`.
+    const std::string snapshot_body = json.dump ();
 
     // A scenario run states its work as an ordered collection, so it has no
     // single method/url to require and states its iteration count inside
@@ -2404,7 +2516,7 @@ httplib::Response& res) {
     // Issue #1488 - see compression_scope_of's doc comment.
     const auto header_policy = vayu::http::resolve_default_header_policy (
     ctx.db, compression_scope_of (run.type));
-    run.config_snapshot = run_config_snapshot (req.body, is_scenario,
+    run.config_snapshot = run_config_snapshot (snapshot_body, is_scenario,
     scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes,
     run_snapshot_secrets (ctx.db, run, scenario_execution.get ()));
     // The file a single-request run sends, as the plan checked it: name, size
@@ -2431,35 +2543,29 @@ httplib::Response& res) {
         return;
     }
 
-    // Start run via RunManager. A refusal means the daemon is draining its
-    // workers for shutdown; the row exists but nothing will ever run it, so
-    // say so rather than returning a 202 for a run that never starts.
     // A load-mode scenario takes the load path: same event loop, metrics
     // thread, drain and summary as a single-request run, with the virtual-
     // user state machine in place of a LoadStrategy. Only the design-mode
     // sequential runner needs the cookie jar, which is why only it is
     // handed one.
-    const bool started = (is_scenario && !is_scenario_load) ?
-    ctx.run_manager.start_scenario_run (
-    run_id, json, scenario_execution, ctx.db, ctx.cookie_jar) :
-    ctx.run_manager.start_run (run_id, json, ctx.db,
-    is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set),
-    std::move (load_data.auth), std::move (load_files));
-    if (!started) {
-        send_error (res, 503, "Engine is shutting down");
+    const auto start = [&] () {
+        return (is_scenario && !is_scenario_load) ?
+        ctx.run_manager.start_scenario_run (
+        run_id, json, scenario_execution, ctx.db, ctx.cookie_jar) :
+        ctx.run_manager.start_run (run_id, json, ctx.db,
+        is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set),
+        std::move (load_data.auth), std::move (load_files));
+    };
+    if (auto refusal = start_created_run (ctx.db, run_id, start)) {
+        res.status = refusal->status;
+        res.set_content (refusal->body.dump (), "application/json");
         return;
     }
 
     nlohmann::json response;
-    response["runId"]  = run_id;
-    response["status"] = to_string (vayu::RunStatus::Pending);
-    if (is_scenario_load) {
-        response["message"] = "Scenario load test started";
-    } else if (is_scenario) {
-        response["message"] = "Collection run started";
-    } else {
-        response["message"] = "Load test started";
-    }
+    response["runId"]   = run_id;
+    response["status"]  = to_string (vayu::RunStatus::Pending);
+    response["message"] = started_message (is_scenario, is_scenario_load);
 
     res.status = 202;
     res.set_content (response.dump (), "application/json");

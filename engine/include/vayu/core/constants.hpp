@@ -190,6 +190,19 @@ constexpr int64_t MAX_EXEMPLAR_RESULTS = 100000;
 /// client-side SLO setting (`app/src/constants/client-settings.ts`), so a
 /// budget the dialog can express is one the engine accepts.
 constexpr int64_t MAX_SLO_MS = 60000;
+/// Upper bound on a run's top-level `iterations`. An iterations run stops on
+/// its request count alone and reads it as a `size_t`, so the bound is what
+/// keeps a negative count (~1.8e19) from being a run that never ends. It is
+/// the ceiling `scenario.iterations` already has (`scenario_plan.cpp`), so one
+/// count is legal in both places, and it sits above every client's own cap
+/// (the MCP `maxIterations` ceiling is 100,000,000).
+constexpr int64_t MAX_ITERATIONS = 2147483647;
+/// Upper bound on `rps` / `targetRps`, the open-loop arrival rate. The
+/// highest value the app's RPS ceiling setting and the MCP `maxRps` setting
+/// can reach, so a rate either client can send is one the engine accepts;
+/// past it the pacing interval is under a microsecond, finer than any tick
+/// the generator can keep.
+constexpr int64_t MAX_TARGET_RPS = 1000000;
 } // namespace run_config
 
 /**

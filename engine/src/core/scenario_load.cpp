@@ -30,17 +30,6 @@ namespace vayu::core {
 
 namespace {
 
-/// The rate fields that put `ConstantLoadStrategy` on its open-loop path. Read
-/// through one helper so the validator and the executor cannot disagree about
-/// what "asked for a rate" means.
-double requested_rps (const nlohmann::json& config) {
-    double rps = config.value ("rps", 0.0);
-    if (rps == 0.0) {
-        rps = config.value ("targetRps", 0.0);
-    }
-    return rps;
-}
-
 /// Steady-clock milliseconds, the same clock `take_ready_vu`'s `ready_at_ms`
 /// check and `timer.think`'s own wait are measured against - never
 /// `system_clock`, which can step backwards under a load run's wall time.

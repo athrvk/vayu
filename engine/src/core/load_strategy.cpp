@@ -274,21 +274,34 @@ int64_t duration_field_ms (const nlohmann::json& config, const std::string& key,
     if (it == config.end () || it->is_null ())
         return default_ms;
 
-    std::optional<int64_t> parsed;
-    if (it->is_string ()) {
-        parsed = parse_duration_ms (it->get<std::string> ());
-    } else if (it->is_number ()) {
-        const double seconds = it->get<double> ();
-        if (std::isfinite (seconds) && seconds >= 0.0)
-            parsed = static_cast<int64_t> (seconds * 1000.0);
-    }
-
+    const auto parsed = duration_value_ms (*it);
     if (!parsed) {
         throw std::invalid_argument ("Invalid " + key + " " + it->dump () +
         ": expected a non-negative number with an optional ms/s/m/h unit "
         "(e.g. \"500ms\", \"30s\", \"5m\", \"2h\")");
     }
     return *parsed;
+}
+
+std::optional<int64_t> duration_value_ms (const nlohmann::json& value) {
+    if (value.is_string ()) {
+        return parse_duration_ms (value.get<std::string> ());
+    }
+    if (value.is_number ()) {
+        const double seconds = value.get<double> ();
+        if (std::isfinite (seconds) && seconds >= 0.0)
+            return static_cast<int64_t> (seconds * 1000.0);
+    }
+    return std::nullopt;
+}
+
+double requested_rps (const nlohmann::json& config) {
+    const auto rate = [&config] (const char* key) {
+        const auto it = config.find (key);
+        return it == config.end () || it->is_null () ? 0.0 : it->get<double> ();
+    };
+    const double rps = rate ("rps");
+    return rps != 0.0 ? rps : rate ("targetRps");
 }
 
 namespace {
@@ -1056,11 +1069,7 @@ class ConstantLoadStrategy : public LoadStrategy {
         int64_t duration_ms = duration_field_ms (config, "duration", 60000);
         SubmissionRequest live (context, request);
 
-        // Check for targetRps - if specified, use rate-limited mode
-        double target_rps = config.value ("rps", 0.0);
-        if (target_rps == 0.0)
-            target_rps = config.value ("targetRps", 0.0);
-
+        const double target_rps = requested_rps (config);
         if (target_rps > 0.0) {
             run_rate_limited (context, db, live, duration_ms, target_rps);
         } else {

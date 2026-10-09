@@ -17,29 +17,59 @@
  *
  * `validate_run_config` runs in the route before `create_run`, which is the
  * property that matters as much as the 400: a rejected config must leave no
- * run row behind. Testing the function directly (the suite has no in-process
- * HTTP route harness) covers the decision; the ordering is held by the call
- * site, which sits above `ctx.db.create_run (run)` in execution.cpp.
+ * run row behind. Most cases drive the function directly; the
+ * `RunConfigValidationRouteTest` cases at the end go through the real
+ * `POST /runs` handler for what only the route decides - that a `null` member
+ * is absent by the time the run reads it, and that no answer but a 202 leaves
+ * the row `pending` (#1893).
  */
 
+// Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
+// `max` macros break `vayu/core/run_manager.hpp`; `url_scheme_test.cpp`
+// carries the same guard for the same reason.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <gtest/gtest.h>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
+#include <httplib.h>
+
+#include "echo_server.hpp"
 #include "optional_assert.hpp"
+#include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
+#include "vayu/core/run_manager.hpp"
+#include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
+#include "vayu/http/run_summary_cache.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/http/sse_stream.hpp"
+#include "vayu/types.hpp"
 
 namespace vayu::http::routes {
 // Declared here rather than in routes.hpp, matching apply_config_update in
-// config_route_test.cpp: the extracted core is an implementation detail of the
-// route, and only its test needs the prototype.
+// config_route_test.cpp: the extracted cores are implementation details of the
+// route, and only their tests need the prototypes.
 std::optional<std::string> validate_run_config (const nlohmann::json& config,
 const vayu::core::MonitorLimits& monitor_limits = {});
+std::optional<RouteError> start_created_run (vayu::db::Database& db,
+const std::string& run_id,
+const std::function<bool ()>& start);
 } // namespace vayu::http::routes
 
 namespace {
@@ -81,7 +111,10 @@ TEST (RunConfigValidation, AcceptsAConfigThatOmitsEveryOptionalField) {
 TEST (RunConfigValidation, AcceptsExplicitNullsAsAbsent) {
     // The renderer omits fields by sending undefined, but a JSON `null` is what
     // some clients emit for "unset"; treating it as "out of range" would reject
-    // a config that behaves identically to one that omitted the key.
+    // a config that behaves identically to one that omitted the key. Accepting
+    // it here is only half of that promise: the route erases every top-level
+    // null before the run reads its config (`json::value` throws on one), held
+    // by `RunConfigValidationRouteTest.NullMembersRunWithTheirDefaults`.
     auto config                   = valid_config ();
     config["concurrency"]         = nullptr;
     config["success_sample_rate"] = nullptr;
@@ -147,6 +180,13 @@ vayu::core::constants::run_config::MAX_CONCURRENCY },
 // not "no cap" - either reading is a run that does not do what the caller
 // asked, so it is rejected rather than guessed.
 { "MaxInFlight", "maxInFlight", nullptr, 1, vayu::core::constants::run_config::MAX_IN_FLIGHT },
+// An iterations run stops on its count alone, and `-1` cast to a size_t was a
+// run that never ended until stopped (#1893). 0 is not "unlimited" either.
+{ "Iterations", "iterations", "iterations", 1, vayu::core::constants::run_config::MAX_ITERATIONS },
+// The two spellings of the arrival rate. 0 asks for no rate, which is legal in
+// a mode that does not need one; `constant_rps` has its own rule below.
+{ "Rps", "rps", "constant_concurrency", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
+{ "TargetRps", "targetRps", "constant_concurrency", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
 });
 
 class RunConfigBoundedCount : public ::testing::TestWithParam<BoundedCountCase> {
@@ -259,6 +299,88 @@ TEST (RunConfigValidation, DurationUnitsAndBareNumbersAreAccepted) {
         config["duration"] = good;
         EXPECT_FALSE (validate_run_config (config).has_value ())
         << "expected '" << good << "' to be accepted";
+    }
+}
+
+// --- rampUpDuration: read at run time by the same parser, after the row ----
+//
+// It was not checked at all (#1893), so `"10sec"` created a row, flipped it
+// `running` and then `failed`. Its rule is the reader's, not `duration`'s:
+// zero is an instant ramp and a JSON number is seconds.
+
+TEST (RunConfigValidation, AnUnreadableRampUpDurationIsRejected) {
+    for (const nlohmann::json& bad : { nlohmann::json ("10sec"), nlohmann::json ("soon"),
+         nlohmann::json ("-1s"), nlohmann::json (""), nlohmann::json ("1e3s"),
+         nlohmann::json (-1), nlohmann::json (true), nlohmann::json::array ({ 1 }) }) {
+        auto config              = valid_config ();
+        config["mode"]           = "ramp_up";
+        config["rampUpDuration"] = bad;
+        expect_rejected (config, "rampUpDuration");
+    }
+}
+
+TEST (RunConfigValidation, RampUpDurationAcceptsZeroAndNumbersOfSeconds) {
+    for (const nlohmann::json& good : { nlohmann::json ("0"),
+         nlohmann::json ("0s"), nlohmann::json (0), nlohmann::json (10),
+         nlohmann::json (2.5), nlohmann::json ("10s"), nlohmann::json ("500ms"),
+         nlohmann::json (" 1M "), nlohmann::json (nullptr) }) {
+        auto config              = valid_config ();
+        config["mode"]           = "ramp_up";
+        config["rampUpDuration"] = good;
+        EXPECT_FALSE (validate_run_config (config).has_value ())
+        << "expected " << good.dump () << " to be accepted";
+    }
+}
+
+// --- constant_rps without a rate silently ran closed-loop (#1893) ----------
+
+TEST (RunConfigValidation, ConstantRpsWithoutAPositiveRateIsRejected) {
+    auto absent = valid_config ();
+    absent.erase ("rps");
+    expect_rejected (absent, "targetRps");
+
+    // `null` is absent, here as everywhere else.
+    auto null_rate   = valid_config ();
+    null_rate["rps"] = nullptr;
+    expect_rejected (null_rate, "targetRps");
+
+    for (const char* key : { "rps", "targetRps" }) {
+        auto zero = valid_config ();
+        zero.erase ("rps");
+        zero[key] = 0;
+        expect_rejected (zero, "targetRps");
+
+        auto negative = valid_config ();
+        negative.erase ("rps");
+        negative[key] = -5;
+        expect_rejected (negative, key);
+    }
+}
+
+TEST (RunConfigValidation, ConstantRpsTakesEitherSpellingAndAFractionalRate) {
+    // `rps: 0` falls through to `targetRps`, as the executor reads it.
+    auto fallback         = valid_config ();
+    fallback["rps"]       = 0;
+    fallback["targetRps"] = 250;
+    EXPECT_FALSE (validate_run_config (fallback).has_value ());
+
+    auto slow   = valid_config ();
+    slow["rps"] = 0.5;
+    EXPECT_FALSE (validate_run_config (slow).has_value ());
+}
+
+TEST (RunConfigValidation, OnlyALiteralConstantRpsNeedsARate) {
+    // An absent mode reaches the same strategy, but nothing in the payload
+    // claims a rate, so there is nothing to contradict.
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations", "" }) {
+        auto config = valid_config ();
+        config.erase ("rps");
+        if (*mode == '\0') {
+            config.erase ("mode");
+        } else {
+            config["mode"] = mode;
+        }
+        EXPECT_FALSE (validate_run_config (config).has_value ()) << "mode '" << mode << "'";
     }
 }
 
@@ -619,4 +741,203 @@ TEST (RunConfigValidation, BothValuesOfEveryBooleanSettingAreAccepted) {
         EXPECT_FALSE (validate_run_config (config).has_value ())
         << "a null " << key << " was refused";
     }
+}
+
+// --- Through the real POST /runs handler (#1893) ---------------------------
+//
+// What only the route decides: a `null` member is erased before anything that
+// runs reads the config, and no answer but a 202 leaves the row `pending`.
+
+namespace {
+
+using nlohmann::json;
+using vayu::http::routes::start_created_run;
+
+class RunConfigValidationRouteTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH =
+    "test_run_config_validation_route.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        manager_ = std::make_unique<vayu::http::SseStreamManager> ();
+        ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, *manager_, run_summary_cache_ });
+        vayu::http::routes::register_execution_routes (*ctx_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        // A load run's worker writes through the database until it is joined.
+        run_manager_.shutdown ();
+        manager_.reset ();
+        ctx_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// The status and body `POST /runs` answered @p payload with.
+    std::pair<int, json> post_run (const json& payload) const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/runs", payload.dump (), "application/json");
+        if (!response) {
+            ADD_FAILURE () << "no response from POST /runs";
+            return { 0, json::object () };
+        }
+        return { response->status, json::parse (response->body, nullptr, false) };
+    }
+
+    /// One request, once, against @p echo: the smallest run that completes.
+    static json iterations_run (const vayu::tests::EchoServer& echo) {
+        return json{ { "method", "GET" }, { "url", echo.url () },
+            { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } };
+    }
+
+    /// The status @p run_id settles on once its worker is done with it, or
+    /// what it was still stuck at when the wait gave up.
+    vayu::RunStatus settled_status (const std::string& run_id) const {
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (15);
+        while (true) {
+            const auto run = db_->get_run (run_id);
+            if (!run) {
+                ADD_FAILURE () << "no row for " << run_id;
+                return vayu::RunStatus::Pending;
+            }
+            if (run->status != vayu::RunStatus::Pending &&
+            run->status != vayu::RunStatus::Running) {
+                return run->status;
+            }
+            if (std::chrono::steady_clock::now () >= deadline) {
+                ADD_FAILURE ()
+                << run_id << " never left " << vayu::to_string (run->status);
+                return run->status;
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+    }
+
+    /// A `pending` row with nothing running it, the state `create_run` leaves.
+    void create_pending_run (const std::string& run_id) const {
+        vayu::db::Run run;
+        run.id     = run_id;
+        run.type   = vayu::RunType::Load;
+        run.status = vayu::RunStatus::Pending;
+        db_->create_run (run);
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
+    std::unique_ptr<vayu::http::SseStreamManager> manager_;
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+};
+
+} // namespace
+
+// Every key here is read through `json::value (key, default)`, which throws on
+// a `null`: the first three in RunContext's constructor, after the row exists,
+// which left it `pending` behind a 500; `rps` and `concurrency` already in the
+// route's own start log line. Mutation check: drop the `erase_null_members`
+// call and every case answers 500.
+TEST_F (RunConfigValidationRouteTest, NullMembersRunWithTheirDefaults) {
+    const vayu::tests::EchoServer echo;
+    for (const char* key : { "success_sample_rate", "save_timing_breakdown",
+         "slow_threshold_ms", "rps", "concurrency" }) {
+        auto payload              = iterations_run (echo);
+        payload[key]              = nullptr;
+        const auto [status, body] = post_run (payload);
+        ASSERT_EQ (status, 202) << key << ": " << body.dump ();
+
+        const std::string run_id = body.value ("runId", std::string ());
+        EXPECT_EQ (settled_status (run_id), vayu::RunStatus::Completed) << key;
+        // The stored config is what ran, so it carries no `null` either: a
+        // report reading `rps` off it would otherwise lose `targetRps`.
+        const auto run = db_->get_run (run_id);
+        ASSERT_HAS_VALUE (run) << key;
+        EXPECT_FALSE (json::parse (run->config_snapshot).contains (key)) << run->config_snapshot;
+    }
+}
+
+TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
+    const vayu::tests::EchoServer echo;
+    const json url{ { "method", "GET" }, { "url", echo.url () } };
+    const std::vector<std::pair<std::string, json>> cases = {
+        { "rampUpDuration",
+        { { "mode", "ramp_up" }, { "duration", "1s" }, { "rampUpDuration", "10sec" } } },
+        { "iterations", { { "mode", "iterations" }, { "iterations", -1 } } },
+        { "targetRps", { { "mode", "constant_rps" }, { "duration", "1s" } } },
+    };
+    for (const auto& [field, fields] : cases) {
+        auto payload = url;
+        payload.update (fields);
+        const auto [status, body] = post_run (payload);
+        EXPECT_EQ (status, 400) << field << ": " << body.dump ();
+        const auto error = body.find ("error");
+        ASSERT_TRUE (error != body.end () && error->is_object ()) << body.dump ();
+        EXPECT_EQ (error->value ("code", std::string ()), "invalid_run_config")
+        << body.dump ();
+        EXPECT_NE (vayu::http::routes::error_message_of (body).find (field), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADrainingEngineFailsTheRowItAlreadyWrote) {
+    const vayu::tests::EchoServer echo;
+    run_manager_.shutdown ();
+    const auto [status, body] = post_run (iterations_run (echo));
+    EXPECT_EQ (status, 503) << body.dump ();
+
+    const auto runs = db_->get_all_runs ();
+    ASSERT_EQ (runs.size (), 1U);
+    EXPECT_EQ (runs.front ().status, vayu::RunStatus::Failed);
+}
+
+// No payload `validate_run_config` accepts reaches a throw in RunContext's
+// constructor any more, so the throw is planted: this holds the net under the
+// validator, which the route test above cannot reach.
+TEST_F (RunConfigValidationRouteTest, AStartThatThrowsFailsTheRowAndSaysWhy) {
+    create_pending_run ("run_throws");
+    const auto refusal = start_created_run (*db_, "run_throws", [] () -> bool {
+        throw std::runtime_error ("type must be number, but is null");
+    });
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->status, 500);
+    EXPECT_NE (vayu::http::routes::error_message_of (refusal->body).find ("but is null"),
+    std::string::npos)
+    << refusal->body.dump ();
+
+    const auto run = db_->get_run ("run_throws");
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+}
+
+TEST_F (RunConfigValidationRouteTest, AStartThatSucceedsLeavesTheRowToItsWorker) {
+    create_pending_run ("run_started");
+    EXPECT_FALSE (
+    start_created_run (*db_, "run_started", [] () { return true; }).has_value ());
+
+    const auto run = db_->get_run ("run_started");
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Pending);
 }
