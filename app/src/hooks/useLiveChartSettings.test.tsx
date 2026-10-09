@@ -21,7 +21,7 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutate }),
 }));
 
-import { useLiveChartSettings } from "./useLiveChartSettings";
+import { useLiveChartSettings, useLiveWindowSync } from "./useLiveChartSettings";
 import { useDashboardStore } from "@/stores";
 
 function entry(value: string, key = "liveReplayWindowMs"): ConfigEntry {
@@ -57,7 +57,6 @@ describe("useLiveChartSettings", () => {
 		// The stale localStorage value from before this setting moved engine-side
 		// must not win - it is not read at all any more.
 		expect(result.current.window).toBe("30m");
-		expect(useDashboardStore.getState().liveWindowSeconds).toBe(1800);
 	});
 
 	it("holds the default until the config query resolves", () => {
@@ -65,9 +64,6 @@ describe("useLiveChartSettings", () => {
 		const { result } = renderHook(() => useLiveChartSettings());
 
 		expect(result.current.window).toBe("5m");
-		// Bounded, not null - an unbounded store during the load gap would let a
-		// run started at launch accumulate without a time trim.
-		expect(useDashboardStore.getState().liveWindowSeconds).toBe(300);
 	});
 
 	it("maps the engine's 0 to full run", () => {
@@ -75,7 +71,6 @@ describe("useLiveChartSettings", () => {
 		const { result } = renderHook(() => useLiveChartSettings());
 
 		expect(result.current.window).toBe("full");
-		expect(useDashboardStore.getState().liveWindowSeconds).toBeNull();
 	});
 
 	it("writes the picked window back to engine config as milliseconds", () => {
@@ -107,15 +102,11 @@ describe("useLiveChartSettings", () => {
 		expect(useDashboardStore.getState().liveWindowSeconds).toBe(60);
 	});
 
-	// The ceiling is the engine's `liveMaxRetainedTicks`. If this side kept its
-	// own number, the engine could retain ticks the store would then discard -
-	// the drift the shared setting exists to prevent.
-	it("syncs the tick ceiling from engine config", () => {
+	it("reads the tick ceiling from engine config", () => {
 		configEntries = [entry("300000"), entry("120000", "liveMaxRetainedTicks")];
 		const { result } = renderHook(() => useLiveChartSettings());
 
 		expect(result.current.maxRetainedTicks).toBe(120000);
-		expect(useDashboardStore.getState().maxRetainedTicks).toBe(120000);
 	});
 
 	it("falls back to the default ceiling when the key is absent or nonsense", () => {
@@ -125,6 +116,69 @@ describe("useLiveChartSettings", () => {
 
 		configEntries = [entry("300000"), entry("0", "liveMaxRetainedTicks")];
 		rerender();
+		expect(result.current.maxRetainedTicks).toBe(50000);
+	});
+
+	// The sync lives in useLiveWindowSync at the App root; the editor mounts only
+	// with Settings open and must not be what carries the config into the store.
+	it("does not push config into the store itself", () => {
+		configEntries = [entry("0"), entry("120000", "liveMaxRetainedTicks")];
+		renderHook(() => useLiveChartSettings());
+
+		expect(useDashboardStore.getState().liveWindowSeconds).toBe(300);
 		expect(useDashboardStore.getState().maxRetainedTicks).toBe(50000);
+	});
+});
+
+describe("useLiveWindowSync", () => {
+	it("pushes the engine window into the store", () => {
+		configEntries = [entry("1800000")];
+		renderHook(() => useLiveWindowSync());
+
+		expect(useDashboardStore.getState().liveWindowSeconds).toBe(1800);
+	});
+
+	it("maps the engine's 0 to an unbounded (full run) window", () => {
+		configEntries = [entry("0")];
+		renderHook(() => useLiveWindowSync());
+
+		expect(useDashboardStore.getState().liveWindowSeconds).toBeNull();
+	});
+
+	it("holds the default until the config query resolves", () => {
+		configEntries = undefined;
+		renderHook(() => useLiveWindowSync());
+
+		// Bounded, not null - an unbounded store during the load gap would let a
+		// run started at launch accumulate without a time trim.
+		expect(useDashboardStore.getState().liveWindowSeconds).toBe(300);
+	});
+
+	// The ceiling is the engine's `liveMaxRetainedTicks`. If this side kept its
+	// own number, the engine could retain ticks the store would then discard -
+	// the drift the shared setting exists to prevent.
+	it("pushes the tick ceiling into the store", () => {
+		configEntries = [entry("300000"), entry("120000", "liveMaxRetainedTicks")];
+		renderHook(() => useLiveWindowSync());
+
+		expect(useDashboardStore.getState().maxRetainedTicks).toBe(120000);
+	});
+
+	it("falls back to the default ceiling when the key is nonsense", () => {
+		configEntries = [entry("300000"), entry("0", "liveMaxRetainedTicks")];
+		useDashboardStore.getState().setMaxRetainedTicks(1234);
+		renderHook(() => useLiveWindowSync());
+
+		expect(useDashboardStore.getState().maxRetainedTicks).toBe(50000);
+	});
+
+	it("follows the config when it changes", () => {
+		configEntries = [entry("300000")];
+		const { rerender } = renderHook(() => useLiveWindowSync());
+
+		configEntries = [entry("60000")];
+		rerender();
+
+		expect(useDashboardStore.getState().liveWindowSeconds).toBe(60);
 	});
 });

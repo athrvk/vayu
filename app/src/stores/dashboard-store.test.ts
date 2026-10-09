@@ -54,7 +54,7 @@ describe("dashboard-store live retention window", () => {
 	});
 
 	// The ceiling is the engine's `liveMaxRetainedTicks`, synced in by
-	// useLiveChartSettings - so the trim has to read the store's value, not a
+	// useLiveWindowSync - so the trim has to read the store's value, not a
 	// module constant, or raising the setting would enlarge the engine's ring
 	// while this side kept discarding at the old number.
 	it("trims to the configured tick ceiling, not a fixed constant", () => {

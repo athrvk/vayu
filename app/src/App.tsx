@@ -34,6 +34,7 @@ import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
 import { useRunWatchers } from "./hooks/useRunWatchers";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
+import { useLiveWindowSync } from "./hooks/useLiveChartSettings";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
 import { useRunningServicesPublisher } from "@/modules/services";
 import { useSaveStore } from "./stores/save-store";
@@ -127,6 +128,11 @@ function App() {
 	// no warning and the dashboard may not be the open tab, while the run it
 	// interrupts streams from a service that outlives every view (#1357).
 	useHostSleepRecorder();
+
+	// The engine's live-chart retention reaches the store only through this hook,
+	// and a run streams into the store whatever tab (or Settings page) is open,
+	// so it cannot be scoped to the panel that edits it (#1936).
+	useLiveWindowSync();
 
 	// A webhook lands while the user is in another tab, or another application -
 	// which is when its notification matters. The inbox tab is mounted only

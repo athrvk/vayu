@@ -21,9 +21,9 @@ import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
 /**
  * Retention seeded before the window is known. The real value is the engine's
- * `liveReplayWindowMs`, which `useLiveChartSettings` pushes in once the config
- * query resolves - it cannot be read synchronously here the way the old
- * localStorage preference could. Seeding the module default rather than `null`
+ * `liveReplayWindowMs`, which `useLiveWindowSync` (mounted at the App root)
+ * pushes in once the config query resolves - it cannot be read synchronously
+ * here the way the old localStorage preference could. Seeding the module default rather than `null`
  * keeps retention bounded during that gap; a run started in the first moments
  * after launch trims to 5 minutes until the hook corrects it.
  */
@@ -144,14 +144,14 @@ interface DashboardState {
 	/**
 	 * Live retention window in seconds (null = full run, bounded by
 	 * {@link maxRetainedTicks}). Drives the time-based trim in
-	 * {@link addMetricsBatch}. Kept in sync by useLiveChartSettings.
+	 * {@link addMetricsBatch}. Kept in sync by useLiveWindowSync.
 	 */
 	liveWindowSeconds: number | null;
 	/**
 	 * Ceiling on retained ticks whatever the window - the memory backstop, and
 	 * the same `liveMaxRetainedTicks` value the engine bounds its replay ring
 	 * with, so this side never discards what the engine went to the trouble of
-	 * retaining. Also synced by useLiveChartSettings.
+	 * retaining. Also synced by useLiveWindowSync.
 	 */
 	maxRetainedTicks: number;
 
