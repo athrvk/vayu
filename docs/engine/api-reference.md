@@ -8372,7 +8372,7 @@ warning). Neither refuses the run - a literal `{{` can be deliberate in a body -
 they are counted, not fixed. Each entry carries `code` and a human-readable
 `message`; `unresolved_tokens` also carries `count` (requests affected) and
 `names` (a few of the unresolved names, capped); `pre_request_script_skipped`
-carries `steps` (how many carried one). Absent, not an empty array, for a run
+carries `steps` (how many carried a `script.pre` that did not run inline). Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
