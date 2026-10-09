@@ -5640,7 +5640,7 @@ response body's `testResults` and `consoleLogs` (see below) do not
 distinguish a declarative assertion from one a script wrote by hand. The
 response body and the stored trace both carry an `elements` array beside
 `scripts` - one entry per element that ran, each `{id, kind, origin, outcome,
-message?, waitedMs?, wrote?}` with `outcome` one of `ok` | `failed` |
+message?, waitedMs?}` with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
 its `apply` ever running) - see [Elements](elements.md#the-step-trace).
 
@@ -8405,7 +8405,7 @@ scenario step report the same warning for the same mistake.
 **`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
-`id`, `kind`, `outcome`, `message?`, `waitedMs?`, `wrote?`); absent entirely,
+`id`, `kind`, `outcome`, `message?`, `waitedMs?`); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
 other than `"ok"` already means the run never sent anything - `status` is

@@ -326,9 +326,8 @@ load path cannot support yet) no longer applies to either.
 
 A design send's and a sequential run step's stored trace gains an `elements` array beside the
 existing `scripts` node - one entry per compiled element that ran at `step.before` or `step.after`
-(`step.between` too, for the sequential run), each `{ id, kind, origin, outcome, message?, waitedMs?,
-wrote? }`. `outcome` is one of `ok` | `failed` | `missing` | `skipped` | `error`; a disabled element
-is reported `skipped` without its `apply` ever running. `POST /execute`'s live response body carries
+(`step.between` too, for the sequential run), each `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
+`skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running. `POST /execute`'s live response body carries
 the same array under the same key - one object, two homes, on the `scripts` node's own precedent.
 
 `assert.*` outcomes join `pm.test` results in one assertion tally the run's `maxAssertionFailureRatePct`
