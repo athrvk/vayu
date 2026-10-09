@@ -175,9 +175,9 @@ export function successSamplePeriod(percent: number): number {
  *   engine setting, which is the per-worker value a run actually gets.
  * - `durationSeconds` - a day, matching the engine's per-transfer timeout
  *   guard. A run longer than that wants a scheduler, not a dialog.
- * - `rps` / `iterations` - no engine guard applies; these are throughput
- *   figures, and the bound is the point past which a single desktop engine is
- *   not the right tool.
+ * - `rps` / `iterations` - throughput figures, bounded at the point past
+ *   which a single desktop engine is not the right tool. The engine's guards
+ *   (`MAX_TARGET_RPS`, `MAX_ITERATIONS`) sit at or above these.
  */
 export const LOAD_TEST_CEILING_BOUNDS = {
 	rps: { MIN: 1, MAX: 1_000_000 },

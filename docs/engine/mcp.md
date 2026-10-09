@@ -1597,8 +1597,8 @@ configurable in **Settings → MCP** and persisted.
   this tool accepts is one `POST /runs` accepts.
   `duration` / `rampUpDuration` are also rejected when they are not durations at
   all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
-  engine parses), since the engine now fails such a run rather than quietly
-  substituting 60s; a zero `duration` is rejected here for the same reason the
+  engine parses), since the engine refuses such a run with a `400` rather than
+  quietly substituting 60s; a zero `duration` is rejected here for the same reason the
   engine `400`s it, while a zero `rampUpDuration` stays legal (an instant ramp).
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side

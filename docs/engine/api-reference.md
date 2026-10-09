@@ -6021,7 +6021,7 @@ Start a load test run (Vayu Mode).
   "rampUpDuration": "10s",   // Ramp time, ms/s/m/h (ramp_up mode; start may be above target)
   "sloMs": 200,              // p99 budget the search looks for the edge of (capacity mode)
   "stepDuration": "5s",      // How long each level is held before it is judged (capacity mode)
-  "iterations": 0,           // Number of iterations (iterations mode)
+  "iterations": 1000,        // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
@@ -7205,6 +7205,9 @@ default, and whose message names the offending field and why the bound exists:
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
+| `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
+| `iterations` | `1`-`2147483647` | An `iterations` run stops on its request count alone, read as a `size_t`, so `-1` was ~1.8e19 requests and a run that never ended until stopped. The ceiling is the one `scenario.iterations` has. |
+| `rps` / `targetRps` | `0`-`1000000`, fractions allowed | The open-loop arrival rate per second; `0` asks for none. The ceiling is the highest RPS cap the app and MCP settings can be raised to. `constant_rps` needs one of the two positive - see below. |
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
@@ -7212,9 +7215,21 @@ default, and whose message names the offending field and why the bound exists:
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the SLO setting. |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of
-them has a default. The ceilings are crash guards, not policy: each client caps
-itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
-`start_load_run` tool has a user-settable cap in Settings).
+them has a default. The route erases every top-level `null` before anything
+reads the config, so a `null` runs exactly as the absent key would and the
+stored config snapshot carries none (#1893); it used to pass this check and
+then throw in the run's own reader, after the row existed. The ceilings are
+crash guards, not policy: each client caps itself far lower (the load dialog
+offers `concurrency` &le; 1000; the MCP `start_load_run` tool has a
+user-settable cap in Settings).
+
+**`constant_rps` needs a rate.** A `mode` of `constant_rps` with neither `rps`
+nor `targetRps` positive (`rps` is read first, and `targetRps` when `rps` is
+absent or `0`) is a `400` with `error.code` `invalid_run_config`. It used to run
+the closed-loop path at the default concurrency while the stored config and the
+report still said `constant_rps`. Only the literal mode is held to this: an
+absent or unrecognised `mode` reaches the same strategy without claiming a
+rate.
 
 One field is rejected by **presence**, not by range: **`transient`**. It is
 `POST /execute`'s no-run-row flag (issue #382) and has no meaning here, because
@@ -7283,7 +7298,10 @@ workers, `POST /runs` answers `503` with the message `Engine is shutting down` r
 than accepting a run nothing will ever execute. The window is small - the HTTP
 server stops before the drain begins - but it is not empty, and a request
 already in a handler when the drain starts must not be able to spawn a worker
-past it (see `RunManager::shutdown`).
+past it (see `RunManager::shutdown`). The row the route had already written is
+marked `failed` first, and so is the row of a run that throws while starting
+(answered `500`, naming the error): no answer but a `202` leaves a `pending` row
+behind (#1893).
 
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
@@ -7308,14 +7326,15 @@ reject explicitly what the engine already does implicitly. For the closed-loop
 modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
 ignored there.
 
-**Durations.** `duration` and `rampUpDuration` take a number with an optional
-unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix (`"500ms"` is half a
-second, not 500 minutes). A bare number is seconds - `"60"` == `"60s"` - which
+**Durations.** `duration` and `rampUpDuration` take a string holding a number
+with an optional unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix
+(`"500ms"` is half a second, not 500 minutes); `rampUpDuration` also takes a
+JSON number of seconds. A bare number is seconds - `"60"` == `"60s"` - which
 is also how the MCP duration cap reads the field. Fractions are allowed
 (`"1.5s"`), case and spacing are ignored (`"30 S"`). A value the engine cannot
-read - an unknown unit, a non-number, a negative - **fails the run** (status
-`failed`, with the offending field named in the daemon log) rather than being
-silently replaced by the 60s default.
+read - an unknown unit, a non-number, a negative - is a `400` with `error.code`
+`invalid_run_config` naming the field, before the run row exists, rather than
+being silently replaced by the default (see Accepted ranges above).
 
 **`constant_rps` is time-bound, and its shortfall is recorded.** The generator
 accrues `targetRps × elapsed` and submits the whole requests owed each tick,

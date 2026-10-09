@@ -160,6 +160,27 @@ const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn = {});
 duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms);
 
 /**
+ * @brief The rule `duration_field_ms` reads one present, non-null value by:
+ *        milliseconds, or `nullopt` where that function throws.
+ *
+ * Exposed so the route can refuse a value before the run row exists by asking
+ * the reader itself (#1893), rather than through a second grammar that could
+ * disagree with it about a spelling.
+ */
+[[nodiscard]] std::optional<int64_t> duration_value_ms (const nlohmann::json& value);
+
+/**
+ * @brief The arrival rate a run config asks for: `rps`, or `targetRps` when
+ *        `rps` is absent, null or 0; 0 when neither names one.
+ *
+ * A positive answer is what puts `ConstantLoadStrategy` on its open-loop path,
+ * so the route's `constant_rps` refusal and the scenario validator read
+ * through here too, and none of the three can disagree about what "asked for
+ * a rate" means. A non-numeric value throws, as `json::value` would.
+ */
+[[nodiscard]] double requested_rps (const nlohmann::json& config);
+
+/**
  * @brief Why a run payload's top-level `elements` override cannot run, or
  *        `nullopt` if it can (issue #1495).
  *

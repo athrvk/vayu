@@ -149,6 +149,30 @@ describe("load-test limits parity with the engine", () => {
 		expect(LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS).toBe(engineConstant("MAX_STREAM_EVENTS"));
 	});
 
+	// --- The rate and iteration ceilings (issue #1893) ---------------------
+	//
+	// The two ceilings a user can raise in Settings that had no engine guard
+	// behind them. Inside rather than exact: the engine's iterations bound is
+	// the scenario one, far above anything a desktop run asks for.
+
+	it("lets the RPS and iterations ceilings reach no further than the engine's guards", () => {
+		expect(LOAD_TEST_CEILING_BOUNDS.rps.MAX).toBeLessThanOrEqual(
+			engineConstant("MAX_TARGET_RPS")
+		);
+		expect(LOAD_TEST_CEILING_BOUNDS.iterations.MAX).toBeLessThanOrEqual(
+			engineConstant("MAX_ITERATIONS")
+		);
+	});
+
+	it("uses those constants as the route's iterations and rate bounds", () => {
+		expect(executionCpp).toMatch(/\{\s*"iterations",\s*1,\s*limits::MAX_ITERATIONS\b/);
+		for (const key of ["rps", "targetRps"]) {
+			expect(executionCpp).toMatch(
+				new RegExp(String.raw`\{\s*"${key}",\s*0,\s*limits::MAX_TARGET_RPS\b`)
+			);
+		}
+	});
+
 	it("reads the stream flag through the shared parser on POST /runs", () => {
 		// The constants agreeing is not the same as the route reading them: the
 		// refusal this replaced was a flat `return "'stream' is not valid on a
