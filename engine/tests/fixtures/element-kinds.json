@@ -229,7 +229,7 @@
           "x-vayu-group": "advanced"
         },
         "pattern": {
-          "description": "The regular expression to run against the response.",
+          "description": "The regular expression to run against the response, in RE2 syntax: no backreferences or lookaround.",
           "minLength": 1,
           "title": "Pattern",
           "type": "string"
@@ -467,7 +467,7 @@
           "type": "string"
         },
         "regex": {
-          "description": "A regular expression the match's text must contain.",
+          "description": "A regular expression the match's text must contain, in RE2 syntax: no backreferences or lookaround.",
           "title": "Pattern",
           "type": "string"
         }
@@ -504,7 +504,7 @@
           "type": "string"
         },
         "mode": {
-          "description": "How to compare: contains, equals or matches (regular expression).",
+          "description": "How to compare: contains, equals or matches (a regular expression in RE2 syntax).",
           "enum": [
             "contains",
             "equals",

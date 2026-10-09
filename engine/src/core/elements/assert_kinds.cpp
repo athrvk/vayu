@@ -20,9 +20,10 @@
 
 #include "vayu/core/elements.hpp"
 
-#include <regex>
+#include <expected>
 
 #include "json_path.hpp"
+#include "user_regex.hpp"
 
 namespace vayu::core {
 
@@ -98,17 +99,32 @@ class AssertStatusElement final : public Element {
     nlohmann::json config_;
 };
 
+/// A config's user pattern, compiled when the element is built: absent when
+/// the config does not ask for one, the reason when RE2 refuses it.
+using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
+
 // ---------------------------------------------------------------------------
 // assert.jsonpath - the same subset `extract.json` reads: one of `expected`
 // (exact match against the first hit), `regex` (the first hit as text) or
 // `exists` (at least one hit); `negate` flips the verdict.
 // ---------------------------------------------------------------------------
 
+/// A string member, or "" when it is absent or not a string: read in a
+/// constructor, where an exception would escape `compile_elements` instead of
+/// becoming the element's own "error" outcome.
+std::string string_member (const nlohmann::json& config, const char* key) {
+    const auto found = config.find (key);
+    return found != config.end () && found->is_string () ? found->get<std::string> () : "";
+}
+
 class AssertJsonPathElement final : public Element {
     public:
     explicit AssertJsonPathElement (nlohmann::json config)
     : config_ (std::move (config)) {
         path_ = detail::parse_json_path (config_.value ("path", ""));
+        if (config_.contains ("regex")) {
+            regex_ = compile_user_regex (string_member (config_, "regex"));
+        }
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -144,21 +160,14 @@ class AssertJsonPathElement final : public Element {
             config_["expected"].dump () +
             (matches.empty () ? " (no match)" :
                                 ", got " + json_value_to_string (*matches.front ()));
-        } else if (config_.contains ("regex")) {
-            bool found = false;
-            if (!matches.empty ()) {
-                try {
-                    const std::regex pattern (config_.value ("regex", ""));
-                    found = std::regex_search (
-                    json_value_to_string (*matches.front ()), pattern);
-                } catch (const std::regex_error& e) {
-                    ctx.outcome_status = "error";
-                    ctx.outcome_message =
-                    std::string ("invalid regular expression: ") + e.what ();
-                    return;
-                }
+        } else if (const auto& regex = regex_) {
+            if (!*regex) {
+                ctx.outcome_status  = "error";
+                ctx.outcome_message = regex->error ();
+                return;
             }
-            passed  = found;
+            passed = !matches.empty () &&
+            (*regex)->search (json_value_to_string (*matches.front ()));
             failure = "expected '" + path_text + "' to match /" +
             config_.value ("regex", "") + "/";
         } else {
@@ -177,6 +186,7 @@ class AssertJsonPathElement final : public Element {
     private:
     nlohmann::json config_;
     std::optional<std::vector<detail::JsonPathStep>> path_;
+    OptionalUserRegex regex_;
 };
 
 // ---------------------------------------------------------------------------
@@ -184,35 +194,13 @@ class AssertJsonPathElement final : public Element {
 // (contains | equals | matches), `negate`.
 // ---------------------------------------------------------------------------
 
-std::string contains_field_text (const ElementContext& ctx, const std::string& field) {
-    if (ctx.response == nullptr) {
-        return "";
-    }
-    if (field == "headers") {
-        std::string joined;
-        for (const auto& [name, value] : ctx.response->headers) {
-            if (!joined.empty ()) {
-                joined += "\n";
-            }
-            joined += name;
-            joined += ": ";
-            joined += value;
-        }
-        return joined;
-    }
-    if (field == "url") {
-        return ctx.request.url;
-    }
-    if (field == "status") {
-        return std::to_string (ctx.response->status_code);
-    }
-    return ctx.response->body;
-}
-
 class AssertContainsElement final : public Element {
     public:
     explicit AssertContainsElement (nlohmann::json config)
     : config_ (std::move (config)) {
+        if (string_member (config_, "mode") == "matches") {
+            pattern_ = compile_user_regex (string_member (config_, "text"));
+        }
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -225,28 +213,27 @@ class AssertContainsElement final : public Element {
             ctx.outcome_message = "no response";
             return;
         }
-        const std::string field   = config_.value ("field", "body");
-        const std::string text    = config_.value ("text", "");
-        const std::string mode    = config_.value ("mode", "contains");
-        const std::string subject = contains_field_text (ctx, field);
+        const std::string field = config_.value ("field", "body");
+        const std::string text  = config_.value ("text", "");
+        const std::string mode  = config_.value ("mode", "contains");
+        std::string storage;
+        const std::string_view subject = response_field_text (ctx, field, storage);
 
         bool passed;
         std::string verb;
         if (mode == "equals") {
             passed = subject == text;
             verb   = "equal";
-        } else if (mode == "matches") {
-            try {
-                passed = std::regex_search (subject, std::regex (text));
-            } catch (const std::regex_error& e) {
-                ctx.outcome_status = "error";
-                ctx.outcome_message =
-                std::string ("invalid regular expression: ") + e.what ();
+        } else if (const auto& pattern = pattern_) {
+            if (!*pattern) {
+                ctx.outcome_status  = "error";
+                ctx.outcome_message = pattern->error ();
                 return;
             }
-            verb = "match";
+            passed = (*pattern)->search (subject);
+            verb   = "match";
         } else {
-            passed = subject.find (text) != std::string::npos;
+            passed = subject.find (text) != std::string_view::npos;
             verb   = "contain";
         }
         if (config_.value ("negate", false)) {
@@ -262,6 +249,7 @@ class AssertContainsElement final : public Element {
 
     private:
     nlohmann::json config_;
+    OptionalUserRegex pattern_;
 };
 
 // ---------------------------------------------------------------------------
@@ -399,7 +387,9 @@ ElementKind make_assert_jsonpath_kind () {
         { "expected", { { "title", "Expected value" }, { "description", "The exact value the match must equal." } } },
         { "regex",
         { { "type", "string" }, { "title", "Pattern" },
-        { "description", "A regular expression the match's text must contain." } } },
+        { "description",
+        "A regular expression the match's text must contain, in RE2 "
+        "syntax: no backreferences or lookaround." } } },
         { "exists",
         { { "type", "boolean" }, { "title", "Must exist" },
         { "description", "Passes when at least one match is found." } } },
@@ -437,8 +427,8 @@ ElementKind make_assert_contains_kind () {
         { "mode",
         { { "type", "string" }, { "enum", { "contains", "equals", "matches" } }, { "title", "Mode" },
         { "description",
-        "How to compare: contains, equals or matches (regular "
-        "expression)." } } },
+        "How to compare: contains, equals or matches (a regular "
+        "expression in RE2 syntax)." } } },
         { "negate",
         { { "type", "boolean" }, { "title", "Negate" },
         { "description", "Flips the assertion's pass/fail verdict." } } } } },

@@ -18,6 +18,7 @@
     "ryml",
     "valijson",
     "pugixml",
+    "re2",
     {
       "name": "cpp-httplib",
       "default-features": false,

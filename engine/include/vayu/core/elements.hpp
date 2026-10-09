@@ -775,14 +775,25 @@ int64_t own_wait_ms,
 std::mt19937_64* rng);
 
 /**
- * The response body parsed as JSON, cached on @p ctx so `extract.json`,
- * `extract.regex`'s field="body" and `assert.jsonpath` on the same step share
- * one parse. Returns null when there is no response yet, the body is over
- * `ElementContext::max_body_bytes`, or it does not parse as JSON - a caller
- * that needs to tell those apart reads `ctx.body_parse_attempted` (true after
- * this returns) against whether a response is set.
+ * The response body parsed as JSON, cached on @p ctx so `extract.json` and
+ * `assert.jsonpath` on the same step share one parse. Returns null when there
+ * is no response yet, the body is over `ElementContext::max_body_bytes`, or it
+ * does not parse as JSON - a caller that needs to tell those apart reads
+ * `ctx.body_parse_attempted` (true after this returns) against whether a
+ * response is set.
  */
 [[nodiscard]] const nlohmann::json* ensure_parsed_body (ElementContext& ctx);
+
+/**
+ * The text a `field` config names (`body`, `headers`, `url` or `status`), as
+ * `extract.regex` and `assert.contains` read it: anything else is the body.
+ * The body and the URL are viewed in place, never copied; the headers (one
+ * `Name: value` line each) and the status code are built into @p storage,
+ * which must outlive the view. Empty when there is no response.
+ */
+[[nodiscard]] std::string_view response_field_text (const ElementContext& ctx,
+std::string_view field,
+std::string& storage);
 
 /**
  * Runs every compiled element of @p elements whose kind's phase is @p phase,

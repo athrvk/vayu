@@ -285,6 +285,34 @@ const nlohmann::json* ensure_parsed_body (ElementContext& ctx) {
     return ctx.parsed_body ? &*ctx.parsed_body : nullptr;
 }
 
+std::string_view response_field_text (const ElementContext& ctx,
+std::string_view field,
+std::string& storage) {
+    if (ctx.response == nullptr) {
+        return {};
+    }
+    if (field == "url") {
+        return ctx.request.url;
+    }
+    if (field == "status") {
+        storage = std::to_string (ctx.response->status_code);
+        return storage;
+    }
+    if (field != "headers") {
+        return ctx.response->body;
+    }
+    storage.clear ();
+    for (const auto& [name, value] : ctx.response->headers) {
+        if (!storage.empty ()) {
+            storage += "\n";
+        }
+        storage += name;
+        storage += ": ";
+        storage += value;
+    }
+    return storage;
+}
+
 void ElementPipeline::run (Phase phase,
 ElementContext& ctx,
 const std::vector<CompiledElement>& elements,
