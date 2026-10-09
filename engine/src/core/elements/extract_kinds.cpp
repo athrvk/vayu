@@ -62,7 +62,6 @@ ToText to_text) {
             if (fallback) {
                 ctx.set_variable (scope, variable, *fallback);
                 ctx.outcome_status = "ok";
-                ctx.outcome_wrote  = true;
                 return;
             }
             ctx.outcome_status = "missing";
@@ -77,7 +76,6 @@ ToText to_text) {
         }
         ctx.set_variable (scope, variable + "_matchNr", std::to_string (matches.size ()));
         ctx.outcome_status = "ok";
-        ctx.outcome_wrote  = true;
         return;
     }
 
@@ -96,7 +94,6 @@ ToText to_text) {
         if (fallback) {
             ctx.set_variable (scope, variable, *fallback);
             ctx.outcome_status = "ok";
-            ctx.outcome_wrote  = true;
             return;
         }
         ctx.outcome_status = "missing";
@@ -108,7 +105,6 @@ ToText to_text) {
 
     ctx.set_variable (scope, variable, to_text (*picked));
     ctx.outcome_status = "ok";
-    ctx.outcome_wrote  = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +277,6 @@ class ExtractHeaderElement final : public Element {
             if (fallback_) {
                 ctx.set_variable (scope_, variable_, *fallback_);
                 ctx.outcome_status = "ok";
-                ctx.outcome_wrote  = true;
                 return;
             }
             ctx.outcome_status = "missing";
@@ -292,7 +287,6 @@ class ExtractHeaderElement final : public Element {
         }
         ctx.set_variable (scope_, variable_, it->second);
         ctx.outcome_status = "ok";
-        ctx.outcome_wrote  = true;
     }
 
     private:

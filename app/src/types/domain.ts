@@ -776,7 +776,6 @@ export interface ElementOutcome {
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;
-	wrote?: unknown;
 }
 
 export interface Request {

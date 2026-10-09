@@ -447,8 +447,6 @@ struct ElementContext {
     std::optional<std::string> outcome_message{};
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> outcome_waited_ms{};
-    // NOLINTNEXTLINE(readability-redundant-member-init)
-    std::optional<bool> outcome_wrote{};
 };
 
 /**
@@ -647,7 +645,6 @@ struct ElementOutcome {
     std::string status; ///< "ok" | "failed" | "missing" | "skipped" | "error"
     std::optional<std::string> message;
     std::optional<int64_t> waited_ms;
-    std::optional<bool> wrote;
 
     [[nodiscard]] nlohmann::json to_json () const;
 };

@@ -792,7 +792,7 @@ TEST_F (ScenarioRunnerTest, ExtractJsonFeedsTheNextStepsBearerToken) {
     ASSERT_EQ (step1_elements.size (), 1u);
     EXPECT_EQ (step1_elements[0]["kind"], "extract.json");
     EXPECT_EQ (step1_elements[0]["outcome"], "ok");
-    EXPECT_EQ (step1_elements[0]["wrote"], true);
+    EXPECT_FALSE (step1_elements[0].contains ("wrote"));
 }
 
 // A declarative assertion fails a step exactly as a scripted one does - same
