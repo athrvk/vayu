@@ -61,6 +61,9 @@ interface SaveRunToRequestDialogProps {
 	liveRequest: Request;
 }
 
+/** The empty changeset's explanation, shown in the body and on the disabled Save. */
+const ALREADY_MATCHES = "The request already matches this run";
+
 /** Glyph, text colour and stripe colour per state - all Vayu tokens. */
 const STATE_STYLE: Record<ChangeState, { glyph: string; text: string; stripe: string }> = {
 	changed: { glyph: "~", text: "text-warning-text", stripe: "bg-status-warning" },
@@ -282,8 +285,7 @@ export default function SaveRunToRequestDialog({
 					<div className="max-h-[24rem] overflow-y-auto surface-sunken rounded-md">
 						{writable.length === 0 && (
 							<p className="px-4 py-3 text-xs text-muted-foreground">
-								The request already matches this run. Only fields the run cannot
-								write are shown below.
+								{ALREADY_MATCHES}. Only fields the run cannot write are shown below.
 							</p>
 						)}
 						{items.map((item) => (
@@ -303,9 +305,7 @@ export default function SaveRunToRequestDialog({
 					/>
 					<DisabledHint
 						reason={
-							isSaving
-								? "Saving the run"
-								: writable.length === 0 && "No collection here can take a request"
+							isSaving ? "Saving the run" : writable.length === 0 && ALREADY_MATCHES
 						}
 					>
 						<Button
