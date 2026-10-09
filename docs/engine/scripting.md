@@ -1941,8 +1941,10 @@ pm.metrics.rate('cacheHit', pm.response.headers.get('X-Cache') === 'HIT'); // on
 ```
 
 `trend` reports as a distribution (`count`/`p50`/`p95`/`p99`/`max` in the report's
-`customMetrics.<name>`); `counter` is a running total, added to on every call; `rate` is the
-percentage of calls whose value was true. All three share the same 32-distinct-name cap the
+`customMetrics.<name>`); `counter` is a running total, added to on every call, reported as `value`
+beside a `count` of calls (#1937), so a counter only ever given `0` is still recorded and is judged
+by a `custom.<name>.value` threshold; `rate` is the percentage of calls whose value was true. All three share the same
+32-distinct-name cap the
 `metric.record` element does (`api-reference.md`'s `customMetrics` section), across every name
 either surface records under - a script that introduces a 33rd name past what the collection's own
 `metric.record` elements already declared has that call silently do nothing, since the cap is
@@ -1960,6 +1962,7 @@ worse than one that says why it cannot run.
 | A load run's deferred `tests` script, and a scenario load run's deferred per-step script | Throws - a replayed sample is not the run itself |
 | `trend(name, value)` / `rate(name, value)` with fewer than two arguments, or an empty `name` | `TypeError` |
 | `counter(name)` with an empty `name` | `TypeError` |
+| `counter(name, increment)` with a negative, `NaN`, infinite or non-numeric `increment` (an explicit `undefined` is the default `1`) | `TypeError`, and nothing is recorded |
 
 Everywhere else - the sequential run, a scenario load run's inline `step.before`/`step.after` hooks,
 and design mode's `script.pre`/`script.post` - all three methods record into that run's own

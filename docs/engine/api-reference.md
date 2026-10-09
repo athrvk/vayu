@@ -6208,7 +6208,14 @@ actually declares - a `metric.record` on a step the run never reaches, or a
 plain typo, is not distinguishable from a not-yet-recorded metric at validate
 time. Evaluated the same way an unmeasured latency percentile is: `evaluated:
 false` when this run's collector never recorded that name, counted toward
-`failed` rather than a silent pass. **Every run mode is judged**, the same
+`failed` rather than a silent pass. The test is the entry's `count` (records,
+not the total - see [`customMetrics`](#get-runsrunidreport)), so a counter
+nothing recorded through is unevaluated while a counter recorded only by zero
+is evaluated with `actual: 0`, which is what lets
+`{"custom.failures.value": 0}` pass a run that saw none (#1937). A counter
+never goes negative: `pm.metrics.counter` throws on a negative or non-finite
+increment, and `metric.record` reports `error` for one and records nothing.
+**Every run mode is judged**, the same
 rule the six fixed keys follow (#1564): `execute_scenario_run` folds
 `summary.custom_metrics` into the same `RunSummaryInputs` it evaluates
 thresholds against for a collection (sequential, design-mode) run, not only a
@@ -8342,7 +8349,11 @@ own per-step tallies live under `scenario.steps[].elements` instead (see
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/
 `max`; a `"counter"` or `"rate"` entry carries `count` and `value` (a running total, or a 0-100
-percentage). The same shape rides every [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
+percentage). `count` is always how many times the name was recorded: a trend's samples, a
+counter's records (four increments of 1024 are `count: 4, value: 4096`, never the total; #1937),
+a rate's evaluations. A counter's increments are finite and never negative - see
+[`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets). The same shape rides every
+[`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
 and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
 
 **`timingBreakdown` holds two independently-present halves.** The `avg*` fields

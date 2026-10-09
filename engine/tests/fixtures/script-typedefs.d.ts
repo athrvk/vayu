@@ -774,7 +774,7 @@ declare const pm: {
 	 */
 	metrics: {
 		/**
-		 * Add to a named running total, 1 when no increment is given.
+		 * Add to a named running total, 1 when no increment is given. A negative or non-finite increment throws a TypeError.
 		 * 
 		 * Example:
 		 * pm.metrics.counter('bytesOut', pm.response.size().total);

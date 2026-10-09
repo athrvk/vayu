@@ -1710,7 +1710,8 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.metrics.counter(name: string, increment?: number): void" },
     { "documentation",
-    "Add to a named running total, 1 when no increment is given.\n\n"
+    "Add to a named running total, 1 when no increment is given. A negative "
+    "or non-finite increment throws a TypeError.\n\n"
     "Example:\npm.metrics.counter('bytesOut', pm.response.size().total);" },
     { "sortText", "1_pm_metrics_counter" } });
 

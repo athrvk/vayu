@@ -28,6 +28,7 @@
 #include <unordered_map>
 
 #include "optional_assert.hpp"
+#include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/threshold_eval.hpp"
 
@@ -499,6 +500,41 @@ TEST (ThresholdEval, ACustomCounterReadsItsRunningTotalUnderValueOrRate) {
     const auto check = only_check (outcome);
     EXPECT_DOUBLE_EQ (check.actual, 4096.0);
     EXPECT_TRUE (check.passed);
+}
+
+// The ceiling `{"custom.failures.value": 0}` exists for: a counter that was
+// recorded, and only ever by zero, is evaluated and passes (#1937). Fed
+// through a real collector, because the defect was the collector's `count`.
+// Mutation check: derive `count` from the total in
+// `MetricsCollector::custom_metric_summaries` and this reads unevaluated.
+TEST (ThresholdEval, ACustomCounterRecordedOnlyAsZeroIsEvaluatedAndPasses) {
+    vayu::core::MetricsCollector collector ("zero-counter");
+    collector.record_custom_metric ("x", vayu::core::CustomMetricType::Counter, 0.0);
+    RunSummaryInputs inputs = measured_run ();
+    inputs.custom_metrics   = collector.custom_metric_summaries ();
+
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "custom.x.value", 0.0 } }), inputs);
+    const auto check = only_check (outcome);
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_DOUBLE_EQ (check.actual, 0.0);
+    EXPECT_TRUE (check.passed);
+}
+
+// The other half: a counter the plan registered but nothing ever recorded
+// through is unevaluated, the same answer a typo'd name gets.
+TEST (ThresholdEval, ACustomCounterRegisteredButNeverRecordedIsUnevaluated) {
+    vayu::core::MetricsCollector collector ("idle-counter");
+    ASSERT_TRUE (
+    collector.register_custom_metric ("x", vayu::core::CustomMetricType::Counter));
+    RunSummaryInputs inputs = measured_run ();
+    inputs.custom_metrics   = collector.custom_metric_summaries ();
+
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "custom.x.value", 0.0 } }), inputs);
+    const auto check = only_check (outcome);
+    EXPECT_FALSE (check.evaluated);
+    EXPECT_FALSE (check.passed);
 }
 
 TEST (ThresholdEval, ACustomRateReadsItsPercentageUnderRate) {

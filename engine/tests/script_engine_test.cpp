@@ -5498,6 +5498,49 @@ TEST_F (ScriptEngineTest, MetricsTrendRequiresAName) {
     << result.error_message;
 }
 
+// A counter only grows (#1937): a negative or non-finite increment throws and
+// records nothing. Mutation check: drop the range check in
+// `js_pm_metrics_counter` and every case records and succeeds.
+class ScriptEngineMetricsCounterRefusalTest
+: public ScriptEngineTest,
+  public ::testing::WithParamInterface<std::string_view> {};
+
+TEST_P (ScriptEngineMetricsCounterRefusalTest, ThrowsAndRecordsNothing) {
+    size_t recorded   = 0;
+    auto ctx          = scenario_test (request, response, env);
+    ctx.record_metric = [&recorded] (const std::string&,
+                        vayu::core::CustomMetricType, double) { ++recorded; };
+    auto result       = engine.execute (std::string (GetParam ()), ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("finite increment of 0 or more"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (recorded, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P (NegativeOrNonFinite,
+ScriptEngineMetricsCounterRefusalTest,
+::testing::Values ("pm.metrics.counter('x', -1);",
+"pm.metrics.counter('x', NaN);",
+"pm.metrics.counter('x', Infinity);",
+"pm.metrics.counter('x', 'not a number');"));
+
+// `increment?` in the declarations: an explicit `undefined` is the default,
+// and a zero is a real record (the zero-sum counter a ceiling of 0 watches).
+TEST_F (ScriptEngineTest, MetricsCounterTakesUndefinedAsTheDefaultAndRecordsAZero) {
+    std::vector<double> recorded;
+    auto ctx = scenario_test (request, response, env);
+    ctx.record_metric = [&recorded] (const std::string&, vayu::core::CustomMetricType,
+                        double value) { recorded.push_back (value); };
+    auto result = engine.execute (
+    "pm.metrics.counter('x', undefined); pm.metrics.counter('x', 0);", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (recorded.size (), 2u);
+    EXPECT_DOUBLE_EQ (recorded[0], 1.0);
+    EXPECT_DOUBLE_EQ (recorded[1], 0.0);
+}
+
 // The load-mode contract, and it is a decision rather than an omission: a
 // deferred `tests` script has already run against a recorded response and
 // cannot redirect a sequence that already happened. `validate_scripts` builds

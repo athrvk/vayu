@@ -274,10 +274,11 @@ inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS =
  *
  * `type` decides which of the fields beside `count` mean anything: a Trend
  * carries the percentiles and `max`, a Counter and a Rate carry only
- * `value` (a running total, or a 0-100 percentage) - the unused fields stay
- * at their default rather than the struct branching into three shapes,
- * which would cost every reader a variant visit for what is, in the end,
- * five doubles.
+ * `value` (a running total, or a 0-100 percentage) beside `count` (samples
+ * for a Trend, records for a Counter, evaluations for a Rate) - the unused
+ * fields stay at their default rather than the struct branching into three
+ * shapes, which would cost every reader a variant visit for what is, in the
+ * end, five doubles.
  */
 struct CustomMetricSummary {
     CustomMetricType type = CustomMetricType::Trend;
@@ -651,9 +652,9 @@ class MetricsCollector {
      *
      * A Trend value is clamped to zero before scaling into the histogram's
      * fixed-point range (see `constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE`);
-     * a Counter's value is added to the running total; a Rate's value is
-     * read as a boolean (non-zero is true) and counted toward the share
-     * that were true.
+     * a Counter's value is added to the running total and its record
+     * count goes up by one; a Rate's value is read as a boolean (non-zero is
+     * true) and counted toward the share that were true.
      */
     void record_custom_metric (const std::string& name, CustomMetricType type, double value);
 
@@ -1169,15 +1170,18 @@ class MetricsCollector {
      * A trend's histogram is allocated once, at registration, and recorded
      * into lock-free thereafter (`hdr_record_value_atomic`) - the same
      * shape `phase_histograms_` uses. A counter and a rate need no
-     * histogram at all: a plain atomic total, or an atomic true/total pair,
-     * says everything their summary reports.
+     * histogram at all: an atomic total/records pair, or an atomic
+     * true/total pair, says everything their summary reports. A counter's
+     * record count is its own atomic, never derived from the total (#1937):
+     * a counter that only ever recorded zeros was still recorded.
      */
     struct CustomMetricSlot {
         CustomMetricType type           = CustomMetricType::Trend;
-        struct hdr_histogram* histogram = nullptr; // Trend only.
-        std::atomic<double> counter_total{ 0.0 };  // Counter only.
-        std::atomic<uint64_t> rate_true{ 0 };      // Rate only.
-        std::atomic<uint64_t> rate_total{ 0 };     // Rate only.
+        struct hdr_histogram* histogram = nullptr;  // Trend only.
+        std::atomic<double> counter_total{ 0.0 };   // Counter only.
+        std::atomic<uint64_t> counter_records{ 0 }; // Counter only.
+        std::atomic<uint64_t> rate_true{ 0 };       // Rate only.
+        std::atomic<uint64_t> rate_total{ 0 };      // Rate only.
 
         CustomMetricSlot () = default;
         explicit CustomMetricSlot (CustomMetricType metric_type)
