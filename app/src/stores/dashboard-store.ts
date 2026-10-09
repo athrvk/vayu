@@ -216,6 +216,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		set({
 			mode: "stopped",
 			isStreaming: false,
+			// A stream callout is about a run still going; this one was stopped, and
+			// the report effect holds off while the callout is up (#1925).
+			error: null,
 		}),
 
 	setStreaming: (streaming) => set({ isStreaming: streaming }),

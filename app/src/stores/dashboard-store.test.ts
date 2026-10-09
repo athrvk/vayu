@@ -233,3 +233,14 @@ describe("dashboard-store setFinalReport", () => {
 		expect(useDashboardStore.getState().mode).toBe("completed");
 	});
 });
+
+describe("dashboard-store stopRun", () => {
+	it("clears a stream error, so the stopped run's report is not held off", () => {
+		useDashboardStore.getState().startRun("r");
+		useDashboardStore.getState().setError("The connection closed.");
+		useDashboardStore.getState().stopRun();
+		const s = useDashboardStore.getState();
+		expect(s.mode).toBe("stopped");
+		expect(s.error).toBeNull();
+	});
+});
