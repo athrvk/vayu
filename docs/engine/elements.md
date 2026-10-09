@@ -231,8 +231,8 @@ A **blank** `script.pre` / `.post` / `.setup` / `.teardown` (its own `script` em
 whitespace-only, `is_blank_script_element`) is inert everywhere but storage (issue #1609): `POST
 /compose` does not emit it, `compile_elements` compiles it to no runnable behaviour the same way an
 unknown kind does, so `ElementPipeline::run` reports no outcome for it at all - not even `skipped` -
-and `scenario_plan.cpp`'s `step_has_script` (the pre-request-script-under-load warning, a step's
-`preRequestScript` breakdown field) does not count it as carrying one. The stored row is untouched, so
+and `scenario_plan.cpp`'s `step_has_script` and `step_has_deferred_script` (the pre-request-script-under-load
+warning, a step's `preRequestScript` breakdown field) do not count it as carrying one. The stored row is untouched, so
 it still lists and edits in its own request's or collection's Elements tab.
 
 `script.setup` / `script.teardown` are `collection_only` - refused (a `400` naming the index and

@@ -475,18 +475,13 @@ struct RunContext {
 
     /**
      * `elements.scripts` (issue #1495), resolved once here from a payload
-     * `validate_elements_run_override` has already accepted: "asMarked"
-     * leaves each `script.*` element's own `config.inline` to decide,
-     * "allInline" / "allDeferred" force every one regardless of its own
-     * marking. Read by the load paths' producer/completion hooks per
-     * element - `extract.*` / `assert.*` / `timer.think` are never affected,
-     * since this key names only the script.* opt-in.
+     * `validate_elements_run_override` has already accepted (the mode itself
+     * is `vayu::core::ScriptsOverrideMode`, declared in `scenario_plan.hpp`).
+     * Read by the load paths' producer/completion hooks per element -
+     * `extract.*` / `assert.*` / `timer.think` are never affected, since this
+     * key names only the script.* opt-in.
      */
-    enum class ScriptsOverrideMode : std::uint8_t {
-        AsMarked,
-        AllInline,
-        AllDeferred
-    };
+    using ScriptsOverrideMode            = vayu::core::ScriptsOverrideMode;
     ScriptsOverrideMode scripts_override = ScriptsOverrideMode::AsMarked;
 
     /// `elements.includeScriptTime` (issue #1495): false (the default) times
@@ -1334,6 +1329,14 @@ struct RunSummaryInputs {
  * than by convention.
  */
 [[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
+
+/**
+ * @brief The summary's `warnings` array for a finished run (issue #1503): an
+ *        unresolved `{{token}}` that was sent anyway, and, for a scenario run,
+ *        the steps whose `script.pre` did not run inline (#1938). Declared here
+ *        so a test reaches the rule without driving a whole run.
+ */
+[[nodiscard]] nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context);
 
 /**
  * @brief Snapshot what each bounded store thinned away, for the run summary.
