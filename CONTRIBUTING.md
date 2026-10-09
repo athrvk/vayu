@@ -35,7 +35,7 @@ We are committed to providing a friendly, safe, and welcoming environment. Pleas
 3. **Make your changes** with clear commits
 4. **Add tests** for new functionality (if applicable)
 5. **Update documentation** if needed
-6. **Submit PR** with a clear description
+6. **Submit PR** - the template asks why, what to look at, what to skim, and what you ran
 
 ## Development Setup
 
@@ -493,7 +493,7 @@ causing retained references to large response bodies.
 - [ ] New tests added for new features (if applicable)
 - [ ] Documentation updated
 - [ ] Commit messages follow conventions
-- [ ] PR description explains changes
+- [ ] PR description answers the template's questions (why, review guide, verification)
 
 
 ## Getting Help

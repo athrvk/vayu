@@ -17,24 +17,42 @@ judgment calls below - what's obvious, what's risky, whether concerns are
 mixed - only work if you've actually looked, not inferred from the commit
 message alone.
 
-Use `.github/PULL_REQUEST_TEMPLATE.md`'s sections (`Description`, `Type of
-Change`, `Testing`, `Checklist`, `Related Issues`) as the floor. Add a new
-`##` section only when something doesn't fit any of those and earns its own
-heading - a CI-only fix riding along with the real change, a deliberate
+Use `.github/PULL_REQUEST_TEMPLATE.md`'s sections (`Why`, `What changed and
+why this way`, `Review guide`, `How it was verified`, `Docs and follow-ups`,
+and the optional `Visual changes`) as the floor. The template now encodes this
+skill's own rules, so the bullets below describe how to fill each section. Add
+a new `##` section only when something doesn't fit any of those and earns its
+own heading - a CI-only fix riding along with the real change, a deliberate
 deviation from what a linked issue asked for. Don't invent structure the
 change doesn't need.
 
+- **Pointers, not paragraphs.** Every section is a list of bullets, one or
+  two lines each, one idea per bullet. A paragraph is allowed only where a
+  decision needs its reasoning spelled out, and it still stays short.
 - **Scale to the diff, not to a template.** A single-file mechanical fix gets
-  one or two sentences and no bullets. A multi-file behavioral change gets a
-  short paragraph per decision that isn't obvious from reading the code. A
-  Description section longer than the diff it describes is a sign something
-  got restated instead of explained.
+  one line per section. A multi-file behavioral change gets one bullet per
+  decision that isn't obvious from reading the code. A section longer than
+  the diff it describes is a sign something got restated instead of
+  explained.
 - **Never restate the diff.** Before writing a sentence, ask: does the
   reviewer get this by reading the changed lines? If yes, cut it. "Added a
   `fold_scripts_into_elements` function that backfills elements from scripts"
   says nothing the function's name and body don't already say; *why* it's a
   startup repair pass instead of a migration, and what breaks if it were one,
   is the sentence worth writing.
+- **Write for a reader who is short on time: controlled language.** Short
+  sentences, one idea each, active voice, the thing named rather than "it"
+  or "this". Aim about 80% of the way to ASD-STE100 (the aerospace
+  controlled language); the full spec is too strict for a PR, the habit is
+  not. Inside a bullet this means one clause, not a chain of them. The
+  Review guide is where this pays off most: a reviewer skims it before
+  anything else.
+- **A diagram when the change crosses a process boundary.** A change that
+  moves data between the renderer, the Electron main process, the MCP server
+  and the engine, or alters a lifecycle (startup, run, quit), is easier to
+  grasp as a small Mermaid block under "What changed and why this way" than
+  as a paragraph. GitHub renders Mermaid in PR bodies. Prose that spends
+  three sentences on "A calls B which then tells C" is the signal to draw it.
 - **Say what's risky and what's safe to skip, in the open, not at the
   bottom.** This matters more for an agent-authored PR than a human one:
   mechanical changes an agent tends to produce in bulk - renames across
@@ -50,14 +68,15 @@ change doesn't need.
   description - don't paper over it with more headers.** A description that
   successfully explains two unrelated changes at once is a sign the PR should
   have been two PRs, not a sign the description is thorough.
-- **Testing section states what was run and why that covers the change**,
+- **"How it was verified" states what was run and why that covers the change**,
   not a log dump - the same scale-to-the-change judgment this repo's own
   `CLAUDE.md` already asks for when choosing what to run in the first place.
   If nothing needed to run (a comment or doc-only change), say that plainly
   instead of leaving the section as a stub.
-- **Checklist boxes are claims, not decoration.** Check what's actually true.
-  Leave a box unchecked with a short reason when it doesn't apply ("no tests -
-  doc-only change") rather than checking it to look complete.
+- **The Review guide names what to look at and what to skim, explicitly.**
+  Fill both halves of it. An empty "Safe to skim" on a 30-file diff is itself
+  a signal: either the mechanical part went unexamined or the PR mixes more
+  than it should.
 - **Title: imperative mood, present tense**, matching this repo's own recent
   commit style (`feat(app): ...`, `fix(engine): ...`) - describe what the
   change does, not what was wrong before it.
