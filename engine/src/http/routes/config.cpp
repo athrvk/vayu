@@ -11,11 +11,14 @@
  */
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <expected>
 #include <format>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -26,8 +29,38 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http::routes {
+
+/**
+ * @p text as a double, or nothing unless the whole of it is one.
+ *
+ * `std::from_chars` would be the primitive (`utils/parse.hpp`), but its
+ * floating-point overloads are unavailable below macOS 26 and the engine
+ * targets 13.3 (`docs/engine/building.md`). `std::stod` stops at the first
+ * character it cannot use, so "1.5x" is checked by how far it read, and the
+ * leading whitespace it skips is refused the way `parse_number` refuses it.
+ * Extern rather than file-local so `tests/config_route_test.cpp` can drive it:
+ * no seeded entry is typed `number` yet, so no route request reaches it.
+ */
+std::optional<double> parse_whole_double (const std::string& text) {
+    if (text.empty () || std::isspace (static_cast<unsigned char> (text.front ())) != 0) {
+        return std::nullopt;
+    }
+    try {
+        std::size_t consumed = 0;
+        const double parsed  = std::stod (text, &consumed);
+        if (consumed != text.size ()) {
+            return std::nullopt;
+        }
+        return parsed;
+    } catch (const std::logic_error&) {
+        // @deliberate: no digits (invalid_argument) or a value too large for a
+        // double (out_of_range) both mean "not a number" to the caller.
+        return std::nullopt;
+    }
+}
 
 namespace {
 
@@ -144,7 +177,9 @@ std::string config_value_string (const nlohmann::json& value) {
         return value.get<std::string> ();
     }
     if (value.is_number ()) {
-        return std::to_string (value.get<double> ());
+        // `dump` keeps an integer an integer: `to_string (double)` wrote 16 as
+        // "16.000000", which an integer entry now refuses.
+        return value.dump ();
     }
     if (value.is_boolean ()) {
         return value.get<bool> () ? "true" : "false";
@@ -183,27 +218,42 @@ std::unordered_map<std::string, std::string>& out) {
 /**
  * Why @p value is not a number this entry accepts, or an empty string.
  *
- * The bounds are parsed inside the same `try` as the value on purpose: a stored
- * `min` that does not parse is a broken row, and rejecting the write is the
- * safe direction for a validator that cannot tell whether the bound was met.
+ * @p parse maps a whole string to a number or nothing. The bounds go through
+ * it as well, on purpose: a stored `min` that does not parse is a broken row,
+ * and rejecting the write is the safe direction for a validator that cannot
+ * tell whether the bound was met.
  */
 template <typename Value, typename Parse>
 std::string numeric_rejection (const vayu::db::ConfigEntry& entry,
 const std::string& value,
 const char* expected,
 Parse parse) {
-    try {
-        const Value parsed = parse (value);
-        if (entry.min_value && parsed < parse (*entry.min_value)) {
+    std::string malformed =
+    std::format ("'{}' must be {} (got '{}')", entry.label, expected, value);
+
+    const std::optional<Value> parsed = parse (value);
+    if (!parsed) {
+        return malformed;
+    }
+    if (entry.min_value) {
+        const std::optional<Value> min = parse (*entry.min_value);
+        if (!min) {
+            return malformed;
+        }
+        if (*parsed < *min) {
             return std::format ("'{}' must be at least {} (got {})",
             entry.label, *entry.min_value, value);
         }
-        if (entry.max_value && parsed > parse (*entry.max_value)) {
+    }
+    if (entry.max_value) {
+        const std::optional<Value> max = parse (*entry.max_value);
+        if (!max) {
+            return malformed;
+        }
+        if (*parsed > *max) {
             return std::format ("'{}' must be at most {} (got {})", entry.label,
             *entry.max_value, value);
         }
-    } catch (...) {
-        return std::format ("'{}' must be {} (got '{}')", entry.label, expected, value);
     }
     return {};
 }
@@ -242,12 +292,13 @@ std::string enum_rejection (const vayu::db::ConfigEntry& entry, const std::strin
 /** Why @p value does not satisfy the entry's declared type, or an empty string. */
 std::string type_rejection (const vayu::db::ConfigEntry& entry, const std::string& value) {
     if (entry.type == "integer") {
-        return numeric_rejection<int> (entry, value, "an integer",
-        [] (const std::string& text) { return std::stoi (text); });
+        return numeric_rejection<int> (
+        entry, value, "an integer", [] (const std::string& text) {
+            return vayu::utils::parse_number<int> (text);
+        });
     }
     if (entry.type == "number") {
-        return numeric_rejection<double> (entry, value, "a number",
-        [] (const std::string& text) { return std::stod (text); });
+        return numeric_rejection<double> (entry, value, "a number", &parse_whole_double);
     }
     if (entry.type == "boolean") {
         if (value != "true" && value != "false") {

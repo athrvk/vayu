@@ -14,6 +14,7 @@
 #include <cctype>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -38,6 +39,8 @@ apply_config_update (vayu::db::Database& db, const std::string& body);
 std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
 const std::string& body,
 const std::function<void ()>& before_write);
+// The whole-string double check behind `number` entries (#1910).
+std::optional<double> parse_whole_double (const std::string& text);
 } // namespace vayu::http::routes
 
 namespace {
@@ -216,6 +219,61 @@ TEST_F (ConfigRouteTest, NonIntegerReportsType) {
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("Worker Threads"), std::string::npos);
     EXPECT_NE (message.find ("integer"), std::string::npos);
+}
+
+// `std::stoi` read the leading digits and ignored the rest, so "8abc" and "8 "
+// were stored as written and read back as 8 (#1910). Mutation check: put
+// `std::stoi` back behind the integer branch of `type_rejection` and the
+// trailing-text rows go green-to-red.
+TEST_F (ConfigRouteTest, AnIntegerWithTrailingTextOrSpaceIs400AndDoesNotPersist) {
+    const auto before = db_->get_config_entry ("workers");
+    ASSERT_HAS_VALUE (before);
+
+    for (const char* bad : { "8abc", "8 ", " 8", "8.5", "8.000000", "+8", "" }) {
+        const json update{ { "entries", { { "workers", bad } } } };
+        auto [status, body] =
+        vayu::http::routes::apply_config_update (*db_, update.dump ());
+        EXPECT_EQ (status, 400) << "'" << bad << "'";
+        const auto message = body["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("Worker Threads"), std::string::npos) << message;
+        EXPECT_NE (message.find ("integer"), std::string::npos) << message;
+    }
+
+    const auto after = db_->get_config_entry ("workers");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->value, before->value);
+}
+
+TEST_F (ConfigRouteTest, AWholeIntegerIsAccepted) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"8"}})");
+    EXPECT_EQ (status, 200) << body.dump ();
+}
+
+// The docs promise that a JSON number is coerced to its string; the coercion
+// used to write 16 as "16.000000", which only passed because `stoi` stopped
+// at the dot. Mutation check: restore `std::to_string (value.get<double> ())`
+// in `config_value_string` and this goes red.
+TEST_F (ConfigRouteTest, AJsonNumberForAnIntegerEntryIsStoredAsAnInteger) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":16}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    auto stored = db_->get_config_entry ("workers");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->value, "16");
+}
+
+// No seeded entry is typed `number`, so the route cannot reach this branch yet.
+TEST (ParseWholeDoubleTest, AcceptsOnlyAWholeNumber) {
+    using vayu::http::routes::parse_whole_double;
+    EXPECT_EQ (parse_whole_double ("1.5"), 1.5);
+    EXPECT_EQ (parse_whole_double ("-2"), -2.0);
+    EXPECT_EQ (parse_whole_double ("1e3"), 1000.0);
+
+    for (const char* bad : { "1.5x", "1.5 ", " 1.5", "", "abc", "1.5.2", "1e999" }) {
+        EXPECT_FALSE (parse_whole_double (bad).has_value ()) << "'" << bad << "'";
+    }
 }
 
 TEST_F (ConfigRouteTest, InvalidValueDoesNotPersist) {
