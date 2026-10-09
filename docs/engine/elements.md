@@ -180,8 +180,11 @@ step, through `ElementContext`'s lazily filled slot - a body over the
 is not parsed, and every such kind on that step reports `skipped` with the reason.
 
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
-(a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total) or `rate`
-(share of occurrences a `condition` matched, as a percentage). A trend or counter's `source` is one
+(a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total `value`
+beside a `count` of how many times it was recorded, #1937) or `rate`
+(share of occurrences a `condition` matched, as a percentage). A counter only grows: a source that
+reads a negative or non-finite number reports `error` (the message names the source) and records
+nothing, where a trend records the same value. A trend or counter's `source` is one
 of `{jsonpath}` (the same subset `extract.json` reads), `{header}`, `{latency}`, `{status}` or
 `{size}`; a rate's is `{condition: {field, operator, value}}` - a small, self-contained comparison
 rather than the full `control.if` grammar #1515 defines, which is not yet part of this registry and

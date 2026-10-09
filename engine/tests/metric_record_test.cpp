@@ -135,6 +135,51 @@ TEST_F (MetricRecordTest, CounterFromSizeRecordsTheBodyByteCount) {
     EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 10.0);
 }
 
+// A counter only grows (#1937). A trend reading the same negative value is
+// still recorded: its clamp lives in the collector, and nothing here changes
+// it. Mutation check: drop the counter guard in `MetricRecordElement::apply`
+// and the counter case records -5 and reports "ok".
+TEST_F (MetricRecordTest, ANegativeCounterIncrementIsAnErrorAndRecordsNothing) {
+    response                    = ok_json_response (200, "");
+    response.headers["X-Delta"] = "-5";
+    auto elements               = one_element (
+    metric_element ("delta", "counter", nlohmann::json{ { "header", "X-Delta" } }));
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "error");
+    const auto& message = outcomes[0].message;
+    ASSERT_HAS_VALUE (message);
+    EXPECT_NE (message->find ("finite increment of 0 or more"), std::string::npos)
+    << *message;
+    EXPECT_TRUE (recorded.empty ());
+}
+
+TEST_F (MetricRecordTest, ANonFiniteCounterIncrementIsAnErrorAndRecordsNothing) {
+    response                    = ok_json_response (200, "");
+    response.headers["X-Delta"] = "inf";
+    auto elements               = one_element (
+    metric_element ("delta", "counter", nlohmann::json{ { "header", "X-Delta" } }));
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "error");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+TEST_F (MetricRecordTest, ANegativeTrendValueIsStillRecorded) {
+    response                    = ok_json_response (200, "");
+    response.headers["X-Delta"] = "-5";
+    auto elements               = one_element (
+    metric_element ("delta", "trend", nlohmann::json{ { "header", "X-Delta" } }));
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok");
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), -5.0);
+}
+
 TEST_F (MetricRecordTest, TrendFromStatusRecordsTheStatusCode) {
     response      = ok_json_response (429, "");
     auto elements = one_element (
@@ -295,6 +340,22 @@ TEST (MetricsCollectorCustom, CounterAccumulatesARunningTotal) {
     auto summaries = collector.custom_metric_summaries ();
     ASSERT_HAS_VALUE (summaries);
     EXPECT_DOUBLE_EQ (summaries->at ("bytesOut").value, 350.0);
+    EXPECT_EQ (summaries->at ("bytesOut").count, 2u);
+}
+
+// `count` is how many times the counter was recorded, never its total cast to
+// an integer (#1937). Mutation check: derive `count` from `counter_total` in
+// `custom_metric_summaries` and this reads 3072.
+TEST (MetricsCollectorCustom, CounterCountIsTheNumberOfRecordsNotTheTotal) {
+    MetricsCollector collector ("run-2b");
+    for (int i = 0; i < 3; ++i) {
+        collector.record_custom_metric ("bytesOut", CustomMetricType::Counter, 1024.0);
+    }
+    auto summaries = collector.custom_metric_summaries ();
+    ASSERT_HAS_VALUE (summaries);
+    const auto& bytes_out = summaries->at ("bytesOut");
+    EXPECT_EQ (bytes_out.count, 3u);
+    EXPECT_DOUBLE_EQ (bytes_out.value, 3072.0);
 }
 
 TEST (MetricsCollectorCustom, RateReportsThePercentageThatWereTrue) {

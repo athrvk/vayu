@@ -238,6 +238,15 @@ class MetricRecordElement final : public Element {
             ctx.outcome_message = "no numeric value at the '" + kind + "' source";
             return;
         }
+        // A counter only grows (#1937); a trend keeps its own clamp in the
+        // collector.
+        if (type_ == CustomMetricType::Counter && (!std::isfinite (*value) || *value < 0.0)) {
+            ctx.outcome_status = "error";
+            ctx.outcome_message =
+            "a counter needs a finite increment of 0 or more; the '" + kind +
+            "' source read a negative or non-finite value";
+            return;
+        }
         ctx.record_metric (name_, type_, *value);
         ctx.outcome_status = "ok";
     }

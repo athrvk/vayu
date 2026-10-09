@@ -832,6 +832,7 @@ double value) {
     }
     case CustomMetricType::Counter:
         atomic_add_double (slot->counter_total, value);
+        slot->counter_records.fetch_add (1, std::memory_order_relaxed);
         break;
     case CustomMetricType::Rate:
         slot->rate_total.fetch_add (1, std::memory_order_relaxed);
@@ -868,7 +869,8 @@ MetricsCollector::custom_metric_summaries () const {
             break;
         case CustomMetricType::Counter:
             summary.value = slot->counter_total.load (std::memory_order_relaxed);
-            summary.count = static_cast<size_t> (summary.value);
+            summary.count = static_cast<size_t> (
+            slot->counter_records.load (std::memory_order_relaxed));
             break;
         case CustomMetricType::Rate: {
             const uint64_t total = slot->rate_total.load (std::memory_order_relaxed);

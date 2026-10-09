@@ -1169,15 +1169,18 @@ class MetricsCollector {
      * A trend's histogram is allocated once, at registration, and recorded
      * into lock-free thereafter (`hdr_record_value_atomic`) - the same
      * shape `phase_histograms_` uses. A counter and a rate need no
-     * histogram at all: a plain atomic total, or an atomic true/total pair,
-     * says everything their summary reports.
+     * histogram at all: an atomic total/records pair, or an atomic
+     * true/total pair, says everything their summary reports. A counter's
+     * record count is its own atomic, never derived from the total (#1937):
+     * a counter that only ever recorded zeros was still recorded.
      */
     struct CustomMetricSlot {
         CustomMetricType type           = CustomMetricType::Trend;
-        struct hdr_histogram* histogram = nullptr; // Trend only.
-        std::atomic<double> counter_total{ 0.0 };  // Counter only.
-        std::atomic<uint64_t> rate_true{ 0 };      // Rate only.
-        std::atomic<uint64_t> rate_total{ 0 };     // Rate only.
+        struct hdr_histogram* histogram = nullptr;  // Trend only.
+        std::atomic<double> counter_total{ 0.0 };   // Counter only.
+        std::atomic<uint64_t> counter_records{ 0 }; // Counter only.
+        std::atomic<uint64_t> rate_true{ 0 };       // Rate only.
+        std::atomic<uint64_t> rate_total{ 0 };      // Rate only.
 
         CustomMetricSlot () = default;
         explicit CustomMetricSlot (CustomMetricType metric_type)

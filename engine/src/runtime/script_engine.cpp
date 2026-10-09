@@ -8475,7 +8475,10 @@ JSValue js_pm_metrics_trend (JSContext* ctx, JSValueConst this_val, int argc, JS
     return JS_UNDEFINED;
 }
 
-// pm.metrics.counter(name, increment = 1) - added to a running total.
+// pm.metrics.counter(name, increment = 1) - added to a running total. An
+// explicit `undefined` takes the default, as a JS default parameter would.
+// A negative or non-finite increment is refused rather than recorded (#1937):
+// a counter only grows, and NaN or Infinity would poison the total for good.
 JSValue js_pm_metrics_counter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto* data = metrics_context (ctx, "counter");
@@ -8490,9 +8493,15 @@ JSValue js_pm_metrics_counter (JSContext* ctx, JSValueConst this_val, int argc, 
         return JS_EXCEPTION;
     }
     double increment = 1.0;
-    if (argc >= 2 && JS_ToFloat64 (ctx, &increment, argv[1]) != 0) {
-        return JS_ThrowTypeError (
-        ctx, "pm.metrics.counter(name, increment?) needs a numeric increment");
+    if (argc >= 2 && !JS_IsUndefined (argv[1])) {
+        if (JS_ToFloat64 (ctx, &increment, argv[1]) != 0) {
+            return JS_ThrowTypeError (ctx,
+            "pm.metrics.counter(name, increment?) needs a numeric increment");
+        }
+        if (!std::isfinite (increment) || increment < 0.0) {
+            return JS_ThrowTypeError (
+            ctx, "pm.metrics.counter(name, increment?) needs a finite increment of 0 or more");
+        }
     }
     data->record_metric (*name, vayu::core::CustomMetricType::Counter, increment);
     return JS_UNDEFINED;
