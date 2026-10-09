@@ -42,29 +42,11 @@ export interface DashboardHeaderProps {
 		concurrency?: number;
 		comment?: string;
 		/**
-		 * How many `data` rows the run bound (issue #993), off the stored
-		 * snapshot - which keeps the count in the rows' place, since the rows
-		 * themselves are never persisted. Absent for a run without a data file.
+		 * How many `data` rows the run bound (issue #993): off the stored
+		 * snapshot once the report loads - which keeps the count in the rows'
+		 * place, since the rows themselves are never persisted - and off the
+		 * launch config while live. Absent for a run without a data file.
 		 */
-		dataRowCount?: number;
-	};
-}
-
-export interface RunMetadataProps {
-	requestUrl?: string;
-	requestMethod?: string;
-	startTime?: number;
-	endTime?: number;
-	mode: DashboardMode;
-	elapsedDuration: number;
-	setupOverhead?: number; // in seconds
-	configuration?: {
-		mode?: string;
-		duration?: number | string | undefined;
-		targetRps?: number;
-		concurrency?: number;
-		comment?: string;
-		/** See {@link DashboardHeaderProps}: the row count, never the rows. */
 		dataRowCount?: number;
 	};
 }
@@ -135,16 +117,6 @@ export interface DashboardDerived {
 
 export interface RequestResponseViewProps {
 	report: RunReport | null;
-}
-
-export interface LatencyChartProps {
-	data: LoadTestMetrics[];
-	isCompleted: boolean;
-}
-
-export interface ThroughputChartProps {
-	data: LoadTestMetrics[];
-	isCompleted: boolean;
 }
 
 // ============================================================================

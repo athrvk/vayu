@@ -2294,6 +2294,11 @@ export interface RunReport {
 			maxRedirects?: number;
 			/** See {@link RunSummary.acceptEncoding} (issue #1488). */
 			acceptEncoding?: boolean;
+			/**
+			 * How many `data` rows the run bound (issue #993); the rows themselves
+			 * are never stored. Absent for a run without a data file.
+			 */
+			dataRowCount?: number;
 		};
 		/**
 		 * The document this run was measured against (issue #637), echoed from

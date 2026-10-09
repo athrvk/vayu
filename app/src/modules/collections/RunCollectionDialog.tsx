@@ -404,6 +404,7 @@ export default function RunCollectionDialog({
 							mode: "constant_concurrency",
 							concurrency: virtualUserCount,
 							duration: `${durationSeconds.trim()}s`,
+							dataRowCount: dataFile?.parsed.rows.length,
 						});
 						loadTestService.startMonitoring(runId);
 						openTab({ type: "dashboard", entityId: null });

@@ -473,6 +473,30 @@ describe("running the sequence as a load test", () => {
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
 	});
 
+	it("hands the dashboard the row count, and nothing for a run without a file (#1940)", async () => {
+		const { unmount } = render(
+			<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
+		);
+		enableLoadTest();
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [new File(["user\nada\ngrace"], "users.csv")] },
+		});
+		await waitFor(() => expect(screen.queryByText("users.csv")).toBeTruthy());
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		succeedWith("run_load_8");
+
+		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBe(2);
+		unmount();
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		succeedWith("run_load_9");
+
+		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBeUndefined();
+	});
+
 	it("describes the rows as a load run binds them, not as iterations", async () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();

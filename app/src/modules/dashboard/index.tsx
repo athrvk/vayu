@@ -14,7 +14,6 @@
  *
  * Architecture:
  * - DashboardHeader: Title, status, stop button
- * - RunMetadata: API endpoint, config, timing
  * - MetricsView: Live metrics, charts
  * - RequestResponseView: Status codes, errors, timing breakdown
  */
@@ -291,6 +290,7 @@ export default function LoadTestDashboard() {
 				comment: loadTestConfig.comment,
 				rampUpDuration: loadTestConfig.rampUpDuration,
 				startConcurrency: loadTestConfig.startConcurrency,
+				dataRowCount: loadTestConfig.dataRowCount,
 			};
 		}
 		return undefined;

@@ -479,8 +479,7 @@ after the frame left the run's retained ring.
 
 | Component | Role |
 |---|---|
-| `DashboardHeader.tsx` | Title, run status, stop button |
-| `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
+| `DashboardHeader.tsx` | Run status, method and URL, stop button, and the config summary line (concurrency, mode, a data-driven run's row count, elapsed) |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
 | `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests. An expanded validation-failure sample lists each failing test's `trace.failures` message, not just the `ERR` chip and pass/fail counts |
 | `shared.tsx`, `tooltips.tsx`, `format.ts` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording + the `fmt()` number formatter (its own module so `shared.tsx` exports only components) |
