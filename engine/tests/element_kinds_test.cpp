@@ -11,11 +11,12 @@
  *        `scenario_runner_test.cpp` does not already exercise through a full
  *        collection run: `extract.regex`, `extract.header`,
  *        `assert.jsonpath`, `assert.contains`, `assert.duration`,
- *        `assert.size`, and `control.if`'s `matches` (the four kinds that
- *        run a user's pattern through `compile_user_regex`, #1874). `extract.json`, `assert.status` and `timer.think`
- *        have their own coverage there (the acceptance-criterion scenario
- *        and the declarative-failure / spacing cases); this file is the
- *        "one case per kind" the issue's Tests section asks for, at the
+ *        `assert.size`, and `control.if`'s `matches` (the kinds that run a
+ *        user's pattern go through `compile_user_regex`, #1874).
+ *        `extract.json`, `assert.status` and `timer.think` have their own
+ *        coverage there (the acceptance-criterion scenario and the
+ *        declarative-failure / spacing cases); this file is the "one case
+ *        per kind" the issue's Tests section asks for, at the
  *        `ElementContext` level rather than through HTTP - every kind here
  *        is declarative and reads only the response the pipeline hands it.
  *
@@ -468,6 +469,11 @@ std::vector<CompiledElement> control_if (const std::string& condition) {
     { "kind", "control.if" }, { "config", { { "condition", condition } } } });
 }
 
+std::vector<CompiledElement> control_if_raw (const nlohmann::json& condition) {
+    return one_element (nlohmann::json{ { "id", "e1" },
+    { "kind", "control.if" }, { "config", { { "condition", condition } } } });
+}
+
 TEST_F (ElementKindsTest, ControlIfMatchesRunsTheStepOnlyWhenThePatternMatches) {
     const auto elements = control_if ("{{tier}} matches /^go/");
 
@@ -484,6 +490,24 @@ TEST_F (ElementKindsTest, ControlIfMatchesSkipsOnAnInvalidPatternAndSaysWhy) {
     EXPECT_NE (message_of (outcomes[0]).find ("invalid regular expression: "),
     std::string::npos)
     << message_of (outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, ControlIfMatchesWithoutSlashesSkipsAndSaysWhy) {
+    const auto outcomes =
+    run_before_with_tier (control_if ("{{tier}} matches ^go"), "gold");
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "skipped");
+    EXPECT_NE (message_of (outcomes[0]).find ("needs a /pattern/"), std::string::npos)
+    << message_of (outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, AWrongTypedPatternMemberCompilesWithoutThrowing) {
+    EXPECT_NO_THROW (one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.contains" },
+    { "config", { { "mode", "matches" }, { "text", 5 } } } }));
+    EXPECT_NO_THROW (one_element (nlohmann::json{ { "id", "e2" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.a" }, { "regex", 5 } } } }));
+    EXPECT_NO_THROW (control_if_raw (7));
 }
 
 } // namespace

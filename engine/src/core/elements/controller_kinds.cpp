@@ -83,10 +83,18 @@ void mark_skip (ElementContext& ctx, const std::string& reason) {
 // control.if
 // ---------------------------------------------------------------------------
 
+/// A string member, or "" when it is absent or not a string: read in a
+/// constructor, where an exception would escape `compile_elements` instead of
+/// becoming the element's own "error" outcome.
+std::string string_member (const nlohmann::json& config, const char* key) {
+    const auto found = config.find (key);
+    return found != config.end () && found->is_string () ? found->get<std::string> () : "";
+}
+
 class ControlIfElement final : public Element {
     public:
     explicit ControlIfElement (const nlohmann::json& config)
-    : condition_ (config.value ("condition", "")),
+    : condition_ (string_member (config, "condition")),
       parsed_ (parse_condition (condition_)) {
         if (const auto& parsed = parsed_; parsed && parsed->op == "matches") {
             pattern_ = compile_matches_operand (parsed->right);

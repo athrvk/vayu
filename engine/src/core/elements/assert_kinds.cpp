@@ -109,13 +109,21 @@ using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 // `exists` (at least one hit); `negate` flips the verdict.
 // ---------------------------------------------------------------------------
 
+/// A string member, or "" when it is absent or not a string: read in a
+/// constructor, where an exception would escape `compile_elements` instead of
+/// becoming the element's own "error" outcome.
+std::string string_member (const nlohmann::json& config, const char* key) {
+    const auto found = config.find (key);
+    return found != config.end () && found->is_string () ? found->get<std::string> () : "";
+}
+
 class AssertJsonPathElement final : public Element {
     public:
     explicit AssertJsonPathElement (nlohmann::json config)
     : config_ (std::move (config)) {
         path_ = detail::parse_json_path (config_.value ("path", ""));
         if (config_.contains ("regex")) {
-            regex_ = compile_user_regex (config_.value ("regex", ""));
+            regex_ = compile_user_regex (string_member (config_, "regex"));
         }
     }
 
@@ -190,8 +198,8 @@ class AssertContainsElement final : public Element {
     public:
     explicit AssertContainsElement (nlohmann::json config)
     : config_ (std::move (config)) {
-        if (config_.value ("mode", "contains") == "matches") {
-            pattern_ = compile_user_regex (config_.value ("text", ""));
+        if (string_member (config_, "mode") == "matches") {
+            pattern_ = compile_user_regex (string_member (config_, "text"));
         }
     }
 
