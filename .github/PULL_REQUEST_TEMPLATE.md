@@ -1,36 +1,40 @@
 <!-- Title: imperative, present tense, repo style - feat(app): ..., fix(engine): ...
-     Types that pass the title check are listed in CONTRIBUTING.md. -->
+     Types that pass the title check are listed in CONTRIBUTING.md.
+     Every section below: bullets of one or two lines. A paragraph only where
+     a decision needs its reasoning spelled out. -->
 
 ## Why
 
-<!-- One to three sentences: the problem, and why now. Link the issue, do not
+<!-- One or two bullets: the problem, and why now. Link the issue, do not
      retell it. -->
 
 Closes #
 
 ## What changed and why this way
 
-<!-- Only what the diff cannot say: the approach taken, the alternative
-     rejected and why, any deliberate deviation from the linked issue.
-     A one-file fix needs one sentence. Never restate the diff. -->
+<!-- One bullet per decision the diff cannot explain: the approach taken,
+     the alternative rejected and why, any deliberate deviation from the
+     linked issue. A one-file fix needs one line. Never restate the diff. -->
 
 ## Review guide
 
-**Look closely at:** <!-- the files or decisions that need a second pair of
-eyes, and what goes wrong downstream if they are wrong -->
+**Look closely at:**
+<!-- one bullet per file or decision that needs a second pair of eyes, with
+     what goes wrong downstream if it is wrong -->
 
-**Safe to skim:** <!-- the mechanical part: renames, regenerated files, docs
-kept in step with the code -->
+**Safe to skim:**
+<!-- one bullet per mechanical part: renames, regenerated files, docs kept
+     in step with the code -->
 
 ## How it was verified
 
-<!-- What ran and why that covers the change. "Doc-only; mkdocs build
-     --strict passes" is a complete answer. -->
+<!-- One bullet per check that ran and what it covers. "Doc-only; mkdocs
+     build --strict passes" is a complete answer. -->
 
 ## Docs and follow-ups
 
-<!-- Docs updated in this PR, or "none needed". An issue number for anything
-     deferred - the tracker is the only backlog. -->
+<!-- One bullet per doc updated, or "none needed". One bullet per issue
+     filed for anything deferred - the tracker is the only backlog. -->
 
 <!-- ## Visual changes
      Add this section with an embedded screenshot when anything a user sees

@@ -26,23 +26,27 @@ own heading - a CI-only fix riding along with the real change, a deliberate
 deviation from what a linked issue asked for. Don't invent structure the
 change doesn't need.
 
+- **Pointers, not paragraphs.** Every section is a list of bullets, one or
+  two lines each, one idea per bullet. A paragraph is allowed only where a
+  decision needs its reasoning spelled out, and it still stays short.
 - **Scale to the diff, not to a template.** A single-file mechanical fix gets
-  one or two sentences and no bullets. A multi-file behavioral change gets a
-  short paragraph per decision that isn't obvious from reading the code. A
-  section longer than the diff it describes is a sign something got restated
-  instead of explained.
+  one line per section. A multi-file behavioral change gets one bullet per
+  decision that isn't obvious from reading the code. A section longer than
+  the diff it describes is a sign something got restated instead of
+  explained.
 - **Never restate the diff.** Before writing a sentence, ask: does the
   reviewer get this by reading the changed lines? If yes, cut it. "Added a
   `fold_scripts_into_elements` function that backfills elements from scripts"
   says nothing the function's name and body don't already say; *why* it's a
   startup repair pass instead of a migration, and what breaks if it were one,
   is the sentence worth writing.
-- **Write for a reader who is short on time: controlled-language prose.**
-  Short sentences, one idea each, active voice, the thing named rather than
-  "it" or "this". Aim about 80% of the way to ASD-STE100 (the aerospace
+- **Write for a reader who is short on time: controlled language.** Short
+  sentences, one idea each, active voice, the thing named rather than "it"
+  or "this". Aim about 80% of the way to ASD-STE100 (the aerospace
   controlled language); the full spec is too strict for a PR, the habit is
-  not. The Review guide is where this pays off most: a reviewer skims it
-  before anything else.
+  not. Inside a bullet this means one clause, not a chain of them. The
+  Review guide is where this pays off most: a reviewer skims it before
+  anything else.
 - **A diagram when the change crosses a process boundary.** A change that
   moves data between the renderer, the Electron main process, the MCP server
   and the engine, or alters a lifecycle (startup, run, quit), is easier to
