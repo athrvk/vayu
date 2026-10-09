@@ -247,6 +247,11 @@ const std::string& collection_id) {
         }
     }
 
+    scopes.baseline.environment_id = environment_id;
+    scopes.baseline.collection_id  = collection_id;
+    scopes.baseline.environment    = scopes.environment;
+    scopes.baseline.globals        = scopes.globals;
+    scopes.baseline.collection     = scopes.collection;
     return scopes;
 }
 
@@ -287,87 +292,120 @@ std::vector<std::string> secret_variable_values (const ScriptVariableScopes& sco
     return values;
 }
 
-// Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
-//
-// A scope is rewritten only when a script actually changed one of its
-// variables. Before this, every Send rewrote all three scopes unconditionally,
-// which bumped each scope's `updated_at` for a run that touched nothing and,
-// worse, pushed every variable through the serializer - so any field the
-// serializer did not know about was erased from disk by merely sending a
-// request (issue #135). Comparing the parsed on-disk blob with the in-memory
-// one is what makes "no script wrote a variable" mean "no write at all".
-void persist_script_variables (vayu::db::Database& db,
-const std::optional<std::string>& environment_id,
-const std::string& collection_id,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables) {
-    if (environment_id.has_value ()) {
-        try {
-            if (auto db_env = db.get_environment (*environment_id)) {
-                if (vayu::json::parse_variables (db_env->variables) != env) {
-                    vayu::db::Environment updated = *db_env;
-                    updated.variables  = vayu::json::serialize_variables (env);
-                    updated.updated_at = exchange_now_ms ();
-                    db.save_environment (updated);
-                }
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("http",
-            "Persist environment variables failed: " + std::string (e.what ()));
+namespace {
+
+bool only_value_changed (const vayu::Variable& loaded, const vayu::Variable& now) {
+    vayu::Variable loaded_with_new_value = loaded;
+    loaded_with_new_value.value          = now.value;
+    return loaded_with_new_value == now;
+}
+
+// The delta rule (#1878). `loaded` is the scope as the run read it, `now` as
+// the run left it, `stored` a read of the row taken just before the write.
+//  - a name in `loaded` and not in `now` was unset (or cleared): removed;
+//  - a name in `now` and not in `loaded` was set: written whole, created_at
+//    included;
+//  - a name whose only change is its value gets that value on the stored
+//    entry, so a concurrent edit to its other fields survives; any other
+//    change (an `extract.*` write replaces the whole variable) is written
+//    whole, as is a changed name another writer removed meanwhile.
+// A name the run left as loaded keeps whatever `stored` holds.
+vayu::Environment apply_scope_delta (vayu::Environment stored,
+const vayu::Environment& loaded,
+const vayu::Environment& now) {
+    for (const auto& entry : loaded) {
+        if (!now.contains (entry.first)) {
+            stored.erase (entry.first);
         }
     }
+    for (const auto& [name, variable] : now) {
+        const auto was = loaded.find (name);
+        if (was != loaded.end () && was->second == variable) {
+            continue;
+        }
+        const auto current = stored.find (name);
+        if (was != loaded.end () && current != stored.end () &&
+        only_value_changed (was->second, variable)) {
+            current->second.value = variable.value;
+        } else {
+            stored[name] = variable;
+        }
+    }
+    return stored;
+}
 
+// @p row with the run's delta applied and `updated_at` stamped, or nothing
+// when there is no row or the delta leaves its variables as they are.
+template <typename Row>
+std::optional<Row> with_scope_delta (std::optional<Row> row,
+const vayu::Environment& loaded,
+const vayu::Environment& now) {
+    if (!row) {
+        return std::nullopt;
+    }
+    const auto stored = vayu::json::parse_variables (row->variables);
+    auto merged       = apply_scope_delta (stored, loaded, now);
+    if (merged == stored) {
+        return std::nullopt;
+    }
+    row->variables  = vayu::json::serialize_variables (merged);
+    row->updated_at = exchange_now_ms ();
+    return row;
+}
+
+// One scope's write, isolated so a failure in it costs the other scopes
+// nothing.
+void persist_scope (std::string_view what, const std::function<void ()>& write) {
     try {
-        if (auto db_globals = db.get_globals ()) {
-            if (vayu::json::parse_variables (db_globals->variables) != globals) {
-                vayu::db::Globals updated = *db_globals;
-                updated.variables  = vayu::json::serialize_variables (globals);
-                updated.updated_at = exchange_now_ms ();
-                db.save_globals (updated);
-            }
-        }
+        write ();
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "http", "Persist globals failed: " + std::string (e.what ()));
-    }
-
-    if (!collection_id.empty ()) {
-        try {
-            if (auto db_collection = db.get_collection (collection_id)) {
-                if (vayu::json::parse_variables (db_collection->variables) != collectionVariables) {
-                    vayu::db::Collection updated = *db_collection;
-                    updated.variables =
-                    vayu::json::serialize_variables (collectionVariables);
-                    updated.updated_at = exchange_now_ms ();
-                    db.create_collection (updated);
-                }
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("http",
-            "Persist collection variables failed: " + std::string (e.what ()));
-        }
+        vayu::utils::log_error ("http",
+        "Persist " + std::string (what) + " failed: " + std::string (e.what ()));
     }
 }
 
+} // namespace
+
 void persist_script_variables (vayu::db::Database& db,
-const vayu::db::Run& run,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables) {
-    std::string collection_id;
-    if (run.request_id.has_value ()) {
-        try {
-            if (auto db_request = db.get_request (*run.request_id)) {
-                collection_id = db_request->collection_id;
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("http",
-            "Persist collection variables failed: " + std::string (e.what ()));
+const ScriptVariableScopes& scopes,
+const std::function<void ()>& before_write) {
+    const auto staged = [&before_write] {
+        if (before_write) {
+            before_write ();
         }
-    }
-    persist_script_variables (
-    db, run.environment_id, collection_id, env, globals, collectionVariables);
+    };
+
+    const ScriptVariableBaseline& baseline = scopes.baseline;
+
+    db.with_lock ([&] {
+        if (baseline.environment_id.has_value ()) {
+            persist_scope ("environment variables", [&] {
+                if (auto row = with_scope_delta (db.get_environment (*baseline.environment_id),
+                    baseline.environment, scopes.environment)) {
+                    staged ();
+                    db.save_environment (*row);
+                }
+            });
+        }
+
+        persist_scope ("globals", [&] {
+            if (auto row = with_scope_delta (
+                db.get_globals (), baseline.globals, scopes.globals)) {
+                staged ();
+                db.save_globals (*row);
+            }
+        });
+
+        if (!baseline.collection_id.empty ()) {
+            persist_scope ("collection variables", [&] {
+                if (auto row = with_scope_delta (db.get_collection (baseline.collection_id),
+                    baseline.collection, scopes.collection)) {
+                    staged ();
+                    db.create_collection (*row);
+                }
+            });
+        }
+    });
 }
 
 // Execute a script and handle exceptions uniformly

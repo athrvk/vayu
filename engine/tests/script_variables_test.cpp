@@ -1,8 +1,8 @@
 /**
  * @file tests/script_variables_test.cpp
  * @brief Tests for the stored-variables round trip, the design-run persist of
- *        the three variable scopes (issue #135), and the collection chain
- *        those scopes are loaded from (issue #234).
+ *        the three variable scopes (issues #135 and #1878), and the collection
+ *        chain those scopes are loaded from (issue #234).
  *
  * A variables blob is written by the app and rewritten by the engine after
  * every design run, so the two halves of `parse_variables`/`serialize_variables`
@@ -22,12 +22,14 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -42,9 +44,24 @@ using nlohmann::json;
 using vayu::json::parse_variables;
 using vayu::json::serialize_variables;
 
+namespace vayu::http::routes {
+// The competing clients' route cores (environments.cpp, globals.cpp,
+// collections.cpp); each returns {http_status, json_body}.
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+save_globals_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+} // namespace vayu::http::routes
+
 namespace {
 
+using vayu::http::routes::load_script_variable_scopes;
 using vayu::http::routes::persist_script_variables;
+using vayu::http::routes::ScriptVariableScopes;
 
 // A blob in the shape the app writes: every field, including the ordering key.
 constexpr const char* APP_BLOB =
@@ -202,6 +219,18 @@ class PersistScriptVariablesTest : public ::testing::Test {
         return c ? c->updated_at : 0;
     }
 
+    ScriptVariableScopes load () {
+        return load_script_variable_scopes (*db_, run_);
+    }
+
+    static void run_script (ScriptVariableScopes& scopes, const std::string& source) {
+        vayu::runtime::ScriptContext ctx;
+        vayu::http::routes::bind_variable_scopes (ctx, scopes);
+        vayu::runtime::ScriptEngine engine;
+        const auto result = engine.execute (source, ctx);
+        ASSERT_TRUE (result.success) << result.error_message;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     vayu::db::Run run_;
 };
@@ -211,11 +240,7 @@ class PersistScriptVariablesTest : public ::testing::Test {
 // it. Nothing here modifies a variable - a plain Send must leave the blobs
 // exactly as the app wrote them.
 TEST_F (PersistScriptVariablesTest, ARunThatChangesNothingLeavesEveryScopeUntouched) {
-    auto env       = parse_variables (stored_environment_variables ());
-    auto globals   = parse_variables (stored_globals_variables ());
-    auto coll_vars = parse_variables (stored_collection_variables ());
-
-    persist_script_variables (*db_, run_, env, globals, coll_vars);
+    persist_script_variables (*db_, load ());
 
     EXPECT_EQ (stored_environment_variables (), APP_BLOB);
     EXPECT_EQ (stored_globals_variables (), APP_BLOB);
@@ -227,18 +252,16 @@ TEST_F (PersistScriptVariablesTest, ARunThatChangesNothingLeavesEveryScopeUntouc
 // When a script *does* write, the scope is rewritten - and the untouched
 // fields of the untouched variables still survive the trip.
 TEST_F (PersistScriptVariablesTest, AScriptWriteKeepsTheOrderingKeyOfEveryOtherVariable) {
-    auto env       = parse_variables (stored_environment_variables ());
-    auto globals   = parse_variables (stored_globals_variables ());
-    auto coll_vars = parse_variables (stored_collection_variables ());
+    auto scopes = load ();
 
     // What pm.collectionVariables.set("fresh", ...) leaves behind: a new key
     // stamped with its own creation time, every existing key untouched.
     vayu::Variable fresh;
-    fresh.value        = "new";
-    fresh.created_at   = 1784967999999;
-    coll_vars["fresh"] = fresh;
+    fresh.value                = "new";
+    fresh.created_at           = 1784967999999;
+    scopes.collection["fresh"] = fresh;
 
-    persist_script_variables (*db_, run_, env, globals, coll_vars);
+    persist_script_variables (*db_, scopes);
 
     auto stored = json::parse (stored_collection_variables ());
     EXPECT_EQ (stored["token"]["createdAt"], 1784967810149LL);
@@ -260,10 +283,10 @@ TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyG
     bare.request_id.reset ();
     bare.environment_id.reset ();
 
-    auto globals       = parse_variables (stored_globals_variables ());
-    globals["g"].value = "1";
+    auto scopes               = load_script_variable_scopes (*db_, bare);
+    scopes.globals["g"].value = "1";
 
-    persist_script_variables (*db_, bare, {}, globals, {});
+    persist_script_variables (*db_, scopes);
 
     EXPECT_EQ (json::parse (stored_globals_variables ())["g"]["value"], "1");
     EXPECT_EQ (stored_environment_variables (), APP_BLOB);
@@ -273,19 +296,16 @@ TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyG
 // `pm.environment.unset()` (#184) is the first thing that can make a scope
 // *smaller*, and a removal is the write most easily lost: every other one shows
 // up as a changed value, while this one shows up only as a key that is no
-// longer there. The scope is rewritten because the two maps differ, and the
-// serializer writes the map it is given rather than merging into what is on
-// disk - so an absent key stays absent.
+// longer there. The delta carries it as a name the run loaded and no longer
+// holds.
 TEST_F (PersistScriptVariablesTest, AnUnsetVariableIsRemovedFromTheStoredBlob) {
-    auto env       = parse_variables (stored_environment_variables ());
-    auto globals   = parse_variables (stored_globals_variables ());
-    auto coll_vars = parse_variables (stored_collection_variables ());
+    auto scopes = load ();
 
-    ASSERT_EQ (env.count ("token"), 1U);
-    env.erase ("token"); // what pm.environment.unset("token") leaves behind
-    env["kept"] = vayu::Variable{ "still here", false, true };
+    ASSERT_EQ (scopes.environment.count ("token"), 1U);
+    scopes.environment.erase ("token"); // what pm.environment.unset("token") leaves behind
+    scopes.environment["kept"] = vayu::Variable{ "still here", false, true };
 
-    persist_script_variables (*db_, run_, env, globals, coll_vars);
+    persist_script_variables (*db_, scopes);
 
     auto stored = json::parse (stored_environment_variables ());
     EXPECT_FALSE (stored.contains ("token")) << stored.dump ();
@@ -295,17 +315,244 @@ TEST_F (PersistScriptVariablesTest, AnUnsetVariableIsRemovedFromTheStoredBlob) {
 // `clear()` empties one scope and no other. An empty blob is `{}`, not a
 // scope left untouched because "nothing to write" was mistaken for "no change".
 TEST_F (PersistScriptVariablesTest, AClearedScopeIsStoredAsEmptyAndTheOthersAreUntouched) {
-    auto env       = parse_variables (stored_environment_variables ());
-    auto globals   = parse_variables (stored_globals_variables ());
-    auto coll_vars = parse_variables (stored_collection_variables ());
+    auto scopes = load ();
 
-    env.clear (); // what pm.environment.clear() leaves behind
+    scopes.environment.clear (); // what pm.environment.clear() leaves behind
 
-    persist_script_variables (*db_, run_, env, globals, coll_vars);
+    persist_script_variables (*db_, scopes);
 
     EXPECT_EQ (stored_environment_variables (), "{}");
     EXPECT_EQ (stored_globals_variables (), APP_BLOB);
     EXPECT_EQ (stored_collection_variables (), APP_BLOB);
+}
+
+// ---------------------------------------------------------------------------
+// persist_script_variables against another writer (issue #1878)
+//
+// A send, a stream or a collection run loads its scopes at the start and
+// persists at the end, seconds or minutes later. Anything another client wrote
+// to the same row in between - the editor's autosave, `POST /globals`, another
+// send's own persist - must survive. Each case runs once per writable scope.
+// ---------------------------------------------------------------------------
+
+enum class Scope : std::uint8_t { Environment, Globals, Collection };
+
+std::string scope_name (const ::testing::TestParamInfo<Scope>& info) {
+    switch (info.param) {
+    case Scope::Environment: return "Environment";
+    case Scope::Globals: return "Globals";
+    case Scope::Collection: return "Collection";
+    }
+    return "Unknown";
+}
+
+class PersistAgainstAnotherWriterTest : public PersistScriptVariablesTest,
+                                        public ::testing::WithParamInterface<Scope> {
+    protected:
+    /// The script object that writes this scope.
+    static std::string pm_scope () {
+        switch (GetParam ()) {
+        case Scope::Environment: return "pm.environment";
+        case Scope::Globals: return "pm.globals";
+        case Scope::Collection: return "pm.collectionVariables";
+        }
+        return "";
+    }
+
+    static vayu::Environment& written (ScriptVariableScopes& scopes) {
+        switch (GetParam ()) {
+        case Scope::Environment: return scopes.environment;
+        case Scope::Globals: return scopes.globals;
+        case Scope::Collection: return scopes.collection;
+        }
+        return scopes.collection;
+    }
+
+    /// Another client replacing the scope's whole variables map, the way the
+    /// app's editor and `POST /globals` do, through the route core.
+    void write_from_another_client (const json& variables) {
+        const json body{ { "variables", variables } };
+        int status = 0;
+        switch (GetParam ()) {
+        case Scope::Environment:
+            status = vayu::http::routes::update_environment_response (*db_, "env_1", body)
+                     .first;
+            break;
+        case Scope::Globals:
+            status = vayu::http::routes::save_globals_response (*db_, body).first;
+            break;
+        case Scope::Collection:
+            status =
+            vayu::http::routes::update_collection_response (*db_, "col_1", body).first;
+            break;
+        }
+        ASSERT_EQ (status, 200);
+    }
+
+    /// The stored map with one more variable, `region`, beside it.
+    void add_region_from_another_client () {
+        auto variables      = json::parse (stored ());
+        variables["region"] = json{ { "value", "eu" }, { "enabled", true } };
+        write_from_another_client (variables);
+    }
+
+    std::string stored () {
+        switch (GetParam ()) {
+        case Scope::Environment: return stored_environment_variables ();
+        case Scope::Globals: return stored_globals_variables ();
+        case Scope::Collection: return stored_collection_variables ();
+        }
+        return "";
+    }
+
+    int64_t stored_updated_at () {
+        switch (GetParam ()) {
+        case Scope::Environment: {
+            auto row = db_->get_environment ("env_1");
+            return row ? row->updated_at : 0;
+        }
+        case Scope::Globals: {
+            auto row = db_->get_globals ();
+            return row ? row->updated_at : 0;
+        }
+        case Scope::Collection: return stored_collection_updated_at ();
+        }
+        return 0;
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P (EveryWritableScope,
+PersistAgainstAnotherWriterTest,
+::testing::Values (Scope::Environment, Scope::Globals, Scope::Collection),
+scope_name);
+
+// The acceptance case: an edit made while the run was in flight and the
+// run's own script write both reach disk. Persisting the run's snapshot
+// instead reverts `region`.
+TEST_P (PersistAgainstAnotherWriterTest, AnEditMadeDuringTheRunSurvivesTheRunsScriptWrite) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    run_script (scopes, pm_scope () + ".set('token', 'from-the-run');");
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now["token"]["value"], "from-the-run") << stored_now.dump ();
+    EXPECT_EQ (stored_now["region"]["value"], "eu") << stored_now.dump ();
+}
+
+// No script write is no write at all, even though the row no longer matches
+// what the run loaded (#135): the row stays exactly as the other client left
+// it, `updated_at` included.
+TEST_P (PersistAgainstAnotherWriterTest, ARunThatSetsNothingLeavesAnotherClientsEditAlone) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    const std::string after_edit = stored ();
+    const int64_t edited_at      = stored_updated_at ();
+
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_EQ (stored (), after_edit);
+    EXPECT_EQ (stored_updated_at (), edited_at);
+}
+
+// `set()` changes a value and nothing else, so only the value is carried: a
+// flag another client changed on the same variable meanwhile survives.
+TEST_P (PersistAgainstAnotherWriterTest, AValueSetKeepsAFlagAnotherClientChanged) {
+    auto scopes                   = load ();
+    auto variables                = json::parse (stored ());
+    variables["token"]["enabled"] = false;
+    write_from_another_client (variables);
+    run_script (scopes, pm_scope () + ".set('token', 'from-the-run');");
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now["token"]["value"], "from-the-run");
+    EXPECT_EQ (stored_now["token"]["enabled"], false) << stored_now.dump ();
+    EXPECT_EQ (stored_now["token"]["secret"], true);
+    EXPECT_EQ (stored_now["token"]["createdAt"], 1784967810149LL);
+}
+
+// An `extract.*` write replaces the whole variable (`set_scope_variable`), so
+// more than its value changed: the run's variable is written whole, not as a
+// value onto the stored entry, while the variable another client added
+// meanwhile still survives.
+TEST_P (PersistAgainstAnotherWriterTest,
+AWholeVariableReplacementIsWrittenWholeBesideAnotherClientsEdit) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    written (scopes)["token"] = vayu::Variable{ "extracted", false, true, "string" };
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now["token"]["value"], "extracted") << stored_now.dump ();
+    EXPECT_EQ (stored_now["token"]["secret"], false) << stored_now.dump ();
+    EXPECT_EQ (stored_now["token"]["type"], "string") << stored_now.dump ();
+    EXPECT_FALSE (stored_now["token"].contains ("createdAt")) << stored_now.dump ();
+    EXPECT_EQ (stored_now["region"]["value"], "eu") << stored_now.dump ();
+}
+
+// An unset removes the name the run loaded, and only that name: a variable
+// another client added meanwhile is not the run's to remove.
+TEST_P (PersistAgainstAnotherWriterTest, AnUnsetRemovesOnlyTheLoadedName) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    run_script (scopes, pm_scope () + ".unset('token');");
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_FALSE (stored_now.contains ("token")) << stored_now.dump ();
+    EXPECT_EQ (stored_now["region"]["value"], "eu") << stored_now.dump ();
+}
+
+// `clear()` is an unset of every name the run loaded, never "store empty".
+TEST_P (PersistAgainstAnotherWriterTest, AClearRemovesOnlyWhatTheRunLoaded) {
+    auto scopes = load ();
+    add_region_from_another_client ();
+    run_script (scopes, pm_scope () + ".clear();");
+
+    persist_script_variables (*db_, scopes);
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now.size (), 1U) << stored_now.dump ();
+    EXPECT_EQ (stored_now["region"]["value"], "eu") << stored_now.dump ();
+}
+
+// The read, the merge and the write are one lock scope: a second send
+// persisting its own write into the window waits for this one to commit and
+// then merges onto it. Without the lock it writes first and this persist,
+// holding a read from before it, overwrites `session`.
+TEST_P (PersistAgainstAnotherWriterTest, AnotherSendPersistingInsideTheWindowIsNotLost) {
+    auto first                        = load ();
+    auto second                       = load ();
+    written (first)["token"].value    = "from-the-first-send";
+    written (second)["session"].value = "from-the-second-send";
+
+    vayu::tests::CompetingWriter other_send (
+    [this, &second] { persist_script_variables (*db_, second); });
+    persist_script_variables (*db_, first, other_send.probe ());
+    other_send.join ();
+
+    auto stored_now = json::parse (stored ());
+    EXPECT_EQ (stored_now["token"]["value"], "from-the-first-send")
+    << stored_now.dump ();
+    EXPECT_EQ (stored_now["session"]["value"], "from-the-second-send")
+    << stored_now.dump ();
+}
+
+// A row deleted while the run was in flight stays deleted: the persist edits
+// a fresh read and has nothing to edit.
+TEST_F (PersistScriptVariablesTest, ACollectionDeletedDuringTheRunIsNotRecreated) {
+    auto scopes = load ();
+    db_->delete_collection ("col_1");
+    scopes.collection["cursor"].value = "abc";
+
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_FALSE (db_->get_collection ("col_1").has_value ());
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +565,6 @@ TEST_F (PersistScriptVariablesTest, AClearedScopeIsStoredAsEmptyAndTheOthersAreU
 // agreement one (both notations answer the same) and the hazard one (a script
 // write still reaches the leaf collection alone).
 // ---------------------------------------------------------------------------
-
-using vayu::http::routes::load_script_variable_scopes;
 
 class ScriptVariableScopesTest : public ::testing::Test {
     protected:
@@ -468,9 +713,9 @@ TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInThe
 
 // The hazard #226 declined to risk, end to end: a script reads an inherited
 // name and writes its own, and the persist that follows must touch the leaf
-// collection only. If the chain were merged into one writable map, the diff
-// against the leaf's stored blob would report the ancestor's variables as new
-// and write them into the leaf permanently.
+// collection only. If a read merged the chain into the writable map, the delta
+// would report the ancestor's variables as set and write them into the leaf
+// permanently.
 TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnlyTheLeaf) {
     const std::string root_before = stored_variables ("col_root");
 
@@ -491,8 +736,7 @@ TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnl
     ctx);
     ASSERT_TRUE (result.success) << result.error_message;
 
-    persist_script_variables (
-    *db_, run_, scopes.environment, scopes.globals, scopes.collection);
+    persist_script_variables (*db_, scopes);
 
     auto leaf = json::parse (stored_variables ("col_leaf"));
     EXPECT_EQ (leaf["cursor"]["value"], "abc");

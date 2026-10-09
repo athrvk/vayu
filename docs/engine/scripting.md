@@ -1297,7 +1297,27 @@ pm.environment.set('auth_token', 'new_token_value');
 `enabled`, `type` and creation time are kept. A name that does not exist yet is
 created with the defaults and stamped with its creation time, so it appears at
 the bottom of that scope in the variables editor rather than above the rows
-that were already there. A scope no script wrote is not persisted at all.
+that were already there.
+
+A run reaches disk as a **delta**, not a copy of the scope (issue #1878). The
+scopes are loaded when a send, stream or collection run starts and written
+back once when it ends; at that point each scope's row is read again and only
+what the run's scripts changed against what it loaded is applied to it, under
+one database lock:
+
+- a name the run set that it did not load is written whole, creation time
+  included;
+- a name whose value alone changed gets that value, and keeps whatever
+  `enabled`, `secret` or `type` the row holds now; a name whose other fields
+  changed too (an `extract.*` element writes a whole variable) is written
+  whole;
+- a name the run loaded and no longer holds (`unset()`, `clear()`) is removed.
+
+Everything else on the row is left as it is now, so an edit made in the
+variables editor, a `POST /globals` or another send's own write while the run
+was in flight survives it. A scope whose delta changes nothing is not written
+at all, so its `updated_at` does not move, and a row deleted meanwhile is not
+recreated.
 
 ### The six methods every scope has
 
@@ -1321,8 +1341,10 @@ console.log(pm.environment.toObject());
 `unset()` is not the same as `set(name, '')`. An emptied variable is still an
 enabled row, so `{{auth_token}}` resolves to the empty string; an unset one is
 gone, and the template resolves as it does for a name nobody defined. The
-removal reaches disk the same way any other write does - the scope is rewritten
-after the run because the map the script left differs from the stored one.
+removal reaches disk as part of the run's delta: a name the run loaded and no
+longer holds is removed from the stored scope, while a name another client
+added meanwhile is not the run's to remove, so `clear()` empties only what the
+run loaded.
 
 A scope the run was not given (a design run with no active environment, say)
 behaves as an empty one: `get` is `undefined`, `has` is `false`, `toObject` is

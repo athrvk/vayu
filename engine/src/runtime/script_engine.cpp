@@ -6471,9 +6471,8 @@ js_pm_scope_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 
 // The method with no workaround: setting a variable to "" leaves an enabled
 // empty variable behind, which is not the same thing to `{{template}}`
-// resolution as the variable being gone. The removal reaches disk through
-// persist_script_variables, which rewrites a scope whenever the map it ends
-// with differs from the one on disk.
+// resolution as the variable being gone. persist_script_variables carries the
+// removal to disk as a name the run loaded and no longer holds (#1878).
 //
 // Like `set` and `clear`, this erases from the scope's own map only. On the
 // collection scope that is the request's immediate parent: unsetting a name

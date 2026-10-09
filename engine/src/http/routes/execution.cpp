@@ -1362,11 +1362,12 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
  * The run row this execution carries, and the persisted half of it.
  *
  * Built even for a transient execution, because it is also how the handler
- * carries scope: `load_script_variable_scopes` and `persist_script_variables`
- * read its `request_id` / `environment_id`, and the cookie scope comes from the
- * same field. Only the *persisted* half - the id, the config snapshot, the
- * create - is conditional, so a transient execution resolves variables and
- * cookies exactly as a recorded one does.
+ * carries scope: `load_script_variable_scopes` reads its `request_id` /
+ * `environment_id` (and `persist_script_variables` writes back to the rows that
+ * load named), and the cookie scope comes from the same field. Only the
+ * *persisted* half - the id, the config snapshot, the create - is conditional,
+ * so a transient execution resolves variables and cookies exactly as a
+ * recorded one does.
  *
  * @return the message to answer 400 with, already logged, or nothing.
  */
@@ -1381,13 +1382,6 @@ DesignSend& send) {
     send.elements = std::make_shared<const std::vector<vayu::core::CompiledElement>> (
     vayu::core::compile_elements (json.value ("elements", nlohmann::json::array ())));
 
-    // The run row. Built even for a transient execution, because it is also
-    // how this handler carries scope: `load_script_variable_scopes` and
-    // `persist_script_variables` read its `request_id` / `environment_id`,
-    // and the cookie scope below comes from the same field. Only the
-    // *persisted* half - the id, the config snapshot, the create - is
-    // conditional, so a transient execution resolves variables and cookies
-    // exactly as a recorded one does.
     send.run.type   = vayu::RunType::Design;
     send.run.status = vayu::RunStatus::Running;
     seed_run_times (send.run, now_ms ());
@@ -1799,8 +1793,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             }
             // Best-effort and after both scripts, so one `set()` per
             // run reaches disk rather than one per half.
-            persist_script_variables (
-            db, run, scopes.environment, scopes.globals, scopes.collection);
+            persist_script_variables (db, scopes);
         }
 
         // No verdict: a stream's body is an event stream, not a
@@ -1901,8 +1894,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     /*send.stream=*/nullptr, validation, scripts, elements);
 
     // Persist script-set variables (design mode only; best-effort)
-    persist_script_variables (
-    ctx.db, send.run, scopes.environment, scopes.globals, scopes.collection);
+    persist_script_variables (ctx.db, scopes);
 
     // Build and send response
     // Engine returns 200 - the server's status is in the response body
