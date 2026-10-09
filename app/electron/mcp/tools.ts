@@ -3317,6 +3317,11 @@ function describeScenarioStep(index: number, row: ScenarioStepRow): string {
  * and would refuse it for the same reason, so failing early costs nothing and
  * says so in the same words.
  *
+ * A refusal names the host (`gate.error` does) and never the composed URL: the
+ * URL is secret-resolved, so its query string or userinfo can carry a secret
+ * variable's value or a literal credential, and this error is not passed through
+ * the reveal-off withholding (#1892).
+ *
  * Throws {@link ToolArgError} for a refusal; engine transport failures propagate
  * to the caller's `engineErrorResult`.
  */
@@ -3337,6 +3342,8 @@ async function preflightScenarioSteps(
 				signal
 			);
 		} catch (err) {
+			// Invariant: engine compose errors name fields, never resolved values, so
+			// the message is safe to relay with reveal off.
 			throw new ToolArgError(
 				`Cannot compose ${step}: ${err instanceof Error ? err.message : String(err)}. ` +
 					`Nothing was started - the engine resolves this same plan before it creates the ` +
@@ -3347,7 +3354,7 @@ async function preflightScenarioSteps(
 		const gate = checkAllowlist(url, ctx.config);
 		if (!gate.ok) {
 			throw new ToolArgError(
-				`Refusing to run this collection: ${step} sends to ${url}. ${gate.error} ` +
+				`Refusing to run this collection: ${step} is not allowed. ${gate.error} ` +
 					`Nothing was started - a scenario runs as one sequence, so a single step the ` +
 					`allowlist does not cover refuses all ${rows.length} of them.`
 			);
