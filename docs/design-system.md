@@ -2973,40 +2973,39 @@ group by.
 
 ### Status Badges / Pills
 
-**Live (running):**
-```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
-  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-  LIVE
-</span>
-```
+**Run status pill (`RunStatusPill`, `components/shared`):** the one pill for a
+run's status, rendered as a `Badge variant="chip"` (it paints its own
+background) with a glyph and the word - `Running` (spinner), `Completed`,
+`Stopped`, `Failed`. The dashboard header draws it for the settled modes and
+for a streaming run, and nothing for idle.
 
-**Completed / Stopped:**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
-  COMPLETED
-</span>
+<RunStatusPill status="failed" />
 ```
 
 **Status is never colour alone.** A badge, a chip or a glyph that encodes its
 state only as a hue says nothing to a red/green confusion, a monochrome display
 or a greyscale screenshot - and every status surface here is small, where hue is
 hardest to judge. The rule is redundancy: **shape or a word carries the state,
-and the colour agrees with it.** The LIVE pill above carries the word; the
-history row carries the shape.
+and the colour agrees with it.** The pill carries the word and the
+glyph; the history row carries the shape.
 
-**Run status glyph (`RunItem`):** one lucide glyph per status, in the family's
-`-text` token (the bare token is a fill and fails AA as a small foreground - see
-"The bare token is the fill"). It replaced a bare coloured dot, which was five
-identical circles in five colours.
+**Run status map (`RUN_STATUS`, `components/shared/run-status.ts`):** one entry
+per status - label, one lucide glyph, the family's `-text` token (the bare token
+is a fill and fails AA as a small foreground - see "The bare token is the fill")
+and the pill's tint. It replaced a bare coloured dot, which was five identical
+circles in five colours. **One map feeds the dashboard header's pill and the
+history row's glyph** (`RunStatusGlyph`), so a status cannot be green in one and
+neutral in the other; a second status-to-token table in a module is the defect
+it removed (#1932, a failed run drawn as Completed).
 
 ```tsx
-const STATUS_GLYPH = {
-  completed: { icon: CircleCheck,  className: "text-status-success-text" },
-  failed:    { icon: CircleX,      className: "text-status-error-text" },
-  running:   { icon: Loader2,      className: "text-status-running-text animate-spin" },
-  stopped:   { icon: CircleSlash,  className: "text-status-stopped-text" },
-  pending:   { icon: Circle,       className: "text-muted-foreground" },
+const RUN_STATUS = {
+  completed: { label: "Completed", icon: CircleCheck, text: "text-status-success-text", tint: "bg-status-success/15 border-status-success/25" },
+  failed:    { label: "Failed",    icon: CircleX,     text: "text-status-error-text",   tint: "bg-status-error/15 border-status-error/25" },
+  running:   { label: "Running",   icon: Loader2,     text: "text-status-running-text", tint: "bg-status-running/15 border-status-running/25", spin: true },
+  stopped:   { label: "Stopped",   icon: CircleSlash, text: "text-status-stopped-text", tint: "bg-status-stopped/15 border-status-stopped/25" },
+  pending:   { label: "Pending",   icon: Circle,      text: "text-muted-foreground",    tint: "bg-muted border-border" },
 };
 ```
 
@@ -3858,6 +3857,8 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/ResponsePositionButton.tsx` | The Dock's response-position switch - click flips Beside / Below, right-click picks Beside / Below / Auto, icon names the destination, request tabs only |
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
+| `app/src/components/shared/run-status.ts` | `RUN_STATUS`: the one status-to-label/glyph/token map behind the dashboard pill and the history row |
+| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both read from `RUN_STATUS` |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |

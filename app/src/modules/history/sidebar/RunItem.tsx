@@ -14,7 +14,13 @@ import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import type { TimeRow } from "@/lib/time-value";
-import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
+import {
+	MethodBadge,
+	RowContextMenu,
+	RunStatusGlyph,
+	RUN_STATUS,
+	type RowAction,
+} from "@/components/shared";
 import { TimeTooltip } from "@/components/shared/TimeValue";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
@@ -32,47 +38,7 @@ import {
 	Pin,
 	PinOff,
 	AlertTriangle,
-	CircleCheck,
-	CircleX,
-	CircleSlash,
-	Circle,
 } from "lucide-react";
-
-/**
- * One glyph per status - shape first, colour second (#1691).
- *
- * This was a bare coloured dot, and the colour was the whole message: five rows
- * of identical circles that a red/green confusion, a monochrome display or a
- * screenshot pasted into an issue flattens into one. The shape is what carries
- * the status now, and the colour agrees with it rather than being asked to say
- * it alone - the redundancy rule in `docs/design-system.md` (Status Badges).
- *
- * The word and the left-edge bar this row used to carry are still gone, and for
- * the reason they went: a per-row "8h ago" and a status word cost
- * roughly two lines of dead space per row for what a day-group header
- * (`HistoryList.tsx`'s `groupRunsByDay`) or a hover carries instead. The full
- * word and the start time are in the row's time card, and the row's
- * accessible name (the stretched activator below) states the status outright -
- * so the glyph is decorative to a screen reader and `aria-hidden`.
- *
- * `-text`, not the bare fill token: these are small glyphs, and the bare token
- * is a fill that fails AA as a foreground (`status-color-tokens.test.ts`).
- */
-const STATUS_GLYPH: Record<Run["status"], { icon: typeof Circle; className: string }> = {
-	completed: { icon: CircleCheck, className: "text-status-success-text" },
-	failed: { icon: CircleX, className: "text-status-error-text" },
-	running: { icon: Loader2, className: "text-status-running-text animate-spin" },
-	stopped: { icon: CircleSlash, className: "text-status-stopped-text" },
-	pending: { icon: Circle, className: "text-muted-foreground" },
-};
-
-const STATUS_LABEL: Record<Run["status"], string> = {
-	completed: "Completed",
-	failed: "Failed",
-	running: "Running",
-	stopped: "Stopped",
-	pending: "Pending",
-};
 
 interface RunItemProps {
 	run: Run;
@@ -244,7 +210,7 @@ export default function RunItem({
 	// said nothing a hover can't say instead). The comment joins it there too:
 	// it's occasional, not the row's identity, so it earns a hover rather than
 	// a permanent line.
-	const cardRows: TimeRow[] = [{ label: "Status", value: STATUS_LABEL[run.status] }];
+	const cardRows: TimeRow[] = [{ label: "Status", value: RUN_STATUS[run.status].label }];
 	if (run.summary?.comment) cardRows.push({ label: "Comment", value: run.summary.comment });
 
 	// A bare fallback identity for the rare row with neither a url nor a
@@ -271,9 +237,6 @@ export default function RunItem({
 	// it is one hover away, on the same text, the way a truncated url or
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
-
-	// Shape carries the status, colour agrees with it - see STATUS_GLYPH.
-	const { icon: StatusGlyph, className: statusGlyphClass } = STATUS_GLYPH[run.status];
 
 	const hasMeta =
 		(scenario &&
@@ -307,10 +270,10 @@ export default function RunItem({
 				    a run whose work is a sequence), path or collection name, then
 				    the badges and actions a hover or a pinned/warned state reveals. */}
 				<div className="flex h-5 min-w-0 items-center gap-2">
-					<StatusGlyph
-						className={cn("size-3 shrink-0", statusGlyphClass)}
-						aria-hidden="true"
-					/>
+					{/* Glyph only, no word: a per-row status word costs two lines of
+					    dead space, and the time card and the activator's accessible
+					    name state it. The glyph and its colours are `RUN_STATUS`'s. */}
+					<RunStatusGlyph status={run.status} className="size-3 shrink-0" />
 					{method ? (
 						<MethodBadge
 							method={method}

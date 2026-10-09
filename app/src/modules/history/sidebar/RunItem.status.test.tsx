@@ -21,7 +21,7 @@
  * whole point - a guard that compared the rendered markup as-is would pass on
  * five identical dots wearing five different colour classes, which is exactly
  * the state this replaced. Mutation check: give every status the same `icon` in
- * `STATUS_GLYPH` and the first case fails while the colours still differ.
+ * `RUN_STATUS` and the first case fails while the colours still differ.
  */
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";

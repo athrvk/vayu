@@ -223,6 +223,10 @@ export default function LoadTestDashboard() {
 		[currentRunId, setStopping, stopRun, showToast]
 	);
 
+	// A failed run is a finished one: it lays out as the report, only the header's
+	// pill says how it ended (#1932).
+	const isReport = mode === "completed" || mode === "failed";
+
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
 		return historicalMetrics.length > 0
@@ -234,7 +238,7 @@ export default function LoadTestDashboard() {
 	const hasValidReportData = finalReport && finalReport.summary?.totalRequests > 0;
 
 	const displayMetrics = useMemo((): DisplayMetrics | null => {
-		if (mode === "completed" && finalReport) {
+		if (isReport && finalReport) {
 			if (finalReport.summary.totalRequests === 0 && historicalTotalRequests > 0) {
 				return lastHistoricalMetrics as DisplayMetrics;
 			}
@@ -260,7 +264,7 @@ export default function LoadTestDashboard() {
 			};
 		}
 		return (currentMetrics || lastHistoricalMetrics) as DisplayMetrics | null;
-	}, [mode, finalReport, currentMetrics, lastHistoricalMetrics, historicalTotalRequests]);
+	}, [isReport, finalReport, currentMetrics, lastHistoricalMetrics, historicalTotalRequests]);
 
 	const runMetadata = hasValidReportData ? finalReport?.metadata : null;
 
@@ -304,7 +308,7 @@ export default function LoadTestDashboard() {
 	const historicalStartTime =
 		historicalMetrics.length > 0 ? historicalMetrics[0].timestamp : null;
 	const historicalEndTime =
-		mode === "completed" && historicalMetrics.length > 0
+		isReport && historicalMetrics.length > 0
 			? historicalMetrics[historicalMetrics.length - 1].timestamp
 			: null;
 
@@ -319,7 +323,7 @@ export default function LoadTestDashboard() {
 
 	const elapsedDuration = useMemo(() => {
 		// Use accurate testDuration from report if available (in seconds, convert to ms)
-		if (mode === "completed" && finalReport?.summary?.testDuration) {
+		if (isReport && finalReport?.summary?.testDuration) {
 			return finalReport.summary.testDuration * 1000;
 		}
 		if (historicalMetrics.length > 0) {
@@ -327,7 +331,7 @@ export default function LoadTestDashboard() {
 			return lastMetric.elapsed_seconds * 1000;
 		}
 		return startTime && endTime ? endTime - startTime : 0;
-	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
+	}, [isReport, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
 	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
 	const crumbs = useMemo(
@@ -337,10 +341,10 @@ export default function LoadTestDashboard() {
 				id: "run",
 				// The live view and the finished report are different places to be,
 				// and the crumb is the only line that says which one this is.
-				label: mode === "completed" ? "Load test report" : "Live load test",
+				label: isReport ? "Load test report" : "Live load test",
 			},
 		],
-		[mode, revealDrawerView]
+		[isReport, revealDrawerView]
 	);
 
 	// Empty state - placed after all hooks so the hook call order stays stable
@@ -455,7 +459,7 @@ export default function LoadTestDashboard() {
 				<MetricsView
 					metrics={displayMetrics}
 					historicalMetrics={historicalMetrics}
-					isCompleted={mode === "completed"}
+					isCompleted={isReport}
 					finalReport={finalReport}
 					targetRps={
 						displayConfiguration?.targetRps ??

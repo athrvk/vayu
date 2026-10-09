@@ -40,7 +40,7 @@ vi.mock("@/services", () => ({
 
 const crumb = () => screen.getByRole("navigation", { name: "Run location" });
 
-function seed(mode: "running" | "completed") {
+function seed(mode: "running" | "completed" | "failed") {
 	useDashboardStore.setState({ currentRunId: "run_1", mode, isStreaming: mode === "running" });
 }
 
@@ -52,6 +52,12 @@ describe("the dashboard's crumb line", () => {
 		unmount();
 
 		seed("completed");
+		render(<LoadTestDashboard />);
+		expect(crumb().textContent).toBe("HistoryLoad test report");
+	});
+
+	it("lays a failed run out as the finished report, not the live view (#1932)", () => {
+		seed("failed");
 		render(<LoadTestDashboard />);
 		expect(crumb().textContent).toBe("HistoryLoad test report");
 	});

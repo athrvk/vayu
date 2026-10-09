@@ -44,6 +44,16 @@ export interface LoadTestRunConfig {
 }
 
 /**
+ * The mode a finished run settles in. A stop the user asked for stays "stopped"
+ * whatever the report says; otherwise the engine's own status decides, so a
+ * failed run is not shown as a neutral "completed" (#1932).
+ */
+function finalModeFor(current: DashboardMode, reportStatus: string | undefined): DashboardMode {
+	if (current === "stopped" || reportStatus === "stopped") return "stopped";
+	return reportStatus === "failed" ? "failed" : "completed";
+}
+
+/**
  * Seconds in a duration the engine accepts: digits with at most one decimal
  * point and an optional `ms`/`s`/`m`/`h` unit, where a bare number is seconds
  * (see `parse_duration_ms` in `engine/include/vayu/core/load_pacing.hpp`, which
@@ -305,13 +315,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			if (isRunInProgress(report.metadata?.status)) return state;
 			return {
 				finalReport: report,
-				// Set mode based on report status - keep "stopped" if already stopped
-				mode:
-					state.mode === "stopped"
-						? "stopped"
-						: report.metadata?.status === "stopped"
-							? "stopped"
-							: "completed",
+				mode: finalModeFor(state.mode, report.metadata?.status),
 				isStreaming: false,
 			};
 		}),
