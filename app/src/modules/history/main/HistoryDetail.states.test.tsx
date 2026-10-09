@@ -244,7 +244,7 @@ describe("HistoryDetail load run in progress", () => {
 
 		render(<HistoryDetail />);
 
-		expect(useRunReportQuery).toHaveBeenLastCalledWith(null);
+		expect(useRunReportQuery).toHaveBeenLastCalledWith(null, "running");
 	});
 
 	it("does not gate the pane on a report the run cannot have yet", () => {
@@ -268,7 +268,7 @@ describe("HistoryDetail load run in progress", () => {
 
 			expect(screen.getByTestId("load-test-detail")).toBeTruthy();
 			expect(screen.queryByRole("button", { name: /stop/i })).toBeNull();
-			expect(useRunReportQuery).toHaveBeenLastCalledWith("run-1");
+			expect(useRunReportQuery).toHaveBeenLastCalledWith("run-1", status);
 		}
 	);
 

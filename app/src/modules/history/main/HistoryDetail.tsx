@@ -81,7 +81,7 @@ export default function HistoryDetail() {
 		isLoading: loadingReport,
 		error: reportError,
 		refetch: refetchReport,
-	} = useRunReportQuery(showsReport ? selectedRunId : null);
+	} = useRunReportQuery(showsReport ? selectedRunId : null, run?.status);
 
 	// No run selected
 	if (!selectedRunId) {
