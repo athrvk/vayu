@@ -19,7 +19,7 @@ import type { Breakpoint } from "./utils/computeBreakpoint";
 // Dashboard State Types
 // ============================================================================
 
-export type DashboardMode = "idle" | "running" | "completed" | "stopped";
+export type DashboardMode = "idle" | "running" | "completed" | "stopped" | "failed";
 export type DashboardView = "metrics" | "request-response";
 
 // ============================================================================

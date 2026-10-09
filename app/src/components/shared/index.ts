@@ -70,6 +70,10 @@ export * from "./RowActionsMenu";
 // HTTP method display (single source of truth)
 export * from "./MethodBadge";
 
+// A run's status as a word and glyph - the history row and the dashboard header
+export * from "./RunStatusPill";
+export * from "./run-status";
+
 // "Reachable on <bind>" - wherever a non-loopback local service is named
 export * from "./NonLoopbackBadge";
 

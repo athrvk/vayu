@@ -195,6 +195,7 @@ describe("deriveRunProgress", () => {
  *
  * Mutation check: drop the `isRunInProgress` guard in `setFinalReport` and the
  * first two cases redden - `mode` becomes "completed" and the report lands.
+ * Map "failed" to "completed" again and the failed case reddens (#1932).
  */
 describe("dashboard-store setFinalReport", () => {
 	const reportWith = (status?: string) =>
@@ -225,6 +226,18 @@ describe("dashboard-store setFinalReport", () => {
 
 	it("finalises a stopped run as stopped", () => {
 		useDashboardStore.getState().setFinalReport(reportWith("stopped"));
+		expect(useDashboardStore.getState().mode).toBe("stopped");
+	});
+
+	it("finalises a failed run as failed, not completed (#1932)", () => {
+		useDashboardStore.getState().setFinalReport(reportWith("failed"));
+		expect(useDashboardStore.getState().mode).toBe("failed");
+		expect(useDashboardStore.getState().isStreaming).toBe(false);
+	});
+
+	it("keeps a stop the user asked for as stopped, even if the report says failed", () => {
+		useDashboardStore.getState().stopRun();
+		useDashboardStore.getState().setFinalReport(reportWith("failed"));
 		expect(useDashboardStore.getState().mode).toBe("stopped");
 	});
 

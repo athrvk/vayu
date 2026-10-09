@@ -15,8 +15,9 @@ import { memo } from "react";
 import { ArrowLeft } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
-import type { DashboardHeaderProps } from "../types";
-import { MethodBadge, StopRunButton } from "@/components/shared";
+import type { Run } from "@/types";
+import type { DashboardHeaderProps, DashboardMode } from "../types";
+import { MethodBadge, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 
 function formatElapsed(ms: number): string {
@@ -24,6 +25,16 @@ function formatElapsed(ms: number): string {
 	const minutes = Math.floor(totalSeconds / 60);
 	const seconds = totalSeconds % 60;
 	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * What the status pill says. Streaming wins over the mode. Idle, and a run that
+ * is neither streaming nor settled, draw no pill.
+ */
+function pillStatus(mode: DashboardMode, isStreaming: boolean): Run["status"] | null {
+	if (isStreaming) return "running";
+	if (mode === "completed" || mode === "stopped" || mode === "failed") return mode;
+	return null;
 }
 
 // memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
@@ -68,6 +79,8 @@ function DashboardHeader({
 	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
 	const displayMs = elapsedDuration;
 
+	const status = pillStatus(mode, isStreaming);
+
 	// Config summary line
 	const configParts: string[] = [];
 	if (configuration?.concurrency != null)
@@ -91,20 +104,7 @@ function DashboardHeader({
 			)}
 
 			{/* Status pill */}
-			{isStreaming ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
-					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
-					Running
-				</span>
-			) : mode === "completed" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
-					Completed
-				</span>
-			) : mode === "stopped" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
-					Stopped
-				</span>
-			) : null}
+			{status && <RunStatusPill status={status} />}
 
 			{/* Method badge */}
 			{requestMethod && <MethodBadge method={requestMethod} size="md" />}

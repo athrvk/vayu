@@ -985,7 +985,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 ```typescript
 {
   currentRunId: string | null
-  mode: "running" | "completed" | "stopped"
+  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped"
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
   historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)

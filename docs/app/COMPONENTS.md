@@ -1358,6 +1358,15 @@ its toast too. Four variants - `info`, `success`, `warning`, `error` - each
 carried by an icon and a left rail rather than colour alone; tokens and
 durations in `docs/design-system.md` -> Toasts.
 
+## Run Status Pill (`components/shared/RunStatusPill.tsx`)
+
+A run's status as a word and a glyph, tinted by its status family: `Running`
+(spinner), `Completed`, `Stopped`, `Failed`. The dashboard header draws it; the
+history row draws only the glyph (`RunStatusGlyph`). Both read `RUN_STATUS` in
+`components/shared/run-status.ts`, so the label, glyph and `-text` token exist
+once per status. The header's `mode` includes `failed` (#1932), set when the
+engine reports the run failed, so a failed run no longer reads as Completed.
+
 ## Stop Run Button (`components/shared/StopRunButton.tsx`)
 
 "Stop the run that is happening right now", in the one treatment, for the two
