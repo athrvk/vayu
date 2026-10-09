@@ -437,10 +437,12 @@ the serialized value is over `json::MAX_FIELD_SIZE` (10 MiB,
 /collections` carries the same whole value `GET /collections/:id` does, so
 there is no `truncatedFields` here.
 
-**Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
-deletes all their requests before deleting the collections deepest-first, wrapped in a single
-transaction so a crash mid-cascade cannot leave a half-deleted subtree. See
-`Database::delete_collection()`.
+**Cascade delete**: deleting a collection performs BFS to collect all descendant IDs and stamps
+`deleted_at` on them and their requests in one transaction (`Database::delete_collection()`,
+issue #988). The hard cascade is the purge (`DELETE /trash/:id`, or retention): BFS over the
+*stamped* descendants only, re-parenting a live collection it meets to the root (issue #1883),
+then all their requests before the collections deepest-first, wrapped in a single transaction so a
+crash mid-cascade cannot leave a half-deleted subtree. See `Database::purge_collection_locked()`.
 
 `parent_id` forms a tree, but SQLite enforces no such constraint, so the BFS carries a visited
 set and is **cycle-safe**: a self-parent (`parent_id == id`) or an `A -> B -> A` loop terminates

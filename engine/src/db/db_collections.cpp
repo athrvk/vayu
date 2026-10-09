@@ -82,7 +82,14 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
     return cols.front ();
 }
 
-std::vector<std::string> Database::collection_subtree_locked (const std::string& root_id) {
+bool Database::collection_is_trashed (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<Collection> (where (c (&Collection::id) == id &&
+           is_not_null (&Collection::deleted_at))) > 0;
+}
+
+std::vector<std::string>
+Database::collection_subtree_locked (const std::string& root_id, SubtreeRows rows) {
     std::vector<std::string> subtree;
     std::unordered_set<std::string> visited;
     subtree.push_back (root_id);
@@ -92,6 +99,9 @@ std::vector<std::string> Database::collection_subtree_locked (const std::string&
         auto children = impl_->storage.get_all<Collection> (
         where (c (&Collection::parent_id) == subtree[idx]));
         for (const auto& child : children) {
+            if (rows == SubtreeRows::StampedOnly && !child.deleted_at.has_value ()) {
+                continue;
+            }
             if (visited.insert (child.id).second) {
                 subtree.push_back (child.id);
             }
@@ -102,7 +112,10 @@ std::vector<std::string> Database::collection_subtree_locked (const std::string&
 }
 
 void Database::purge_collection_locked (const std::string& id) {
-    const auto subtree = collection_subtree_locked (id);
+    // Stamped rows only (#1883): a live collection under a stamped one was
+    // never listed in the trash, so destroying it would be a delete nobody
+    // asked for. It stops the walk and goes to the root instead.
+    const auto subtree = collection_subtree_locked (id, SubtreeRows::StampedOnly);
 
     // Deepest-first so foreign-key integrity holds at each step, wrapped in a
     // single transaction so a crash mid-cascade cannot leave a half-deleted
@@ -110,6 +123,16 @@ void Database::purge_collection_locked (const std::string& id) {
     // calls sqlite_orm on the same storage handle (same pattern as
     // add_results_batch).
     impl_->storage.transaction ([&] {
+        for (const auto& collection_id : subtree) {
+            for (auto& spared : impl_->storage.get_all<Collection> (
+                 where (c (&Collection::parent_id) == collection_id &&
+                 is_null (&Collection::deleted_at)))) {
+                vayu::utils::log_warning ("db", "Purge re-parented a live collection to the root",
+                { { "id", spared.id }, { "purgedParent", collection_id } });
+                spared.parent_id.reset ();
+                impl_->storage.update (spared);
+            }
+        }
         for (auto it = subtree.rbegin (); it != subtree.rend (); ++it) {
             // Examples first, and by request id rather than by collection: they
             // hang off the request, so deleting the requests before them would
@@ -391,10 +414,11 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     if (!entry) {
         return std::nullopt;
     }
-    // The purge takes the whole subtree, stamp or no stamp - a row left under a
-    // removed collection is reachable by no read and restorable by nothing, so
-    // "the cohort" is the wrong unit here even though it is the right one for a
-    // restore.
+    // The purge takes every stamped row under the root, whichever delete
+    // stamped it - a row left under a removed collection is reachable by no
+    // read and restorable by nothing, so "the cohort" is the wrong unit here
+    // even though it is the right one for a restore. A live collection is not
+    // taken; see purge_collection_locked.
     if (entry->kind == "collection") {
         purge_collection_locked (id);
     } else {

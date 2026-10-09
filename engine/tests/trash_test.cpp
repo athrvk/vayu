@@ -26,6 +26,8 @@
  *  - **A purge that leaves rows behind.** A request left under a removed
  *    collection is reachable by no read and restorable by nothing, so the purge
  *    is asserted over the whole subtree and the examples under it.
+ *  - **A purge that takes a live row** no trash entry ever listed, and the
+ *    write that would have put one under a trashed parent (#1883).
  *  - **Retention purging the wrong side of the window**, and `0` meaning
  *    "immediately" rather than "keep forever".
  *
@@ -58,6 +60,12 @@ std::pair<int, nlohmann::json>
 trash_purge_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json> list_request_examples_response (vayu::db::Database& db,
 const std::string& request_id);
+// Defined in collections.cpp.
+std::pair<int, nlohmann::json>
+create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace vayu::db {
@@ -216,6 +224,54 @@ TEST_F (TrashTest, ADeletedCollectionIsNotListedAsBindingItsSpecDocument) {
     // restore would need. Reclaiming it here would restore a broken binding.
     db_->sweep_orphaned_spec_documents ();
     EXPECT_TRUE (db_->get_spec_document ("spec_1").has_value ());
+}
+
+TEST_F (TrashTest, ACollectionCannotBeParentedUnderATrashedOne) {
+    make_collection ("col_trashed", "Trashed");
+    make_collection ("col_live", "Live");
+    db_->delete_collection ("col_trashed");
+
+    // A trashed parent reads as missing to `get_collection`, and a missing
+    // parent is legal (import's forward references), so only an explicit check
+    // tells the two apart.
+    auto [create_status, create_body] = routes::create_collection_response (
+    *db_, json{ { "name", "x" }, { "parentId", "col_trashed" } });
+    EXPECT_EQ (create_status, 409);
+    EXPECT_EQ (error_field (create_body, "message"),
+    "Collection 'col_trashed' is in the trash - restore it first");
+    EXPECT_EQ (db_->get_collections ().size (), 1U)
+    << "the refused create wrote nothing";
+
+    auto [update_status, update_body] = routes::update_collection_response (
+    *db_, "col_live", json{ { "parentId", "col_trashed" } });
+    EXPECT_EQ (update_status, 409);
+    EXPECT_EQ (error_field (update_body, "message"),
+    "Collection 'col_trashed' is in the trash - restore it first");
+    auto live = db_->get_collection ("col_live");
+    ASSERT_HAS_VALUE (live);
+    EXPECT_FALSE (live->parent_id.has_value ())
+    << "the refused move wrote nothing";
+
+    // An id the store has never seen is still not this refusal.
+    auto [unknown_status, unknown_body] = routes::create_collection_response (
+    *db_, json{ { "name", "y" }, { "parentId", "col_never_written" } });
+    EXPECT_EQ (unknown_status, 200) << error_field (unknown_body, "message");
+}
+
+TEST_F (TrashTest, ACollectionStrandedUnderATrashedOneStaysEditable) {
+    make_collection ("col_trashed", "Trashed");
+    db_->delete_collection ("col_trashed");
+    make_collection ("col_stranded", "Stranded", "col_trashed");
+
+    // The refusal reads the parent the body states, never the stored one, so
+    // a rename does not fail on a parent written before the refusal existed.
+    auto [rename_status, rename_body] = routes::update_collection_response (
+    *db_, "col_stranded", json{ { "name", "Renamed" } });
+    EXPECT_EQ (rename_status, 200) << error_field (rename_body, "message");
+
+    auto [move_status, move_body] = routes::update_collection_response (
+    *db_, "col_stranded", json{ { "parentId", nullptr } });
+    EXPECT_EQ (move_status, 200) << error_field (move_body, "message");
 }
 
 TEST_F (TrashTest, AReorderRefusesADeletedRow) {
@@ -439,6 +495,51 @@ TEST_F (TrashTest, PurgeTakesARowAnEarlierDeleteLeftUnderTheSubtree) {
     // under a removed collection is reachable by no read and restorable by
     // nothing, so it would leak forever.
     EXPECT_TRUE (db_->get_trash ().empty ());
+}
+
+TEST_F (TrashTest, PurgeNeverTakesALiveRow) {
+    make_collection ("col_parent", "Parent");
+    db_->delete_collection ("col_parent");
+    // The state #1883's write-side refusal now prevents, seeded directly: a
+    // live collection (with a live request and a live child) under a stamped
+    // one, plus a separately deleted collection under the live one.
+    make_collection ("col_live", "Live", "col_parent");
+    make_request ("req_live", "col_live");
+    make_collection ("col_grandchild", "Grandchild", "col_live");
+    make_collection ("col_own_root", "Own root", "col_live");
+    db_->delete_collection ("col_own_root");
+
+    ASSERT_HAS_VALUE (db_->purge_deleted ("col_parent"));
+
+    auto live = db_->get_collection ("col_live");
+    ASSERT_HAS_VALUE (live);
+    EXPECT_FALSE (live->parent_id.has_value ())
+    << "a live child of a purged collection comes back at the tree root";
+    const auto listed = db_->get_collections ();
+    EXPECT_TRUE (std::ranges::any_of (
+    listed, [] (const Collection& row) { return row.id == "col_live"; }))
+    << "and the sidebar's read sees it there";
+    EXPECT_TRUE (db_->get_request ("req_live").has_value ());
+    auto grandchild = db_->get_collection ("col_grandchild");
+    ASSERT_HAS_VALUE (grandchild);
+    ASSERT_HAS_VALUE (grandchild->parent_id);
+    EXPECT_EQ (*grandchild->parent_id, "col_live");
+    EXPECT_TRUE (entry_for ("col_own_root").has_value ())
+    << "a stamped row below the live boundary stays its own trash root";
+    EXPECT_FALSE (entry_for ("col_parent").has_value ());
+}
+
+TEST_F (TrashTest, RetentionNeverTakesALiveRow) {
+    make_collection ("col_parent", "Parent");
+    db_->delete_collection ("col_parent");
+    make_collection ("col_live", "Live", "col_parent");
+    auto entry = entry_for ("col_parent");
+    ASSERT_HAS_VALUE (entry);
+
+    EXPECT_EQ (db_->purge_expired_trash (30, entry->deleted_at + (31 * DAY_MS)), 1);
+    auto live = db_->get_collection ("col_live");
+    ASSERT_HAS_VALUE (live);
+    EXPECT_FALSE (live->parent_id.has_value ());
 }
 
 TEST_F (TrashTest, PurgingALiveRowIsRefused) {

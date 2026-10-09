@@ -257,9 +257,18 @@ Two rules make a restore mean something precise:
   required - so restoring one whose collection is in the trash is refused with a
   `409` that names the collection to restore first.
 
-A purge is deliberately *not* limited to the cohort: it takes the whole subtree,
-because a request left under a removed collection would be reachable by no read
-and restorable by nothing.
+A purge is deliberately *not* limited to the cohort: it takes every stamped row
+in the subtree, whichever delete stamped it, because a request left under a
+removed collection would be reachable by no read and restorable by nothing. It
+takes stamped rows *only* (issue #1883): a live collection found under a purged
+one was never listed in the trash, so it is re-parented to the tree root - the
+restore's rule - and the walk stops there, leaving anything below it alone.
+
+The write side keeps that state from arising. `POST /collections` and
+`PUT /collections/:id` refuse a `parentId` naming a collection in the trash with
+a `409` (`Collection '<id>' is in the trash - restore it first`). A parent id the
+store has never seen is still accepted, as before, because an import names
+parents it has not written yet.
 
 One thing a soft delete deliberately does not release: a stamped collection
 still binds its OpenAPI document, so the orphan sweep leaves that document alone
