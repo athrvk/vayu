@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { useSessionStore } from "@/stores/session-store";
+import { invalidateCompositions } from "./compose-invalidation";
 import { queryKeys } from "./keys";
 import type { Environment, CreateEnvironmentRequest, UpdateEnvironmentRequest } from "@/types";
 
@@ -68,6 +69,7 @@ export function useUpdateEnvironmentMutation() {
 				queryKeys.environments.detail(updatedEnvironment.id),
 				updatedEnvironment
 			);
+			invalidateCompositions(queryClient);
 		},
 	});
 }

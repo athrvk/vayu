@@ -13,6 +13,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { invalidateCompositions } from "./compose-invalidation";
 import { queryKeys } from "./keys";
 import type { GlobalVariables, VariableValue } from "@/types";
 
@@ -38,6 +39,7 @@ export function useUpdateGlobalsMutation() {
 		onSuccess: (updatedGlobals) => {
 			// Update cache
 			queryClient.setQueryData<GlobalVariables>(queryKeys.globals.all, updatedGlobals);
+			invalidateCompositions(queryClient);
 		},
 	});
 }

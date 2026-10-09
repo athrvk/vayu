@@ -16,6 +16,7 @@ import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
+import { invalidateCompositions } from "./compose-invalidation";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
@@ -341,6 +342,9 @@ export function useUpdateCollectionMutation() {
 					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
 				return next.sort(compareTreeOrder);
 			});
+			// A collection's auth, headers, scripts and variables are what every
+			// descendant request composes against.
+			invalidateCompositions(queryClient);
 		},
 	});
 }
@@ -454,6 +458,7 @@ export function useUpdateRequestMutation() {
 					queryKey: queryKeys.requests.listByCollection(collectionId),
 				});
 			}
+			invalidateCompositions(queryClient, updatedRequest.id);
 			/*
 			 * A foreign write's own refetch can land in this cache while this
 			 * save's response is still in flight (issue #1436) - an MCP agent's
