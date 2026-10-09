@@ -39,6 +39,9 @@ import {
 	flattenRunPages,
 	runsPollInterval,
 	runDetailOptions,
+	useRunReportQuery,
+	useRunTimeSeriesQuery,
+	useRunMonitorSeriesQuery,
 	useDeleteRunMutation,
 	useInvalidateRuns,
 	RunNotFoundError,
@@ -58,6 +61,8 @@ const getRunReport = vi.fn();
 const getRun = vi.fn();
 const deleteRun = vi.fn();
 const startScenarioRun = vi.fn();
+const getRunTimeSeries = vi.fn();
+const getRunMonitorSeries = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
@@ -66,6 +71,8 @@ vi.mock("@/services/api", () => ({
 		getRun: (...a: unknown[]) => getRun(...a),
 		deleteRun: (...a: unknown[]) => deleteRun(...a),
 		startScenarioRun: (...a: unknown[]) => startScenarioRun(...a),
+		getRunTimeSeries: (...a: unknown[]) => getRunTimeSeries(...a),
+		getRunMonitorSeries: (...a: unknown[]) => getRunMonitorSeries(...a),
 	},
 }));
 
@@ -99,6 +106,8 @@ beforeEach(() => {
 	getRun.mockReset();
 	deleteRun.mockReset();
 	startScenarioRun.mockReset();
+	getRunTimeSeries.mockReset();
+	getRunMonitorSeries.mockReset();
 });
 
 function runRow(id: string) {
@@ -676,5 +685,156 @@ describe("runsPollInterval", () => {
 		expect(runsPollInterval(1)).toBe(5000);
 		expect(runsPollInterval(2)).toBe(false);
 		expect(runsPollInterval(10)).toBe(false);
+	});
+});
+
+/**
+ * The engine answers a run's report and series for a live run too, so what a
+ * pane read mid-run must not be cached as the final copy (#1934). Every case
+ * runs both branches - a run in progress and a terminal one - because a policy
+ * that was "always stale" or "always fresh" would pass either half alone.
+ */
+describe("a run's data while it is in progress", () => {
+	const REPORT_POLL_MS = 3000;
+	const seconds = (n: number) => n * 1000;
+
+	/** A cache entry written a few seconds ago, as a pane opened mid-run leaves. */
+	function seed(client: QueryClient, key: readonly unknown[], data: unknown) {
+		client.setQueryData(key, data, { updatedAt: Date.now() - seconds(4) });
+	}
+
+	/** Long enough for a mount fetch to start, so "not called" is not vacuous. */
+	const settle = () =>
+		act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		});
+
+	const emptyPage = (over: object = {}) => ({
+		data: [],
+		pagination: { total: 0, limit: 1000, offset: 0, hasMore: false, returned: 0 },
+		...over,
+	});
+
+	/*
+	 * Mutation check: make `runStaleTime` return `terminalMs` unconditionally and
+	 * the running rows redden; make it return 0 unconditionally and the terminal
+	 * and absent rows redden.
+	 */
+	it.each([
+		["running", true],
+		["pending", true],
+		["completed", false],
+		["failed", false],
+		["stopped", false],
+		[undefined, false],
+	])("report for status %s refetches a cached copy on mount: %s", async (status, refetches) => {
+		const client = makeClient();
+		seed(client, queryKeys.runs.report("run_1"), { metadata: { status: "running" } });
+		getRunReport.mockResolvedValue({ metadata: { status: "completed" } });
+
+		const { result } = renderHook(() => useRunReportQuery("run_1", status), {
+			wrapper: wrapper(client),
+		});
+
+		if (refetches) {
+			await waitFor(() =>
+				expect(result.current.data).toMatchObject({ metadata: { status: "completed" } })
+			);
+			expect(getRunReport).toHaveBeenCalledTimes(1);
+		} else {
+			await settle();
+			expect(getRunReport).not.toHaveBeenCalled();
+			expect(result.current.data).toMatchObject({ metadata: { status: "running" } });
+		}
+	});
+
+	it("polls the report of a running run and leaves a terminal one alone", async () => {
+		vi.useFakeTimers();
+		try {
+			getRunReport.mockResolvedValue({ metadata: { status: "running" } });
+			const running = renderHook(() => useRunReportQuery("run_live", "running"), {
+				wrapper: wrapper(makeClient()),
+			});
+			const done = renderHook(() => useRunReportQuery("run_done", "completed"), {
+				wrapper: wrapper(makeClient()),
+			});
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(getRunReport.mock.calls.filter(([id]) => id === "run_live")).toHaveLength(1);
+			expect(getRunReport.mock.calls.filter(([id]) => id === "run_done")).toHaveLength(1);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(REPORT_POLL_MS * 2 + 100);
+			});
+			expect(
+				getRunReport.mock.calls.filter(([id]) => id === "run_live").length
+			).toBeGreaterThan(2);
+			expect(getRunReport.mock.calls.filter(([id]) => id === "run_done")).toHaveLength(1);
+			running.unmount();
+			done.unmount();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		["running", 1],
+		["completed", 0],
+		[undefined, 0],
+	])(
+		"time series for status %s refetches a cached copy on mount %i time(s)",
+		async (status, calls) => {
+			const client = makeClient();
+			seed(client, queryKeys.runs.timeSeries("run_1"), {
+				pages: [emptyPage()],
+				pageParams: [0],
+			});
+			getRunTimeSeries.mockResolvedValue(emptyPage());
+
+			renderHook(() => useRunTimeSeriesQuery("run_1", status), { wrapper: wrapper(client) });
+			await settle();
+
+			expect(getRunTimeSeries).toHaveBeenCalledTimes(calls);
+		}
+	);
+
+	it.each([
+		["running", 1],
+		["completed", 0],
+		[undefined, 0],
+	])(
+		"monitor series for status %s refetches a cached copy on mount %i time(s)",
+		async (status, calls) => {
+			const client = makeClient();
+			seed(client, queryKeys.runs.monitorSeries("run_1"), {
+				pages: [emptyPage()],
+				pageParams: [0],
+			});
+			getRunMonitorSeries.mockResolvedValue(emptyPage());
+
+			renderHook(() => useRunMonitorSeriesQuery("run_1", true, status), {
+				wrapper: wrapper(client),
+			});
+			await settle();
+
+			expect(getRunMonitorSeries).toHaveBeenCalledTimes(calls);
+		}
+	);
+
+	/*
+	 * `runDetailOptions` is spread into every open tab's query in
+	 * `tab-descriptors`, so the interval has to be per-run: a function that
+	 * answers `false` for everything but a live run.
+	 */
+	it("polls a run's detail only while the stored status says it is running", () => {
+		const { refetchInterval } = runDetailOptions("run_1");
+		const asQuery = (data: unknown) => ({ state: { data } }) as never;
+
+		expect(refetchInterval(asQuery({ status: "running" }))).toBe(3000);
+		expect(refetchInterval(asQuery({ status: "pending" }))).toBe(3000);
+		expect(refetchInterval(asQuery({ status: "completed" }))).toBe(false);
+		expect(refetchInterval(asQuery(undefined))).toBe(false);
 	});
 });

@@ -99,7 +99,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		isFetchingNextPage,
 		hasNextPage,
 		fetchNextPage,
-	} = useRunTimeSeriesQuery(runId ?? null);
+	} = useRunTimeSeriesQuery(runId ?? null, report.metadata?.status);
 
 	// Auto-page through the full series so breakpoint detection and the charts see
 	// every tick, not just the first page.
@@ -124,7 +124,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		isFetchingNextPage: isFetchingMonitorPage,
 		hasNextPage: hasMoreMonitor,
 		fetchNextPage: fetchMoreMonitor,
-	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples);
+	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples, report.metadata?.status);
 
 	useEffect(() => {
 		if (hasMoreMonitor && !isFetchingMonitorPage) {
