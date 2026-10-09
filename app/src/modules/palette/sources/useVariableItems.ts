@@ -74,9 +74,9 @@ export function useVariableItems(query: string): PaletteItem[] {
 	const needle = query.trim().toLowerCase();
 
 	const scopes = useMemo<Scope[]>(() => {
-		// Resolution order runs environment > collection > global, and the tree
-		// lists the scopes that way round; this follows it, so the palette agrees
-		// with the screen about which scope wins.
+		// Palette order only: environments, collections, then globals. It is not the
+		// sidebar tree's section order and neither is precedence; the ladder is in
+		// docs/app/variable-resolution.md.
 		const built: Scope[] = environments.map((environment) => ({
 			key: environment.id,
 			label: environment.name,

@@ -340,7 +340,8 @@ export default function VariablesCategoryTree() {
 					onFocus={treeFocus.onFocus}
 					className="flex flex-col w-full py-2"
 				>
-					{/* Globals Section (Lowest Priority) */}
+					{/* Globals Section. Section order is not precedence; see
+							docs/app/variable-resolution.md for the ladder. */}
 					<div className="mb-4">
 						{/* The row is the treeitem; the button inside it owns the
 						    action and is not a tab stop of its own. A leaf: no
@@ -377,7 +378,7 @@ export default function VariablesCategoryTree() {
 						</div>
 					</div>
 
-					{/* Environments Section (Medium Priority) */}
+					{/* Environments Section (order here is not precedence) */}
 					{/* The header is a level-1 row: Right expands it, Left collapses
 					    it, Enter does either. `data-tree-toggle` and
 					    `data-tree-activate` are the same button because for a section
@@ -687,7 +688,7 @@ export default function VariablesCategoryTree() {
 						)}
 					</DrawerSection>
 
-					{/* Collections Section (Highest Priority) */}
+					{/* Collections Section (order here is not precedence) */}
 					{/* `count` takes a dash while loading *and* while failed: a literal
 					    0 beside "Couldn't load collections" asserts a count the app
 					    does not have. */}
