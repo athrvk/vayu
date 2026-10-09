@@ -6,10 +6,8 @@
  */
 
 /**
- * useLiveChartSettings
- *
- * Owns the two settings that bound live dashboard chart history - the retention
- * window and the tick ceiling - and keeps the dashboard store in sync with both.
+ * Live dashboard chart retention: the window and the tick ceiling that bound
+ * how much history the charts keep.
  *
  * They live **engine-side**, as the `liveReplayWindowMs` and
  * `liveMaxRetainedTicks` config entries, not in localStorage. The engine needs
@@ -19,13 +17,20 @@
  * could only drift from it, with one side retaining less than the other assumes.
  * Reading and writing the same entries is what keeps them equal by construction.
  *
- * The Live Dashboard panel's picker is the window's **only** editor (#586): the
- * engine settings list used to offer a second one under a second label and a
- * second save model, and `ENGINE_SETTINGS_EDITED_IN_APP` is what keeps that row
- * out of it. The ceiling is a memory backstop, edited from the engine list and
- * only read here, which is why it is returned rather than settable. Until the
- * config query resolves the store keeps its module defaults, so retention is
- * bounded from the first tick.
+ * Two hooks, because reading and editing have different lifetimes (#1936):
+ *
+ * - {@link useLiveWindowSync} pushes both values into the dashboard store. It is
+ *   mounted once at the App root, since a run streams into the store whether or
+ *   not Settings is open; scoped to the editor it only ran while Settings >
+ *   Dashboard was on screen, and the store otherwise kept its module defaults.
+ *   Until the config query resolves the store keeps those defaults, so
+ *   retention is bounded from the first tick.
+ * - {@link useLiveChartSettings} is the editor the Live Dashboard panel's picker
+ *   uses. The picker is the window's **only** editor (#586): the engine settings
+ *   list used to offer a second one under a second label and a second save
+ *   model, and `ENGINE_SETTINGS_EDITED_IN_APP` is what keeps that row out of it.
+ *   The ceiling is a memory backstop, edited from the engine list and only read
+ *   here, which is why it is returned rather than settable.
  */
 
 import { useCallback, useEffect } from "react";
@@ -42,11 +47,8 @@ import {
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
 import { useDashboardStore } from "@/stores";
 
-export function useLiveChartSettings() {
+function useLiveConfigValues(): { window: LiveWindow; maxTicks: number } {
 	const { data: config } = useConfigQuery();
-	const updateConfig = useUpdateConfigMutation();
-	const setLiveWindowSeconds = useDashboardStore((s) => s.setLiveWindowSeconds);
-	const setMaxRetainedTicks = useDashboardStore((s) => s.setMaxRetainedTicks);
 
 	const entryValue = (key: string): string | undefined =>
 		config?.entries?.find((e) => e.key === key)?.value;
@@ -62,7 +64,15 @@ export function useLiveChartSettings() {
 	const maxTicks =
 		Number.isFinite(rawTicks) && rawTicks > 0 ? rawTicks : DEFAULT_MAX_RETAINED_TICKS;
 
-	// Push both into the store's retention whenever they change.
+	return { window, maxTicks };
+}
+
+/** Pushes the engine's retention settings into the dashboard store. Mount once, at the App root. */
+export function useLiveWindowSync(): void {
+	const { window, maxTicks } = useLiveConfigValues();
+	const setLiveWindowSeconds = useDashboardStore((s) => s.setLiveWindowSeconds);
+	const setMaxRetainedTicks = useDashboardStore((s) => s.setMaxRetainedTicks);
+
 	useEffect(() => {
 		setLiveWindowSeconds(liveWindowSeconds(window));
 	}, [window, setLiveWindowSeconds]);
@@ -70,6 +80,12 @@ export function useLiveChartSettings() {
 	useEffect(() => {
 		setMaxRetainedTicks(maxTicks);
 	}, [maxTicks, setMaxRetainedTicks]);
+}
+
+export function useLiveChartSettings() {
+	const { window, maxTicks } = useLiveConfigValues();
+	const updateConfig = useUpdateConfigMutation();
+	const setLiveWindowSeconds = useDashboardStore((s) => s.setLiveWindowSeconds);
 
 	const setWindow = useCallback(
 		(next: LiveWindow) => {

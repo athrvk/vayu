@@ -108,7 +108,7 @@ export function liveWindowFromMs(ms: number | null | undefined): LiveWindow {
  * this is. It only binds when window / tick-interval exceeds it.
  *
  * Like the window, the live value is the engine's - `liveMaxRetainedTicks`,
- * synced in by useLiveChartSettings - because the engine's replay ring must not
+ * synced in by useLiveWindowSync - because the engine's replay ring must not
  * retain ticks this side would discard. This constant is the value used until
  * the config query resolves, and must match the engine's DEFAULT_MAX_LIVE_TICKS.
  */
