@@ -350,6 +350,11 @@ find_package(ryml CONFIG REQUIRED)
 # hashTree/testElement XML dialect; core/jmeter_import.cpp is the only
 # translation unit that includes it.
 find_package(pugixml CONFIG REQUIRED)
+# The one regular-expression engine for a pattern a user wrote (issue #1874).
+# Linear time with its state on the heap, where std::regex recursed once per
+# character and overflowed the stack on a large response body;
+# core/elements/user_regex.cpp is the only translation unit that includes it.
+find_package(re2 CONFIG REQUIRED)
 # WHATWG URL host processing (UTS #46 IDNA), the library Node's
 # `url.domainToASCII` is built on: a non-ASCII host is sent by the punycode
 # name Postman sends it by (http/url_parts.cpp, `ascii_host`).
@@ -587,6 +592,7 @@ add_library(vayu_core STATIC
     src/core/elements/script_kinds.cpp
     src/core/elements/pipeline.cpp
     src/core/elements/json_path.cpp
+    src/core/elements/user_regex.cpp
     src/core/elements/extract_kinds.cpp
     src/core/elements/assert_kinds.cpp
     src/core/elements/timer_think.cpp
@@ -623,6 +629,8 @@ target_link_libraries(vayu_core PUBLIC
     ryml::ryml
     # Same reasoning: only jmeter_import.cpp includes pugixml.hpp.
     pugixml::pugixml
+    # Same reasoning: only core/elements/user_regex.cpp includes re2.h.
+    re2::re2
     ada::ada
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
