@@ -141,6 +141,11 @@ export const MCP_DATA_ENTITIES = [
 	// long enough for an agent to clear a token, say so, and leave the window
 	// showing the entry it just destroyed.
 	"oauth",
+	// Variables a script or extractor wrote back while a send ran (#1916), with
+	// no `update_*` call behind them. Its own family rather than `environment`/`collection` because
+	// the run tools that cause it cannot name which scope changed, and borrowing
+	// `collection` would drop every request and trash cache for a variable write.
+	"variables",
 ] as const;
 
 export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
@@ -5107,7 +5112,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "run_request",
 		category: "execute",
-		invalidates: ["run", "cookie"],
+		invalidates: ["run", "cookie", "variables"],
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
@@ -7381,11 +7386,11 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "run_collection_smoke",
 		category: "execute",
-		invalidates: ["run", "cookie"],
+		invalidates: ["run", "cookie", "variables"],
 		description:
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
-			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data. " +
+			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
 			WITHHELD_RUN_OUTPUT_SENTENCE +
@@ -7556,9 +7561,9 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "run_collection",
 		category: "execute",
-		invalidates: ["run", "cookie"],
+		invalidates: ["run", "cookie", "variables"],
 		description:
-			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. Pass `thresholds` to judge the run against pass/fail budgets, the same way a load run can. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
+			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. Pass `thresholds` to judge the run against pass/fail budgets, the same way a load run can. Sends real traffic and, as the app's Run Collection does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
 		annotations: {
 			title: "Run collection",
 			readOnlyHint: false,

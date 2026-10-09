@@ -3493,11 +3493,12 @@ describe("run_collection", () => {
 		});
 	}
 
-	test("is an execute tool that invalidates runs and the cookie jar", () => {
+	test("is an execute tool that invalidates runs, the cookie jar and saved-back variables", () => {
 		const tool = TOOLS.find((t) => t.name === "run_collection");
 		expect(tool?.category).toBe("execute");
-		// Steps share the environment's jar, the way a Send does.
-		expect(tool?.invalidates).toEqual(["run", "cookie"]);
+		// Steps share the environment's jar, the way a Send does, and a step's
+		// script can persist variables (#1916).
+		expect(tool?.invalidates).toEqual(["run", "cookie", "variables"]);
 	});
 
 	test("posts the scenario block with rows, recursion and iterations intact", async () => {

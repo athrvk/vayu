@@ -326,6 +326,28 @@ const INVALIDATORS: Record<
 	oauth: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.oauth.all });
 	},
+
+	/*
+	 * Variables a script or extractor saved back while a send ran (issue #1916):
+	 * the engine persists environment, globals and collection variables after the
+	 * run tools finish, and none of them declares a variable family of its own.
+	 * The renderer's own Send invalidates the same three reads after it
+	 * (environments, globals, collections), and `compose` rides along for the
+	 * reason the `environment` family gives - a composition substitutes these
+	 * values.
+	 *
+	 * Not the coarse `collection` family: a variable write changes no request and
+	 * no trash row, and an agent looping `run_request` would otherwise refetch
+	 * every request list, the Trash drawer and the warm-cache pass per send.
+	 * `collections.all` is taken because the event cannot say which of the three
+	 * scopes moved, and a collection's variables live on its row.
+	 */
+	variables: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
+	},
 };
 
 /**

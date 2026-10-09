@@ -60,7 +60,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 				| "cookie"
 				| "config"
 				| "service"
-				| "oauth";
+				| "oauth"
+				| "variables";
 			collectionId?: string;
 			requestId?: string;
 			runId?: string;

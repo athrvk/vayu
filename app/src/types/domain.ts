@@ -3075,7 +3075,9 @@ export type McpDataEntity =
 	/** Engine-hosted local services: webhook inboxes, mock servers and mock issuers. */
 	| "service"
 	/** The engine's OAuth 2.0 token cache - fetched, refreshed or cleared. */
-	| "oauth";
+	| "oauth"
+	/** Variables a script or extractor saved back during a run: environment, globals, collection. */
+	| "variables";
 
 /**
  * What the main process sends over `mcp:data-changed`. Invalidation only - the

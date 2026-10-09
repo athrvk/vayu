@@ -274,6 +274,29 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.globals.all);
 	});
 
+	test("saved-back variables invalidate environments, globals, collections and compositions", () => {
+		// A script persists these after a run tool returns (#1916), and none of the
+		// four refetches on its own. Asserted key by key so dropping any one fails
+		// by name.
+		const { handled, keys } = keysFor({ entity: "variables" });
+		expect(handled).toBe(true);
+		expect(keys).toContainEqual(queryKeys.environments.all);
+		expect(keys).toContainEqual(queryKeys.globals.all);
+		expect(keys).toContainEqual(queryKeys.collections.all);
+		expect(keys).toContainEqual(queryKeys.compose.all);
+	});
+
+	test("saved-back variables take no request, trash or warm-cache key", () => {
+		// A variable write changes no request row and adds nothing to Trash; the
+		// coarse `collection` family would refetch both for every `run_request` in
+		// an agent's loop.
+		const { keys } = keysFor({ entity: "variables" });
+		expect(keys).toHaveLength(4);
+		expect(keys).not.toContainEqual(queryKeys.requests.all);
+		expect(keys).not.toContainEqual(queryKeys.trash.all);
+		expect(keys).not.toContainEqual(queryKeys.prefetch.allRequests());
+	});
+
 	test("a run invalidates both list families", () => {
 		const { keys } = keysFor({ entity: "run" });
 		expect(keys).toContainEqual(queryKeys.runs.lists());
