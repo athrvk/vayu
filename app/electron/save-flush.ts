@@ -40,12 +40,12 @@ export const FLUSH_TIMEOUT_MS = 2000;
 
 /**
  * What a settled flush actually did, so the window can stop deciding to close
- * on faith (#1489). `pending` is 0 from every real flush - the renderer's
- * `flushAll` attempts and settles every dirty context before it resolves at
- * all - and exists so the shape has somewhere to say "unknown" without a
- * fourth field: `null` from `SaveFlusher.flush` (the 2s ceiling fired before
- * the renderer answered) is read the same as a result whose `pending` is
- * nonzero by `flushNeedsConfirmation` below.
+ * on faith (#1489). `failed` is a save that was attempted and errored;
+ * `pending` is one that settled without persisting its edit (a save the editor
+ * declined to send, an edit that landed mid-flight). `null` from
+ * `SaveFlusher.flush` (the 2s ceiling fired before the renderer answered) is
+ * read the same as a result with either nonzero by `flushNeedsConfirmation`
+ * below.
  */
 export interface FlushResult {
 	saved: number;
@@ -169,7 +169,13 @@ export function flushNeedsConfirmation(result: FlushResult | null): boolean {
 	return result === null || result.failed > 0 || result.pending > 0;
 }
 
-/** What to put in front of the user, phrased for `gesture`, when a flush did not land cleanly. */
+/**
+ * What to put in front of the user, phrased for `gesture`, when a flush did not
+ * land cleanly. A failed save blames the engine; a save that merely stayed
+ * pending does not, because nothing is wrong with the engine and "keep working
+ * until it answers" would send the user to wait for something that is not
+ * coming.
+ */
 export function buildFlushFailurePrompt(
 	gesture: "quit" | "window-close",
 	result: FlushResult | null
@@ -177,14 +183,21 @@ export function buildFlushFailurePrompt(
 	const verb = gesture === "quit" ? "Quit" : "Close";
 	const lost = result === null ? null : result.failed + result.pending;
 	const subject = lost === null ? "some edits" : lost === 1 ? "one edit" : `${lost} edits`;
+	const pronoun = lost === 1 ? "it" : "them";
+	const discards = `${verb === "Quit" ? "Quitting" : "Closing"} anyway discards ${pronoun}.`;
+	const blockedOnly = result !== null && result.failed === 0;
 	return {
-		message: `Couldn't save ${subject} - the engine isn't responding.`,
-		detail:
-			`${verb === "Quit" ? "Quitting" : "Closing"} anyway discards ` +
-			`${lost === 1 ? "it" : "them"}. Keep working to try again once the engine answers.`,
+		message: blockedOnly
+			? `${capitalize(subject)} couldn't be saved as ${lost === 1 ? "it is" : "they are"}.`
+			: `Couldn't save ${subject} - the engine isn't responding.`,
+		detail: blockedOnly
+			? `${discards} Keep working to finish ${pronoun}, then save again.`
+			: `${discards} Keep working to try again once the engine answers.`,
 		buttons: [`${verb} anyway`, "Keep working"],
 	};
 }
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
  * Ask before discarding a flush that did not land cleanly; proceed silently

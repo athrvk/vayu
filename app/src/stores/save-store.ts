@@ -24,14 +24,28 @@ import { useToastStore } from "./toast-store";
 
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
+/**
+ * One context's verdict on one save, which is not the same thing as the
+ * store-wide `status`: that is a single slot every surface publishes to, so two
+ * contexts saving in the same tick overwrite each other's verdict.
+ *
+ * `pending` is a save the context declined to send (`SaveBlockedError`) or one
+ * that left an edit behind: nothing failed, the edit is simply not on disk.
+ */
+export type SaveOutcome = "saved" | "failed" | "pending";
+
 /** Save context - represents a saveable entity in the app */
 export interface SaveContext {
 	/** Unique identifier for this save context */
 	id: string;
 	/** Human-readable name for the context (e.g., "Request", "Global Variables") */
 	name: string;
-	/** Function to perform the save */
-	save: () => Promise<void>;
+	/**
+	 * Function to perform the save. A context that reports its own verdict
+	 * resolves with it; one that resolves with nothing is judged by the status it
+	 * published (see `runSave`).
+	 */
+	save: () => Promise<SaveOutcome | void>;
 	/** Whether there are pending changes */
 	hasPendingChanges: boolean;
 }
@@ -140,25 +154,55 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			(context) => context.id !== exceptId && context.hasPendingChanges
 		);
 
+	// A context that reports no verdict is judged by the status it published for
+	// itself: every such context reports its own failure through `failSave` and
+	// then resolves rather than rejecting (`SettingsMain`, `VariableTableEditor`),
+	// so resolving is not proof of success. Overwriting unconditionally turned a
+	// failed Cmd+S into "Saved" - with the failure toast still on screen next to
+	// it. This wrapper only fills in the silence when nothing else has.
+	//
+	// Filling in the silence can itself publish `pending` (`completeSaveThenIdle`
+	// holds another dirty context against a success), and `flushAll` runs every
+	// dirty context at once, so the next void context to resolve would read that
+	// `pending` as its own and the flush would report an edit that saved as
+	// still pending. `fillInLeftPending` marks the status as ours; every
+	// `runSave` clears it as it starts, before any fill-in of the same batch.
+	let fillInLeftPending = false;
+	const fillInSuccess = (context: SaveContext) => {
+		get().completeSaveThenIdle(context.id);
+		fillInLeftPending = get().status === "pending";
+	};
+	const outcomeFromPublishedStatus = (context: SaveContext): SaveOutcome => {
+		const published = get().status;
+		if (published === "error") return "failed";
+		if (published === "pending" && !fillInLeftPending) return "pending";
+		fillInSuccess(context);
+		return "saved";
+	};
+
+	// A context that did report is believed over the shared status, which another
+	// context saving in the same tick may have overwritten. A reported "saved"
+	// still fills in the silence, because a context such as `useDraftSaveContext`
+	// publishes nothing on success, but never over another context's "error" or
+	// "pending".
+	const outcomeFromReport = (context: SaveContext, reported: SaveOutcome): SaveOutcome => {
+		if (reported !== "saved") return reported;
+		const published = get().status;
+		if (published !== "error" && published !== "pending") fillInSuccess(context);
+		return "saved";
+	};
+
 	// Internal helper - runs a save for the given context, updates store state,
-	// and reports whether it actually landed. Caller must own the in-progress
-	// guard if needed.
-	const runSave = async (context: SaveContext): Promise<"saved" | "failed"> => {
+	// and reports what became of it. Caller must own the in-progress guard if
+	// needed.
+	const runSave = async (context: SaveContext): Promise<SaveOutcome> => {
+		fillInLeftPending = false;
 		set({ status: "saving" });
 		try {
-			await context.save();
-			// Resolving is not proof of success. Every registered context reports
-			// its own failure through `failSave` and then resolves rather than
-			// rejecting (`useSaveManager`, `SettingsMain`, `VariableTableEditor`
-			// all do), so overwriting unconditionally turned a failed Cmd+S into
-			// "Saved" - with the failure toast still on screen next to it. A
-			// status the context published for itself is the truthful one; this
-			// wrapper only fills in the silence when nothing else has.
-			const published = get().status;
-			if (published === "error") return "failed";
-			if (published === "pending") return "saved";
-			get().completeSaveThenIdle(context.id);
-			return "saved";
+			const reported = await context.save();
+			return reported
+				? outcomeFromReport(context, reported)
+				: outcomeFromPublishedStatus(context);
 		} catch (error) {
 			get().failSave(
 				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
@@ -287,14 +331,13 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		flushAll: async () => {
 			const dirty = [...get().contexts.values()].filter((c) => c.hasPendingChanges);
 			const outcomes = await Promise.all(dirty.map((c) => runSave(c)));
-			const failed = outcomes.filter((outcome) => outcome === "failed").length;
-			// `pending` is always 0 here: every dirty context this call started is
-			// attempted and settled (saved or failed) before `flushAll` resolves.
-			// It stays part of the shape because the caller (`main.ts`, #1489) also
-			// sees the case a completed flush cannot represent - the 2s ceiling
-			// firing before the renderer even answers, where nothing is known to
-			// have landed at all.
-			return { saved: outcomes.length - failed, failed, pending: 0 };
+			const count = (wanted: SaveOutcome) =>
+				outcomes.filter((outcome) => outcome === wanted).length;
+			// `pending` is a context that settled without persisting its edit (a
+			// blocked save, an edit that landed mid-flight). The caller (`main.ts`,
+			// #1489) also sees the case no completed flush can represent - the 2s
+			// ceiling firing before the renderer answers - as a `null` result.
+			return { saved: count("saved"), failed: count("failed"), pending: count("pending") };
 		},
 	};
 });

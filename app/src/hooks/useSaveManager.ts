@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSaveStore } from "@/stores/save-store";
+import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
@@ -90,7 +90,7 @@ export function useSaveManager({
 
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	// Saves are queued, never dropped - see performSave.
-	const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const saveQueueRef = useRef<Promise<SaveOutcome | void>>(Promise.resolve());
 	const onSaveRef = useRef(onSave);
 	const hasChangesRef = useRef(hasChanges);
 	const changeTokenRef = useRef(changeToken);
@@ -176,7 +176,11 @@ export function useSaveManager({
 	// has run. The cost is one redundant round trip when nothing changed in
 	// between, which is the right trade against reporting a save that never
 	// happened.
-	const performSave = useCallback((): Promise<void> => {
+	//
+	// The verdict is returned as well as published: `status` is one slot shared
+	// with every other surface, so a caller that needs to know what became of
+	// *this* save (`flushAll`) cannot read it back from there.
+	const performSave = useCallback((): Promise<SaveOutcome | void> => {
 		if (!entityId) return Promise.resolve();
 
 		// Bind the saver now, not when the queue reaches us. An entity switch
@@ -189,7 +193,7 @@ export function useSaveManager({
 		// read taken later would describe an edit this save is not carrying.
 		const savedGeneration = changeTokenRef.current;
 
-		const run = saveQueueRef.current.then(async () => {
+		const run = saveQueueRef.current.then(async (): Promise<SaveOutcome> => {
 			startSaving();
 			try {
 				await save();
@@ -199,11 +203,12 @@ export function useSaveManager({
 				// Dock reads this store, and it used to flash "Saved" over an
 				// edit nobody had persisted. The caller re-arms the save; this
 				// only refuses to mislabel it.
-				if (changeTokenRef.current === savedGeneration) {
-					completeSaveThenIdle(saveContextId(entityId));
-				} else {
+				if (changeTokenRef.current !== savedGeneration) {
 					markPendingSave();
+					return "pending";
 				}
+				completeSaveThenIdle(saveContextId(entityId));
+				return "saved";
 			} catch (error) {
 				if (error instanceof SaveBlockedError) {
 					// Not a failure - the caller chose not to send. Report the same
@@ -212,7 +217,7 @@ export function useSaveManager({
 					// (which checks for `"error"`) does not arm a retry against a
 					// payload that will not have changed by the next tick.
 					markPendingSave();
-					return;
+					return "pending";
 				}
 				console.error("Save failed:", error);
 				failSave(
@@ -231,6 +236,7 @@ export function useSaveManager({
 					// waiting.
 					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
 				}
+				return "failed";
 			}
 		});
 		saveQueueRef.current = run;

@@ -684,17 +684,29 @@ failed loses nothing by saving now instead of on its own schedule.
 
 **`triggerSave` will not report a success the context did not have.** Registered
 contexts report their own failures through `failSave` and then *resolve* rather
-than rejecting - `useSaveManager`, `SettingsMain` and `VariableTableEditor` all
-do - so `runSave` checks for `status === "error"` after awaiting instead of
-setting `"saved"` unconditionally. Without that check a failed Cmd/Ctrl+S showed
-"Saved" beside its own failure toast.
+than rejecting, so `runSave` cannot take a resolved promise for a success. Without
+that a failed Cmd/Ctrl+S showed "Saved" beside its own failure toast.
 
-It refuses `"pending"` on the same grounds (#1381). A context that saw an edit
-land while its write was in flight publishes `pending`, because the payload that
-went out does not hold that edit - and `runSave` is the path Cmd/Ctrl+S and the
-quit flush take, so overwriting it put "Saved" on the Dock over an edit nobody
-had persisted. One rule covers both: a status the context published for itself
-is the truthful one, and `runSave` only fills in the silence.
+**A context's `save` can report its own verdict** (`SaveOutcome`: `"saved"`,
+`"failed"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
+store-wide `status` is one slot, so two contexts saving in the same tick
+overwrite each other's - reading it back charged one context's failure to the
+other, and `flushAll` counted a save that landed as failed. `runSave` believes
+the reported verdict. A reported `"saved"` still fills in the silence with
+`completeSaveThenIdle` (the draft editors publish nothing on success), but never
+over another context's `error` or `pending`. `pending` is a save that settled
+without persisting its edit: a `SaveBlockedError` (the editor declined to send an
+incomplete element) or an edit that landed while the write was in flight. It is
+not a failure - no toast, no "Not saved", no retry - and `flushAll` counts it in
+`pending`.
+
+A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
+`variable-commit`) is judged by the status it published, as before: `error` is
+`failed`, and `pending` (#1381) is `pending`, because a context that saw an edit
+land mid-write publishes it for the payload that went out not holding that edit.
+Otherwise `runSave` fills in the silence. The `pending` that
+`completeSaveThenIdle` itself publishes while a sibling is dirty is not read back
+as the next void context's own.
 
 **A writer that registers no context inherits that rule from
 `completeSaveThenIdle`.** The collection tree's two renames call `startSaving`
@@ -723,7 +735,7 @@ its own unsaved edit is untouched.
 {
   id: string
   name: string
-  save: () => Promise<void>
+  save: () => Promise<SaveOutcome | void>  // SaveOutcome: "saved" | "failed" | "pending"
   hasPendingChanges: boolean
 }
 ```
@@ -2614,8 +2626,11 @@ useDraftSaveContext({
   sibling to mount would answer for the panel on screen.
 - **A failure toasts rather than resolving quietly.** The editors render an
   inline `SaveFailed` callout for a button press, but a quit flush has no callout
-  on screen, and `runSave` reads a resolved promise as success - swallowing here
-  would report "Saved" for a write that failed.
+  on screen, and a resolved promise reads as success - swallowing here would
+  report "Saved" for a write that failed. The registered save resolves with its
+  verdict: `"failed"` after the toast, `"saved"` on success, and `"pending"` for
+  a `SaveBlockedError`, which only marks the Dock "Unsaved changes" - no toast,
+  no "Not saved" (the same reading `useSaveManager` gives it).
 - **The save must carry its own validity guard.** A disabled button does not stop
   the store-driven paths, which is why `InfoTab` refuses a blank collection name
   inside `persist`. With its buttons gone that guard is now the only one, and it
@@ -2778,7 +2793,9 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 12. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
     button), `useSaveStore().flushAll()` saves all dirty contexts and resolves
     to `{ saved, failed, pending }` - what actually landed, not just that the
-    round trip finished
+    round trip finished. Each count is the sum of the contexts' own verdicts:
+    `pending` is an edit that settled unsaved (a blocked save), `failed` one the
+    engine refused
 
 **Both window-destroying paths flush, through one coordinator.** `before-quit`
 always did; `close` did not, and `close` is what the X button fires - it
@@ -2807,8 +2824,10 @@ when the ceiling gave up all looked identical to a clean quit. The renderer's
 (`FlushResult`, `electron/save-flush.ts`), and a settle with no ACK at all (the
 ceiling won) is treated the same as a failure - nothing is known to have
 landed. Either case holds the close behind one native dialog,
-`confirmDiscardOnFailedFlush`: "N edits could not be saved - the engine is not
-responding", **Quit/Close anyway** or **Keep working**. A clean flush still
+`confirmDiscardOnFailedFlush`: "Couldn't save N edits - the engine isn't
+responding" for a failure or the unanswered ceiling, and "N edits couldn't be
+saved as they are" when every loss is a blocked save (`pending` only, where the
+engine is fine), **Quit/Close anyway** or **Keep working**. A clean flush still
 closes with no dialog, exactly as before. `useTabsStore.closeTab` asks the same
 question one tab early: closing a single dirty tab while the engine is not
 `connected` keeps the tab and toasts instead of letting the unmount flush fail

@@ -76,6 +76,19 @@ describe("a save an onSave callback blocks", () => {
 		expect(useSaveStore.getState().lastErrorMessage).toBeNull();
 	});
 
+	it("resolves 'pending' to a caller that asked for the verdict", async () => {
+		const onSave = vi.fn().mockRejectedValue(new SaveBlockedError());
+		mountManager({ entityId: "req_1", onSave });
+
+		const context = useSaveStore.getState().contexts.get("request-req_1");
+		let outcome: unknown;
+		await act(async () => {
+			outcome = await context?.save();
+		});
+
+		expect(outcome).toBe("pending");
+	});
+
 	it("does not schedule a retry, unlike a genuine failure", async () => {
 		const onSave = vi.fn().mockRejectedValue(new SaveBlockedError());
 		mountManager({ entityId: "req_1", onSave });
