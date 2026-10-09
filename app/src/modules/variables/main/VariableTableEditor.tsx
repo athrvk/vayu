@@ -220,6 +220,9 @@ interface VariableEditorConfig {
 	collection?: Collection;
 }
 
+// The three infoText banners state the ladder in docs/app/variable-resolution.md
+// (globals < collection chain < active environment < bound data row); edit them
+// together with it.
 const EDITOR_CONFIGS = {
 	globals: {
 		icon: Globe as LucideIcon,
@@ -240,7 +243,7 @@ const EDITOR_CONFIGS = {
 		title: (name: string) => name,
 		subtitle: "Environment scope",
 		infoText:
-			"Variables in this scope override the global scope but are overridden by collection scope.",
+			"Variables in this scope override collection and global variables. While a data row is bound, its bare column names override these.",
 		infoBg: "bg-scope-environment/10",
 		infoTextColor: "text-scope-environment",
 		infoBorder: "border-scope-environment/20",
@@ -253,7 +256,7 @@ const EDITOR_CONFIGS = {
 		title: (name: string) => name,
 		subtitle: "Collection scope",
 		infoText:
-			"Variables in this scope have the highest priority and override both global and environment scopes.",
+			"Variables in this scope override globals and are overridden by the active environment. A nested collection's variables override its parent's.",
 		infoBg: "bg-scope-collection/10",
 		infoTextColor: "text-scope-collection",
 		infoBorder: "border-scope-collection/20",

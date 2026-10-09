@@ -55,6 +55,12 @@ bound to one row (issue #1007). With no dataset the ladder is the three-tier
 one it has always been; a bare name resolves exactly as it did before this
 tier existed.
 
+The Variables pane's info banners (`EDITOR_CONFIGS` in
+`app/src/modules/variables/main/VariableTableEditor.tsx`) state this ladder for
+each scope, and the sidebar's section order (Globals, Environments,
+Collections) is not precedence; check an edit to either against the other
+(issue #1880).
+
 ### `data.*` is reserved, and sits outside this order
 
 `{{data.column}}` addresses a column of a collection run's data file (issue

@@ -144,7 +144,7 @@ Resizable sidebar (220–480px default, per view). The single left navigation fo
 |------|-----------|------------------|
 | **`collections`** | `CollectionTree` (hierarchical collections + requests) | add collection, add request, import |
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
-| **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
+| **`variables`** | `VariablesCategoryTree` (globals, environments, collections) | - |
 | **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers, mock servers) | new inbox, new issuer |
 | **`trash`** | `TrashList` (deleted collections and requests, restore or purge for good) | item count |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
