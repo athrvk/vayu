@@ -21,10 +21,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useRunWatchers } from "./useRunWatchers";
+import { apiService } from "@/services/api";
 import { loadTestService } from "@/services/load-test-service";
 import { scenarioRunService } from "@/services/scenario-run-service";
 import { useDashboardStore } from "@/stores/dashboard-store";
-import type { McpDataChangedEvent } from "@/types/domain";
+import type { McpDataChangedEvent, Run, RunConfigSnapshot } from "@/types/domain";
 
 type Bridge = NonNullable<Window["electronAPI"]>;
 
@@ -60,8 +61,24 @@ function mounted(): {
 	return { emit, unsubscribe, unmount };
 }
 
+/** A `GET /runs/:id` body carrying only the snapshot, which is all the hook reads. */
+function runRow(id: string, configSnapshot?: RunConfigSnapshot): Run {
+	return { id, type: "load", status: "running", startTime: 0, endTime: 0, configSnapshot };
+}
+
+/** Let the hook's pending `getRun` promise chain settle. */
+async function settled(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 afterEach(() => {
-	useDashboardStore.setState({ currentRunId: null, mode: "running" });
+	useDashboardStore.setState({
+		currentRunId: null,
+		mode: "running",
+		error: null,
+		loadTestConfig: null,
+		requestInfo: null,
+	});
 	bridged(null);
 	vi.restoreAllMocks();
 });
@@ -72,6 +89,7 @@ describe("useRunWatchers", () => {
 		const scenario = vi
 			.spyOn(scenarioRunService, "startMonitoring")
 			.mockImplementation(() => {});
+		vi.spyOn(apiService, "getRun").mockResolvedValue(runRow("run_7"));
 		const { emit } = mounted();
 
 		emit({ entity: "run", startedRun: { runId: "run_7", kind: "load" } });
@@ -84,6 +102,90 @@ describe("useRunWatchers", () => {
 		// while it was closed belong to nothing.
 		expect(useDashboardStore.getState().currentRunId).toBe("run_7");
 		expect(useDashboardStore.getState().mode).toBe("running");
+	});
+
+	describe("configuring a load run from its row (#1935)", () => {
+		const SNAPSHOT: RunConfigSnapshot = {
+			url: "https://api.example.com/items",
+			method: "POST",
+			mode: "ramp_up",
+			duration: "30m",
+			concurrency: 50,
+			startConcurrency: 5,
+			rampUpDuration: "5m",
+		};
+
+		it("reads the run once and sets the config and request the dashboard shows", async () => {
+			// Mutation check: drop the `configureFromRunRow` call and no read
+			// happens - the dashboard renders constant_rps cards, no URL and no
+			// keep-awake prompt for a half-hour run.
+			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			const getRun = vi
+				.spyOn(apiService, "getRun")
+				.mockResolvedValue(runRow("run_20", SNAPSHOT));
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_20", kind: "load" } });
+			await settled();
+
+			expect(getRun).toHaveBeenCalledTimes(1);
+			expect(getRun).toHaveBeenCalledWith("run_20");
+			const state = useDashboardStore.getState();
+			expect(state.loadTestConfig).toEqual({
+				mode: "ramp_up",
+				duration: "30m",
+				concurrency: 50,
+				startConcurrency: 5,
+				rampUpDuration: "5m",
+			});
+			expect(state.requestInfo).toEqual({
+				method: "POST",
+				url: "https://api.example.com/items",
+			});
+			expect(state.currentRunId).toBe("run_20");
+		});
+
+		it("drops a response that arrives after another run took the dashboard", async () => {
+			// Mutation check: remove the `currentRunId` comparison and run A's row
+			// overwrites run B's config.
+			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			let resolveA: (run: Run) => void = () => {};
+			vi.spyOn(apiService, "getRun").mockImplementation((id) =>
+				id === "run_a"
+					? new Promise<Run>((resolve) => {
+							resolveA = resolve;
+						})
+					: Promise.resolve(runRow(id, { ...SNAPSHOT, mode: "iterations" }))
+			);
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_a", kind: "load" } });
+			emit({ entity: "run", startedRun: { runId: "run_b", kind: "load" } });
+			await settled();
+			resolveA(runRow("run_a", SNAPSHOT));
+			await settled();
+
+			const state = useDashboardStore.getState();
+			expect(state.currentRunId).toBe("run_b");
+			expect(state.loadTestConfig?.mode).toBe("iterations");
+		});
+
+		it("leaves the dashboard and its error alone when the row cannot be read", async () => {
+			// Mutation check: replace the swallow with `setError(...)` and the
+			// lost-stream callout appears over a stream that is fine.
+			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			vi.spyOn(apiService, "getRun").mockRejectedValue(new Error("engine unreachable"));
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_21", kind: "load" } });
+			await settled();
+
+			const state = useDashboardStore.getState();
+			expect(state.error).toBeNull();
+			expect(state.loadTestConfig).toBeNull();
+			expect(state.requestInfo).toBeNull();
+			expect(state.currentRunId).toBe("run_21");
+		});
 	});
 
 	it("watches a collection run through the scenario service", () => {

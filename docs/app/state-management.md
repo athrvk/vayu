@@ -1053,6 +1053,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 ```typescript
 const {
   startRun, stopRun, setStreaming,
+  setRunConfig,     // Fill in loadTestConfig / requestInfo of a run started without them (agent runs)
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   addMonitorSamples, // Append scraped server vitals, bounded by maxRetainedTicks
   setFinalReport, setError, setActiveView, setStopping,
@@ -2079,9 +2080,16 @@ lock, the OS progress bar and the finished notification all begin when an
 agent's run does rather than when someone opens its tab. For a load run it
 points `dashboard-store` at the run first, exactly as those surfaces do:
 `startMonitoring` states that its caller has registered the run, and a store
-left unpointed would collect the ticks of a run it does not name. It carries no
-config - the agent's arguments are the engine's business, and a run with no
-declared duration is one whose bar has no denominator yet. Every other `run`
+left unpointed would collect the ticks of a run it does not name. The event
+carries no config, so the hook then reads the run's row (`GET /runs/:id`) and
+hands its `configSnapshot` to `setRunConfig` (issue #1935): the mode, duration,
+rate, concurrency and ramp the dashboard's cards and the keep-awake prompt read,
+and the method and URL it shows, mapped by `lib/run-config-snapshot.ts`.
+`setRunConfig` sets those two fields and nothing else - `startRun` would clear
+the ticks already gathered - and the write is dropped if another run has taken
+the dashboard by the time the row arrives. A row that cannot be read is
+swallowed, never `setError`, which would raise the lost-stream callout over a
+stream that is fine; the dashboard then keeps its config-less look. Every other `run`
 event names a run that already exists (a stop, a baseline change, a delete) and
 starts no watcher; `run_collection_smoke` sends its requests one at a time and
 has no run to watch at all.

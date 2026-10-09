@@ -172,6 +172,12 @@ interface DashboardState {
 		requestInfo?: LoadTestRequestInfo,
 		sourceRequestId?: string | null
 	) => void;
+	/**
+	 * Fill in the config and request a run was started without (issue #1935).
+	 * Touches those two fields and nothing else: the run is already streaming,
+	 * and {@link startRun} would clear the metrics it has gathered.
+	 */
+	setRunConfig: (config: LoadTestRunConfig, requestInfo: LoadTestRequestInfo | null) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
 	setLiveWindowSeconds: (seconds: number | null) => void;
@@ -221,6 +227,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			peakConcurrency: 0,
 			breakpoint: INITIAL_BREAKPOINT,
 		}),
+
+	setRunConfig: (config, requestInfo) =>
+		set((state) => ({
+			loadTestConfig: config,
+			requestInfo: requestInfo ?? state.requestInfo,
+		})),
 
 	stopRun: () =>
 		set({

@@ -31,7 +31,31 @@
 import { useEffect } from "react";
 import { loadTestService } from "@/services/load-test-service";
 import { scenarioRunService } from "@/services/scenario-run-service";
+import { apiService } from "@/services/api";
 import { useDashboardStore } from "@/stores/dashboard-store";
+import { loadConfigFromSnapshot, requestInfoFromSnapshot } from "@/lib/run-config-snapshot";
+
+/**
+ * Give the dashboard the config an agent's run was started with, read from the
+ * run's stored snapshot (issue #1935).
+ *
+ * Best effort: the run is already being watched, and a row that cannot be read
+ * leaves the dashboard as it was. It must not reach `setError`, which raises the
+ * lost-stream callout for a stream that is fine. A response that arrives after
+ * another run took the dashboard is dropped rather than written over it.
+ */
+async function configureFromRunRow(runId: string): Promise<void> {
+	try {
+		const snapshot = (await apiService.getRun(runId)).configSnapshot;
+		if (!snapshot || useDashboardStore.getState().currentRunId !== runId) return;
+		useDashboardStore
+			.getState()
+			.setRunConfig(loadConfigFromSnapshot(snapshot), requestInfoFromSnapshot(snapshot));
+	} catch {
+		// Swallowed on purpose: the dashboard without a config is how this run
+		// looked before the row was read, and nothing else depends on it.
+	}
+}
 
 export function useRunWatchers(): void {
 	useEffect(() => {
@@ -45,12 +69,12 @@ export function useRunWatchers(): void {
 			if (started.kind === "load") {
 				// Registered before the stream, exactly as the app's own callers do:
 				// `startMonitoring` writes metrics into this store and states that
-				// its caller has already pointed the store at the run. No config
-				// rides along - the agent's arguments are the engine's business,
-				// and the dashboard reads a run with no declared duration as one
-				// whose bar has no denominator yet, which is what it is.
+				// its caller has already pointed the store at the run. The agent's
+				// arguments are not on the event, so the config follows from the
+				// run's row once it is read.
 				useDashboardStore.getState().startRun(started.runId);
 				loadTestService.startMonitoring(started.runId);
+				void configureFromRunRow(started.runId);
 			} else {
 				scenarioRunService.startMonitoring(started.runId);
 			}

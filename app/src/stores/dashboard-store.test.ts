@@ -257,3 +257,34 @@ describe("dashboard-store stopRun", () => {
 		expect(s.error).toBeNull();
 	});
 });
+
+describe("dashboard-store setRunConfig", () => {
+	it("fills in config and request without restarting the run (#1935)", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		s.addMetricsBatch([tick(1), tick(2)]);
+		s.setRunConfig(
+			{ mode: "ramp_up", duration: "30m" },
+			{ method: "GET", url: "https://x.test" }
+		);
+
+		const after = useDashboardStore.getState();
+		expect(after.loadTestConfig).toEqual({ mode: "ramp_up", duration: "30m" });
+		expect(after.requestInfo).toEqual({ method: "GET", url: "https://x.test" });
+		expect(after.currentRunId).toBe("r");
+		expect(after.mode).toBe("running");
+		expect(after.isStreaming).toBe(true);
+		expect(after.historicalMetrics).toHaveLength(2);
+		expect(after.currentMetrics?.elapsed_seconds).toBe(2);
+	});
+
+	it("keeps the request it already has when the row names none", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r", undefined, { method: "GET", url: "https://x.test" });
+		s.setRunConfig({ mode: "iterations" }, null);
+		expect(useDashboardStore.getState().requestInfo).toEqual({
+			method: "GET",
+			url: "https://x.test",
+		});
+	});
+});
