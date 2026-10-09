@@ -17,7 +17,8 @@
  * `metadata.configuration` is missing entirely - so it cannot say what a design
  * run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a
  * design run it also carries the stored exchange. The report is therefore
- * fetched only for a load run.
+ * fetched only for a load run, and only once it has finished: a run still
+ * executing shows `LoadRunInProgress` instead.
  *
  * The header deliberately does not show the URL. `DesignRunView` renders the
  * builder's own URL bar directly below it, and two URL bars stacked one above
@@ -27,12 +28,14 @@
 
 import { History } from "lucide-react";
 import { useRunQuery, useRunReportQuery, isRunNotFound } from "@/queries";
+import { isRunInProgress } from "@/lib/run-status";
 import { useTabsStore } from "@/stores";
 import { Badge, Button } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 import ScenarioRunView from "./ScenarioRunView";
+import LoadRunInProgress from "./components/LoadRunInProgress";
 
 export default function HistoryDetail() {
 	const openTabs = useTabsStore((s) => s.openTabs);
@@ -64,12 +67,21 @@ export default function HistoryDetail() {
 	 * has arrived.
 	 */
 	const isLoadRun = !!run && !isDesignRun && !isScenarioRun;
+	/*
+	 * A load run the engine is still executing has a report, but not a result:
+	 * the numbers are the requests so far, and caching them is what froze this
+	 * tab on a half-finished run (#1934). Nothing is fetched until the run
+	 * ends; `runDetailOptions` polls the run's status, so this flips to the
+	 * report without the tab being closed.
+	 */
+	const isLoadRunInProgress = isLoadRun && isRunInProgress(run.status);
+	const showsReport = isLoadRun && !isLoadRunInProgress;
 	const {
 		data: report,
 		isLoading: loadingReport,
 		error: reportError,
 		refetch: refetchReport,
-	} = useRunReportQuery(isLoadRun ? selectedRunId : null);
+	} = useRunReportQuery(showsReport ? selectedRunId : null, run?.status);
 
 	// No run selected
 	if (!selectedRunId) {
@@ -85,7 +97,7 @@ export default function HistoryDetail() {
 	// Loading state. A skeleton rather than a spinner, matching every other
 	// detail pane: it holds the shape of the header that is about to land
 	// instead of only saying "busy".
-	if (loadingRun || (isLoadRun && loadingReport)) {
+	if (loadingRun || (showsReport && loadingReport)) {
 		return <DetailSkeleton label="Loading run report" rows={5} />;
 	}
 
@@ -128,7 +140,7 @@ export default function HistoryDetail() {
 		);
 	}
 
-	if (isLoadRun && (reportError || !report)) {
+	if (showsReport && (reportError || !report)) {
 		const detail = reportError instanceof Error ? reportError.message : null;
 		return (
 			<ErrorState
@@ -189,6 +201,8 @@ export default function HistoryDetail() {
 					<DesignRunView run={run} />
 				) : isScenarioRun ? (
 					<ScenarioRunView run={run} />
+				) : isLoadRunInProgress ? (
+					<LoadRunInProgress runId={selectedRunId} />
 				) : (
 					<LoadTestDetail report={report!} runId={selectedRunId} />
 				)}

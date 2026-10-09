@@ -28,6 +28,7 @@ import { useTabsStore } from "@/stores";
 
 const refetch = vi.fn();
 const refetchRun = vi.fn();
+const useRunReportQuery = vi.fn();
 const reportQuery = {
 	data: undefined as unknown,
 	isLoading: false,
@@ -53,7 +54,10 @@ vi.mock("@/queries", async () => {
 	const runs = await vi.importActual<typeof import("@/queries/runs")>("@/queries/runs");
 	return {
 		useRunQuery: () => runQuery,
-		useRunReportQuery: () => reportQuery,
+		useRunReportQuery: (...args: unknown[]) => {
+			useRunReportQuery(...args);
+			return reportQuery;
+		},
 		isRunNotFound: runs.isRunNotFound,
 	};
 });
@@ -73,6 +77,7 @@ vi.mock("./ScenarioRunView", () => ({
 beforeEach(() => {
 	refetch.mockClear();
 	refetchRun.mockClear();
+	useRunReportQuery.mockClear();
 	reportQuery.data = undefined;
 	reportQuery.isLoading = false;
 	reportQuery.error = null;
@@ -206,5 +211,78 @@ describe("HistoryDetail routing", () => {
 		expect(screen.getByText(/completed/i)).toBeTruthy();
 		// The builder below owns the URL bar; showing it here too was two of them.
 		expect(screen.queryByText(/https:\/\//)).toBeNull();
+	});
+});
+
+/**
+ * A load run the engine is still executing has a report, but it is the requests
+ * so far, and cached as the tab's content it froze the pane on a half-finished
+ * run (#1934). Both branches are asserted: a settled run still gets the report.
+ */
+describe("HistoryDetail load run in progress", () => {
+	/*
+	 * Mutation check: drop the `isLoadRunInProgress` branch (render
+	 * `LoadTestDetail` unconditionally) and the in-progress cases redden.
+	 */
+	it.each(["running", "pending"])(
+		"says a %s load run is in progress, with Stop, instead of a report",
+		(status) => {
+			runQuery.data = { id: "run-1", type: "load", status };
+			// What the engine would hand back for a live run.
+			reportQuery.data = { metadata: { runType: "load", status } };
+
+			render(<HistoryDetail />);
+
+			expect(screen.getByText(/this load test is still running/i)).toBeTruthy();
+			expect(screen.getByRole("button", { name: /stop/i })).toBeTruthy();
+			expect(screen.queryByTestId("load-test-detail")).toBeNull();
+		}
+	);
+
+	it("does not ask for the report while the run is in progress", () => {
+		runQuery.data = { id: "run-1", type: "load", status: "running" };
+
+		render(<HistoryDetail />);
+
+		expect(useRunReportQuery).toHaveBeenLastCalledWith(null, "running");
+	});
+
+	it("does not gate the pane on a report the run cannot have yet", () => {
+		runQuery.data = { id: "run-1", type: "load", status: "running" };
+		reportQuery.data = undefined;
+		reportQuery.error = new Error("no report yet");
+
+		render(<HistoryDetail />);
+
+		expect(screen.getByText(/this load test is still running/i)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+	});
+
+	it.each(["completed", "stopped", "failed"])(
+		"renders the report for a %s load run, with no Stop",
+		(status) => {
+			runQuery.data = { id: "run-1", type: "load", status };
+			reportQuery.data = { metadata: { runType: "load" } };
+
+			render(<HistoryDetail />);
+
+			expect(screen.getByTestId("load-test-detail")).toBeTruthy();
+			expect(screen.queryByRole("button", { name: /stop/i })).toBeNull();
+			expect(useRunReportQuery).toHaveBeenLastCalledWith("run-1", status);
+		}
+	);
+
+	it("turns into the report when the run ends, without the tab being reopened", () => {
+		runQuery.data = { id: "run-1", type: "load", status: "running" };
+		const { rerender } = render(<HistoryDetail />);
+		expect(screen.queryByTestId("load-test-detail")).toBeNull();
+
+		// What the detail poll, or the close invalidation, delivers.
+		runQuery.data = { id: "run-1", type: "load", status: "completed" };
+		reportQuery.data = { metadata: { runType: "load" } };
+		rerender(<HistoryDetail />);
+
+		expect(screen.getByTestId("load-test-detail")).toBeTruthy();
+		expect(screen.queryByText(/this load test is still running/i)).toBeNull();
 	});
 });

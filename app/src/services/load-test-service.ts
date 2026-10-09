@@ -17,7 +17,6 @@ import { sseClient, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
-import { QUERY_CACHE } from "@/config/cache";
 import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
@@ -429,16 +428,24 @@ class LoadTestService {
 	/**
 	 * The engine's stored report for `runId`, or null when it cannot be read.
 	 *
-	 * Through the query cache, not a bare fetch: opening the same run in
-	 * History reads `runs.report(runId)` and would otherwise re-fetch a report
-	 * that cannot change.
+	 * Through the query cache, not a bare fetch: the same entry is what a
+	 * mounted History tab for this run observes, so a fetch that bypassed it
+	 * would leave that tab on the copy it already held.
 	 */
 	private async fetchStoredReport(runId: string): Promise<RunReport | null> {
 		try {
 			return await queryClient.fetchQuery({
 				queryKey: queryKeys.runs.report(runId),
 				queryFn: () => apiService.getRunReport(runId),
-				staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+				/*
+				 * `staleTime: 0`: this is the one fetch in the app that knows the
+				 * data just changed. A History tab opened on this run while it was
+				 * running cached a mid-run report seconds ago, and `fetchQuery`
+				 * under `RUNS_STALE_TIME_MS` would resolve from it without a
+				 * request - handing the dashboard, and the notification, a
+				 * report that predates the run's end (#1934).
+				 */
+				staleTime: 0,
 			});
 		} catch (e) {
 			console.warn("[LoadTestService] report fetch failed", e);
@@ -479,6 +486,25 @@ class LoadTestService {
 		// are stale until the next 5s poll - and once the user has paged History,
 		// that poll is off.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		this.invalidateRunData(runId);
+	}
+
+	/**
+	 * Everything a History tab holds for `runId` was read while the run was
+	 * live: the status, the report, and the per-tick series, which stop at the
+	 * ticks written so far and are cached as final (#1934). Invalidation, not
+	 * removal, so a tab that is mounted refetches in place and one that is
+	 * opened later finds the entries stale.
+	 */
+	private invalidateRunData(runId: string): void {
+		for (const queryKey of [
+			queryKeys.runs.detail(runId),
+			queryKeys.runs.report(runId),
+			queryKeys.runs.timeSeries(runId),
+			queryKeys.runs.monitorSeries(runId),
+		]) {
+			void queryClient.invalidateQueries({ queryKey });
+		}
 	}
 
 	/**
@@ -489,8 +515,9 @@ class LoadTestService {
 	 * bar this close already let go of.
 	 */
 	private loseStream(runId: string): void {
-		// The copy just cached says "running"; the read after a reconnect must
-		// not resolve from it.
+		// The copy just cached says "running". This service's own next read
+		// bypasses the cache, but a reader that honours it, such as a History tab
+		// opened on this run later, must not take that copy as final.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.report(runId) });
 		const store = useDashboardStore.getState();
 		if (store.currentRunId === runId) store.setError(STREAM_DROPPED_MESSAGE);

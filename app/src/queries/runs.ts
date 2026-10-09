@@ -18,12 +18,14 @@ import {
 	useQueryClient,
 	useInfiniteQuery,
 	type InfiniteData,
+	type Query,
 } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
+import { isRunInProgress } from "@/lib/run-status";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
@@ -32,6 +34,20 @@ import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/histor
 
 /** How often the unpaged run list re-asks the engine. */
 const RUNS_POLL_MS = 5000;
+
+/** How often a run that is still executing is re-read, for its status and report. */
+const RUN_IN_PROGRESS_POLL_MS = 3000;
+
+/**
+ * A run's stored data is final only once the engine says the run is. The
+ * engine answers the report and series endpoints for a live run too (#1925),
+ * so a copy read mid-run and cached as final is what the pane then shows
+ * forever (#1934). `status` is the run's own, from its detail or report; an
+ * absent one is a caller with no run in hand, which keeps the terminal policy.
+ */
+function runStaleTime(status: string | null | undefined, terminalMs: number): number {
+	return isRunInProgress(status) ? 0 : terminalMs;
+}
 
 /**
  * Polling is gated to the unpaged state on purpose.
@@ -253,6 +269,13 @@ export function runDetailOptions(runId: string | null) {
 			!isRunNotFound(error) &&
 			(isEngineStartFailure(error) || count < QUERY_CACHE.DEFAULT_QUERY_RETRY),
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+		// A run opened while it executes has to notice that it ended: nothing
+		// else invalidates this key for a run another window, an agent or a
+		// relaunch started (#1934). Function form because this object is spread
+		// into every tab's query in `tab-descriptors`, and only a live run's
+		// should poll.
+		refetchInterval: (query: Query<Run>) =>
+			isRunInProgress(query.state.data?.status) ? RUN_IN_PROGRESS_POLL_MS : false,
 	};
 }
 
@@ -261,15 +284,19 @@ export function useRunQuery(runId: string | null) {
 }
 
 /**
- * Fetch a single run's report
+ * Fetch a single run's report.
+ *
+ * Pass the run's `status` when it is known: a run still executing gets a report
+ * that is stale at once and re-read on a timer, where a terminal one is cached
+ * for good (#1934). Omitted, the report is treated as a finished run's.
  */
-export function useRunReportQuery(runId: string | null) {
+export function useRunReportQuery(runId: string | null, status?: string | null) {
 	return useQuery({
 		queryKey: queryKeys.runs.report(runId ?? ""),
 		queryFn: () => apiService.getRunReport(runId!),
 		enabled: !!runId,
-		// Reports don't change, cache longer
-		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+		staleTime: runStaleTime(status, QUERY_CACHE.RUNS_STALE_TIME_MS),
+		refetchInterval: isRunInProgress(status) ? RUN_IN_PROGRESS_POLL_MS : false,
 	});
 }
 
@@ -300,8 +327,13 @@ export function useRunSamplesQuery(runId: string | null, enabled: boolean) {
 /**
  * Fetch time-series metrics for a run (paginated, auto-fetches all pages)
  * Used for rendering historical charts in load test detail view.
+ *
+ * A finished run's ticks never change, so they are cached for good; `status`
+ * says when the run is not finished, and the ticks written so far are then
+ * stale at once (#1934). Not polled: a refetch re-reads every loaded page, and
+ * the live ticks have the dashboard's stream.
  */
-export function useRunTimeSeriesQuery(runId: string | null) {
+export function useRunTimeSeriesQuery(runId: string | null, status?: string | null) {
 	return useInfiniteQuery<TimeSeriesResponse, Error>({
 		queryKey: queryKeys.runs.timeSeries(runId ?? ""),
 		queryFn: ({ pageParam = 0 }) =>
@@ -310,8 +342,7 @@ export function useRunTimeSeriesQuery(runId: string | null) {
 				offset: pageParam as number,
 			}),
 		enabled: !!runId,
-		// Historical data never changes
-		staleTime: Infinity,
+		staleTime: runStaleTime(status, Infinity),
 		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
 		initialPageParam: 0,
 		getNextPageParam: (lastPage) =>
@@ -330,7 +361,11 @@ export function useRunTimeSeriesQuery(runId: string | null) {
  * run that configured no monitor must not pay a second fetch it would only ever
  * read as empty - which is what `enabled` expresses at the call site.
  */
-export function useRunMonitorSeriesQuery(runId: string | null, enabled = true) {
+export function useRunMonitorSeriesQuery(
+	runId: string | null,
+	enabled = true,
+	status?: string | null
+) {
 	return useInfiniteQuery<MonitorSeriesResponse, Error>({
 		queryKey: queryKeys.runs.monitorSeries(runId ?? ""),
 		queryFn: ({ pageParam = 0 }) =>
@@ -340,7 +375,7 @@ export function useRunMonitorSeriesQuery(runId: string | null, enabled = true) {
 			}),
 		enabled: !!runId && enabled,
 		// A finished run's scrapes never change, like its time series.
-		staleTime: Infinity,
+		staleTime: runStaleTime(status, Infinity),
 		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
 		initialPageParam: 0,
 		getNextPageParam: (lastPage) =>

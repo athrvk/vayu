@@ -1739,16 +1739,31 @@ click; refetching either removes it or proves it real.
   unreachable engine - is rethrown untouched and keeps the default retry budget.
   `HistoryDetail` renders the two cases differently: "this run no longer exists"
   with **Close tab**, versus "couldn't load this run" with **Try again**.
-- **`useRunReportQuery(runId)`** - Fetch final report for a run. Also written by
-  `LoadTestService` at stream end via `queryClient.fetchQuery`, so opening the
-  run in History reads the cached copy rather than re-fetching a report that
-  cannot change. The one exception is a stream that dropped while the run was
-  still going: that copy says `running`, so the service invalidates it.
+  The options carry a function-form `refetchInterval` that polls (3s) only while
+  the cached run's status is `running` or `pending`: this object is spread into
+  every open tab's query by `tab-descriptors`, and a run opened mid-run (from
+  another window, an agent or a relaunch) has nothing else that tells it the run
+  ended (#1934).
+- **`useRunReportQuery(runId, status?)`** - Fetch a run's report. The engine
+  answers the report endpoint for a live run too, so a copy is final only when
+  the run is. Pass the run's `status` when it is known: `running` or `pending`
+  (`isRunInProgress`, `lib/run-status.ts`) makes the report `staleTime: 0` and
+  re-read every 3s; any other status, or none, keeps `RUNS_STALE_TIME_MS` and
+  no timer. Also written by `LoadTestService` at stream end via
+  `queryClient.fetchQuery` with `staleTime: 0` - the one fetch that knows the
+  data just changed, so it must not resolve from a mid-run copy a History tab
+  cached (#1934). The service then invalidates `runs.detail`, `runs.report`,
+  `runs.timeSeries` and `runs.monitorSeries` for the run, so a mounted tab
+  refetches in place and one opened later finds stale entries. A stream that
+  dropped while the run was still going invalidates the report alone: nothing
+  ended, so the status and series are still current.
 
-- **`useRunTimeSeriesQuery(runId)`** (`@/queries/runs`) - The stored per-tick
-  series behind the History charts, as an infinite query over the same
-  `{data, pagination}` envelope. Historical data cannot change, so
-  `staleTime: Infinity`.
+- **`useRunTimeSeriesQuery(runId, status?)`** (`@/queries/runs`) - The stored
+  per-tick series behind the History charts, as an infinite query over the same
+  `{data, pagination}` envelope. A finished run's ticks cannot change, so
+  `staleTime: Infinity`; with an in-progress `status` the ticks written so far
+  are stale at once. Not polled, because a refetch re-reads every loaded page.
+  `useRunMonitorSeriesQuery(runId, enabled, status?)` follows the same policy.
 
 **Mutations:**
 - **Stopping a run is not a mutation hook.** It is
@@ -2052,8 +2067,8 @@ is how this section drifted before. The current shape:
 |-------|--------|
 | Collections, requests lists, environments, globals, runs list | `DEFAULT_STALE_TIME_MS` (30s) via the shared client |
 | Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once and mutations invalidate it |
-| Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable |
-| Run time series | `staleTime: Infinity`, `RUNS_GC_TIME_MS` (30m) |
+| Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934) |
+| Run time series, monitor series | `staleTime: Infinity`, `RUNS_GC_TIME_MS` (30m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Engine config | `CONFIG_STALE_TIME_MS` (1m) |
 | Script completions | `SCRIPT_COMPLETIONS_STALE_TIME_MS` (1h), same gc time |
 | Health | `staleTime: 0`, refetched every `TIMING.HEALTH_CHECK_INTERVAL_MS` (30s) |
@@ -2682,8 +2697,8 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 6. As metrics stream in, `addMetricsBatch()` folds them into historical metrics (trimmed to `liveWindowSeconds`, backstopped by `maxRetainedTicks`) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
-9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, so History reuses it) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
-10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll
+9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, with `staleTime: 0` so a mid-run copy a History tab cached is not served as final, #1934) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
+10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll, and so are the run's detail, report and series, which a History tab on the same run read while it was live
 11. **A stream that ends without a `complete` frame is not a finished run** (issue #1925). `handleClose(null)` reads the same stored report, and if its `metadata.status` is still `running` or `pending` it sets `dashboard-store.error` instead of the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A collection run taking the shared stream (`handleSuperseded`) sets the error the same way, and fetches nothing. Either way the dashboard stays in its running layout, Stop included, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch keyed on `!isStreaming && !finalReport`, held off while that callout is up, and re-armed by the report callout's Retry
 
 ### Saving a Request with Auto-Save

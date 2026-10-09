@@ -48,10 +48,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
-import { queryClient } from "@/lib/query-client";
-import { queryKeys } from "@/queries/keys";
-import { apiService } from "@/services/api";
-import { useScenarioRunStore, useToastStore } from "@/stores";
+import { useStopRun } from "@/hooks/useStopRun";
+import { isRunInProgress } from "@/lib/run-status";
+import { useScenarioRunStore } from "@/stores";
 import { Badge, Input } from "@/components/ui";
 import {
 	ContractCoverage,
@@ -154,7 +153,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const thinned = thinningDisclosure(report);
 	const scenario = report?.scenario;
 
-	const inProgress = run.status === "running" || run.status === "pending";
+	const inProgress = isRunInProgress(run.status);
 
 	/*
 	 * Stoppable while the engine still owns the run, and that is two signals
@@ -165,47 +164,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 */
 	const isLive = isStreaming || inProgress;
 
-	const showToast = useToastStore((s) => s.showToast);
-	const [isStopping, setIsStopping] = useState(false);
-
-	const handleStop = async () => {
-		setIsStopping(true);
-		try {
-			await apiService.stopRun(run.id);
-			/*
-			 * The streaming tab hears this again through `complete`: the engine
-			 * drives a stopped scenario to a terminal status and closes the
-			 * topic, and `ScenarioRunService` refreshes the run and its report on
-			 * close. A tab that is *not* attached to the stream gets no such
-			 * event, so without this its run would sit on "running" - still
-			 * offering a Stop for something already stopped, and never loading
-			 * the step rows the run just wrote.
-			 */
-			await queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(run.id) });
-			await queryClient.invalidateQueries({ queryKey: queryKeys.runs.report(run.id) });
-			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-		} catch (error) {
-			// The run keeps executing and the button comes back, so without this
-			// a click that failed is indistinguishable from one that did nothing.
-			console.error("Failed to stop scenario run:", error);
-			showToast({
-				message:
-					error instanceof Error
-						? `Couldn't stop the run - ${error.message}`
-						: "Couldn't stop the run",
-				variant: "error",
-				// The sequence is still sending requests, so the retry is the
-				// reason for telling them at all.
-				action: {
-					label: "Try again",
-					altText: "Try stopping the run again",
-					onClick: () => void handleStop(),
-				},
-			});
-		} finally {
-			setIsStopping(false);
-		}
-	};
+	const { stop, isStopping } = useStopRun(run.id);
 
 	// One iteration is the common case and "Iteration 1" on every row is noise;
 	// more than one and which pass a step belongs to is the whole point.
@@ -394,9 +353,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				{/* Last, and only while the run is live. A terminal run has
 				    nothing to stop, and a Stop that lingers on a finished run
 				    reads as a run that never ended. */}
-				{isLive && (
-					<StopRunButton onStop={() => void handleStop()} isStopping={isStopping} />
-				)}
+				{isLive && <StopRunButton onStop={() => void stop()} isStopping={isStopping} />}
 			</header>
 
 			<div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">

@@ -77,6 +77,8 @@ import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
 import { NOTIFY_KINDS } from "./notify";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/queries/keys";
 
 /**
  * `handleClose` is private; the SSE client is what calls it in production, with
@@ -125,6 +127,65 @@ describe("LoadTestService", () => {
 		await closeStream();
 		expect(apiService.getRunReport).toHaveBeenCalledWith("run_2");
 		expect(mockSetFinalReport).toHaveBeenCalled();
+	});
+
+	/*
+	 * A History tab opened on a running load test caches its mid-run report under
+	 * the same key (#1934). The close must read the engine again - under the
+	 * five-minute stale time it resolved from that copy and handed the dashboard,
+	 * and the notification, a report that predates the run's end.
+	 *
+	 * Mutation check: restore `staleTime: RUNS_STALE_TIME_MS` in
+	 * `fetchStoredReport` and both assertions redden.
+	 */
+	it("reads the report afresh when a mid-run copy of it is already cached", async () => {
+		const midRun = { summary: {}, latency: {}, metadata: { status: "running" } };
+		queryClient.setQueryData(queryKeys.runs.report("run_cached"), midRun, {
+			updatedAt: Date.now() - 4000,
+		});
+		vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+			summary: {},
+			latency: {},
+			metadata: { status: "completed" },
+		} as never);
+		dashboard.currentRunId = "run_cached";
+		loadTestService.startMonitoring("run_cached");
+
+		await closeStream("completed");
+
+		expect(apiService.getRunReport).toHaveBeenCalledWith("run_cached");
+		expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+			metadata: { status: "completed" },
+		});
+	});
+
+	/*
+	 * The status, the report and the per-tick series a History tab holds were
+	 * all read while the run was live, and the series are cached as final. A
+	 * tab that is mounted refetches on invalidation; one opened later finds the
+	 * entries stale.
+	 *
+	 * Mutation check: drop `invalidateRunData` from `finishRun` and every key
+	 * stays valid.
+	 */
+	it("invalidates what a History tab read while the run was live, once it ends", async () => {
+		const runId = "run_invalidate";
+		const keys = [
+			queryKeys.runs.detail(runId),
+			queryKeys.runs.report(runId),
+			queryKeys.runs.timeSeries(runId),
+			queryKeys.runs.monitorSeries(runId),
+		];
+		// The report is the one `fetchQuery` rewrites; the rest are written by hand.
+		for (const key of keys) queryClient.setQueryData(key, { status: "running" });
+		dashboard.currentRunId = runId;
+		loadTestService.startMonitoring(runId);
+
+		await closeStream("completed");
+
+		for (const key of keys) {
+			expect(queryClient.getQueryState(key)?.isInvalidated, JSON.stringify(key)).toBe(true);
+		}
 	});
 
 	/*
@@ -197,9 +258,11 @@ describe("LoadTestService", () => {
 
 		/*
 		 * The live copy went into the query cache under the run's report key,
-		 * where the five-minute stale time would hand it back when the
-		 * reconnected run really ends. Mutation check: drop the invalidation in
-		 * `loseStream` and the final report handed over says "running".
+		 * where a reader honouring the five-minute stale time would hand it back
+		 * when the reconnected run really ends. The service's own read bypasses
+		 * the cache, so this one asserts on the cache and on the final report.
+		 * Mutation check: drop the invalidation in `loseStream` and the cached
+		 * entry is no longer invalidated.
 		 */
 		it("reads a fresh report when the reconnected run ends", async () => {
 			vi.mocked(apiService.getRunReport)
@@ -216,6 +279,22 @@ describe("LoadTestService", () => {
 			expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
 				metadata: { status: "completed" },
 			});
+		});
+
+		it("marks the cached running report stale and leaves the run's other data alone", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce(reportWith("running"));
+			const detailKey = queryKeys.runs.detail("run_drop_5");
+			queryClient.setQueryData(detailKey, { status: "running" });
+			dashboard.currentRunId = "run_drop_5";
+			loadTestService.startMonitoring("run_drop_5");
+
+			await closeStream(null);
+
+			expect(
+				queryClient.getQueryState(queryKeys.runs.report("run_drop_5"))?.isInvalidated
+			).toBe(true);
+			// Nothing ended, so the run's status is not stale.
+			expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(false);
 		});
 
 		/*
