@@ -1353,8 +1353,9 @@ UI-only: Search, filter (type/status/pinned/origin), and sort (newest/oldest) fo
 }
 ```
 
-**Helper:** `filterRuns(runs, filters)` applies **type/status/origin filtering
-and sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
+**Helper:** `filterRuns(runs, filters)` re-applies the type, status, pin and origin
+filters the engine already applied, then narrows by MCP client and sorts, over the
+loaded pages. Search is **not** handled here: `searchQuery` is
 debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
 runs, not just the pages loaded into the sidebar.
 
@@ -1901,7 +1902,7 @@ trash: {
 runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
-  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline)
+  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline, origin, type, status)
   lastDesigns: () => ["runs", "lastDesign"],               // prefix: invalidate every request's last run
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
   recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list

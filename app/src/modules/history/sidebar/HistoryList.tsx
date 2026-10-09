@@ -123,7 +123,9 @@ export default function HistoryList() {
 	} = useRunsQuery(
 		debouncedSearch,
 		pinnedOnly,
-		filterOrigin === "all" ? undefined : filterOrigin
+		filterOrigin === "all" ? undefined : filterOrigin,
+		filterType === "all" ? undefined : filterType,
+		filterStatus === "all" ? undefined : filterStatus
 	);
 	const deleteRunMutation = useDeleteRunMutation();
 	const setBaselineMutation = useSetRunBaselineMutation();
@@ -133,9 +135,9 @@ export default function HistoryList() {
 	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 	const [pinningId, setPinningId] = useState<string | null>(null);
 
-	// Flatten (de-duped) the loaded pages, then apply the client-side type/
-	// status/sort filters over them. `total` is the server's count for the
-	// current search.
+	// Flatten (de-duped) the loaded pages, then re-apply the filters and the
+	// sort over them (see `filterRuns`). `total` is the server's count for the
+	// current search and filters.
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
 	const runs = filterRuns(allRuns, {
@@ -375,13 +377,11 @@ export default function HistoryList() {
 							</Button>
 						</div>
 						{/*
-						 * The pin is the only filter that changes what is
-						 * *fetched* rather than what is shown (`baseline=true`),
-						 * so it sits apart from the two Selects: those narrow the
-						 * loaded pages, this one asks the engine a different
-						 * question. `aria-pressed` because it is a toggle, not a
-						 * navigation - the variant swap alone says nothing to a
-						 * screen reader.
+						 * The pin is a toggle rather than a Select, so it sits
+						 * apart from them although it too is asked of the engine
+						 * (`baseline=true`). `aria-pressed` because it is a
+						 * toggle, not a navigation - the variant swap alone says
+						 * nothing to a screen reader.
 						 */}
 						<Button
 							variant={pinnedOnly ? "default" : "ghost"}
@@ -436,7 +436,14 @@ export default function HistoryList() {
 							/>
 						)}
 
-						{!isLoading && !showError && runs.length === 0 && (
+						{/*
+						 * Not while older pages remain: the engine filters the list, so
+						 * an empty loaded set with `hasNextPage` set is a patched page
+						 * (an unpin drops the last pinned row in place) with more behind
+						 * it, and "no runs found" or "clear the filters" would be false.
+						 * "Load older runs" below is the way on.
+						 */}
+						{!isLoading && !showError && runs.length === 0 && !hasNextPage && (
 							// `h-full` because this scroll container is not a flex
 							// column, so `flex-1` has nothing to grow against. Without
 							// it the block sits at the top while the collections

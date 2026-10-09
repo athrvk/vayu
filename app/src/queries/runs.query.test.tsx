@@ -389,6 +389,41 @@ describe("useRunsQuery", () => {
 		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ origin: undefined }));
 	});
 
+	// Type and status are asked of the engine too (#1942): "Failed" has to find
+	// the failures older than the loaded pages, and "all" leaves both unsent.
+	it("passes the type and status to the engine, and sends none for all", async () => {
+		listRuns.mockResolvedValue(page([]));
+
+		renderHook(() => useRunsQuery(undefined, false, undefined, "load", "failed"), {
+			wrapper: wrapper(makeClient()),
+		});
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "load", status: "failed" })
+		);
+
+		listRuns.mockClear();
+		renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(
+			expect.objectContaining({ type: undefined, status: undefined })
+		);
+	});
+
+	it("keys the type and status in only when set, each to its own entry", () => {
+		const unfiltered = runsListInfiniteOptions().queryKey;
+		expect(Object.keys(unfiltered[2])).not.toContain("type");
+		expect(Object.keys(unfiltered[2])).not.toContain("status");
+
+		const failed = runsListInfiniteOptions(undefined, false, undefined, undefined, "failed");
+		const load = runsListInfiniteOptions(undefined, false, undefined, "load");
+		expect(failed.queryKey[2]).toMatchObject({ status: "failed" });
+		expect(load.queryKey[2]).toMatchObject({ type: "load" });
+		expect(failed.queryKey).not.toEqual(unfiltered);
+		expect(load.queryKey).not.toEqual(unfiltered);
+		expect(failed.queryKey).not.toEqual(load.queryKey);
+	});
+
 	it("keys the origin in only when set, so the unfiltered list keeps its entry", () => {
 		const unfiltered = runsListInfiniteOptions().queryKey;
 		expect(unfiltered).toEqual(queryKeys.runs.list({ q: undefined, baseline: undefined }));
