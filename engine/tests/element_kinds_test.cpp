@@ -169,8 +169,12 @@ TEST_F (ElementKindsTest, ExtractRegexNonRequiredMissAppendsNoTest) {
 // took the daemon down when a greedy group spanned it, because libstdc++'s
 // std::regex recursed once per character it consumed (#1874).
 std::string two_mebibyte_page () {
-    return "<html><head><title>Vayu</title></head><body>" +
-    std::string (std::size_t{ 2 } << 20, 'a') + "</body></html>";
+    // Built by append: GCC 13 at -O3 reports a false -Warray-bounds on
+    // `literal + std::string (n, c)` at this size.
+    std::string page = "<html><head><title>Vayu</title></head><body>";
+    page.append (std::size_t{ 2 } << 20, 'a');
+    page.append ("</body></html>");
+    return page;
 }
 
 TEST_F (ElementKindsTest, ExtractRegexMatchesAGreedyGroupAcrossATwoMebibyteBody) {
