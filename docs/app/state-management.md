@@ -1901,7 +1901,7 @@ trash: {
 runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
-  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline)
+  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline, origin, type, status)
   lastDesigns: () => ["runs", "lastDesign"],               // prefix: invalidate every request's last run
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
   recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list

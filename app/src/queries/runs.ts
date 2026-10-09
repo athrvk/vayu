@@ -72,7 +72,7 @@ export function runsPollInterval(loadedPages: number): number | false {
  * surface fetching on mount anyway - "written but never read" in cache form.
  *
  * @param q Optional server-side substring search over the stored snapshot.
- *          Type/status/sort stay client-side (see history-store `filterRuns`).
+ *          Only sort stays client-side (see history-store `filterRuns`).
  * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so
  *          a pin older than the loaded pages is reachable. Left unset rather
  *          than passed as `false`, which the engine reads as "only unpinned".
@@ -80,21 +80,35 @@ export function runsPollInterval(loadedPages: number): number | false {
  *          than the loaded pages have to be reachable. Part of the key only
  *          when set, so the unfiltered list - the key the warm-up writes and
  *          the other observers read - is the same entry it was before.
+ * @param type Server-side (`type=<kind>`), keyed in only when set, for the same
+ *          reason as `origin`: "Failed" has to find the failures older than the
+ *          loaded pages, and the header total has to count what is listed.
+ * @param status Server-side (`status=<status>`) and keyed like `type`.
  */
 export function runsListInfiniteOptions(
 	q?: string,
 	pinnedOnly = false,
-	origin?: RunOrigin["kind"]
+	origin?: RunOrigin["kind"],
+	type?: Run["type"],
+	status?: Run["status"]
 ) {
 	const search = q?.trim() || undefined;
 	const baseline = pinnedOnly ? true : undefined;
 	return {
-		queryKey: queryKeys.runs.list({ q: search, baseline, ...(origin && { origin }) }),
+		queryKey: queryKeys.runs.list({
+			q: search,
+			baseline,
+			...(origin && { origin }),
+			...(type && { type }),
+			...(status && { status }),
+		}),
 		queryFn: ({ pageParam }: { pageParam: number }): Promise<RunListResponse> =>
 			apiService.listRuns({
 				q: search,
 				baseline,
 				origin,
+				type,
+				status,
 				limit: RUNS_PAGE_LIMIT,
 				offset: pageParam,
 			}),
@@ -117,9 +131,15 @@ export function runsListInfiniteOptions(
  * is what an *observer* costs: a surface that renders runs pays it while it is
  * mounted, and nothing pays it while none is (#1150).
  */
-export function useRunsQuery(q?: string, pinnedOnly = false, origin?: RunOrigin["kind"]) {
+export function useRunsQuery(
+	q?: string,
+	pinnedOnly = false,
+	origin?: RunOrigin["kind"],
+	type?: Run["type"],
+	status?: Run["status"]
+) {
 	return useInfiniteQuery({
-		...runsListInfiniteOptions(q, pinnedOnly, origin),
+		...runsListInfiniteOptions(q, pinnedOnly, origin, type, status),
 		refetchInterval: (query) => runsPollInterval(query.state.data?.pages.length ?? 0),
 	});
 }

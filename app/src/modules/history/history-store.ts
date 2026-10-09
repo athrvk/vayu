@@ -99,16 +99,17 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 /**
  * Filter (by type/status/pin/origin) and sort a run list. Search is *not* handled
  * here: it moved server-side to the `q` param so it covers all runs, not just
- * the pages loaded into the sidebar (see `useRunsQuery`). Type/status/sort stay
- * client-side, applied over the currently loaded pages.
+ * the pages loaded into the sidebar (see `useRunsQuery`). Only the sort is
+ * client-side alone, applied over the currently loaded pages.
  * Use with the flattened infinite-query data.
  *
- * `pinnedOnly` and the origin kind are applied on *both* sides, and
- * deliberately: the `baseline=true` / `origin=` params decide which runs are
- * fetched, and this pass decides which of the fetched rows are shown. Unpinning patches the loaded pages in
- * place rather than refetching them (`useSetRunBaselineMutation` - a refetch
- * would lose a pin the user scrolled to), so without this pass the run just
- * unpinned would sit in the pinned-only list until the next poll.
+ * Type, status, `pinnedOnly` and the origin kind are applied on *both* sides,
+ * and deliberately: the `type=` / `status=` / `baseline=true` / `origin=`
+ * params decide which runs are fetched, and this pass decides which of the
+ * fetched rows are shown. Unpinning patches the loaded pages in place rather
+ * than refetching them (`useSetRunBaselineMutation` - a refetch would lose a
+ * pin the user scrolled to), so without this pass the run just unpinned would
+ * sit in the pinned-only list until the next poll.
  */
 export function filterRuns(
 	runs: Run[],

@@ -20,6 +20,12 @@
  */
 
 /**
+ * Type and status are asked of the engine (#1942), so the list is empty only
+ * when the engine's filtered list is: while older pages remain, the pane must
+ * not say the filters emptied it.
+ */
+
+/**
  * Finding the runs you pinned (#503).
  *
  * The pin has been storable and visible on a row since #472, but there was no
@@ -42,9 +48,14 @@ import { useHistoryStore } from "@/modules/history/history-store";
 import HistoryList from "./HistoryList";
 
 /** What the list asked the engine for, per render. */
-const runsQueryCalls: { q: string | undefined; pinnedOnly: boolean }[] = [];
+const runsQueryCalls: {
+	q: string | undefined;
+	pinnedOnly: boolean;
+	type: string | undefined;
+	status: string | undefined;
+}[] = [];
 
-const queryState = { rows: [] as unknown[] };
+const queryState = { rows: [] as unknown[], hasNextPage: false };
 
 function infinite(rows: unknown[]) {
 	return {
@@ -65,8 +76,14 @@ function infinite(rows: unknown[]) {
 }
 
 vi.mock("@/queries", () => ({
-	useRunsQuery: (q?: string, pinnedOnly = false) => {
-		runsQueryCalls.push({ q, pinnedOnly });
+	useRunsQuery: (
+		q?: string,
+		pinnedOnly = false,
+		_origin?: string,
+		type?: string,
+		status?: string
+	) => {
+		runsQueryCalls.push({ q, pinnedOnly, type, status });
 		return {
 			data: infinite(queryState.rows),
 			isLoading: false,
@@ -74,7 +91,7 @@ vi.mock("@/queries", () => ({
 			error: null,
 			refetch: vi.fn(),
 			fetchNextPage: vi.fn(),
-			hasNextPage: false,
+			hasNextPage: queryState.hasNextPage,
 			isFetchingNextPage: false,
 		};
 	},
@@ -108,6 +125,7 @@ function renderList() {
 beforeEach(() => {
 	runsQueryCalls.length = 0;
 	queryState.rows = [];
+	queryState.hasNextPage = false;
 	useHistoryStore.getState().resetFilters();
 });
 
@@ -128,5 +146,40 @@ describe("the history sidebar's empty list", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Clear the filters" }));
 		expect(useHistoryStore.getState().searchQuery).toBe("");
 		expect(screen.queryByRole("button", { name: "Clear the filters" })).toBeNull();
+	});
+
+	it("does not blame the filters while older pages remain", () => {
+		queryState.hasNextPage = true;
+		useHistoryStore.getState().setFilterStatus("failed");
+		renderList();
+
+		expect(screen.queryByText("No test runs found")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Clear the filters" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Load older runs" })).toBeInTheDocument();
+	});
+
+	it("says so once the engine's filtered list is exhausted and empty", () => {
+		useHistoryStore.getState().setFilterStatus("failed");
+		renderList();
+
+		expect(screen.getByText("No test runs found")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Clear the filters" })).toBeInTheDocument();
+	});
+
+	it("asks the engine for the chosen type and status, and for neither under all", () => {
+		renderList();
+		expect(runsQueryCalls[runsQueryCalls.length - 1]).toMatchObject({
+			type: undefined,
+			status: undefined,
+		});
+
+		useHistoryStore.getState().setFilterType("load");
+		useHistoryStore.getState().setFilterStatus("failed");
+		runsQueryCalls.length = 0;
+		renderList();
+		expect(runsQueryCalls[runsQueryCalls.length - 1]).toMatchObject({
+			type: "load",
+			status: "failed",
+		});
 	});
 });
