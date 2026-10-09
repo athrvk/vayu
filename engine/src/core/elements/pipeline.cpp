@@ -164,9 +164,6 @@ nlohmann::json ElementOutcome::to_json () const {
     if (waited_ms) {
         node["waitedMs"] = *waited_ms;
     }
-    if (wrote) {
-        node["wrote"] = *wrote;
-    }
     return node;
 }
 
@@ -326,7 +323,6 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.outcome_status = "ok";
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
-        ctx.outcome_wrote.reset ();
         ctx.element_id = compiled.id;
 
         std::optional<std::string> skipped;
@@ -355,7 +351,6 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.outcome_status,
         ctx.outcome_message,
         ctx.outcome_waited_ms,
-        ctx.outcome_wrote,
         });
     }
 }
