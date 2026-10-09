@@ -84,3 +84,22 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, guards, routed }) => {
 		}
 	});
 });
+
+/*
+ * The engine filter lists inputs by hand and nothing derives it from the job,
+ * so a floor-check script the engine job runs can be edited on a PR that never
+ * runs it (#1864). Compared against the job's own `run:` lines rather than a
+ * second list.
+ */
+describe("engine filter", () => {
+	it("routes every scripts/check-*.sh the workflow runs", () => {
+		const run = [...workflow.matchAll(/run:\s*\.\/(scripts\/check-[\w-]+\.sh)/g)].map(
+			(m) => m[1]
+		);
+		expect(run.length).toBeGreaterThan(0);
+		const routed = routedPaths(workflow, "engine");
+		for (const script of run) {
+			expect(routed, script).toContain(script);
+		}
+	});
+});
