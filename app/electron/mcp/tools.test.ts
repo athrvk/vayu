@@ -7807,6 +7807,59 @@ describe("run housekeeping tools", () => {
 			expect(client.deleteRun).not.toHaveBeenCalled();
 		});
 
+		describe("a credential typed into the run's url (#1909)", () => {
+			const runWith = (url: string) =>
+				vi.fn().mockResolvedValue({
+					id: "run_b",
+					type: "load",
+					status: "completed",
+					startTime: 1_755_000_000_000,
+					configSnapshot: { url },
+				});
+
+			test("is masked in the preview by its name, with the rest of the url kept", async () => {
+				const client = fakeClient({
+					getRun: runWith("https://api.example.com/users?api_key=LITERAL-KEY&page=2"),
+				});
+				const res = await dispatchTool(
+					"delete_run",
+					{ runId: "run_b" },
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(firstText(res)).not.toContain("LITERAL-KEY");
+				expect(firstText(res)).toContain("api_key=<redacted>&page=2");
+				expect(client.deleteRun).not.toHaveBeenCalled();
+			});
+
+			test("is shown as written with reveal on, and no secret is read to know it", async () => {
+				const client = fakeClient({
+					getRun: runWith("https://api.example.com/users?api_key=LITERAL-KEY&page=2"),
+				});
+				const res = await dispatchTool(
+					"delete_run",
+					{ runId: "run_b" },
+					ctxWith(client, { allowWrites: true, revealSecretsToAgents: true })
+				);
+				expect(firstText(res)).toContain("api_key=LITERAL-KEY&page=2");
+				expect(client.getGlobals).not.toHaveBeenCalled();
+			});
+
+			test("withholds the whole call when the masking cannot be built, deleting nothing", async () => {
+				const client = fakeClient({
+					getRun: runWith("https://api.example.com/users?api_key=LITERAL-KEY"),
+					getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+				});
+				const res = await dispatchTool(
+					"delete_run",
+					{ runId: "run_b", confirmed: true },
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).not.toContain("LITERAL-KEY");
+				expect(client.deleteRun).not.toHaveBeenCalled();
+			});
+		});
+
 		test("deletes once confirmed", async () => {
 			const client = fakeClient();
 			const res = await dispatchTool(
