@@ -72,7 +72,7 @@ export function runsPollInterval(loadedPages: number): number | false {
  * surface fetching on mount anyway - "written but never read" in cache form.
  *
  * @param q Optional server-side substring search over the stored snapshot.
- *          Only sort stays client-side (see history-store `filterRuns`).
+ *          Only the sort and the MCP-client narrowing stay client-side (see history-store `filterRuns`).
  * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so
  *          a pin older than the loaded pages is reachable. Left unset rather
  *          than passed as `false`, which the engine reads as "only unpinned".

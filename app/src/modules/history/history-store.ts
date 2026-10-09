@@ -99,8 +99,8 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 /**
  * Filter (by type/status/pin/origin) and sort a run list. Search is *not* handled
  * here: it moved server-side to the `q` param so it covers all runs, not just
- * the pages loaded into the sidebar (see `useRunsQuery`). Only the sort is
- * client-side alone, applied over the currently loaded pages.
+ * the pages loaded into the sidebar (see `useRunsQuery`). Only the MCP-client
+ * narrowing and the sort are client-side alone, over the loaded pages.
  * Use with the flattened infinite-query data.
  *
  * Type, status, `pinnedOnly` and the origin kind are applied on *both* sides,

@@ -1353,8 +1353,9 @@ UI-only: Search, filter (type/status/pinned/origin), and sort (newest/oldest) fo
 }
 ```
 
-**Helper:** `filterRuns(runs, filters)` applies **type/status/origin filtering
-and sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
+**Helper:** `filterRuns(runs, filters)` re-applies the type, status, pin and origin
+filters the engine already applied, then narrows by MCP client and sorts, over the
+loaded pages. Search is **not** handled here: `searchQuery` is
 debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
 runs, not just the pages loaded into the sidebar.
 
