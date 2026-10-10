@@ -418,7 +418,7 @@ for ([key, val] of globalsData.variables) push(key, val, "global");
 
 // 2. Collection chain - root first so leaf overrides parent. Each collection is
 //    its own origin: two in one chain both have scope "collection".
-const chain = buildCollectionChain(activeCollectionId, collections); // root-first array
+const chain = walkAncestors(activeCollectionId, collections); // root-first array
 for (const col of chain)
   for ([key, val] of col.variables)
     push(key, val, "collection", { id: col.id, name: col.name });
@@ -430,8 +430,10 @@ for ([key, val] of env.variables)
 // The winner is the last *enabled* definition.
 ```
 
-`buildCollectionChain(startId, collections)` walks `parentId` links upward and
-returns the chain with the root at index 0. It keeps a `seen` set and stops on
+`walkAncestors(startId, nodes)` (`app/src/modules/collections/tree-utils.ts`)
+is the one place every `parentId` walk lives; the resolver, the data-contract
+lookup and `isDescendantOf` all call it. It walks `parentId` links upward and returns the
+chain with the root at index 0. It keeps a `seen` set and stops on
 a revisit: the engine rejects parent cycles on write (issue #79), so a cycle
 means the database already went bad, and the walk runs inside a `useMemo` -
 an unterminated one is a frozen window, not a wrong preview.
