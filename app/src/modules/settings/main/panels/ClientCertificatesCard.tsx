@@ -72,6 +72,11 @@ import {
 import { useToastStore } from "@/stores";
 import type { ClientCertificate, ClientCertificateFormat } from "@/types";
 import { fileBaseName } from "@/lib/file-path";
+import { appSetting } from "../app-settings";
+
+// The anchor and heading come from the catalogue so search cannot offer a name
+// this card does not print - see `app-settings.ts`.
+const CLIENT_CERTIFICATES = appSetting("clientCertificates");
 
 /** What an entry is called: the same `host` / `host:port` the engine traces. */
 function targetLabel(certificate: ClientCertificate): string {
@@ -285,11 +290,11 @@ export function ClientCertificatesCard() {
 		// ledger's `--cert` / `--key` entries (#708) reveal this card the same
 		// way the settings search reveals a config row. Read by
 		// `useRevealedSetting`, which scrolls it into view and outlines it.
-		<Card data-setting-anchor="clientCertificates">
+		<Card data-setting-anchor={CLIENT_CERTIFICATES.anchor}>
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<KeyRound className="w-5 h-5 text-muted-foreground" />
-					<CardTitle>Client certificates</CardTitle>
+					<CardTitle>{CLIENT_CERTIFICATES.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Certificates Vayu presents to hosts that require mutual TLS. A registered host

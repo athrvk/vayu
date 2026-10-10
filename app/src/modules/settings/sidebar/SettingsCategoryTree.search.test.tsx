@@ -211,6 +211,38 @@ describe("settings search", () => {
 		});
 	});
 
+	/*
+	 * The two Cards under Network & connectivity are engine surfaces `/config`
+	 * does not describe, so no engine entry puts them in the index; the app
+	 * catalogue does, filed under the engine category that renders them. Run
+	 * against the real catalogue and registry: a fixture would have passed while
+	 * the index dropped every setting whose panel was not a client panel.
+	 */
+	describe("the Cards of an engine category", () => {
+		it.each([
+			["client certificate", "Client certificates"],
+			["connection test", "Connection test"],
+		])("finds %s as one result in Network & connectivity", (query, label) => {
+			renderTree();
+			fireEvent.change(search(), { target: { value: query } });
+
+			expect(screen.getByText("1 result")).toBeInTheDocument();
+			expect(screen.getByText(label)).toBeInTheDocument();
+			// An app setting's subtitle is the category that holds it, no key.
+			expect(screen.getByText("Network & connectivity")).toBeInTheDocument();
+		});
+
+		it("selects the engine category and names the Card to reveal", () => {
+			renderTree();
+			fireEvent.change(search(), { target: { value: "mtls" } });
+			fireEvent.click(screen.getByText("Client certificates"));
+
+			const state = useSettingsStore.getState();
+			expect(state.selectedCategory).toBe("network_performance");
+			expect(state.highlightedKey).toBe("clientCertificates");
+		});
+	});
+
 	it("says so when nothing matches, and the clear button restores the sections", () => {
 		renderTree();
 		fireEvent.change(search(), { target: { value: "zzzz" } });

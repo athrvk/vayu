@@ -8,7 +8,8 @@
 /**
  * App settings catalogue
  *
- * Every individual setting the client panels render, declared as data.
+ * Every individual setting the client panels render, declared as data - and
+ * the engine categories' `Cards`, the blocks `GET /config` does not describe.
  *
  * The engine half of Settings has always had this: `GET /config` sends one
  * record per setting, so search could index them. The app half had nothing
@@ -37,12 +38,16 @@
  * block does not print the label declared for it, so neither half can drift.
  */
 
-import type { ClientSettingsCategory } from "@/types";
+import type { SettingsCategory } from "@/types";
 
 export interface AppSettingDescriptor {
 	/** Unique across panels; also the `data-setting-anchor` the panel renders. */
 	anchor: string;
-	panel: ClientSettingsCategory;
+	/**
+	 * The category that holds the block: a client panel, or an engine category
+	 * whose `Cards` render it (`engine-categories.ts`).
+	 */
+	panel: SettingsCategory;
 	/**
 	 * The heading the panel prints on this block - the panel reads it from here,
 	 * so there is one writer. Guarded by `app-settings.drift.test.tsx`.
@@ -402,6 +407,25 @@ export const APP_SETTINGS = [
 		searchText:
 			"Every chord the app listens for, listed for this platform - send, save, close tab, the drawer views and the tab digits.",
 		keywords: ["hotkey", "keybinding", "chord", "accelerator", "cheat sheet"],
+	},
+
+	// Engine category Cards (`engine-categories.ts`): blocks the engine's generic
+	// entry renderer cannot draw, so no `/config` entry puts them in the index.
+	{
+		anchor: "clientCertificates",
+		panel: "network_performance",
+		label: "Client certificates",
+		searchText:
+			"The certificate Vayu presents to each host that requires mutual TLS, registered by host with the file paths it reads at send time.",
+		keywords: ["mtls", "client cert", "pkcs12", "pem"],
+	},
+	{
+		anchor: "connection-test",
+		panel: "network_performance",
+		label: "Connection test",
+		searchText:
+			"Send one request with the current proxy and trust settings and see which hop answered.",
+		keywords: ["proxy test", "tls", "reachability"],
 	},
 ] as const satisfies readonly AppSettingDescriptor[];
 
