@@ -7,9 +7,12 @@
 
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import { Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
-import { useTabsStore, useImportModalStore } from "@/stores";
+import { useTabsStore, useImportModalStore, useSessionStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries";
+import { useNewRequest } from "@/hooks/useNewRequest";
+import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
+import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
 import {
 	Button,
 	Input,
@@ -102,11 +105,33 @@ export default function CollectionTree() {
 
 	const { panel, rows } = useTreeCrud({
 		collections,
-		rootCollections,
-		selectedCollectionId,
 		requestsByCollection,
 		getRequestsByCollection,
 	});
+
+	/*
+	 * The toolbar's "+" asks the same question every other "New request" entry
+	 * point asks, so it cannot disagree with them about where the request lands.
+	 * One thing outranks that rule here: a collection's own tab being open says
+	 * which collection the user is in, and the button is on that collection's
+	 * screen. Only a collection that still exists counts - a tab can outlive it.
+	 */
+	const { newRequest, isCreating, pickerProps } = useNewRequest();
+	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
+	const tabCollection = collections.find((c) => c.id === selectedCollectionId);
+	/*
+	 * The collection the button would fill, when that is not a guess: the open
+	 * tab's, or the one the rule resolves to without asking. Null when it would
+	 * ask or create, and the tooltip then names nothing rather than a collection
+	 * the click might not use.
+	 */
+	const addRequestTarget = useMemo(() => {
+		if (tabCollection) return tabCollection;
+		const target = resolveNewRequestTarget(lastCollectionId, collections);
+		if (target.kind !== "collection") return null;
+		return collections.find((c) => c.id === target.collectionId) ?? null;
+	}, [tabCollection, lastCollectionId, collections]);
+	const isAddingRequest = isCreating || panel.isCreatingRequest;
 
 	/*
 	 * The row the open delete dialog would remove. Collections and requests carry
@@ -240,11 +265,13 @@ export default function CollectionTree() {
 							<Button
 								variant="ghost"
 								size="icon"
-								onClick={panel.createRequestFromToolbar}
-								disabled={panel.isCreatingRequest}
+								onClick={() =>
+									newRequest(undefined, { collectionId: tabCollection?.id })
+								}
+								disabled={isAddingRequest}
 								aria-label="Add request"
 							>
-								{panel.isCreatingRequest ? (
+								{isAddingRequest ? (
 									<Loader2 className="size-icon animate-spin" />
 								) : (
 									<Plus className="size-icon" />
@@ -252,8 +279,8 @@ export default function CollectionTree() {
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>
-							{selectedCollectionId
-								? `Add request in ${collections.find((c) => c.id === selectedCollectionId)?.name ?? "selected collection"}`
+							{addRequestTarget
+								? `Add request in ${addRequestTarget.name}`
 								: "Add request"}
 						</TooltipContent>
 					</Tooltip>
@@ -498,6 +525,8 @@ export default function CollectionTree() {
 					onClose={closeMoveDialog}
 					onMove={moveToOwner}
 				/>
+
+				<CollectionPicker {...pickerProps} />
 			</div>
 		</DrawerPanel>
 	);

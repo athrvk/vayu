@@ -31,9 +31,6 @@ import { ICON_MOTION } from "@/components/ui";
 
 export interface TreeCrudOptions {
 	collections: Collection[];
-	/** Sorted roots, so "New request" with nothing selected has a target. */
-	rootCollections: Collection[];
-	selectedCollectionId: string | null;
 	requestsByCollection: Map<string, Request[]>;
 	getRequestsByCollection: (collectionId: string) => Request[];
 }
@@ -46,8 +43,6 @@ export interface TreeCrudPanel {
 	openNewCollectionForm: () => void;
 	cancelNewCollectionForm: () => void;
 	createCollection: () => void;
-	/** "New request": into the selected collection, else the first root. */
-	createRequestFromToolbar: () => void;
 	isCreatingCollection: boolean;
 	isCreatingRequest: boolean;
 	deleteConfirm: DeleteConfirmTarget | null;
@@ -105,8 +100,6 @@ export interface TreeCrud {
  */
 export function useTreeCrud({
 	collections,
-	rootCollections,
-	selectedCollectionId,
 	requestsByCollection,
 	getRequestsByCollection,
 }: TreeCrudOptions): TreeCrud {
@@ -277,28 +270,6 @@ export function useTreeCrud({
 		},
 		[createRequestMutation, expandCollection, navigateToRequest, reportFailure]
 	);
-
-	// Handle "New Request" button click - use selected collection or first root
-	const handleNewRequestClick = useCallback(() => {
-		if (rootCollections.length === 0) {
-			// No collections - prompt to create one first
-			handleOpenNewCollectionForm();
-			return;
-		}
-
-		// Use selected collection only if it still exists; otherwise first root collection
-		const selectedExists =
-			selectedCollectionId && collections.some((c) => c.id === selectedCollectionId);
-		const targetCollection =
-			(selectedExists ? selectedCollectionId : null) ?? rootCollections[0].id;
-		void handleCreateRequest(targetCollection);
-	}, [
-		rootCollections,
-		selectedCollectionId,
-		collections,
-		handleOpenNewCollectionForm,
-		handleCreateRequest,
-	]);
 
 	const handleRenameCollection = useCallback((collection: Collection) => {
 		setRenamingId(collection.id);
@@ -779,7 +750,6 @@ export function useTreeCrud({
 			openNewCollectionForm: handleOpenNewCollectionForm,
 			cancelNewCollectionForm: handleCancelNewCollectionForm,
 			createCollection: () => void handleCreateCollection(),
-			createRequestFromToolbar: handleNewRequestClick,
 			isCreatingCollection,
 			isCreatingRequest,
 			deleteConfirm,
@@ -800,7 +770,6 @@ export function useTreeCrud({
 			handleOpenNewCollectionForm,
 			handleCancelNewCollectionForm,
 			handleCreateCollection,
-			handleNewRequestClick,
 			isCreatingCollection,
 			isCreatingRequest,
 			deleteConfirm,
