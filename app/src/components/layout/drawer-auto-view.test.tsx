@@ -233,6 +233,52 @@ describe("Shell sidebar auto-view effect", () => {
 		expect(useLayoutStore.getState().drawerView).toBe("history");
 	});
 
+	/*
+	 * The effect reads only the active tab's type, so a switch between two tabs
+	 * of one type is not a navigation into a drawer view. Depending on the
+	 * entity id as well re-opened a drawer the user had closed with the toggle
+	 * chord (#1863).
+	 */
+	it("leaves a drawer the user closed shut when switching between two request tabs", () => {
+		useLayoutStore.setState({ drawerOpen: true, drawerView: "collections" });
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "r1", type: "request", entityId: "req-1" },
+				{ id: "r2", type: "request", entityId: "req-2" },
+			],
+			activeTabId: "r1",
+		});
+		renderShell();
+
+		act(() => useLayoutStore.getState().toggleDrawer());
+		expect(useLayoutStore.getState().drawerOpen).toBe(false);
+
+		act(() => useTabsStore.getState().focusTab("r2"));
+
+		expect(useTabsStore.getState().activeTabId).toBe("r2");
+		expect(useLayoutStore.getState().drawerOpen).toBe(false);
+	});
+
+	it("leaves a drawer the user closed shut when switching between two collection tabs", () => {
+		useLayoutStore.setState({ drawerOpen: true, drawerView: "collections" });
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "c1", type: "collection", entityId: "col-1" },
+				{ id: "c2", type: "collection", entityId: "col-2" },
+			],
+			activeTabId: "c1",
+		});
+		renderShell();
+
+		act(() => useLayoutStore.getState().toggleDrawer());
+		expect(useLayoutStore.getState().drawerOpen).toBe(false);
+
+		act(() => useTabsStore.getState().focusTab("c2"));
+
+		expect(useTabsStore.getState().activeTabId).toBe("c2");
+		expect(useLayoutStore.getState().drawerOpen).toBe(false);
+	});
+
 	it("leaves the drawer alone for a dashboard tab", () => {
 		/*
 		 * A load test is a detour from a request, not a list item - it opens only
