@@ -41,10 +41,8 @@ elif [ -f "engine/build/vayu-cli" ]; then
     CLI_PATH="engine/build/vayu-cli"
 else
     echo "Error: vayu-cli not found. Please build the engine first:"
-    echo "  ./scripts/build/build-macos.sh -e      # Production build"
-    echo "  ./scripts/build/build-linux.sh -e      # Production build"
-    echo "  ./scripts/build/build-macos.sh dev -e  # Development build"
-    echo "  ./scripts/build/build-linux.sh dev -e  # Development build"
+    echo "  python build.py -e        # Production build"
+    echo "  python build.py --dev -e  # Development build"
     exit 1
 fi
 
