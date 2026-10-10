@@ -15,6 +15,7 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { CheckCircle2 } from "lucide-react";
+import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import {
 	Button,
 	Input,
@@ -120,6 +121,74 @@ const COLS: Record<number, string> = {
 	5: "grid-cols-5",
 };
 
+interface TileGroupProps {
+	value: string;
+	onChange: (value: string) => void;
+	/** Tailwind grid-cols class for the tile grid. */
+	columns: string;
+	children: ReactNode;
+}
+
+/**
+ * The pick-one tile grid as a radio group: each {@link TileItem} is a
+ * `role="radio"` with `aria-checked`, and arrow keys move focus between them.
+ * Shared by {@link OptionButtons} and `FontPicker`, which differ only in what a
+ * tile holds.
+ *
+ * Not the `ui/toggle-group` segmented control: its items are a fixed-height
+ * strip with the label rendered twice to reserve the bold width, which a tile
+ * with a preview and a description cannot sit in. This is the Radix primitive
+ * underneath, unstyled.
+ */
+export function TileGroup({ value, onChange, columns, children }: TileGroupProps) {
+	return (
+		<ToggleGroupPrimitive.Root
+			type="single"
+			role="radiogroup"
+			value={value}
+			// Radix clears the value when the chosen tile is pressed again; a
+			// pick-one setting has no "off".
+			onValueChange={(next) => next && onChange(next)}
+			className={cn("grid gap-3", columns)}
+		>
+			{children}
+		</ToggleGroupPrimitive.Root>
+	);
+}
+
+interface TileItemProps {
+	value: string;
+	selected: boolean;
+	/** Layout of the tile's contents; the border, fill and states are the tile's own. */
+	className?: string;
+	/** Placement of the selected check mark. */
+	checkClassName: string;
+	children: ReactNode;
+}
+
+export function TileItem({ value, selected, className, checkClassName, children }: TileItemProps) {
+	return (
+		<ToggleGroupPrimitive.Item
+			value={value}
+			className={cn(
+				"relative flex flex-col rounded-lg border-2",
+				"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
+				"hover:bg-accent hover:border-accent-foreground/20",
+				selected ? "border-primary bg-primary/5" : "border-border",
+				className
+			)}
+		>
+			{children}
+			{selected && (
+				<CheckCircle2
+					aria-hidden="true"
+					className={cn("size-icon text-primary absolute", checkClassName)}
+				/>
+			)}
+		</ToggleGroupPrimitive.Item>
+	);
+}
+
 export function OptionButtons<T extends string | number>({
 	options,
 	value,
@@ -128,22 +197,27 @@ export function OptionButtons<T extends string | number>({
 	align = "center",
 }: OptionButtonsProps<T>) {
 	const cols = columns ?? COLS[Math.min(options.length, 5)] ?? "grid-cols-3";
+	// Radix values are strings; the caller's may be numbers, so the chosen
+	// string is looked back up rather than cast.
+	const handleChange = (next: string) => {
+		const option = options.find((o) => String(o.value) === next);
+		if (option) onChange(option.value);
+	};
 	return (
-		<div className={cn("grid gap-3", cols)}>
+		<TileGroup value={String(value)} onChange={handleChange} columns={cols}>
 			{options.map((option) => {
 				const isSelected = value === option.value;
 				return (
-					<button
+					<TileItem
 						key={String(option.value)}
-						onClick={() => onChange(option.value)}
+						value={String(option.value)}
+						selected={isSelected}
+						checkClassName="top-1.5 right-1.5"
 						className={cn(
-							"relative flex flex-col gap-0.5 p-3 rounded-lg border-2",
-							"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
+							"gap-0.5 p-3",
 							align === "center"
 								? "items-center justify-center text-center"
-								: "items-start text-left",
-							"hover:bg-accent hover:border-accent-foreground/20",
-							isSelected ? "border-primary bg-primary/5" : "border-border"
+								: "items-start text-left"
 						)}
 					>
 						{option.preview && (
@@ -159,13 +233,10 @@ export function OptionButtons<T extends string | number>({
 								{option.description}
 							</span>
 						)}
-						{isSelected && (
-							<CheckCircle2 className="size-icon text-primary absolute top-1.5 right-1.5" />
-						)}
-					</button>
+					</TileItem>
 				);
 			})}
-		</div>
+		</TileGroup>
 	);
 }
 

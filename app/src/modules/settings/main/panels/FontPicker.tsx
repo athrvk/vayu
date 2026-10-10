@@ -14,10 +14,9 @@
  * font (Editor) so the two stay consistent.
  */
 
-import { CheckCircle2 } from "lucide-react";
 import { Input } from "@/components/ui";
-import { cn } from "@/lib/utils";
 import type { FontOption } from "@/constants/appearance";
+import { TileGroup, TileItem } from "./SettingControls";
 
 interface FontPickerProps {
 	options: readonly FontOption[];
@@ -35,29 +34,26 @@ interface FontPickerProps {
 }
 
 function FontTile({
+	value,
 	selected,
-	onClick,
 	label,
 	description,
 	stack,
 	sample,
 }: {
+	value: string;
 	selected: boolean;
-	onClick: () => void;
 	label: string;
 	description: string;
 	stack: string;
 	sample: string;
 }) {
 	return (
-		<button
-			onClick={onClick}
-			className={cn(
-				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left",
-				"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
-				"hover:bg-accent hover:border-accent-foreground/20",
-				selected ? "border-primary bg-primary/5" : "border-border"
-			)}
+		<TileItem
+			value={value}
+			selected={selected}
+			checkClassName="top-2 right-2"
+			className="items-start gap-1 p-3 text-left"
 		>
 			<span className="text-sm font-medium">{label}</span>
 			<span className="text-xs text-muted-foreground">{description}</span>
@@ -67,8 +63,7 @@ function FontTile({
 			>
 				{sample}
 			</span>
-			{selected && <CheckCircle2 className="size-icon text-primary absolute top-2 right-2" />}
-		</button>
+		</TileItem>
 	);
 }
 
@@ -84,12 +79,12 @@ export function FontPicker({
 }: FontPickerProps) {
 	return (
 		<div className="space-y-3">
-			<div className="grid grid-cols-2 gap-3">
+			<TileGroup value={value} onChange={onChange} columns="grid-cols-2">
 				{options.map((option) => (
 					<FontTile
 						key={option.value}
+						value={option.value}
 						selected={value === option.value}
-						onClick={() => onChange(option.value)}
 						label={option.label}
 						description={option.description}
 						stack={option.stack}
@@ -97,14 +92,14 @@ export function FontPicker({
 					/>
 				))}
 				<FontTile
+					value="custom"
 					selected={value === "custom"}
-					onClick={() => onChange("custom")}
 					label="Custom…"
 					description="Any font installed on your system"
 					stack={customStack(customValue)}
 					sample={sample}
 				/>
-			</div>
+			</TileGroup>
 			{value === "custom" && (
 				<div className="enter-fade">
 					<Input

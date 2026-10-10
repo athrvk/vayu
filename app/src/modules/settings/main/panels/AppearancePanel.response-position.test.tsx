@@ -49,7 +49,7 @@ describe("Response position row", () => {
 		render(<AppearancePanel />);
 		for (const label of ["Beside", "Below", "Auto"]) {
 			expect(
-				screen.getByRole("button", { name: new RegExp(`^${label}`) })
+				screen.getByRole("radio", { name: new RegExp(`^${label}`) })
 			).toBeInTheDocument();
 		}
 		expect(
@@ -59,10 +59,10 @@ describe("Response position row", () => {
 
 	it("writes the store, and reflects a choice made elsewhere", () => {
 		render(<AppearancePanel />);
-		fireEvent.click(screen.getByRole("button", { name: /^Below/ }));
+		fireEvent.click(screen.getByRole("radio", { name: /^Below/ }));
 		expect(useLayoutStore.getState().responsePosition).toBe("below");
 
-		fireEvent.click(screen.getByRole("button", { name: /^Auto/ }));
+		fireEvent.click(screen.getByRole("radio", { name: /^Auto/ }));
 		expect(useLayoutStore.getState().responsePosition).toBe("auto");
 	});
 });
