@@ -1202,6 +1202,22 @@ TEST (PostmanImport, CountsAnUnsupportedMethodAndFallsBackToGet) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_method"), 1);
 }
 
+/// The schema allows `item.request` to be a bare URL string (#1907): a GET to
+/// that URL, its query read into a row, with nothing tallied as lost.
+TEST (PostmanImport, ARequestThatIsABareUrlStringImportsAsAGetToThatUrl) {
+    const ImportParse parsed = parse_import (R"({"info":{"schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"item":[{"name":"R","request":"https://x.test/a?b=1"}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("url"), "https://x.test/a?b=1");
+    EXPECT_EQ (request.at ("method"), "GET");
+    ASSERT_EQ (request.at ("params").size (), 1);
+    EXPECT_EQ (request.at ("params")[0].at ("key"), "b");
+    EXPECT_EQ (request.at ("params")[0].at ("value"), "1");
+    EXPECT_TRUE (skip_counts (parsed.result.at ("meta").at ("skipped")).empty ());
+}
+
 /// `pm_folder` recurses per nested `item`, bounded only because `read_document`
 /// refuses a document past `MAX_READ_DEPTH` first (#1782): pin that the bound
 /// holds for the folder shape, so the recursion cannot be reached unbounded.
