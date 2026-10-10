@@ -85,7 +85,9 @@ interface TabsState {
 	 * Read by the command palette, which lists open tabs most-recently-used
 	 * first - the order a switcher has to have, and one `openTabs` cannot give:
 	 * that array is insertion order, so the tab you were just in sits wherever
-	 * it was opened.
+	 * it was opened - and by `openTab`'s LRU eviction, which takes the least
+	 * recently focused clean tab. Both read it, so every path that makes a tab
+	 * active stamps it, a close that activates a survivor included.
 	 *
 	 * Session-scoped by design (absent from `partialize`). Tabs *are* restored
 	 * across launches, so a persisted copy would rank a restored list by
@@ -327,10 +329,10 @@ function forgetLocations(
  * the history, which is `closeTabsForEntities`' own concern.
  */
 function closeTabs(
-	state: Pick<TabsState, "openTabs" | "activeTabId" | "navHistory" | "navIndex">,
+	state: Pick<TabsState, "openTabs" | "activeTabId" | "tabFocusedAt" | "navHistory" | "navIndex">,
 	closing: ReadonlySet<string>
 ): Partial<TabsState> | null {
-	const { openTabs, activeTabId, navHistory, navIndex } = state;
+	const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = state;
 	const remaining = openTabs.filter((t) => !closing.has(t.id));
 	if (remaining.length === openTabs.length) return null;
 
@@ -348,7 +350,14 @@ function closeTabs(
 	 */
 	for (let i = navIndex - 1; i >= 0; i--) {
 		const open = remaining.find((t) => sameLocation(t, navHistory[i]));
-		if (open) return { openTabs: remaining, activeTabId: open.id, navIndex: i };
+		if (open) {
+			return {
+				openTabs: remaining,
+				activeTabId: open.id,
+				tabFocusedAt: stampFocus(tabFocusedAt, remaining, open.id),
+				navIndex: i,
+			};
+		}
 	}
 
 	/*
@@ -364,6 +373,7 @@ function closeTabs(
 	return {
 		openTabs: remaining,
 		activeTabId: survivor.id,
+		tabFocusedAt: stampFocus(tabFocusedAt, remaining, survivor.id),
 		...recordVisit(navHistory, navIndex, {
 			type: survivor.type,
 			entityId: survivor.entityId,
@@ -461,6 +471,40 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 	}
 }
 
+/**
+ * Index of the tab LRU eviction takes: the least recently focused one that is
+ * safe to lose, or `-1` when none is.
+ *
+ * Safe means not on screen, not exempt and clean. The tab being opened is never
+ * a candidate - it has no stamp, so it would rank first, and dropping it would
+ * leave `activeTabId` naming a tab that is not there. When every other tab is
+ * dirty the strip therefore runs past the cap rather than losing work.
+ *
+ * A tab with no stamp (restored this session, never focused) ranks as `0`, so it
+ * goes before any tab the user has actually used. Ties keep strip order, the
+ * earlier tab first.
+ */
+function leastRecentlyFocusedIndex(
+	tabs: Tab[],
+	openingId: string,
+	activeTabId: string | null,
+	tabFocusedAt: Record<string, number>,
+	contexts: Map<string, SaveContext>
+): number {
+	let evictIndex = -1;
+	let evictStamp = Infinity;
+	tabs.forEach((t, i) => {
+		if (t.id === openingId || t.id === activeTabId) return;
+		if (LRU_EXEMPT_TYPES.includes(t.type)) return;
+		if (isTabDirty(t, contexts)) return;
+		const stamp = tabFocusedAt[t.id] ?? 0;
+		if (stamp >= evictStamp) return;
+		evictIndex = i;
+		evictStamp = stamp;
+	});
+	return evictIndex;
+}
+
 /** The slice of the store that reaches localStorage - see `partialize` below. */
 interface PersistedTabs {
 	openTabs: Tab[];
@@ -487,9 +531,12 @@ function migrateTabs(persisted: unknown): PersistedTabs {
 /**
  * Stamp `focusedId` as focused now, keeping only the tabs that still exist.
  *
- * Pruning here rather than in each close path is what keeps the close paths
- * unchanged: a stamp for a closed tab is unreachable (the palette only ranks
- * open tabs) and is dropped the next time anything is focused.
+ * Every path that makes a tab active calls this, the close paths included: a
+ * tab a close brings on screen is being focused, and eviction ranks by the
+ * stamp. Pruning here rather than in the close branches that activate nothing
+ * is what keeps those unchanged: a stamp for a closed tab is unreachable
+ * (nothing ranks a tab that is not open) and is dropped the next time anything
+ * is focused.
  */
 function stampFocus(
 	previous: Record<string, number>,
@@ -591,21 +638,18 @@ export const useTabsStore = create<TabsState>()(
 				let tabs = [...openTabs, newTab];
 
 				// LRU eviction when over cap. Nothing is flushed on the way out:
-				// the predicate below refuses to select a dirty tab, so the flush
-				// branch that used to sit here was unreachable by construction - and
-				// had it ever run, `void ctx.save()` would have dropped the
+				// the selector refuses a dirty tab, so there is no flush to run -
+				// and had there been one, `void ctx.save()` would have dropped the
 				// rejection. Eviction simply never takes unsaved work.
 				if (tabs.length > MAX_OPEN_TABS) {
-					// Find the oldest non-active, non-exempt, non-dirty tab
-					const contexts = useSaveStore.getState().contexts;
-					const evictIndex = tabs.findIndex((t) => {
-						if (t.id === activeTabId) return false;
-						if (LRU_EXEMPT_TYPES.includes(t.type)) return false;
-						return !isTabDirty(t, contexts);
-					});
-					if (evictIndex !== -1) {
-						tabs.splice(evictIndex, 1);
-					}
+					const evictIndex = leastRecentlyFocusedIndex(
+						tabs,
+						newTab.id,
+						activeTabId,
+						tabFocusedAt,
+						useSaveStore.getState().contexts
+					);
+					if (evictIndex !== -1) tabs.splice(evictIndex, 1);
 				}
 
 				set({
@@ -716,7 +760,7 @@ export const useTabsStore = create<TabsState>()(
 				const { clearEntity } = useTabSelectionStore.getState();
 				for (const id of ids) clearEntity(id);
 
-				const { openTabs, activeTabId, navHistory, navIndex } = get();
+				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = get();
 				const shouldClose = (t: TabLocation) =>
 					t.entityId !== null &&
 					ids.has(t.entityId) &&
@@ -742,7 +786,7 @@ export const useTabsStore = create<TabsState>()(
 				}
 
 				let nextActiveId = activeTabId;
-				let navigation = forgotten;
+				let navigation: Partial<TabsState> = forgotten;
 				const activeIdx = openTabs.findIndex((t) => t.id === activeTabId);
 				if (activeIdx !== -1 && shouldClose(openTabs[activeIdx])) {
 					// Active tab is closing: focus the nearest survivor, preferring the
@@ -762,10 +806,13 @@ export const useTabsStore = create<TabsState>()(
 					 * survivor is normally somewhere they have been.
 					 */
 					if (pick) {
-						navigation = recordVisit(forgotten.navHistory, forgotten.navIndex, {
-							type: pick.type,
-							entityId: pick.entityId,
-						});
+						navigation = {
+							...recordVisit(forgotten.navHistory, forgotten.navIndex, {
+								type: pick.type,
+								entityId: pick.entityId,
+							}),
+							tabFocusedAt: stampFocus(tabFocusedAt, remaining, pick.id),
+						};
 					}
 				}
 
