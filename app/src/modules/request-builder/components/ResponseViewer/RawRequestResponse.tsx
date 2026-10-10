@@ -33,13 +33,13 @@
  * string for this component and the grammar to disagree about - which they had
  * already managed to do once.
  *
- * **The empty state is gone, because it could never render.** The guard was
- * `if (!rawRequest && !response)`, and `response` is a required object prop -
- * always truthy, so the condition was always false and "No raw data available"
- * had never been on screen. Rewriting the condition was the first attempt and
- * was also wrong: `buildRawResponse` always emits a status line, and the tab is
- * mounted behind `hasRaw = !!response.rawRequest`. Nothing here can be empty;
- * the check is the tab's *existence*, one level up.
+ * **There is no response half when nothing came back.** A `status: 0` exchange
+ * (a timeout, a refused connection, a failed handshake) has no response, and
+ * `buildRawResponse` would still print `HTTP/1.1 0` under the real request - a
+ * status line no server sent. That case shows the sent request alone, and an
+ * empty state when the engine recorded none (a failure before the send, such as
+ * an invalid URL). Every other response still renders both halves with or
+ * without a recorded request: restored traces omit `rawRequest`.
  *
  * **`language="http"` finally means something.** Monaco ships no `http`
  * language, so this editor had been falling back to plain text since it was
@@ -47,6 +47,7 @@
  */
 
 import { CodeEditor } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { buildRawResponse } from "@/components/shared/response-viewer";
 import { markLines, SENT_MARKER, RECEIVED_MARKER } from "@/lib/http-language";
 
@@ -67,6 +68,14 @@ export interface RawRequestResponseProps {
 }
 
 export default function RawRequestResponse({ rawRequest, response }: RawRequestResponseProps) {
+	if (response.status === 0) {
+		return rawRequest ? (
+			<RawEditor value={markLines(rawRequest, SENT_MARKER)} />
+		) : (
+			<EmptyState variant="inline" title="No request was recorded" />
+		);
+	}
+
 	const rawResponse = buildRawResponse(
 		response.status,
 		response.statusText,
@@ -78,22 +87,25 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 	const received = markLines(rawResponse, RECEIVED_MARKER);
 
 	/*
-	 * A ternary, not a guard clause. `rawRequest` is typed `string` and the
-	 * caller gates on it being non-empty, so the else-branch is unreachable
-	 * through the app - it is kept because it makes this total over its declared
-	 * prop type, which returning an empty state did not.
-	 *
 	 * No blank line between the halves: `markLines` ends the request with a bare
 	 * `>`, which is the blank line that closes a head, and the response opens on
 	 * `< HTTP/1.1 ...`. That is exactly what `curl -v` prints, and it is what the
 	 * grammar reads to know the response head has started.
 	 */
 	return (
+		<RawEditor
+			value={rawRequest ? `${markLines(rawRequest, SENT_MARKER)}\n${received}` : received}
+		/>
+	);
+}
+
+function RawEditor({ value }: { value: string }) {
+	return (
 		<CodeEditor
 			height="100%"
 			language="http"
 			ariaLabel="Raw request and response"
-			value={rawRequest ? `${markLines(rawRequest, SENT_MARKER)}\n${received}` : received}
+			value={value}
 			readOnly
 			/*
 			 * No line numbers, and no gutter left where they were.
