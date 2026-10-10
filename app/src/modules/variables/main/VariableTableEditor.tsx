@@ -776,7 +776,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							) : (
 								<Badge
 									variant="outline"
-									className="min-w-30 h-8 justify-center border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
+									className="min-w-30 h-control-sm justify-center border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
 								>
 									Active
 								</Badge>
@@ -785,7 +785,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								label="Delete environment"
 								icon={<Trash2 className="size-icon" />}
 								onClick={() => setShowDeleteConfirm(true)}
-								className="h-8 w-8 text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
+								className="text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
 							/>
 						</div>
 					)}

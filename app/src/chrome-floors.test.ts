@@ -21,7 +21,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { stripComments } from "@/lib/strip-comments.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -226,6 +226,13 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// size-N is 3N px, so N <= 7.5 is under 24px, fractions included; an
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
+	//
+	// The second bound is a bare `h-8`, on height only (#1912). It is 24px, so
+	// it clears the floor, but it is the pre-density literal #1679 retired from
+	// controls: a control states `h-control` / `h-control-sm`, which are the
+	// same 24px at Default and 32px at Comfortable. `w-8` and `size-8` stay
+	// legitimate boxes. The drawer row's `h-8` is normally a `<div>`, outside the
+	// tag set; the hand-rolled `<button>` rows are listed in DRAWER_ROW_BUTTONS.
 	const OPEN =
 		/<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger|DialogCancelButton)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
@@ -234,6 +241,8 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// shrinking a target.
 	const BOX_SIZE =
 		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\w./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
+	// A height of exactly 8 (not `h-80`, `h-8.5`, `min-h-8` or `h-8/12`).
+	const RETIRED_HEIGHT = /(?<![\w-])h-8(?![\w./-])/;
 	const TARGET_FLOOR_PX = 24;
 	const PX_PER_REM = 16;
 
@@ -247,6 +256,36 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		return undefined;
 	}
 
+	function retiredHeight(tag: string): string | undefined {
+		return tag.match(RETIRED_HEIGHT)?.[0];
+	}
+
+	/** The first class in `tag` that sizes a control with a bound this scan rejects. */
+	function offendingClass(tag: string): string | undefined {
+		return undersizedClass(tag) ?? retiredHeight(tag);
+	}
+
+	// A hand-rolled `<button>` that IS a single-line drawer row keeps `h-8`: the
+	// row height is the drawer's own (docs/design-system.md, "Drawer Row
+	// Metric"), not a control's. The others of its kind are `<div>`s and never
+	// reach this scan. Keyed by path under `src/`; the test below fails when an
+	// entry stops matching a real `h-8`, so an entry cannot outlive its row.
+	const DRAWER_ROW_BUTTONS: Record<string, string> = {
+		"modules/settings/sidebar/SettingsCategoryTree.tsx":
+			"a category row of the Settings drawer, beside the other single-line drawer rows",
+	};
+
+	function sourcePath(file: string): string {
+		return relative(srcRoot, file).split(sep).join("/");
+	}
+
+	/** How many interactive tags in `file` carry a bare `h-8`. */
+	function retiredHeightTags(file: string): number {
+		const code = stripComments(readFileSync(file, "utf8"));
+		return [...code.matchAll(OPEN)].filter((m) => retiredHeight(openingTag(code, m.index)))
+			.length;
+	}
+
 	it.each([
 		["a whole step", "h-7", "h-7"],
 		["a fractional step", "h-3.5 rounded-md", "h-3.5"],
@@ -256,13 +295,15 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["an arbitrary px size", "h-[18px]", "h-[18px]"],
 		["an arbitrary rem size", "size-[1rem]", "size-[1rem]"],
 		["an svg descendant override", "[&_svg]:size-3", "size-3"],
+		["a bare h-8", "h-8 w-auto", "h-8"],
+		["a variant-prefixed h-8", "sm:h-8 px-3", "h-8"],
 	])("flags %s", (_label, classes, expected) => {
-		expect(undersizedClass(`<Button className="${classes}"`)).toBe(expected);
+		expect(offendingClass(`<Button className="${classes}"`)).toBe(expected);
 	});
 
 	it.each([
 		["the target floor class", "size-target"],
-		["a step at the floor", "h-8 w-8"],
+		["a width and size at the floor", "w-8 size-8"],
 		["a step above the floor", "h-10 size-12"],
 		["an arbitrary size at the floor", "h-[24px] w-[1.5rem]"],
 		["an arbitrary size above the floor", "h-[2rem]"],
@@ -272,8 +313,12 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["a fraction of the parent", "w-1/2"],
 		["the size-icon step", "size-icon-sm"],
 		["a container-size width", "w-3xs"],
+		["a min-height at the retired step", "min-h-8"],
+		["a max-height at the retired step", "max-h-8"],
+		["a taller step", "h-80 h-8.5"],
+		["a control token", "h-control-sm"],
 	])("does not flag %s", (_label, classes) => {
-		expect(undersizedClass(`<Button className="${classes}"`)).toBeUndefined();
+		expect(offendingClass(`<Button className="${classes}"`)).toBeUndefined();
 	});
 
 	it("scans a non-empty set of files and tags", () => {
@@ -288,16 +333,29 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(tags).toContain("<DialogCancelButton");
 	});
 
-	it("finds no undersized h / w / size in an interactive element's own tag", () => {
+	it("finds no undersized h / w / size or bare h-8 in an interactive element's own tag", () => {
 		const offences: string[] = [];
 		for (const file of files()) {
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
-				const hit = undersizedClass(openingTag(code, m.index));
+				const tag = openingTag(code, m.index);
+				const exempt = sourcePath(file) in DRAWER_ROW_BUTTONS;
+				const hit = undersizedClass(tag) ?? (exempt ? undefined : retiredHeight(tag));
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}
 		expect(offences.join("\n")).toBe("");
+	});
+
+	it("keeps every drawer-row exemption pointing at a real h-8 control tag", () => {
+		const entries = Object.keys(DRAWER_ROW_BUTTONS);
+		expect(entries.length).toBeGreaterThan(0);
+		for (const path of entries) {
+			expect(
+				retiredHeightTags(join(srcRoot, path)),
+				`${path} no longer carries h-8`
+			).toBeGreaterThan(0);
+		}
 	});
 });
 

@@ -363,7 +363,7 @@ export default function HistoryList() {
 								variant={sortBy === "newest" ? "default" : "ghost"}
 								onClick={() => setSortBy("newest")}
 								size="sm"
-								className="h-8"
+								className="h-control-sm"
 							>
 								Newest
 							</Button>
@@ -371,7 +371,7 @@ export default function HistoryList() {
 								variant={sortBy === "oldest" ? "default" : "ghost"}
 								onClick={() => setSortBy("oldest")}
 								size="sm"
-								className="h-8"
+								className="h-control-sm"
 							>
 								Oldest
 							</Button>
@@ -387,7 +387,7 @@ export default function HistoryList() {
 							variant={pinnedOnly ? "default" : "ghost"}
 							onClick={() => setPinnedOnly(!pinnedOnly)}
 							size="sm"
-							className="h-8 gap-1 ml-auto"
+							className="h-control-sm gap-1 ml-auto"
 							aria-pressed={pinnedOnly}
 							title="Show only pinned runs"
 						>
