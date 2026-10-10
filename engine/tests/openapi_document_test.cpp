@@ -453,6 +453,36 @@ TEST (ResponseSchemas, LeavesANullableWithNoTypeAlone) {
     (json{ { "description", "anything" } }));
 }
 
+TEST (ResponseSchemas, KeepsANullableBesideACombinatorOrRefAsAUnionWithNull) {
+    // `{nullable, allOf:[{$ref}]}` is how 3.0 spells a nullable object: the
+    // `allOf` resolves to `type: object`, so leaving the schema alone rejects a
+    // null the document permits (#1895).
+    const json null_branch = { { "type", "null" } };
+    const json ref_branch =
+    json::array ({ json{ { "$ref", "#/components/schemas/Owner" } } });
+    const json plain = { { "allOf", ref_branch } };
+    EXPECT_EQ (translated (json{ { "nullable", true }, { "allOf", ref_branch } }),
+    (json{ { "anyOf", json::array ({ plain, null_branch }) } }));
+
+    const std::vector<json> others = { json{ { "anyOf", ref_branch } },
+        json{ { "oneOf", ref_branch } }, json{ { "not", json{ { "type", "string" } } } },
+        json{ { "enum", json::array ({ "a" }) } } };
+    for (const json& inner : others) {
+        json source        = inner;
+        source["nullable"] = true;
+        EXPECT_EQ (translated (source),
+        (json{ { "anyOf", json::array ({ inner, null_branch }) } }))
+        << inner.dump ();
+    }
+    const json bare_ref = { { "$ref", "#/components/schemas/Owner" } };
+    EXPECT_EQ (
+    translated (json{ { "$ref", "#/components/schemas/Owner" }, { "nullable", true } }),
+    (json{ { "anyOf", json::array ({ bare_ref, null_branch }) } }));
+
+    // `nullable: false` is the default and changes nothing.
+    EXPECT_EQ (translated (json{ { "nullable", false }, { "allOf", ref_branch } }), plain);
+}
+
 TEST (ResponseSchemas, TranslatesDraft04BooleanExclusiveBoundsIntoDraft07Values) {
     EXPECT_EQ (translated (json{ { "type", "integer" }, { "minimum", 5 },
                { "exclusiveMinimum", true } }),

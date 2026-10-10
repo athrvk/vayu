@@ -621,6 +621,20 @@ nlohmann::ordered_json& out) {
     }
 }
 
+/// Keywords that can reject null with no `type` beside them: a combinator or
+/// `$ref` that resolves to a typed schema, `not`, an `enum` that omits null.
+constexpr std::array<std::string_view, 6> NULL_REJECTING_KEYS = { "allOf",
+    "anyOf", "oneOf", "$ref", "not", "enum" };
+
+bool constrains_without_type (const nlohmann::ordered_json& out) {
+    for (const auto& entry : out.items ()) {
+        if (holds (NULL_REJECTING_KEYS, entry.key ())) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * OpenAPI 3.0's `nullable`, applied once against whatever `type` ended up being
  * - doing it per key would depend on key order.
@@ -632,8 +646,15 @@ void apply_nullable (const nlohmann::ordered_json& schema, nlohmann::ordered_jso
     }
     const auto type = out.find ("type");
     if (type == out.end ()) {
-        // With no `type` at all, `nullable` constrains nothing: every JSON value
-        // was already allowed, null included.
+        // No `type` and no keyword that could still reject null: `nullable`
+        // constrains nothing. Beside allOf / anyOf / oneOf / $ref (#1895) the
+        // composed schema is typed (`{nullable, allOf:[{$ref}]}` is the usual
+        // spelling of a nullable object), so null needs a branch of its own.
+        if (constrains_without_type (out)) {
+            out = nlohmann::ordered_json{ { "anyOf",
+            nlohmann::ordered_json::array (
+            { out, nlohmann::ordered_json{ { "type", "null" } } }) } };
+        }
         return;
     }
     if (type->is_string ()) {

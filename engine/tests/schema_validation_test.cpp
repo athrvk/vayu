@@ -18,12 +18,14 @@
 
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/openapi_document.hpp"
 #include "vayu/core/schema_validation.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -49,6 +51,9 @@ const json& ref_roots           = json::object ()) {
     { "schema", schema } } }) } } });
     return index.dump ();
 }
+
+/// The most a derived index may hold; far above anything these documents reach.
+constexpr size_t INDEX_CAP = size_t{ 1024 } * 1024;
 
 const char* const GET_PET = R"({"operationId":"getPet","method":"GET","path":"/pets/{petId}"})";
 
@@ -374,6 +379,34 @@ TEST (SchemaDialectTest, AnOpenApiKeywordThatSurvivedExtractionIsDisclosed) {
 
     ASSERT_EQ (found.size (), 1u);
     EXPECT_EQ (found.front ().first, "nullable");
+}
+
+TEST (SchemaValidationNullableTest, ANullableObjectBesideAllOfAcceptsNullEndToEnd) {
+    // The usual 3.0 spelling of a nullable object (#1895). Revert the union in
+    // `apply_nullable` and the `null` below is reported as a type failure.
+    const auto indexes = derive_spec_indexes (
+    R"({"openapi":"3.0.0","paths":{"/pets/{petId}":{"get":{"operationId":"getPet",)"
+    R"("responses":{"200":{"content":{"application/json":{"schema":)"
+    R"({"type":"object","properties":{"owner":{"nullable":true,)"
+    R"("allOf":[{"$ref":"#/components/schemas/Owner"}]}}}}}}}}}},)"
+    R"("components":{"schemas":{"Owner":{"type":"object"}}}})",
+    INDEX_CAP);
+    ASSERT_TRUE (indexes.ok ()) << indexes.error;
+
+    const auto index = ResponseSchemaIndex::parse (indexes.response_schemas);
+    ASSERT_HAS_VALUE (index);
+
+    const auto null_owner =
+    index->check (GET_PET, 200, "application/json", R"({"owner":null})");
+    EXPECT_TRUE (null_owner.checked);
+    EXPECT_TRUE (null_owner.valid)
+    << "a null the document permits is not a failure";
+
+    const auto wrong_type =
+    index->check (GET_PET, 200, "application/json", R"({"owner":5})");
+    EXPECT_TRUE (wrong_type.checked);
+    EXPECT_FALSE (wrong_type.valid)
+    << "the union must not turn the schema into a free pass";
 }
 
 // ─── Bounds ─────────────────────────────────────────────────────────────────

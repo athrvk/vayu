@@ -836,7 +836,11 @@ design: it compares bytes, and these bytes did not move.
 
 Schemas are translated by the engine when the document is stored, because a
 validator reads JSON Schema and OpenAPI 3.0's dialect is *not* it. `nullable: true` becomes a
-union with null, 3.0's draft-04 boolean `exclusiveMinimum` becomes the bound
+union with null - on the `type` when there is one, and as `anyOf: [<the schema>,
+{"type": "null"}]` when the schema is composed instead (`allOf`, `anyOf`, `oneOf`,
+`$ref`, `not` or `enum` with no `type` beside it, the usual spelling of a
+nullable `$ref`-ed object); a bare `nullable: true` with none of those constrains
+nothing and is just dropped. 3.0's draft-04 boolean `exclusiveMinimum` becomes the bound
 itself, and `discriminator` / `xml` / `example` are dropped as things that
 describe no constraint. Without that step a null the document explicitly permits
 would be reported as a type failure - a wrong answer, which is worse than no
