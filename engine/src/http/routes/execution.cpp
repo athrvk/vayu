@@ -2070,6 +2070,20 @@ void erase_null_members (nlohmann::json& json) {
 }
 
 /**
+ * A collection run (a scenario with no load `mode`) has no scrape lifecycle,
+ * so a `monitor` block beside it would be accepted and never read (#1939).
+ * The caller has already established the payload is that shape.
+ */
+std::optional<std::string> refuse_monitor_on_collection_run (const nlohmann::json& json) {
+    const auto monitor = json.find ("monitor");
+    if (monitor == json.end () || monitor->is_null ()) {
+        return std::nullopt;
+    }
+    return "'monitor' is only read by a load run - a collection run scrapes no "
+           "vitals; add a load 'mode' beside 'scenario', or drop 'monitor'";
+}
+
+/**
  * POST /runs
  * Starts a load test run (Vayu Mode).
  *
@@ -2094,6 +2108,14 @@ RunOrigin& origin) {
         if (auto invalid = vayu::core::validate_scenario_load_config (json)) {
             vayu::utils::log_warning (
             "http", "POST /runs - Invalid scenario load config: " + *invalid);
+            return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+        }
+    }
+
+    if (is_scenario && !is_scenario_load) {
+        if (auto invalid = refuse_monitor_on_collection_run (json)) {
+            vayu::utils::log_warning (
+            "http", "POST /runs - Invalid collection run config: " + *invalid);
             return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
         }
     }

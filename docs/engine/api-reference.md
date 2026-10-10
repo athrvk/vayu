@@ -6464,6 +6464,10 @@ served by [`GET /runs/:runId/monitor`](#get-runsrunidmonitor), streamed live as
 in the report's `monitor` section. Without the block nothing is scraped and none
 of those three carry anything.
 
+Only a load run reads the block. A `scenario` payload with no load `mode` is a
+collection run, which has no scrape lifecycle, so it is refused (below) rather
+than accepted and never scraped; add a `mode` beside `scenario` to scrape.
+
 ```jsonc
 {
   "monitor": {
@@ -6514,6 +6518,10 @@ scraping the user's own infrastructure. An unusable block (no `url`, a
 non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
 `intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
 field, before the run row is created.
+
+A `monitor` block beside a `scenario` that carries no load `mode` (absent,
+empty or not a string) is likewise a `400` `invalid_run_config` naming
+`'monitor'`.
 
 #### The `scenario` block (collection runs)
 
