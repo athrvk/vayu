@@ -668,7 +668,12 @@ stays unsaved.
 is the only caller that does: on a failure it re-arms with the auto-save
 delay, doubling on each further failure and capped at
 `TIMING.SAVE_RETRY_MAX_DELAY_MS` (one minute), cancelled on unmount, on an
-entity switch, and by the next ordinary edit. Cmd/Ctrl+S and the
+entity switch, and by the next ordinary edit. A 4xx is final (#1889): the engine
+rejected the payload itself (a 400, a 413), so `performSave` reports it as
+`"final"` (`isFinalError`, the predicate the query and mutation retry rules
+share) and no retry is armed. The status stays `error` - the Dock keeps saying
+"Not saved" - and the next edit re-arms the debounce. A 5xx, a timeout or an
+unreachable engine keeps retrying. Cmd/Ctrl+S and the
 entity-switch/quit goodbye flush still call `performSave` directly and report
 their own outcome once - retrying either would save into a pane the user has
 already left, or double a save they just asked for by hand.
@@ -688,7 +693,7 @@ than rejecting, so `runSave` cannot take a resolved promise for a success. Witho
 that a failed Cmd/Ctrl+S showed "Saved" beside its own failure toast.
 
 **A context's `save` can report its own verdict** (`SaveOutcome`: `"saved"`,
-`"failed"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
+`"failed"`, `"final"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
 store-wide `status` is one slot, so two contexts saving in the same tick
 overwrite each other's - reading it back charged one context's failure to the
 other, and `flushAll` counted a save that landed as failed. `runSave` believes
@@ -698,7 +703,8 @@ over another context's `error` or `pending`. `pending` is a save that settled
 without persisting its edit: a `SaveBlockedError` (the editor declined to send an
 incomplete element) or an edit that landed while the write was in flight. It is
 not a failure - no toast, no "Not saved", no retry - and `flushAll` counts it in
-`pending`.
+`pending`. `"final"` is a failure that will not retry (a 4xx); `flushAll` counts
+it in `failed`.
 
 A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
 `variable-commit`) is judged by the status it published, as before: `error` is
@@ -735,7 +741,7 @@ its own unsaved edit is untouched.
 {
   id: string
   name: string
-  save: () => Promise<SaveOutcome | void>  // SaveOutcome: "saved" | "failed" | "pending"
+  save: () => Promise<SaveOutcome | void>  // SaveOutcome: "saved" | "failed" | "final" | "pending"
   hasPendingChanges: boolean
 }
 ```

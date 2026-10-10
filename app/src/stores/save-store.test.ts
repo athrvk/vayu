@@ -219,6 +219,24 @@ describe("flushAll", () => {
 		});
 	});
 
+	it("counts a context that resolves 'final' as failed, so the quit prompt still asks (#1889)", async () => {
+		useSaveStore.getState().registerContext({
+			id: "request-1",
+			name: "request-1",
+			save: () => {
+				useSaveStore.getState().failSave("Couldn't save - bad request");
+				return Promise.resolve("final");
+			},
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 0,
+			failed: 1,
+			pending: 0,
+		});
+	});
+
 	it("counts a context that resolves 'pending' as pending, not saved", async () => {
 		// A save the editor declined to send (`SaveBlockedError`) is neither a
 		// success nor a failure, and the quit prompt must not call it either.

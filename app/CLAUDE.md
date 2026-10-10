@@ -74,11 +74,14 @@ everything.
 - **A save that fails is retried, and the failure stays on screen until it
   lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,
   the health poll's reconnect branch flushes every dirty registered context
-  (`queries/health.ts`), and the Dock renders `error` as **Not saved**. **A
+  (`queries/health.ts`), and the Dock renders `error` as **Not saved**. A 4xx
+  is the exception: the engine's verdict on the payload is `final`
+  (`isFinalError`, #1889), so autosave does not re-send it and the next edit is
+  what tries again. **A
   quit or close never discards a save silently** (#1489): `save-flush.ts`
   answers `{ saved, failed, pending }` and `flushNeedsConfirmation` decides
   whether the main process asks before the window goes. Each context reports
-  its own verdict (`SaveOutcome`: saved, failed or pending) rather than the
+  its own verdict (`SaveOutcome`: saved, failed, final or pending) rather than the
   store reading back the one shared status; a save an editor declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. An editor takes part
