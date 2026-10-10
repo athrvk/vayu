@@ -31,8 +31,12 @@ export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
  *
  * `pending` is a save the context declined to send (`SaveBlockedError`) or one
  * that left an edit behind: nothing failed, the edit is simply not on disk.
+ *
+ * `final` is a failure the engine will repeat for this payload (a 4xx, #1889):
+ * the same as `failed` to every reader of the count, and the one a caller that
+ * retries must not retry.
  */
-export type SaveOutcome = "saved" | "failed" | "pending";
+export type SaveOutcome = "saved" | "failed" | "final" | "pending";
 
 type FillIn = (context: SaveContext) => void;
 
@@ -348,7 +352,11 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// blocked save, an edit that landed mid-flight). The caller (`main.ts`,
 			// #1489) also sees the case no completed flush can represent - the 2s
 			// ceiling firing before the renderer answers - as a `null` result.
-			return { saved: count("saved"), failed: count("failed"), pending: count("pending") };
+			return {
+				saved: count("saved"),
+				failed: count("failed") + count("final"),
+				pending: count("pending"),
+			};
 		},
 	};
 });

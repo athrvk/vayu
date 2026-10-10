@@ -58,6 +58,9 @@ function mountManager(initial: Props) {
 beforeEach(() => {
 	vi.useFakeTimers();
 	useSaveStore.getState().reset();
+	// A prior case's re-registered draft (#1489) would read as a dirty sibling and
+	// turn the next case's "saved" into "pending".
+	useSaveStore.setState({ contexts: new Map() });
 	useClientSettingsStore.setState({ autoSave: { enabled: true, delayMs: 5000 } });
 	queryClient.clear();
 });
@@ -239,18 +242,113 @@ describe("retrying a failed auto-save", () => {
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 		const onSave = vi
 			.fn()
-			.mockRejectedValueOnce(new ApiError(400, "BAD_REQUEST", "bad request"))
-			.mockRejectedValueOnce(new Error("fetch failed"));
+			.mockRejectedValueOnce(new ApiError(400, "BAD_REQUEST", "bad request"));
 		mountManager({ entityId: "req_1", onSave });
 
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(5000);
 		});
+		expect(onSave).toHaveBeenCalledTimes(1);
 		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it("pokes the health query when a save fails without the engine answering", async () => {
+		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+		const onSave = vi.fn().mockRejectedValueOnce(new Error("fetch failed"));
+		mountManager({ entityId: "req_1", onSave });
 
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(5000); // the retry, a network error this time
+			await vi.advanceTimersByTimeAsync(5000);
 		});
 		expect(invalidate).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * A 4xx is the engine's verdict on the payload, so re-sending it can only
+ * re-toast (#1889). The status stays "error" - the Dock keeps saying "Not
+ * saved" - and the next edit is what arms another attempt.
+ */
+describe("a save the engine rejected with a 4xx", () => {
+	it("is not retried, and the failure stays on screen", async () => {
+		const onSave = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(400, "BAD_REQUEST", "bad request"));
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
+		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	it("is saved again by the next edit", async () => {
+		const onSave = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(413, "PAYLOAD_TOO_LARGE", "too large"))
+			.mockResolvedValueOnce(undefined);
+		const { rerender } = renderHook(
+			({ changeToken }: { changeToken: number }) =>
+				useSaveManager({
+					entityId: "req_1",
+					onSave,
+					hasChanges: true,
+					changeToken,
+				}),
+			{ initialProps: { changeToken: 1 }, wrapper }
+		);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			rerender({ changeToken: 2 });
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(2);
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("still retries a 5xx, which is the engine's trouble and not the payload's", async () => {
+		const onSave = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(503, "UNAVAILABLE", "busy"))
+			.mockResolvedValueOnce(undefined);
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(2);
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("still retries a failure that is not an engine verdict at all", async () => {
+		const onSave = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("fetch failed"))
+			.mockResolvedValueOnce(undefined);
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(2);
 	});
 });

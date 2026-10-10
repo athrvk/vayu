@@ -21,8 +21,10 @@ import { engineStarting } from "./engine-start-window";
  * answers the same way three times in a row, and retrying it only delays the
  * error the caller is waiting for. Anything else - a 5xx, a timeout, an
  * unreachable engine - keeps the default budget, because those do recover.
+ *
+ * Exported for the autosave retry (#1889), which draws the same line.
  */
-function isFinalError(error: unknown): boolean {
+export function isFinalError(error: unknown): boolean {
 	return error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500;
 }
 

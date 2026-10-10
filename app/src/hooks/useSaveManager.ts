@@ -23,6 +23,7 @@ import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import { TIMING } from "@/config/timing";
 import { SaveBlockedError } from "@/lib/elements";
+import { isFinalError } from "@/lib/query-client";
 
 /**
  * The registry id this hook saves under. Three places in this file need it -
@@ -236,7 +237,7 @@ export function useSaveManager({
 					// waiting.
 					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
 				}
-				return "failed";
+				return isFinalError(error) ? "final" : "failed";
 			}
 		});
 		saveQueueRef.current = run;
@@ -253,15 +254,22 @@ export function useSaveManager({
 	 * again, so only it (and the retry this schedules for itself) goes through
 	 * this wrapper.
 	 *
-	 * `performSave` swallows its own errors and always resolves, so the
-	 * outcome is read back from the store status it just published rather than
-	 * from a rejection.
+	 * `performSave` swallows its own errors and always resolves, so a failure
+	 * is read back from the store status it just published rather than from a
+	 * rejection; the outcome only says whether that failure is worth retrying.
 	 */
 	const attemptAutoSave = useCallback(async () => {
-		await performSave();
+		const outcome = await performSave();
 		if (useSaveStore.getState().status !== "error") {
 			retryAttemptRef.current = 0;
 			clearRetry();
+			return;
+		}
+		// The engine rejected this payload (#1889) and would again: re-sending it
+		// only re-toasts. The status stays "error" so the Dock keeps saying "Not
+		// saved", and the next edit re-arms the debounce above.
+		if (outcome === "final") {
+			retryAttemptRef.current = 0;
 			return;
 		}
 		if (!enabledRef.current) return;
