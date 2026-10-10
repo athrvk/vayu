@@ -509,6 +509,51 @@ export class EngineSidecar {
 	}
 
 	/**
+	 * Settle a live process the lock file names (issue #1905).
+	 *
+	 * The lock PID is verified to be a Vayu engine, so a missing `/health`
+	 * answer means that engine is either still starting - an orphan from a
+	 * crashed session reads its database and runs migrations before it listens -
+	 * or hung. Spawning beside it loses the flock, and falling through to the
+	 * port check would blame "another application" for our own engine. So it is
+	 * given the budget a freshly spawned engine gets, adopted if it answers, and
+	 * stopped and replaced if it does not.
+	 *
+	 * @returns whether the engine was adopted. `false` means it was stopped
+	 *          instead, and the caller falls through to spawning.
+	 */
+	private async adoptLockedEngine(pid: number): Promise<boolean> {
+		if (await this.system.probeHealth(this.port)) {
+			return this.adoptIfVersionMatches(pid);
+		}
+
+		appLogger().warn(
+			"sidecar",
+			"Lock file indicates the process is running, but the engine is not responding on this port - waiting for it",
+			{ pid, port: this.port }
+		);
+		if (await this.pollHealthWithinBudget(() => null)) {
+			return this.adoptIfVersionMatches(pid);
+		}
+
+		appLogger().warn(
+			"sidecar",
+			"Engine never answered /health - stopping it to start a fresh one",
+			{
+				pid,
+				port: this.port,
+				budgetMs: ENGINE_HEALTH_POLL_BUDGET_MS,
+			}
+		);
+		this.ownership = { kind: "adopted", pid };
+		await this.stopAdopted(pid);
+		// Same gap `restart()` waits out between a stop and the spawn that follows.
+		await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
+		appLogger().info("sidecar", "Replaced an unresponsive engine", { pid });
+		return false;
+	}
+
+	/**
 	 * Start the engine process
 	 */
 	async start(): Promise<void> {
@@ -529,21 +574,10 @@ export class EngineSidecar {
 				appLogger().info("sidecar", "Lock file found, process is running", {
 					pid: lockStatus.pid,
 				});
-				// Verify engine is actually responding on the port
-				if (await this.system.probeHealth(this.port)) {
-					if (await this.adoptIfVersionMatches(lockStatus.pid)) {
-						return;
-					}
-					// Mismatched daemon stopped instead of adopted - fall through to spawn.
-				} else {
-					appLogger().warn(
-						"sidecar",
-						"Lock file indicates the process is running, but the engine is not responding on this port",
-						{ pid: lockStatus.pid, port: this.port }
-					);
-					// Process might be stuck, but we'll let the engine's lock mechanism handle it
-					// The engine will fail to start if it can't acquire the lock
+				if (await this.adoptLockedEngine(lockStatus.pid)) {
+					return;
 				}
+				// Silent or mismatched daemon stopped instead of adopted - fall through to spawn.
 			} else if (lockStatus.pid !== null) {
 				// Lock file exists but process is not running - stale lock file
 				appLogger().warn("sidecar", "Stale lock file found, cleaning up", {
@@ -704,6 +738,23 @@ export class EngineSidecar {
 	 * still alive; the caller decides what a slow engine costs.
 	 */
 	private async waitForEngine(spawnFailure: () => SpawnFailure | null): Promise<void> {
+		if (await this.pollHealthWithinBudget(spawnFailure)) {
+			appLogger().info("sidecar", "Engine is ready");
+			return;
+		}
+		throw new EngineNotReadyError(ENGINE_HEALTH_POLL_BUDGET_MS);
+	}
+
+	/**
+	 * The ramped health poll behind `waitForEngine`, shared with the wait on a
+	 * lock-file engine that has not answered yet (#1905).
+	 *
+	 * @returns `true` once `/health` answers, `false` when the budget is spent.
+	 *          A `spawnFailure` that reports a dead child throws instead.
+	 */
+	private async pollHealthWithinBudget(
+		spawnFailure: () => SpawnFailure | null
+	): Promise<boolean> {
 		let waited = 0;
 		let interval = ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS;
 
@@ -721,14 +772,9 @@ export class EngineSidecar {
 				throw new Error(describeSpawnFailure(died));
 			}
 
-			if (await this.system.probeHealth(this.port)) {
-				appLogger().info("sidecar", "Engine is ready");
-				return;
-			}
+			if (await this.system.probeHealth(this.port)) return true;
 
-			if (waited >= ENGINE_HEALTH_POLL_BUDGET_MS) {
-				throw new EngineNotReadyError(ENGINE_HEALTH_POLL_BUDGET_MS);
-			}
+			if (waited >= ENGINE_HEALTH_POLL_BUDGET_MS) return false;
 
 			await this.system.sleep(interval);
 			waited += interval;
