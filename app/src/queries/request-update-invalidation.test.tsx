@@ -121,4 +121,23 @@ describe("useUpdateRequestMutation invalidates only the affected lists", () => {
 
 		expect(client.getQueryData(queryKeys.requests.detail("req_1"))).toEqual(updated);
 	});
+
+	it("drops only the written request's compositions, under every environment (#1877)", async () => {
+		updateRequest.mockResolvedValue(req("req_1", "col_a"));
+		const client = makeClient();
+		seed(client);
+		const written = queryKeys.compose.forRequest("req_1", "env_1");
+		const other = queryKeys.compose.forRequest("req_2", "env_1");
+		client.setQueryData(written, {});
+		client.setQueryData(other, {});
+
+		const { result } = renderHook(() => useUpdateRequestMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync({ id: "req_1", name: "Renamed" });
+
+		expect(client.getQueryState(written)?.isInvalidated).toBe(true);
+		// Widening to `compose.all` turns this true.
+		expect(client.getQueryState(other)?.isInvalidated).toBe(false);
+	});
 });

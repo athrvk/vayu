@@ -19,6 +19,7 @@
  */
 
 import type { QueryClient } from "@tanstack/react-query";
+import { invalidateCompositions } from "@/queries/compose-invalidation";
 import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent, McpDataEntity } from "@/types/domain";
 
@@ -74,7 +75,7 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
+		invalidateCompositions(queryClient);
 	},
 
 	/*
@@ -127,9 +128,7 @@ const INVALIDATORS: Record<
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.requests.detail(event.requestId),
 			});
-			void queryClient.invalidateQueries({
-				queryKey: queryKeys.compose.allForRequest(event.requestId),
-			});
+			invalidateCompositions(queryClient, event.requestId);
 		}
 	},
 
@@ -159,7 +158,7 @@ const INVALIDATORS: Record<
 	environment: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
+		invalidateCompositions(queryClient);
 	},
 
 	/*
@@ -346,7 +345,7 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
+		invalidateCompositions(queryClient);
 	},
 };
 

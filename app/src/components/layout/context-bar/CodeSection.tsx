@@ -23,10 +23,11 @@
  * `{{token}}`.
  *
  * Composing happens when the section is expanded, when the user asks for it
- * again, and when a write the renderer did not make lands on this request,
- * never per keystroke: the section is only mounted while expanded (see
- * `Section.tsx`) and the query is `staleTime: Infinity` behind an explicit
- * refresh or an invalidation (see `lib/mcp-invalidation.ts`).
+ * again, and when a committed write (the renderer's own PUT or an MCP agent's)
+ * lands on this request, never per keystroke: the section is only mounted
+ * while expanded (see `Section.tsx`) and the query is `staleTime: Infinity`
+ * behind an explicit refresh or an invalidation (see
+ * `queries/compose-invalidation.ts`).
  */
 
 import { useState } from "react";
@@ -87,11 +88,11 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 		// Never refetched on its own: a compose is a round trip, and the section
 		// would otherwise pay one per keystroke behind it (#1310). It is refreshed
 		// by an explicit act instead - the user's refresh button, or an
-		// invalidation from a write the renderer did not make, which is how an MCP
-		// agent's edit to this request or its collection chain reaches the snippet
-		// (`lib/mcp-invalidation.ts`, #1438). `invalidateQueries` refetches a
-		// mounted observer whatever its `staleTime`, so this value gates the cost
-		// without gating correctness.
+		// invalidation from a committed write, the renderer's own PUT or an MCP
+		// agent's, to this request, its collection chain, an environment or the
+		// globals (`invalidateCompositions`, #1438, #1877). `invalidateQueries`
+		// refetches a mounted observer whatever its `staleTime`, so this value
+		// gates the cost without gating correctness.
 		staleTime: Infinity,
 		retry: false,
 	});
