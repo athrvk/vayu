@@ -16,7 +16,7 @@ everything.
   reason in a comment.
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`.
 - Feature-organized: `app/src/modules/<feature>/` (collections, dashboard,
-  history, inbox, palette, request-builder, services, settings, trash,
+  history, inbox, mock-server, palette, request-builder, services, settings, trash,
   variables, welcome); shared shell and primitives in `app/src/components/`
   (layout, shared, ui). See `docs/app/COMPONENTS.md`.
 - **Import holds no parser** (#877). `app/src/services/importers/` is the batch

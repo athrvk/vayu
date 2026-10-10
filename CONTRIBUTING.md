@@ -79,12 +79,11 @@ vayu/
 ├── app/             # Electron + React UI
 │   ├── electron/    # Main process
 │   ├── src/         # Renderer (React)
-|   ├── public/      # Public assets
 |   ├── installer/   # Installer files
 │   └── package.json # Dependencies
-├── scripts/         # Build scripts
-│   ├── build/       # Platform-specific build scripts
-│   └── test/        # Test scripts
+├── scripts/         # pre-commit, floor checks, test fixtures, perf harness
+│   ├── test/        # Test scripts and fixtures
+│   └── perf/        # Weekly measurement harness
 └── docs/            # Documentation
     ├── engine/      # Engine documentation
     ├── app/         # App documentation
@@ -95,7 +94,7 @@ vayu/
 
 ### C++ (Engine)
 
-- **Standard:** C++20
+- **Standard:** C++23
 - **Style:** Google C++ Style Guide (with modifications)
 - **Formatting:** clang-format, **19 exactly**. `.clang-format` at the repository
   root governs `engine/{src,include,tests}`; `engine/vendor/` is excluded by a
