@@ -238,11 +238,20 @@ describe("the app settings catalogue", () => {
 			"renders every anchor the catalogue declares for %s",
 			(id, category) => {
 				const declared = APP_SETTINGS.filter((s) => s.panel === id);
-				// A Card with no catalogue entry is a block search cannot find.
 				expect(declared.length).toBeGreaterThan(0);
 
 				const { container } = renderCards(category.Cards ?? []);
 				const rendered = renderedAnchors(container);
+
+				// The other direction: a Card with no catalogue entry is a block search
+				// cannot find.
+				const declaredAnchors = new Set<string | null>(declared.map((s) => s.anchor));
+				for (const anchor of rendered) {
+					expect(
+						declaredAnchors.has(anchor),
+						`${category.label} renders "${anchor}" but the catalogue has no entry for it`
+					).toBe(true);
+				}
 
 				for (const setting of declared) {
 					expect(

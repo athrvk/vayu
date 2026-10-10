@@ -221,6 +221,8 @@ describe("settings search", () => {
 	describe("the Cards of an engine category", () => {
 		it.each([
 			["client certificate", "Client certificates"],
+			["client cert", "Client certificates"],
+			["mtls", "Client certificates"],
 			["connection test", "Connection test"],
 		])("finds %s as one result in Network & connectivity", (query, label) => {
 			renderTree();
