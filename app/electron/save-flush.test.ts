@@ -25,7 +25,7 @@ import { dirname, join } from "node:path";
 import {
 	createSaveFlusher,
 	buildFlushFailurePrompt,
-	confirmDiscardOnFailedFlush,
+	createFlushFailureGate,
 	flushNeedsConfirmation,
 	FLUSH_TIMEOUT_MS,
 	type FlushResult,
@@ -285,6 +285,12 @@ describe("a second gesture inside the flush window", () => {
 });
 
 describe("asking before a failed flush is discarded (#1489)", () => {
+	const makeGate = (answer = true) => {
+		const ask = vi.fn().mockResolvedValue(answer);
+		const log = vi.fn();
+		return { gate: createFlushFailureGate({ ask, log }), ask, log };
+	};
+
 	it("needs no confirmation for a clean settle", () => {
 		expect(flushNeedsConfirmation({ saved: 3, failed: 0, pending: 0 })).toBe(false);
 	});
@@ -335,25 +341,61 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 	});
 
 	it("does not ask, and proceeds, when the flush landed clean", async () => {
-		const ask = vi.fn();
-		const proceed = await confirmDiscardOnFailedFlush(ask, "quit", CLEAN);
+		const { gate, ask } = makeGate();
+		const proceed = await gate.confirm("quit", CLEAN);
 		expect(proceed).toBe(true);
 		expect(ask).not.toHaveBeenCalled();
 	});
 
 	it("asks, and proceeds only on the answer, when the flush did not land clean", async () => {
-		const keepWorking = vi.fn().mockResolvedValue(false);
 		const failed: FlushResult = { saved: 0, failed: 1, pending: 0 };
-		expect(await confirmDiscardOnFailedFlush(keepWorking, "quit", failed)).toBe(false);
-		expect(keepWorking).toHaveBeenCalledWith(buildFlushFailurePrompt("quit", failed));
+		const keepWorking = makeGate(false);
+		expect(await keepWorking.gate.confirm("quit", failed)).toBe(false);
+		expect(keepWorking.ask).toHaveBeenCalledWith(buildFlushFailurePrompt("quit", failed));
 
-		const quitAnyway = vi.fn().mockResolvedValue(true);
-		expect(await confirmDiscardOnFailedFlush(quitAnyway, "quit", failed)).toBe(true);
+		const quitAnyway = makeGate(true);
+		expect(await quitAnyway.gate.confirm("quit", failed)).toBe(true);
 	});
 
 	it("asks on an unanswered ceiling, not only on a reported failure", async () => {
-		const ask = vi.fn().mockResolvedValue(false);
-		await confirmDiscardOnFailedFlush(ask, "window-close", null);
+		const { gate, ask } = makeGate(false);
+		await gate.confirm("window-close", null);
+		expect(ask).toHaveBeenCalledTimes(1);
+	});
+
+	it("an unattended quit proceeds on a failed flush without asking (#1908)", async () => {
+		const failed: FlushResult = { saved: 0, failed: 1, pending: 0 };
+		const { gate, ask, log } = makeGate(false);
+		gate.markQuitUnattended();
+
+		expect(await gate.confirm("quit", failed)).toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+		expect(log).toHaveBeenCalledWith(expect.any(String), { result: failed });
+	});
+
+	it("an unattended quit proceeds on an unanswered ceiling too", async () => {
+		const { gate, ask, log } = makeGate(false);
+		gate.markQuitUnattended();
+
+		expect(await gate.confirm("quit", null)).toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+		expect(log).toHaveBeenCalledWith(expect.any(String), { result: null });
+	});
+
+	it("an unattended quit logs nothing for a clean flush", async () => {
+		const { gate, log } = makeGate();
+		gate.markQuitUnattended();
+
+		expect(await gate.confirm("quit", CLEAN)).toBe(true);
+		expect(log).not.toHaveBeenCalled();
+	});
+
+	it("still asks the window's own close after a quit was marked unattended", async () => {
+		const failed: FlushResult = { saved: 0, failed: 1, pending: 0 };
+		const { gate, ask } = makeGate(false);
+		gate.markQuitUnattended();
+
+		expect(await gate.confirm("window-close", failed)).toBe(false);
 		expect(ask).toHaveBeenCalledTimes(1);
 	});
 });
@@ -383,17 +425,18 @@ describe("main.ts wiring", () => {
 	it("gates the actual quit on the flush's outcome, not just its settling (#1489)", () => {
 		expect(main).toContain("const resumeQuitAfterFlush = (result: FlushResult | null) => {");
 		const resumeHandler = main.slice(main.indexOf("const resumeQuitAfterFlush"));
-		expect(resumeHandler).toContain(
-			'confirmDiscardOnFailedFlush(askFlushFailure, "quit", result)'
-		);
+		expect(resumeHandler).toContain('flushFailureGate.confirm("quit", result)');
+	});
+
+	it("marks the flush unattended on a signal, so no dialog waits on nobody (#1908)", () => {
+		const signalWiring = main.slice(main.indexOf("installQuitOnSignal("));
+		expect(signalWiring).toContain("flushFailureGate.markQuitUnattended()");
 	});
 
 	it("gates the window's close on the flush's outcome, not just its settling (#1489)", () => {
 		const closeHandler = main.slice(main.indexOf('.on("close"'));
 		expect(closeHandler).toContain("const closeAfterFlush = (result: FlushResult | null) => {");
-		expect(closeHandler).toContain(
-			'confirmDiscardOnFailedFlush(askFlushFailure, "window-close", result)'
-		);
+		expect(closeHandler).toContain('flushFailureGate.confirm("window-close", result)');
 		expect(closeHandler).toContain("saveFlusher.flush(closeAfterFlush)");
 	});
 

@@ -199,17 +199,49 @@ export function buildFlushFailurePrompt(
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+export interface FlushFailureGateDeps {
+	/** Put the prompt in front of the user; true is "proceed anyway". */
+	ask: (prompt: FlushFailurePrompt) => Promise<boolean>;
+	/** Where an unattended quit records what it discarded instead of asking. */
+	log: (msg: string, fields: Record<string, unknown>) => void;
+}
+
+export interface FlushFailureGate {
+	/**
+	 * Ask before discarding a flush that did not land cleanly; proceed silently
+	 * when it did (#1489). An unattended quit proceeds either way and logs the
+	 * result it discarded.
+	 */
+	confirm: (gesture: "quit" | "window-close", result: FlushResult | null) => Promise<boolean>;
+	/**
+	 * The next quit has nobody behind it - a signal, not a gesture. A dialog
+	 * there waits for an answer that is never coming and the process is killed
+	 * with its engine still running (#1908). Only the quit gesture is cleared:
+	 * the window's own X always has someone behind it.
+	 */
+	markQuitUnattended: () => void;
+}
+
 /**
- * Ask before discarding a flush that did not land cleanly; proceed silently
- * when it did (#1489). `ask` is injected so this is testable without
- * Electron - `main.ts` wires it to `dialog.showMessageBox` through the same
- * `askOnWindow` helper the crash and unresponsive-window prompts already use.
+ * `ask` is injected so this is testable without Electron - `main.ts` wires it
+ * to `dialog.showMessageBox` through the same `askOnWindow` helper the crash
+ * and unresponsive-window prompts already use.
  */
-export async function confirmDiscardOnFailedFlush(
-	ask: (prompt: FlushFailurePrompt) => Promise<boolean>,
-	gesture: "quit" | "window-close",
-	result: FlushResult | null
-): Promise<boolean> {
-	if (!flushNeedsConfirmation(result)) return true;
-	return ask(buildFlushFailurePrompt(gesture, result));
+export function createFlushFailureGate(deps: FlushFailureGateDeps): FlushFailureGate {
+	let unattendedQuit = false;
+
+	return {
+		markQuitUnattended: () => {
+			unattendedQuit = true;
+		},
+
+		confirm: async (gesture, result) => {
+			if (!flushNeedsConfirmation(result)) return true;
+			if (gesture === "quit" && unattendedQuit) {
+				deps.log("Quitting on a signal with a flush that did not land cleanly", { result });
+				return true;
+			}
+			return deps.ask(buildFlushFailurePrompt(gesture, result));
+		},
+	};
 }
