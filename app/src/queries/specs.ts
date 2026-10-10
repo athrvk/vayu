@@ -252,7 +252,7 @@ export function useSpecMatchQuery(
 		const operationPart = operations
 			.map((o) => `${o.operationId ?? ""} ${o.method} ${o.path}`)
 			.join("\n");
-		return `${requestPart} ${operationPart}`;
+		return `${requestPart}\u0000${operationPart}`;
 	}, [requests, operations]);
 
 	return useQuery({
