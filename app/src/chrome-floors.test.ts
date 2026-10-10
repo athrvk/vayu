@@ -232,7 +232,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// controls: a control states `h-control` / `h-control-sm`, which are the
 	// same 24px at Default and 32px at Comfortable. `w-8` and `size-8` stay
 	// legitimate boxes. The drawer row's `h-8` is normally a `<div>`, outside the
-	// tag set; the hand-rolled `<button>` rows are listed in DRAWER_ROW_BUTTONS.
+	// tag set; the hand-rolled `<button>` rows are counted in DRAWER_ROW_BUTTONS.
 	const OPEN =
 		/<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger|DialogCancelButton)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
@@ -268,12 +268,33 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// A hand-rolled `<button>` that IS a single-line drawer row keeps `h-8`: the
 	// row height is the drawer's own (docs/design-system.md, "Drawer Row
 	// Metric"), not a control's. The others of its kind are `<div>`s and never
-	// reach this scan. Keyed by path under `src/`; the test below fails when an
-	// entry stops matching a real `h-8`, so an entry cannot outlive its row.
-	const DRAWER_ROW_BUTTONS: Record<string, string> = {
-		"modules/settings/sidebar/SettingsCategoryTree.tsx":
-			"a category row of the Settings drawer, beside the other single-line drawer rows",
+	// reach this scan. Keyed by path under `src/`, with the exact number of tags
+	// allowed: a further `h-8` in the same file is an offence, and the rot test
+	// below fails when the file stops carrying exactly that many, so an entry
+	// cannot outlive its row.
+	const DRAWER_ROW_BUTTONS: Record<string, { tags: number; reason: string }> = {
+		"modules/settings/sidebar/SettingsCategoryTree.tsx": {
+			tags: 1,
+			reason: "a category row of the Settings drawer, beside the other single-line drawer rows",
+		},
 	};
+
+	/** One line per interactive tag in `code` that breaks a bound, exemptions spent first-come. */
+	function offencesIn(
+		path: string,
+		code: string,
+		exemptions: typeof DRAWER_ROW_BUTTONS
+	): string[] {
+		let allowance = exemptions[path]?.tags ?? 0;
+		const offences: string[] = [];
+		for (const m of code.matchAll(OPEN)) {
+			const tag = openingTag(code, m.index);
+			let hit = undersizedClass(tag);
+			if (!hit && retiredHeight(tag) && allowance-- <= 0) hit = retiredHeight(tag);
+			if (hit) offences.push(`${path}: ${m[0]} ${hit}`);
+		}
+		return offences;
+	}
 
 	function sourcePath(file: string): string {
 		return relative(srcRoot, file).split(sep).join("/");
@@ -334,27 +355,29 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	});
 
 	it("finds no undersized h / w / size or bare h-8 in an interactive element's own tag", () => {
-		const offences: string[] = [];
-		for (const file of files()) {
-			const code = stripComments(readFileSync(file, "utf8"));
-			for (const m of code.matchAll(OPEN)) {
-				const tag = openingTag(code, m.index);
-				const exempt = sourcePath(file) in DRAWER_ROW_BUTTONS;
-				const hit = undersizedClass(tag) ?? (exempt ? undefined : retiredHeight(tag));
-				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
-			}
-		}
+		const offences = files().flatMap((file) =>
+			offencesIn(
+				sourcePath(file),
+				stripComments(readFileSync(file, "utf8")),
+				DRAWER_ROW_BUTTONS
+			)
+		);
 		expect(offences.join("\n")).toBe("");
 	});
 
-	it("keeps every drawer-row exemption pointing at a real h-8 control tag", () => {
-		const entries = Object.keys(DRAWER_ROW_BUTTONS);
+	it("spends an exemption on its allowed count and flags a further h-8 in the same file", () => {
+		const row = '<button className="h-8 flex">';
+		const exemptions = { "a.tsx": { tags: 1, reason: "test" } };
+		expect(offencesIn("a.tsx", row, exemptions)).toEqual([]);
+		expect(offencesIn("a.tsx", `${row}${row}`, exemptions)).toEqual(["a.tsx: <button h-8"]);
+		expect(offencesIn("b.tsx", row, exemptions)).toEqual(["b.tsx: <button h-8"]);
+	});
+
+	it("keeps every drawer-row exemption pointing at exactly its h-8 control tags", () => {
+		const entries = Object.entries(DRAWER_ROW_BUTTONS);
 		expect(entries.length).toBeGreaterThan(0);
-		for (const path of entries) {
-			expect(
-				retiredHeightTags(join(srcRoot, path)),
-				`${path} no longer carries h-8`
-			).toBeGreaterThan(0);
+		for (const [path, { tags }] of entries) {
+			expect(retiredHeightTags(join(srcRoot, path)), `${path} h-8 tag count`).toBe(tags);
 		}
 	});
 });

@@ -237,7 +237,7 @@ function VariableRow({
 						 * on state stays clearly distinct on `warning-text`.
 						 */
 						className={cn(
-							"transition-colors",
+							"size-control-sm transition-colors",
 							variable.secret
 								? "text-warning-text hover:text-warning-text hover:bg-warning/10"
 								: "text-muted-foreground hover:text-foreground"
@@ -252,7 +252,7 @@ function VariableRow({
 						size="icon"
 						onClick={() => onRemove(variable.id)}
 						aria-label="Delete variable"
-						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 					>
 						<Trash2 className="size-icon" />
 					</Button>

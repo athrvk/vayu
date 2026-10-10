@@ -46,3 +46,16 @@ describe("buttonVariants listRow", () => {
 		expect(classes).toContain("active:scale-100");
 	});
 });
+
+describe("buttonVariants icon beside a control-sm field", () => {
+	// `size-control-sm` is unknown to tailwind-merge's size group unless
+	// `lib/utils.ts` registers it, and then both it and the variant's
+	// `size-target` stay in the class list while the stylesheet's declaration
+	// order, not the caller, picks the box. Mutation-checked: dropping
+	// "control-sm" from `SQUARE_STEPS` fails this.
+	it("replaces size-target rather than sitting beside it", () => {
+		const classes = cn(buttonVariants({ size: "icon", className: "size-control-sm" }));
+		expect(classes).toContain("size-control-sm");
+		expect(classes).not.toMatch(/(^|\s)size-target(\s|$)/);
+	});
+});

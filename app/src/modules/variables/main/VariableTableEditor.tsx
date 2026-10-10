@@ -785,7 +785,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								label="Delete environment"
 								icon={<Trash2 className="size-icon" />}
 								onClick={() => setShowDeleteConfirm(true)}
-								className="text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
+								className="size-control-sm text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
 							/>
 						</div>
 					)}
