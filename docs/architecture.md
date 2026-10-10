@@ -304,7 +304,13 @@ collections, and a click on either is the same request - the Dock menu calls
 into main directly, while a Jump List task is a shortcut to the executable and
 arrives as a command line, on a cold start as `process.argv` and on a warm one
 as `second-instance`. A document dropped on the icon is the third: macOS raises
-`open-file`, the other two put the path on that same command line. Intents are
+`open-file`, the other two put the path on that same command line. Both doors
+pass the path through `isImportableFile` first. The packaged app declares `.json`,
+`.yaml` and `.yml` as documents it opens (`mac.fileAssociations` and
+`linux.mimeTypes` in `electron-builder.json`) with role `Viewer` and rank
+`Alternate`, so it appears under Open With and never takes over as the default for
+JSON. Windows registers nothing: NSIS rewrites the extension's default handler on
+install and does not restore it, so there the route in is Open With. Intents are
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.

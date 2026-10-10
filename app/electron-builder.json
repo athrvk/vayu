@@ -71,7 +71,15 @@
 		"artifactName": "${productName}-${version}-${arch}.${ext}",
 		"gatekeeperAssess": false,
 		"entitlements": "installer/entitlements.mac.plist",
-		"entitlementsInherit": "installer/entitlements.mac.plist"
+		"entitlementsInherit": "installer/entitlements.mac.plist",
+		"fileAssociations": [
+			{
+				"ext": ["json", "yaml", "yml"],
+				"name": "API spec or collection",
+				"role": "Viewer",
+				"rank": "Alternate"
+			}
+		]
 	},
 	"dmg": {
 		"contents": [
@@ -97,6 +105,7 @@
 		"category": "Development",
 		"icon": "build/icons",
 		"syncDesktopName": true,
+		"mimeTypes": ["application/json", "application/yaml", "text/yaml"],
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {

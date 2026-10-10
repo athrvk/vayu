@@ -44,7 +44,7 @@ import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
-import { createOpenIntents, OPEN_INTENT_CHANNEL } from "./open-intent.js";
+import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
 import {
 	createServiceStopGuard,
 	holdForConfirmation,
@@ -1476,9 +1476,12 @@ if (!isPrimaryInstance) {
 
 	// macOS hands a dropped or double-clicked document over here rather than on
 	// the command line, and it fires before `whenReady` resolves on a cold
-	// launch - which is why the intents are buffered rather than sent.
+	// launch - which is why the intents are buffered rather than sent. The
+	// event carries whatever path the OS hands over, so it passes the same
+	// allowlist the command-line door does.
 	app.on("open-file", (event, filePath) => {
 		event.preventDefault();
+		if (!isImportableFile(filePath)) return;
 		openIntents.offer({ kind: "import", path: filePath });
 	});
 
