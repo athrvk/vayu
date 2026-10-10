@@ -252,6 +252,36 @@ describe("the stream and the fetch writing one list", () => {
 	});
 });
 
+// Issue #1913: the confirmation counted the loaded page, so Clear over an
+// inbox of 120 promised to remove 50.
+describe("what Clear says it removes", () => {
+	it("counts the whole inbox, not the page on screen", async () => {
+		listInboxCaptures.mockResolvedValue(page(120, 2, 120));
+		renderTab();
+		await screen.findByText("/hook/120");
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent(
+			"All 120 recorded requests, including the ones not shown here, are removed."
+		);
+		expect(dialog).not.toHaveTextContent("2 recorded");
+	});
+
+	it("keeps the plain wording when the page holds everything", async () => {
+		listInboxCaptures.mockResolvedValue(page(2, 2, 2));
+		renderTab();
+		await screen.findByText("/hook/2");
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent("All 2 recorded requests in this inbox are removed.");
+		expect(dialog).not.toHaveTextContent("not shown here");
+	});
+});
+
 describe("reading one capture while others arrive", () => {
 	it("keeps the clicked capture selected as new rows push it down", async () => {
 		listInboxCaptures.mockResolvedValue(page(3, 3, 3));

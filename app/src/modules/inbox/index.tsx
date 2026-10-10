@@ -55,11 +55,12 @@ import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 import { CaptureDetail } from "./CaptureDetail";
 import { DeleteInboxDialog } from "./DeleteInboxDialog";
-import { useInboxDeletion } from "./useInboxDeletion";
+import { capturesAtRisk, useInboxDeletion } from "./useInboxDeletion";
 import { useInboxLive } from "./useInboxLive";
 import { cannedResponseKey } from "./utils";
 
@@ -138,6 +139,18 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 			</span>
 		</button>
 	);
+}
+
+/**
+ * The Clear confirmation's wording. @p listed is what the loaded page holds;
+ * when it is short of @p total the sentence says so, because "All 50" over an
+ * inbox of 120 understates the loss by exactly the part the user cannot see.
+ */
+function clearDescription(total: number, listed: number): string {
+	const requests = `${total} recorded ${pluralize(total, "request")}`;
+	return listed < total
+		? `All ${requests}, including the ones not shown here, are removed. This can't be undone.`
+		: `All ${requests} in this inbox are removed. This can't be undone.`;
 }
 
 /**
@@ -295,6 +308,10 @@ export default function InboxView() {
 		);
 	}
 
+	// What Clear destroys is the whole ring, not the loaded page (issue #1913);
+	// the same count Delete confirms with.
+	const clearableCount = capturesAtRisk(inbox, capturesTotal);
+
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -352,14 +369,14 @@ export default function InboxView() {
 						reason={
 							clearCaptures.isPending
 								? "Clearing the captures"
-								: captures.length === 0 && "No captures to clear"
+								: clearableCount === 0 && "No captures to clear"
 						}
 					>
 						<Button
 							variant="outline"
 							size="sm"
 							onClick={() => setConfirmClearOpen(true)}
-							disabled={clearCaptures.isPending || captures.length === 0}
+							disabled={clearCaptures.isPending || clearableCount === 0}
 						>
 							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
 							Clear
@@ -400,9 +417,7 @@ export default function InboxView() {
 				open={confirmClearOpen}
 				onOpenChange={setConfirmClearOpen}
 				title="Clear captures?"
-				description={`All ${captures.length} recorded ${
-					captures.length === 1 ? "request" : "requests"
-				} in this inbox are removed. This can't be undone.`}
+				description={clearDescription(clearableCount, captures.length)}
 				confirmLabel="Clear"
 				onConfirm={() =>
 					clearCaptures.mutate(inbox.inboxId, {
