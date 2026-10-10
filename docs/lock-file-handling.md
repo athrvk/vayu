@@ -116,7 +116,9 @@ The Electron sidecar (`app/electron/sidecar.ts`) automatically handles stale loc
    signal-0 probe answers a PID nothing holds, and only a live PID is worth a
    `tasklist` / `ps` call to verify the name
 4. **Removes stale lock** if process is dead
-5. **Logs warnings** for debugging
+5. **Waits for, then replaces,** a live engine that never answers `/health`
+   (below)
+6. **Logs warnings** for debugging
 
 This ensures that:
 - Stale locks from crashes are cleaned up
@@ -187,7 +189,8 @@ rm ~/Library/Application\ Support/Vayu/vayu.lock
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
 - Function: `isVayuEngineRunning()` - cross-platform process check with process name verification. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse
-- Method: `adoptIfVersionMatches()` - the version gate above, called at both places `start()` finds a healthy engine already on the port
+- Method: `adoptIfVersionMatches()` - the version gate above, called wherever `start()` finds a healthy engine already on the port
+- Method: `adoptLockedEngine()` - settles a live lock PID: adopts it, or waits on `pollHealthWithinBudget()` and replaces it if it stays silent
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 
@@ -208,4 +211,4 @@ To test lock file handling:
 
 **Issue**: Multiple instances error after uninstall/reinstall
 
-**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. If the engine still refuses to start, the PID in the lock file belongs to a live engine - stop it, or remove the lock file manually.
+**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. A live engine that never answers `/health` is replaced automatically after the health budget; if the engine still refuses to start, the replacement kill failed - stop the PID in the lock file, or remove the lock file manually.

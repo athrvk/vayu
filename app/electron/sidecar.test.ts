@@ -259,10 +259,7 @@ describe("EngineSidecar - adoption", () => {
 	});
 
 	// Issue #1905: a live lock PID that does not answer /health is an engine
-	// that is hung or still starting, not "another application". Mutation
-	// check: restore the warn-and-fall-through branch and both of these red -
-	// the first on the port-in-use error, the second on a spawn that never
-	// should have happened.
+	// that is hung or still starting, not "another application".
 	describe("a live lock PID that does not answer /health", () => {
 		/** Healthy only once this test's own engine has been spawned. */
 		function answersOnlyAfterSpawn(state: { spawned: FakeChild[] }) {

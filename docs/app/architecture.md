@@ -105,7 +105,7 @@ The `EngineSidecar` class manages the C++ engine process:
   instead, which the launch path treats as "not yet" rather than as fatal
 - **Build guidance**: A missing binary names `python build.py -e` and
   `docs/building.md` - the single build entry point, not per-platform scripts
-- **Port Management**: Checks if port 9876 is available or if engine is already running
+- **Port Management**: Checks if port 9876 is available or if engine is already running (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced)
 - **Ownership**: Tracks whether the engine was *spawned* or *adopted* (already
   running at startup). An adopted engine is owned just as fully - `isRunning()`
   reports it, `restart()` really replaces it, and quit shuts it down by PID.
