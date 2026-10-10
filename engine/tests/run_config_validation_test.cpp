@@ -902,6 +902,69 @@ TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
     EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
+// A collection run (a scenario with a missing, empty or non-string `mode`)
+// scrapes nothing, so a `monitor` block beside it used to be accepted and never
+// read (#1939). Mutation check: drop the `refuse_monitor_on_collection_run`
+// call in `validate_load_request` and the missing-mode, empty-mode and
+// non-string-mode cases fall through to `invalid_scenario`.
+TEST_F (RunConfigValidationRouteTest, AMonitorBesideACollectionRunIsRefusedBeforeAnyRow) {
+    const json scenario{ { "source", "collection" }, { "collectionId", "x" } };
+    const json monitor{ { "url", "http://127.0.0.1:9100/metrics" },
+        { "series", json::array ({ "up" }) } };
+    const std::vector<std::pair<std::string, json>> cases = {
+        { "no mode", json::object () },
+        { "empty mode", { { "mode", "" } } },
+        { "non-string mode", { { "mode", 7 } } },
+    };
+    for (const auto& [label, fields] : cases) {
+        json payload{ { "scenario", scenario }, { "monitor", monitor } };
+        payload.update (fields);
+        const auto [status, body] = post_run (payload);
+        EXPECT_EQ (status, 400) << label << ": " << body.dump ();
+        const auto error = body.find ("error");
+        ASSERT_TRUE (error != body.end () && error->is_object ()) << body.dump ();
+        EXPECT_EQ (error->value ("code", std::string ()), "invalid_run_config")
+        << label << ": " << body.dump ();
+        EXPECT_NE (
+        vayu::http::routes::error_message_of (body).find ("'monitor'"), std::string::npos)
+        << label << ": " << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+// The refusal is the collection-run shape's alone: a `null` monitor is "no
+// block", and a real load mode beside `scenario` moves on to resolving the
+// collection, which this database does not hold.
+TEST_F (RunConfigValidationRouteTest, TheMonitorRefusalIsScopedToACollectionRun) {
+    const json scenario{ { "source", "collection" }, { "collectionId", "x" } };
+    const json monitor{ { "url", "http://127.0.0.1:9100/metrics" },
+        { "series", json::array ({ "up" }) } };
+    const std::vector<std::pair<std::string, json>> cases = {
+        { "load mode with a monitor",
+        { { "scenario", scenario }, { "monitor", monitor }, { "mode", "iterations" } } },
+        { "no mode with a null monitor", { { "scenario", scenario }, { "monitor", nullptr } } },
+    };
+    for (const auto& [label, payload] : cases) {
+        const auto [status, body] = post_run (payload);
+        EXPECT_EQ (status, 400) << label << ": " << body.dump ();
+        const auto error = body.find ("error");
+        ASSERT_TRUE (error != body.end () && error->is_object ()) << body.dump ();
+        EXPECT_EQ (error->value ("code", std::string ()), "invalid_scenario")
+        << label << ": " << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ASingleRequestLoadRunKeepsItsMonitor) {
+    const vayu::tests::EchoServer echo;
+    auto payload = iterations_run (echo);
+    payload["monitor"] = { { "url", echo.url () }, { "series", json::array ({ "up" }) } };
+    const auto [status, body] = post_run (payload);
+    ASSERT_EQ (status, 202) << body.dump ();
+    EXPECT_EQ (settled_status (body.value ("runId", std::string ())),
+    vayu::RunStatus::Completed);
+}
+
 TEST_F (RunConfigValidationRouteTest, ADrainingEngineFailsTheRowItAlreadyWrote) {
     const vayu::tests::EchoServer echo;
     run_manager_.shutdown ();
