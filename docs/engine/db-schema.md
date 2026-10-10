@@ -151,10 +151,13 @@ Three things worth knowing about where it sits:
 
 - **Last in `init()`**, after the run prune and the trash purge, so it sees the pages every sweep
   freed rather than only the first one's.
-- **On a connection of its own**, like `POST /workspace/backup`'s `VACUUM INTO` - sqlite_orm
-  exposes no way to run these statements on the connection it holds. Nothing contends for it:
-  `init` runs before the HTTP listener starts, and the lock file has already refused a second
-  engine.
+- **On the storage's own held connection** (`open_forever`), under the DB mutex, never on a
+  second one: the truncating checkpoint below has to run on the connection that holds the file
+  mapping, because Windows refuses to truncate a file another connection still has mapped
+  (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
+  (`POST /workspace/backup`'s `VACUUM INTO` is the one that runs on its own separate connection, since
+  it writes a different file.) Nothing contends for it: `init` runs before the HTTP listener
+  starts, and the lock file has already refused a second engine.
 - **The `VACUUM` is followed by a `wal_checkpoint(TRUNCATE)`.** Under WAL the rewritten image
   lands in the `-wal` file and the database is not resized until a checkpoint copies it back, so
   without it the pass would free every page it set out to and leave the file exactly as large as
