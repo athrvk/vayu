@@ -247,7 +247,7 @@ export default function Shell() {
 			 * nonsensical - just contrary to the flow.
 			 */
 		}
-	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
+	}, [activeTab?.type, setDrawerOpen, setDrawerView]);
 
 	useEffect(() => {
 		/*
