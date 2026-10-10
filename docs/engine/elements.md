@@ -41,7 +41,9 @@ An element is `{"id", "kind", "enabled", "name"?, "config"}` in an ordered array
 `id` and `kind` are required; `kind` must be one `GET /elements/kinds` lists, and `config` must
 validate against that kind's JSON Schema - both checked by
 `vayu::core::Registry::validate` (`engine/include/vayu/core/elements.hpp`), which every write route
-runs before storing (`400` naming the index, the kind and the field on a violation). A request
+runs before storing (`400` naming the index, the kind and the field on a violation). A rule the
+schema cannot express (a JSONPath that parses) is the kind's optional `validate_config` hook, run
+after the schema accepts the config and worded the same way. A request
 disables an element it would otherwise inherit from an ancestor collection with an
 `inherit.disable` entry naming the ancestor's `id` in its own list, rather than by deleting it.
 
@@ -114,8 +116,12 @@ shipping silently mismatched.
 | `control.transaction` | transaction | `step.after` | #1515 |
 | `metric.record` | metric | `step.after` | #1500 |
 
-`extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
-refused at validate. `extract.regex` compiles its `pattern` once, when the element is compiled (once
+`extract.json`, `assert.jsonpath` and `metric.record`'s `jsonpath` source share one JSONPath subset:
+`$.a.b` (any member name up to the next `.` or `[`, so `$.data.user-id` works), `$['a.b']` or
+`$["a.b"]` for a name that holds a `.`, `[` or `]` (the name runs to the next matching quote and has
+no escape for it; an empty name or an unterminated quote is refused), `[n]` (negative counts from the
+end), `[*]` and `..name`. A path outside it, a filter (`[?...]`) included, is refused at validate
+through the one parser, not a pattern per kind. `extract.regex` compiles its `pattern` once, when the element is compiled (once
 per run plan, or once per design send), and writes a `$1$`-style template of the match's groups for
 every non-overlapping match, leftmost first (`$N$` past the pattern's last group writes nothing).
 `extract.boundary` (issue #1518, JMeter's Boundary Extractor) takes everything between the first
@@ -144,7 +150,7 @@ character. A pattern RE2 refuses is that element's `"error"` outcome, `invalid r
 with the same reason in the message. After an empty match the search resumes one byte later, so
 `-1` over a pattern that can match nothing still ends.
 
-`assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes the same path subset with
+`assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes a path with
 one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate`;
 `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
 `contains` | `equals` | `matches` (an RE2 search, above) mode;
@@ -205,7 +211,7 @@ beside a `count` of how many times it was recorded, #1937) or `rate`
 (share of occurrences a `condition` matched, as a percentage). A counter only grows: a source that
 reads a negative or non-finite number reports `error` (the message names the source) and records
 nothing, where a trend records the same value. A trend or counter's `source` is one
-of `{jsonpath}` (the same subset `extract.json` reads), `{header}`, `{latency}`, `{status}` or
+of `{jsonpath}`, `{header}`, `{latency}`, `{status}` or
 `{size}`; a rate's is `{condition: {field, operator, value}}` - a small, self-contained comparison
 rather than the full `control.if` grammar #1515 defines, which is not yet part of this registry and
 would be a needless dependency for what a rate condition actually needs. `metric.record` writes

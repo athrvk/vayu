@@ -22,8 +22,10 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -163,6 +165,89 @@ TEST_F (ElementsRegistryTest, AWellFormedListValidatesCleanly) {
     json{ { "id", "el_2" }, { "kind", "inherit.disable" },
     { "config", { { "elementId", "el_9" } } } } });
     EXPECT_FALSE (Registry::instance ().validate (elements).has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// The JSONPath subset is one rule, checked by each kind's `validate_config`
+// rather than by a schema pattern per kind (#1903).
+// ---------------------------------------------------------------------------
+
+json extract_json_entry (const json& path) {
+    return json{ { "id", "el_1" }, { "kind", "extract.json" },
+        { "config", { { "path", path }, { "variable", "v" } } } };
+}
+
+json assert_jsonpath_entry (const json& path) {
+    return json{ { "id", "el_1" }, { "kind", "assert.jsonpath" },
+        { "config", { { "path", path }, { "exists", true } } } };
+}
+
+json metric_source_entry (const json& source) {
+    return json{ { "id", "el_1" }, { "kind", "metric.record" },
+        { "config", { { "name", "m" }, { "type", "trend" }, { "source", source } } } };
+}
+
+std::optional<std::string> validate_entry (const json& entry) {
+    return Registry::instance ().validate (json::array ({ entry }));
+}
+
+TEST_F (ElementsRegistryTest, APathOutsideTheSubsetIsRefusedForEveryJsonPathKind) {
+    const std::vector<std::pair<std::string, json>> entries = {
+        { "extract.json", extract_json_entry ("$x") },
+        { "assert.jsonpath", assert_jsonpath_entry ("$x") },
+        { "metric.record", metric_source_entry ({ { "jsonpath", "$x" } }) },
+        { "metric.record condition",
+        metric_source_entry ({ { "condition",
+        { { "field", "jsonpath" }, { "jsonpath", "$x" }, { "operator", "eq" },
+        { "value", 1 } } } }) },
+    };
+    for (const auto& [name, entry] : entries) {
+        const auto reason = validate_entry (entry);
+        ASSERT_HAS_VALUE (reason) << name;
+        EXPECT_NE (reason->find ("item 1"), std::string::npos) << name << ": " << *reason;
+        EXPECT_NE (reason->find ("not a supported JSONPath"), std::string::npos)
+        << name << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, TheSubsetAcceptsWhatTheOldSchemaPatternRefused) {
+    for (const char* path : { "$.data.user-id", "$['a.b']", "$[\"a b\"]",
+         "$['a]b']", "$['a'].b[0][*]..c", "$..user-id", "$" }) {
+        EXPECT_FALSE (validate_entry (extract_json_entry (path)).has_value ()) << path;
+        EXPECT_FALSE (validate_entry (assert_jsonpath_entry (path)).has_value ()) << path;
+        EXPECT_FALSE (
+        validate_entry (metric_source_entry ({ { "jsonpath", path } })).has_value ())
+        << path;
+    }
+}
+
+TEST_F (ElementsRegistryTest, AFilterOrAMalformedBracketMemberIsRefused) {
+    for (const char* path :
+    { "$[?(@.a)]", "$['']", "$['a", "$['a'", "$['a']x", "$.a.", "", "a.b" }) {
+        const auto reason = validate_entry (extract_json_entry (path));
+        ASSERT_HAS_VALUE (reason) << path;
+        EXPECT_NE (reason->find ("not a supported JSONPath"), std::string::npos)
+        << path << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, ANonStringPathKeepsTheSchemasOwnError) {
+    const auto wrong_type = validate_entry (extract_json_entry (7));
+    ASSERT_HAS_VALUE (wrong_type);
+    EXPECT_EQ (wrong_type->find ("not a supported JSONPath"), std::string::npos)
+    << *wrong_type;
+
+    const auto absent = validate_entry (json{ { "id", "el_1" },
+    { "kind", "assert.jsonpath" }, { "config", { { "exists", true } } } });
+    ASSERT_HAS_VALUE (absent);
+    EXPECT_EQ (absent->find ("not a supported JSONPath"), std::string::npos) << *absent;
+}
+
+TEST_F (ElementsRegistryTest, AMetricConditionPathIsOnlyReadWhenItsFieldIsJsonpath) {
+    const json condition = { { "field", "status" }, { "jsonpath", "$x" },
+        { "operator", "eq" }, { "value", 200 } };
+    EXPECT_FALSE (
+    validate_entry (metric_source_entry ({ { "condition", condition } })).has_value ());
 }
 
 /**

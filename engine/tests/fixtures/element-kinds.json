@@ -158,8 +158,7 @@
           "x-vayu-group": "advanced"
         },
         "path": {
-          "description": "A JSONPath subset ($.a.b, [n], [*], ..name) locating the value to extract.",
-          "pattern": "^\\$(\\.[A-Za-z0-9_]+|\\.\\.[A-Za-z0-9_]+|\\[\\*\\]|\\[-?[0-9]+\\])*$",
+          "description": "A JSONPath ($.a.b, $['a b'], [n], [*], ..name) locating the value to extract.",
           "title": "JSONPath",
           "type": "string"
         },
@@ -191,7 +190,7 @@
       ],
       "type": "object"
     },
-    "description": "Reads one value out of the JSON response body by a JSONPath subset ($.a.b, [n], [*], ..name) into a variable.",
+    "description": "Reads one value out of the JSON response body by a JSONPath into a variable.",
     "hotPathClass": "declarative",
     "kind": "extract.json",
     "label": "Extract from JSON",
@@ -462,7 +461,7 @@
           "type": "boolean"
         },
         "path": {
-          "description": "A JSONPath subset locating the value to check.",
+          "description": "A JSONPath ($.a.b, $['a b'], [n], [*], ..name) locating the value to check.",
           "title": "JSONPath",
           "type": "string"
         },

@@ -577,6 +577,12 @@ struct ElementKind {
     /// (#1512's extensibility contract, rule 1); the config key itself, not
     /// this flag alone, decides whether a given occurrence actually shares.
     bool supports_shared_state = false;
+    /// A rule `config_schema` cannot express (a JSONPath that parses), checked
+    /// by `Registry::validate` only after the schema accepted the config.
+    /// Returns the problem in the wording a client reads after
+    /// `'<label>' (item N): `, or `nullopt` when the config is fine. Absent
+    /// for a kind the schema alone covers.
+    std::function<std::optional<std::string> (const nlohmann::json& config)> validate_config;
     // Absent for a kind that only validates (phase 0's `inherit.disable`);
     // present once a kind actually runs (#1514 onward).
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;
