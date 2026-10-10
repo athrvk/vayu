@@ -328,6 +328,7 @@ jobs:
               - '.clang-format'
               - '.github/check-windows-deps.py'
               - 'scripts/check-linux-glibc.sh'
+              - 'scripts/check-macos-min-version.sh'
               - '.github/actions/linux-release-toolchain/**'
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
