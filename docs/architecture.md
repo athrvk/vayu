@@ -310,7 +310,9 @@ pass the path through `isImportableFile` first. The packaged app declares `.json
 `linux.mimeTypes` in `electron-builder.json`) with role `Viewer` and rank
 `Alternate`, so it appears under Open With and never takes over as the default for
 JSON. Windows registers nothing: NSIS rewrites the extension's default handler on
-install and does not restore it, so there the route in is Open With. Intents are
+install and does not restore it, so there the routes in are Shift-dragging the file onto the
+taskbar button or Open with > Choose another app > Vayu (both launch the executable with the
+path). Intents are
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
