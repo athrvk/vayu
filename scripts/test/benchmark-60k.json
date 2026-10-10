@@ -4,7 +4,7 @@
     "headers": {
         "Accept": "application/json"
     },
-    "mode": "constant",
+    "mode": "constant_rps",
     "duration": "5s",
     "targetRps": 90000,
     "tests": ""
