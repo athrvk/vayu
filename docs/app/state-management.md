@@ -940,8 +940,8 @@ the "match system accent" preference, with `isDark`, `supportsAccent` and
 preference by the action (`vayu-theme-source`, `vayu-color-scheme`,
 `vayu-match-system-accent`), not through zustand's `persist`: the pre-paint
 script in `index.html` reads the first two, and `SETTINGS_STORAGE_KEYS` clears
-them; `vayu-match-system-accent` is neither read pre-paint nor cleared yet
-(#1857, #1861).
+all three on "Reset app settings"; `vayu-match-system-accent` is not read
+pre-paint (#1861).
 
 **State:**
 ```typescript

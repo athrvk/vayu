@@ -75,6 +75,8 @@ describe("client-settings store", () => {
 	it("reset key list covers every renderer preference but not workspace state", () => {
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.CLIENT_SETTINGS);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.THEME_SOURCE);
+		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.COLOR_SCHEME);
+		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.MATCH_SYSTEM_ACCENT);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.UI_RADIUS);
 		// The live chart window is engine config (`liveReplayWindowMs`), not a
 		// renderer preference, so it has no localStorage key to reset here - the
