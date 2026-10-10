@@ -5669,7 +5669,7 @@ export const TOOLS: McpTool[] = [
 				if (!binding) {
 					return withCaveat(
 						jsonResult({ collectionId, bound: false }),
-						"\n\nThis collection is not bound to an OpenAPI document. Binding one is done in the Vayu app (Collection → Spec) - see https://github.com/athrvk/vayu/issues/761."
+						"\n\nThis collection is not bound to an OpenAPI document. Bind one with `bind_spec` (call `preview_spec_bind` first to see what it would change)."
 					);
 				}
 				specId = binding.specId;
@@ -5716,7 +5716,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half. " +
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift. " +
 			WITHHELD_SPEC_DIFF_SENTENCE,
 		annotations: {
 			title: "Diff OpenAPI spec against collection",

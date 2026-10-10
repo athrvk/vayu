@@ -54,3 +54,23 @@ describe("published tool counts", () => {
 		}
 	});
 });
+
+describe("the published write roster", () => {
+	const text = readFileSync(fromRepoRoot("docs/engine/mcp.md"), "utf8");
+	// The sentence between the rule and the first thing the category does not gate.
+	const roster = text.match(/declared `category: "write"` in `tools\.ts`([\s\S]*?)Does not gate/);
+
+	it("names exactly the tools declared category: write", () => {
+		expect(roster).not.toBeNull();
+		const named = [...(roster?.[1] ?? "").matchAll(/`([a-z_0-9]+)`/g)].map((m) => m[1]);
+		const declared = TOOLS.filter((t) => t.category === "write").map((t) => t.name);
+
+		expect(declared.length).toBeGreaterThan(20);
+		expect(named.sort()).toEqual(declared.sort());
+	});
+
+	it("states the count of write tools", () => {
+		const declared = TOOLS.filter((t) => t.category === "write").length;
+		expect(roster?.[1]).toContain(`${declared} write tools`);
+	});
+});

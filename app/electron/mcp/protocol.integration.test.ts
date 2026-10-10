@@ -22,12 +22,14 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "./server.js";
-import { McpHttpServer } from "./http.js";
+import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
+import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
 import type { EngineClient } from "./engine-client.js";
+import type { Logger } from "../log.js";
 
 const REPORT = {
 	summary: { totalRequests: 100, errorCount: 1 },
@@ -252,6 +254,20 @@ describe("MCP protocol handshake (in-memory)", () => {
 	 * `compare_runs` is exempt because it is also a prompt name, and the
 	 * instructions legitimately point at the prompts - which nothing disables.
 	 */
+	it("names every resource the server registers in the instructions", async () => {
+		const { client, server } = await connectClient();
+		const instructions = client.getInstructions() ?? "";
+		// Both sides must be non-empty or the loop below proves nothing.
+		expect(STATIC_RESOURCES.length).toBeGreaterThan(5);
+		for (const uri of [
+			...STATIC_RESOURCES.map((r) => r.uri),
+			RUN_REPORT_RESOURCE.uriTemplate,
+		]) {
+			expect(instructions).toContain(uri);
+		}
+		await server.close();
+	});
+
 	it("does not name individual tools in the server instructions", async () => {
 		const { client, server } = await connectClient();
 		const instructions = client.getInstructions() ?? "";
@@ -795,13 +811,17 @@ describe("Streamable HTTP host", () => {
 		httpServer = null;
 	});
 
-	async function start(safety?: Partial<McpSafetyConfig>) {
+	async function start(
+		safety?: Partial<McpSafetyConfig>,
+		extra: Partial<McpHttpServerOptions> = {}
+	) {
 		activePort = nextPort++;
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port: activePort,
 			info: { name: "vayu", version: "test" },
 			contextProvider: contextProvider(safety),
+			...extra,
 		});
 		await httpServer.start();
 	}
@@ -910,6 +930,32 @@ describe("Streamable HTTP host", () => {
 	 * "Internal error" - the shape of a server that fell over, sending the
 	 * client to check whether Vayu is alive instead of at its own JSON.
 	 */
+	it("answers a handler that throws with a fixed -32603 and logs the cause", async () => {
+		const log = { error: vi.fn() } as unknown as Logger;
+		await start(undefined, {
+			log,
+			contextProvider: () => {
+				throw new Error("secret detail at /home/user/.vayu");
+			},
+		});
+		const res = await request({ body: initBody });
+		expect(res.status).toBe(500);
+		expect(res.json).toEqual({
+			jsonrpc: "2.0",
+			error: { code: -32603, message: "Internal error" },
+			id: null,
+		});
+		expect(JSON.stringify(res.json)).not.toContain("secret detail");
+		expect(log.error).toHaveBeenCalledWith(
+			"mcp",
+			expect.any(String),
+			expect.objectContaining({
+				path: "/mcp",
+				error: expect.stringContaining("secret detail at /home/user/.vayu"),
+			})
+		);
+	});
+
 	it("answers malformed JSON with 400 / -32700, not a 500", async () => {
 		await start();
 		const res = await request({ rawBody: '{"jsonrpc":"2.0", "id":1,' });

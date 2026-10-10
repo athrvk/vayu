@@ -50,6 +50,7 @@ export class VayuMcpService {
 			host: opts.host,
 			port: opts.port,
 			info: { name: "vayu", version: opts.version },
+			log: opts.log,
 			contextProvider: (): ToolContext => ({
 				client: this.client,
 				config: this.config,

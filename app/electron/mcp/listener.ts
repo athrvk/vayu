@@ -27,6 +27,7 @@
 
 import http from "node:http";
 import { MCP_PATH } from "../constants.js";
+import type { Logger } from "../log.js";
 import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 
 export type McpRequestHandler = (
@@ -39,6 +40,8 @@ export interface McpListenerOptions {
 	port: number;
 	/** Produces the handler that serves every `POST /mcp` from then on. */
 	loadHandler: () => Promise<McpRequestHandler>;
+	/** Where the cause of a 500 goes; the wire carries none of it. */
+	log?: Logger;
 }
 
 export class McpListener {
@@ -62,7 +65,9 @@ export class McpListener {
 		if (this.server) return Promise.resolve();
 		return new Promise((resolve, reject) => {
 			const server = http.createServer((req, res) => {
-				this.dispatch(req, res).catch((err) => answerInternalError(res, err));
+				this.dispatch(req, res).catch((err) =>
+					answerInternalError(req, res, err, this.opts.log)
+				);
 			});
 			server.on("error", reject);
 			server.listen(this.opts.port, this.opts.host, () => {

@@ -86,10 +86,13 @@ const WRITE_GATE_SENTENCE =
 	"needs one is blocked on the user turning on Write access in Vayu Settings → " +
 	"MCP, after which they appear in `tools/list`. ";
 
+/** Every resource the server registers, derived so the sentence cannot lag the list. */
+const RESOURCE_URIS = [...STATIC_RESOURCES.map((r) => r.uri), RUN_REPORT_RESOURCE.uriTemplate];
+
 const INSTRUCTIONS_TAIL =
 	"`tools/list` is authoritative for what this session actually has. " +
-	"Vayu data is also available as resources (vayu://runs, vayu://collections, " +
-	"vayu://environments, vayu://config, and vayu://run/{runId}/report) to attach as " +
+	`Vayu data is also available as resources (${RESOURCE_URIS.slice(0, -1).join(", ")}, ` +
+	`and ${RESOURCE_URIS[RESOURCE_URIS.length - 1]}) to attach as ` +
 	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +
 	"suggest_load_profile) provide ready-made starting points. Before writing a " +
 	"preRequestScript or postRequestScript, read vayu://scripting/completions - it is " +
