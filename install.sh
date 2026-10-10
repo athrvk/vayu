@@ -796,8 +796,9 @@ download_asset() {
 	# one that will not download is a failed fetch or a tampered release, and
 	# installing anyway is exactly what the checksum exists to prevent. An
 	# older pinned VAYU_VERSION predates it and only warns; so does a call with
-	# no version at all.
-	if ! curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
+	# no version at all. The fetch retries so that a transient miss is not
+	# mistaken for a removed sidecar.
+	if ! curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
 		if [ -n "$version" ] && version_at_least "$version" "$FIRST_CHECKSUMMED_VERSION"; then
 			die "No checksum could be fetched for Vayu $version - nothing was installed."
 		fi
