@@ -352,7 +352,7 @@ class LogChannel {
 const channels = new Map<string, LogChannel>();
 
 function getChannel(opts: ChannelOptions): LogChannel {
-	const key = `${opts.logsDir ?? ""} ${opts.filePrefix} ${opts.consoleSplitByLevel}`;
+	const key = `${opts.logsDir ?? ""}\u0000${opts.filePrefix}\u0000${opts.consoleSplitByLevel}`;
 	let channel = channels.get(key);
 	if (!channel) {
 		channel = new LogChannel(opts);
