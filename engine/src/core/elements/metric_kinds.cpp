@@ -284,6 +284,26 @@ nlohmann::json condition_schema () {
     };
 }
 
+/// The two places a `jsonpath` can be read from (`source` and, for a rate,
+/// the `condition`'s own), checked once the schema has accepted the shape.
+/// A condition's path is only read when its `field` is `jsonpath`, so a stale
+/// one beside another field is not refused.
+std::optional<std::string> validate_metric_paths (const nlohmann::json& config) {
+    const auto source = config.find ("source");
+    if (source == config.end () || !source->is_object ()) {
+        return std::nullopt;
+    }
+    if (auto problem = detail::json_path_problem (*source, "jsonpath", "source.jsonpath")) {
+        return problem;
+    }
+    const auto condition = source->find ("condition");
+    if (condition == source->end () || !condition->is_object () ||
+    condition->value ("field", "") != "jsonpath") {
+        return std::nullopt;
+    }
+    return detail::json_path_problem (*condition, "jsonpath", "source.condition.jsonpath");
+}
+
 } // namespace
 
 ElementKind make_metric_record_kind () {
@@ -301,6 +321,7 @@ ElementKind make_metric_record_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<MetricRecordElement> (config);
     };
+    kind.validate_config = validate_metric_paths;
     // Not a strict `oneOf` across `source`'s six shapes: valijson's `oneOf`
     // failure reports "matched N schemas", which names none of the six
     // by name, where `MetricRecordElement::apply`'s own checks report

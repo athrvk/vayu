@@ -349,6 +349,91 @@ TEST_F (ElementKindsTest, AssertJsonPathRegexReportsAnInvalidPattern) {
 }
 
 // ---------------------------------------------------------------------------
+// The shared JSONPath subset: member names beyond [A-Za-z0-9_], and the
+// bracket spelling of a member (#1903)
+// ---------------------------------------------------------------------------
+
+nlohmann::json extract_json_at (const std::string& path) {
+    return nlohmann::json{ { "id", "e1" }, { "kind", "extract.json" },
+        { "config", { { "path", path }, { "variable", "v" } } } };
+}
+
+TEST_F (ElementKindsTest, ExtractJsonReadsAHyphenatedMemberName) {
+    response = ok_json_response (200, R"({"user-id": 7})");
+
+    auto outcomes = run_after (one_element (extract_json_at ("$.user-id")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "7");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonReadsAQuotedBracketMemberWithADot) {
+    response = ok_json_response (200, R"({"a.b": 1, "a": {"b": 2}})");
+
+    for (const char* path : { "$['a.b']", "$[\"a.b\"]" }) {
+        variables.clear ();
+        auto outcomes = run_after (one_element (extract_json_at (path)));
+        ASSERT_EQ (outcomes.size (), 1u) << path;
+        EXPECT_EQ (outcomes[0].status, "ok") << path;
+        EXPECT_EQ (variables["collection:v"], "1")
+        << path << " is the member named 'a.b', not a.b";
+    }
+}
+
+TEST_F (ElementKindsTest, ExtractJsonMixesBracketAndDotSteps) {
+    response = ok_json_response (200, R"({"a": {"b c": [10, 20], "d": 5}})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$['a'].d")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "5");
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$.a['b c'][1]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "20");
+    EXPECT_EQ (run_after (one_element (extract_json_at ("$['a'].['d']")))[0].status, "error")
+    << "a '.' before '[' is not part of the subset";
+}
+
+TEST_F (ElementKindsTest, ExtractJsonQuotedNameMayHoldABracket) {
+    response = ok_json_response (200, R"({"a]b": 3, "x[0": 4})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$['a]b']")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "3");
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$[\"x[0\"]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "4");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonQuotedNameHasNoEscapeForItsQuote) {
+    response = ok_json_response (200, R"({"it's": 1})");
+
+    // The name ends at the first matching quote, so what follows is not a `]`.
+    EXPECT_EQ (run_after (one_element (extract_json_at ("$['it\\'s']")))[0].status, "error");
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$[\"it's\"]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "1");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonRefusesAMalformedBracketMemberAtRun) {
+    response = ok_json_response (200, R"({"": 1, "a": 2})");
+
+    for (const char* path : { "$['']", "$[\"\"]", "$['a", "$['a'", "$['a']x",
+         "$['a\"]", "$['a' 'b']", "$[ 'a']" }) {
+        auto outcomes = run_after (one_element (extract_json_at (path)));
+        ASSERT_EQ (outcomes.size (), 1u) << path;
+        EXPECT_EQ (outcomes[0].status, "error") << path;
+        EXPECT_EQ (message_of (outcomes[0]), "invalid JSONPath") << path;
+    }
+    EXPECT_TRUE (variables.empty ());
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathReadsAQuotedBracketMember) {
+    response = ok_json_response (200, R"({"a.b": 1})");
+    auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$['a.b']" }, { "expected", 1 } } } });
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok");
+}
+
+// ---------------------------------------------------------------------------
 // assert.contains
 // ---------------------------------------------------------------------------
 

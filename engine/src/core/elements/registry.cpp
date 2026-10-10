@@ -174,7 +174,16 @@ nlohmann::json& config_out) {
         return std::format ("'{}' (item {}): 'name' must be text", kind->label, index + 1);
     }
     config_out = entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
-    return validate_config_against_schema (*kind, config_out, index);
+    if (auto reason = validate_config_against_schema (*kind, config_out, index)) {
+        return reason;
+    }
+    if (!kind->validate_config) {
+        return std::nullopt;
+    }
+    if (auto problem = kind->validate_config (config_out)) {
+        return std::format ("'{}' (item {}): {}", kind->label, index + 1, *problem);
+    }
+    return std::nullopt;
 }
 
 /// The one cross-entry rule `validate_one_element` cannot check on its own:

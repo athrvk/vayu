@@ -108,8 +108,8 @@ ToText to_text) {
 }
 
 // ---------------------------------------------------------------------------
-// extract.json - a JSONPath subset: `$.a.b`, `[n]`, `[*]`, `..name`. Filters
-// (`[?...]`) are refused at validate through the schema's `path` pattern.
+// extract.json - a JSONPath subset: `$.a.b`, `['a b']`, `[n]`, `[*]`, `..name`.
+// Filters (`[?...]`) are refused at validate by the kind's `validate_config`.
 // The subset itself lives in `json_path.{hpp,cpp}`, shared with
 // `assert.jsonpath` below.
 // ---------------------------------------------------------------------------
@@ -382,20 +382,22 @@ ElementKind make_extract_json_kind () {
     kind.label   = "Extract from JSON";
     kind.description =
     "Reads one value out of the JSON response body by a JSONPath "
-    "subset ($.a.b, [n], [*], ..name) into a variable.";
+    "into a variable.";
     kind.category = "extract";
     kind.hot_path = HotPathClass::Declarative;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractJsonElement> (config);
     };
+    kind.validate_config = [] (const nlohmann::json& config) {
+        return detail::json_path_problem (config, "path", "path");
+    };
     kind.config_schema = {
         { "type", "object" },
         { "properties",
         { { "path",
-          { { "type", "string" }, { "pattern", "^\\$(\\.[A-Za-z0-9_]+|\\.\\.[A-Za-z0-9_]+|\\[\\*\\]|\\[-?[0-9]+\\])*$" },
-          { "title", "JSONPath" },
+          { { "type", "string" }, { "title", "JSONPath" },
           { "description",
-          "A JSONPath subset ($.a.b, [n], [*], ..name) locating the "
+          "A JSONPath ($.a.b, $['a b'], [n], [*], ..name) locating the "
           "value to extract." } } },
         { "variable",
         { { "type", "string" }, { "minLength", 1 }, { "title", "Variable name" },

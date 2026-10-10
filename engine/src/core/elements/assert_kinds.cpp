@@ -378,12 +378,15 @@ ElementKind make_assert_jsonpath_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<AssertJsonPathElement> (config);
     };
+    kind.validate_config = [] (const nlohmann::json& config) {
+        return detail::json_path_problem (config, "path", "path");
+    };
     kind.config_schema = {
         { "type", "object" },
         { "properties",
         { { "path",
           { { "type", "string" }, { "title", "JSONPath" },
-          { "description", "A JSONPath subset locating the value to check." } } },
+          { "description", "A JSONPath ($.a.b, $['a b'], [n], [*], ..name) locating the value to check." } } },
         { "expected", { { "title", "Expected value" }, { "description", "The exact value the match must equal." } } },
         { "regex",
         { { "type", "string" }, { "title", "Pattern" },
