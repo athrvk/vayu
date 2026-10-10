@@ -105,7 +105,6 @@
 		"category": "Development",
 		"icon": "build/icons",
 		"syncDesktopName": true,
-		"mimeTypes": ["application/json", "application/yaml", "text/yaml"],
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {

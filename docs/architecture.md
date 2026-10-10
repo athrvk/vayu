@@ -306,10 +306,11 @@ arrives as a command line, on a cold start as `process.argv` and on a warm one
 as `second-instance`. A document dropped on the icon is the third: macOS raises
 `open-file`, the other two put the path on that same command line. Both doors
 pass the path through `isImportableFile` first. The packaged app declares `.json`,
-`.yaml` and `.yml` as documents it opens (`mac.fileAssociations` and
-`linux.mimeTypes` in `electron-builder.json`) with role `Viewer` and rank
+`.yaml` and `.yml` as documents it opens (`mac.fileAssociations` in
+`electron-builder.json`) with role `Viewer` and rank
 `Alternate`, so it appears under Open With and never takes over as the default for
-JSON. Windows registers nothing: NSIS rewrites the extension's default handler on
+JSON. Linux declares nothing yet (the desktop entry's `%U` can hand over `file://` URLs the door
+does not decode). Windows registers nothing: NSIS rewrites the extension's default handler on
 install and does not restore it, so there the routes in are Shift-dragging the file onto the
 taskbar button or Open with > Choose another app > Vayu (both launch the executable with the
 path). Intents are

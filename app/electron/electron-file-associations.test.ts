@@ -22,7 +22,7 @@ const config = JSON.parse(
 	fileAssociations?: FileAssociation[];
 	mac?: { fileAssociations?: FileAssociation[] };
 	win?: { fileAssociations?: FileAssociation[] };
-	linux?: { mimeTypes?: string[] };
+	linux?: { mimeTypes?: string[]; fileAssociations?: FileAssociation[] };
 };
 
 const macAssociations = config.mac?.fileAssociations ?? [];
@@ -64,9 +64,9 @@ describe("electron-builder file associations (#1919)", () => {
 		expect(config.win?.fileAssociations).toBeUndefined();
 	});
 
-	it("lists the matching MIME types for the Linux desktop entry", () => {
-		expect(config.linux?.mimeTypes).toEqual(
-			expect.arrayContaining(["application/json", "application/yaml", "text/yaml"])
-		);
+	it("declares no Linux MIME types while the desktop entry's Exec ends in %U", () => {
+		// electron-builder appends %U, so a file manager may pass file:// URLs,
+		// which the open-intent door does not decode.
+		expect(config.linux?.mimeTypes).toBeUndefined();
 	});
 });
