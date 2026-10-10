@@ -9,15 +9,15 @@ Vayu is a free Postman alternative that runs entirely on your machine. It combin
 - **Platforms**: Windows (x64), macOS (universal), Linux (AppImage)
 - **License**: Engine - AGPL-3.0 / UI - Apache-2.0
 - **No account, no telemetry, 100% offline**
-- **Import formats**: Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
+- **Import formats**: Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.1/3.0, Swagger 2.0, JMeter `.jmx`
 - **Scripting**: QuickJS with `pm.*` API - compatible with Postman test scripts
 - **Auth**: Bearer, Basic, API key, and OAuth 2.0 (client credentials, password, authorization code + PKCE); resolved engine-side
 - **Load testing**: built-in, real-time metrics streaming via SSE
-- **Variable resolution**: layered - globals → collection chain → active environment
+- **Variable resolution**: layered - globals → collection chain → active environment → bound data row (bare column names, while a row is bound)
 
 ## Architecture
 
-Sidecar pattern: Electron UI (Manager) communicates with a C++20 daemon (Engine) over HTTP on localhost:9876. The separation keeps the UI responsive during high-throughput load tests.
+Sidecar pattern: Electron UI (Manager) communicates with a C++23 daemon (Engine) over HTTP on localhost:9876. The separation keeps the UI responsive during high-throughput load tests.
 
 ## Documentation
 
