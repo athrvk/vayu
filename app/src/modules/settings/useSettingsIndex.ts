@@ -29,7 +29,7 @@ import { ENGINE_SETTINGS_EDITED_IN_APP } from "@/modules/settings/engine-setting
 
 /**
  * Every searchable settings entry: the seven client panels, the settings inside
- * them, and the engine entries.
+ * them and inside the engine categories' Cards, and the engine entries.
  *
  * The engine half is empty until `/config` answers, and empty is the honest
  * answer while it has not - the app half is client-side and searchable

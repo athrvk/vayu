@@ -43,6 +43,11 @@ import { apiService } from "@/services/api";
 import type { ConnectionTestOutcome, ConnectionTestResult } from "@/types";
 import { cn } from "@/lib/utils";
 import { useSystemProxyRefresh } from "../../useSystemProxyRefresh";
+import { appSetting } from "../app-settings";
+
+// The anchor and heading come from the catalogue so search cannot offer a name
+// this card does not print - see `app-settings.ts`.
+const CONNECTION_TEST = appSetting("connection-test");
 
 /**
  * What each outcome is called and how it reads.
@@ -121,11 +126,11 @@ export function ConnectionTestCard() {
 	const outcome = result ? OUTCOME[result.outcome] : null;
 
 	return (
-		<Card>
+		<Card data-setting-anchor={CONNECTION_TEST.anchor}>
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<PlugZap className="w-5 h-5 text-muted-foreground" />
-					<CardTitle>Connection test</CardTitle>
+					<CardTitle>{CONNECTION_TEST.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Sends one request with the settings on this screen and reports which hop
