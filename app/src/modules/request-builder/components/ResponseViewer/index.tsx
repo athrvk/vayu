@@ -353,8 +353,8 @@ export default function ResponseViewer() {
 	 *
 	 * The cost is that four tabs can now be empty, so each says so. Console and
 	 * Cookies already did; Timing, Tests and Raw did not. `RawRequestResponse`'s
-	 * empty state in particular was deleted earlier in this same branch for being
-	 * unreachable - this is what makes it reachable.
+	 * empty state is reachable only for a `status: 0` response with no recorded
+	 * request.
 	 */
 	const consoleLogCount = shown.consoleLogs?.length ?? 0;
 	const hasScriptError = !!shown.preScriptError || !!shown.postScriptError;
@@ -566,7 +566,7 @@ export default function ResponseViewer() {
 					{isClientError ? (
 						/* `ClientErrorView` centres itself with `flex-1`, so it needs a
 						   flex box of the pane's height to be centred in. */
-						<div className="flex h-full">
+						<div className="flex h-full min-h-0 overflow-auto">
 							<ClientErrorView
 								errorCode={shown.errorCode}
 								errorMessage={shown.errorMessage}
