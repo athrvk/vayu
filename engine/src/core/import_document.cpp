@@ -1642,11 +1642,19 @@ json pm_request_named (const json* item, PostmanCounts& counts) {
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared = as_record (prop (item, "request"));
-    const json empty     = json::object ();
-    const json* rq       = declared == nullptr ? &empty : declared;
-    auto [url, params]   = pm_url (prop (rq, "url"), counts);
-    json auth            = with_postman_source (
+    // The schema's `request` is an object or a bare URL string (#1907); the
+    // string is a GET to that URL and nothing else.
+    const json* declared = prop (item, "request");
+    json from_bare_url;
+    if (declared != nullptr && declared->is_string ()) {
+        from_bare_url = json{ { "url", *declared } };
+        declared      = &from_bare_url;
+    }
+    declared           = as_record (declared);
+    const json empty   = json::object ();
+    const json* rq     = declared == nullptr ? &empty : declared;
+    auto [url, params] = pm_url (prop (rq, "url"), counts);
+    json auth          = with_postman_source (
     map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
     prop (rq, "auth"));
     if (is_data_only_auth (auth)) {
