@@ -584,8 +584,9 @@ Result<Response> Client::send (const Request& request) {
 
     // Cookie jar (issue #301) - only when a caller opted in; see
     // ClientConfig::cookie_jar.
+    std::vector<std::string> jar_seeded_from;
     if (impl_->config.cookie_jar) {
-        detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
+        jar_seeded_from = detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
         impl_->config.cookie_scope, impl_->config.cookie_writes);
     }
 
@@ -607,8 +608,8 @@ Result<Response> Client::send (const Request& request) {
     // Before any error return below: a failed transfer can still have
     // collected cookies - see capture_jar_cookies.
     if (impl_->config.cookie_jar) {
-        detail::capture_jar_cookies (
-        curl, *impl_->config.cookie_jar, impl_->config.cookie_scope);
+        detail::capture_jar_cookies (curl, *impl_->config.cookie_jar,
+        impl_->config.cookie_scope, jar_seeded_from);
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)

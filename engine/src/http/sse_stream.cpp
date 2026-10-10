@@ -17,8 +17,10 @@
 #include <algorithm>
 #include <chrono>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
@@ -472,8 +474,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     }
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.request.http_version));
+    std::vector<std::string> jar_seeded_from;
     if (request.cookie_jar) {
-        detail::apply_jar_cookies (
+        jar_seeded_from = detail::apply_jar_cookies (
         curl, *request.cookie_jar, request.cookie_scope, request.cookie_writes);
     }
 
@@ -485,7 +488,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         curl_slist_free_all (headers_list);
     }
     if (request.cookie_jar) {
-        detail::capture_jar_cookies (curl, *request.cookie_jar, request.cookie_scope);
+        detail::capture_jar_cookies (
+        curl, *request.cookie_jar, request.cookie_scope, jar_seeded_from);
     }
 
     // Whatever the server left unterminated still arrived - dispatch it before

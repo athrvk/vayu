@@ -299,25 +299,38 @@ void ingest_header_line (std::string_view line, Headers& headers);
  * rather than in the jar, so the transfer carries them and its capture persists
  * them - the ordering cookie_jar.hpp describes.
  *
+ * Returns the scope's lines as read, before @p writes: what
+ * `capture_jar_cookies` must be handed back so it can tell this transfer's
+ * changes, the staged writes among them, from another transfer's.
+ *
  * Shared by the single-request client and the SSE stream consumer so the two
  * cannot drift into sending different sessions for the same request.
  */
-void apply_jar_cookies (CURL* curl,
+[[nodiscard]] std::vector<std::string> apply_jar_cookies (CURL* curl,
 CookieJar& jar,
 const std::string& scope,
 const std::vector<CookieWrite>& writes);
 
 /**
- * @brief Store what the transfer left in the handle's jar back into the scope.
+ * @brief Fold what the transfer changed in the handle's jar back into the
+ *        scope (`CookieJar::reconcile`), against the @p seeded_from lines
+ *        `apply_jar_cookies` returned.
+ *
+ * A delta rather than a replace, because transfers in one scope overlap and a
+ * replace from the one finishing last would drop the other's `Set-Cookie`
+ * (issue #1888).
  *
  * Called even when the transfer failed, for the same reason the timing reads
  * are: a redirect chain that dies on its last hop still collected the cookies
  * of the hops that succeeded, and dropping those would make a login flow depend
  * on the last request having gone well. A stream that ends on a cap is the same
  * case - it authenticated successfully, it just did not run to the server's own
- * end.
+ * end. When libcurl cannot export the handle's list the scope is left as it is.
  */
-void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope);
+void capture_jar_cookies (CURL* curl,
+CookieJar& jar,
+const std::string& scope,
+const std::vector<std::string>& seeded_from);
 
 /**
  * @brief libcurl's cumulative phase timers, in seconds, for one transfer.

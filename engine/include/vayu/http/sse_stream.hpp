@@ -305,9 +305,9 @@ struct SseStreamRequest {
     /// What the pre-request script's `pm.cookies.jar()` staged, applied on top
     /// of the stored lines for this transfer alone. Carried here rather than
     /// written into the jar for the reason cookie_jar.hpp gives: the transfer
-    /// applies them and its capture persists them, so they happen exactly once
-    /// and in the order the send decides - the same route the non-streaming
-    /// client's `ClientConfig::cookie_writes` takes.
+    /// applies them and its capture reconciles them into the scope, so they
+    /// happen exactly once and in the order the send decides - the same route
+    /// the non-streaming client's `ClientConfig::cookie_writes` takes.
     std::vector<CookieWrite> cookie_writes;
     /// How this stream reaches the network (issue #705). Resolved by the route
     /// alongside `limits`, for the same reason: read once when the stream
