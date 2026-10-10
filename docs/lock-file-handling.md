@@ -136,6 +136,21 @@ logging both versions. A version that could not be read at all (the probe
 answered but the field was missing or malformed) adopts rather than disrupts
 a healthy engine on an ambiguous answer.
 
+**A live lock PID that does not answer `/health` is waited for, then replaced**
+(issue #1905). Between "stale" and "healthy" there is a third case: the PID is
+alive and is a Vayu engine, but nothing answers on the port. It is either still
+starting - an orphan from a crashed session reads its database and runs
+migrations before it listens - or hung. Spawning beside it loses the flock, and
+falling through to the port check would report "another application" for
+Vayu's own engine. So `EngineSidecar` polls `/health` on the same ramped
+budget a freshly spawned engine gets (`ENGINE_HEALTH_POLL_BUDGET_MS`). An
+engine that answers in time goes through the version check above and is
+adopted. One that does not is stopped by PID (the name-verified kill, so a
+recycled PID is left alone), the port is given `ENGINE_PORT_RELEASE_DELAY_MS`
+to clear, the replaced PID is logged, and this instance spawns its own. The
+"port already in use by another application" error is left for a port held when
+the lock file names no live Vayu engine.
+
 ## Manual Cleanup
 
 If needed, users can manually remove the lock file:
