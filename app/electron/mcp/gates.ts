@@ -18,6 +18,7 @@
 
 import type http from "node:http";
 import { MCP_PATH } from "../constants.js";
+import type { Logger } from "../log.js";
 
 function jsonRpcError(
 	res: http.ServerResponse,
@@ -55,15 +56,29 @@ export function answerUnlessMcpPost(req: http.IncomingMessage, res: http.ServerR
 	return false;
 }
 
-/** The 500 for an error nothing closer to the request answered. */
-export function answerInternalError(res: http.ServerResponse, err: unknown): void {
+/**
+ * The 500 for an error nothing closer to the request answered. The wire says
+ * only "Internal error": this response goes to anyone who can reach the port,
+ * and a thrown message can carry a path or an engine URL. The cause goes to the
+ * log instead.
+ */
+export function answerInternalError(
+	req: http.IncomingMessage,
+	res: http.ServerResponse,
+	err: unknown,
+	log?: Logger
+): void {
+	log?.error("mcp", "Unhandled error serving an MCP request", {
+		path: req.url ?? "",
+		error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+	});
 	if (!res.headersSent) {
 		res.writeHead(500, { "Content-Type": "application/json" });
 	}
 	res.end(
 		JSON.stringify({
 			jsonrpc: "2.0",
-			error: { code: -32603, message: `Internal error: ${String(err)}` },
+			error: { code: -32603, message: "Internal error" },
 			id: null,
 		})
 	);

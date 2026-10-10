@@ -10,6 +10,7 @@ import net from "node:net";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { McpListener, type McpRequestHandler } from "./listener.js";
 import { MCP_PATH } from "../constants.js";
+import type { Logger } from "../log.js";
 
 /** A port nothing holds right now, so the fixed MCP port stays out of the tests. */
 function freePort(): Promise<number> {
@@ -132,16 +133,23 @@ describe("McpListener", () => {
 			.fn<() => Promise<McpRequestHandler>>()
 			.mockRejectedValueOnce(new Error("boom"))
 			.mockResolvedValue(okHandler);
-		listener = new McpListener({ host: "127.0.0.1", port, loadHandler });
+		const log = { error: vi.fn() } as unknown as Logger;
+		listener = new McpListener({ host: "127.0.0.1", port, loadHandler, log });
 		await listener.start();
 
 		const failed = await request(port, "POST", MCP_PATH, "{}");
 		expect(failed.status).toBe(500);
 		expect(JSON.parse(failed.body)).toEqual({
 			jsonrpc: "2.0",
-			error: { code: -32603, message: "Internal error: Error: boom" },
+			error: { code: -32603, message: "Internal error" },
 			id: null,
 		});
+		expect(failed.body).not.toContain("boom");
+		expect(log.error).toHaveBeenCalledWith(
+			"mcp",
+			expect.any(String),
+			expect.objectContaining({ path: MCP_PATH, error: expect.stringContaining("boom") })
+		);
 
 		const served = await request(port, "POST", MCP_PATH, "{}");
 		expect(served.status).toBe(200);
@@ -161,7 +169,8 @@ describe("McpListener", () => {
 
 		const answer = await request(port, "POST", MCP_PATH, "{}");
 		expect(answer.status).toBe(500);
-		expect(JSON.parse(answer.body).error.code).toBe(-32603);
+		expect(JSON.parse(answer.body).error).toEqual({ code: -32603, message: "Internal error" });
+		expect(answer.body).not.toContain("handler fell over");
 	});
 
 	it("stop closes the port", async () => {

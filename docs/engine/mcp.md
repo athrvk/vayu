@@ -111,7 +111,8 @@ wire. The body is read before the transport sees it, so these are answered
 directly rather than by the SDK. Both messages are fixed strings - nothing
 derived from the underlying error reaches the wire - and `-32603`
 ("Internal error") is left to mean a genuine handler failure, including a socket
-error while reading.
+error while reading. That message is a fixed string too: the thrown error goes to
+the MCP log (`src: "mcp"`, with the request path), not to the client.
 The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping. The one thing carried
 from one request to the next is the client's name from its handshake, under an
@@ -1630,7 +1631,8 @@ configurable in **Settings → MCP** and persisted.
   not a gate.
   Because the tool set is recomputed per built server (a fresh one per HTTP
   request), flipping the toggle takes effect on the client's next `tools/list` -
-  the same timing the per-tool switch below already has. The category covers:
+  the same timing the per-tool switch below already has. The category is every
+  tool declared `category: "write"` in `tools.ts` - 28 write tools:
   `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
   `create_request_example`, `update_request_example`,
@@ -1639,7 +1641,8 @@ configurable in **Settings → MCP** and persisted.
   `delete_environment`, `update_globals`, `clear_cookies`,
   `update_engine_config`, `set_run_baseline`,
   `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`,
-  `restore_trash_entry`, `purge_trash_entry`. Does not gate
+  `restore_trash_entry`, `purge_trash_entry`, `sync_spec`, `import_document`,
+  `bind_spec`, `unbind_spec`, `clear_oauth2_token`. Does not gate
   `run_request` / `run_collection_smoke` / load runs
   (allowlist + caps). Seven of those need the toggle **and** confirmation - the
   six deletes plus `purge_trash_entry`: the toggle is a single session-wide

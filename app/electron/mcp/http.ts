@@ -22,6 +22,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
+import type { Logger } from "../log.js";
 import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 
@@ -30,6 +31,8 @@ export interface McpHttpServerOptions {
 	port: number;
 	info: McpServerInfo;
 	contextProvider: ToolContextProvider;
+	/** Where the cause of a 500 goes; the wire carries none of it. */
+	log?: Logger;
 }
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -82,7 +85,9 @@ export class McpHttpServer {
 	 * `start()` puts the same handler on a socket of this server's own.
 	 */
 	handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-		return this.handle(req, res).catch((err) => answerInternalError(res, err));
+		return this.handle(req, res).catch((err) =>
+			answerInternalError(req, res, err, this.opts.log)
+		);
 	}
 
 	private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

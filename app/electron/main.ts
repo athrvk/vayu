@@ -85,7 +85,7 @@ import { registerFileIpc } from "./file-ipc.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
- * `mcp/index.js` re-exports `toolCatalog` from the 7,300-line tool registry and
+ * `mcp/index.js` re-exports `toolCatalog` from the tool registry, `tools.ts`, and
  * constructs its facade over `http.js`, so importing *anything* runtime from it
  * evaluates the MCP SDK, zod and all 67 tool schemas - ~250-300ms of serial
  * main-process evaluation, before `app.whenReady` and therefore ahead of the
@@ -958,6 +958,7 @@ async function startMcp() {
 		const listener = new McpListener({
 			host: MCP_HOST,
 			port: MCP_PORT,
+			log: mcpLogger(),
 			loadHandler: async () => {
 				const { VayuMcpService } = await loadMcp();
 				const service = new VayuMcpService({
