@@ -1438,14 +1438,14 @@ declare const clearInterval: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Scripts cannot make network calls. The request being built is the only one sent; edit it through pm.request.
+ * No fetch in the sandbox. Use pm.sendRequest(request, callback), which is synchronous and allowed only when the run's allowScriptRequests setting is on.
  */
 declare const fetch: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * Scripts cannot make network calls.
+ * No XMLHttpRequest in the sandbox. Use pm.sendRequest.
  */
 declare const XMLHttpRequest: never;
 

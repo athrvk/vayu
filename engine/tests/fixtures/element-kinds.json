@@ -47,7 +47,7 @@
       ],
       "type": "object"
     },
-    "description": "Runs before the request is sent, with the pm API. Edits to pm.request change what is actually sent. Never runs under a load test - only on Send and in a collection run.",
+    "description": "Runs before the request is sent, with the pm API. Edits to pm.request change what is actually sent. Under a load test it runs only when Run inline is on.",
     "hotPathClass": "script",
     "kind": "script.pre",
     "label": "Pre-request script",
