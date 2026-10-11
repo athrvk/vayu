@@ -1566,7 +1566,8 @@ focus classes for the default case.**
 **Clipping panels.** An element whose `overflow-*` would cut off an outset ring
 must carry `.panel-clip`; every focusable descendant then gets
 `outline-offset: -1px`. Currently on the `TabStrip` row, the `Drawer` content
-wrapper and the load-test dialog's "Recording & limits" card. Put it on the
+wrapper and the bordered cards in the load-test and run-collection dialogs;
+`rg panel-clip app/src` is the authoritative list. Put it on the
 element carrying the overflow - not on the rows. For a one-off outside such a
 container, use the `.focus-ring-inset` utility.
 
