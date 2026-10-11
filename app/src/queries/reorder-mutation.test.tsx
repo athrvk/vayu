@@ -28,6 +28,7 @@ import type { ReactNode } from "react";
 import { useReorderMutation } from "./collections";
 import { queryKeys } from "./keys";
 import { useSaveStore } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
 import type { Collection, Request, ReorderRequest } from "@/types";
 
 const reorder = vi.fn();
@@ -89,6 +90,7 @@ const swapPlan: ReorderRequest = {
 beforeEach(() => {
 	vi.clearAllMocks();
 	useSaveStore.setState({ status: "idle" });
+	useToastStore.setState({ toasts: [] });
 });
 
 describe("useReorderMutation draws the drop before the write returns", () => {
@@ -198,7 +200,7 @@ describe("useReorderMutation settles on the rows the engine wrote", () => {
 });
 
 describe("useReorderMutation rolls back a failed drop", () => {
-	it("restores every touched cache and reports through failSave", async () => {
+	it("restores every touched cache and reports through a toast, not the Dock", async () => {
 		reorder.mockRejectedValue(new Error("engine said no"));
 		const client = makeClient();
 		seed(client);
@@ -207,7 +209,28 @@ describe("useReorderMutation rolls back a failed drop", () => {
 		await expect(result.current.mutateAsync(swapPlan)).rejects.toThrow("engine said no");
 
 		expect(ids(client, "col_a")).toEqual(["a", "b", "c"]);
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(useToastStore.getState().toasts).toEqual([
+			expect.objectContaining({
+				message: "Couldn't reorder - engine said no",
+				variant: "error",
+			}),
+		]);
+		// The drop was rolled back, so no edit is unsaved: "Not saved" would
+		// describe nothing (#1885).
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("reports a non-Error rejection without a reason", async () => {
+		reorder.mockRejectedValue("nope");
+		const client = makeClient();
+		seed(client);
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await expect(result.current.mutateAsync(swapPlan)).rejects.toBe("nope");
+
+		expect(useToastStore.getState().toasts).toEqual([
+			expect.objectContaining({ message: "Couldn't reorder.", variant: "error" }),
+		]);
 	});
 
 	it("puts a cross-collection move back in its source list", async () => {

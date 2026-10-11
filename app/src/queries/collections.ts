@@ -21,7 +21,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { useResponseStore } from "@/stores/response-store";
-import { useSaveStore } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
 import { useDataFileStore } from "@/stores/data-file-store";
 import { useSpecFileStore } from "@/stores/spec-file-store";
 import { walkAncestors } from "@/modules/collections/tree-utils";
@@ -667,9 +667,10 @@ function placeRequest(
  *    normally what was drawn, but a normalization the client planned and the
  *    engine performed is authoritative here, so the tree settles on real
  *    positions rather than on a guess that happens to sort the same.
- *  - `onError` restores the snapshots wholesale and reports through `failSave`,
- *    the one channel every save failure in the app reaches the Dock and the
- *    toast through.
+ *  - `onError` restores the snapshots wholesale and reports through a toast. A
+ *    failed reorder is rolled back, not an edit left unsaved, so it stays off
+ *    the save store, which would park the Dock on "Not saved" with nothing
+ *    pending (#1885).
  *
  * `onSettled` then invalidates the affected keys once - not per row, which is
  * the invalidation storm the per-row path produced.
@@ -717,12 +718,13 @@ export function useReorderMutation() {
 			for (const [queryKey, data] of context?.snapshots ?? []) {
 				queryClient.setQueryData(queryKey, data);
 			}
-			useSaveStore
+			useToastStore
 				.getState()
-				.failSave(
+				.showToast(
 					error instanceof Error
 						? `Couldn't reorder - ${error.message}`
-						: "Couldn't reorder."
+						: "Couldn't reorder.",
+					"error"
 				);
 		},
 		onSettled: (_data, _error, _plan, context) => {
