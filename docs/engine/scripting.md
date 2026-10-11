@@ -1509,7 +1509,7 @@ generators through `replaceIn`.
 
 The one part of the sandbox that touches the network. Its reason for existing is
 the token fetch: a pre-request script that needs a credential the request itself
-cannot supply.
+cannot supply. `fetch` and `XMLHttpRequest` are absent; their hover points here.
 
 ```javascript
 pm.sendRequest(

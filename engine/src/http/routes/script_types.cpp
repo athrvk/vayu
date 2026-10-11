@@ -128,9 +128,10 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "clearTimeout", "There is no setTimeout to cancel." },
 { "clearInterval", "There is no setInterval to cancel." },
 { "fetch",
-"Scripts cannot make network calls. The request being built is "
-"the only one sent; edit it through pm.request." },
-{ "XMLHttpRequest", "Scripts cannot make network calls." },
+"No fetch in the sandbox. Use pm.sendRequest(request, callback), "
+"which is synchronous and allowed only when the run's "
+"allowScriptRequests setting is on." },
+{ "XMLHttpRequest", "No XMLHttpRequest in the sandbox. Use pm.sendRequest." },
 { "require",
 "No module system - QuickJS here has no loader, and there is "
 "no filesystem to load from." },

@@ -203,8 +203,8 @@ bool is_blank_script_element (const std::string& kind, const nlohmann::json& con
 ElementKind make_script_pre_kind () {
     auto kind = make_script_kind (Phase::StepBefore, "script.pre", "Pre-request script",
     "Runs before the request is sent, with the pm API. Edits to pm.request "
-    "change what is actually sent. Never runs under a load test - only on "
-    "Send and in a collection run.");
+    "change what is actually sent. Under a load test it runs only when Run "
+    "inline is on.");
     allow_inline_marking (kind);
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPreElement> (config);
