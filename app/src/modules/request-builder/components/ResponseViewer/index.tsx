@@ -353,8 +353,8 @@ export default function ResponseViewer() {
 	 *
 	 * The cost is that four tabs can now be empty, so each says so. Console and
 	 * Cookies already did; Timing, Tests and Raw did not. `RawRequestResponse`'s
-	 * empty state in particular was deleted earlier in this same branch for being
-	 * unreachable - this is what makes it reachable.
+	 * empty state is reachable only for a `status: 0` response with no recorded
+	 * request.
 	 */
 	const consoleLogCount = shown.consoleLogs?.length ?? 0;
 	const hasScriptError = !!shown.preScriptError || !!shown.postScriptError;
@@ -385,6 +385,10 @@ export default function ResponseViewer() {
 		? shown.streamEndReason
 		: (streamIsMine && liveEndReason) || undefined;
 
+	// Client-side error (status 0 means no server response): the Body tab shows
+	// `ClientErrorView`, and every other tab renders from `shown` as usual.
+	const isClientError = shown.status === 0;
+
 	/*
 	 * "Save as example" (issue #588) - present only when there is something to
 	 * attach it to and something finished to attach.
@@ -400,45 +404,11 @@ export default function ResponseViewer() {
 	 * construction. Saving it would store an example of a response that had not
 	 * arrived. The button comes back when the stream ends and the run's stored
 	 * response takes over.
+	 *
+	 * And for a client-side error: no server answered, so there is no exchange
+	 * to keep as an example of one.
 	 */
-	const canSaveExample = !!requestId && !isStreaming;
-
-	// Client-side error state (status === 0 means no server response)
-	const isClientError = shown.status === 0;
-
-	// Show dedicated error view for client-side errors
-	if (isClientError) {
-		return (
-			<div
-				className="relative flex-1 flex flex-col surface-card overflow-hidden"
-				aria-busy={busy}
-			>
-				{busy && <SendingWave />}
-				<ResponseStatusBar
-					className={staleClass}
-					status={shown.status}
-					statusText={shown.statusText}
-					time={shown.time}
-					size={shown.size}
-					// The failure path needs this more than the success one: a
-					// handshake refused by the server is the exchange where
-					// "which certificate did we present" is the whole question.
-					clientCertificate={shown.clientCertificate}
-					receivedAt={shown.receivedAt}
-					restoredFrom={shown.restoredFrom}
-				/>
-				{/* The wrapper is what carries the dim, `ClientErrorView` taking no
-				    class of its own; `flex-1 flex flex-col` is the box it was
-				    already given as a direct child of this column. */}
-				<div className={cn("flex-1 flex flex-col min-h-0", staleClass)}>
-					<ClientErrorView
-						errorCode={shown.errorCode}
-						errorMessage={shown.errorMessage}
-					/>
-				</div>
-			</div>
-		);
-	}
+	const canSaveExample = !!requestId && !isStreaming && !isClientError;
 
 	return (
 		<div
@@ -593,70 +563,81 @@ export default function ResponseViewer() {
 				 * always rendered together.
 				 */}
 				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
-					<div className="flex flex-col h-full">
-						{/*
-						 * The engine caps a stored trace body at `maxTraceBodyBytes`,
-						 * so a response restored from a run (cold start, or a design
-						 * run opened from History) may hold only the stored slice.
-						 * Say so, and how to get the whole thing back.
-						 */}
-						{shown.bodyTruncated && (
-							<div className="px-4 pt-3 shrink-0">
-								<Callout severity="warning" title="Body truncated for storage">
-									Only the first {formatSize(shown.body.length)} of{" "}
-									{formatSize(shown.bodyBytes ?? shown.body.length)} was kept.
-									Re-send the request to view the full response.
-								</Callout>
-							</div>
-						)}
-						{/*
-						 * A different fact from the one above, and deliberately not
-						 * exclusive with it (issue #1157): that one is storage
-						 * shortening a body the user already saw whole, which a
-						 * re-send undoes. This one is the engine never having read
-						 * past `maxDesignResponseBodyBytes`, which a re-send
-						 * reproduces - so the remedy is the setting, not the button.
-						 */}
-						{shown.bodyCapped && (
-							<div className="px-4 pt-3 shrink-0">
-								<Callout severity="warning" title="Body capped while reading">
-									Only the first {formatSize(shown.size || shown.body.length)} of
-									this response was read - the engine stops a design-mode send
-									there, so re-sending reads the same amount. Raise Max Design
-									Response Body in Settings to read more.
-								</Callout>
-							</div>
-						)}
-						<div className="flex-1 min-h-0">
-							<SharedResponseBody
-								body={shown.body}
-								bodyRaw={shown.bodyRaw}
-								headers={shown.headers}
-								showModeToggle
-								/*
-								 * Copy and download live *here*, not on the tab row.
-								 *
-								 * They act on the body - `content={shown.body}` - and
-								 * always did, so on the tab row they sat above Headers,
-								 * Timing and Raw claiming to act on whatever you were
-								 * looking at while copying something else. Moving them
-								 * beside the Pretty/Raw switch puts them with the thing
-								 * they operate on, and gives the tab strip back the ~64px
-								 * they were taking, which is what let all seven tabs
-								 * render without the strip scrolling.
-								 *
-								 * `shown.bodyType` names the download; the history
-								 * viewer has no such field and keeps `.txt`.
-								 */
-								actions={
-									<ResponseActions
-										content={shown.body}
-										fileExtension={shown.bodyType}
-									/>
-								}
+					{isClientError ? (
+						/* `ClientErrorView` centres itself with `flex-1`, so it needs a
+						   flex box of the pane's height to be centred in. */
+						<div className="flex h-full min-h-0 overflow-auto">
+							<ClientErrorView
+								errorCode={shown.errorCode}
+								errorMessage={shown.errorMessage}
 							/>
 						</div>
-					</div>
+					) : (
+						<div className="flex flex-col h-full">
+							{/*
+							 * The engine caps a stored trace body at `maxTraceBodyBytes`,
+							 * so a response restored from a run (cold start, or a design
+							 * run opened from History) may hold only the stored slice.
+							 * Say so, and how to get the whole thing back.
+							 */}
+							{shown.bodyTruncated && (
+								<div className="px-4 pt-3 shrink-0">
+									<Callout severity="warning" title="Body truncated for storage">
+										Only the first {formatSize(shown.body.length)} of{" "}
+										{formatSize(shown.bodyBytes ?? shown.body.length)} was kept.
+										Re-send the request to view the full response.
+									</Callout>
+								</div>
+							)}
+							{/*
+							 * A different fact from the one above, and deliberately not
+							 * exclusive with it (issue #1157): that one is storage
+							 * shortening a body the user already saw whole, which a
+							 * re-send undoes. This one is the engine never having read
+							 * past `maxDesignResponseBodyBytes`, which a re-send
+							 * reproduces - so the remedy is the setting, not the button.
+							 */}
+							{shown.bodyCapped && (
+								<div className="px-4 pt-3 shrink-0">
+									<Callout severity="warning" title="Body capped while reading">
+										Only the first {formatSize(shown.size || shown.body.length)}{" "}
+										of this response was read - the engine stops a design-mode
+										send there, so re-sending reads the same amount. Raise Max
+										Design Response Body in Settings to read more.
+									</Callout>
+								</div>
+							)}
+							<div className="flex-1 min-h-0">
+								<SharedResponseBody
+									body={shown.body}
+									bodyRaw={shown.bodyRaw}
+									headers={shown.headers}
+									showModeToggle
+									/*
+									 * Copy and download live *here*, not on the tab row.
+									 *
+									 * They act on the body - `content={shown.body}` - and
+									 * always did, so on the tab row they sat above Headers,
+									 * Timing and Raw claiming to act on whatever you were
+									 * looking at while copying something else. Moving them
+									 * beside the Pretty/Raw switch puts them with the thing
+									 * they operate on, and gives the tab strip back the ~64px
+									 * they were taking, which is what let all seven tabs
+									 * render without the strip scrolling.
+									 *
+									 * `shown.bodyType` names the download; the history
+									 * viewer has no such field and keeps `.txt`.
+									 */
+									actions={
+										<ResponseActions
+											content={shown.body}
+											fileExtension={shown.bodyType}
+										/>
+									}
+								/>
+							</div>
+						</div>
+					)}
 				</TabsContent>
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 					<ResponseHeadersPanel
