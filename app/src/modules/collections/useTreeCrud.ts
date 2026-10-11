@@ -438,9 +438,10 @@ export function useTreeCrud({
 	 *
 	 * A restore brings the rows back, and nothing else: the tab the delete
 	 * closed stays closed and the collection's remembered data-file and
-	 * spec-file paths (#599, #1890) stay cleared, because both were discarded on the way out. Neither
-	 * can be read back afterwards - that is the point of capturing here, while
-	 * they still exist - so the closure this returns carries them.
+	 * spec-file paths (#599, #1890) stay cleared, because the delete discarded
+	 * all three on the way out. None can be read back afterwards - that is the
+	 * point of capturing here, while they still exist - so the closure this
+	 * returns carries them.
 	 *
 	 * **Only the tab that was focused.** Restoring a collection whose cascade
 	 * closed nine tabs must not reopen nine tabs; the complaint this answers is

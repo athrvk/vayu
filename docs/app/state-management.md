@@ -382,8 +382,8 @@ asserts against the persisted payload rather than against the store's surface.
 
 The path is written when the user declares a contract in the Data tab
 (`CollectionDetail/DataTab.tsx`), obtained through the preload's existing
-`getFilePath` bridge, and dropped when the collection is deleted or its contract
-cleared. Reading it back needs the gated `dataFile:read` IPC
+`getFilePath` bridge, and dropped when the collection is deleted or purged, or its
+contract cleared. Reading it back needs the gated `dataFile:read` IPC
 (`electron/data-file.ts`), because the renderer otherwise cannot name a path.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:

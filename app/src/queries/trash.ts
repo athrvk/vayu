@@ -91,9 +91,8 @@ export function useRestoreTrashMutation() {
  * worth having whole rather than on one of the two buttons a trash row carries.
  *
  * The purged id's remembered data-file and spec-file paths go with it (#1890):
- * the purge is where a collection ends for good, including one deleted outside
- * `useDeleteCollectionMutation` (an MCP client). A request's id has no entry in
- * either store, so clearing it is a no-op.
+ * the purge is where a collection ends for good, whatever deleted it. A
+ * request's id has no entry in either store, so clearing it is a no-op.
  */
 export function usePurgeTrashMutation() {
 	const queryClient = useQueryClient();
