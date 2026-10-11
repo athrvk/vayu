@@ -30,12 +30,61 @@
  * Electron IPC handlers at import time, which no unit test can do.
  */
 
+import { isBrowsableUrl } from "./external-url.js";
+
 export type AuthWindowResult = { callbackUrl: string } | { error: string };
 
 export interface AuthWindowFlowParams {
 	authorizeUrl: string;
 	/** The registered callback URL, matched by prefix to capture the redirect. */
 	redirectUri: string;
+}
+
+/** The partition prefix every embedded-login session must carry. */
+const PARTITION_PREFIX = "oauth:";
+const DEFAULT_PARTITION = `${PARTITION_PREFIX}default`;
+
+export interface OpenAuthWindowParams extends AuthWindowFlowParams {
+	/** Session partition so different logins don't share cookies. */
+	partition: string;
+}
+
+function readNonEmptyString(value: unknown, what: string): string {
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error(`Refusing to open an auth window without ${what}`);
+	}
+	return value;
+}
+
+/**
+ * Read the `oauth:openWindow` payload off the wire, before any session or
+ * window exists.
+ *
+ * The partition rule is the load-bearing one: `session.fromPartition("")` is the
+ * default session, the one that carries the engine bridge, so an unprefixed
+ * partition would put an IdP page inside it. A malformed `redirectUri` would
+ * otherwise throw only after the window was constructed, leaking a hidden one.
+ * Custom-scheme callbacks are legal, so `redirectUri` is checked for presence
+ * only.
+ */
+export function readAuthWindowParams(value: unknown): OpenAuthWindowParams {
+	if (!value || typeof value !== "object") {
+		throw new Error("Refusing to open an auth window without parameters");
+	}
+	const { authorizeUrl, redirectUri, partition } = value as Record<string, unknown>;
+	if (typeof authorizeUrl !== "string" || !isBrowsableUrl(authorizeUrl)) {
+		throw new Error("Refusing to open a non-HTTP(S) authorize URL");
+	}
+	const callback = readNonEmptyString(redirectUri, "a redirect URI");
+	if (partition === undefined) {
+		return { authorizeUrl, redirectUri: callback, partition: DEFAULT_PARTITION };
+	}
+	if (typeof partition !== "string" || !partition.startsWith(PARTITION_PREFIX)) {
+		throw new Error(
+			`Refusing to open an auth window outside an "${PARTITION_PREFIX}" partition`
+		);
+	}
+	return { authorizeUrl, redirectUri: callback, partition };
 }
 
 /** The slice of the BrowserWindow this needs, so a test can pass a fake. */

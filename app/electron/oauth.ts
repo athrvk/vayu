@@ -18,16 +18,14 @@
  */
 
 import { ipcMain, shell, BrowserWindow, session } from "electron";
-import { createAuthWindowFlow, type AuthWindowResult } from "./oauth-window.js";
+import {
+	createAuthWindowFlow,
+	readAuthWindowParams,
+	type AuthWindowResult,
+	type OpenAuthWindowParams,
+} from "./oauth-window.js";
 import { isBrowsableUrl, urlProtocol } from "./external-url.js";
 import { denyDevicePermissions } from "./permissions.js";
-
-export interface OpenAuthWindowParams {
-	authorizeUrl: string;
-	redirectUri: string;
-	/** Session partition so different logins don't share cookies. */
-	partition?: string;
-}
 
 export type OpenAuthWindowResult = AuthWindowResult;
 
@@ -40,7 +38,7 @@ export type OpenAuthWindowResult = AuthWindowResult;
  * is only the Electron window it settles for.
  */
 function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowResult> {
-	const partition = params.partition ?? "oauth:default";
+	const { partition } = params;
 	// Before the window exists: the IdP page is the first thing to ask.
 	denyDevicePermissions(session.fromPartition(partition));
 	const win = new BrowserWindow({
@@ -115,13 +113,7 @@ export function setupOAuthIpcHandlers(): void {
 	});
 
 	// Embedded mode: capture the redirect URL and return it to the renderer.
-	ipcMain.handle(
-		"oauth:openWindow",
-		async (_e, params: OpenAuthWindowParams): Promise<OpenAuthWindowResult> => {
-			if (!isBrowsableUrl(params.authorizeUrl)) {
-				throw new Error("Refusing to open a non-HTTP(S) authorize URL");
-			}
-			return openAuthWindow(params);
-		}
+	ipcMain.handle("oauth:openWindow", async (_e, params: unknown): Promise<OpenAuthWindowResult> =>
+		openAuthWindow(readAuthWindowParams(params))
 	);
 }
