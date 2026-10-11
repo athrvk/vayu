@@ -126,6 +126,24 @@ describe("startup ordering", () => {
 	 * engineStartup;` and this reddens. On macOS a Dock click while the engine is
 	 * still starting, with the window closed, then found no handler to rebuild it.
 	 */
+	/*
+	 * Mutation check: drop `await updaterArmed`, the `.finally(markUpdaterArmed)`
+	 * or the `engineStartup?.catch(markUpdaterArmed)` and this reddens, as does
+	 * a menu item or `update:check` calling the updater without `checkForUpdates`.
+	 */
+	it("holds a check until the updater is armed, on every path", () => {
+		const fnAt = main.indexOf("async function checkForUpdates(");
+		const fnBody = main.slice(fnAt, main.indexOf("\n}\n", fnAt));
+
+		expect(fnAt).toBeGreaterThan(-1);
+		expect(fnBody.indexOf("await updaterArmed")).toBeGreaterThan(-1);
+		expect(main).toContain(".finally(markUpdaterArmed)");
+		expect(main).toContain("engineStartup?.catch(markUpdaterArmed)");
+		expect(main.split('click: () => void checkForUpdates("menu")')).toHaveLength(3);
+		expect(main).toContain('ipcMain.handle("update:check", () => checkForUpdates("renderer"))');
+		expect(fnBody).toContain("checkForUpdatesNow(source)");
+	});
+
 	it("listens for activate before it waits on the engine", () => {
 		const activateAt = main.indexOf('\n\tapp.on("activate"');
 		const engineAt = main.indexOf("\n\tawait engineStartup;");

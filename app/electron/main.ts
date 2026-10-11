@@ -898,14 +898,15 @@ async function startEngine() {
 }
 
 /**
- * The updater, loaded at most once, after the engine.
+ * The updater, loaded at most once, on first use: the update channels, the
+ * Help menu or the startup arming, whichever asks first.
  *
  * `electron-updater` constructs its platform updater the moment its export is
  * read and eagerly requires fs-extra, js-yaml, semver and six updater classes on
  * the way (measured: ~60 ms inside Electron), and the first check it exists for
  * waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway - so a static import spent
  * that on every launch before `app.whenReady`, ahead of the window. Cached as a
- * promise for the same reason `loadMcp` is: the menu and the startup arming may
+ * promise for the same reason `loadMcp` is: those callers may
  * ask at once, and a module that failed to load is a broken install.
  */
 type UpdaterModule = typeof import("./updater.js");
@@ -1622,7 +1623,9 @@ app.whenReady().then(async () => {
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the
 	// engine, and the updater and MCP both read state the engine owns. The window
 	// is already loading throughout, which was the point; the start itself was
-	// begun before `app.whenReady` (see `engineStartup`).
+	// begun before `app.whenReady` (see `engineStartup`). A failed start never
+	// reaches the arming below, so it releases the checks waiting on it here.
+	void engineStartup?.catch(markUpdaterArmed);
 	await engineStartup;
 
 	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
