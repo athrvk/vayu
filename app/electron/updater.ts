@@ -6,7 +6,7 @@
  */
 
 import type { BrowserWindow } from "electron";
-import { app, dialog, ipcMain, shell } from "electron";
+import { app, dialog, shell } from "electron";
 // electron-updater is CommonJS; under "type": "module" the named export must
 // be pulled off the default import.
 import electronUpdater from "electron-updater";
@@ -121,7 +121,11 @@ const MAX_CHECK_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2_000;
 
 let intervalTimer: NodeJS.Timeout | null = null;
-/** True once initAutoUpdater has configured the updater (not in dev). */
+/**
+ * True once initAutoUpdater has configured the updater (not in dev). A check
+ * made before that point would read false for the wrong reason, which is why
+ * main.ts holds checks until `initAutoUpdater` has run.
+ */
 let updaterReady = false;
 let pendingCheck: PendingCheck | null = null;
 let resolveWindow: WindowAccessor | null = null;
@@ -280,7 +284,9 @@ function handleCheckFailure(err: unknown): void {
 }
 
 /**
- * Wire up auto-update for the current platform.
+ * Arm auto-update for the current platform. The renderer's IPC channels are not
+ * registered here: they are forwarders in main.ts's `setupIpcHandlers`, so they
+ * exist before this runs and a call that lands first waits for it.
  *
  *   - silent (Windows, Linux AppImage): download in the background, then tell
  *     the renderer it can restart-and-install.
@@ -298,38 +304,6 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	});
 
 	resolveWindow = getWindow;
-
-	// Registered before the `disabled` bail-out. The renderer calls these
-	// unconditionally, and an unregistered channel rejects with "No handler
-	// registered" - an error that reads like a bug rather than "not in a
-	// packaged build". They no-op safely while `updaterReady` is false.
-	ipcMain.handle("update:restartToInstall", () => {
-		// Only meaningful on the silent path, where an update was downloaded.
-		if (updaterReady) autoUpdater.quitAndInstall();
-	});
-
-	// Takes no argument: the renderer is not trusted to name the URL, and the
-	// release page for the version on offer is the only one this opens.
-	ipcMain.handle("update:openReleasePage", () => {
-		if (!offeredReleaseUrl) return;
-		return shell.openExternal(offeredReleaseUrl);
-	});
-
-	ipcMain.handle("update:check", () => checkForUpdatesNow("renderer"));
-
-	// The macOS notify path's other half: the installer cannot replace a bundle
-	// whose processes are still running, so it has to quit Vayu itself - and
-	// from a terminal that means an Apple Event, which macOS gates behind an
-	// Automation consent prompt the user has to notice and approve.
-	//
-	// Quitting from in here needs no such permission and takes the ordinary
-	// `before-quit` path in main.ts, which flushes pending renderer saves and
-	// stops the engine and MCP server before exiting. So the app quitting itself
-	// is strictly better than the script killing it, and the script's own quit
-	// stays as the fallback for anyone who runs the command directly.
-	ipcMain.handle("update:quitForUpdate", () => {
-		app.quit();
-	});
 
 	if (strategy === "disabled") {
 		appLogger().info("updater", "Disabled (development)");
@@ -405,6 +379,37 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	// disk work (see `UPDATE_STARTUP_CHECK_DELAY_MS`).
 	scheduleStartupCheck();
 	intervalTimer = setInterval(() => startCheckCycle(), CHECK_INTERVAL_MS);
+}
+
+/** `update:restartToInstall`. Only meaningful on the silent path, where an update was downloaded. */
+export function restartToInstall(): void {
+	if (updaterReady) autoUpdater.quitAndInstall();
+}
+
+/**
+ * `update:openReleasePage`. Takes no argument: the renderer is not trusted to
+ * name the URL, and the release page for the version on offer is the only one
+ * this opens.
+ */
+export async function openReleasePage(): Promise<void> {
+	if (!offeredReleaseUrl) return;
+	await shell.openExternal(offeredReleaseUrl);
+}
+
+/**
+ * `update:quitForUpdate`, the macOS notify path's other half: the installer
+ * cannot replace a bundle whose processes are still running, so it has to quit
+ * Vayu itself - and from a terminal that means an Apple Event, which macOS gates
+ * behind an Automation consent prompt the user has to notice and approve.
+ *
+ * Quitting from in here needs no such permission and takes the ordinary
+ * `before-quit` path in main.ts, which flushes pending renderer saves and
+ * stops the engine and MCP server before exiting. So the app quitting itself
+ * is strictly better than the script killing it, and the script's own quit
+ * stays as the fallback for anyone who runs the command directly.
+ */
+export function quitForUpdate(): void {
+	app.quit();
 }
 
 /**
@@ -497,6 +502,8 @@ function settleCheck(result: UpdateCheckResult): void {
  * the user feedback - unlike the periodic check, which stays silent.
  */
 export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<UpdateCheckResult> {
+	// Reached in a build with no release feed (development): main.ts does not
+	// forward a check until `initAutoUpdater` has had its say.
 	if (!updaterReady) {
 		const result: UpdateCheckResult = {
 			status: "unavailable",

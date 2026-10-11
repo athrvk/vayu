@@ -691,10 +691,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () =>
-									void loadUpdater().then((updater) =>
-										updater.checkForUpdatesNow("menu")
-									),
+								click: () => void checkForUpdates("menu"),
 							},
 							{ type: "separator" as const },
 							{
@@ -853,10 +850,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () =>
-									void loadUpdater().then((updater) =>
-										updater.checkForUpdatesNow("menu")
-									),
+								click: () => void checkForUpdates("menu"),
 							},
 							{
 								label: "About Vayu",
@@ -907,14 +901,15 @@ async function startEngine() {
 }
 
 /**
- * The updater, loaded at most once, after the engine.
+ * The updater, loaded at most once, on first use: the update channels, the
+ * Help menu or the startup arming, whichever asks first.
  *
  * `electron-updater` constructs its platform updater the moment its export is
  * read and eagerly requires fs-extra, js-yaml, semver and six updater classes on
  * the way (measured: ~60 ms inside Electron), and the first check it exists for
  * waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway - so a static import spent
  * that on every launch before `app.whenReady`, ahead of the window. Cached as a
- * promise for the same reason `loadMcp` is: the menu and the startup arming may
+ * promise for the same reason `loadMcp` is: those callers may
  * ask at once, and a module that failed to load is a broken install.
  */
 type UpdaterModule = typeof import("./updater.js");
@@ -927,6 +922,26 @@ function loadUpdater(): Promise<UpdaterModule> {
 		return module;
 	});
 	return updaterModulePromise;
+}
+
+/**
+ * Settles when `initAutoUpdater` has run, or the updater failed to load.
+ *
+ * The update channels and the Help menu item exist from the first moment, but
+ * the updater is armed only after the engine is up. A check that went through
+ * before that would find it unarmed and answer "only run in packaged builds"
+ * in a packaged build; so a check waits here instead.
+ */
+let markUpdaterArmed!: () => void;
+const updaterArmed = new Promise<void>((resolve) => {
+	markUpdaterArmed = resolve;
+});
+
+/** A user-initiated check, held until the updater is armed. */
+async function checkForUpdates(source: Parameters<UpdaterModule["checkForUpdatesNow"]>[0]) {
+	const updater = await loadUpdater();
+	await updaterArmed;
+	return updater.checkForUpdatesNow(source);
 }
 
 /**
@@ -1190,6 +1205,15 @@ function setupIpcHandlers() {
 	// Async because the registry is loaded on demand - opening Settings is the
 	// place to pay for it, not launching the app.
 	ipcMain.handle("mcp:getTools", async () => (await loadMcp()).toolCatalog());
+
+	// The updater's channels are registered here, with the rest, rather than by
+	// `initAutoUpdater`: that waits for the engine, and a channel with no handler
+	// rejects the renderer's invoke with "No handler registered". Each forwards
+	// into the lazily loaded module, which stays off the startup import graph.
+	ipcMain.handle("update:restartToInstall", async () => (await loadUpdater()).restartToInstall());
+	ipcMain.handle("update:openReleasePage", async () => (await loadUpdater()).openReleasePage());
+	ipcMain.handle("update:check", () => checkForUpdates("renderer"));
+	ipcMain.handle("update:quitForUpdate", async () => (await loadUpdater()).quitForUpdate());
 
 	// Apply and persist a safety-config change from Settings. The renderer input
 	// is sanitized here (never trusted), applied live to the running server, and
@@ -1588,6 +1612,14 @@ app.whenReady().then(async () => {
 	// everything the user can see is up and wired.
 	createWindow();
 
+	// Before the engine wait, like the window: a macOS Dock click during a slow
+	// engine start would otherwise find nothing to rebuild a closed window.
+	app.on("activate", () => {
+		if (BrowserWindow.getAllWindows().length === 0) {
+			createWindow();
+		}
+	});
+
 	// A cold launch carries its request on its own command line - a document
 	// double-clicked with Vayu not running, or a Jump List task that started it
 	// (#1364). Offered after the window exists so `openIntents` has something to
@@ -1597,7 +1629,9 @@ app.whenReady().then(async () => {
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the
 	// engine, and the updater and MCP both read state the engine owns. The window
 	// is already loading throughout, which was the point; the start itself was
-	// begun before `app.whenReady` (see `engineStartup`).
+	// begun before `app.whenReady` (see `engineStartup`). A failed start never
+	// reaches the arming below, so it releases the checks waiting on it here.
+	void engineStartup?.catch(markUpdaterArmed);
 	await engineStartup;
 
 	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
@@ -1625,18 +1659,14 @@ app.whenReady().then(async () => {
 	// This arms them rather than running one: the first check waits out
 	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not
 	// start while the window, the engine and the user's first requests are still
-	// competing for the link and the disk.
+	// competing for the link and the disk. The channels it serves are already
+	// registered; a check that arrived first is waiting on `updaterArmed`.
 	void loadUpdater()
 		.then((updater) => updater.initAutoUpdater(() => mainWindow))
 		.catch((error: unknown) => {
 			appLogger().error("main", "Could not load the updater", { error: String(error) });
-		});
-
-	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) {
-			createWindow();
-		}
-	});
+		})
+		.finally(markUpdaterArmed);
 
 	// Start the MCP server last (best-effort; it never blocks app startup). It
 	// swallows its own failures, and starting it here means even one that escaped

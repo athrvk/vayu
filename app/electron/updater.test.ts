@@ -31,6 +31,7 @@ const ipcHandlers = new Map<string, (event: unknown, ...args: unknown[]) => unkn
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
 const checkForUpdates = vi.fn().mockResolvedValue(null);
 const quit = vi.fn();
+const quitAndInstall = vi.fn();
 const openExternal = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("electron", () => ({
@@ -65,7 +66,7 @@ vi.mock("electron-updater", () => ({
 				listeners.set(event, handler);
 			},
 			checkForUpdates: () => checkForUpdates(),
-			quitAndInstall: vi.fn(),
+			quitAndInstall: () => quitAndInstall(),
 		},
 	},
 }));
@@ -110,6 +111,7 @@ beforeEach(() => {
 	showMessageBox.mockClear().mockResolvedValue({ response: 0 });
 	checkForUpdates.mockClear().mockResolvedValue(null);
 	openExternal.mockClear();
+	quitAndInstall.mockClear();
 	currentWindow = makeWindow();
 	vi.stubEnv("NODE_ENV", "production");
 });
@@ -216,32 +218,61 @@ describe("checkForUpdatesNow", () => {
 		});
 	});
 
-	it("registers the renderer channels even when updates are disabled", async () => {
-		// The settings panel invokes `update:check` on every platform. Without a
-		// handler the invoke rejects with "No handler registered", which reads
-		// like a bug rather than "this is a dev build".
+	it("leaves the renderer channels to main.ts, where a second registration would throw", async () => {
+		// `ipcMain.handle` throws on a channel it already has, and main.ts registers
+		// all four before the engine wait (startup-order.test.ts) so the renderer
+		// never meets "No handler registered". The module serves them as exported
+		// functions and must not claim the channels itself, armed or not.
+		const armed = await loadUpdater();
+		armed.initAutoUpdater(getWindow);
+		expect([...ipcHandlers.keys()]).toEqual([]);
+
 		vi.stubEnv("NODE_ENV", "development");
-		const { initAutoUpdater } = await loadUpdater();
-		initAutoUpdater(getWindow);
-		expect([...ipcHandlers.keys()]).toEqual(
-			expect.arrayContaining([
-				"update:check",
-				"update:restartToInstall",
-				"update:openReleasePage",
-			])
-		);
-		await expect(ipcHandlers.get("update:check")?.(null)).resolves.toMatchObject({
+		const disabled = await loadUpdater();
+		disabled.initAutoUpdater(getWindow);
+		expect([...ipcHandlers.keys()]).toEqual([]);
+	});
+
+	it("serves every renderer channel safely when updates are disabled", async () => {
+		// The settings panel calls these on every platform, so a development build
+		// has to answer each of them without throwing.
+		vi.stubEnv("NODE_ENV", "development");
+		const updater = await loadUpdater();
+		updater.initAutoUpdater(getWindow);
+
+		await expect(updater.checkForUpdatesNow("renderer")).resolves.toMatchObject({
 			status: "unavailable",
 		});
+		updater.restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+		await updater.openReleasePage();
+		expect(openExternal).not.toHaveBeenCalled();
+	});
+});
+
+describe("restartToInstall", () => {
+	it("restarts into the downloaded update once the updater is armed", async () => {
+		const { initAutoUpdater, restartToInstall } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		restartToInstall();
+		expect(quitAndInstall).toHaveBeenCalledTimes(1);
+	});
+
+	it("does nothing before the updater is armed", async () => {
+		const { restartToInstall } = await loadUpdater();
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
 	});
 });
 
 describe("update:openReleasePage", () => {
 	it("opens the release page the updater offered and ignores the renderer's argument", async () => {
-		const { initAutoUpdater } = await loadUpdater();
+		const { initAutoUpdater, openReleasePage } = await loadUpdater();
 		initAutoUpdater(getWindow);
 		listeners.get("update-available")?.({ version: "1.2.3" });
-		await ipcHandlers.get("update:openReleasePage")?.(null, "file:///etc/passwd");
+		// A stray argument, as a hostile renderer would send; the signature has no
+		// room for it and the handler in main.ts forwards none.
+		await (openReleasePage as (url: string) => Promise<void>)("file:///etc/passwd");
 		expect(openExternal).toHaveBeenCalledTimes(1);
 		expect(openExternal).toHaveBeenCalledWith(
 			expect.stringMatching(/\/releases\/tag\/v1\.2\.3$/)
@@ -249,9 +280,9 @@ describe("update:openReleasePage", () => {
 	});
 
 	it("opens nothing when no release has been offered", async () => {
-		const { initAutoUpdater } = await loadUpdater();
+		const { initAutoUpdater, openReleasePage } = await loadUpdater();
 		initAutoUpdater(getWindow);
-		await ipcHandlers.get("update:openReleasePage")?.(null, "https://evil.test");
+		await (openReleasePage as (url: string) => Promise<void>)("https://evil.test");
 		expect(openExternal).not.toHaveBeenCalled();
 	});
 });
@@ -514,9 +545,8 @@ describe("the macOS update instruction", () => {
 		// permission and takes main.ts's before-quit path, which flushes saves
 		// and stops the engine first.
 		quit.mockClear();
-		const { initAutoUpdater } = await loadUpdater("darwin");
-		initAutoUpdater(getWindow);
-		await ipcHandlers.get("update:quitForUpdate")?.(null);
+		const { quitForUpdate } = await loadUpdater("darwin");
+		quitForUpdate();
 		expect(quit).toHaveBeenCalled();
 	});
 
