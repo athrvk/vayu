@@ -243,6 +243,14 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\w./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
 	// A height of exactly 8 (not `h-80`, `h-8.5`, `min-h-8` or `h-8/12`).
 	const RETIRED_HEIGHT = /(?<![\w-])h-8(?![\w./-])/;
+	// The icon steps are glyph sizes, not target sizes (12px / 16px). On the tag
+	// itself, unprefixed, one is the element's box - and on a `Button` it also
+	// replaces the `size-target` variant (tailwind-merge). A `[&_svg]:size-icon`
+	// sizes a descendant and is left alone, so the lookbehind refuses any
+	// variant prefix. A pseudo-element that states the floor (`after:size-target`,
+	// the TabItem close button's shape) keeps the glyph and grows the hit area.
+	const BARE_ICON_BOX = /(?<![\w:\]-])size-icon(?:-sm)?(?![\w-])/;
+	const PSEUDO_TARGET_FLOOR = /(?<![\w-])(?:after|before):size-target(?![\w-])/;
 	const TARGET_FLOOR_PX = 24;
 	const PX_PER_REM = 16;
 
@@ -256,13 +264,51 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		return undefined;
 	}
 
+	/**
+	 * The value of `tag`'s own `className` attribute. A glyph passed as a prop
+	 * (`icon={<X className="size-icon-sm" />}`) sits inside braces, at depth 1,
+	 * and is not the element's box.
+	 */
+	function ownClassName(tag: string): string {
+		let depth = 0;
+		for (let i = 0; i < tag.length; i++) {
+			if (tag[i] === "{") depth++;
+			else if (tag[i] === "}") depth--;
+			else if (depth === 0 && tag.startsWith("className=", i)) {
+				return attributeValue(tag, i + "className=".length);
+			}
+		}
+		return "";
+	}
+
+	/** The quoted string or balanced `{...}` expression starting at `start`. */
+	function attributeValue(tag: string, start: number): string {
+		const open = tag[start];
+		if (open === '"' || open === "'") {
+			return tag.slice(start, tag.indexOf(open, start + 1) + 1);
+		}
+		let depth = 0;
+		for (let i = start; i < tag.length; i++) {
+			if (tag[i] === "{") depth++;
+			else if (tag[i] === "}" && --depth === 0) return tag.slice(start, i + 1);
+		}
+		return tag.slice(start);
+	}
+
+	/** A bare icon-step box on `tag` with no pseudo-element hit area behind it. */
+	function iconBoxWithoutFloor(tag: string): string | undefined {
+		const classes = ownClassName(tag);
+		if (PSEUDO_TARGET_FLOOR.test(classes)) return undefined;
+		return classes.match(BARE_ICON_BOX)?.[0];
+	}
+
 	function retiredHeight(tag: string): string | undefined {
 		return tag.match(RETIRED_HEIGHT)?.[0];
 	}
 
 	/** The first class in `tag` that sizes a control with a bound this scan rejects. */
 	function offendingClass(tag: string): string | undefined {
-		return undersizedClass(tag) ?? retiredHeight(tag);
+		return undersizedClass(tag) ?? iconBoxWithoutFloor(tag) ?? retiredHeight(tag);
 	}
 
 	// A hand-rolled `<button>` that IS a single-line drawer row keeps `h-8`: the
@@ -289,7 +335,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		const offences: string[] = [];
 		for (const m of code.matchAll(OPEN)) {
 			const tag = openingTag(code, m.index);
-			let hit = undersizedClass(tag);
+			let hit = undersizedClass(tag) ?? iconBoxWithoutFloor(tag);
 			if (!hit && retiredHeight(tag) && allowance-- <= 0) hit = retiredHeight(tag);
 			if (hit) offences.push(`${path}: ${m[0]} ${hit}`);
 		}
@@ -317,6 +363,8 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["an arbitrary rem size", "size-[1rem]", "size-[1rem]"],
 		["an svg descendant override", "[&_svg]:size-3", "size-3"],
 		["a bare h-8", "h-8 w-auto", "h-8"],
+		["a bare size-icon-sm box", "size-icon-sm rounded-full", "size-icon-sm"],
+		["a bare size-icon box", "flex size-icon", "size-icon"],
 		["a variant-prefixed h-8", "sm:h-8 px-3", "h-8"],
 	])("flags %s", (_label, classes, expected) => {
 		expect(offendingClass(`<Button className="${classes}"`)).toBe(expected);
@@ -332,7 +380,8 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["a zero minimum", "min-w-0"],
 		["a max cap", "max-h-6"],
 		["a fraction of the parent", "w-1/2"],
-		["the size-icon step", "size-icon-sm"],
+		["a glyph size on a descendant", "[&_svg]:size-icon-sm [&>svg]:size-icon"],
+		["an icon step beside a pseudo-element target", "size-icon-sm after:size-target"],
 		["a container-size width", "w-3xs"],
 		["a min-height at the retired step", "min-h-8"],
 		["a max-height at the retired step", "max-h-8"],
@@ -340,6 +389,17 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["a control token", "h-control-sm"],
 	])("does not flag %s", (_label, classes) => {
 		expect(offendingClass(`<Button className="${classes}"`)).toBeUndefined();
+	});
+
+	it("reads the icon step off the tag's own className, not a glyph passed as a prop", () => {
+		const glyphProp =
+			'<TooltipIconButton icon={<X className="size-icon-sm" />} className="flex" />';
+		const ownBox =
+			'<button className={cn("size-icon", extra)} icon={<X className="size-icon" />}>';
+		const quoted = "<button className='size-icon-sm'>";
+		expect(offencesIn("a.tsx", glyphProp, {})).toEqual([]);
+		expect(offencesIn("a.tsx", ownBox, {})).toEqual(["a.tsx: <button size-icon"]);
+		expect(offencesIn("a.tsx", quoted, {})).toEqual(["a.tsx: <button size-icon-sm"]);
 	});
 
 	it("scans a non-empty set of files and tags", () => {

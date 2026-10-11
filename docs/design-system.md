@@ -1297,7 +1297,7 @@ below.
 | `--spacing-control` | `h-control` | 28px | 36px | `Input` default, `Select`, `Button` default, the URL bar's controls |
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs, `Input` / `VariableInput` `size="sm"` |
 | `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
-| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu) |
+| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu), `InfoChip` (as an `after:` hit box behind its 12px dot) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
 
@@ -1322,6 +1322,11 @@ latter that the chrome bands, interactive targets and icon classes across
 `<button>` tag carrying `h-N`, `w-N` or `size-N` with N <= 7.5 (under 24px at
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
 under 24px: such an override outranks the size variant in emission order. It
+also flags a bare `size-icon` / `size-icon-sm` as the tag's own box (#1867): a
+glyph step is 12-16px, and on a `Button` it replaces `size-target`. A glyph
+passed in an `icon={...}` prop or a `[&_svg]:size-icon-sm` descendant is not the
+box; a small visible dot keeps its size and states the floor as an
+`after:size-target` hit area, as `InfoChip` and `TabItem`'s close button do. It
 also flags a bare `h-8` on those tags (#1912): 24px clears the floor, but it is
 the pre-density literal a control no longer states (`w-8` and `size-8` are
 fine). The one place `h-8` stays is a single-line drawer row (see "Drawer Row
