@@ -34,10 +34,11 @@ vi.mock("@/stores", () => ({
 		selector({ openTab }),
 }));
 
-const collections: Collection[] = [
-	{
-		id: "c1",
-		name: "Payments",
+function collection(id: string, name: string, parentId?: string): Collection {
+	return {
+		id,
+		name,
+		...(parentId ? { parentId } : {}),
 		description: "",
 		order: 0,
 		variables: {},
@@ -45,30 +46,38 @@ const collections: Collection[] = [
 		elements: [],
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
-	},
+	};
+}
+
+// A root, a child and a grandchild, so the subtitle (where it sits) is
+// exercised at every depth.
+const collections: Collection[] = [
+	collection("c1", "Payments"),
+	collection("c2", "Auth", "c1"),
+	collection("c3", "Tokens", "c2"),
 ];
 
 // Only the fields the hook reads - `id`, `name`, `method`, `url` - matter to
 // this test; the rest of `Request`'s shape is irrelevant to it.
+function request(id: string, collectionId: string, name: string): Request {
+	return {
+		id,
+		collectionId,
+		name,
+		method: "GET",
+		url: "https://api.example/user",
+		order: 0,
+		headers: [],
+		params: [],
+		auth: { mode: "none" },
+		createdAt: new Date(0).toISOString(),
+		updatedAt: new Date(0).toISOString(),
+	} as unknown as Request;
+}
+
 const requestsByCollection = new Map<string, Request[]>([
-	[
-		"c1",
-		[
-			{
-				id: "r1",
-				collectionId: "c1",
-				name: "Get user",
-				method: "GET",
-				url: "https://api.example/user",
-				order: 0,
-				headers: [],
-				params: [],
-				auth: { mode: "none" },
-				createdAt: new Date(0).toISOString(),
-				updatedAt: new Date(0).toISOString(),
-			} as unknown as Request,
-		],
-	],
+	["c1", [request("r1", "c1", "Get user")]],
+	["c3", [request("r2", "c3", "Refresh token")]],
 ]);
 
 const runsData = { pages: [{ runs: [] as Run[] }] };
@@ -93,6 +102,26 @@ describe("useEntityItems", () => {
 
 	it("still builds the collection and request rows", () => {
 		const { result } = renderHook(() => useEntityItems());
-		expect(result.current.map((item) => item.id)).toEqual(["collection:c1", "request:r1"]);
+		expect(result.current.map((item) => item.id)).toEqual([
+			"collection:c1",
+			"request:r1",
+			"collection:c2",
+			"collection:c3",
+			"request:r2",
+		]);
+	});
+
+	it("subtitles a row with where it sits: the parent path for a collection, its own path for a request", () => {
+		const { result } = renderHook(() => useEntityItems());
+		const subtitles = Object.fromEntries(
+			result.current.map((item) => [item.id, item.subtitle])
+		);
+		expect(subtitles).toEqual({
+			"collection:c1": undefined,
+			"collection:c2": "Payments",
+			"collection:c3": "Payments / Auth",
+			"request:r1": "Payments",
+			"request:r2": "Payments / Auth / Tokens",
+		});
 	});
 });
