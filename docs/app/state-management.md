@@ -2837,11 +2837,13 @@ when the ceiling gave up all looked identical to a clean quit. The renderer's
 (`FlushResult`, `electron/save-flush.ts`), and a settle with no ACK at all (the
 ceiling won) is treated the same as a failure - nothing is known to have
 landed. Either case holds the close behind one native dialog,
-`confirmDiscardOnFailedFlush`: "Couldn't save N edits - the engine isn't
+`createFlushFailureGate`: "Couldn't save N edits - the engine isn't
 responding" for a failure or the unanswered ceiling, and "N edits couldn't be
 saved as they are" when every loss is a blocked save (`pending` only, where the
 engine is fine), **Quit/Close anyway** or **Keep working**. A clean flush still
-closes with no dialog, exactly as before. `useTabsStore.closeTab` asks the same
+closes with no dialog, exactly as before, and a quit from a signal never asks:
+it logs the flush result at warn and proceeds (#1908). `useTabsStore.closeTab`
+asks the same
 question one tab early: closing a single dirty tab while the engine is not
 `connected` keeps the tab and toasts instead of letting the unmount flush fail
 into a pane that no longer exists.

@@ -63,7 +63,7 @@ import {
 import { showApplicationMenu } from "./app-menu.js";
 import {
 	createSaveFlusher,
-	confirmDiscardOnFailedFlush,
+	createFlushFailureGate,
 	type FlushResult,
 	type FlushFailurePrompt,
 } from "./save-flush.js";
@@ -314,7 +314,7 @@ async function askOnWindow(options: Electron.MessageBoxOptions): Promise<number>
 	return response;
 }
 
-// The dialog `confirmDiscardOnFailedFlush` shows when a flush did not land
+// The dialog `flushFailureGate` shows when a flush did not land
 // cleanly (#1489). "Proceed" is the default button, matching the running-
 // services confirm below - Enter takes the destructive option, Esc/close
 // keeps working, which is what leaves the draft exactly as it was.
@@ -327,6 +327,11 @@ const askFlushFailure = (prompt: FlushFailurePrompt): Promise<boolean> =>
 		defaultId: 0,
 		cancelId: 1,
 	}).then((choice) => choice === 0);
+
+const flushFailureGate = createFlushFailureGate({
+	ask: askFlushFailure,
+	log: (msg, fields) => appLogger().warn("main", msg, fields),
+});
 
 // Shared by the quit path and the window-close path - see save-flush.ts for why
 // there is only one of these.
@@ -609,11 +614,9 @@ function createWindow() {
 		// window actually closes (#1489): a failed or unanswered flush asks
 		// before discarding it, instead of closing unconditionally once settled.
 		const closeAfterFlush = (result: FlushResult | null) => {
-			void confirmDiscardOnFailedFlush(askFlushFailure, "window-close", result).then(
-				(proceed) => {
-					if (proceed && !closingWindow.isDestroyed()) closingWindow.close();
-				}
-			);
+			void flushFailureGate.confirm("window-close", result).then((proceed) => {
+				if (proceed && !closingWindow.isDestroyed()) closingWindow.close();
+			});
 		};
 		saveFlusher.flush(closeAfterFlush);
 	});
@@ -1655,7 +1658,7 @@ const resumeQuit = () => app.quit();
 // falls straight through to `quitShutdown.handleQuit`, so the question is
 // never asked twice.
 const resumeQuitAfterFlush = (result: FlushResult | null) => {
-	void confirmDiscardOnFailedFlush(askFlushFailure, "quit", result).then((proceed) => {
+	void flushFailureGate.confirm("quit", result).then((proceed) => {
 		if (proceed) resumeQuit();
 	});
 };
@@ -1716,8 +1719,10 @@ app.on("will-quit", () => {
 //
 // Nobody is behind a signal, so it is also the one quit that must not ask about
 // running services: the dialog would wait for an answer that is never coming,
-// and install.sh's AppImage replacement would wait with it (#1363).
+// and install.sh's AppImage replacement would wait with it (#1363). The same
+// holds for the flush-failure dialog (#1908).
 installQuitOnSignal(process, () => {
 	serviceStopGuard.markQuitUnattended();
+	flushFailureGate.markQuitUnattended();
 	app.quit();
 });
