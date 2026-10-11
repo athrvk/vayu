@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1488,6 +1489,159 @@ TEST_F (StreamExecuteTest, ABufferedSendWithoutScriptsStoresNoScriptNode) {
     const auto trace = latest_design_trace ();
     EXPECT_FALSE (trace.contains ("scripts")) << trace.dump (2);
     EXPECT_FALSE (trace.contains ("events")) << trace.dump (2);
+}
+
+// ---------------------------------------------------------------------------
+// `persistVariables: false` (#1904), on both transports
+//
+// An extractor writing the globals and a post-request script writing the
+// environment, in one send. With the flag the elements still run and report,
+// and the script reads the extracted value back within the send, but neither
+// row on disk changes; without it both are written, which is what keeps the
+// unchanged-row assertions from passing vacuously. Mutation check: pass `true`
+// for the flag at either transport's `persist_send_variables` call in
+// execution.cpp and that transport's opted-out case reds.
+// ---------------------------------------------------------------------------
+
+class PersistVariablesExecuteTest : public StreamExecuteTest {
+    protected:
+    static constexpr const char* ENV_ID = "env_persist";
+
+    void SetUp () override {
+        StreamExecuteTest::SetUp ();
+        vayu::db::Environment environment;
+        environment.id         = ENV_ID;
+        environment.name       = "Env";
+        environment.variables  = "{}";
+        environment.created_at = 1;
+        environment.updated_at = 1;
+        db_->save_environment (environment);
+
+        vayu::db::Globals globals;
+        globals.id         = "globals";
+        globals.variables  = "{}";
+        globals.updated_at = 1;
+        db_->save_globals (globals);
+    }
+
+    /// The payload under test, @p persist stated only when it has a value.
+    static json payload (std::optional<bool> persist) {
+        json elements = json::array ();
+        elements.push_back ({ { "id", "el_extract" }, { "kind", "extract.header" },
+        { "config",
+        { { "header", "Content-Type" }, { "variable", "fromExtractor" },
+        { "scope", "globals" } } } });
+        for (auto& script : script_elements ("", R"JS(
+            pm.environment.set('fromScript', 'v');
+            pm.test('the extracted value is visible within the send', function () {
+                pm.expect(pm.globals.get('fromExtractor')).to.include('event-stream');
+            });
+        )JS")) {
+            elements.push_back (std::move (script));
+        }
+        json body{ { "environmentId", ENV_ID }, { "elements", std::move (elements) } };
+        if (persist) {
+            body["persistVariables"] = *persist;
+        }
+        return body;
+    }
+
+    json stored_globals () {
+        auto row = db_->get_globals ();
+        if (!row) {
+            ADD_FAILURE () << "the seeded globals row is gone";
+            return json::object ();
+        }
+        return json::parse (row->variables);
+    }
+
+    json stored_environment () {
+        auto row = db_->get_environment (ENV_ID);
+        if (!row) {
+            ADD_FAILURE () << "the seeded environment row is gone";
+            return json::object ();
+        }
+        return json::parse (row->variables);
+    }
+
+    /// The send ran both elements: the extractor answered `ok` and the
+    /// script's own assertion passed.
+    static void expect_elements_ran (const json& elements, const json& tests) {
+        ASSERT_TRUE (elements.is_array ()) << elements.dump (2);
+        ASSERT_FALSE (elements.empty ()) << elements.dump (2);
+        EXPECT_EQ (elements[0].value ("kind", ""), "extract.header")
+        << elements.dump (2);
+        EXPECT_EQ (elements[0].value ("outcome", ""), "ok") << elements.dump (2);
+        ASSERT_EQ (tests.size (), 1u) << tests.dump (2);
+        EXPECT_TRUE (tests[0].value ("passed", false)) << tests.dump (2);
+    }
+};
+
+TEST_F (PersistVariablesExecuteTest, ABufferedSendThatOptsOutWritesNothingBack) {
+    serve (1);
+    const auto body = send_buffered (payload (false));
+    expect_elements_ran (
+    body.value ("elements", json ()), body.value ("testResults", json ()));
+
+    EXPECT_EQ (stored_globals (), json::object ());
+    EXPECT_EQ (stored_environment (), json::object ());
+}
+
+TEST_F (PersistVariablesExecuteTest, ABufferedSendPersistsByDefault) {
+    serve (1);
+    const auto body = send_buffered (payload (std::nullopt));
+    expect_elements_ran (
+    body.value ("elements", json ()), body.value ("testResults", json ()));
+
+    EXPECT_TRUE (stored_globals ().contains ("fromExtractor"))
+    << stored_globals ().dump ();
+    EXPECT_TRUE (stored_environment ().contains ("fromScript"))
+    << stored_environment ().dump ();
+}
+
+TEST_F (PersistVariablesExecuteTest, AStreamThatOptsOutWritesNothingBack) {
+    serve (1);
+    const auto run_id = start (payload (false));
+    ASSERT_FALSE (run_id.empty ());
+    // The trace is written after the persist call, so its arrival means the
+    // completion callback has already decided.
+    const auto trace = trace_for (run_id);
+    expect_elements_ran (trace.value ("elements", json ()),
+    trace.value ("scripts", json::object ()).value ("testResults", json ()));
+
+    EXPECT_EQ (stored_globals (), json::object ());
+    EXPECT_EQ (stored_environment (), json::object ());
+}
+
+TEST_F (PersistVariablesExecuteTest, AStreamPersistsByDefault) {
+    serve (1);
+    const auto run_id = start (payload (true));
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+    expect_elements_ran (trace.value ("elements", json ()),
+    trace.value ("scripts", json::object ()).value ("testResults", json ()));
+
+    EXPECT_TRUE (stored_globals ().contains ("fromExtractor"))
+    << stored_globals ().dump ();
+    EXPECT_TRUE (stored_environment ().contains ("fromScript"))
+    << stored_environment ().dump ();
+}
+
+// Refused before a run row exists, like every other malformed flag.
+TEST_F (PersistVariablesExecuteTest, ANonBooleanFlagIsA400WithNoRunRow) {
+    serve (1);
+    json body                = payload (std::nullopt);
+    body["method"]           = "GET";
+    body["url"]              = origin_->url ("/scripted");
+    body["persistVariables"] = "false";
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    auto response = client.Post ("/execute", body.dump (), "application/json");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400) << response->body;
+    EXPECT_NE (response->body.find ("persistVariables"), std::string::npos)
+    << response->body;
+    EXPECT_TRUE (db_->get_runs_paginated (vayu::db::RunFilter{}, 1, 0).empty ());
 }
 
 // ---------------------------------------------------------------------------

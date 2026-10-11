@@ -5818,6 +5818,102 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	/*
+	 * #1904: an extractor writes a variable, and with reveal on so may an agent's
+	 * script. With write access off the engine is told to keep those values
+	 * within the send; with it on the key is absent, so the engine's default
+	 * (persist) applies exactly as for the app's own Send.
+	 */
+	describe("variables a send sets while write access is off", () => {
+		const target = { url: "https://api.example.com/users" };
+		const allow = ["api.example.com"];
+		const extractor = {
+			kind: "extract.jsonpath",
+			config: { path: "$.token", variable: "token", scope: "globals" },
+		};
+		const executePayload = (client: EngineClient) =>
+			(client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				unknown
+			>;
+
+		test.each([
+			["an extractor with reveal off", { elements: [extractor] }, {}],
+			[
+				"a script with reveal on",
+				{ postRequestScript: "pm.environment.set('token', 'x');" },
+				{ revealSecretsToAgents: true },
+			],
+		])(
+			"a buffered run_request with %s asks the engine not to persist",
+			async (_label, extra, safety) => {
+				const client = fakeClient();
+				const res = await dispatchTool(
+					"run_request",
+					{ ...target, ...extra },
+					ctxWith(client, { allowlist: allow, ...safety })
+				);
+				expect(res.isError).toBeFalsy();
+				expect(executePayload(client)).toMatchObject({
+					stream: false,
+					persistVariables: false,
+				});
+			}
+		);
+
+		test("a streaming run_request carries the same flag", async () => {
+			const client = fakeClient({
+				executeRequest: vi
+					.fn()
+					.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+				consumeStreamEvents: vi
+					.fn()
+					.mockResolvedValue({ events: [], completed: true, capReached: false }),
+			});
+			const res = await dispatchTool(
+				"run_request",
+				{ ...target, stream: true, elements: [extractor] },
+				ctxWith(client, { allowlist: allow })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(executePayload(client)).toMatchObject({ stream: true, persistVariables: false });
+		});
+
+		test("with write access on the key is absent and the engine's default applies", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ ...target, elements: [extractor] },
+				ctxWith(client, { allowlist: allow, allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(executePayload(client)).not.toHaveProperty("persistVariables");
+		});
+
+		test("start_load_run is unchanged: a load run never persists, so no flag rides it", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{
+					...target,
+					confirmed: true,
+					postRequestScript: "pm.environment.set('token', 'x');",
+				},
+				ctxWith(client, { allowlist: allow, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload).not.toHaveProperty("persistVariables");
+		});
+
+		test("the description says what write access off means for a send", () => {
+			const description = TOOLS.find((t) => t.name === "run_request")!.description;
+			expect(description).toMatch(
+				/write access off, nothing a script or extractor sets is stored/
+			);
+		});
+	});
+
 	test("run_request hands /compose the raw request and executes what it returns", async () => {
 		// The engine resolves {{host}}; MCP must send it raw (never pre-resolved -
 		// that would be a second interpolation pass) and forward the composed URL.

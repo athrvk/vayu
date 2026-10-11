@@ -5121,7 +5121,7 @@ export const TOOLS: McpTool[] = [
 			agentScriptGateSentence(
 				"`preRequestScript`, `postRequestScript`, `tests`, or an `elements` entry of a `script.*` kind"
 			) +
-			" Extractors, assertions and timers in `elements` are not scripts and pass. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
+			" Extractors, assertions and timers in `elements` are not scripts and pass. With write access off, nothing a script or extractor sets is stored: the value is visible for the rest of this send and is not written to the environment, collection or globals. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
 			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. ` +
@@ -5268,6 +5268,9 @@ export const TOOLS: McpTool[] = [
 			// clients follow for `followRedirects`.
 			const streaming = args.stream === true;
 			payload.stream = streaming;
+			// Beside `stream` so both transports carry it: with write access off,
+			// what a script or extractor sets stays within this send (#1904).
+			if (!ctx.config.allowWrites) payload.persistVariables = false;
 			if (!streaming) {
 				return callEngineForRunOutput(
 					ctx,

@@ -1002,25 +1002,34 @@ const nlohmann::json& json,
 const std::optional<std::string>& request_id);
 
 /**
- * The outcome of reading `POST /execute`'s `transient` flag (issue #382).
+ * The outcome of reading one of `POST /execute`'s boolean opt-outs:
+ * `transient` (issue #382) or `persistVariables` (#1904).
  *
- * `value` is what the payload asked for; `ok == false` means the field was
- * present with a non-boolean type, which is a `400` rather than a silent
- * `false` - see `read_transient_flag`.
+ * `value` is what the payload asked for, or the flag's default when it is
+ * absent or `null`; `ok == false` means the field was present with a
+ * non-boolean type, which is a `400` rather than a silent default.
  */
-struct TransientFlag {
+struct ExecuteFlag {
     bool ok = true;
     std::string error;
     bool value = false;
 };
 
 /**
- * Read the `transient` flag off a `POST /execute` payload.
+ * Read the `transient` flag off a `POST /execute` payload (default `false`).
  *
  * Extracted from the handler (execution.cpp) so transient_execute_test.cpp can
  * drive it directly, matching the suite's other route-core tests.
  */
-TransientFlag read_transient_flag (const nlohmann::json& json);
+ExecuteFlag read_transient_flag (const nlohmann::json& json);
+
+/**
+ * Read the `persistVariables` flag off a `POST /execute` payload (default
+ * `true`). `false` runs every script and extractor as usual but writes none of
+ * the variables they set back to the environment, the collection or the
+ * globals (#1904); the MCP server sends it while write access is off.
+ */
+ExecuteFlag read_persist_variables_flag (const nlohmann::json& json);
 
 /**
  * The outcome of reading a payload's `stream` flag and its caps (issue #573;

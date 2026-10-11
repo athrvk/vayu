@@ -5376,6 +5376,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
                                        // settable in the request builder's Settings tab
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
+  "persistVariables": true,            // Optional, default true - see below
   "origin": { "kind": "app" },         // Optional, who started the run - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
@@ -5990,14 +5991,26 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
-**Variables the scripts wrote are persisted, and only those.** After the
-post-request script runs, the engine writes back the three variable scopes
-(the run's environment, globals, and the executed request's collection) - but
-only for a scope whose variables a script actually changed. A run that sets no
-variable writes nothing at all, so it does not move a collection's or
-environment's `updatedAt`. Each variable round-trips whole, `createdAt`
-included; see [VariableValue shape](db-schema.md#variablevalue-shape) for why
-that field must survive and who may stamp it.
+**Variables the scripts and extractors wrote are persisted, and only those.**
+After the post-request elements run, the engine writes back the three variable
+scopes (the run's environment, globals, and the executed request's collection) -
+but only for a scope whose variables a script or an `extract.*` element actually
+changed. A run that sets no variable writes nothing at all, so it does not move
+a collection's or environment's `updatedAt`. Each variable round-trips whole,
+`createdAt` included; see [VariableValue shape](db-schema.md#variablevalue-shape)
+for why that field must survive and who may stamp it.
+
+**`persistVariables: false` keeps them within the send** (#1904). Every script
+and extractor still runs, a value one sets is visible to the elements after it,
+and the response (or a stream's trace) reports their outcomes and `testResults`
+as usual; only the write-back above is skipped, on both the buffered and the
+streaming path, so no environment, collection or globals row changes. Absent
+and `null` mean `true`, which is what the app's Send relies on; a present
+non-boolean is a **400** (`'persistVariables' must be a boolean`) before any run
+row exists, for the reason `transient`'s is. It is independent of `transient`:
+that flag decides whether the *run* is recorded, this one whether the
+*variables* are. MCP's `run_request` sends `false` whenever write access is off
+([MCP](mcp.md#safety-model)).
 
 ### POST /runs
 

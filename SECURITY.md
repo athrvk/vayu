@@ -89,6 +89,13 @@ request or collection, which the write tools can create, is not covered and
 still runs with your secrets, so leave write access off unless you want an
 agent to author them.
 
+While write access is off, nothing a `run_request` sets is saved: an extractor
+the agent attaches, or its own script once reveal is on, still runs and reports,
+but the variables it sets stay within that one request and never reach an
+environment, a collection or the globals. A collection replay
+(`run_collection_smoke`, `run_collection`) runs the scripts and extractors
+stored on your requests and saves what they set, as the app's Send does.
+
 An agent backed by a hosted model forwards what it reads to that model's
 provider. Treat connecting an agent as granting it read access to the rest of
 your workspace, and keep the server off until you want that.
@@ -130,8 +137,12 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 - **Data writes off by default.** The data-mutating tools (`create_request`,
   `update_environment`, `update_engine_config`) are refused unless the user
   enables write access in Settings. Traffic-sending tools (`run_request`,
-  `run_collection_smoke`, `run_collection`) and load runs are not affected by
-  this toggle - they are governed by the allowlist and caps.
+  `run_collection_smoke`, `run_collection`) and load runs are not refused by
+  this toggle - they are governed by the allowlist and caps. The one thing it
+  changes for them: with writes off, `run_request` keeps every variable its
+  extractors and scripts set within the send rather than saving it. The
+  collection replays still save what the stored scripts and extractors set,
+  and a load run saves no variable either way.
 - **Network settings gated separately.** Even with writes on,
   `update_engine_config` refuses the proxy keys (`proxy*`) and
   `customCaCertificates` unless the user also enables network settings in

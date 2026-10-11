@@ -215,7 +215,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `thresholds` budgets, the same argument `start_load_run` takes |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
@@ -934,7 +934,9 @@ matched case- and whitespace-insensitively), and `start_load_run` refuses
 names every offending argument and the setting. Nothing else changes: a blank
 script (empty or whitespace-only) is not refused, because the engine composes
 and compiles none (`is_blank_script_element`); extractors, assertions and
-timers in `elements` pass; `requestId` on `run_request` only links History and
+timers in `elements` pass (with write access off, what an extractor or a
+revealed script sets is not stored - see the write toggle below);
+`requestId` on `run_request` only links History and
 composes nothing stored, so it carries no script; and with reveal on every
 call is as it was. Scripts stored on a request or collection are not affected
 (see the write toggle below).
@@ -1629,6 +1631,18 @@ configurable in **Settings → MCP** and persisted.
   runs with the secrets under `run_collection_smoke`, `run_collection` and
   `start_load_run`. That is a residual of write access,
   not a gate.
+  A send writes saved data too, through the variables it sets: an extractor in
+  `run_request`'s `elements` does (its default scope is the collection), and so
+  does an agent's own script once reveal is on. With the toggle off,
+  `run_request` sends `persistVariables: false` on both its buffered and its
+  streaming path (#1904): every script and extractor still runs and reports, a
+  value one sets is visible for the rest of that send, and nothing reaches the
+  environment, the collection or the globals. With the toggle on the key is
+  absent and the engine persists as it does for the app's Send.
+  `run_collection_smoke` and `run_collection` are not covered: they replay the
+  scripts and extractors *stored* on the requests and save back what those set,
+  which is the write-access residual above. `start_load_run` never persists a
+  variable at all.
   Because the tool set is recomputed per built server (a fresh one per HTTP
   request), flipping the toggle takes effect on the client's next `tools/list` -
   the same timing the per-tool switch below already has. The category is every
