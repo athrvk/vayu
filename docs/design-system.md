@@ -410,8 +410,11 @@ reads on each". Adopted by the response-viewer family, the import dialog
 (`ImportModal.surface-rule.test.tsx` guards the latter's declarations) and the
 command list, whose `Command` root declares `bg-card surface-card` so the
 input's divider, the section separators and the footer can all say `border-rule`
-(`command.chrome.test.tsx`); the rest of the app still uses explicit tokens and
-can migrate as it is touched.
+(`command.chrome.test.tsx`), the collection `InheritanceChain` card and the
+dashboard's `MetricsView` with its hero, stat and chart cards
+(`MetricsView.surface-rule.test.tsx`); the rest of the app still uses explicit
+tokens and can migrate as it is touched. A progress or stacked-bar track filled
+with `--accent` carries no border at all, since no border token reads there.
 
 A surface a component only *looks* like it has is the case the command list
 answers: it painted `bg-popover`, which no surface class declares. `--popover`

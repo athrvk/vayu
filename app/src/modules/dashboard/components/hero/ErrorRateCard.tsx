@@ -85,7 +85,7 @@ export function ErrorRateCard({
 			{/* Always render the stack + legend so the card height doesn't jump
 			    when the final report arrives. During live the bar is empty;
 			    after completion it fills with the real distribution. */}
-			<div className="flex h-2 mt-2 rounded-sm border border-border bg-accent overflow-hidden">
+			<div className="flex h-2 mt-2 rounded-sm bg-accent overflow-hidden">
 				{STATUS_SEGMENTS.map((s) => (
 					<span
 						key={s.key}

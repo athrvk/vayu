@@ -50,7 +50,7 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				<StreamStat label="streams" value={fmtCount(stream.completions)} />
 			</div>
 
-			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 pt-2.5 border-t border-dashed border-border text-label text-muted-foreground">
+			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 pt-2.5 border-t border-dashed border-rule text-label text-muted-foreground">
 				<span />
 				<span className="text-right font-medium">p50</span>
 				<span className="text-right font-medium">p95</span>

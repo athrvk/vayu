@@ -28,7 +28,7 @@ export function ThroughputTwinCard({
 	const deltaOk = delta !== undefined && delta < 1;
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
+		<div className="bg-card surface-card border border-border rounded-md p-4 flex flex-col gap-1.5">
 			<Eyebrow>
 				Send · Throughput
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
