@@ -39,7 +39,7 @@ These labels indicate **where** in the codebase a change lands. **Applied automa
 | Label | Color | Description | Auto-applied when |
 |-------|-------|-------------|------------------|
 | `component:app` | Blue (#3498DB) | Electron + React UI | Changes in `app/**` |
-| `component:engine` | Teal (#16A085) | C++20 engine (daemon, HTTP, scripting) | Changes in `engine/**` |
+| `component:engine` | Teal (#16A085) | C++23 engine (daemon, HTTP, scripting) | Changes in `engine/**` |
 | `component:database` | Purple (#8E44AD) | Database schema, SQLite persistence | Changes in `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_*` |
 | `component:ci` | Gray (#95A5A6) | GitHub Actions, CI configuration | Changes in `.github/**` |
 | `component:build` | Dark Gray (#7F8C8D) | CMake, vcpkg, version, build script | Changes to `build.py`, `VERSION`, etc. |
@@ -52,7 +52,7 @@ These labels narrow a change to a **feature sub-area**, one level finer than `co
 
 | Label | Description | Applies to |
 |-------|-------------|-----------|
-| `area:http` | HTTP server, routes, SSE, request/response handling | `engine/src/http/**` |
+| `area:http` | HTTP server, routes, SSE, request/response handling | `engine/src/http/**`, `engine/include/vayu/http/**` |
 | `area:auth` | Authentication, OAuth2, authorization | Any file under `engine/**` with `auth` or `oauth` in its name - also matches `area:http`, since auth lives under `engine/src/http/` today |
 | `area:metrics` | Metrics collection, statistics, measurement | Any file under `engine/**` with `metrics` in its name |
 | `area:scripting` | QuickJS runtime, script execution, pm.* API | `engine/src/runtime/**` |
