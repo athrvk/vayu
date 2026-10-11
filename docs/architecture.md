@@ -462,10 +462,10 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 ### Single Request Execution
 
 1. User builds request in RequestBuilder
-2. Variables resolved in frontend (`{{baseUrl}}` → `https://api.example.com`)
-3. Manager sends `POST /execute` to Engine
-4. Engine executes HTTP request via libcurl
-5. Engine runs pre-request script (if provided)
+2. Manager sends `POST /compose`; the engine interpolates `{{variables}}` and resolves `inherit` auth
+3. Manager sends `POST /execute` to Engine with the composed payload
+4. Engine runs pre-request script (if provided)
+5. Engine executes HTTP request via libcurl
 6. Engine runs test script (if provided)
 7. Engine returns response with timing and test results
 8. Manager displays response in ResponseViewer
@@ -563,12 +563,10 @@ them.
 
 ### Variable Resolution
 
-Variables are resolved with priority: **Environment > Collection > Global**
-
-1. Manager fetches globals, collections, and environments
-2. Builds flat map with resolution priority
-3. Replaces `{{variableName}}` patterns in URL, headers, body
-4. Resolved request sent to Engine
+The **engine** owns execution-time resolution (`POST /compose`); the renderer
+keeps a preview-only copy. Later sources win:
+**Globals < Collection chain (root to leaf) < Active environment < Bound data row**.
+See [Variable resolution](app/variable-resolution.md) for the rules.
 
 ## Security
 
@@ -635,8 +633,7 @@ Variables are resolved with priority: **Environment > Collection > Global**
   setting's name; the stored value and the engine's API are unchanged. libcurl derives the
   `Proxy-Authorization` header from the URL, and that header is on the
   redaction list, so credentials do not reach a stored trace. The engine's
-  startup log is the exception today: it can print a scheme-less proxy URL
-  with its password (#1781).
+  startup log redacts them too, with or without a scheme (#1781).
 - **Client-certificate keys**: never stored. The `client_certificates` table
   holds the *paths* of the certificate and key files - one path where the
   certificate is a PKCS#12 bundle carrying both - and the engine opens them
