@@ -53,6 +53,29 @@ export function walkAncestors<T extends TreeNode>(startId: string, nodes: readon
 }
 
 /**
+ * "Payments / Auth" for a nested collection: the names from the root down, the
+ * start node's own included. A root yields just its name, an unloaded id "".
+ *
+ * Takes an id-keyed map rather than the node list so a caller labelling many
+ * rows builds the map once; `walkAncestors` rebuilds one per call. Same
+ * termination guard as the other walks.
+ */
+export function collectionPath(
+	id: string,
+	byId: ReadonlyMap<string, TreeNode & { name: string }>
+): string {
+	const names: string[] = [];
+	const seen = new Set<string>();
+	let current = byId.get(id);
+	while (current && !seen.has(current.id)) {
+		seen.add(current.id);
+		names.unshift(current.name);
+		current = current.parentId ? byId.get(current.parentId) : undefined;
+	}
+	return names.join(" / ");
+}
+
+/**
  * Whether `candidateId` sits anywhere below `ancestorId`.
  *
  * Strict: a node is not its own descendant. Drop-target validation wants both

@@ -25,27 +25,8 @@ import { Folder } from "lucide-react";
 import { useTabsStore } from "@/stores";
 import { useCollectionsQuery, useMultipleCollectionRequests, useRunsQuery } from "@/queries";
 import { flattenRunPages } from "@/queries";
-import type { Collection } from "@/types";
+import { collectionPath } from "@/modules/collections/tree-utils";
 import type { PaletteItem } from "../types";
-
-/**
- * "Payments / Auth" for a nested collection, "" for a root one.
- *
- * Built iteratively with a visited set rather than by recursion: `parentId`
- * comes off the wire, and a cycle in it would otherwise hang the renderer
- * rather than mislabel one row.
- */
-function collectionPath(id: string, byId: Map<string, Collection>): string {
-	const names: string[] = [];
-	const seen = new Set<string>();
-	let current = byId.get(id);
-	while (current && !seen.has(current.id)) {
-		seen.add(current.id);
-		names.unshift(current.name);
-		current = current.parentId ? byId.get(current.parentId) : undefined;
-	}
-	return names.join(" / ");
-}
 
 /** When each request was last sent, from the run history already in cache. */
 function lastSentByRequest(runs: { requestId?: string | null; startTime: number }[]) {

@@ -15,7 +15,7 @@
  * past a budget no correct walk can reach: `parentId` reads for the ancestor
  * walk, and a request lookup per visited collection for the descendant walk.
  * That turns "hangs" into "fails with a message" - mutation-check by deleting
- * the `seen` set in `walkAncestors` or the `visited` set in
+ * the `seen` set in `walkAncestors` or `collectionPath`, or the `visited` set in
  * `collectDescendantEntityIds`, and these fail in milliseconds rather than
  * stalling.
  */
@@ -23,6 +23,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
 	walkAncestors,
+	collectionPath,
 	isDescendant,
 	collectDescendantEntityIds,
 	type TreeNode,
@@ -104,6 +105,36 @@ describe("walkAncestors", () => {
 
 		expect(steps).toBeGreaterThan(0);
 		expect(steps).toBeLessThanOrEqual(STEP_BUDGET);
+	});
+});
+
+describe("collectionPath", () => {
+	const byId = (nodes: ReturnType<typeof named>[]) => new Map(nodes.map((n) => [n.id, n]));
+
+	it("is the bare name for a root", () => {
+		expect(collectionPath("root", byId(budgeted([named("root")])))).toBe("root");
+	});
+
+	it("joins the names root first, the start node included", () => {
+		const nodes = byId(budgeted([named("leaf", "mid"), named("mid", "root"), named("root")]));
+
+		expect(collectionPath("leaf", nodes)).toBe("root / mid / leaf");
+		expect(collectionPath("mid", nodes)).toBe("root / mid");
+	});
+
+	it("is empty for an id that is not loaded", () => {
+		expect(collectionPath("ghost", byId(budgeted([named("root")])))).toBe("");
+	});
+
+	it("stops at an unloaded parent instead of inventing one", () => {
+		expect(collectionPath("orphan", byId(budgeted([named("orphan", "gone")])))).toBe("orphan");
+	});
+
+	it("terminates on a cycle, naming each node once", () => {
+		expect(collectionPath("a", byId(budgeted([named("a", "b"), named("b", "a")])))).toBe(
+			"b / a"
+		);
+		expect(collectionPath("self", byId(budgeted([named("self", "self")])))).toBe("self");
 	});
 });
 
