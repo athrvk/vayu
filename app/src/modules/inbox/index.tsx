@@ -41,7 +41,13 @@ import {
 	Switch,
 	ICON_MOTION,
 } from "@/components/ui";
-import { Callout, EmptyState, ErrorState, NonLoopbackBadge } from "@/components/shared";
+import {
+	Callout,
+	EmptyState,
+	ErrorState,
+	ListSkeleton,
+	NonLoopbackBadge,
+} from "@/components/shared";
 import {
 	useClearInboxCapturesMutation,
 	useInboxCapturesQuery,
@@ -224,6 +230,10 @@ export default function InboxView() {
 		inboxes.find((i) => i.inboxId === addressedInboxId) ?? ordered[0] ?? null;
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
+	// `captures` defaults to `[]`, so an in-flight fetch is indistinguishable
+	// from an empty inbox by length alone (#1928); this is the one place that
+	// tells them apart.
+	const capturesLoading = capturesQuery.isLoading;
 	const captures = capturesQuery.data?.data ?? [];
 	const capturesTotal = capturesQuery.data?.pagination.total ?? 0;
 	const hasMoreCaptures = capturesQuery.data?.pagination.hasMore === true;
@@ -369,14 +379,18 @@ export default function InboxView() {
 						reason={
 							clearCaptures.isPending
 								? "Clearing the captures"
-								: clearableCount === 0 && "No captures to clear"
+								: capturesLoading
+									? "Loading the captures"
+									: clearableCount === 0 && "No captures to clear"
 						}
 					>
 						<Button
 							variant="outline"
 							size="sm"
 							onClick={() => setConfirmClearOpen(true)}
-							disabled={clearCaptures.isPending || clearableCount === 0}
+							disabled={
+								clearCaptures.isPending || capturesLoading || clearableCount === 0
+							}
 						>
 							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
 							Clear
@@ -469,7 +483,7 @@ export default function InboxView() {
 				<aside className="flex w-72 min-h-0 shrink-0 flex-col border-r border-border">
 					<div className="flex items-center justify-between px-3 py-2">
 						<span className="text-xs font-medium text-muted-foreground">Captured</span>
-						<Badge variant="outline">{capturesTotal}</Badge>
+						<Badge variant="outline">{capturesLoading ? "-" : capturesTotal}</Badge>
 					</div>
 					{/* What the list is showing against what the inbox holds. The
 					    surface fetched one page and said nothing about the rest, so
@@ -481,7 +495,9 @@ export default function InboxView() {
 						</p>
 					)}
 					<div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-						{captures.length === 0 ? (
+						{capturesLoading ? (
+							<ListSkeleton rows={4} leading={false} badge />
+						) : captures.length === 0 ? (
 							<EmptyState
 								variant="inline"
 								title="No captures yet."

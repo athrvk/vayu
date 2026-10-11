@@ -344,3 +344,69 @@ describe("a body the engine only kept a prefix of", () => {
 		).toBeInTheDocument();
 	});
 });
+
+// Issue #1928: `captures` defaults to `[]`, so a fetch still in flight read as
+// an inbox that had recorded nothing.
+describe("the first fetch of the capture list", () => {
+	function holdFirstPage() {
+		let resolvePage: (value: InboxCapturesResponse) => void = () => {};
+		listInboxCaptures.mockReturnValueOnce(
+			new Promise<InboxCapturesResponse>((resolve) => {
+				resolvePage = resolve;
+			})
+		);
+		return (value: InboxCapturesResponse) => resolvePage(value);
+	}
+
+	it("shows a skeleton, not the empty state, while it is in flight", async () => {
+		holdFirstPage();
+		renderTab();
+
+		const list = (await screen.findByRole("status", { name: "Loading" })).closest("aside");
+		expect(list).not.toBeNull();
+		const aside = within(list as HTMLElement);
+		expect(aside.queryByText("No captures yet.")).not.toBeInTheDocument();
+		// A count of 0 is as false as the sentence: the total is not known yet.
+		expect(aside.getByText("-")).toBeInTheDocument();
+		expect(aside.queryByText("0")).not.toBeInTheDocument();
+		expect(aside.queryByText(/^Showing /)).not.toBeInTheDocument();
+	});
+
+	it("holds Clear off until the total is known", async () => {
+		holdFirstPage();
+		// The record's polled count is already non-zero, so only the loading
+		// gate - not the empty-inbox gate - can be what disables the button.
+		listInboxes.mockResolvedValue([inbox({ captureCount: 7 })]);
+		renderTab();
+
+		await screen.findByRole("status", { name: "Loading" });
+		expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
+	});
+
+	it("swaps the skeleton for the empty state once an empty page lands", async () => {
+		const resolveFirstPage = holdFirstPage();
+		renderTab();
+		await screen.findByRole("status", { name: "Loading" });
+
+		await act(async () => {
+			resolveFirstPage(page(0, 0, 0));
+		});
+
+		expect(await screen.findByText("No captures yet.")).toBeInTheDocument();
+		expect(screen.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
+	});
+
+	it("swaps the skeleton for the rows once a page lands", async () => {
+		const resolveFirstPage = holdFirstPage();
+		renderTab();
+		await screen.findByRole("status", { name: "Loading" });
+
+		await act(async () => {
+			resolveFirstPage(page(60, 50, 60));
+		});
+
+		expect(await screen.findByText("/hook/60")).toBeInTheDocument();
+		expect(screen.getByText("Showing 50 of 60")).toBeInTheDocument();
+		expect(screen.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
+	});
+});
