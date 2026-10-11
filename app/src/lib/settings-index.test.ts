@@ -101,6 +101,29 @@ describe("buildSettingsIndex", () => {
 		expect(index.find((e) => e.id === "appearance")?.anchor).toBeUndefined();
 	});
 
+	it("keeps an app setting filed under an engine category, labelled by that category", () => {
+		// A Card an engine category renders is declared in the app catalogue with
+		// the engine category as its panel; the panel registry does not hold it.
+		const withCard = buildSettingsIndex({
+			panels,
+			appSettings: [
+				{
+					anchor: "connection-test",
+					panel: "network_performance" as const,
+					label: "Connection test",
+					searchText: "Send one request and see which hop answered.",
+				},
+			],
+			engineEntries: [],
+			engineCategories,
+		});
+		const card = withCard.find((e) => e.id === "connection-test");
+		expect(card?.kind).toBe("app-setting");
+		expect(card?.category).toBe("network_performance");
+		expect(card?.categoryLabel).toBe("Network & connectivity");
+		expect(card?.anchor).toBe("connection-test");
+	});
+
 	it("drops an app setting whose panel is not registered", () => {
 		expect(index.find((e) => e.id === "orphan-setting")).toBeUndefined();
 	});

@@ -6,7 +6,7 @@
  */
 
 /**
- * Decides where a new request from the welcome screen should land.
+ * Decides where a new request from any "New request" entry point should land.
  *
  * Hybrid, weighted toward the last-worked-in collection:
  *  - a valid remembered collection (`lastCollectionId`, still present) wins -

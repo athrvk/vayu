@@ -16,7 +16,7 @@
  * would fail - which is the point of counting them.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTabsStore, type TabLocation } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
 
@@ -235,5 +235,70 @@ describe("what a bulk close does to the history", () => {
 		store().goForward();
 
 		expect(activeEntity()).toBe("b"); // reopened by the history, as a browser does
+	});
+});
+
+/**
+ * A tab a close brings on screen is being focused, so it is stamped like any
+ * other focus: the palette lists open tabs by the stamp and LRU eviction takes
+ * the lowest one, and the tab the user is looking at must not rank below the
+ * ones they are not.
+ */
+describe("what a close does to the focus stamps", () => {
+	let clock = 0;
+	const tick = () => vi.setSystemTime((clock += 10));
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		clock = 1_000;
+		vi.setSystemTime(clock);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** Open request tabs one tick apart, so every stamp is distinct. */
+	function openSpaced(...ids: string[]) {
+		for (const id of ids) {
+			tick();
+			openRequests(id);
+		}
+	}
+
+	const newestStamp = () => Math.max(...Object.values(store().tabFocusedAt));
+
+	it("stamps the tab the history walks back to", () => {
+		openSpaced("a", "b", "c"); // history a, b, c - closing "c" lands on "b"
+		const before = store().tabFocusedAt[tabId("b")];
+
+		tick();
+		store().closeTab(tabId("c"));
+
+		expect(activeEntity()).toBe("b");
+		expect(store().tabFocusedAt[tabId("b")]).toBeGreaterThan(before);
+		expect(store().tabFocusedAt[tabId("b")]).toBe(newestStamp());
+	});
+
+	it("stamps the nearest survivor when the history names nothing that is open", () => {
+		openSpaced("a", "b");
+		store().goBack();
+		openSpaced("c"); // history a, c; "b" is open but outside it
+		const before = store().tabFocusedAt[tabId("b")];
+
+		tick();
+		store().closeOtherTabs(tabId("b"));
+
+		expect(activeEntity()).toBe("b");
+		expect(store().tabFocusedAt[tabId("b")]).toBeGreaterThan(before);
+		expect(Object.keys(store().tabFocusedAt)).toEqual([tabId("b")]);
+	});
+
+	it("leaves the stamps alone when the tab in view is staying", () => {
+		openSpaced("a", "b", "c");
+		const before = store().tabFocusedAt;
+
+		store().closeTab(tabId("a"));
+
+		expect(store().tabFocusedAt[tabId("c")]).toBe(before[tabId("c")]);
 	});
 });

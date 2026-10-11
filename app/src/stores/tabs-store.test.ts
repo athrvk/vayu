@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTabsStore } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
@@ -46,6 +46,28 @@ describe("closeTabsForEntities", () => {
 		const { openTabs, activeTabId } = useTabsStore.getState();
 		const aTab = openTabs.find((t) => t.entityId === "a")!;
 		expect(activeTabId).toBe(aTab.id); // left neighbor
+	});
+
+	it("stamps the survivor it focuses, so the tab on screen ranks newest", () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			vi.setSystemTime(1_000);
+			openRequests(["a", "b", "c"]);
+			const aTab = useTabsStore.getState().openTabs.find((t) => t.entityId === "a")!;
+			const bTab = useTabsStore.getState().openTabs.find((t) => t.entityId === "b")!;
+			vi.setSystemTime(2_000);
+			useTabsStore.getState().focusTab(bTab.id);
+
+			vi.setSystemTime(3_000);
+			useTabsStore.getState().closeTabsForEntities(["b"]);
+
+			const { activeTabId, tabFocusedAt } = useTabsStore.getState();
+			expect(activeTabId).toBe(aTab.id);
+			expect(tabFocusedAt[aTab.id]).toBe(3_000);
+			expect(Math.max(...Object.values(tabFocusedAt))).toBe(3_000);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("closes several entities at once (e.g. a collection cascade)", () => {
@@ -136,12 +158,115 @@ function openTypes(): string[] {
 	return useTabsStore.getState().openTabs.map((t) => t.type);
 }
 
+/** Every open tab's entity, in strip order. */
+function openEntities(): (string | null)[] {
+	return useTabsStore.getState().openTabs.map((t) => t.entityId);
+}
+
+/** The id of the open tab showing `entityId`. */
+function tabIdFor(entityId: string): string {
+	const tab = useTabsStore.getState().openTabs.find((t) => t.entityId === entityId);
+	if (!tab) throw new Error(`No open tab for ${entityId}`);
+	return tab.id;
+}
+
 describe("LRU eviction and a clean tab", () => {
-	it("evicts the oldest tab once the cap is passed", () => {
-		openRequestTabs(13);
-		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
-		expect(ids).toHaveLength(12);
-		expect(ids).not.toContain("req_0");
+	// Date.now() has millisecond resolution and a loop of opens shares one, so a
+	// ranking by stamp would be decided by the tie-break rather than by recency.
+	let clock = 0;
+	const tick = () => vi.setSystemTime((clock += 10));
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		clock = 1_000;
+		vi.setSystemTime(clock);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** Open `count` request tabs, each a tick after the last. */
+	function openSpacedRequests(count: number) {
+		for (let i = 0; i < count; i++) {
+			tick();
+			useTabsStore.getState().openTab({ type: "request", entityId: `req_${i}` });
+		}
+	}
+
+	it("evicts the least recently focused tab once the cap is passed", () => {
+		openSpacedRequests(12);
+		const stamps: Record<string, number> = {};
+		// req_7 was focused longest ago although it sits mid-strip; the strip's
+		// first tab, req_0, was focused later than it.
+		for (const [i, entity] of openEntities().entries()) {
+			stamps[tabIdFor(entity as string)] = entity === "req_7" ? 1 : 100 + i;
+		}
+		useTabsStore.setState({ tabFocusedAt: stamps });
+
+		tick();
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_12" });
+
+		const entities = openEntities();
+		expect(entities).toHaveLength(12);
+		expect(entities).not.toContain("req_7");
+		expect(entities).toContain("req_0");
+		expect(entities).toContain("req_12");
+	});
+
+	it("keeps a tab that was just focused, though it was opened first", () => {
+		openSpacedRequests(12);
+		tick();
+		useTabsStore.getState().focusTab(tabIdFor("req_0"));
+		tick();
+		useTabsStore.getState().focusTab(tabIdFor("req_11"));
+
+		tick();
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_12" });
+
+		const entities = openEntities();
+		expect(entities).toHaveLength(12);
+		expect(entities).toContain("req_0");
+		expect(entities).not.toContain("req_1");
+	});
+
+	it("evicts a tab that was never focused before any that was", () => {
+		openSpacedRequests(12);
+		const unstamped = tabIdFor("req_5");
+		const { [unstamped]: _dropped, ...stamped } = useTabsStore.getState().tabFocusedAt;
+		useTabsStore.setState({ tabFocusedAt: stamped });
+
+		tick();
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_12" });
+
+		expect(openEntities()).not.toContain("req_5");
+		expect(openEntities()).toContain("req_0");
+	});
+
+	it("falls back to strip order when the stamps tie", () => {
+		openSpacedRequests(12);
+		useTabsStore.setState({ tabFocusedAt: {} });
+
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_12" });
+
+		const entities = openEntities();
+		expect(entities).not.toContain("req_0");
+		expect(entities).toContain("req_1");
+	});
+
+	it("never takes the tab on screen, however long ago it was focused", () => {
+		openSpacedRequests(12);
+		const active = tabIdFor("req_11");
+		const others = useTabsStore.getState().tabFocusedAt;
+		useTabsStore.setState({
+			tabFocusedAt: { ...others, [active]: 1 },
+			activeTabId: active,
+		});
+
+		tick();
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_12" });
+
+		expect(openEntities()).toContain("req_11");
+		expect(openEntities()).not.toContain("req_0");
 	});
 
 	it("still evicts a request tab whose context is clean", () => {
@@ -251,10 +376,12 @@ describe("LRU eviction never takes a dirty tab", () => {
 			markDirty(`request-req_${i}`);
 		}
 
-		// The only tab the predicate can select here is the one just opened,
-		// which carries no edits yet. Every tab holding work survives.
-		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
-		for (let i = 0; i < 12; i++) expect(ids).toContain(`req_${i}`);
+		// The tab just opened is not a candidate, so with nothing else to take the
+		// strip runs past the cap, and the active tab is still in it.
+		const { openTabs, activeTabId } = useTabsStore.getState();
+		const ids = openTabs.map((t) => t.entityId);
+		for (let i = 0; i < 13; i++) expect(ids).toContain(`req_${i}`);
+		expect(openTabs.some((t) => t.id === activeTabId)).toBe(true);
 	});
 });
 

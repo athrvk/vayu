@@ -48,8 +48,6 @@ function renderCrud() {
 	return renderHook(() =>
 		useTreeCrud({
 			collections,
-			rootCollections: collections,
-			selectedCollectionId: null,
 			requestsByCollection,
 			getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
 		})

@@ -25,13 +25,11 @@
  * assertion is about *which token was named*, and naming is exactly what went
  * wrong.
  *
- * **The Raw tab's empty state could never render, and is gone.** The guard was
- * `if (!rawRequest && !response)` where `response` is a required object -
- * always truthy, so the condition was always false. Rewriting the condition was
- * the first attempt and was *also* dead: `buildRawResponse` always emits a
- * status line, and the tab is mounted behind `hasRaw = !!response.rawRequest`.
- * Nothing this component renders can be empty; the check is the tab's
- * existence, one level up.
+ * **The Raw tab's old empty state could never render, and is gone.** The guard
+ * was `if (!rawRequest && !response)` where `response` is a required object -
+ * always truthy. `buildRawResponse` always emits a status line, so a response
+ * that arrived is never empty. The one empty case is a status 0 failure with no
+ * recorded request, which has its own condition (issue #1884).
  *
  * **And its editor asked for a language that did not exist.** Monaco ships no
  * `http`; unknown ids fall back to plain text, so the one tab whose job is
@@ -202,14 +200,40 @@ describe("the Raw tab", () => {
 		expect(value).not.toMatch(/^>/m);
 	});
 
-	it("has no empty state, because nothing it renders can be empty", () => {
+	it("has no empty state for a response that arrived, whether or not the request was recorded", () => {
 		/*
 		 * The original guard `!rawRequest && !response` could not fire -
-		 * `response` is a required object. Rewriting the condition was the first
-		 * attempt and was also dead: `buildRawResponse` always emits a status
-		 * line, and the tab is mounted behind `hasRaw = !!response.rawRequest`.
-		 * The emptiness check is the tab's existence, one level up.
+		 * `response` is a required object. `buildRawResponse` always emits a
+		 * status line, so a response that arrived is never an empty tab.
 		 */
+		editorProps.length = 0;
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={{ status: 200, statusText: "OK", headers: {}, body: "" }}
+			/>
+		);
+		expect(screen.queryByText(/no raw data available/i)).toBeNull();
+		expect(last()?.value).toContain("HTTP/1.1 200 OK");
+	});
+
+	it("prints no response under the request when nothing came back (status 0)", () => {
+		// `HTTP/1.1 0` is a status line no server sent.
+		editorProps.length = 0;
+		render(
+			<RawRequestResponse
+				rawRequest="GET /slow HTTP/1.1"
+				response={{ status: 0, statusText: "", headers: {}, body: "" }}
+			/>
+		);
+
+		const lines = (last()?.value ?? "").split("\n");
+		expect(lines).toContain(`${SENT_MARKER} GET /slow HTTP/1.1`);
+		expect(lines.some((l) => l.startsWith(RECEIVED_MARKER))).toBe(false);
+		expect(last()?.value).not.toContain("HTTP/1.1 0");
+	});
+
+	it("says no request was recorded for status 0 without one, rather than an editor", () => {
 		editorProps.length = 0;
 		render(
 			<RawRequestResponse
@@ -217,8 +241,9 @@ describe("the Raw tab", () => {
 				response={{ status: 0, statusText: "", headers: {}, body: "" }}
 			/>
 		);
-		expect(screen.queryByText(/no raw data available/i)).toBeNull();
-		expect(last()?.value).toContain("HTTP/1.1");
+
+		expect(editorProps).toHaveLength(0);
+		expect(screen.getByText("No request was recorded")).toBeTruthy();
 	});
 });
 

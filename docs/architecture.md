@@ -341,7 +341,11 @@ one app instance may drive it:
   and shut down on quit like any engine the app spawned itself. Adoption checks
   the running engine's `/health.version` against this app's own first (issue
   #1492): a mismatch is stopped rather than adopted, and this instance starts
-  its own build instead - see `docs/lock-file-handling.md`.
+  its own build instead - see `docs/lock-file-handling.md`. A lock PID that is
+  a live Vayu engine but never answers `/health` is waited for on the same
+  budget a spawned engine gets, adopted if it answers, and otherwise stopped by
+  PID and replaced (issue #1905); "port in use by another application" is left
+  for a port the lock does not explain.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a
   wait for the process to go, then a name-verified kill by PID if it outstays
   the grace period. The name check is what keeps a recycled PID from being
@@ -368,10 +372,12 @@ one app instance may drive it:
   quit or close behind one native dialog - "Couldn't save N edits - the
   engine isn't responding", or "N edits couldn't be saved as they are" when
   the engine is fine and every loss is a pending edit, Quit/Close anyway or
-  Keep working - built by `confirmDiscardOnFailedFlush` in `save-flush.ts`
+  Keep working - built by `createFlushFailureGate` in `save-flush.ts`
   and shown through the same `dialog.showMessageBox` primitive the crash and
   unresponsive-window prompts already use. A clean flush proceeds exactly as
-  before, with no dialog. Closing one dirty tab (not the whole window) is the
+  before, with no dialog, and so does a quit from a signal whatever the flush
+  reported: it logs the result at warn and goes on (issue #1908). Closing one
+  dirty tab (not the whole window) is the
   same question asked earlier: `useTabsStore.closeTab` keeps the tab and
   toasts instead of unmounting it when the tab is dirty and the engine is not
   `connected`, rather than letting `useSaveManager`'s unmount flush fail into
@@ -386,7 +392,9 @@ one app instance may drive it:
   leaves everything up. macOS's window-close asks nothing, having stopped
   nothing. The one quit that never asks is a signal: `install.sh` replaces a
   running AppImage that way, and a dialog would hold the upgrade open waiting for
-  an answer nobody is there to give (issue #1363).
+  an answer nobody is there to give (issue #1363). The flush-failure dialog above
+  is no exception: a signal quit that cannot save its edits would stall on it
+  until `install.sh` killed the app and orphaned the engine (issue #1908).
 - **A taken port is a loud failure, not a silent one.** The engine binds 9876
   before it serves, so anything already holding the port makes it print
   `Could not bind 127.0.0.1:9876 - ...` to stderr and exit **1** rather than

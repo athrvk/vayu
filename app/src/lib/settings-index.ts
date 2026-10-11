@@ -9,8 +9,9 @@
  * Settings search index
  *
  * One searchable corpus over all of Settings: the client panels (the app-panels
- * registry), the individual settings inside them (the app-settings catalogue)
- * and the engine entries the `/config` API sends. Pure data in, pure data out -
+ * registry), the individual settings inside them and inside the engine
+ * categories' Cards (the app-settings catalogue), and the engine entries the
+ * `/config` API sends. Pure data in, pure data out -
  * no React, no stores - so the sidebar's search and the command palette's
  * settings source (#527) share one index rather than each growing its own
  * matcher.
@@ -146,7 +147,12 @@ export function buildSettingsIndex({
 	engineEntriesEditedInApp = {},
 }: BuildSettingsIndexInput): SettingsIndexEntry[] {
 	const categoryLabels = new Map(engineCategories.map((c) => [c.id as string, c.label]));
-	const panelLabels = new Map(panels.map((p) => [p.id as string, p.label]));
+	// An app setting can live in an engine category too (a Card there), so its
+	// owning heading is looked up in both registries.
+	const panelLabels = new Map([
+		...categoryLabels,
+		...panels.map((p): [string, string] => [p.id as string, p.label]),
+	]);
 
 	const index: SettingsIndexEntry[] = panels.map((panel) => ({
 		id: panel.id,
