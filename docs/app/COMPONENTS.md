@@ -700,7 +700,9 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   control, the running/live badge, the `Notify` toggle (`NotifyOnCaptureToggle`, whose two gates
   are `capture-notifier.ts` below), the inbox switcher, the capture list and the detail pane. Clear
   (Eraser) empties the capture list; Delete (bin) ends the inbox itself, so the two adjacent
-  destructive controls do not share an icon. The switcher is a
+  destructive controls do not share an icon. The first fetch of the capture list shows a
+  `ListSkeleton` (the count dashes and Clear waits) rather than "No captures yet.", which an
+  in-flight query would otherwise be indistinguishable from (#1928). The switcher is a
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
   what is already on screen) and ordered by port - the engine lists in map order, which is not
   stable across polls, and a switcher whose entries move under the pointer is worse than none. An
@@ -989,6 +991,8 @@ log, it needs a surface that can grow while it is watched.
   served. Both poll at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`: the route table's *shape* is a
   start-time snapshot, but each route's `hits` moves live as traffic arrives, so it joined the fast
   interval alongside Activity rather than the mock list's slower one.
+  Each section shows a `ListSkeleton` on its first fetch, and the Routes count a dash, rather than
+  "Routes (0)" or "Nothing served yet" for a query still in flight (#1928).
 - **One tab, not one per mock**, and **the tab's own `entityId` is the address**, exactly as the
   inbox tab: a mock is engine-process state with no id worth restoring across a restart, and the
   address is read from the tab rather than mirrored into local state - the drawer row and this

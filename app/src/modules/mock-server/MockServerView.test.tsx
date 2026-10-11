@@ -158,4 +158,67 @@ describe("MockServerView", () => {
 		render(<MockServerView />);
 		expect(screen.getByText("unmatched")).toBeInTheDocument();
 	});
+
+	// Issue #1928: both lists default to `[]`, so a query in flight read as a
+	// mock with no routes and nothing served.
+	describe("while the first fetch is in flight", () => {
+		beforeEach(() => {
+			vi.mocked(useMockServerRoutesQuery).mockReturnValue({
+				data: undefined,
+				isLoading: true,
+				isError: false,
+			} as ReturnType<typeof useMockServerRoutesQuery>);
+			vi.mocked(useMockActivityQuery).mockReturnValue({
+				data: undefined,
+				isLoading: true,
+				isError: false,
+			} as ReturnType<typeof useMockActivityQuery>);
+		});
+
+		it("dashes the route count instead of claiming there are none", () => {
+			render(<MockServerView />);
+			expect(screen.getByText("Routes (-)")).toBeInTheDocument();
+			expect(screen.queryByText("Routes (0)")).not.toBeInTheDocument();
+		});
+
+		it("draws a skeleton in each section, not the activity empty state", () => {
+			render(<MockServerView />);
+			expect(screen.queryByText(/Nothing served yet/)).not.toBeInTheDocument();
+			const routes = within(screen.getByText("Routes (-)").closest("section")!);
+			const activity = within(screen.getByText("Activity").closest("section")!);
+			expect(routes.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+			expect(activity.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+		});
+
+		it("gates the two sections independently", () => {
+			vi.mocked(useMockServerRoutesQuery).mockReturnValue({
+				data: [ROUTE],
+				isError: false,
+			} as ReturnType<typeof useMockServerRoutesQuery>);
+			render(<MockServerView />);
+			const routes = within(screen.getByText("Routes (1)").closest("section")!);
+			const activity = within(screen.getByText("Activity").closest("section")!);
+			expect(routes.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
+			expect(routes.getByText("/pets")).toBeInTheDocument();
+			expect(activity.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+		});
+	});
+
+	it("still says nothing was served once the activity log has loaded empty", () => {
+		vi.mocked(useMockActivityQuery).mockReturnValue({
+			data: [] as MockActivityEntry[],
+			isError: false,
+		} as ReturnType<typeof useMockActivityQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText(/Nothing served yet/)).toBeInTheDocument();
+	});
+
+	it("still counts a loaded, empty route table as Routes (0)", () => {
+		vi.mocked(useMockServerRoutesQuery).mockReturnValue({
+			data: [] as MockServerRoute[],
+			isError: false,
+		} as ReturnType<typeof useMockServerRoutesQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText("Routes (0)")).toBeInTheDocument();
+	});
 });

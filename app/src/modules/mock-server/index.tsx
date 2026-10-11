@@ -30,7 +30,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { EmptyState, ErrorState, TruncatedText } from "@/components/shared";
+import { EmptyState, ErrorState, ListSkeleton, TruncatedText } from "@/components/shared";
 import {
 	useMockActivityQuery,
 	useMockServerRoutesQuery,
@@ -164,7 +164,7 @@ export default function MockServerView() {
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="border-b border-border px-3 py-2">
 					<h3 className="pb-2 text-xs font-medium text-muted-foreground">
-						Routes ({routes.length})
+						Routes ({routesQuery.isLoading ? "-" : routes.length})
 					</h3>
 					{routesQuery.isError ? (
 						<ErrorState
@@ -172,6 +172,8 @@ export default function MockServerView() {
 							title="Couldn't load the routes"
 							onRetry={() => void routesQuery.refetch()}
 						/>
+					) : routesQuery.isLoading ? (
+						<ListSkeleton rows={2} leading={false} badge />
 					) : (
 						<ul>
 							{routes.map((route) => (
@@ -209,6 +211,8 @@ export default function MockServerView() {
 							title="Couldn't load the activity log"
 							onRetry={() => void activityQuery.refetch()}
 						/>
+					) : activityQuery.isLoading ? (
+						<ListSkeleton rows={2} leading={false} badge />
 					) : activity.length === 0 ? (
 						<EmptyState
 							variant="inline"
