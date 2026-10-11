@@ -10,10 +10,10 @@
  * behind the window's own settings, so that markup reaching the DOM by mistake
  * is text rather than code with the renderer's privileges (#1780).
  *
- * One builder serves both deliveries: the main process sets it as a response
- * header, and `vite-plugins/csp-meta.ts` stamps it into the built `index.html`
- * as a `<meta>`, which is the only one that applies to a packaged `file://`
- * load. Both hash the same inline script, so they cannot disagree.
+ * Delivered one way: `vite-plugins/csp-meta.ts` stamps it into the built
+ * `index.html` as a `<meta>`. A packaged `file://` load has no response to carry
+ * a header, and `engine-origin.ts` owns the session's single
+ * `onHeadersReceived` listener (Electron keeps one per event per session).
  *
  * Pure on purpose: the Vite config imports it, and it must not pull in Electron.
  */
