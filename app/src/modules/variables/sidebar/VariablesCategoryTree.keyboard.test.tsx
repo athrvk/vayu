@@ -141,6 +141,9 @@ function press(target: HTMLElement, key: string, init: Partial<KeyboardEventInit
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	createEnvironment.mockReset();
+	updateEnvironment.mockReset();
+	failSave.mockReset();
 	environments = [STAGING, PRODUCTION];
 	deleteEnvironment.mockResolvedValue(undefined);
 	redraw = null;
@@ -527,5 +530,16 @@ describe("a failed environment write is reported, never swallowed", () => {
 		await waitFor(() => expect(completeSaveThenIdle).toHaveBeenCalledTimes(1));
 		expect(startSaving).toHaveBeenCalledTimes(1);
 		expect(failSave).not.toHaveBeenCalled();
+	});
+
+	it("closes the field without a write or a save when the name is unchanged", async () => {
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+		fireEvent.keyDown(screen.getByDisplayValue("Staging"), { key: "Enter" });
+
+		await waitFor(() => expect(screen.queryByDisplayValue("Staging")).not.toBeInTheDocument());
+		expect(updateEnvironment).not.toHaveBeenCalled();
+		expect(startSaving).not.toHaveBeenCalled();
 	});
 });

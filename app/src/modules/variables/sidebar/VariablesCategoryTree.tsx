@@ -235,7 +235,7 @@ export default function VariablesCategoryTree() {
 			const fallback = "Couldn't rename the environment";
 			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
 		} finally {
-			setRenamingEnvId(null);
+			setRenamingEnvId((current) => (current === envId ? null : current));
 		}
 	};
 
