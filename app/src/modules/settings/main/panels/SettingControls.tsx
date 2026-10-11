@@ -106,6 +106,8 @@ interface OptionButtonsProps<T extends string | number> {
 	options: readonly OptionButtonItem<T>[];
 	value: T;
 	onChange: (value: T) => void;
+	/** The accessible name of the radiogroup: the setting the tiles pick. */
+	label: string;
 	/** Tailwind grid-cols class; defaults to a sensible per-count layout. */
 	columns?: string;
 	/** `start` left-aligns the tile's contents (the roundedness previews). */
@@ -124,6 +126,8 @@ const COLS: Record<number, string> = {
 interface TileGroupProps {
 	value: string;
 	onChange: (value: string) => void;
+	/** The accessible name of the radiogroup: the setting the tiles pick. */
+	label: string;
 	/** Tailwind grid-cols class for the tile grid. */
 	columns: string;
 	children: ReactNode;
@@ -140,11 +144,12 @@ interface TileGroupProps {
  * with a preview and a description cannot sit in. This is the Radix primitive
  * underneath, unstyled.
  */
-export function TileGroup({ value, onChange, columns, children }: TileGroupProps) {
+export function TileGroup({ value, onChange, label, columns, children }: TileGroupProps) {
 	return (
 		<ToggleGroupPrimitive.Root
 			type="single"
 			role="radiogroup"
+			aria-label={label}
 			value={value}
 			// Radix clears the value when the chosen tile is pressed again; a
 			// pick-one setting has no "off".
@@ -193,6 +198,7 @@ export function OptionButtons<T extends string | number>({
 	options,
 	value,
 	onChange,
+	label,
 	columns,
 	align = "center",
 }: OptionButtonsProps<T>) {
@@ -204,7 +210,7 @@ export function OptionButtons<T extends string | number>({
 		if (option) onChange(option.value);
 	};
 	return (
-		<TileGroup value={String(value)} onChange={handleChange} columns={cols}>
+		<TileGroup value={String(value)} onChange={handleChange} label={label} columns={cols}>
 			{options.map((option) => {
 				const isSelected = value === option.value;
 				return (

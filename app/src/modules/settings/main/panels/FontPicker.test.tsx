@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { UI_FONTS } from "@/constants/appearance";
 import { FontPicker } from "./FontPicker";
 
@@ -23,6 +23,7 @@ beforeEach(cleanup);
 function renderPicker(value: string, onChange = vi.fn()) {
 	render(
 		<FontPicker
+			label="Interface font"
 			options={UI_FONTS}
 			value={value}
 			onChange={onChange}
@@ -43,6 +44,13 @@ describe("FontPicker", () => {
 		expect(screen.getByRole("radio", { name: /^Inter/, checked: true })).toBeTruthy();
 		expect(screen.getByRole("radio", { name: /^System/, checked: false })).toBeTruthy();
 		expect(screen.getAllByRole("radio", { checked: true })).toHaveLength(1);
+	});
+
+	it("names the radiogroup by the setting the font is for", () => {
+		renderPicker("inter");
+
+		const group = screen.getByRole("radiogroup", { name: "Interface font" });
+		expect(within(group).getAllByRole("radio")).toHaveLength(UI_FONTS.length + 1);
 	});
 
 	it("puts the Custom tile in the same group", () => {

@@ -155,6 +155,7 @@ export default function AppearancePanel() {
 						</div>
 					) : (
 						<OptionButtons
+							label={THEME_MODE.label}
 							options={themeOptions.map((option) => {
 								const Icon = option.icon;
 								return {
@@ -230,6 +231,7 @@ export default function AppearancePanel() {
 									</p>
 								)}
 								<OptionButtons
+									label={COLOR_SCHEME.label}
 									options={COLOR_SCHEMES.map((option) => {
 										const Icon = option.icon;
 										return {
@@ -280,6 +282,7 @@ export default function AppearancePanel() {
 					<div data-setting-anchor={UI_FONT.anchor}>
 						<Eyebrow className="mb-2">{UI_FONT.label}</Eyebrow>
 						<FontPicker
+							label={UI_FONT.label}
 							options={UI_FONTS}
 							value={font}
 							onChange={(v) => setFont(v as UiFontChoice)}
@@ -334,6 +337,7 @@ export default function AppearancePanel() {
 							{ROUNDEDNESS.label}
 						</Eyebrow>
 						<OptionButtons
+							label={ROUNDEDNESS.label}
 							options={UI_RADII.map((option) => ({
 								value: option.value,
 								label: option.label,
@@ -359,6 +363,7 @@ export default function AppearancePanel() {
 							{DENSITY.label}
 						</Eyebrow>
 						<OptionButtons
+							label={DENSITY.label}
 							options={UI_DENSITIES.map((option) => ({
 								value: option.value,
 								label: option.label,
@@ -384,6 +389,7 @@ export default function AppearancePanel() {
 							{RESPONSE_POSITION.label}
 						</Eyebrow>
 						<OptionButtons
+							label={RESPONSE_POSITION.label}
 							options={RESPONSE_POSITIONS.map((option) => ({
 								value: option.value,
 								label: option.label,

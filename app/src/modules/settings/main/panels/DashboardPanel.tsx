@@ -72,6 +72,7 @@ export default function DashboardPanel() {
 					<div data-setting-anchor={CHART_WINDOW.anchor}>
 						<Eyebrow className="mb-2">{CHART_WINDOW.label}</Eyebrow>
 						<OptionButtons
+							label={CHART_WINDOW.label}
 							options={LIVE_WINDOW_OPTIONS.map((o) => ({
 								value: o.value,
 								label: o.label,
@@ -88,6 +89,7 @@ export default function DashboardPanel() {
 					<div data-setting-anchor={CHART_GRANULARITY.anchor}>
 						<Eyebrow className="mb-2">{CHART_GRANULARITY.label}</Eyebrow>
 						<OptionButtons
+							label={CHART_GRANULARITY.label}
 							options={CHART_GRANULARITY_OPTIONS}
 							value={chartBucketSeconds}
 							onChange={setChartBucketSeconds}
@@ -102,6 +104,7 @@ export default function DashboardPanel() {
 					<div data-setting-anchor={LIVE_REFRESH.anchor}>
 						<Eyebrow className="mb-2">{LIVE_REFRESH.label}</Eyebrow>
 						<OptionButtons
+							label={LIVE_REFRESH.label}
 							options={LIVE_REFRESH_OPTIONS}
 							value={liveRefreshMs}
 							onChange={setLiveRefreshMs}

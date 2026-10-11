@@ -71,6 +71,7 @@ export default function EditorPanel() {
 					<div data-setting-anchor={CODE_FONT.anchor}>
 						<Eyebrow className="mb-2">{CODE_FONT.label}</Eyebrow>
 						<FontPicker
+							label={CODE_FONT.label}
 							options={MONO_FONTS}
 							value={monoFont}
 							onChange={(v) => setMonoFont(v as MonoFontChoice)}
@@ -85,6 +86,7 @@ export default function EditorPanel() {
 					<div data-setting-anchor={FONT_SIZE.anchor}>
 						<Eyebrow className="mb-2">{FONT_SIZE.label}</Eyebrow>
 						<OptionButtons
+							label={FONT_SIZE.label}
 							options={EDITOR_FONT_SIZES.map((v) => ({ value: v, label: `${v}px` }))}
 							value={editor.fontSize}
 							onChange={(fontSize) => setEditor({ fontSize })}
@@ -94,6 +96,7 @@ export default function EditorPanel() {
 					<div data-setting-anchor={TAB_WIDTH.anchor}>
 						<Eyebrow className="mb-2">{TAB_WIDTH.label}</Eyebrow>
 						<OptionButtons
+							label={TAB_WIDTH.label}
 							options={EDITOR_TAB_SIZES.map((v) => ({
 								value: v,
 								label: `${v} spaces`,
