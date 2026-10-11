@@ -21,9 +21,8 @@
  *
  * **Rows were 48px.** `VariableInput` is `h-9` (36px), the row added `p-1` and
  * the stack added `space-y-1` - so eight headers cost 384px, in a panel whose
- * tab band is 24px and whose URL bar is 40px. They are `h-8` now, the height 43
- * other places in the app already use, at a 36px pitch. Same eight headers,
- * 288px.
+ * tab band is 24px and whose URL bar is 40px. They are `size="sm"` fields
+ * (`control-sm`) now, at a 36px pitch. Same eight headers, 288px.
  *
  * **The Resolved column is gone.** It held an equal third of the table -
  * `grid-cols-[24px_1fr_1fr_1fr_32px]` - and on a row with no variable in it,

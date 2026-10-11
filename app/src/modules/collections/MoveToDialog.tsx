@@ -98,7 +98,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 					{offersTopLevel && (
 						<Button
 							variant="listRow"
-							className="gap-2 h-8"
+							className="gap-2 h-control-sm"
 							onClick={() => onMove(entity, null)}
 						>
 							<FolderTree className="size-icon shrink-0 text-primary" />
@@ -109,7 +109,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 						<Button
 							key={collection.id}
 							variant="listRow"
-							className="gap-2 h-8"
+							className="gap-2 h-control-sm"
 							style={{ paddingLeft: rowInsetPx(depth) }}
 							onClick={() => onMove(entity, collection.id)}
 						>

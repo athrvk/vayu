@@ -62,7 +62,7 @@ export default function FilePartCell({
 			disabled={disabled}
 			onClick={open}
 			aria-label={chosen ? `Replace file ${name}` : "Choose file"}
-			className="h-8 w-full justify-start gap-1.5 rounded-md px-2 font-normal"
+			className="h-control-sm w-full justify-start gap-1.5 rounded-md px-2 font-normal"
 		>
 			<FileUp className="size-icon-sm shrink-0" />
 			<span className={cn("truncate text-xs", !chosen && "text-muted-foreground")}>

@@ -138,7 +138,7 @@ function RevealButton({
 			icon={revealed ? <EyeOff className="size-icon-sm" /> : <Eye className="size-icon-sm" />}
 			onClick={onToggle}
 			autoFocus={autoFocus}
-			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
+			className="absolute right-0 top-0 size-control-sm text-muted-foreground hover:text-foreground"
 		/>
 	);
 }

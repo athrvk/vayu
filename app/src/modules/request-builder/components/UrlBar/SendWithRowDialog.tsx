@@ -54,6 +54,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 
 import {
+	Button,
 	Dialog,
 	DialogBody,
 	DialogContent,
@@ -628,20 +629,13 @@ export default function SendWithRowDialog({
 							    Disabled while the named row is not in the file, so the
 							    button never offers a send it would have to make without
 							    a row; the line above the grid says which row and why. */}
-							<button
-								type="button"
+							<Button
+								size="sm"
 								disabled={selectedMissing}
 								onClick={() => send(selected)}
-								className={cn(
-									"h-8 rounded-md px-3 text-xs font-semibold",
-									"bg-primary-fill text-white border border-primary-fill",
-									"hover:bg-primary-fill/90 hover:border-primary-fill/90",
-									"disabled:opacity-50 disabled:hover:bg-primary-fill",
-									"disabled:hover:border-primary-fill transition-colors"
-								)}
 							>
 								Send row {(selected + 1).toLocaleString()}
-							</button>
+							</Button>
 						</DialogFooter>
 					</>
 				)}

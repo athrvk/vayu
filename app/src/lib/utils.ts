@@ -31,7 +31,7 @@ import { extendTailwindMerge } from "tailwind-merge";
  *
  * Registered here rather than worked around at the call sites: every
  * `text-hero`/`text-metric` and every `h-band`/`h-banner`/`h-control`/
- * `h-control-sm`/`h-control-xs`/`h-target`/`size-target`/`size-icon`/`size-icon-sm` in the
+ * `h-control-sm`/`h-control-xs`/`h-target`/`size-target`/`size-control-sm`/`size-icon`/`size-icon-sm` in the
  * app goes through `cn()` or a plain string, and a call site that "knows"
  * about the merge order is the kind of hand-rolled copy this repo keeps out
  * of components.
@@ -47,6 +47,9 @@ const FLOOR_STEPS = [
 	"target",
 ] as const;
 const ICON_STEPS = ["target", "icon", "icon-sm"] as const;
+// An icon button that must span a `control-sm` neighbour (a field beside it)
+// states `size-control-sm`; it replaces the variant's `size-target`.
+const SQUARE_STEPS = [...ICON_STEPS, "control-sm"] as const;
 
 const twMerge = extendTailwindMerge({
 	extend: {
@@ -56,7 +59,7 @@ const twMerge = extendTailwindMerge({
 			"min-h": [{ "min-h": ["band", "band-md", "band-lg", "banner"] }],
 			w: [{ w: [...FLOOR_STEPS] }],
 			"min-w": [{ "min-w": ["target"] }],
-			size: [{ size: [...ICON_STEPS] }],
+			size: [{ size: [...SQUARE_STEPS] }],
 		},
 	},
 });

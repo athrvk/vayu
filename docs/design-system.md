@@ -1318,9 +1318,19 @@ latter that the chrome bands, interactive targets and icon classes across
 `Button` / `TooltipIconButton` / `TimeMarker` / `SelectTrigger` / plain
 `<button>` tag carrying `h-N`, `w-N` or `size-N` with N <= 7.5 (under 24px at
 the 3px unit, fractions included), or an arbitrary `h-[18px]` / `size-[1rem]`
-under 24px: such an override outranks the size variant in emission order. A
-compact text button or select trigger states `h-control-sm`, an icon button
-`size-target`. The text fields are scanned too, by a rule of their own
+under 24px: such an override outranks the size variant in emission order. It
+also flags a bare `h-8` on those tags (#1912): 24px clears the floor, but it is
+the pre-density literal a control no longer states (`w-8` and `size-8` are
+fine). The one place `h-8` stays is a single-line drawer row (see "Drawer Row
+Metric" below): those are `<div>`s outside the tag set, plus the Settings
+drawer's category rows, which are hand-rolled `<button>`s. The test counts them
+per file in `DRAWER_ROW_BUTTONS` (one tag in `SettingsCategoryTree.tsx`): a
+further `h-8` in that file is an offence, and an entry that stops matching
+exactly that many tags fails the test. A compact text button or select trigger
+states `h-control-sm`, an icon button `size-target`, or `size-control-sm` when
+it sits beside a `control-sm` field and has to span it (the variables table's
+row buttons, the popover's reveal eye; `lib/utils.ts` teaches `cn()` that it
+replaces `size-target`). The text fields are scanned too, by a rule of their own
 (#1830): **a text field states its size, never its height.** `Input`,
 `VariableInput` and `SecretInput` take `size` from three of these tokens (the
 map is `input-size.ts`, shared so the two kinds of field cannot drift), and

@@ -208,7 +208,7 @@ function ScenarioStepCard({
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-8 gap-1.5 px-2 text-xs"
+						className="h-control-sm gap-1.5 px-2 text-xs"
 						onClick={() => openRequest(requestId)}
 						aria-label={
 							rowIndex === undefined
