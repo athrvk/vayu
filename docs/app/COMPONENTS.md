@@ -2691,8 +2691,9 @@ only the hint that something is still happening. Sole consumer so far is
 
 ### `info-chip`
 
-The 14px "i" dot with a tooltip, beside a label that needs a sentence -
-timing phases, chart axes, the wire/queue/total summary. It lived in
+The 12px "i" dot with a tooltip, beside a label that needs a sentence -
+timing phases, chart axes, the wire/queue/total summary. The hit box is 24px:
+an `after:size-target` square centred on the dot, so no row moves. It lived in
 `modules/dashboard/components/shared.tsx`, where nothing outside the dashboard
 could import it without a module reaching into another module, so the request
 builder grew its own copy - and the copy is the one that got the `border-rule`

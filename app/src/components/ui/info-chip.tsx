@@ -19,6 +19,10 @@
  * comment explaining that on a card `--border` is the same colour as `--card`
  * in dark so the dot had no outline, and the dashboard's copy never got it.
  *
+ * The dot is 12px and the hit box is 24px: the `after:` square states the
+ * target floor (`size-target`, 28px at Comfortable) without moving the row,
+ * the way `TabItem`'s close button grows its hit area behind a 12px glyph.
+ *
  * The border stays a caller decision rather than being unified, because it is
  * genuinely one: `border-rule` inherits from the declared surface and falls
  * back to the invisible default under none, so it is right inside a
@@ -49,7 +53,7 @@ export function InfoChip({ tip, className }: InfoChipProps) {
 				<button
 					type="button"
 					className={cn(
-						"ml-1.5 inline-flex size-icon-sm items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle",
+						"relative ml-1.5 inline-flex size-icon-sm items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle after:absolute after:left-1/2 after:top-1/2 after:size-target after:-translate-x-1/2 after:-translate-y-1/2",
 						className
 					)}
 					aria-label="More information"
