@@ -2590,6 +2590,7 @@ const {
   setDraft: Dispatch<SetStateAction<T>>    // Standard setState signature
   isDirty: boolean                         // Draft differs from the persisted value
   reset: () => void                        // Discard the draft, adopting the persisted value
+  consumeDiscard: () => boolean            // Was the last clean edge a reset? Clears the answer (#1931)
   baseline: T                              // The value the draft last agreed with the server on
   externalValue: T | null                  // A persisted change pending while the draft is dirty
 } = useEntityDraft<T>({
@@ -2675,6 +2676,14 @@ useDraftSaveContext({
   reset rather than fired across an `id` change, so switching the entity a
   mounted editor describes never reports the previous entity's save as this
   one's.
+- **A discard is not a save (#1931).** The clean edge is a save landing or a
+  `useEntityDraft` `reset` (the Reset button, an external change's "Take
+  theirs"). The editors pass the draft's `consumeDiscard` as the hook's
+  `consumeDiscard` option; when it says the edge was a discard the hook calls
+  `discardPendingSave(id)` instead, so the Dock returns to idle rather than
+  flashing "Saved" for a write that never happened. `discardPendingSave` leaves
+  the status alone while another context still holds an edit, and when it is
+  `saved` or `saving`.
 
 ### The request builder's draft adopts an external write per field
 

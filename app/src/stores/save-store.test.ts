@@ -178,6 +178,55 @@ describe("completeSaveThenIdle with other unsaved work on screen", () => {
  * `undefined` regardless of what happened, so a down or hung engine at quit
  * looked identical to a clean save.
  */
+describe("discardPendingSave", () => {
+	beforeEach(() => {
+		useSaveStore.setState({
+			status: "idle",
+			lastErrorMessage: null,
+			contexts: new Map(),
+			activeContextId: null,
+		});
+	});
+
+	it("takes the Dock from pending back to idle", () => {
+		registerContext("a", true);
+		useSaveStore.getState().markPendingSave();
+
+		useSaveStore.getState().discardPendingSave("a");
+
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("clears an error left by the discarded edit's failed save", () => {
+		registerContext("a", true);
+		useSaveStore.setState({ status: "error", lastErrorMessage: "boom" });
+
+		useSaveStore.getState().discardPendingSave("a");
+
+		expect(useSaveStore.getState().status).toBe("idle");
+		expect(useSaveStore.getState().lastErrorMessage).toBeNull();
+	});
+
+	it("leaves the status to another context that still holds an edit", () => {
+		registerContext("a", true);
+		registerContext("b", true);
+		useSaveStore.getState().markPendingSave();
+
+		useSaveStore.getState().discardPendingSave("a");
+
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("leaves a save in flight or just landed alone", () => {
+		registerContext("a", true);
+		for (const status of ["saving", "saved"] as const) {
+			useSaveStore.setState({ status });
+			useSaveStore.getState().discardPendingSave("a");
+			expect(useSaveStore.getState().status).toBe(status);
+		}
+	});
+});
+
 describe("flushAll", () => {
 	beforeEach(() => {
 		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });

@@ -128,6 +128,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		setDraft: setAuth,
 		isDirty,
 		reset: resetDraft,
+		consumeDiscard,
 		externalValue,
 	} = useEntityDraft<CollectionAuth>({
 		entityKey: collection.id,
@@ -156,6 +157,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		isDirty,
 		isActive: active,
 		save: persist,
+		consumeDiscard,
 	});
 
 	// Published outside this tab so the Inheritance Chain card (rendered below)

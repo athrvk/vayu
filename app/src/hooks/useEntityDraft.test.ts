@@ -199,3 +199,34 @@ describe("useEntityDraft - a dirty draft against a background refetch (#1437)", 
 		expect(result.current.isDirty).toBe(false);
 	});
 });
+
+describe("useEntityDraft - telling a discard from a save", () => {
+	it("reports a reset of a dirty draft once, then forgets it", () => {
+		const { result } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft((d) => ({ ...d, name: "Renamed" })));
+
+		act(() => result.current.reset());
+
+		expect(result.current.consumeDiscard()).toBe(true);
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+
+	it("does not report a reset of a clean draft", () => {
+		const { result } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.reset());
+
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+
+	it("does not report a save landing", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+		const saved = { ...acme, name: "Renamed" };
+		act(() => result.current.setDraft(saved));
+
+		rerender({ entityKey: "c1", value: saved });
+
+		expect(result.current.isDirty).toBe(false);
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+});

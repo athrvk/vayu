@@ -123,6 +123,14 @@ interface SaveState {
 	 */
 	completeSaveThenIdle: (reportingContextId?: string) => void;
 	failSave: (error: string) => void;
+	/**
+	 * Withdraw the edit `contextId` reported as unsaved because it was thrown
+	 * away, not written: nothing was saved, so the Dock goes back to `idle`
+	 * rather than claiming `saved`. Leaves the status alone while another context
+	 * still holds an edit (that one owns `pending`/`error`) and when the status is
+	 * `saved` or `saving` (somebody else's write).
+	 */
+	discardPendingSave: (contextId: string) => void;
 	reset: () => void;
 
 	// Context management
@@ -282,6 +290,13 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		failSave: (error) => {
 			set({ status: "error", lastErrorMessage: error });
 			useToastStore.getState().showToast(error, "error");
+		},
+
+		discardPendingSave: (contextId) => {
+			const { status } = get();
+			if (status !== "pending" && status !== "error") return;
+			if (dirtyContextExists(contextId)) return;
+			get().reset();
 		},
 
 		reset: () => set({ status: "idle", lastErrorMessage: null }),
