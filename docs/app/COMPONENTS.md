@@ -865,7 +865,7 @@ falls back to the lowest-numbered port.
 **Entry points:** the **Services** drawer view, which lists every inbox and opens this tab (issue
 #502), and the palette's `Inbox` entry. The welcome Launcher's tile is now `Services` rather than
 `Inbox` - it teaches where the whole family of local services lives instead of opening one tab -
-and the Dock's running-services indicator activates the same view. Until #502 the Launcher tile was
+and the Dock's running-services indicator reveals the same view. Until #502 the Launcher tile was
 the *only* way in, and a running inbox was invisible once its tab was closed. The **OS** Dock or
 taskbar icon - not the in-app Dock this paragraph otherwise means - is one more pointer back: its
 unread count is what says a capture arrived at all when no Vayu window is in front (issue #1364).
@@ -874,7 +874,7 @@ unread count is what says a capture arrived at all when no Vayu window is in fro
 
 One home for the app's **local services** - the things that keep listening after you switch tabs
 (issue #502). Rendered as the `services` drawer view; the Dock's indicator and the welcome tile
-both activate it.
+both reveal it.
 
 - `ServicesPanel.tsx` - the view. Three groups: **Webhook inboxes**, **OAuth issuers** and **Mock
   servers**, each with a one-sentence empty state saying what the service would give you - this
@@ -1020,8 +1020,8 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `FirstRunWelcome.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
 - `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
-  request, Search, Import, History, Variables, Services. Services and History both activate a
-  drawer view rather than opening a tab. Search opens the command palette - the
+  request, Search, Import, History, Variables, Services. Services and History both reveal a
+  drawer view (never close it) rather than opening a tab. Search opens the command palette - the
   chord alone is undiscoverable, and this grid is where the app teaches its own surfaces.
 - `components/CollectionPicker.tsx` - the "Add request to" dialog, shown when a new request has no remembered collection. A nested collection shows its parent path (`collectionPath`) under its name, because two same-named folders under different parents are otherwise the same row (#1881).
 - `components/DemoApiTile.tsx` - "Open Demo API" (issue #1694), its own row below the action grid

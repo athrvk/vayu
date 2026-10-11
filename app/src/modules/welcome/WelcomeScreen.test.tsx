@@ -130,6 +130,31 @@ describe("WelcomeScreen", () => {
 			expect(useLayoutStore.getState().paletteOpen).toBe(true);
 		});
 
+		/*
+		 * The tiles point at a drawer view, so they must not toggle it: on
+		 * `activateDrawerView` a click with the drawer already on that view closed
+		 * the list the tile promised to show.
+		 */
+		it.each([
+			["History", "history"],
+			["Services", "services"],
+		] as const)("the %s tile keeps an open drawer open on that view", (name, view) => {
+			useLayoutStore.setState({ drawerOpen: true, drawerView: view });
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}$`, "i") }));
+			expect(useLayoutStore.getState()).toMatchObject({ drawerOpen: true, drawerView: view });
+		});
+
+		it.each([
+			["History", "history"],
+			["Services", "services"],
+		] as const)("the %s tile opens a closed drawer on that view", (name, view) => {
+			useLayoutStore.setState({ drawerOpen: false, drawerView: "collections" });
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}$`, "i") }));
+			expect(useLayoutStore.getState()).toMatchObject({ drawerOpen: true, drawerView: view });
+		});
+
 		it("shows one tile per action, and the skeleton matches", () => {
 			const { container } = renderScreen();
 			expect(container.querySelectorAll(".grid > button")).toHaveLength(LAUNCHER_TILES);

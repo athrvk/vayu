@@ -5,6 +5,10 @@
  * store at all, so `.persist.getOptions()` is undefined without a DOM.
  */
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { stripComments } from "@/lib/strip-comments.testkit";
 import { useLayoutStore, resolveResponseArrangement } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
@@ -623,5 +627,83 @@ describe("layout-store response position", () => {
 			expect(migrated.requestSplitRatioBeside).toBe(0.4);
 			expect(migrated.requestSplitRatioBelow).toBe(0.6);
 		});
+	});
+});
+
+/**
+ * `setDrawerOpen(true)` then `setDrawerView(x)` is the open-and-select pair
+ * `revealDrawerView` exists to be (#1879). It is easy to write and easy to
+ * miss: the sibling `activateDrawerView` reads like the same thing and toggles
+ * the drawer shut when it is already on that view, which a caller that points
+ * at a view must never do.
+ */
+describe("revealDrawerView", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({ drawerOpen: false, drawerView: "collections" });
+	});
+
+	it("opens a closed drawer on the view", () => {
+		useLayoutStore.getState().revealDrawerView("history");
+		expect(useLayoutStore.getState()).toMatchObject({
+			drawerOpen: true,
+			drawerView: "history",
+		});
+	});
+
+	it("leaves an open drawer open when it is already on that view", () => {
+		useLayoutStore.setState({ drawerOpen: true, drawerView: "history" });
+		useLayoutStore.getState().revealDrawerView("history");
+		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+	});
+});
+
+describe("no hand-rolled reveal outside the store", () => {
+	/** `app/src` - this file lives in `src/stores`. */
+	const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
+	/** How far past the open a select may sit and still be the same pair. */
+	const PAIR_WINDOW_LINES = 3;
+
+	function sourceFiles(dir: string): string[] {
+		return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+			if (entry.name === "node_modules" || entry.name === "dist") return [];
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) return sourceFiles(full);
+			return /\.tsx?$/.test(entry.name) && !entry.name.includes(".test.") ? [full] : [];
+		});
+	}
+
+	/** 1-based lines where an open is followed closely by a select. */
+	function handRolledReveals(source: string): number[] {
+		const lines = stripComments(source).split("\n");
+		const hits: number[] = [];
+		lines.forEach((line, i) => {
+			if (!line.includes("setDrawerOpen(true)")) return;
+			const window = lines.slice(i, i + PAIR_WINDOW_LINES + 1).join("\n");
+			if (window.includes("setDrawerView(")) hits.push(i + 1);
+		});
+		return hits;
+	}
+
+	it("recognises the pair, and only the pair", () => {
+		const pair = "a();\nstore.setDrawerOpen(true);\nstore.setDrawerView('x');";
+		expect(handRolledReveals(pair)).toEqual([2]);
+		expect(handRolledReveals("store.setDrawerOpen(true);\nother();")).toEqual([]);
+		expect(handRolledReveals("// setDrawerOpen(true)\n// setDrawerView(x)")).toEqual([]);
+		expect(handRolledReveals("store.revealDrawerView('x');")).toEqual([]);
+	});
+
+	it("is absent from every source file but the store", () => {
+		const files = sourceFiles(SRC).filter(
+			(f) => !f.endsWith(join("stores", "layout-store.ts"))
+		);
+		// A walk that stopped matching would make the case below vacuous.
+		expect(files.length).toBeGreaterThan(200);
+
+		const offenders = files.flatMap((file) =>
+			handRolledReveals(readFileSync(file, "utf8")).map(
+				(line) => `${relative(SRC, file)}:${line}`
+			)
+		);
+		expect(offenders).toEqual([]);
 	});
 });
