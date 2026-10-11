@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
 	createAuthWindowFlow,
+	readAuthWindowParams,
 	AUTH_WINDOW_TIMEOUT_MS,
 	ERR_ABORTED,
 	type AuthWindowFlow,
@@ -266,5 +267,67 @@ describe("oauth.ts wiring", () => {
 	it("starts the flow and returns its promise, rather than resolving its own", () => {
 		expect(oauthSource).toContain("flow.start()");
 		expect(oauthSource).toContain("return flow.result");
+	});
+});
+
+describe("readAuthWindowParams", () => {
+	const RENDERER_SHAPE = {
+		authorizeUrl: "https://idp/x",
+		redirectUri: "vayu://cb",
+		partition: "oauth:abc",
+	};
+
+	it("accepts the shape the renderer sends and returns it", () => {
+		expect(readAuthWindowParams(RENDERER_SHAPE)).toEqual(RENDERER_SHAPE);
+	});
+
+	it("defaults an absent partition to the shared oauth one", () => {
+		const { partition: _omitted, ...withoutPartition } = RENDERER_SHAPE;
+		expect(readAuthWindowParams(withoutPartition).partition).toBe("oauth:default");
+	});
+
+	it.each([
+		["an empty partition, which Electron resolves to the default session", ""],
+		["a partition outside the oauth: namespace", "persist:main"],
+		["a bare prefix-less name", "abc"],
+		["a non-string partition", 7],
+		["a null partition", null],
+	])("refuses %s", (_label, partition) => {
+		expect(() => readAuthWindowParams({ ...RENDERER_SHAPE, partition })).toThrow(/partition/);
+	});
+
+	it.each([
+		["missing", undefined],
+		["empty", ""],
+		["a number", 42],
+		["an object", { href: "vayu://cb" }],
+	])("refuses a redirectUri that is %s", (_label, redirectUri) => {
+		expect(() => readAuthWindowParams({ ...RENDERER_SHAPE, redirectUri })).toThrow(
+			/redirect URI/
+		);
+	});
+
+	it.each([
+		["a file URL", "file:///etc/passwd"],
+		["a custom scheme", "vayu://authorize"],
+		["not a URL", "idp/authorize"],
+		["empty", ""],
+		["missing", undefined],
+	])("refuses an authorizeUrl that is %s", (_label, authorizeUrl) => {
+		expect(() => readAuthWindowParams({ ...RENDERER_SHAPE, authorizeUrl })).toThrow(
+			"Refusing to open a non-HTTP(S) authorize URL"
+		);
+	});
+
+	it.each([[null], [undefined], ["https://idp/x"], [42]])(
+		"refuses a non-object payload %j",
+		(value) => {
+			expect(() => readAuthWindowParams(value)).toThrow(/parameters/);
+		}
+	);
+
+	it("is the first thing the IPC handler does, before any session or window", () => {
+		const handler = oauthSource.slice(oauthSource.indexOf('"oauth:openWindow"'));
+		expect(handler).toContain("openAuthWindow(readAuthWindowParams(params))");
 	});
 });
