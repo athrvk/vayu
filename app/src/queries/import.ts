@@ -7,6 +7,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
 import { assignTempIds } from "@/services/importers/assign-ids";
 import { ImportOrchestrator, type ImportApi } from "@/services/importers/orchestrator";
@@ -86,7 +87,7 @@ export function useImportMutation() {
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
-			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			invalidateAllRequestLists(queryClient);
 			// A Postman globals export writes the globals singleton; without this the
 			// imported variables sit on the engine unread until the next reload.
 			queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });

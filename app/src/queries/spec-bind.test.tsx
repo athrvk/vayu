@@ -130,11 +130,20 @@ describe("useBindSpecMutation", () => {
 
 		// Settled rather than success: the counts the Spec tab shows are read off
 		// the request rows, and a bind that failed leaves them as they were - the
-		// tab only reports that by reading them again.
-		expect(invalidatedKeys(failed.invalidate)).toEqual(['["collections"]', '["requests"]']);
+		// tab only reports that by reading them again. The pass goes ahead of the
+		// lists so they join one `GET /requests`.
+		expect(invalidatedKeys(failed.invalidate)).toEqual([
+			'["collections"]',
+			'["prefetch","all-requests"]',
+			'["requests"]',
+		]);
 
 		const ok = bind();
 		await ok.result.current.mutateAsync(input());
-		expect(invalidatedKeys(ok.invalidate)).toEqual(['["collections"]', '["requests"]']);
+		expect(invalidatedKeys(ok.invalidate)).toEqual([
+			'["collections"]',
+			'["prefetch","all-requests"]',
+			'["requests"]',
+		]);
 	});
 });

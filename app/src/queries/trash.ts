@@ -24,6 +24,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiService } from "@/services/api";
+import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
 import type { ListTrashResponse } from "@/types";
 
@@ -68,10 +69,7 @@ export function useRestoreTrashMutation() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-			// Ahead of `requests.all`: the lists that refetch then join this one
-			// call instead of each making their own (`requestsForCollection`).
-			queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
-			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			invalidateAllRequestLists(queryClient);
 		},
 		onError: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });

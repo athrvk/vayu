@@ -25,8 +25,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useMultipleCollectionRequests, usePrefetchCollectionsAndRequests } from "./collections";
+import {
+	useDeleteCollectionMutation,
+	useDeleteRequestMutation,
+	useMultipleCollectionRequests,
+	usePrefetchCollectionsAndRequests,
+} from "./collections";
+import { useImportMutation } from "./import";
 import { queryKeys } from "./keys";
+import { useBindSpecMutation, useSyncSpecMutation } from "./specs";
 import { QUERY_CACHE } from "@/config/cache";
 import type { Collection, Request } from "@/types";
 
@@ -37,6 +44,13 @@ vi.mock("@/services/api", () => ({
 	apiService: {
 		listRequests: (...a: unknown[]) => listRequests(...a),
 		listCollections: (...a: unknown[]) => listCollections(...a),
+		deleteCollection: vi.fn(async () => undefined),
+		deleteRequest: vi.fn(async () => undefined),
+		applyImport: vi.fn(async () => ({ idMap: {} })),
+		getGlobals: vi.fn(async () => ({ id: "globals", variables: {}, updatedAt: "0" })),
+		updateGlobals: vi.fn(async (variables: unknown) => ({ id: "globals", variables })),
+		bindSpec: vi.fn(async () => ({})),
+		syncSpec: vi.fn(async () => ({})),
 	},
 }));
 
@@ -161,5 +175,162 @@ describe("the launch's request lists", () => {
 
 		expect(listRequests).toHaveBeenCalledTimes(2);
 		expect(listRequests.mock.calls[1]).toEqual([{ collectionId: "c2" }]);
+	});
+});
+
+const THREE = [collection("c1"), collection("c2"), collection("c3")];
+const ONE_EACH = [req("r1", "c1"), req("r2", "c2"), req("r3", "c3")];
+
+/** The launch, settled: the pass landed and the tree holds three list observers. */
+async function launched() {
+	listCollections.mockResolvedValue(THREE);
+	listRequests.mockImplementation((params?: { collectionId?: string }) =>
+		Promise.resolve(
+			params?.collectionId
+				? ONE_EACH.filter((r) => r.collectionId === params.collectionId)
+				: ONE_EACH
+		)
+	);
+	const client = newClient();
+	renderHook(() => useLaunch(), { wrapper: wrapper(client) });
+	await waitFor(() =>
+		expect(client.getQueryState(queryKeys.prefetch.allRequests())?.status).toBe("success")
+	);
+	await waitFor(() => expect(client.isFetching()).toBe(0));
+	listRequests.mockClear();
+	return client;
+}
+
+/** Waits out whatever the mutation's invalidations refetched. */
+async function settle(client: QueryClient) {
+	await waitFor(() => expect(listRequests).toHaveBeenCalled());
+	await waitFor(() => expect(client.isFetching()).toBe(0));
+}
+
+/**
+ * A mutation that invalidates the request lists has to do it through the pass.
+ *
+ * With the tree mounted, every collection's list is an observer, and each one
+ * `invalidateQueries` refetches would put one `GET /requests?collectionId=` per
+ * collection on the engine. Invalidating `prefetch.allRequests` first makes
+ * them join the one `GET /requests` instead (`invalidateAllRequestLists`).
+ */
+describe("a mutation that invalidates every request list", () => {
+	/** Every call joined the one pass: a single `GET /requests`, never a scoped list. */
+	function expectOneWorkspaceCall() {
+		expect(listRequests.mock.calls).toEqual([[]]);
+	}
+
+	it("joins one list call when a collection is deleted", async () => {
+		const client = await launched();
+		const { result } = renderHook(() => useDeleteCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+
+		await act(async () => {
+			await result.current.mutateAsync("c1");
+		});
+		await settle(client);
+
+		expectOneWorkspaceCall();
+	});
+
+	it("joins one list call when an import settles", async () => {
+		const client = await launched();
+		const { result } = renderHook(() => useImportMutation(), { wrapper: wrapper(client) });
+
+		await act(async () => {
+			await result.current.mutateAsync({
+				result: {
+					collections: [],
+					environments: [],
+					globals: {},
+					meta: {
+						format: "Postman Globals",
+						requestCount: 0,
+						folderCount: 0,
+						environmentCount: 0,
+						globalCount: 0,
+						exampleCount: 0,
+						skipped: [],
+						nonExecutableAuth: 0,
+						unattachedFileParts: 0,
+					},
+				},
+				opts: { importEnvironments: true, importScripts: true },
+			});
+		});
+		await settle(client);
+
+		expectOneWorkspaceCall();
+	});
+
+	it("joins one list call when a spec is bound", async () => {
+		const client = await launched();
+		const { result } = renderHook(() => useBindSpecMutation(), { wrapper: wrapper(client) });
+
+		await act(async () => {
+			await result.current.mutateAsync({ collectionId: "c1", content: "{}" });
+		});
+		await settle(client);
+
+		expectOneWorkspaceCall();
+	});
+
+	it("joins one list call when a spec is synced", async () => {
+		const client = await launched();
+		const { result } = renderHook(() => useSyncSpecMutation(), { wrapper: wrapper(client) });
+
+		await act(async () => {
+			await result.current.mutateAsync({
+				collectionId: "c1",
+				spec: { content: "{}" },
+				collections: [],
+				create: [],
+				update: [],
+				delete: [],
+			});
+		});
+		await settle(client);
+
+		expectOneWorkspaceCall();
+	});
+});
+
+describe("deleting a request", () => {
+	async function deleteRequest(client: QueryClient, id: string) {
+		const { result } = renderHook(() => useDeleteRequestMutation(), {
+			wrapper: wrapper(client),
+		});
+		await act(async () => {
+			await result.current.mutateAsync(id);
+		});
+		await settle(client);
+	}
+
+	it("refetches only the owner's list when the detail names it, with no pass", async () => {
+		const client = await launched();
+		client.setQueryData(queryKeys.requests.detail("r2"), req("r2", "c2"));
+
+		await deleteRequest(client, "r2");
+
+		expect(listRequests.mock.calls).toEqual([[{ collectionId: "c2" }]]);
+		expect(client.getQueryData(queryKeys.requests.detail("r2"))).toBeUndefined();
+	});
+
+	it("finds the owner in the list caches when no detail was opened", async () => {
+		const client = await launched();
+
+		await deleteRequest(client, "r3");
+
+		expect(listRequests.mock.calls).toEqual([[{ collectionId: "c3" }]]);
+	});
+
+	it("joins one list call when no cache knows the owner", async () => {
+		const client = await launched();
+
+		await deleteRequest(client, "unknown");
+
+		expect(listRequests.mock.calls).toEqual([[]]);
 	});
 });

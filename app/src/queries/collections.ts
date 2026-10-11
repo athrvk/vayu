@@ -111,6 +111,32 @@ function requestsForCollection(queryClient: QueryClient, collectionId: string): 
 }
 
 /**
+ * Invalidate every collection's request list, joined into one `GET /requests`.
+ *
+ * Ahead of `requests.all`: the lists that refetch then join the warm-cache pass
+ * this starts instead of each making a call of their own (`requestsForCollection`).
+ */
+export function invalidateAllRequestLists(queryClient: QueryClient): void {
+	queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
+	queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+}
+
+/**
+ * The collection a request belongs to, read out of the list caches the tree is
+ * already showing. An uncached one yields `undefined`: nothing on screen is
+ * displaying it.
+ */
+function ownerOfRequest(queryClient: QueryClient, requestId: string): string | undefined {
+	for (const [, rows] of queryClient.getQueriesData<Request[]>({
+		queryKey: queryKeys.requests.lists(),
+	})) {
+		const found = rows?.find((row) => row.id === requestId);
+		if (found) return found.collectionId;
+	}
+	return undefined;
+}
+
+/**
  * Prefetch all collections and their requests
  *
  * Mounted once by `App`, at launch. Invalidating `prefetch.allRequests` re-runs
@@ -375,10 +401,12 @@ export function useDeleteCollectionMutation() {
 			 * without this a deleted request stays fresh forever and keeps feeding
 			 * restored tabs. `collections.all` covers the descendants left behind
 			 * by the single-id filter above, which the ancestor walk and the
-			 * resolver would otherwise still see.
+			 * resolver would otherwise still see. The lists that refetch join one
+			 * `GET /requests` rather than each making a call of their own
+			 * (`invalidateAllRequestLists`).
 			 */
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			invalidateAllRequestLists(queryClient);
 			/*
 			 * The delete is soft (issue #988): the row left the tree for the
 			 * trash rather than the void, so the list that shows the trash is
@@ -500,17 +528,6 @@ function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: Reor
 	const requestScopes = new Set<string>();
 	const movedRequestIds: string[] = [];
 
-	const ownerOf = (requestId: string): string | undefined => {
-		for (const [key, rows] of queryClient.getQueriesData<Request[]>({
-			queryKey: queryKeys.requests.lists(),
-		})) {
-			void key;
-			const found = rows?.find((row) => row.id === requestId);
-			if (found) return found.collectionId;
-		}
-		return undefined;
-	};
-
 	for (const scope of plan.normalize) {
 		if (scope.type === "collection") touchesCollections = true;
 		else requestScopes.add(scope.collectionId);
@@ -521,7 +538,7 @@ function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: Reor
 			continue;
 		}
 		movedRequestIds.push(move.id);
-		const current = ownerOf(move.id);
+		const current = ownerOfRequest(queryClient, move.id);
 		if (current) requestScopes.add(current);
 		if (move.collectionId) requestScopes.add(move.collectionId);
 	}
@@ -728,10 +745,18 @@ export function useDeleteRequestMutation() {
 	return useMutation({
 		mutationFn: (id: string) => apiService.deleteRequest(id),
 		onSuccess: (_, deletedId) => {
-			// Invalidate all request lists since we don't know the collection
-			queryClient.invalidateQueries({
-				queryKey: queryKeys.requests.lists(),
-			});
+			// Read before the detail is removed below. A row only the lists know
+			// falls back to their scan; with no owner at all, any list could hold it.
+			const owner =
+				queryClient.getQueryData<Request>(queryKeys.requests.detail(deletedId))
+					?.collectionId ?? ownerOfRequest(queryClient, deletedId);
+			if (owner) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.requests.listByCollection(owner),
+				});
+			} else {
+				invalidateAllRequestLists(queryClient);
+			}
 			// Remove the detail cache for this request
 			queryClient.removeQueries({
 				queryKey: queryKeys.requests.detail(deletedId),

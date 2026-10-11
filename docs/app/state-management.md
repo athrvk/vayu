@@ -1638,12 +1638,21 @@ engine's `scenario_plan_test.cpp` (issue #431).
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
-  also invalidates the trash list so the Trash view picks it up
+  also invalidates the trash list so the Trash view picks it up. Every mutation
+  that invalidates **all** the request lists does it through
+  `invalidateAllRequestLists` (`queries/collections.ts`): `prefetch.allRequests()`
+  *before* `requests.all`, so the per-collection lists that refetch join the one
+  `GET /requests` instead of each making a call of their own. It is used by this
+  mutation, `useImportMutation`, `useBindSpecMutation`, `useSyncSpecMutation`,
+  `useRestoreTrashMutation` and the MCP `collection` family
 - **`useCreateRequestMutation()`** - Create request
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
 - **`useDeleteRequestMutation()`** - Soft-delete a request into the trash (also
-  clears the response, and invalidates the trash list)
+  clears the response, and invalidates the trash list). Refetches only the
+  owner's list, read from the request's cached detail before it is removed and
+  from the list caches failing that; with no owner known it falls back to
+  `invalidateAllRequestLists`
 - **`useReorderMutation()`** - Reposition collections and requests through
   `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
@@ -1687,10 +1696,10 @@ are how the app sees what got stamped (`queries/trash.ts`).
   delete mutations above, and the startup retention purge, so the default is
   already the cheapest correct answer.
 - **`useRestoreTrashMutation()`** - Put one deleted root back
-  (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all`,
-  `requests.all` and `prefetch.allRequests()` - the same coarse invalidation
-  `useDeleteCollectionMutation` does, and for the same reason (see the cascade
-  delete note below).
+  (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all` and
+  every request list through `invalidateAllRequestLists` - the same coarse
+  invalidation `useDeleteCollectionMutation` does, and for the same reason (see
+  the cascade delete note below).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
