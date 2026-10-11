@@ -460,6 +460,20 @@ fi
 (download_asset "file://$payload" "$dest" "0.12.0") >/dev/null 2>&1 \
 	|| fail "a pre-checksum version without a sidecar should only warn"
 
+# The sidecar fetch is fail-closed, so a transient miss on it must be retried
+# rather than discard the finished download. The file:// cases above cannot see
+# curl's flags; this stub logs them. It succeeds for the asset and fails the
+# sidecar, so download_asset reaches the sidecar fetch and then dies.
+curl() {
+	printf '%s\n' "$*" >>"$TMPROOT/curl.log"
+	case "$*" in *.sha256*) return 22 ;; esac
+	: >"${*: -1}"
+}
+(download_asset "https://example.invalid/asset" "$dest" "9.9.9") >/dev/null 2>&1 || true
+unset -f curl
+grep '\.sha256' "$TMPROOT/curl.log" | grep -q -- '--retry 3' \
+	|| fail "the checksum sidecar fetch must retry transient failures"
+
 version_at_least 0.40.0 0.33.0 || fail "0.40.0 is at least 0.33.0"
 version_at_least 0.33.0 0.33.0 || fail "0.33.0 is at least 0.33.0"
 version_at_least 1.0.0 0.40.0 || fail "1.0.0 is at least 0.40.0"
