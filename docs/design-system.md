@@ -1875,7 +1875,7 @@ not rule names - two of these lines silence two rules at once.
 - `modules/history/sidebar/HistoryList.tsx` (1) -
   `jsx-a11y/no-noninteractive-element-interactions` on the `role="group"` run
   list: roving tabindex for Up/Down/Home/End between the row activators inside
-  (`useHistoryListFocus`), the same shape `ActivityRail` uses, on a group
+  (`useHistoryListFocus`), the same Up/Down shape `ActivityRail` uses, on a group
   rather than a widget role because this flat, occasionally day-headered list
   has no `listbox`/`tree` selection model to claim.
 - `modules/variables/sidebar/VariablesCategoryTree.tsx` (2) -
