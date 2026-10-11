@@ -64,9 +64,16 @@ describe("electron-builder file associations (#1919)", () => {
 		expect(config.win?.fileAssociations).toBeUndefined();
 	});
 
-	it("declares no Linux MIME types while the desktop entry's Exec ends in %U", () => {
-		// electron-builder appends %U, so a file manager may pass file:// URLs,
-		// which the open-intent door does not decode.
-		expect(config.linux?.mimeTypes).toBeUndefined();
+	it("declares the Linux MIME types the import pipeline's extensions resolve to", () => {
+		// The desktop entry's Exec ends in %U, so a file manager passes file://
+		// URLs; `parseOpenIntents` decodes them (#2000). Older shared-mime-info
+		// releases name YAML application/x-yaml and newer ones application/yaml, so
+		// both are listed or .yml is not offered on one of them.
+		expect(config.linux?.mimeTypes).toEqual([
+			"application/json",
+			"application/yaml",
+			"application/x-yaml",
+			"text/yaml",
+		]);
 	});
 });

@@ -35,6 +35,7 @@
  */
 
 import path from "path";
+import { fileURLToPath } from "url";
 
 import { SPEC_FILE_EXTENSIONS } from "./spec-file.js";
 import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon.js";
@@ -71,6 +72,27 @@ export function isImportableFile(candidate: string): boolean {
 	return SPEC_FILE_EXTENSIONS.includes(path.extname(candidate).toLowerCase());
 }
 
+const FILE_URL_PREFIX = /^file:\/\//i;
+
+/**
+ * The path an argument names, or null when it is a `file://` URL that does not
+ * name a local file.
+ *
+ * electron-builder ends the Linux desktop entry's `Exec` in `%U`, so a file
+ * manager may hand over `file:///home/u/my%20spec.json` rather than a path
+ * (#2000). Anything else is already a path and passes through untouched.
+ * `fileURLToPath` throws on a host other than `localhost` and on an encoded
+ * separator, and a URL that cannot be a local file is not worth offering.
+ */
+function argumentToPath(argument: string): string | null {
+	if (!FILE_URL_PREFIX.test(argument)) return argument;
+	try {
+		return fileURLToPath(argument);
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Every intent on one command line, in the order it appears.
  *
@@ -91,7 +113,10 @@ export function parseOpenIntents(argv: readonly string[]): OpenIntent[] {
 			if (collectionId) intents.push({ kind: "collection", collectionId });
 			continue;
 		}
-		if (isImportableFile(argument)) intents.push({ kind: "import", path: argument });
+		const filePath = argumentToPath(argument);
+		if (filePath !== null && isImportableFile(filePath)) {
+			intents.push({ kind: "import", path: filePath });
+		}
 	}
 	return intents;
 }

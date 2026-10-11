@@ -182,8 +182,11 @@ Configuration is in `electron-builder.json`:
 - Product Name: `Vayu`
 - Engine binary: Packaged in `resources/bin/` (copied to `bin/` in app)
 - File associations: `.json`, `.yaml` and `.yml` as `Viewer` at rank `Alternate`
-  in `mac.fileAssociations`. None on Linux (the desktop entry's `%U` can pass
-  `file://` URLs) or Windows: NSIS would replace the extension's default handler
+  in `mac.fileAssociations`. On Linux, `linux.mimeTypes` (`application/json`,
+  `application/yaml`, `application/x-yaml`, `text/yaml`) fills the desktop
+  entry's `MimeType`; its `Exec` keeps electron-builder's `%U`, and
+  `open-intent.ts` decodes the `file://` URLs that passes. None on Windows: NSIS
+  would replace the extension's default handler
   (`electron-file-associations.test.ts`)
 
 #### The app id, and the two things pinned to it
