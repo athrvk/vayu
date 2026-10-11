@@ -46,6 +46,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { ENGINE_HOST, ENGINE_PORT, DATA_FILE_MAX_BYTES_SEED } from "./constants.js";
+import { engineFetch } from "./engine-fetch.js";
 
 /**
  * Extensions this channel will open, lower-cased and with the dot.
@@ -81,7 +82,7 @@ const defaultSystem: DataFileSystem = {
 	stat: (filePath) => fs.stat(filePath),
 	readFile: (filePath) => fs.readFile(filePath),
 	fetchConfig: async () => {
-		const response = await fetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
+		const response = await engineFetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 		return await response.json();
 	},

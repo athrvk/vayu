@@ -31,6 +31,7 @@
 
 import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
 import { appLogger } from "./app-log.js";
+import { engineFetch } from "./engine-fetch.js";
 
 /**
  * The URL Chromium is asked about.
@@ -118,13 +119,13 @@ export const defaultProxyResolutionSystem: ProxyResolutionSystem = {
 	// process with no session: it leaves the setting alone.
 	resolveProxy: async () => "DIRECT",
 	readSetting: async (key) => {
-		const response = await fetch(`${engineBase()}/config`);
+		const response = await engineFetch(`${engineBase()}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 		const config = (await response.json()) as { entries?: { key?: string; value?: string }[] };
 		return config?.entries?.find((entry) => entry.key === key)?.value ?? "";
 	},
 	writeSetting: async (key, value) => {
-		const response = await fetch(`${engineBase()}/config`, {
+		const response = await engineFetch(`${engineBase()}/config`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ entries: { [key]: value } }),
