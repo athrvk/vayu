@@ -14,6 +14,8 @@
  * anything to send it to.
  */
 
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
 	createOpenIntents,
@@ -87,6 +89,43 @@ describe("parseOpenIntents", () => {
 	it("keeps every intent on the line, in order", () => {
 		expect(parseOpenIntents(["vayu", "--enable-logging", "b.yaml", "a.json"])).toEqual([
 			{ kind: "import", path: "b.yaml" },
+			{ kind: "import", path: "a.json" },
+		]);
+	});
+
+	/*
+	 * Mutation check: pass the argument through undecoded and the intent's path
+	 * is the URL itself, which `specFile:read` would refuse (#2000).
+	 */
+	it("decodes a file:// URL a Linux file manager passes through %U", () => {
+		const url = pathToFileURL(path.resolve("specs", "my spec.json"));
+		expect(url.href).toContain("my%20spec.json");
+		expect(parseOpenIntents(["vayu", url.href])).toEqual([
+			{ kind: "import", path: path.resolve("specs", "my spec.json") },
+		]);
+	});
+
+	it("decodes the URL scheme whatever its case", () => {
+		const href = pathToFileURL(path.resolve("a.yaml")).href;
+		expect(parseOpenIntents(["vayu", href.replace(/^file/, "FILE")])).toEqual([
+			{ kind: "import", path: path.resolve("a.yaml") },
+		]);
+	});
+
+	it("decodes the one-slash file: form too", () => {
+		const target = path.resolve("spec.json");
+		const oneSlash = pathToFileURL(target).href.replace(/^file:\/\/\//, "file:/");
+		expect(parseOpenIntents(["vayu", oneSlash])).toEqual([{ kind: "import", path: target }]);
+	});
+
+	it("drops a file:// URL to something the pipeline could not read", () => {
+		const href = pathToFileURL(path.resolve("notes.txt")).href;
+		expect(parseOpenIntents(["vayu", href])).toEqual([]);
+	});
+
+	it("drops a file:// URL that cannot be decoded rather than throwing", () => {
+		// An encoded separator is refused by `fileURLToPath` on every platform.
+		expect(parseOpenIntents(["vayu", "file:///tmp/a%2Fb.json", "file://[", "a.json"])).toEqual([
 			{ kind: "import", path: "a.json" },
 		]);
 	});

@@ -309,11 +309,14 @@ pass the path through `isImportableFile` first. The packaged app declares `.json
 `.yaml` and `.yml` as documents it opens (`mac.fileAssociations` in
 `electron-builder.json`) with role `Viewer` and rank
 `Alternate`, so it appears under Open With and never takes over as the default for
-JSON. Linux declares nothing yet (the desktop entry's `%U` can hand over `file://` URLs the door
-does not decode). Windows registers nothing: NSIS rewrites the extension's default handler on
-install and does not restore it, so there the routes in are Shift-dragging the file onto the
-taskbar button or Open with > Choose another app > Vayu (both launch the executable with the
-path). Intents are
+JSON. Linux lists `application/json`, `application/yaml`, `application/x-yaml` and
+`text/yaml` as the desktop entry's `MimeType` (`linux.mimeTypes`; the `x-yaml` name is what
+older shared-mime-info releases give `.yml`). The entry's `Exec` ends in `%U`, so a file manager
+may pass a `file://` URL rather than a path, and `parseOpenIntents` decodes it to the path before
+the allowlist; a URL that does not name a local file is dropped. Windows registers nothing: NSIS
+rewrites the extension's default handler on install and does not restore it, so there the routes
+in are Shift-dragging the file onto the taskbar button or Open with > Choose another app > Vayu
+(both launch the executable with the path). Intents are
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
