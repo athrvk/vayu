@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { CollapsibleText, OptionButtons, SelectSettingRow, ToggleRow } from "./SettingControls";
 
 beforeEach(cleanup);
@@ -199,16 +199,22 @@ describe("OptionButtons", () => {
 	] as const;
 
 	it("exposes the chosen tile as a checked radio and the rest as unchecked", () => {
-		render(<OptionButtons options={THEMES} value="dark" onChange={vi.fn()} />);
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={vi.fn()} />);
 
 		expect(screen.getByRole("radio", { name: "Dark", checked: true })).toBeTruthy();
 		expect(screen.getByRole("radio", { name: "Light", checked: false })).toBeTruthy();
-		expect(screen.getByRole("radiogroup")).toBeTruthy();
+	});
+
+	it("names the radiogroup by the setting it picks", () => {
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={vi.fn()} />);
+
+		const group = screen.getByRole("radiogroup", { name: "Theme" });
+		expect(within(group).getAllByRole("radio")).toHaveLength(THEMES.length);
 	});
 
 	it("hides the check glyph from assistive tech", () => {
 		const { container } = render(
-			<OptionButtons options={THEMES} value="dark" onChange={vi.fn()} />
+			<OptionButtons label="Theme" options={THEMES} value="dark" onChange={vi.fn()} />
 		);
 
 		const glyph = container.querySelector("svg");
@@ -220,7 +226,7 @@ describe("OptionButtons", () => {
 		// press (Enter and Space click a <button>), so focus alone must not
 		// call onChange.
 		const onChange = vi.fn();
-		render(<OptionButtons options={THEMES} value="dark" onChange={onChange} />);
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={onChange} />);
 		const dark = screen.getByRole("radio", { name: "Dark" });
 		dark.focus();
 
@@ -237,7 +243,7 @@ describe("OptionButtons", () => {
 
 	it("does not clear the choice when the chosen tile is pressed again", () => {
 		const onChange = vi.fn();
-		render(<OptionButtons options={THEMES} value="dark" onChange={onChange} />);
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={onChange} />);
 
 		fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
 
@@ -251,7 +257,7 @@ describe("OptionButtons", () => {
 			{ value: 3, label: "Large" },
 		] as const;
 		const onChange = vi.fn();
-		render(<OptionButtons options={SIZES} value={2} onChange={onChange} />);
+		render(<OptionButtons label="Size" options={SIZES} value={2} onChange={onChange} />);
 
 		expect(screen.getByRole("radio", { name: "Medium", checked: true })).toBeTruthy();
 		fireEvent.click(screen.getByRole("radio", { name: "Large" }));

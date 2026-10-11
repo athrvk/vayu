@@ -129,6 +129,7 @@ export default function NotificationsPanel() {
 					<div data-setting-anchor={POSITION.anchor}>
 						<Eyebrow className="mb-2">{POSITION.label}</Eyebrow>
 						<OptionButtons
+							label={POSITION.label}
 							options={TOAST_POSITIONS.map((p) => ({
 								value: p.value,
 								label: p.label,
@@ -173,6 +174,7 @@ export default function NotificationsPanel() {
 					<div data-setting-anchor={DURATION.anchor}>
 						<Eyebrow className="mb-2">{DURATION.label}</Eyebrow>
 						<OptionButtons
+							label={DURATION.label}
 							options={TOAST_DURATION_SCALES.map((d) => ({
 								value: d.value,
 								label: d.label,
@@ -194,6 +196,7 @@ export default function NotificationsPanel() {
 					<div data-setting-anchor={STACK_SIZE.anchor}>
 						<Eyebrow className="mb-2">{STACK_SIZE.label}</Eyebrow>
 						<OptionButtons
+							label={STACK_SIZE.label}
 							options={TOAST_STACK_OPTIONS.map((o) => ({
 								value: o.value,
 								label: o.label,
@@ -212,6 +215,7 @@ export default function NotificationsPanel() {
 					<div data-setting-anchor={SEVERITY.anchor}>
 						<Eyebrow className="mb-2">{SEVERITY.label}</Eyebrow>
 						<OptionButtons
+							label={SEVERITY.label}
 							options={TOAST_SEVERITY_FLOORS.map((f) => ({
 								value: f.value,
 								label: f.label,

@@ -23,6 +23,8 @@ interface FontPickerProps {
 	/** Selected value - a preset's `value` or the literal "custom". */
 	value: string;
 	onChange: (value: string) => void;
+	/** The accessible name of the tile radiogroup: the setting the font is for. */
+	label: string;
 	/** The user-typed family (shown/edited when "custom" is selected). */
 	customValue: string;
 	onCustomChange: (family: string) => void;
@@ -71,6 +73,7 @@ export function FontPicker({
 	options,
 	value,
 	onChange,
+	label,
 	customValue,
 	onCustomChange,
 	sample,
@@ -79,7 +82,7 @@ export function FontPicker({
 }: FontPickerProps) {
 	return (
 		<div className="space-y-3">
-			<TileGroup value={value} onChange={onChange} columns="grid-cols-2">
+			<TileGroup value={value} onChange={onChange} label={label} columns="grid-cols-2">
 				{options.map((option) => (
 					<FontTile
 						key={option.value}

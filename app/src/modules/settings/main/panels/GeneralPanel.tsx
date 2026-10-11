@@ -53,6 +53,7 @@ const AUTO_SAVE = appSetting("auto-save");
 const DATA_MANAGEMENT = appSetting("data-management");
 const STORAGE_PATHS = appSetting("storage-paths");
 const RESET = appSetting("reset-app-settings");
+const SAVE_DELAY_LABEL = "Save delay";
 
 interface AppPaths {
 	appDir: string;
@@ -172,8 +173,9 @@ export default function GeneralPanel() {
 					/>
 					{autoSave.enabled && (
 						<div className="enter-fade">
-							<Eyebrow className="mb-2">Save delay</Eyebrow>
+							<Eyebrow className="mb-2">{SAVE_DELAY_LABEL}</Eyebrow>
 							<OptionButtons
+								label={SAVE_DELAY_LABEL}
 								options={AUTO_SAVE_DELAY_OPTIONS}
 								value={autoSave.delayMs}
 								onChange={(delayMs) => setAutoSave({ delayMs })}
