@@ -35,11 +35,13 @@ import { tabItemPropsEqual } from "./tab-item-props-equal";
 export interface TabItemProps {
 	tab: Tab;
 	isActive: boolean;
+	/** The strip's one `tabIndex={0}`; moves with the arrow keys, not the selection. */
+	isRovingStop: boolean;
 	width: number;
 	descriptor: TabDescriptor;
 }
 
-export function TabItemImpl({ tab, isActive, width, descriptor }: TabItemProps) {
+export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: TabItemProps) {
 	// Actions only - stable references, so TabItem never re-renders on a store
 	// write that leaves its own isActive/descriptor props untouched (#1714).
 	const focusTab = useTabsStore((s) => s.focusTab);
@@ -49,7 +51,7 @@ export function TabItemImpl({ tab, isActive, width, descriptor }: TabItemProps) 
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
 	// Previously every tab carried tabIndex={0}, so a developer with a dozen tabs
 	// open had to press Tab a dozen times to get past the strip.
-	const rovingTabIndex = isActive ? 0 : -1;
+	const rovingTabIndex = isRovingStop ? 0 : -1;
 	const Icon = descriptor.icon;
 
 	return (

@@ -241,6 +241,20 @@ describe("ActivityRail - roving tabindex", () => {
 		expect(useLayoutStore.getState().drawerView).toBe("collections");
 	});
 
+	it("hands the tab stop to the clicked view after arrowing elsewhere (#1856)", () => {
+		renderRail();
+		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
+		screen.getByRole("button", { name: "Collections" }).focus();
+		fireEvent.keyDown(nav, { key: "ArrowDown" });
+
+		fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+
+		const buttons = Array.from(nav.querySelectorAll("button"));
+		expect(buttons.filter((b) => b.tabIndex === 0)).toEqual([
+			screen.getByRole("button", { name: "Trash" }),
+		]);
+	});
+
 	it("ArrowUp from the first button wraps to the last", () => {
 		renderRail();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
