@@ -26,6 +26,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
+import { useDataFileStore } from "@/stores/data-file-store";
+import { useSpecFileStore } from "@/stores/spec-file-store";
 import type { ListTrashResponse } from "@/types";
 
 /**
@@ -87,14 +89,21 @@ export function useRestoreTrashMutation() {
  * The failure path is the restore's, for the same reason and no other: a purge
  * that fails on a row the list still shows is the same phantom, and the rule is
  * worth having whole rather than on one of the two buttons a trash row carries.
+ *
+ * The purged id's remembered data-file and spec-file paths go with it (#1890):
+ * the purge is where a collection ends for good, including one deleted outside
+ * `useDeleteCollectionMutation` (an MCP client). A request's id has no entry in
+ * either store, so clearing it is a no-op.
  */
 export function usePurgeTrashMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: (id: string) => apiService.purgeTrashEntry(id),
-		onSuccess: () => {
+		onSuccess: (_, id) => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+			useDataFileStore.getState().clearDataFile(id);
+			useSpecFileStore.getState().clearSpecFile(id);
 		},
 		onError: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });

@@ -7,7 +7,13 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Plus, Trash2, Edit2, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
-import { useTabsStore, useSaveStore, useToastStore, useDataFileStore } from "@/stores";
+import {
+	useTabsStore,
+	useSaveStore,
+	useToastStore,
+	useDataFileStore,
+	useSpecFileStore,
+} from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCreateCollectionMutation,
@@ -431,8 +437,8 @@ export function useTreeCrud({
 	 * What the delete threw away on the client, captured before it runs.
 	 *
 	 * A restore brings the rows back, and nothing else: the tab the delete
-	 * closed stays closed and the collection's remembered data-file path
-	 * (#599) stays cleared, because both were discarded on the way out. Neither
+	 * closed stays closed and the collection's remembered data-file and
+	 * spec-file paths (#599, #1890) stay cleared, because both were discarded on the way out. Neither
 	 * can be read back afterwards - that is the point of capturing here, while
 	 * they still exist - so the closure this returns carries them.
 	 *
@@ -459,11 +465,17 @@ export function useTreeCrud({
 			const dataFile = collectionId
 				? (useDataFileStore.getState().locations[collectionId] ?? null)
 				: null;
+			const specFile = collectionId
+				? (useSpecFileStore.getState().locations[collectionId] ?? null)
+				: null;
 
 			return () => {
 				if (closedActiveTab) openTab(closedActiveTab);
 				if (collectionId && dataFile) {
 					useDataFileStore.getState().setDataFile(collectionId, dataFile);
+				}
+				if (collectionId && specFile) {
+					useSpecFileStore.getState().setSpecFile(collectionId, specFile);
 				}
 			};
 		},

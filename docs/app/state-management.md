@@ -431,7 +431,8 @@ needs the gated `specFile:read` IPC (`electron/spec-file.ts`), which takes the
 document's path plus the reference and resolves one against the other in the
 main process - the renderer names no directory of its own, the same posture
 `dataFile:read` holds. It is normalized through **both** `migrate` and
-`merge`, for the reason spelled out for `data-file-store` above.
+`merge`, for the reason spelled out for `data-file-store` above. Deleting or
+purging the collection drops its entry (#1890), as for the data-file store.
 
 #### `bound-row-store.ts` - The Row The Open Builder Is Bound To
 
@@ -1638,7 +1639,10 @@ engine's `scenario_plan_test.cpp` (issue #431).
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
-  also invalidates the trash list so the Trash view picks it up. Every mutation
+  also invalidates the trash list so the Trash view picks it up. Clears the
+  deleted id's entry in `data-file-store` and `spec-file-store` (the id only;
+  a cascaded descendant's entry is inert), and the tree's Undo puts both back
+  (`captureClientState` in `useTreeCrud.ts`, #1890). Every mutation
   that invalidates **all** the request lists does it through
   `invalidateAllRequestLists` (`queries/collections.ts`): `prefetch.allRequests()`
   *before* `requests.all`, so the per-collection lists that refetch join the one
@@ -1703,7 +1707,10 @@ are how the app sees what got stamped (`queries/trash.ts`).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
-  changes nothing a live read can see.
+  changes nothing a live read can see. It also clears the purged id's entry in
+  `data-file-store` and `spec-file-store` (#1890), since a path kept for a
+  collection that is gone for good is persisted for nothing; a request's id has
+  no entry, so the same call is a no-op there.
 
 Both mutations also invalidate `trash.all` on **failure** (#1438). The row
 either acted on is one this list said existed, so the likeliest failure is that
