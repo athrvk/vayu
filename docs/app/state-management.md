@@ -69,7 +69,11 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   id, new address - rather than focusing whatever it was showing. The inbox tab is the case that
   needs it: every Services drawer row opens that one tab pointed at its own inbox (issue #554).
   The other three are always opened with a null `entityId`, for which this is a no-op
-- LRU eviction: Oldest non-active, non-exempt, clean tabs are closed when over limit
+- LRU eviction: when over the limit, the least recently focused non-active, non-exempt,
+  clean tab is closed - "oldest" is by `tabFocusedAt`, not strip order, with an unstamped
+  tab ranking first and ties kept in strip order. The tab being opened is never a
+  candidate, so a strip whose other tabs are all dirty runs past the cap. Every path that
+  makes a tab active stamps it, a close that activates a survivor included
 - Integration with save-store: dirty tabs are never selected for eviction. The
   guard resolves each tab's save-context key by tab *type* (`isTabDirty`),
   because the registry is keyed by editor and the two do not line up: `settings`
