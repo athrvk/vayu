@@ -21,9 +21,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SaveBlockedError } from "@/lib/elements";
 import { useToastStore } from "@/stores/toast-store";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useSaveStore } from "@/stores/save-store";
 import { useDraftSaveContext } from "./useDraftSaveContext";
+import { useEntityDraft } from "./useEntityDraft";
 
 beforeEach(() => {
 	useSaveStore.setState({
@@ -96,6 +97,91 @@ describe("useDraftSaveContext's Dock status wiring", () => {
 		rerender({ id: "b", isDirty: false });
 
 		expect(useSaveStore.getState().status).toBe("pending");
+	});
+});
+
+describe("a discarded draft is not a save (#1931)", () => {
+	/** The way the editors wire it: the real draft hook feeding the real context hook. */
+	function mountEditor(saved: string) {
+		const statuses: string[] = [];
+		const unsubscribe = useSaveStore.subscribe((s) => statuses.push(s.status));
+		const view = renderHook(
+			({ value }: { value: string }) => {
+				const draft = useEntityDraft<string>({
+					entityKey: "a",
+					value,
+					mutation: { reset: () => {} },
+				});
+				useDraftSaveContext({
+					id: "a",
+					name: "Test editor",
+					isDirty: draft.isDirty,
+					isActive: true,
+					save: () => Promise.resolve(),
+					consumeDiscard: draft.consumeDiscard,
+				});
+				return draft;
+			},
+			{ initialProps: { value: saved } }
+		);
+		return { ...view, statuses, unsubscribe };
+	}
+
+	it("a reset reports idle, not saved", () => {
+		const { result, statuses, unsubscribe } = mountEditor("stored");
+		act(() => result.current.setDraft("edited"));
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		act(() => result.current.reset());
+
+		unsubscribe();
+		expect(useSaveStore.getState().status).toBe("idle");
+		expect(statuses).not.toContain("saved");
+	});
+
+	it("a save that lands after a discard still reports saved", () => {
+		const { result, rerender } = mountEditor("stored");
+		act(() => result.current.setDraft("edited"));
+		act(() => result.current.reset());
+		expect(useSaveStore.getState().status).toBe("idle");
+
+		act(() => result.current.setDraft("second edit"));
+		rerender({ value: "second edit" });
+
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("a reset of a clean draft leaves nothing behind to colour the next save", () => {
+		const { result, rerender } = mountEditor("stored");
+		act(() => result.current.reset());
+
+		act(() => result.current.setDraft("edited"));
+		rerender({ value: "edited" });
+
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("leaves another editor's unsaved edit showing", () => {
+		useSaveStore.getState().registerContext({
+			id: "sibling",
+			name: "Sibling",
+			save: () => Promise.resolve(),
+			hasPendingChanges: true,
+		});
+		const { result } = mountEditor("stored");
+		act(() => result.current.setDraft("edited"));
+
+		act(() => result.current.reset());
+
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("reports a clean edge as a save when the editor offers no discard signal", () => {
+		const { rerender } = mount({ id: "a", isDirty: true });
+
+		rerender({ id: "a", isDirty: false });
+
+		expect(useSaveStore.getState().status).toBe("saved");
 	});
 });
 

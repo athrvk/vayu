@@ -95,6 +95,12 @@ interface EntityDraft<T> {
 	/** Throw the draft away and go back to the persisted value. */
 	reset: () => void;
 	/**
+	 * Whether the draft going clean was a `reset` rather than a save landing, and
+	 * clears that answer. Pass it to `useDraftSaveContext` so the Dock reports a
+	 * discard as idle instead of "Saved" (#1931).
+	 */
+	consumeDiscard: () => boolean;
+	/**
 	 * The persisted value the draft last agreed with the server on. A caller
 	 * that merges by field (`InfoTab`'s `{name, description}`) diffs `draft`
 	 * and `externalValue` against this to tell which side touched which key; a
@@ -209,16 +215,30 @@ export function useEntityDraft<T>({
 		resetSave();
 	}, [entityKey, resetSave]);
 
+	// Set only when `reset` actually discards an edit: resetting a clean draft
+	// produces no dirty-to-clean edge to consume it, and a mark left behind
+	// would make the next real save read as a discard.
+	const discardedRef = useRef(false);
 	const reset = useCallback(() => {
+		if (JSON.stringify(draftRef.current) !== JSON.stringify(valueRef.current)) {
+			discardedRef.current = true;
+		}
 		setDraft(valueRef.current);
 		syncTo(valueRef.current);
 	}, [syncTo]);
+
+	const consumeDiscard = useCallback(() => {
+		const discarded = discardedRef.current;
+		discardedRef.current = false;
+		return discarded;
+	}, []);
 
 	return {
 		draft,
 		setDraft,
 		isDirty: JSON.stringify(draft) !== serializedValue,
 		reset,
+		consumeDiscard,
 		baseline,
 		externalValue,
 	};

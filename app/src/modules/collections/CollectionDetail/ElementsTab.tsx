@@ -103,6 +103,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		setDraft: setElements,
 		isDirty,
 		reset: resetDraft,
+		consumeDiscard,
 		externalValue,
 	} = useEntityDraft<ElementDef[]>({
 		entityKey: `${collection.id}:elements`,
@@ -132,6 +133,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		isDirty,
 		isActive: active,
 		save: persist,
+		consumeDiscard,
 	});
 
 	const handleSave = () => void persist().catch(() => {});

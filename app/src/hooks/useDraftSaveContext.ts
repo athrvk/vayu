@@ -54,6 +54,12 @@ interface DraftSaveContextOptions {
 	 * `SaveBlockedError` says the edit was deliberately not sent and is still unsaved.
 	 */
 	save: () => Promise<void>;
+	/**
+	 * Asked on every dirty-to-clean edge: true when the draft was thrown away
+	 * (`useEntityDraft`'s `consumeDiscard`), so the Dock goes idle rather than
+	 * reporting a save that never happened. Omitted, every clean edge is a save.
+	 */
+	consumeDiscard?: () => boolean;
 }
 
 export function useDraftSaveContext({
@@ -62,6 +68,7 @@ export function useDraftSaveContext({
 	isDirty,
 	isActive,
 	save,
+	consumeDiscard,
 }: DraftSaveContextOptions): void {
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
@@ -69,6 +76,7 @@ export function useDraftSaveContext({
 	const setActiveContext = useSaveStore((s) => s.setActiveContext);
 	const markPendingSave = useSaveStore((s) => s.markPendingSave);
 	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const discardPendingSave = useSaveStore((s) => s.discardPendingSave);
 	const failSave = useSaveStore((s) => s.failSave);
 
 	// The registered save is bound once and reads the latest `save` when it runs,
@@ -119,13 +127,27 @@ export function useDraftSaveContext({
 	const prevRef = useRef({ id, isDirty: false });
 	useEffect(() => {
 		updateContext(id, { hasPendingChanges: isDirty });
+		// Consumed on every run, not only on the falling edge, so a mark that no
+		// edge claimed (an id switch landing with it) cannot colour a later save.
+		const discarded = consumeDiscard?.() ?? false;
 		const prev = prevRef.current;
 		if (prev.id === id) {
 			if (isDirty && !prev.isDirty) markPendingSave();
-			else if (!isDirty && prev.isDirty) completeSaveThenIdle(id);
+			else if (!isDirty && prev.isDirty) {
+				if (discarded) discardPendingSave(id);
+				else completeSaveThenIdle(id);
+			}
 		}
 		prevRef.current = { id, isDirty };
-	}, [id, isDirty, updateContext, markPendingSave, completeSaveThenIdle]);
+	}, [
+		id,
+		isDirty,
+		consumeDiscard,
+		updateContext,
+		markPendingSave,
+		completeSaveThenIdle,
+		discardPendingSave,
+	]);
 
 	useEffect(() => {
 		if (isActive) setActiveContext(id);
