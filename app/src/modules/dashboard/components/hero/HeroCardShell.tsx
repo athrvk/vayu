@@ -30,7 +30,7 @@ export function HeroCardShell({
 	children: ReactNode;
 }) {
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
+		<div className="bg-card surface-card border border-border rounded-md p-4 flex flex-col gap-1.5">
 			<Eyebrow>
 				{label}
 				<InfoChip tip={tip} />
@@ -83,7 +83,7 @@ export function MiniBar({
 	showTarget?: boolean;
 }) {
 	return (
-		<div className="relative mt-2 h-1 rounded-sm border border-border bg-accent overflow-hidden">
+		<div className="relative mt-2 h-1 rounded-sm bg-accent overflow-hidden">
 			<div
 				// `transition-[width,background-color]`: both the fill's width and
 				// its tier colour change live while a load test runs, and neither

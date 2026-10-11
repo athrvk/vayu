@@ -94,7 +94,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 	const sourceId = source?.id;
 
 	return (
-		<div className="mt-7 p-3.5 px-4 bg-card border border-border rounded-md">
+		<div className="mt-7 p-3.5 px-4 bg-card surface-card border border-border rounded-md">
 			{/* Was a hand-typed copy of the eyebrow that had drifted to
 			    `tracking-[0.07em]`. At 11px that is 0.11px per character - not a
 			    deliberate variant, just a copy nobody could diff against the
@@ -112,7 +112,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 						key={c.id}
 						className={cn(
 							"flex items-center gap-2 py-1.5",
-							!isLast && "border-b border-border"
+							!isLast && "border-b border-rule"
 						)}
 					>
 						<span

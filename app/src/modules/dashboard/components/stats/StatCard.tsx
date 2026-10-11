@@ -24,7 +24,7 @@ export function StatCard({
 	infoTip?: ReactNode;
 }) {
 	return (
-		<div className="bg-card border border-border rounded-md p-3">
+		<div className="bg-card surface-card border border-border rounded-md p-3">
 			<p className={cn(EYEBROW_CLASS, "mb-1.5")}>
 				{label}
 				{infoTip && <InfoChip tip={infoTip} />}

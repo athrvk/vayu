@@ -74,7 +74,7 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 				</div>
 			))}
 
-			<p className="pt-2.5 border-t border-dashed border-border text-label text-muted-foreground">
+			<p className="pt-2.5 border-t border-dashed border-rule text-label text-muted-foreground">
 				Every completion ({sampleCount.toLocaleString()}), not the trace sample.
 			</p>
 

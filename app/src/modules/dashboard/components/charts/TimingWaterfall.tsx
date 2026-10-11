@@ -90,7 +90,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 					</div>
 				);
 			})}
-			<div className="mt-2.5 pt-2.5 border-t border-dashed border-border flex justify-between text-label text-muted-foreground">
+			<div className="mt-2.5 pt-2.5 border-t border-dashed border-rule flex justify-between text-label text-muted-foreground">
 				<span>Avg total</span>
 				<span className="font-mono font-semibold">
 					{hasData ? (

@@ -140,4 +140,33 @@ describe("InheritanceChain", () => {
 			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
 		).toBeInTheDocument();
 	});
+
+	it("declares the card surface its row dividers read (#1891)", () => {
+		// `--border` is the same colour as `--card` in dark, so a divider on it
+		// inside the card is absent; `border-rule` is only right under a declared
+		// surface, hence the card's `surface-card` is asserted beside the rows'.
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", { mode: "bearer", token: "t" }),
+			collection("mid", "Payments", { mode: "none" }),
+			collection("leaf", "Refunds", { mode: "none" })
+		);
+
+		const { container } = render(<InheritanceChain collectionId="leaf" />);
+
+		const card = container.firstElementChild!;
+		expect(card.classList.contains("bg-card")).toBe(true);
+		expect(card.classList.contains("surface-card")).toBe(true);
+
+		const rows = ["Acme", "Payments", "Refunds"].map((name) =>
+			screen.getByText(name).closest(".py-1\\.5")!
+		);
+		const [first, second, last] = rows.map((row) => row.classList);
+		for (const divided of [first, second]) {
+			expect(divided.contains("border-rule")).toBe(true);
+			expect(divided.contains("border-border")).toBe(false);
+		}
+		// The last row has nothing beneath it to divide from.
+		expect(last.contains("border-b")).toBe(false);
+	});
 });

@@ -229,7 +229,7 @@ function MetricsView({
 
 			{/* Row 2 - Throughput over time */}
 			{chartWindow.length > 1 && (
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Throughput over time
@@ -290,7 +290,7 @@ function MetricsView({
 						sleeps={hostSleeps}
 					/>
 					{rampOverlay && (
-						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-label font-mono text-muted-foreground">
+						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
 							<span>
 								<span className="text-muted-foreground">ramp deviation </span>
 								<span className="text-foreground font-semibold">
@@ -318,7 +318,7 @@ function MetricsView({
 
 			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
 			{hasMultiplePoints && (
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency over time
@@ -362,7 +362,7 @@ function MetricsView({
 			    every other mode shows Response-time percentiles over time. */}
 			{derived.mode === "ramp_up"
 				? historicalMetrics.length > 1 && (
-						<div className="bg-card border border-border rounded-md p-3.5">
+						<div className="bg-card surface-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
 									Response time vs concurrency
@@ -394,7 +394,7 @@ function MetricsView({
 					)
 				: hasMultiplePoints &&
 					hasPercentileData && (
-						<div className="bg-card border border-border rounded-md p-3.5">
+						<div className="bg-card surface-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
 									Response time percentiles over time
@@ -437,7 +437,7 @@ function MetricsView({
 
 			{/* Status codes over time - stacked per-interval class composition */}
 			{hasStatusData && (
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Status codes over time
@@ -481,7 +481,7 @@ function MetricsView({
 			{/* Server vitals - only for a run that scraped an endpoint, so a run
 			    without a monitor block keeps the dashboard it always had. */}
 			{monitorSamples.length > 0 && chartWindow.length > 1 && (
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Server vitals
@@ -505,7 +505,7 @@ function MetricsView({
 			{/* Custom metrics - only for a run that declared metric.record / pm.metrics
 			    names, so a run that recorded none keeps the dashboard it always had. */}
 			{hasCustomMetricsData && chartWindow.length > 1 && (
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Custom metrics
@@ -526,7 +526,7 @@ function MetricsView({
 			{/* Row 3 - HDR plot + Timing waterfall */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
 				{/* HDR */}
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency distribution
@@ -547,7 +547,7 @@ function MetricsView({
 					) : (
 						<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
 					)}
-					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-label font-mono text-muted-foreground">
+					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
 						<LatencyStat k="min" v={finalReport?.latency?.min} />
 						<LatencyStat k="mean" v={finalReport?.latency?.avg} />
 						<LatencyStat k="p50" v={finalReport?.latency?.p50} />
@@ -558,7 +558,7 @@ function MetricsView({
 				</div>
 
 				{/* Timing waterfall */}
-				<div className="bg-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Avg request timing
@@ -578,7 +578,7 @@ function MetricsView({
 					    a column-to-column comparison that is not valid. Renders
 					    nothing when the run recorded no distributions. */}
 					{finalReport?.timingBreakdown?.phases && (
-						<div className="mt-3.5 pt-3.5 border-t border-border">
+						<div className="mt-3.5 pt-3.5 border-t border-rule">
 							<h3 className="text-xs font-semibold text-foreground mb-3">
 								Phase percentiles
 								<InfoChip tip={TOOLTIPS.phasePercentiles} />
@@ -592,7 +592,7 @@ function MetricsView({
 					    run's time to first event. Absent for every run that did
 					    not stream - see StreamMetrics. */}
 					{finalReport?.stream && (
-						<div className="mt-3.5 pt-3.5 border-t border-border">
+						<div className="mt-3.5 pt-3.5 border-t border-rule">
 							<h3 className="text-xs font-semibold text-foreground mb-3">
 								Stream events
 								<InfoChip tip={TOOLTIPS.streamEvents} />
