@@ -52,12 +52,23 @@ export interface NewRequestPickerProps {
 	onSelect: (collectionId: string) => void;
 }
 
+export interface NewRequestOptions {
+	/**
+	 * Create the request here and skip the targeting rule. For a caller that
+	 * already has a stronger signal than "last worked in" - the sidebar's "+" while
+	 * a collection's own tab is open. The caller vouches that it still exists.
+	 */
+	collectionId?: string;
+}
+
 export interface UseNewRequestReturn {
 	/**
 	 * Start the flow. Opens the picker only when the target is ambiguous.
 	 * @param preset Fields to create the request with, instead of blank.
 	 */
-	newRequest: (preset?: RequestPreset) => void;
+	newRequest: (preset?: RequestPreset, options?: NewRequestOptions) => void;
+	/** A request create is in flight, so a button that starts the flow can show it. */
+	isCreating: boolean;
 	pickerProps: NewRequestPickerProps;
 }
 
@@ -100,8 +111,12 @@ export function useNewRequest(): UseNewRequestReturn {
 	);
 
 	const newRequest = useCallback(
-		(preset?: RequestPreset) => {
+		(preset?: RequestPreset, options?: NewRequestOptions) => {
 			presetRef.current = preset ?? null;
+			if (options?.collectionId) {
+				void createRequestIn(options.collectionId);
+				return;
+			}
 			const target = resolveNewRequestTarget(lastCollectionId, collections);
 			if (target.kind === "pick") {
 				setPickerOpen(true);
@@ -137,6 +152,7 @@ export function useNewRequest(): UseNewRequestReturn {
 
 	return {
 		newRequest,
+		isCreating: createRequestMutation.isPending,
 		pickerProps: { open: pickerOpen, onOpenChange: setPickerOpen, collections, onSelect },
 	};
 }
