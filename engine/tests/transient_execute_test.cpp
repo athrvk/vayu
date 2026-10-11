@@ -29,6 +29,11 @@
  * `validate_run_config` rejecting `transient` on `POST /runs` lives with the
  * rest of that endpoint's validation, in run_config_validation_test.cpp.
  *
+ * `read_persist_variables_flag` (#1904) is the sibling opt-out for what the
+ * scripts and extractors set, read by the same rule, so its table sits here;
+ * the route honouring it on both transports is driven end to end in
+ * sse_stream_test.cpp's `StreamExecuteTest`.
+ *
  * What is NOT covered here: that the route skips `create_run` for a transient
  * payload. The suite has no in-process HTTP route harness (see
  * run_route_test.cpp), so that ordering is held by the call site - the
@@ -55,24 +60,25 @@
 namespace {
 
 using nlohmann::json;
+using vayu::http::routes::read_persist_variables_flag;
 using vayu::http::routes::read_transient_flag;
 using vayu::http::routes::record_design_result;
 
-struct TransientFlagCase {
+struct FlagCase {
     const char* name;
     const char* payload;
     bool expected_ok;
     bool expected_value;
 };
 
-constexpr auto TRANSIENT_FLAG_CASES = std::to_array<TransientFlagCase> ({
+constexpr auto TRANSIENT_FLAG_CASES = std::to_array<FlagCase> ({
 { "AbsentMeansRecorded", R"({"method":"GET","url":"http://x/"})", true, false },
 { "NullMeansRecorded", R"({"transient":null})", true, false },
 { "TrueOptsOut", R"({"transient":true})", true, true },
 { "FalseIsExplicitlyRecorded", R"({"transient":false})", true, false },
 });
 
-class TransientFlagAccepted : public ::testing::TestWithParam<TransientFlagCase> {};
+class TransientFlagAccepted : public ::testing::TestWithParam<FlagCase> {};
 
 TEST_P (TransientFlagAccepted, ReadsTheExpectedValue) {
     const auto& c = GetParam ();
@@ -84,7 +90,7 @@ TEST_P (TransientFlagAccepted, ReadsTheExpectedValue) {
 INSTANTIATE_TEST_SUITE_P (TransientFlag,
 TransientFlagAccepted,
 ::testing::ValuesIn (TRANSIENT_FLAG_CASES),
-[] (const ::testing::TestParamInfo<TransientFlagCase>& info) {
+[] (const ::testing::TestParamInfo<FlagCase>& info) {
     return std::string (info.param.name);
 });
 
@@ -97,6 +103,43 @@ TEST (TransientFlag, ANonBooleanIsRejectedAndNamesTheField) {
         auto flag = read_transient_flag (json{ { "transient", bad } });
         ASSERT_FALSE (flag.ok) << "expected rejection for " << bad.dump ();
         EXPECT_NE (flag.error.find ("transient"), std::string::npos)
+        << "message should name the field, got: " << flag.error;
+    }
+}
+
+// `persistVariables` (#1904) reads through the same rule with the opposite
+// default: absent keeps writing back, so no existing caller changes.
+constexpr auto PERSIST_VARIABLES_FLAG_CASES = std::to_array<FlagCase> ({
+{ "AbsentMeansPersisted", R"({"method":"GET","url":"http://x/"})", true, true },
+{ "NullMeansPersisted", R"({"persistVariables":null})", true, true },
+{ "TrueIsExplicitlyPersisted", R"({"persistVariables":true})", true, true },
+{ "FalseOptsOut", R"({"persistVariables":false})", true, false },
+});
+
+class PersistVariablesFlagAccepted : public ::testing::TestWithParam<FlagCase> {};
+
+TEST_P (PersistVariablesFlagAccepted, ReadsTheExpectedValue) {
+    const auto& c = GetParam ();
+    auto flag     = read_persist_variables_flag (json::parse (c.payload));
+    EXPECT_EQ (flag.ok, c.expected_ok);
+    EXPECT_EQ (flag.value, c.expected_value);
+}
+
+INSTANTIATE_TEST_SUITE_P (PersistVariablesFlag,
+PersistVariablesFlagAccepted,
+::testing::ValuesIn (PERSIST_VARIABLES_FLAG_CASES),
+[] (const ::testing::TestParamInfo<FlagCase>& info) {
+    return std::string (info.param.name);
+});
+
+// A caller sending `"false"` believes nothing reaches disk; reading that as the
+// default `true` would write anyway.
+TEST (PersistVariablesFlag, ANonBooleanIsRejectedAndNamesTheField) {
+    for (const auto& bad :
+    { json ("false"), json (0), json (json::array ()), json (json::object ()) }) {
+        auto flag = read_persist_variables_flag (json{ { "persistVariables", bad } });
+        ASSERT_FALSE (flag.ok) << "expected rejection for " << bad.dump ();
+        EXPECT_NE (flag.error.find ("persistVariables"), std::string::npos)
         << "message should name the field, got: " << flag.error;
     }
 }

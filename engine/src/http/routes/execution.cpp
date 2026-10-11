@@ -222,6 +222,26 @@ std::string scenario_snapshot (const std::string& sanitized, const nlohmann::jso
     return parsed.dump ();
 }
 
+namespace {
+/// One boolean `POST /execute` flag: absent or `null` reads as @p fallback, any
+/// other non-boolean is refused naming @p key.
+ExecuteFlag read_execute_flag (const nlohmann::json& json, const char* key, bool fallback) {
+    ExecuteFlag flag;
+    flag.value       = fallback;
+    const auto field = json.find (key);
+    if (field == json.end () || field->is_null ()) {
+        return flag;
+    }
+    if (!field->is_boolean ()) {
+        flag.ok    = false;
+        flag.error = std::string ("'") + key + "' must be a boolean";
+        return flag;
+    }
+    flag.value = field->get<bool> ();
+    return flag;
+}
+} // namespace
+
 /**
  * @brief Read `POST /execute`'s `transient` flag (issue #382).
  *
@@ -240,22 +260,21 @@ std::string scenario_snapshot (const std::string& sanitized, const nlohmann::jso
  * than `allowScriptRequests`, whose non-boolean-means-no is safe in the other
  * direction: it denies a capability rather than granting exposure.)
  *
- * Non-static: transient_execute_test.cpp drives it directly, the suite having
- * no in-process HTTP route harness.
+ * Non-static: transient_execute_test.cpp drives it directly.
  */
-TransientFlag read_transient_flag (const nlohmann::json& json) {
-    TransientFlag flag;
-    auto field = json.find ("transient");
-    if (field == json.end () || field->is_null ()) {
-        return flag;
-    }
-    if (!field->is_boolean ()) {
-        flag.ok    = false;
-        flag.error = "'transient' must be a boolean";
-        return flag;
-    }
-    flag.value = field->get<bool> ();
-    return flag;
+ExecuteFlag read_transient_flag (const nlohmann::json& json) {
+    return read_execute_flag (json, "transient", false);
+}
+
+/**
+ * @brief Read `POST /execute`'s `persistVariables` flag (#1904).
+ *
+ * Absent and `null` mean `true`, so every existing caller keeps writing back
+ * what its scripts set. A non-boolean is a 400 for the reason `transient`'s
+ * is: a caller sending `"false"` believes nothing reaches disk.
+ */
+ExecuteFlag read_persist_variables_flag (const nlohmann::json& json) {
+    return read_execute_flag (json, "persistVariables", true);
 }
 
 /**
@@ -1261,6 +1280,8 @@ struct ExecutePayload {
     nlohmann::json json;
     /// No row is recorded for this execution (issue #382).
     bool transient = false;
+    /// What the scripts and extractors set is written back to disk (#1904).
+    bool persist_variables = true;
     StreamFlag stream;
     RunOrigin origin;
     /// The row this send binds, if the caller named one (issue #601).
@@ -1289,6 +1310,8 @@ struct DesignSend {
     vayu::runtime::ScriptConfig script_config;
     std::optional<nlohmann::json> data_row;
     StreamFlag stream;
+    /// Copied from the payload; both paths hand it to `persist_send_variables`.
+    bool persist_variables = true;
 };
 
 
@@ -1320,6 +1343,11 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (!transient.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + transient.error);
         return transient.error;
+    }
+    const auto persist_variables = read_persist_variables_flag (json);
+    if (!persist_variables.ok) {
+        vayu::utils::log_warning ("http", "POST /execute - " + persist_variables.error);
+        return persist_variables.error;
     }
 
     // Beside the transient flag and for the same reason: `stream` changes
@@ -1428,13 +1456,14 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
         vayu::utils::log_warning ("http", "POST /execute - " + bound.error);
         return bound.error;
     }
-    out.json      = std::move (json);
-    out.transient = transient.value;
-    out.stream    = std::move (stream);
-    out.origin    = std::move (*origin);
-    out.data_row  = std::move (data_row.value);
-    out.row_auth  = std::move (row_auth);
-    out.built     = std::move (built);
+    out.json              = std::move (json);
+    out.transient         = transient.value;
+    out.persist_variables = persist_variables.value;
+    out.stream            = std::move (stream);
+    out.origin            = std::move (*origin);
+    out.data_row          = std::move (data_row.value);
+    out.row_auth          = std::move (row_auth);
+    out.built             = std::move (built);
     return std::nullopt;
 }
 
@@ -1542,9 +1571,21 @@ DesignSend& send) {
     // no - see ScriptConfig::allow_send_request.
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
-    send.data_row = payload.data_row;
-    send.stream   = payload.stream;
+    send.data_row          = payload.data_row;
+    send.stream            = payload.stream;
+    send.persist_variables = payload.persist_variables;
     return std::nullopt;
+}
+
+/**
+ * Write back what a design send's scripts and extractors set, unless the
+ * caller sent `persistVariables: false` (#1904). The one place both transports
+ * decide it; best-effort, as `persist_script_variables` is.
+ */
+void persist_send_variables (vayu::db::Database& db, const ScriptVariableScopes& scopes, bool persist) {
+    if (persist) {
+        persist_script_variables (db, scopes);
+    }
 }
 
 /**
@@ -1782,9 +1823,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
     run = send.run, script_config = send.script_config, elements = send.elements,
     request_name = send.script_request_name, scopes, iteration_data = send.data_row,
-    transport, default_headers, script_response_bound, element_body_bytes,
-    pre_script_result, pre_element_outcomes] (const vayu::Request& sent,
-    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
+    persist_variables = send.persist_variables, transport, default_headers,
+    script_response_bound, element_body_bytes, pre_script_result,
+    pre_element_outcomes] (const vayu::Request& sent, const vayu::Response& response,
+    const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
         std::vector<vayu::core::ElementOutcome> element_outcomes =
@@ -1873,7 +1915,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             }
             // Best-effort and after both scripts, so one `set()` per
             // run reaches disk rather than one per half.
-            persist_script_variables (db, scopes);
+            persist_send_variables (db, scopes, persist_variables);
         }
 
         // No verdict: a stream's body is an event stream, not a
@@ -1973,8 +2015,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
     /*send.stream=*/nullptr, validation, scripts, elements);
 
-    // Persist script-set variables (design mode only; best-effort)
-    persist_script_variables (ctx.db, scopes);
+    persist_send_variables (ctx.db, scopes, send.persist_variables);
 
     // Build and send response
     // Engine returns 200 - the server's status is in the response body
