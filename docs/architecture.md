@@ -341,7 +341,11 @@ one app instance may drive it:
   and shut down on quit like any engine the app spawned itself. Adoption checks
   the running engine's `/health.version` against this app's own first (issue
   #1492): a mismatch is stopped rather than adopted, and this instance starts
-  its own build instead - see `docs/lock-file-handling.md`.
+  its own build instead - see `docs/lock-file-handling.md`. A lock PID that is
+  a live Vayu engine but never answers `/health` is waited for on the same
+  budget a spawned engine gets, adopted if it answers, and otherwise stopped by
+  PID and replaced (issue #1905); "port in use by another application" is left
+  for a port the lock does not explain.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a
   wait for the process to go, then a name-verified kill by PID if it outstays
   the grace period. The name check is what keeps a recycled PID from being

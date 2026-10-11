@@ -258,6 +258,75 @@ describe("EngineSidecar - adoption", () => {
 		expect(sidecar.isRunning()).toBe(true);
 	});
 
+	// Issue #1905: a live lock PID that does not answer /health is an engine
+	// that is hung or still starting, not "another application".
+	describe("a live lock PID that does not answer /health", () => {
+		/** Healthy only once this test's own engine has been spawned. */
+		function answersOnlyAfterSpawn(state: { spawned: FakeChild[] }) {
+			return vi.fn(async () => state.spawned.length > 0);
+		}
+
+		it("is waited for, then stopped and replaced", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			state.healthy = false;
+			const probeHealth = answersOnlyAfterSpawn(state);
+			system.probeHealth = probeHealth;
+			const sidecar = new EngineSidecar(TEST_PORT, system);
+
+			await sidecar.start();
+
+			expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
+			expect(system.spawnEngine).toHaveBeenCalledOnce();
+			expect(sidecar.isRunning()).toBe(true);
+			// The ramped budget was spent before the kill, not skipped.
+			const sleeps = vi.mocked(system.sleep).mock.calls.map(([ms]) => ms);
+			expect(sleeps).toContain(ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS);
+			expect(sleeps).toContain(ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
+			expect(sleeps).toContain(ENGINE_PORT_RELEASE_DELAY_MS);
+		});
+
+		it("is adopted when it answers late", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			let probes = 0;
+			system.probeHealth = vi.fn(async () => ++probes > 3);
+			const sidecar = new EngineSidecar(TEST_PORT, system);
+
+			await sidecar.start();
+
+			expect(probes).toBe(4);
+			expect(system.spawnEngine).not.toHaveBeenCalled();
+			expect(system.killEngineProcess).not.toHaveBeenCalled();
+			expect(sidecar.isRunning()).toBe(true);
+			// Adopted with the lock PID, so quit can still find it.
+			await sidecar.stop();
+			expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
+		});
+	});
+
+	// The port-in-use message is for a port held by something that is not a
+	// Vayu engine - the lock names nothing alive, or names nothing at all.
+	it("reports a port held by another application when no lock names a live engine", async () => {
+		const { system, state } = fakeSystem();
+		system.isPortFree = vi.fn(async () => false);
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await expect(sidecar.start()).rejects.toThrow(/already in use by another application/);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(state.spawned).toHaveLength(0);
+	});
+
+	it("reports a port held by another application when the lock PID is dead", async () => {
+		const { system } = fakeSystem();
+		writeFileSync(join(fake.userData, ENGINE_LOCK_FILE), `${ADOPTED_PID}\n`);
+		system.isPortFree = vi.fn(async () => false);
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await expect(sidecar.start()).rejects.toThrow(/already in use by another application/);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+	});
+
 	it("stops an adopted engine on quit, force-killing one that ignores the request", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
