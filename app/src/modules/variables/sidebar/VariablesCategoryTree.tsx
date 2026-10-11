@@ -42,7 +42,7 @@
 import { useId, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useDeleteRefocus } from "@/modules/collections/useDeleteRefocus";
-import { useTabsStore, useSaveStore, useLayoutStore } from "@/stores";
+import { useTabsStore, useSaveStore, useLayoutStore, useToastStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import {
 	useCollectionsQuery,
@@ -159,7 +159,10 @@ export default function VariablesCategoryTree() {
 	const selectedCategory = useVariablesStore((s) => s.selectedCategory);
 	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const openTab = useTabsStore((s) => s.openTab);
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
 	const failSave = useSaveStore((s) => s.failSave);
+	const showToast = useToastStore((s) => s.showToast);
 
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
@@ -202,11 +205,38 @@ export default function VariablesCategoryTree() {
 		setRenamingEnvId(null);
 	};
 
+	/**
+	 * Report a failed create, duplicate or delete as a plain error toast. Not
+	 * `failSave`: that parks the Dock on "Not saved", and none of these is an
+	 * unsaved edit (`save-store.ts`). The fallback leads because the engine's
+	 * message says why, never what was being attempted.
+	 */
+	const reportFailure = (error: unknown, fallback: string) =>
+		showToast(error instanceof Error ? `${fallback} - ${error.message}` : fallback, "error");
+
+	/**
+	 * A rename is a save, so it goes through the save store and a failure parks
+	 * the Dock on "Not saved". The field stays mounted until the PUT settles: the
+	 * hook has already closed the editor, so the blur that follows is a no-op, and
+	 * unmounting early would snap the row back to the old name before the failure
+	 * is reported.
+	 */
 	const submitRenameEnvironment = async (envId: string, name: string) => {
 		const current = environments.find((e) => e.id === envId);
-		setRenamingEnvId(null);
-		if (name === current?.name) return;
-		await updateEnvironmentMutation.mutateAsync({ id: envId, name });
+		if (name === current?.name) {
+			setRenamingEnvId(null);
+			return;
+		}
+		startSaving();
+		try {
+			await updateEnvironmentMutation.mutateAsync({ id: envId, name });
+			completeSaveThenIdle();
+		} catch (error) {
+			const fallback = "Couldn't rename the environment";
+			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+		} finally {
+			setRenamingEnvId((current) => (current === envId ? null : current));
+		}
 	};
 
 	/**
@@ -240,11 +270,15 @@ export default function VariablesCategoryTree() {
 	 */
 	const duplicateEnvironment = async (env: Environment) => {
 		if (createEnvironmentMutation.isPending) return;
-		await createEnvironmentMutation.mutateAsync({
-			name: `${env.name} (Copy)`,
-			description: env.description,
-			variables: env.variables ?? {},
-		});
+		try {
+			await createEnvironmentMutation.mutateAsync({
+				name: `${env.name} (Copy)`,
+				description: env.description,
+				variables: env.variables ?? {},
+			});
+		} catch (error) {
+			reportFailure(error, "Couldn't duplicate the environment");
+		}
 	};
 
 	const isSelected = (category: VariableCategory) => {
@@ -269,10 +303,16 @@ export default function VariablesCategoryTree() {
 	const handleCreateEnvironment = async () => {
 		if (!newEnvName.trim() || createEnvironmentMutation.isPending) return;
 
-		const newEnv = await createEnvironmentMutation.mutateAsync({
-			name: newEnvName.trim(),
-			variables: {},
-		});
+		let newEnv: Environment;
+		try {
+			newEnv = await createEnvironmentMutation.mutateAsync({
+				name: newEnvName.trim(),
+				variables: {},
+			});
+		} catch (error) {
+			reportFailure(error, "Couldn't create the environment");
+			return; // Keep the field open with the typed name so it can be retried.
+		}
 
 		setCreatingEnvironment(false);
 		setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
@@ -314,11 +354,8 @@ export default function VariablesCategoryTree() {
 				setSelectedCategory(null);
 			}
 		} catch (error) {
-			// A bare `mutateAsync` left the rejection unhandled and the dialog up,
-			// which reads as "the click didn't register" rather than "the delete
-			// failed". Reported through the Dock, the channel the collection tree's
-			// own failures already use.
-			failSave(error instanceof Error ? error.message : "Couldn't delete the environment");
+			// A toast, not `failSave`: a delete is not an unsaved edit (`save-store.ts`).
+			reportFailure(error, "Couldn't delete the environment");
 		} finally {
 			// Both outcomes close it, because focus is handed back from the close
 			// and the decision of *where* is read from whether the row actually

@@ -593,11 +593,15 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
 raises an error toast carrying the reason. Its call sites are the collection
-tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
+and environment trees' *renames* (a rename is a save: `startSaving`, then
+`completeSaveThenIdle` or `failSave`), `useSaveManager`, `SettingsMain`,
 `VariableTableEditor`, `useDraftSaveContext`, the context bar's
 `VariablesSection` and the inbox's `CannedResponseControls` - and doing the
 reporting here rather than at each of them means a new caller cannot forget to
-report. The last two were added because both could fail in complete silence:
+report. A failed create, duplicate or delete (collections, requests and
+environments alike) is not a save: nothing is pending and nothing retries, so
+it raises its own error toast and leaves the Dock alone. The last two call
+sites above were added because both could fail in complete silence:
 the variables section fired three mutations with no `onError` at all, and the
 manual-draft editors rendered an inline callout that a quit flush has no screen
 to show. `CannedResponseControls` (#1450) is a direct writer like

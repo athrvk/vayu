@@ -119,9 +119,17 @@ vi.mock("@/queries", () => ({
 const setSelectedCategory = vi.fn();
 vi.mock("@/stores", () => ({
 	useTabsStore: (select: (s: { openTab: () => void }) => unknown) => select({ openTab: vi.fn() }),
-	// The environment tree reports a failed delete through the Dock's save status.
-	useSaveStore: (select: (s: { failSave: () => void }) => unknown) =>
-		select({ failSave: vi.fn() }),
+	// The environment tree reports a failed rename through the Dock and a failed
+	// create, duplicate or delete through a toast.
+	useSaveStore: (
+		select: (s: {
+			startSaving: () => void;
+			completeSaveThenIdle: () => void;
+			failSave: () => void;
+		}) => unknown
+	) => select({ startSaving: vi.fn(), completeSaveThenIdle: vi.fn(), failSave: vi.fn() }),
+	useToastStore: (select: (s: { showToast: () => void }) => unknown) =>
+		select({ showToast: vi.fn() }),
 	// Read by the empty-collections note's "Browse collections" action (#1693).
 	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>
 		select({ revealDrawerView: vi.fn() }),

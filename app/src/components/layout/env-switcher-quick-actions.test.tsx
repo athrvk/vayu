@@ -101,6 +101,24 @@ describe("environment switcher quick actions", () => {
 		expect(useSessionStore.getState().activeEnvironmentId).toBeNull();
 	});
 
+	it("reports a rejected create and goes nowhere", async () => {
+		createEnvironment.mockRejectedValue(new Error("database is locked"));
+		renderTitleBar();
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("New environment"));
+
+		await vi.waitFor(() =>
+			expect(useToastStore.getState().toasts).toContainEqual(
+				expect.objectContaining({
+					message: "Couldn't create the environment - database is locked",
+					variant: "error",
+				})
+			)
+		);
+		expect(useVariablesStore.getState().selectedCategory).toBeNull();
+		expect(useTabsStore.getState().openTabs).toEqual([]);
+	});
+
 	it("opens the import dialog from Import Environment...", () => {
 		renderTitleBar();
 		const menu = openMenu();

@@ -55,6 +55,7 @@ import {
 } from "@/queries";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
+import type { Environment } from "@/types";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -332,10 +333,20 @@ function EnvSwitcher() {
 	 * choice through `selectEnvironment` below.
 	 */
 	const createNewEnvironment = async () => {
-		const newEnv = await createEnvironment.mutateAsync({
-			name: DEFAULT_ENVIRONMENT_NAME,
-			variables: {},
-		});
+		let newEnv: Environment;
+		try {
+			newEnv = await createEnvironment.mutateAsync({
+				name: DEFAULT_ENVIRONMENT_NAME,
+				variables: {},
+			});
+		} catch (error) {
+			const fallback = "Couldn't create the environment";
+			showToast({
+				message: error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+				variant: "error",
+			});
+			return;
+		}
 		setSelectedCategory({ type: "environment", environmentId: newEnv.id });
 		openTab({ type: "variables", entityId: null });
 	};
