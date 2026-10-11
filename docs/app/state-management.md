@@ -1672,8 +1672,10 @@ left it before the write returns:
   carries. They are normally what was drawn, but a normalization is authoritative
   from the engine, so the tree settles on real positions rather than a guess.
 - `onError` restores the snapshots wholesale and reports through
-  `useSaveStore.failSave` - the one channel every save failure reaches the Dock
-  and the toast through. The mutation owns this rather than its caller, so the
+  `useToastStore.showToast`, not `failSave`: the drop is rolled back, so no edit
+  is unsaved, and `failSave` would park the Dock on "Not saved" with nothing
+  pending (a failure that is not an unsaved edit raises its own toast, per
+  `save-store.ts`). The mutation owns this rather than its caller, so the
   gesture layer cannot forget it.
 - `onSettled` invalidates the affected keys **once** - the collections list only
   if a collection moved, and only the request lists the plan named.
