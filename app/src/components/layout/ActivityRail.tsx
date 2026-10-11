@@ -41,6 +41,9 @@ import { useLayoutStore } from "@/stores";
 import { useRunningServiceCount } from "@/modules/services";
 import { RailButton } from "./RailButton";
 import { regionProps } from "./region-focus";
+import { useRovingStop } from "./useRovingStop";
+
+const VIEW_IDS = DRAWER_VIEWS.map(({ view }) => view);
 
 export function ActivityRail() {
 	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
@@ -48,37 +51,44 @@ export function ActivityRail() {
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const runningServices = useRunningServiceCount();
 	const navRef = useRef<HTMLElement>(null);
+	// The roving stop tracks the *selected* view, not whether the Drawer is
+	// currently open on it - the Drawer being closed must not leave the rail
+	// with zero tab stops.
+	const [rovingView, setRovingView] = useRovingStop(drawerView, VIEW_IDS);
 
 	/**
 	 * Up/Down move focus along the rail without activating - the same shape
 	 * `TabStrip`'s arrow-key handler uses, and for the same reason: arrowing
 	 * past every view on the way to Trash must not switch the Drawer six times.
 	 *
-	 * DOM query rather than a ref list, so the roving stop always matches what
-	 * is actually rendered; direct `.tabIndex` mutation rather than React state,
-	 * because promoting a destination without first clearing every other stop
-	 * leaves two buttons at `tabIndex={0}` when the vdom prop that would have
-	 * cleared the old one does not change (`TabStrip.tsx`'s own comment on this).
+	 * DOM query for the focused button, so it always matches what is rendered;
+	 * the roving stop itself is state (`useRovingStop`), since a `.tabIndex` write
+	 * leaves the prop `RailButton` renders unchanged and a later view change
+	 * would add a second stop beside it (#1856).
 	 */
-	const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
-		if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+	const onKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLElement>) => {
+			if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
 
-		const buttons = Array.from(navRef.current?.querySelectorAll<HTMLElement>("button") ?? []);
-		if (buttons.length === 0) return;
+			const buttons = Array.from(
+				navRef.current?.querySelectorAll<HTMLElement>("button") ?? []
+			);
+			if (buttons.length === 0) return;
 
-		const current = buttons.findIndex((el) => el === document.activeElement);
-		if (current === -1) return;
+			const current = buttons.findIndex((el) => el === document.activeElement);
+			if (current === -1) return;
 
-		const next =
-			e.key === "ArrowDown"
-				? (current + 1) % buttons.length
-				: (current - 1 + buttons.length) % buttons.length;
+			const next =
+				e.key === "ArrowDown"
+					? (current + 1) % buttons.length
+					: (current - 1 + buttons.length) % buttons.length;
 
-		e.preventDefault();
-		for (const el of buttons) el.tabIndex = -1;
-		buttons[next].tabIndex = 0;
-		buttons[next].focus();
-	}, []);
+			e.preventDefault();
+			setRovingView(VIEW_IDS[next]);
+			buttons[next].focus();
+		},
+		[setRovingView]
+	);
 
 	return (
 		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- roving tabindex for Up/Down between the six view buttons, the same shape TabStrip's tablist uses for Left/Right; the rail is deliberately `role="toolbar"`-free (see the file doc comment), so this lands on a landmark rather than a widget role
@@ -90,10 +100,6 @@ export function ActivityRail() {
 			{...regionProps("rail")}
 		>
 			{DRAWER_VIEWS.map(({ view, label, icon: Icon, motion }) => {
-				// The roving stop tracks the *selected* view, not whether the Drawer
-				// is currently open on it - the Drawer being closed must not leave
-				// the rail with zero tab stops.
-				const isRovingStop = drawerView === view;
 				return (
 					<RailButton
 						key={view}
@@ -103,7 +109,7 @@ export function ActivityRail() {
 						shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
 						side="left"
 						variant="indicator"
-						tabIndex={isRovingStop ? 0 : -1}
+						tabIndex={view === rovingView ? 0 : -1}
 					>
 						{/* The descriptor names the motion, not this file: the rail
 						    draws six glyphs generically and must not learn which one

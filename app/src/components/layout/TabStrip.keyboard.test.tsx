@@ -104,6 +104,49 @@ describe("TabStrip keyboard navigation", () => {
 		expect(document.activeElement).toBe(tabs[1]);
 	});
 
+	/*
+	 * The Tab stop is React state, not a DOM write (#1856). Written onto the
+	 * element, an arrow press left the vdom prop untouched, so a later click moved
+	 * `isActive` and the new active tab became a second `tabindex="0"` beside the
+	 * stray one; a close removed the only tab holding the stop and left none.
+	 */
+	it("hands the Tab stop to the clicked tab after arrowing elsewhere", () => {
+		renderStrip();
+		const tabs = screen.getAllByRole("tab");
+		tabs[0].focus();
+		press("ArrowRight");
+
+		fireEvent.click(tabs[2]);
+
+		const stops = screen.getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0");
+		expect(stops).toHaveLength(1);
+		expect(stops[0].getAttribute("data-tab-id")).toBe("t3");
+	});
+
+	it("does not revive an old arrow move when the selection comes back", () => {
+		renderStrip();
+		screen.getAllByRole("tab")[0].focus();
+		press("ArrowRight");
+		fireEvent.click(screen.getAllByRole("tab")[2]);
+
+		fireEvent.click(screen.getAllByRole("tab")[0]);
+
+		const stops = screen.getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0");
+		expect(stops.map((t) => t.getAttribute("data-tab-id"))).toEqual(["t1"]);
+	});
+
+	it("keeps a Tab stop on the active tab after the arrowed-to tab is closed", () => {
+		renderStrip();
+		screen.getAllByRole("tab")[0].focus();
+		press("ArrowRight");
+
+		press("Delete");
+
+		const stops = screen.getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0");
+		expect(stops).toHaveLength(1);
+		expect(stops[0].getAttribute("data-tab-id")).toBe(useTabsStore.getState().activeTabId);
+	});
+
 	it("leaves one Tab stop after Home and End too", () => {
 		renderStrip();
 		const tabs = screen.getAllByRole("tab");

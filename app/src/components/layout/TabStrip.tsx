@@ -62,6 +62,7 @@ import { useTabDescriptors } from "./tab-descriptors";
 import { getMethodColor } from "@/lib/method-display";
 // One tab, in its own module so a test can `vi.mock` it (#1714).
 import TabItem from "./TabItem";
+import { useRovingStop } from "./useRovingStop";
 
 export function TabStrip() {
 	const openTabs = useTabsStore((s) => s.openTabs);
@@ -100,6 +101,11 @@ export function TabStrip() {
 	);
 	const activeIndex = openTabs.findIndex((t) => t.id === activeTabId);
 	const { visible, overflowed } = fitTabs(widths, available, activeIndex);
+	// The Tab stop is state so TabItem's memo sees it move; see useRovingStop.
+	const [rovingId, setRovingId] = useRovingStop(
+		activeTabId,
+		visible.map((i) => openTabs[i].id)
+	);
 
 	/**
 	 * Arrow-key navigation across the strip.
@@ -112,39 +118,35 @@ export function TabStrip() {
 	 *
 	 * Focus moves without activating (`aria-selected` follows the click, not the
 	 * arrow). With a heavy tab like a dashboard in the strip, activate-on-arrow
-	 * would fire a mount for every tab you skate past.
+	 * would fire a mount for every tab you skate past. The Tab stop moves with
+	 * the focus, as state: a DOM write would leave the tabs' `tabIndex` props
+	 * disagreeing with the page.
 	 */
-	const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-		const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-		if (!keys.includes(e.key)) return;
+	const onKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLDivElement>) => {
+			const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+			if (!keys.includes(e.key)) return;
 
-		const tabs = Array.from(
-			listRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []
-		);
-		if (tabs.length === 0) return;
+			const tabs = Array.from(
+				listRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []
+			);
+			if (tabs.length === 0) return;
 
-		const current = tabs.findIndex((el) => el === document.activeElement);
-		if (current === -1) return;
+			const current = tabs.findIndex((el) => el === document.activeElement);
+			if (current === -1) return;
 
-		let next = current;
-		if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
-		if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
-		if (e.key === "Home") next = 0;
-		if (e.key === "End") next = tabs.length - 1;
+			let next = current;
+			if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+			if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
+			if (e.key === "Home") next = 0;
+			if (e.key === "End") next = tabs.length - 1;
 
-		e.preventDefault();
-		// Reset every tab before promoting the destination, the shape `focusItem`
-		// in useRovingTreeFocus uses. Setting the destination alone leaked a tab
-		// stop per arrow press: this is a DOM mutation on top of a vdom prop that
-		// did not change, so React re-renders to nothing and the stray `0` on each
-		// tab skated past survives. There is no render to rely on either, because
-		// focus deliberately moves without activating - arrow across a dozen tabs
-		// and the strip was a dozen Tab stops again, the thing roving tabindex is
-		// here to prevent.
-		for (const el of tabs) el.tabIndex = -1;
-		tabs[next].tabIndex = 0;
-		tabs[next].focus();
-	}, []);
+			e.preventDefault();
+			setRovingId(tabs[next].dataset.tabId ?? null);
+			tabs[next].focus();
+		},
+		[setRovingId]
+	);
 
 	return (
 		<div
@@ -210,6 +212,7 @@ export function TabStrip() {
 						key={openTabs[i].id}
 						tab={openTabs[i]}
 						isActive={openTabs[i].id === activeTabId}
+						isRovingStop={openTabs[i].id === rovingId}
 						width={widths[i]}
 						descriptor={descriptors[i]}
 					/>

@@ -27,6 +27,7 @@ export function tabItemPropsEqual(prev: TabItemProps, next: TabItemProps): boole
 	return (
 		prev.tab === next.tab &&
 		prev.isActive === next.isActive &&
+		prev.isRovingStop === next.isRovingStop &&
 		prev.width === next.width &&
 		shallow(prev.descriptor, next.descriptor)
 	);
