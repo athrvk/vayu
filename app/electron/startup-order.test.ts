@@ -88,6 +88,53 @@ describe("startup ordering", () => {
 		expect(mcpAt).toBeGreaterThan(windowAt);
 	});
 
+	/*
+	 * Mutation check: move `setupIpcHandlers();` below `await engineStartup;`, or
+	 * the updater's four `ipcMain.handle` calls out of `setupIpcHandlers` into
+	 * something that runs after it, and this reddens. The renderer's update
+	 * invokes rejected with "No handler registered" for as long as the engine
+	 * took to come up, when the channels were registered by `initAutoUpdater`.
+	 */
+	it("registers the update channels before it waits on the engine", () => {
+		const channels = [
+			"update:restartToInstall",
+			"update:openReleasePage",
+			"update:check",
+			"update:quitForUpdate",
+		];
+		const setupAt = main.indexOf("\nfunction setupIpcHandlers()");
+		const setupEnd = main.indexOf("\n}\n", setupAt);
+		const callAt = main.indexOf("\n\tsetupIpcHandlers();");
+		const engineAt = main.indexOf("\n\tawait engineStartup;");
+
+		expect(setupAt).toBeGreaterThan(-1);
+		expect(setupEnd).toBeGreaterThan(setupAt);
+		expect(callAt).toBeGreaterThan(-1);
+		expect(engineAt).toBeGreaterThan(-1);
+		expect(callAt).toBeLessThan(engineAt);
+
+		const setupBody = main.slice(setupAt, setupEnd);
+		for (const channel of channels) {
+			expect(setupBody, channel).toContain(`ipcMain.handle("${channel}"`);
+			// Registered exactly once in the file: a second registration throws.
+			expect(main.split(`ipcMain.handle("${channel}"`), channel).toHaveLength(2);
+		}
+	});
+
+	/*
+	 * Mutation check: move the `activate` listener back below `await
+	 * engineStartup;` and this reddens. On macOS a Dock click while the engine is
+	 * still starting, with the window closed, then found no handler to rebuild it.
+	 */
+	it("listens for activate before it waits on the engine", () => {
+		const activateAt = main.indexOf('\n\tapp.on("activate"');
+		const engineAt = main.indexOf("\n\tawait engineStartup;");
+
+		expect(activateAt).toBeGreaterThan(-1);
+		expect(engineAt).toBeGreaterThan(-1);
+		expect(activateAt).toBeLessThan(engineAt);
+	});
+
 	it("does not quit the app for an engine that is merely slow", () => {
 		// The whole point of the split: `EngineNotReadyError` returns, everything
 		// else still reaches the dialog and the quit below it.

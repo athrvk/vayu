@@ -452,8 +452,10 @@ reads from there - Vite bundles its packages into `dist/` - so the only packages
 that belong under `dependencies` are the ones the unbundled main process imports
 at runtime:
 
-- **electron-updater**: the update check and download, loaded once the engine
-  is up (`loadUpdater` in `main.ts`) rather than on the startup import graph
+- **electron-updater**: the update check and download, loaded on first use
+  (`loadUpdater` in `main.ts`: the startup arming once the engine is up, or an
+  earlier update call from the renderer or the menu) rather than on the startup
+  import graph
 - **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
   schemas, loaded by the first request (see `docs/engine/mcp.md`)
 
