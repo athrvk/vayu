@@ -13,7 +13,7 @@
  * centralized `--primary` accent for the selected/on state.
  */
 
-import { useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useId, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2 } from "lucide-react";
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import {
@@ -134,30 +134,55 @@ interface TileGroupProps {
 }
 
 /**
+ * What a {@link TileItem} asks of its group: pick this tile because keyboard
+ * navigation just focused it. Absent outside a {@link TileGroup}, where a tile
+ * has no group to pick in.
+ */
+const TileGroupContext = createContext<((value: string) => void) | null>(null);
+
+/**
  * The pick-one tile grid as a radio group: each {@link TileItem} is a
- * `role="radio"` with `aria-checked`, and arrow keys move focus between them.
- * Shared by {@link OptionButtons} and `FontPicker`, which differ only in what a
- * tile holds.
+ * `role="radio"` with `aria-checked`, and arrow keys move the selection with
+ * the focus, as the WAI-ARIA radio pattern has it (issue #1865). Shared by
+ * {@link OptionButtons} and `FontPicker`, which differ only in what a tile
+ * holds.
  *
  * Not the `ui/toggle-group` segmented control: its items are a fixed-height
  * strip with the label rendered twice to reserve the bold width, which a tile
  * with a preview and a description cannot sit in. This is the Radix primitive
- * underneath, unstyled.
+ * underneath, unstyled. Radix roves focus only, so selection-follows-focus is
+ * added here: focus that arrives after a key press picks the tile, while a
+ * pointer press is left to Radix's own click so `onChange` fires once.
  */
 export function TileGroup({ value, onChange, label, columns, children }: TileGroupProps) {
+	// Set by a key press, cleared by a pointer press: Radix moves focus from the
+	// arrow keys with a `.focus()` call that a handler cannot tell from a click's.
+	const focusFollowsKey = useRef(false);
+	const chooseOnKeyFocus = (next: string) => {
+		if (focusFollowsKey.current) onChange(next);
+	};
+
 	return (
-		<ToggleGroupPrimitive.Root
-			type="single"
-			role="radiogroup"
-			aria-label={label}
-			value={value}
-			// Radix clears the value when the chosen tile is pressed again; a
-			// pick-one setting has no "off".
-			onValueChange={(next) => next && onChange(next)}
-			className={cn("grid gap-3", columns)}
-		>
-			{children}
-		</ToggleGroupPrimitive.Root>
+		<TileGroupContext.Provider value={chooseOnKeyFocus}>
+			<ToggleGroupPrimitive.Root
+				type="single"
+				role="radiogroup"
+				aria-label={label}
+				value={value}
+				// Radix clears the value when the chosen tile is pressed again; a
+				// pick-one setting has no "off".
+				onValueChange={(next) => next && onChange(next)}
+				onKeyDown={() => {
+					focusFollowsKey.current = true;
+				}}
+				onPointerDown={() => {
+					focusFollowsKey.current = false;
+				}}
+				className={cn("grid gap-3", columns)}
+			>
+				{children}
+			</ToggleGroupPrimitive.Root>
+		</TileGroupContext.Provider>
 	);
 }
 
@@ -172,9 +197,12 @@ interface TileItemProps {
 }
 
 export function TileItem({ value, selected, className, checkClassName, children }: TileItemProps) {
+	const chooseOnKeyFocus = useContext(TileGroupContext);
 	return (
 		<ToggleGroupPrimitive.Item
 			value={value}
+			// Tab lands on the checked tile, so only a move to another one picks.
+			onFocus={() => !selected && chooseOnKeyFocus?.(value)}
 			className={cn(
 				"relative flex flex-col rounded-lg border-2",
 				"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
