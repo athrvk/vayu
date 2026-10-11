@@ -20,6 +20,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 import { invalidateCompositions } from "@/queries/compose-invalidation";
+import { invalidateAllRequestLists } from "@/queries/collections";
 import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent, McpDataEntity } from "@/types/domain";
 
@@ -72,8 +73,7 @@ const INVALIDATORS: Record<
 	 */
 	collection: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+		invalidateAllRequestLists(queryClient);
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		invalidateCompositions(queryClient);
 	},

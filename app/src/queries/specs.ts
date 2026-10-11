@@ -15,6 +15,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
 import { boundCollections, type BoundSpec } from "@/services/openapi/bound-spec-match";
 import type {
@@ -361,7 +362,7 @@ export function useBindSpecMutation() {
 			}),
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			invalidateAllRequestLists(queryClient);
 		},
 	});
 }
@@ -408,7 +409,7 @@ export function useSyncSpecMutation() {
 			apiService.syncSpec(payload),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			invalidateAllRequestLists(queryClient);
 		},
 	});
 }
