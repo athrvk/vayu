@@ -28,7 +28,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore, useDataFileStore } from "@/stores";
+import { useTabsStore, useDataFileStore, useSpecFileStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -124,6 +124,7 @@ beforeEach(() => {
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["root"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useDataFileStore.setState({ locations: {} });
+	useSpecFileStore.setState({ locations: {} });
 });
 
 describe("deleting from the tree", () => {
@@ -292,6 +293,30 @@ describe("deleting from the tree", () => {
 			expect(useDataFileStore.getState().locations.root).toEqual({
 				path: "/data/users.csv",
 				fileName: "users.csv",
+			})
+		);
+	});
+
+	it("gives the collection back its remembered spec file", async () => {
+		// The spec-file path (#1890) is cleared by the delete the same way the
+		// data-file path is, and has the same need to come back with an Undo.
+		useSpecFileStore.setState({
+			locations: { root: { path: "/specs/petstore.yaml", fileName: "petstore.yaml" } },
+		});
+		renderTree();
+		await askToDeleteCollection("Acme");
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+		// `@/queries` is mocked here, so the real mutation's clearSpecFile never
+		// ran; do what it does, or the entry survives and the assertion proves
+		// nothing about the capture.
+		useSpecFileStore.getState().clearSpecFile("root");
+
+		lastToast().action.onClick();
+
+		await waitFor(() =>
+			expect(useSpecFileStore.getState().locations.root).toEqual({
+				path: "/specs/petstore.yaml",
+				fileName: "petstore.yaml",
 			})
 		);
 	});

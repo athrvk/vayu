@@ -26,14 +26,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useDeleteRequestMutation } from "./collections";
+import { useDeleteCollectionMutation, useDeleteRequestMutation } from "./collections";
 import { useResponseStore } from "@/stores/response-store";
+import { useDataFileStore } from "@/stores/data-file-store";
+import { useSpecFileStore } from "@/stores/spec-file-store";
 
 const deleteRequest = vi.fn();
+const deleteCollection = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
 		deleteRequest: (...a: unknown[]) => deleteRequest(...a),
+		deleteCollection: (...a: unknown[]) => deleteCollection(...a),
 	},
 }));
 
@@ -55,7 +59,10 @@ const storeResponse = (requestId: string) =>
 
 beforeEach(() => {
 	deleteRequest.mockReset();
+	deleteCollection.mockReset();
 	useResponseStore.getState().clearAll();
+	useDataFileStore.setState({ locations: {} });
+	useSpecFileStore.setState({ locations: {} });
 });
 
 describe("useDeleteRequestMutation", () => {
@@ -89,5 +96,50 @@ describe("useDeleteRequestMutation", () => {
 		await expect(result.current.mutateAsync("req_1")).rejects.toThrow("database is locked");
 
 		expect(useResponseStore.getState().getResponse("req_1")).not.toBeNull();
+	});
+});
+
+describe("useDeleteCollectionMutation", () => {
+	const remember = () => {
+		for (const id of ["col_1", "col_2"]) {
+			useDataFileStore
+				.getState()
+				.setDataFile(id, { path: `/d/${id}.csv`, fileName: `${id}.csv` });
+			useSpecFileStore
+				.getState()
+				.setSpecFile(id, { path: `/s/${id}.yaml`, fileName: `${id}.yaml` });
+		}
+	};
+
+	it("forgets the deleted collection's data-file and spec-file paths", async () => {
+		deleteCollection.mockResolvedValue(undefined);
+		remember();
+
+		const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+		const { result } = renderHook(() => useDeleteCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync("col_1");
+
+		await waitFor(() => {
+			expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+			expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
+		});
+		expect(useDataFileStore.getState().locations.col_2).toBeDefined();
+		expect(useSpecFileStore.getState().locations.col_2).toBeDefined();
+	});
+
+	it("keeps both paths when the delete fails", async () => {
+		deleteCollection.mockRejectedValue(new Error("database is locked"));
+		remember();
+
+		const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+		const { result } = renderHook(() => useDeleteCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await expect(result.current.mutateAsync("col_1")).rejects.toThrow("database is locked");
+
+		expect(useDataFileStore.getState().locations.col_1).toBeDefined();
+		expect(useSpecFileStore.getState().locations.col_1).toBeDefined();
 	});
 });
