@@ -72,7 +72,7 @@ export function isImportableFile(candidate: string): boolean {
 	return SPEC_FILE_EXTENSIONS.includes(path.extname(candidate).toLowerCase());
 }
 
-const FILE_URL_PREFIX = /^file:\/\//i;
+const FILE_URL_PREFIX = /^file:/i;
 
 /**
  * The path an argument names, or null when it is a `file://` URL that does not

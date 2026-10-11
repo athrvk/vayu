@@ -185,9 +185,8 @@ Configuration is in `electron-builder.json`:
   in `mac.fileAssociations`. On Linux, `linux.mimeTypes` (`application/json`,
   `application/yaml`, `application/x-yaml`, `text/yaml`) fills the desktop
   entry's `MimeType`; its `Exec` keeps electron-builder's `%U`, and
-  `open-intent.ts` decodes the `file://` URLs that passes. None on Windows: NSIS
-  would replace the extension's default handler
-  (`electron-file-associations.test.ts`)
+  `open-intent.ts` decodes the `file://` URLs that passes. None on Windows: NSIS would
+  replace the extension's default handler (`electron-file-associations.test.ts`)
 
 #### The app id, and the two things pinned to it
 

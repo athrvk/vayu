@@ -112,6 +112,12 @@ describe("parseOpenIntents", () => {
 		]);
 	});
 
+	it("decodes the one-slash file: form too", () => {
+		const target = path.resolve("spec.json");
+		const oneSlash = pathToFileURL(target).href.replace(/^file:\/\/\//, "file:/");
+		expect(parseOpenIntents(["vayu", oneSlash])).toEqual([{ kind: "import", path: target }]);
+	});
+
 	it("drops a file:// URL to something the pipeline could not read", () => {
 		const href = pathToFileURL(path.resolve("notes.txt")).href;
 		expect(parseOpenIntents(["vayu", href])).toEqual([]);
