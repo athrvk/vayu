@@ -70,6 +70,22 @@ describe("SettingsCategoryTree", () => {
 		expect(refetch).toHaveBeenCalledTimes(1);
 	});
 
+	it("marks only the selected row with aria-current", () => {
+		useSettingsStore.setState({ selectedCategory: "appearance" });
+		renderTree();
+
+		// data-active is a styling hook; a screen reader needs aria-current to
+		// know which category the panel beside the tree is showing.
+		expect(screen.getByRole("button", { name: /Appearance/i })).toHaveAttribute(
+			"aria-current",
+			"true"
+		);
+		const current = screen
+			.getAllByRole("button")
+			.filter((row) => row.hasAttribute("aria-current"));
+		expect(current).toHaveLength(1);
+	});
+
 	// App Settings are client-side; a dead engine must not take them with it.
 	it("keeps the App Settings rows usable while the engine is down", () => {
 		configQuery.error = new Error("engine down");

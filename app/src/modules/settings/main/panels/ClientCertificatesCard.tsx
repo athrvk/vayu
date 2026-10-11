@@ -222,7 +222,7 @@ function PathPicker({
 }
 
 export function ClientCertificatesCard() {
-	const { data: certificates = [], isError } = useClientCertificatesQuery();
+	const { data: certificates = [], isError, isLoading } = useClientCertificatesQuery();
 	const createCertificate = useCreateClientCertificateMutation();
 	const deleteCertificate = useDeleteClientCertificateMutation();
 	const showToast = useToastStore((s) => s.showToast);
@@ -308,7 +308,7 @@ export function ClientCertificatesCard() {
 					<p className="text-sm text-muted-foreground">
 						The engine did not answer, so the registered certificates are unknown.
 					</p>
-				) : certificates.length === 0 ? (
+				) : isLoading ? null : certificates.length === 0 ? (
 					<p className="text-sm text-muted-foreground">No certificates registered.</p>
 				) : (
 					<div>

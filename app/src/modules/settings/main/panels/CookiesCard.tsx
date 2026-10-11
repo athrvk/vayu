@@ -67,7 +67,7 @@ function Expiry({ expires }: { expires: number }) {
 }
 
 export function CookiesCard() {
-	const { data, isError } = useCookiesQuery();
+	const { data, isError, isLoading } = useCookiesQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const clearCookies = useClearCookiesMutation();
 	const showToast = useToastStore((s) => s.showToast);
@@ -113,7 +113,7 @@ export function CookiesCard() {
 					<p className="text-sm text-muted-foreground">
 						The engine did not answer, so what it is holding is unknown.
 					</p>
-				) : total === 0 ? (
+				) : isLoading ? null : total === 0 ? (
 					<p className="text-sm text-muted-foreground">No cookies stored.</p>
 				) : (
 					<>
@@ -155,6 +155,7 @@ export function CookiesCard() {
 										size="sm"
 										onClick={() => setConfirming(scope)}
 										disabled={clearCookies.isPending}
+										aria-label={`Clear cookies for ${scopeLabel(scope, environmentName)}`}
 									>
 										Clear
 									</Button>

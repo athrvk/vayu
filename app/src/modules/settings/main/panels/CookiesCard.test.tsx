@@ -57,7 +57,7 @@ const scopes = [
 	},
 ];
 
-let queryResult: { data?: { scopes: typeof scopes }; isError: boolean } = {
+let queryResult: { data?: { scopes: typeof scopes }; isError: boolean; isLoading?: boolean } = {
 	data: { scopes },
 	isError: false,
 };
@@ -150,5 +150,27 @@ describe("CookiesCard", () => {
 		// one that stops someone looking for the session that is still live.
 		expect(screen.queryByText(/no cookies stored/i)).not.toBeInTheDocument();
 		expect(screen.getByText(/did not answer/i)).toBeInTheDocument();
+	});
+
+	it("renders no verdict until the query settles", () => {
+		queryResult = { data: undefined, isLoading: true, isError: false };
+		render(<CookiesCard />);
+
+		// The first paint has no data yet, and "No cookies stored" would be a
+		// claim the card cannot make before the engine has answered.
+		expect(screen.queryByText(/no cookies stored/i)).not.toBeInTheDocument();
+	});
+
+	it("names each Clear button for the jar it empties", () => {
+		render(<CookiesCard />);
+
+		expect(
+			screen.getByRole("button", { name: /clear cookies for staging/i })
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: /clear cookies for no environment/i })
+		).toBeInTheDocument();
+		// A bare "Clear" repeated per scope is indistinguishable to a screen reader.
+		expect(screen.queryAllByRole("button", { name: /^clear$/i })).toHaveLength(0);
 	});
 });
