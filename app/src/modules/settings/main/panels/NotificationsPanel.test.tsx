@@ -66,13 +66,13 @@ describe("NotificationsPanel", () => {
 	it("writes each setting through to the store", () => {
 		render(<NotificationsPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /top left/i }));
+		fireEvent.click(screen.getByRole("radio", { name: /top left/i }));
 		expect(prefs().position).toBe("top-left");
 
-		fireEvent.click(screen.getByRole("button", { name: /^long/i }));
+		fireEvent.click(screen.getByRole("radio", { name: /^long/i }));
 		expect(prefs().durationScale).toBe("long");
 
-		fireEvent.click(screen.getByRole("button", { name: /errors only/i }));
+		fireEvent.click(screen.getByRole("radio", { name: /errors only/i }));
 		expect(prefs().minSeverity).toBe("error");
 	});
 

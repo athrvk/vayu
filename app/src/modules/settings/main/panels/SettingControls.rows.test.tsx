@@ -19,8 +19,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { CollapsibleText, SelectSettingRow, ToggleRow } from "./SettingControls";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { CollapsibleText, OptionButtons, SelectSettingRow, ToggleRow } from "./SettingControls";
 
 beforeEach(cleanup);
 
@@ -188,5 +188,75 @@ describe("CollapsibleText", () => {
 		render(<CollapsibleText text={SHORT} clampAt={5} />);
 
 		expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+	});
+});
+
+describe("OptionButtons", () => {
+	const THEMES = [
+		{ value: "light", label: "Light" },
+		{ value: "dark", label: "Dark" },
+		{ value: "system", label: "System" },
+	] as const;
+
+	it("exposes the chosen tile as a checked radio and the rest as unchecked", () => {
+		render(<OptionButtons options={THEMES} value="dark" onChange={vi.fn()} />);
+
+		expect(screen.getByRole("radio", { name: "Dark", checked: true })).toBeTruthy();
+		expect(screen.getByRole("radio", { name: "Light", checked: false })).toBeTruthy();
+		expect(screen.getByRole("radiogroup")).toBeTruthy();
+	});
+
+	it("hides the check glyph from assistive tech", () => {
+		const { container } = render(
+			<OptionButtons options={THEMES} value="dark" onChange={vi.fn()} />
+		);
+
+		const glyph = container.querySelector("svg");
+		expect(glyph?.getAttribute("aria-hidden")).toBe("true");
+	});
+
+	it("moves focus with the arrow keys but does not choose until the tile is pressed", async () => {
+		// Radix roving focus: an arrow key moves focus only. Selection is the
+		// press (Enter and Space click a <button>), so focus alone must not
+		// call onChange.
+		const onChange = vi.fn();
+		render(<OptionButtons options={THEMES} value="dark" onChange={onChange} />);
+		const dark = screen.getByRole("radio", { name: "Dark" });
+		dark.focus();
+
+		fireEvent.keyDown(dark, { key: "ArrowRight" });
+
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole("radio", { name: "System" }))
+		);
+		expect(onChange).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("radio", { name: "System" }));
+		expect(onChange).toHaveBeenCalledWith("system");
+	});
+
+	it("does not clear the choice when the chosen tile is pressed again", () => {
+		const onChange = vi.fn();
+		render(<OptionButtons options={THEMES} value="dark" onChange={onChange} />);
+
+		fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("hands numeric option values back as numbers", () => {
+		const SIZES = [
+			{ value: 1, label: "Small" },
+			{ value: 2, label: "Medium" },
+			{ value: 3, label: "Large" },
+		] as const;
+		const onChange = vi.fn();
+		render(<OptionButtons options={SIZES} value={2} onChange={onChange} />);
+
+		expect(screen.getByRole("radio", { name: "Medium", checked: true })).toBeTruthy();
+		fireEvent.click(screen.getByRole("radio", { name: "Large" }));
+
+		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenCalledWith(3);
 	});
 });
