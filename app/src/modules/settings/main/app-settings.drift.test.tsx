@@ -21,6 +21,10 @@
  *   that they really do - a heading typed back into a panel as a literal is the
  *   regression, and it is the one a reviewer reads straight past.
  *
+ * Both hold for the Cards an engine category renders (`Cards` in
+ * `engine-categories.ts`) as well: the catalogue files them under the engine
+ * category, and the same two checks run over what that category renders.
+ *
  * Rendered rather than source-scanned, because both the anchor and the label
  * arrive through props (the `NumberSettingRow` and `ToggleRow` rows do) and no
  * scan of a panel file would see them.
@@ -34,6 +38,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { APP_SETTINGS } from "./app-settings";
 import { APP_SETTINGS_PANELS } from "./app-panels";
 import { APP_PANEL_COMPONENTS } from "./app-panel-components";
+import { ENGINE_SETTINGS_CATEGORIES } from "../engine-categories";
 
 /**
  * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
@@ -61,6 +66,11 @@ vi.mock("@/queries", () => ({
 	useFileRootsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useCreateFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	// Network & connectivity's client-certificate registry, one of the engine
+	// category Cards rendered below.
+	useClientCertificatesQuery: () => ({ data: [], isError: false }),
+	useCreateClientCertificateMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteClientCertificateMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 beforeEach(cleanup);
@@ -96,6 +106,58 @@ function blockHeading(block: Element): string | null {
 	return row === null ? null : (row.getAttribute("data-setting-row") ?? "");
 }
 
+/** The `data-setting-anchor` values on screen. */
+function renderedAnchors(container: HTMLElement): Set<string | null> {
+	return new Set(
+		[...container.querySelectorAll("[data-setting-anchor]")].map((el) =>
+			el.getAttribute("data-setting-anchor")
+		)
+	);
+}
+
+/**
+ * Assert the block for each declared setting is headed by the catalogue's label,
+ * and return how many it checked so the caller can guard against checking none.
+ * `ownerLabel` is the panel or engine category the blocks were rendered under.
+ */
+function expectBlocksHeadedByCatalogue(
+	container: HTMLElement,
+	declared: readonly (typeof APP_SETTINGS)[number][],
+	ownerLabel: string
+): number {
+	let checked = 0;
+	for (const setting of declared) {
+		const block = container.querySelector(`[data-setting-anchor="${setting.anchor}"]`);
+		// The anchor test owns the missing-block failure; skipping here keeps one
+		// defect from failing two tests with two stories.
+		if (block === null) continue;
+
+		// A panel-level anchor is headed by the pane's band, not by a card
+		// inside the panel: the catalogue label and the panel label are the
+		// same string (Keyboard shortcuts is the only one), and a card
+		// repeating it was the double heading issue #1688 removed. The band
+		// half is asserted in SettingsMain.panel-heading.test.tsx, which
+		// renders it - this file renders the panel alone, so the heading it
+		// is looking for is genuinely elsewhere rather than missing.
+		if (setting.label === ownerLabel) {
+			checked += 1;
+			continue;
+		}
+
+		const heading = blockHeading(block);
+		expect(
+			heading,
+			`${ownerLabel}: the block for "${setting.anchor}" prints no heading a search result could be checked against - it needs a CardTitle, an Eyebrow or a named row`
+		).not.toBeNull();
+		expect(
+			heading,
+			`${ownerLabel}: search offers "${setting.label}" for "${setting.anchor}" but the block is headed "${heading}" - it should render appSetting("${setting.anchor}").label`
+		).toBe(setting.label);
+		checked += 1;
+	}
+	return checked;
+}
+
 describe("the app settings catalogue", () => {
 	it("describes something - the guard is worthless against an empty list", () => {
 		expect(APP_SETTINGS.length).toBeGreaterThan(20);
@@ -108,10 +170,13 @@ describe("the app settings catalogue", () => {
 		expect(new Set(anchors).size).toBe(anchors.length);
 	});
 
-	it("names a panel that exists for every setting", () => {
-		const panels = new Set(APP_SETTINGS_PANELS.map((p) => p.id));
+	it("names a panel or an engine category that exists for every setting", () => {
+		const owners = new Set<string>([
+			...APP_SETTINGS_PANELS.map((p) => p.id),
+			...ENGINE_SETTINGS_CATEGORIES.map((c) => c.id),
+		]);
 		for (const setting of APP_SETTINGS) {
-			expect(panels.has(setting.panel)).toBe(true);
+			expect(owners.has(setting.panel)).toBe(true);
 		}
 	});
 
@@ -124,11 +189,7 @@ describe("the app settings catalogue", () => {
 			expect(declared.length).toBeGreaterThan(0);
 
 			const { container } = renderPanel(APP_PANEL_COMPONENTS[panel.id]);
-			const rendered = new Set(
-				[...container.querySelectorAll("[data-setting-anchor]")].map((el) =>
-					el.getAttribute("data-setting-anchor")
-				)
-			);
+			const rendered = renderedAnchors(container);
 
 			for (const setting of declared) {
 				expect(
@@ -145,40 +206,71 @@ describe("the app settings catalogue", () => {
 			const declared = APP_SETTINGS.filter((s) => s.panel === id);
 			const { container } = renderPanel(APP_PANEL_COMPONENTS[panel.id]);
 
-			let checked = 0;
-			for (const setting of declared) {
-				const block = container.querySelector(`[data-setting-anchor="${setting.anchor}"]`);
-				// The anchor test above owns the missing-block failure; skipping
-				// here keeps one defect from failing two tests with two stories.
-				if (block === null) continue;
-
-				// A panel-level anchor is headed by the pane's band, not by a card
-				// inside the panel: the catalogue label and the panel label are the
-				// same string (Keyboard shortcuts is the only one), and a card
-				// repeating it was the double heading issue #1688 removed. The band
-				// half is asserted in SettingsMain.panel-heading.test.tsx, which
-				// renders it - this file renders the panel alone, so the heading it
-				// is looking for is genuinely elsewhere rather than missing.
-				if (setting.label === panel.label) {
-					checked += 1;
-					continue;
-				}
-
-				const heading = blockHeading(block);
-				expect(
-					heading,
-					`${panel.label}: the block for "${setting.anchor}" prints no heading a search result could be checked against - it needs a CardTitle, an Eyebrow or a named row`
-				).not.toBeNull();
-				expect(
-					heading,
-					`${panel.label}: search offers "${setting.label}" for "${setting.anchor}" but the block is headed "${heading}" - the panel should render appSetting("${setting.anchor}").label`
-				).toBe(setting.label);
-				checked += 1;
-			}
+			const checked = expectBlocksHeadedByCatalogue(container, declared, panel.label);
 
 			// Guards the guard: a resolver that quietly found nothing would pass
 			// every assertion above by never running one.
 			expect(checked).toBe(declared.length);
 		}
 	);
+
+	const ENGINE_CATEGORIES_WITH_CARDS = ENGINE_SETTINGS_CATEGORIES.filter(
+		(c) => c.Cards !== undefined
+	);
+
+	/** What the engine settings view renders for a category's `Cards`, in order. */
+	function renderCards(cards: NonNullable<(typeof ENGINE_SETTINGS_CATEGORIES)[number]["Cards"]>) {
+		return renderPanel(() => (
+			<>
+				{cards.map((Card, index) => (
+					<Card key={index} />
+				))}
+			</>
+		));
+	}
+
+	describe("the Cards of an engine category", () => {
+		it("exist - the guard is worthless against an empty list", () => {
+			expect(ENGINE_CATEGORIES_WITH_CARDS.length).toBeGreaterThan(0);
+		});
+
+		it.each(ENGINE_CATEGORIES_WITH_CARDS.map((c) => [c.id, c] as const))(
+			"renders every anchor the catalogue declares for %s",
+			(id, category) => {
+				const declared = APP_SETTINGS.filter((s) => s.panel === id);
+				expect(declared.length).toBeGreaterThan(0);
+
+				const { container } = renderCards(category.Cards ?? []);
+				const rendered = renderedAnchors(container);
+
+				// The other direction: a Card with no catalogue entry is a block search
+				// cannot find.
+				const declaredAnchors = new Set<string | null>(declared.map((s) => s.anchor));
+				for (const anchor of rendered) {
+					expect(
+						declaredAnchors.has(anchor),
+						`${category.label} renders "${anchor}" but the catalogue has no entry for it`
+					).toBe(true);
+				}
+
+				for (const setting of declared) {
+					expect(
+						rendered.has(setting.anchor),
+						`${category.label} declares "${setting.anchor}" (${setting.label}) but its Cards render no such data-setting-anchor`
+					).toBe(true);
+				}
+			}
+		);
+
+		it.each(ENGINE_CATEGORIES_WITH_CARDS.map((c) => [c.id, c] as const))(
+			"prints the catalogue's label as the heading of every Card in %s",
+			(id, category) => {
+				const declared = APP_SETTINGS.filter((s) => s.panel === id);
+				const { container } = renderCards(category.Cards ?? []);
+
+				const checked = expectBlocksHeadedByCatalogue(container, declared, category.label);
+				expect(checked).toBe(declared.length);
+			}
+		);
+	});
 });
