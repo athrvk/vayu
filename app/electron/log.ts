@@ -28,6 +28,7 @@
 import fs from "fs";
 import path from "path";
 import { APP_LOG_MAX_BYTES, APP_LOG_RETENTION_COUNT } from "./constants.js";
+import { engineFetch } from "./engine-fetch.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogSrc = "app" | "mcp" | "renderer";
@@ -441,7 +442,7 @@ const KNOWN_LEVELS: ReadonlySet<string> = new Set(["debug", "info", "warn", "err
  */
 export async function applyFloorFromEngine(logger: Logger, baseUrl: string): Promise<void> {
 	try {
-		const response = await fetch(`${baseUrl}/config`);
+		const response = await engineFetch(`${baseUrl}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 		const config = (await response.json()) as { entries?: { key?: string; value?: string }[] };
 		const raw = config?.entries?.find((entry) => entry.key === "logLevel")?.value;

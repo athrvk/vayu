@@ -48,6 +48,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { ENGINE_HOST, ENGINE_PORT, SPEC_DOCUMENT_MAX_BYTES_SEED } from "./constants.js";
+import { engineFetch } from "./engine-fetch.js";
 
 /** Extensions this channel will open, lower-cased and with the dot. */
 export const SPEC_FILE_EXTENSIONS: readonly string[] = [".json", ".yaml", ".yml"];
@@ -71,7 +72,7 @@ const defaultSystem: SpecFileSystem = {
 	readFile: (filePath) => fs.readFile(filePath),
 	realpath: (filePath) => fs.realpath(filePath),
 	fetchConfig: async () => {
-		const response = await fetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
+		const response = await engineFetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 		return await response.json();
 	},

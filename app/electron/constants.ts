@@ -122,6 +122,13 @@ export const ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS = 50;
 export const ENGINE_HEALTH_POLL_MAX_INTERVAL_MS = 500;
 export const ENGINE_HEALTH_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
+/**
+ * Deadline for a main-process `/config` read or write (`engine-fetch.ts`).
+ * Longer than the health probe because a write takes the engine's DB mutex and
+ * a read can queue behind startup housekeeping, yet still short enough that a
+ * silent engine releases the file dialog it is blocking.
+ */
+export const ENGINE_CONFIG_REQUEST_TIMEOUT_MS = 5000;
 export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
 /**
  * Poll interval while waiting for an *adopted* engine to exit.
