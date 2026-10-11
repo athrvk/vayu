@@ -120,6 +120,24 @@ describe("startup ordering", () => {
 		expect(openFileAt).toBeLessThan(whenReadyAt);
 	});
 
+	it("offers an open-file path only after the import allowlist has passed it", () => {
+		// `open-file` receives any path the OS hands over, a `.png` dropped on the
+		// Dock icon included. The command-line door filters through
+		// `isImportableFile`; this one must too, or the renderer is sent a path
+		// `specFile:read` then refuses by name.
+		const handlerAt = main.indexOf('app.on("open-file"');
+		const handlerEnd = main.indexOf("\n\t});", handlerAt);
+		const handler = main.slice(handlerAt, handlerEnd);
+
+		expect(handlerAt).toBeGreaterThan(-1);
+		expect(handlerEnd).toBeGreaterThan(handlerAt);
+		expect(handler).toContain("event.preventDefault();");
+		expect(handler).toContain("if (!isImportableFile(filePath)) return;");
+		expect(handler.indexOf("isImportableFile(")).toBeLessThan(
+			handler.indexOf("openIntents.offer(")
+		);
+	});
+
 	it("reads the launch's own argv once there is a window to focus", () => {
 		// The other half of the same handoff, and it wants the opposite order:
 		// `offerArgv` focuses the window when it finds something, so it runs

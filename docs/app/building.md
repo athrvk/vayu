@@ -181,6 +181,10 @@ Configuration is in `electron-builder.json`:
 - App ID: `io.github.athrvk.vayu`
 - Product Name: `Vayu`
 - Engine binary: Packaged in `resources/bin/` (copied to `bin/` in app)
+- File associations: `.json`, `.yaml` and `.yml` as `Viewer` at rank `Alternate`
+  in `mac.fileAssociations`. None on Linux (the desktop entry's `%U` can pass
+  `file://` URLs) or Windows: NSIS would replace the extension's default handler
+  (`electron-file-associations.test.ts`)
 
 #### The app id, and the two things pinned to it
 
