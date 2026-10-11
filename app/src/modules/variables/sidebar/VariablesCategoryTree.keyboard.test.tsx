@@ -76,9 +76,15 @@ vi.mock("@/queries", () => ({
 
 const setSelectedCategory = vi.fn();
 const failSave = vi.fn();
+const startSaving = vi.fn();
+const completeSaveThenIdle = vi.fn();
+const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useTabsStore: (select: (s: { openTab: () => void }) => unknown) => select({ openTab: vi.fn() }),
-	useSaveStore: (select: (s: { failSave: typeof failSave }) => unknown) => select({ failSave }),
+	useSaveStore: (select: (s: Record<string, unknown>) => unknown) =>
+		select({ startSaving, completeSaveThenIdle, failSave }),
+	useToastStore: (select: (s: { showToast: typeof showToast }) => unknown) =>
+		select({ showToast }),
 	// The empty-collections note's "Browse collections" action reads this
 	// (issue #1693); these cases never render it, since they always have rows.
 	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>
@@ -409,7 +415,12 @@ describe("a delete never strands focus", () => {
 		// The row is still sitting there, so focus belongs on it - the outcome
 		// decides, never the confirm click.
 		expect(document.activeElement).toBe(row(tree, "Production"));
-		expect(failSave).toHaveBeenCalledWith("database is locked");
+		// A toast, not the Dock: a delete is not an unsaved edit.
+		expect(showToast).toHaveBeenCalledWith(
+			"Couldn't delete the environment - database is locked",
+			"error"
+		);
+		expect(failSave).not.toHaveBeenCalled();
 	});
 
 	it("returns focus to the row when the dialog is cancelled", async () => {
@@ -420,5 +431,101 @@ describe("a delete never strands focus", () => {
 
 		await waitFor(() => expect(document.activeElement).toBe(row(tree, "Staging")));
 		expect(deleteEnvironment).not.toHaveBeenCalled();
+	});
+});
+
+describe("a failed environment write is reported, never swallowed", () => {
+	it("keeps the create field and its typed name, and toasts, when create is rejected", async () => {
+		createEnvironment.mockRejectedValue(new Error("database is locked"));
+		renderTree();
+
+		fireEvent.click(screen.getByRole("button", { name: "Add environment" }));
+		const field = screen.getByPlaceholderText("Environment name");
+		fireEvent.change(field, { target: { value: "Preview" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't create the environment - database is locked",
+				"error"
+			)
+		);
+		expect(screen.getByPlaceholderText("Environment name")).toHaveValue("Preview");
+		expect(setSelectedCategory).not.toHaveBeenCalled();
+	});
+
+	it("closes the create field and selects the new environment on success", async () => {
+		createEnvironment.mockResolvedValue({ ...STAGING, id: "env_new", name: "Preview" });
+		renderTree();
+
+		fireEvent.click(screen.getByRole("button", { name: "Add environment" }));
+		const field = screen.getByPlaceholderText("Environment name");
+		fireEvent.change(field, { target: { value: "Preview" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+
+		await waitFor(() =>
+			expect(setSelectedCategory).toHaveBeenCalledWith({
+				type: "environment",
+				environmentId: "env_new",
+			})
+		);
+		expect(screen.queryByPlaceholderText("Environment name")).toBeNull();
+		expect(showToast).not.toHaveBeenCalled();
+	});
+
+	it("toasts when a duplicate is rejected", async () => {
+		createEnvironment.mockRejectedValue(new Error("database is locked"));
+		const tree = renderTree();
+
+		fireEvent.contextMenu(row(tree, "Production"));
+		const menu = await screen.findByRole("menu");
+		fireEvent.click(within(menu).getByRole("menuitem", { name: "Duplicate" }));
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't duplicate the environment - database is locked",
+				"error"
+			)
+		);
+		expect(failSave).not.toHaveBeenCalled();
+	});
+
+	it("reports a rejected rename through the Dock and reverts the row only afterwards", async () => {
+		let fieldMountedWhenReported: boolean | null = null;
+		failSave.mockImplementation(() => {
+			fieldMountedWhenReported = screen.queryByDisplayValue("Sandbox") !== null;
+		});
+		updateEnvironment.mockRejectedValue(new Error("database is locked"));
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+		fireEvent.change(screen.getByDisplayValue("Staging"), { target: { value: "Sandbox" } });
+		fireEvent.keyDown(screen.getByDisplayValue("Sandbox"), { key: "Enter" });
+
+		await waitFor(() =>
+			expect(failSave).toHaveBeenCalledWith(
+				"Couldn't rename the environment - database is locked"
+			)
+		);
+		expect(startSaving).toHaveBeenCalledTimes(1);
+		expect(completeSaveThenIdle).not.toHaveBeenCalled();
+		expect(showToast).not.toHaveBeenCalled();
+		// The field was still up when the failure was reported, and is gone after.
+		expect(fieldMountedWhenReported).toBe(true);
+		await waitFor(() => expect(screen.queryByDisplayValue("Sandbox")).toBeNull());
+		expect(row(tree, "Staging")).toBeInTheDocument();
+	});
+
+	it("completes the save when a rename lands", async () => {
+		updateEnvironment.mockResolvedValue(undefined);
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+		fireEvent.change(screen.getByDisplayValue("Staging"), { target: { value: "Sandbox" } });
+		fireEvent.keyDown(screen.getByDisplayValue("Sandbox"), { key: "Enter" });
+
+		await waitFor(() => expect(completeSaveThenIdle).toHaveBeenCalledTimes(1));
+		expect(startSaving).toHaveBeenCalledTimes(1);
+		expect(failSave).not.toHaveBeenCalled();
 	});
 });
