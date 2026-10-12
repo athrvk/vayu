@@ -47,6 +47,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
@@ -60,6 +61,12 @@ std::pair<int, nlohmann::json>
 import_document_response (vayu::db::Database& db, const nlohmann::json& body);
 std::pair<int, nlohmann::json>
 import_response (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json> import_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::function<void ()>& before_write);
+// Defined in globals.cpp; the testable core of POST /globals.
+std::pair<int, nlohmann::json>
+save_globals_response (vayu::db::Database& db, const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -2187,6 +2194,38 @@ TEST_F (ImportParseRoute, WritesAGlobalsExportIntoTheGlobalScopeAndMergesASecond
     (json{ { "host", { { "value", "z" }, { "enabled", true } } },
     { "token", { { "value", "b" }, { "enabled", true } } },
     { "extra", { { "value", "c" }, { "enabled", true } } } }));
+}
+
+/**
+ * A `POST /globals` landing inside the import's merge is kept beside the
+ * imported variables (#1906). The competing save has the renderer's shape - its
+ * view of the set plus one edit, saved whole - so it keeps the import's
+ * variables only by reading after the import's write, and the import keeps the
+ * save only by holding the lock from its read to its write.
+ */
+TEST_F (ImportParseRoute, KeepsAGlobalsSaveThatLandsDuringTheMerge) {
+    int competing_status = 0;
+    vayu::tests::CompetingWriter renderer ([&] {
+        const auto row = db_->get_globals ();
+        json variables = row ? json::parse (row->variables) : json::object ();
+        variables["session"] = { { "value", "s" }, { "enabled", true } };
+        const json save      = { { "variables", variables } };
+        competing_status =
+        vayu::http::routes::save_globals_response (*db_, save).first;
+    });
+
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"({"_postman_variable_scope":"globals","values":[{"key":"host","value":"a"}]})" } },
+    renderer.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    renderer.join ();
+    EXPECT_EQ (competing_status, 200);
+
+    const auto row = db_->get_globals ();
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (json::parse (row->variables),
+    (json{ { "host", { { "value", "a" }, { "enabled", true } } },
+    { "session", { { "value", "s" }, { "enabled", true } } } }));
 }
 
 TEST_F (ImportParseRoute, RefusesBytesThatAreNotADocument) {
