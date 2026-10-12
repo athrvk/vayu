@@ -74,9 +74,10 @@ class EventLoopImpl {
 
     /// Windows' 1 ms timer resolution, held for exactly as long as this loop
     /// exists (issue #1161). The loop is the consumer that needs it - each
-    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, and for
-    /// a rate-limited token wait of 1 ms up to TOKEN_WAIT_CAP_MS, which the OS default
-    /// rounds to ~15.6ms - and the rate-limited pacing loop
+    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, and a
+    /// rate-limited worker parks in the same poll for a token wait as short as
+    /// 1 ms (at most TOKEN_WAIT_CAP_MS); the OS default rounds either to
+    /// ~15.6ms - and the rate-limited pacing loop
     /// that sleeps beside it below ~500 RPS is coextensive with it. A loop
     /// exists only while a run is sending, so an idle sidecar - which it is
     /// for nearly all of an app session - asks for nothing, and a design-mode

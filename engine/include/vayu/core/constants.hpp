@@ -116,8 +116,8 @@ constexpr int POLL_TIMEOUT_MS = 1;
 /// Longest a worker with nothing in flight parks waiting for its next
 /// rate-limiter token (issue #1915). submit() and stop() cut the wait short
 /// via curl_multi_wakeup; the cap bounds what nothing wakes it for - a drain
-/// deadline passing - and keeps a very low rate's wait (a 0.25 rps worker's
-/// token is 4s away) well inside curl_multi_poll's int timeout.
+/// deadline passing - so a bounded drain ends within this of its deadline
+/// rather than up to a token interval late (a 0.25 rps worker's is 4s).
 constexpr int TOKEN_WAIT_CAP_MS = 100;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation).
 /// Governs both curl's own cache and the pre-resolution pin cache.

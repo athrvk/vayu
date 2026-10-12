@@ -800,7 +800,8 @@ Debug build, a 4-vCPU cloud VM):
 The pacing is unchanged: the window still lasts 2.0 s, and the
 `EnforcesTargetRPS` pair (100 RPS, one and four workers) holds its ±25%
 window either side. With the worker parked for a token 2 s away, `stop
-(false)` returned in under 0.5 ms and a bounded drain (`stop (true, 200 ms)`)
+(false)` returned at once (the test bounds it at 0.5 s; a hand-timed run
+was well under a millisecond) and a bounded drain (`stop (true, 200 ms)`)
 in 0.20 s; without the cap that drain took 1.95 s, which is what the cap is
 for.
 
