@@ -596,7 +596,9 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
 raises an error toast carrying the reason. Its call sites are the collection
 and environment trees' *renames* (a rename is a save: `startSaving`, then
-`completeSaveThenIdle` or `failSave`), `useSaveManager`, `SettingsMain`,
+`completeSaveThenIdle` or `failSave`; both trees keep the rename field mounted
+until the PUT settles, so a failure is reported over the typed name rather than
+after the row has snapped back), `useSaveManager`, `SettingsMain`,
 `VariableTableEditor`, `useDraftSaveContext`, the context bar's
 `VariablesSection` and the inbox's `CannedResponseControls` - and doing the
 reporting here rather than at each of them means a new caller cannot forget to
