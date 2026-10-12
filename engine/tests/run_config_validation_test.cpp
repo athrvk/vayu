@@ -786,16 +786,21 @@ class RunConfigValidationRouteTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
     }
 
-    /// The status and body `POST /runs` answered @p payload with.
-    std::pair<int, json> post_run (const json& payload) const {
+    /// The status and body @p path answered @p payload with.
+    std::pair<int, json> post (const char* path, const json& payload) const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
-        auto response = client.Post ("/runs", payload.dump (), "application/json");
+        auto response = client.Post (path, payload.dump (), "application/json");
         if (!response) {
-            ADD_FAILURE () << "no response from POST /runs";
+            ADD_FAILURE () << "no response from POST " << path;
             return { 0, json::object () };
         }
         return { response->status, json::parse (response->body, nullptr, false) };
+    }
+
+    /// The status and body `POST /runs` answered @p payload with.
+    std::pair<int, json> post_run (const json& payload) const {
+        return post ("/runs", payload);
     }
 
     /// One request, once, against @p echo: the smallest run that completes.
@@ -900,6 +905,71 @@ TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
         << body.dump ();
     }
     EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+// `requestId` / `environmentId` were read with `get<std::string> ()`, so a
+// number threw a nlohmann `type_error` the server answered as a 500 with an
+// empty body (#1917). Mutation check: restore the unchecked `get<std::string> ()`
+// in `read_run_scope_ids` and every case answers 500 instead of 400.
+TEST_F (RunConfigValidationRouteTest, ANonStringScopeIdIsRefusedNamingTheFieldBeforeAnyRowOrSend) {
+    const vayu::tests::EchoServer echo;
+    const json send{ { "method", "GET" }, { "url", echo.url () } };
+    for (const char* path : { "/execute", "/runs" }) {
+        for (const char* field : { "requestId", "environmentId" }) {
+            for (const auto& bad : { json (7), json (true), json::object () }) {
+                auto payload = path == std::string ("/runs") ? iterations_run (echo) : send;
+                payload[field]            = bad;
+                const auto [status, body] = post (path, payload);
+                EXPECT_EQ (status, 400) << path << " " << field << "=" << bad.dump ();
+                EXPECT_NE (vayu::http::routes::error_message_of (body).find (
+                           std::string ("'") + field + "'"),
+                std::string::npos)
+                << path << ": " << body.dump ();
+            }
+        }
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
+// `null` stays "no value" beside a real string, so a client that always sends
+// both keys keeps working.
+TEST_F (RunConfigValidationRouteTest, NullAndStringScopeIdsStillRun) {
+    const vayu::tests::EchoServer echo;
+    json payload{ { "method", "GET" }, { "url", echo.url () },
+        { "requestId", "req_1" }, { "environmentId", nullptr } };
+    const auto [status, body] = post ("/execute", payload);
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto runs = db_->get_all_runs ();
+    ASSERT_EQ (runs.size (), 1U);
+    EXPECT_EQ (runs.front ().request_id, std::optional<std::string> ("req_1"));
+    EXPECT_FALSE (runs.front ().environment_id.has_value ());
+}
+
+// `0` is libcurl's "no timeout" and a negative one is a rejected option the
+// transfer then runs without (#1917). Mutation check: drop the
+// `REQUEST_TIMEOUT_FIELD` check in `read_execute_payload` and each case sends.
+TEST_F (RunConfigValidationRouteTest, AnUnusableExecuteTimeoutIsRefusedBeforeAnyRowOrSend) {
+    const vayu::tests::EchoServer echo;
+    for (const auto& bad :
+    { json (0), json (-1), json (0.5), json (86400001), json ("30") }) {
+        const json payload{ { "method", "GET" }, { "url", echo.url () }, { "timeout", bad } };
+        const auto [status, body] = post ("/execute", payload);
+        EXPECT_EQ (status, 400) << bad.dump ();
+        EXPECT_NE (
+        vayu::http::routes::error_message_of (body).find ("'timeout'"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
+TEST_F (RunConfigValidationRouteTest, AnExecuteTimeoutInRangeSends) {
+    const vayu::tests::EchoServer echo;
+    const json payload{ { "method", "GET" }, { "url", echo.url () }, { "timeout", 5000 } };
+    const auto [status, body] = post ("/execute", payload);
+    EXPECT_EQ (status, 200) << body.dump ();
 }
 
 // A collection run (a scenario with a missing, empty or non-string `mode`)
