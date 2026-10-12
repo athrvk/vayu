@@ -40,12 +40,24 @@ export interface TabProps {
 }
 
 /**
+ * A failed time-series fetch, with the action that retries it. `retry` is the
+ * owner's choice of what to re-run (the first page, or the page that failed), so
+ * the charts section only offers it.
+ */
+export interface SeriesFailure {
+	message: string;
+	retry: () => void;
+}
+
+/**
  * PerformanceTab additionally receives the persisted per-tick time-series
  * (fetched once by LoadTestDetail) so it can render the latency percentile
  * chart / response-time-vs-concurrency scatter without a second query.
  */
 export interface PerformanceTabProps extends TabProps {
 	timeSeries: LoadTestMetrics[];
+	/** Set when fetching the series failed; absent while it is healthy. */
+	seriesFailure?: SeriesFailure;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples: MonitorSample[];
 	isLoadingSeries?: boolean;
