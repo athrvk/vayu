@@ -26,6 +26,7 @@ export function baseCommandContext(): CommandContext {
 	return {
 		activeTab: openTabs.find((tab) => tab.id === activeTabId) ?? null,
 		activeTabLabel: null,
+		activeTabReference: null,
 		activeCollection: null,
 	};
 }

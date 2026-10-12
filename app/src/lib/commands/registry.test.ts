@@ -20,7 +20,7 @@
  * persists - a node environment has no `localStorage` for it to seed from.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
@@ -32,9 +32,15 @@ import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories
 import type { Collection } from "@/types";
 
 const COLLECTION: Collection = { id: "c1", name: "Payments" } as Collection;
+const PAYMENTS_REFERENCE = 'Vayu collection "Payments" (c1)';
 
 function surfaces(): CommandSurfaces {
-	return { newRequest: () => {}, runCollection: () => {}, toggleThemeMode: () => {} };
+	return {
+		newRequest: () => {},
+		runCollection: () => {},
+		toggleThemeMode: () => {},
+		copy: async () => {},
+	};
 }
 
 /** A context with a host and a collection open - everything is available. */
@@ -42,6 +48,7 @@ function fullContext(): CommandContext {
 	return {
 		activeTab: { id: "t1", type: "collection", entityId: "c1" },
 		activeTabLabel: "Payments",
+		activeTabReference: PAYMENTS_REFERENCE,
 		activeCollection: COLLECTION,
 		surfaces: surfaces(),
 	};
@@ -123,6 +130,7 @@ describe("availability", () => {
 		const withHost: CommandContext = {
 			activeTab: null,
 			activeTabLabel: null,
+			activeTabReference: null,
 			activeCollection: null,
 			surfaces: surfaces(),
 		};
@@ -141,6 +149,7 @@ describe("availability", () => {
 		const requestTab: CommandContext = {
 			activeTab: { id: "t1", type: "request", entityId: "r1" },
 			activeTabLabel: "Charge card",
+			activeTabReference: null,
 			activeCollection: null,
 			surfaces: surfaces(),
 		};
@@ -162,6 +171,7 @@ describe("availability", () => {
 		const requestTab: CommandContext = {
 			activeTab: { id: "t1", type: "request", entityId: "r1" },
 			activeTabLabel: "Charge card",
+			activeTabReference: null,
 			activeCollection: null,
 			surfaces: surfaces(),
 		};
@@ -174,12 +184,36 @@ describe("availability", () => {
 		expect(availableCommands(contributed).map((c) => c.id)).toContain("send-request");
 	});
 
+	/*
+	 * The tab menu's "Copy for agent", for the tab on screen (#2047). The
+	 * reference is the descriptor's, so a tab that names no entity - welcome,
+	 * settings, variables, the dashboard - has none, and neither has a tab whose
+	 * entity is still loading.
+	 */
+	it("hides the copy command until a tab with a reference is active", () => {
+		const settingsTab: CommandContext = {
+			activeTab: { id: "t1", type: "settings", entityId: null },
+			activeTabLabel: "Settings",
+			activeTabReference: null,
+			activeCollection: null,
+			surfaces: surfaces(),
+		};
+		expect(availableCommands(settingsTab).map((c) => c.id)).not.toContain("copy-for-agent");
+		expect(availableCommands(fullContext()).map((c) => c.id)).toContain("copy-for-agent");
+	});
+
+	it("hides the copy command from a caller with no clipboard host", () => {
+		const { surfaces: _omitted, ...withoutHost } = fullContext();
+		expect(availableCommands(withoutHost).map((c) => c.id)).not.toContain("copy-for-agent");
+	});
+
 	it("names the target of a contextual command, so Enter holds no surprise", () => {
 		const ctx = fullContext();
 		expect(commandTitle(commandById("run-collection"), ctx)).toBe('Run "Payments"');
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe('Close "Payments"');
 		expect(commandTitle(commandById("run-load-test"), ctx)).toBe('Load test "Payments"');
 		expect(commandTitle(commandById("send-request"), ctx)).toBe('Send "Payments"');
+		expect(commandTitle(commandById("copy-for-agent"), ctx)).toBe('Copy "Payments" for agent');
 	});
 
 	it("prints the send chord on the row, from the chord itself", () => {
@@ -192,6 +226,7 @@ describe("availability", () => {
 		const ctx: CommandContext = {
 			activeTab: { id: "t1", type: "request", entityId: "r1" },
 			activeTabLabel: null,
+			activeTabReference: null,
 			activeCollection: null,
 		};
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe("Close tab");
@@ -221,6 +256,15 @@ describe("performing", () => {
 	it("opens the import modal through its store, not a copy of it", () => {
 		commandById("import-collection").perform(baseCommandContext());
 		expect(useImportModalStore.getState().isOpen).toBe(true);
+	});
+
+	it("copies the active tab's reference through the host's copy, as a Reference", () => {
+		const copy = vi.fn(async () => {});
+		const ctx: CommandContext = { ...fullContext(), surfaces: { ...surfaces(), copy } };
+
+		commandById("copy-for-agent").perform(ctx);
+
+		expect(copy).toHaveBeenCalledExactlyOnceWith(PAYMENTS_REFERENCE, "Reference");
 	});
 
 	it("closes the active tab", () => {

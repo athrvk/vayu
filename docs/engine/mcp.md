@@ -935,6 +935,23 @@ Vayu mock issuer "port 9100" (issuer_6f8a0c2e-4b5d-4e71-9a3c-5e7f9b1d3a45)
 Vayu trash entry "Legacy \"v1\" orders" (col_a1b3c5d7-e9f0-4a2b-8c4d-6e8f0a1b3c5e) - collection
 ```
 
+Where the user copies each kind from in the app:
+
+- **request**: the request's row menu in the Collections drawer, and its tab's menu.
+- **example**: the copy button on the example's row in the request's Examples tab.
+- **collection**: the collection's row menu, and its tab's menu.
+- **environment**: the environment's row menu in the Variables drawer.
+- **run**: the run's row menu in History, the run tab's header, and its tab's menu.
+- **run comparison**: *Copy comparison for agent* on a load test report's vs-baseline strip.
+- **inbox**: the inbox's row menu in the Services drawer, the inbox tab's header, and its tab's menu.
+- **capture**: the copy button in the capture's detail header.
+- **mock server**: the mock's row menu in the Services drawer, the mock-server tab's header, and its
+  tab's menu.
+- **mock issuer**: the issuer's row menu in the Services drawer.
+- **trash entry**: the copy button on the entry in Trash.
+
+The command palette's `Copy "<tab>" for agent` copies the line of whichever of those tabs is active.
+
 Two rules for the cases where the user did not paste one:
 
 - **The request the user means:** ask the user for a Vayu reference line, or call

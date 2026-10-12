@@ -395,8 +395,8 @@ it in. The grammar and an example of every kind are in
 `agent-reference.docs.test.ts` fails when a line on that page stops matching the formatter's output.
 
 The surfaces that put a line on the clipboard are the "Copy for agent" row actions (#2047): request, collection,
-environment, history, inbox, mock-issuer and mock-server rows and the tab menu, each through `useCopy()` with the
-name "Reference" (toast "Reference copied"). A collection's line takes the chain *above* it and a request's the chain of its own
+environment, history, inbox, mock-issuer and mock-server rows, the tab menu and the palette's
+`copy-for-agent` command, each through `useCopy()` with the name "Reference" (toast "Reference copied"). A collection's line takes the chain *above* it and a request's the chain of its own
 collection, so neither names a folder twice. The same line is on the surfaces that have no row menu:
 a trash entry, an example row and a capture's detail header carry an icon button (`useCopy({ feedback:
 "icon" })` with `IconSwap`, so the glyph swaps to a check and no toast follows), and the inbox and
@@ -1097,8 +1097,8 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   `useVariableItems` (environment names and variable keys across every scope) and `useRunItems`
   (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
   data, it maps the [command registry](#command-registry-libcommands) onto the same shape.
-- **`useCommandSurfaces.ts`** - the collection picker, the run dialog and the theme hook, which
-  three commands need and no store can hold. Their original hosts are not always on screen (the
+- **`useCommandSurfaces.ts`** - the collection picker, the run dialog, the theme hook and
+  `useCopy`'s `copy`, which four commands need and no store can hold. Their original hosts are not always on screen (the
   welcome screen's picker only on the welcome tab, the tree's run dialog only while the drawer
   is open), so the palette mounts its own - the same components, driven by the same calls. It
   also merges the surfaces a *mounted feature* contributes (the request builder's live draft,
@@ -1301,7 +1301,8 @@ in step or could enumerate them.
   object the handler matches, so a surface printing it cannot advertise a key nothing answers
   (#938) - and is present only where such a chord genuinely exists.
 - **`registry.ts`** - the roster. Actions (new request, import, run collection, send, load test,
-  close tab, save, toggle drawer, toggle context bar, toggle response position - request tabs
+  copy for agent - `Copy "<tab>" for agent`, the active tab's `agentReference` from its
+  descriptor, absent on a tab that names no entity (#2047) - close tab, save, toggle drawer, toggle context bar, toggle response position - request tabs
   only, toggle theme, open settings) plus one
   command per drawer view - **generated** from `constants/drawer-views.ts`, the same table `ActivityRail`
   reads, filtered to drop Settings (which `open-settings` already covers, tab and all) - plus one
@@ -1316,7 +1317,8 @@ Two rules make it work without a dependency-injection tangle:
 
 - **Stores are not in the context.** They are module singletons, so a `perform` calls
   `useTabsStore.getState().openTab(...)` directly. The context carries only what `getState()`
-  cannot answer: the active tab and its label, the collection that tab shows, and the surfaces.
+  cannot answer: the active tab, its label and its reference line, the collection that tab
+  shows, and the surfaces.
 - **A command that needs a surface the caller cannot offer declares itself unavailable** rather
   than throwing when picked. `CommandSurfaces` is optional on the context; the menu bridge omits
   it, so "New request" is simply not among the commands it can run.
@@ -1326,9 +1328,9 @@ Two rules make it work without a dependency-injection tangle:
 Most of what a `perform` needs is a store, and a store is always the answer when the state
 outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two halves:
 
-- **Host-owned** (`newRequest`, `runCollection`, `toggleThemeMode`) - dialogs and hooks that are
-  React but that *any* rendering caller can mount for itself. The palette does exactly that in
-  `useCommandSurfaces`, so offering `surfaces` at all means offering these three.
+- **Host-owned** (`newRequest`, `runCollection`, `toggleThemeMode`, `copy`) - dialogs and hooks
+  that are React but that *any* rendering caller can mount for itself. The palette does exactly
+  that in `useCommandSurfaces`, so offering `surfaces` at all means offering these four.
 - **Contributed by a mounted feature** (`startLoadTest`, `sendRequest`) - state that exists only
   inside one component tree and cannot be lifted without copying it. Starting a load test needs
   the request builder's **live editor draft**, before autosave has run; the palette is a sibling of

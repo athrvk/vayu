@@ -8,8 +8,9 @@
 /**
  * The dialogs and flows the palette's commands open.
  *
- * Three commands need something React owns rather than something a store holds:
- * a collection picker, the run dialog, and the theme hook. Their existing hosts
+ * Four commands need something React owns rather than something a store holds:
+ * a collection picker, the run dialog, the theme hook, and `useCopy` (the one
+ * clipboard writer, `clipboard-single-writer.test.ts`). Their existing hosts
  * are not always on screen - the welcome screen's picker exists only on the
  * welcome tab, and the collections tree's run dialog is unmounted the moment the
  * drawer closes - so the palette hosts its own. Each is the same component the
@@ -34,6 +35,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { useElectronTheme } from "@/hooks/useElectronTheme";
+import { useCopy } from "@/hooks/useCopy";
 import { useLiveCommandSurfaceStore, type CommandSurfaces } from "@/lib/commands";
 import type { Collection } from "@/types";
 import type { NewRequestPickerProps } from "@/hooks/useNewRequest";
@@ -49,6 +51,7 @@ export interface UseCommandSurfacesReturn {
 export function useCommandSurfaces(): UseCommandSurfacesReturn {
 	const { newRequest, pickerProps } = useNewRequest();
 	const { isDark, setTheme } = useElectronTheme();
+	const { copy } = useCopy();
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 	const startLoadTest = useLiveCommandSurfaceStore((s) => s.startLoadTest);
 	const sendRequest = useLiveCommandSurfaceStore((s) => s.sendRequest);
@@ -71,10 +74,11 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 			newRequest,
 			runCollection: setRunTarget,
 			toggleThemeMode,
+			copy,
 			...(startLoadTest ? { startLoadTest } : {}),
 			...(sendRequest ? { sendRequest } : {}),
 		}),
-		[newRequest, toggleThemeMode, startLoadTest, sendRequest]
+		[newRequest, toggleThemeMode, copy, startLoadTest, sendRequest]
 	);
 
 	return { surfaces, pickerProps, runTarget, dismissRunDialog };

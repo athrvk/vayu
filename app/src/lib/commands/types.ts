@@ -44,8 +44,8 @@ export type CommandGroup = "action" | "settings";
  * than throwing when picked.
  *
  * Two kinds of entry live here, and the difference is who supplies them. The
- * required three are the *host's*: a surface that renders the palette can mount
- * all three itself, so offering `surfaces` at all means offering those. The
+ * required four are the *host's*: a surface that renders the palette can mount
+ * all four itself, so offering `surfaces` at all means offering those. The
  * optional ones are contributed by a **mounted feature** through
  * `live-surfaces.ts` - present only while that feature is on screen, which is
  * why they are optional even for a host that offers everything it owns.
@@ -57,6 +57,8 @@ export interface CommandSurfaces {
 	runCollection: (collection: Collection) => void;
 	/** Flip the app between light and dark. */
 	toggleThemeMode: () => void;
+	/** `useCopy`'s `copy`, the one clipboard writer, which toasts what it copied. */
+	copy: (value: string, what: string) => Promise<void>;
 	/**
 	 * Start a load test for the request the builder currently holds - the live
 	 * editor draft, not the saved copy. Contributed by the mounted request
@@ -87,6 +89,11 @@ export interface CommandContext {
 	 * strip itself uses, so a command names a tab the way the tab is named.
 	 */
 	activeTabLabel: string | null;
+	/**
+	 * The active tab's reference line, the descriptor's `agentReference`, or
+	 * `null` on a tab that names no entity or whose entity has not loaded.
+	 */
+	activeTabReference: string | null;
 	/** The collection the active tab shows, when it shows one. */
 	activeCollection: Collection | null;
 	surfaces?: CommandSurfaces;

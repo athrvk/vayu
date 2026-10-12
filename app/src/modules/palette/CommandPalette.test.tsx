@@ -32,7 +32,7 @@ import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CommandPalette } from "./CommandPalette";
-import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
+import { useImportModalStore, useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
@@ -774,6 +774,46 @@ describe("commands", () => {
 			expect(useLayoutStore.getState().paletteOpen).toBe(false);
 		}
 	);
+
+	/*
+	 * The join the registry test cannot see (#2047): the line is the tab
+	 * strip's descriptor, carried by `useCommandContext`, and the copy is the
+	 * palette host's `useCopy`. Drop either and the row never appears.
+	 */
+	it("copies the active tab's reference, and offers nothing on a tab that names none", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		useToastStore.setState({ toasts: [] });
+
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "settings", entityId: null }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		expect(screen.queryByText(/for agent$/)).not.toBeInTheDocument();
+		cleanup();
+
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		typeQuery('Copy "Pay');
+		pressEnter();
+
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith('Vayu collection "Payments" (c1)')
+		);
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+				"Reference copied",
+			])
+		);
+	});
 
 	it("keeps the run dialog on screen after the pick closes the palette", () => {
 		useTabsStore.setState({

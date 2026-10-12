@@ -31,6 +31,7 @@ import {
 	ArrowRight,
 	CheckCheck,
 	ChevronsRight,
+	Copy,
 	Download,
 	MoveLeft,
 	MoveRight,
@@ -189,6 +190,22 @@ const ACTION_COMMANDS: readonly Command[] = [
 		 */
 		available: (ctx) => ctx.surfaces?.startLoadTest !== undefined,
 		perform: (ctx) => ctx.surfaces?.startLoadTest?.(),
+	},
+	{
+		id: "copy-for-agent",
+		title: (ctx) => `Copy "${ctx.activeTabLabel}" for agent`,
+		keywords: ["reference", "mcp", "agent", "clipboard", "id", "share"],
+		group: "action",
+		icon: Copy,
+		// The tab menu's item, for the tab on screen (#2047). The reference is
+		// null on a tab that names no entity (welcome, settings, variables, the
+		// dashboard) and until the entity loads, so the row is absent there.
+		available: (ctx) => ctx.activeTabReference !== null && ctx.surfaces?.copy !== undefined,
+		perform: (ctx) => {
+			if (ctx.activeTabReference !== null) {
+				void ctx.surfaces?.copy(ctx.activeTabReference, "Reference");
+			}
+		},
 	},
 	{
 		id: "close-tab",
