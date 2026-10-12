@@ -5461,6 +5461,11 @@ The worker parses SSE frames into a bounded in-memory ring that
 `events` node into the run's stored trace when the stream ends, so History
 restores the timeline.
 
+A UTF-8 byte-order mark at the very start of the stream is dropped, as the
+EventSource specification requires (issue #1917); without that the first line's
+field name would carry the mark and the first event would be lost. One mark is
+dropped, however its three bytes are split across reads, and only at the start.
+
 **Every stream ends, and the run says why.** Five terminations, never "the
 timeout happened to fire":
 

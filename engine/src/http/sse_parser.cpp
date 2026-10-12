@@ -104,6 +104,9 @@ std::string sanitize_utf8 (std::string_view text) {
 }
 
 namespace {
+/// U+FEFF as UTF-8, which the EventSource spec says a stream may open with.
+constexpr std::string_view UTF8_BOM = "\xEF\xBB\xBF";
+
 /// Headroom the line buffer gets over the event cap, so a field name is not
 /// paid for out of the payload's budget: `data: ` is six bytes, and without
 /// this a cap of 8 would keep two bytes of an event and call it truncated. It
@@ -138,9 +141,10 @@ std::vector<SseEvent> SseParser::feed (std::string_view chunk) {
         hold (chunk.substr (start, i - start));
         consume_line (line_, out);
         line_.clear ();
-        line_dropped_ = 0;
-        pending_cr_   = (c == '\r');
-        start         = i + 1;
+        line_dropped_    = 0;
+        pending_cr_      = (c == '\r');
+        start            = i + 1;
+        at_stream_start_ = false;
     }
     if (start < chunk.size ()) {
         hold (chunk.substr (start));
@@ -165,6 +169,22 @@ void SseParser::hold (std::string_view text) {
     const std::size_t kept = std::min (room, text.size ());
     line_.append (text.substr (0, kept));
     line_dropped_ += text.size () - kept;
+    drop_leading_bom ();
+}
+
+void SseParser::drop_leading_bom () {
+    if (!at_stream_start_) {
+        return;
+    }
+    // The line is held across chunks, so its front is the BOM however the three
+    // bytes were split. Still a prefix of the BOM means more bytes may complete it.
+    const std::string_view front = std::string_view (line_).substr (0, UTF8_BOM.size ());
+    if (front == UTF8_BOM) {
+        line_.erase (0, UTF8_BOM.size ());
+    } else if (UTF8_BOM.starts_with (front)) {
+        return;
+    }
+    at_stream_start_ = false;
 }
 
 void SseParser::consume_line (std::string_view line, std::vector<SseEvent>& out) {

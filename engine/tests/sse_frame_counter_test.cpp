@@ -96,6 +96,10 @@ TEST (SseFrameCounterTest, CountsAMultiLineFrameOnce) {
 // ---------------------------------------------------------------------------
 
 TEST (SseFrameCounterTest, AgreesWithTheParser) {
+    // A hex escape swallows the hex digits after it ("\xBFda" is one escape),
+    // so the marks are named and joined rather than spelled inside a literal.
+    const std::string BOM                 = "\xEF\xBB\xBF";
+    const std::string PARTIAL_BOM         = "\xEF\xBB";
     const std::vector<std::string> bodies = {
         "",
         "\n\n",
@@ -117,6 +121,13 @@ TEST (SseFrameCounterTest, AgreesWithTheParser) {
         // A trailing frame with no data: neither dispatches it.
         "data: one\n\nid: 9",
         ":\n\n",
+        // A leading BOM is dropped by the parser, so the counter must skip it.
+        BOM + "data: one\n\n",
+        BOM + BOM + "data: one\n\n",
+        PARTIAL_BOM + "data: one\n\ndata: two\n\n",
+        PARTIAL_BOM + "\n\ndata: two\n\n",
+        "data: one\n\n" + BOM + "data: two\n\n",
+        PARTIAL_BOM,
     };
 
     for (const auto& body : bodies) {
@@ -135,6 +146,16 @@ TEST (SseFrameCounterTest, CountsAFrameSplitAcrossChunks) {
     counter.feed ("ta: hel");
     counter.feed ("lo\n");
     counter.feed ("\n");
+    counter.finish ();
+    EXPECT_EQ (counter.events (), 1u);
+}
+
+TEST (SseFrameCounterTest, SkipsALeadingBomSplitAcrossChunks) {
+    SseFrameCounter counter;
+    counter.feed ("\xEF");
+    counter.feed ("\xBB\xBF"
+                  "da");
+    counter.feed ("ta: hello\n\n");
     counter.finish ();
     EXPECT_EQ (counter.events (), 1u);
 }

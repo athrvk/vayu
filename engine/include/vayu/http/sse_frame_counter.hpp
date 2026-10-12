@@ -18,7 +18,7 @@
  * user would put string building in `write_callback`.
  *
  * So this counts and holds nothing else. It allocates never, copies no payload,
- * and its whole state is the nine bytes below, which is what makes it safe to
+ * and its whole state is the few bytes below, which is what makes it safe to
  * run inside the curl write callback for every transfer of a 60k-RPS run.
  *
  * **It agrees with `SseParser` on what an event is**, which is the one property
@@ -67,6 +67,9 @@ class SseFrameCounter {
                     continue;
                 }
             }
+            if (at_stream_start_ && swallow_bom_byte (c)) {
+                continue;
+            }
             if (c == '\n' || c == '\r') {
                 pending_cr_ = (c == '\r');
                 end_line ();
@@ -111,6 +114,25 @@ class SseFrameCounter {
     /// How much of a leading `data` this line has matched. `Decided` means the
     /// question is settled either way and the rest of the line is skipped.
     enum class FieldMatch : std::uint8_t { Matching, MatchedName, Decided };
+
+    /// True when @p c extends the UTF-8 BOM the stream may open with, which
+    /// `SseParser` drops and so must not count as part of the first line. A
+    /// prefix that stops short of the whole BOM leaves a first line starting
+    /// 0xEF, which names no `data` field, exactly as the parser reads it.
+    bool swallow_bom_byte (char c) {
+        static constexpr std::string_view BOM = "\xEF\xBB\xBF";
+
+        if (c == BOM[bom_matched_]) {
+            at_stream_start_ = ++bom_matched_ < BOM.size ();
+            return true;
+        }
+        at_stream_start_ = false;
+        if (bom_matched_ > 0) {
+            line_empty_  = false;
+            field_match_ = FieldMatch::Decided;
+        }
+        return false;
+    }
 
     void advance_field_match (char c) {
         static constexpr std::string_view FIELD = "data";
@@ -159,13 +181,15 @@ class SseFrameCounter {
         resolve_line ();
     }
 
-    std::size_t events_     = 0;
-    bool pending_cr_        = false;
-    bool line_empty_        = true;
-    bool frame_has_data_    = false;
-    bool line_is_data_      = false;
-    std::uint8_t matched_   = 0;
-    FieldMatch field_match_ = FieldMatch::Matching;
+    std::size_t events_       = 0;
+    bool pending_cr_          = false;
+    bool at_stream_start_     = true;
+    std::uint8_t bom_matched_ = 0;
+    bool line_empty_          = true;
+    bool frame_has_data_      = false;
+    bool line_is_data_        = false;
+    std::uint8_t matched_     = 0;
+    FieldMatch field_match_   = FieldMatch::Matching;
 };
 
 } // namespace vayu::http

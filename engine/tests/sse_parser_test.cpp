@@ -298,6 +298,69 @@ SanitizeUtf8Test,
     return std::string (info.param.name);
 });
 
+// ---------------------------------------------------------------------------
+// A leading byte-order mark (#1917)
+// ---------------------------------------------------------------------------
+
+// The spec ignores one leading U+FEFF; without that the first line's field name
+// reads `\xEF\xBB\xBFdata`, an unknown field, and the first event is lost.
+// Mutation check: make `drop_leading_bom` return at once and the first event of
+// each case below vanishes.
+TEST (SseParser, DropsALeadingBomBeforeTheFirstField) {
+    const auto events = parse_all ("\xEF\xBB\xBF"
+                                   "data: a\n\n");
+    ASSERT_EQ (events.size (), 1u);
+    EXPECT_EQ (events[0].data, "a");
+}
+
+TEST (SseParser, DropsALeadingBomHoweverItsBytesAreSplit) {
+    const std::string stream = "\xEF\xBB\xBF"
+                               "event: t\ndata: a\n\n";
+    for (std::size_t first = 1; first < 3; ++first) {
+        for (std::size_t second = first; second <= 3; ++second) {
+            SseParser parser (GENEROUS);
+            auto events = parser.feed (std::string_view (stream).substr (0, first));
+            for (auto& event :
+            parser.feed (std::string_view (stream).substr (first, second - first))) {
+                events.push_back (event);
+            }
+            for (auto& event : parser.feed (std::string_view (stream).substr (second))) {
+                events.push_back (event);
+            }
+            ASSERT_EQ (events.size (), 1u) << first << "," << second;
+            EXPECT_EQ (events[0].event, "t") << first << "," << second;
+            EXPECT_EQ (events[0].data, "a") << first << "," << second;
+        }
+    }
+}
+
+// Only the stream's first bytes are a BOM; the same bytes later are text, and
+// a second BOM at the start is not a second one to ignore.
+TEST (SseParser, KeepsABomThatIsNotAtTheStartOfTheStream) {
+    const auto later = parse_all ("data: a\n\n\xEF\xBB\xBF"
+                                  "data: b\n\n");
+    ASSERT_EQ (later.size (), 1u);
+    EXPECT_EQ (later[0].data, "a");
+
+    const auto doubled = parse_all ("\xEF\xBB\xBF\xEF\xBB\xBF"
+                                    "data: a\n\n");
+    EXPECT_TRUE (doubled.empty ());
+}
+
+// A first line that merely starts like a BOM is ordinary content: its held
+// bytes must come back as the text they are, not vanish with the prefix.
+TEST (SseParser, KeepsAFirstLineThatOnlyResemblesABom) {
+    const auto events = parse_all ("data: \xEF\xBB\xBFx\n\xEF\xBB"
+                                   "data: skipped\n\n");
+    ASSERT_EQ (events.size (), 1u);
+    EXPECT_EQ (events[0].data, "\xEF\xBB\xBFx");
+
+    const auto partial = parse_all ("\xEF\xBB"
+                                    "data: lost\n\ndata: kept\n\n");
+    ASSERT_EQ (partial.size (), 1u);
+    EXPECT_EQ (partial[0].data, "kept");
+}
+
 TEST (SseParser, ReplacesInvalidUtf8InDispatchedText) {
     const auto events = parse_all ("event: t\xFFm\ndata: bad \xFF byte\n\n");
     ASSERT_EQ (events.size (), 1u);
