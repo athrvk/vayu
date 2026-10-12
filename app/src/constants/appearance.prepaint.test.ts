@@ -108,3 +108,36 @@ describe("index.html pre-paint scale", () => {
 		expect(document.documentElement.style.zoom).toBe("");
 	});
 });
+
+describe("index.html pre-paint accent (#1861)", () => {
+	const scheme = () => document.documentElement.getAttribute("data-color-scheme");
+
+	beforeEach(() => {
+		document.documentElement.removeAttribute("data-color-scheme");
+		localStorage.setItem("vayu-color-scheme", "sunset");
+	});
+
+	afterEach(() => {
+		document.documentElement.removeAttribute("data-color-scheme");
+	});
+
+	it("paints the last OS accent while matching it", () => {
+		localStorage.setItem("vayu-match-system-accent", "true");
+		localStorage.setItem("vayu-system-accent", "sky");
+		runPrePaint();
+		expect(scheme()).toBe("sky");
+	});
+
+	it("paints the manual pick when not matching, whatever accent is stored", () => {
+		localStorage.setItem("vayu-match-system-accent", "false");
+		localStorage.setItem("vayu-system-accent", "sky");
+		runPrePaint();
+		expect(scheme()).toBe("sunset");
+	});
+
+	it("paints the manual pick when matching but no accent has been stored", () => {
+		localStorage.setItem("vayu-match-system-accent", "true");
+		runPrePaint();
+		expect(scheme()).toBe("sunset");
+	});
+});
