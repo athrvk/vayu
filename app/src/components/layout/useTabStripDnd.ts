@@ -31,6 +31,7 @@ import { useTabsStore } from "@/stores";
 import {
 	consumeClick,
 	cancelGesture,
+	isOwnEvent,
 	moveGesture,
 	pressGesture,
 	releaseGesture,
@@ -48,23 +49,6 @@ export interface TabStripDndOptions {
 	visibleIds: readonly string[];
 	/** The tab landed in a new place; the strip hands the roving Tab stop to it. */
 	onMoved: (tabId: string) => void;
-}
-
-/**
- * Whether an event that reached a tab's handler actually happened on that tab.
- *
- * Radix renders menus and popovers through a **portal** - a React child of the
- * component that opened it whose DOM lives on `document.body`. React bubbles
- * synthetic events through the component tree, so a press on a portalled child of
- * the tab arrives here as a press on the tab. Taking it captures the pointer on
- * the tab, which retargets the `pointerup` the portalled control needed, and it
- * silently stops working. Only a DOM containment check tells the two apart.
- *
- * Today's right-click menu is a React sibling of the tab, not a child, so it does
- * not reach these handlers; the guard is for the first portal that is a child.
- */
-function isOwnEvent(e: { target: EventTarget | null; currentTarget: HTMLElement }): boolean {
-	return e.target instanceof Node && e.currentTarget.contains(e.target);
 }
 
 function renderedTabs(strip: HTMLElement | null): HTMLElement[] {
