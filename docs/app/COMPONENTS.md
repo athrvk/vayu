@@ -378,6 +378,21 @@ What a drag surface shares without sharing a DOM. The collection tree is the fir
 | `lib/drag/drop-slot.ts` | Where a drop lands in a one-dimensional list: `slotAt` (the number of items whose midpoint is before the pointer), `landingIndex` (the index the item ends up at once lifted out of its old place) and `isNoOpSlot` (the two slots that leave it where it was). Pure and node-tested; throws on a non-integer or negative index. The collection tree does not use it - its drops resolve against folder blocks and anchors (`drop-position.ts`, `useTreeDnd.ts`'s `indexInBlock`) |
 | `components/shared/DropIndicator.tsx` | The 2px `--primary` line a drag draws at the edge it would drop on, `horizontal` (across a row, indented by `indentPx`) or `vertical` (down the side of an item). `aria-hidden`, `pointer-events-none`, and `data-drop-indicator` carries the edge. The host must be `relative`. The tree's `RowDropIndicator` delegates to it |
 
+## Agent references (`lib/agent-reference.ts`)
+
+The one place the app words an entity for an agent (#2046): `Vayu <kind> "<name>" (<id>)` plus a tail, one
+exported formatter per kind (`requestReference`, `exampleReference`, `collectionReference`,
+`environmentReference`, `runReference`, `runComparisonReference`, `inboxReference`, `captureReference`,
+`mockServerReference`, `mockIssuerReference`, `trashReference`). **A reference carries no value:** each
+formatter takes a `Pick<>` of exactly the fields it prints, so a URL, header, body, variable, token or
+secret is not reachable from inside it, and a run's URL is cut to its path with `lib/path-label.ts`
+(`pathLabel`, shared with the tab titles) plus a cut at any `?` or `#`. The module is pure - no React, store
+or query import - so the caller resolves what a line names (a collection chain from
+`collectionNamePath` in `modules/collections/tree-utils.ts`, a collection run's collection name) and passes
+it in. The grammar and an example of every kind are in
+[MCP: Naming what the user means](../engine/mcp.md#naming-what-the-user-means);
+`agent-reference.docs.test.ts` fails when a line on that page stops matching the formatter's output.
+
 ## Collections (`modules/collections/`)
 
 | Component | Role |

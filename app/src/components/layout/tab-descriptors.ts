@@ -20,26 +20,12 @@
 import { Folder, Zap, Braces, Clock, Settings, Inbox, Radio } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
-import { walkAncestors } from "@/modules/collections/tree-utils";
+import { collectionNamePath } from "@/modules/collections/tree-utils";
+import { pathLabel } from "@/lib/path-label";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
-
-/**
- * Extract a short display path from a request URL. URLs may contain
- * {{variables}} or be malformed mid-edit, so this never throws.
- */
-export function pathLabel(url: string): string {
-	if (!url) return "";
-	try {
-		return decodeURIComponent(new URL(url).pathname) || "/";
-	} catch {
-		// Strip scheme+host if present, otherwise show the raw string
-		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
-		return decodeURIComponent(stripped) || decodeURIComponent(url);
-	}
-}
 
 /**
  * Title for a request tab: the user-set name when there is one, otherwise the
@@ -244,12 +230,9 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					// path labels are not confined to run tabs.
 					isPath: name.startsWith("/"),
 					fromUrl: !hasOwnName(request.name),
-					// `walkAncestors` returns the chain root-first and carries the
-					// cycle guard a hand-rolled parent walk would not.
-					path: [
-						...walkAncestors(request.collectionId, collections).map((c) => c.name),
-						name,
-					].join(" / "),
+					path: [...collectionNamePath(request.collectionId, collections), name].join(
+						" / "
+					),
 				};
 			}
 			case "run": {
