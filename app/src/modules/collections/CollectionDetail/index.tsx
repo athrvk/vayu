@@ -54,7 +54,7 @@ const TABS: { id: CollectionTab; label: string }[] = [
  * context on mount, so keeping it alive behind another tab would leave the
  * variables editor claiming Ctrl/Cmd+S while something else is on screen.
  *
- * `data` is absent for the opposite reason: it saves explicitly, per action, and
+ * `data` is absent for the opposite reason: it saves per gesture (a pick, a Remove), and
  * the only thing it holds between actions is a parsed file - which is user data
  * of unknown sensitivity, so letting it outlive a look at another tab is a cost
  * with nothing bought.
