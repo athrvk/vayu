@@ -12,8 +12,11 @@
  * LoadTestDetail's "Test config" row names the data set a run bound (#1940).
  * The rows are never stored; the report's `dataRowCount` is the whole record.
  *
+ * Since #2051 the row also names the file (`2 rows · users.csv`); the hash
+ * is never drawn.
+ *
  * Mutation check: remove the `Data:` entry from `LoadTestDetail` and the
- * shown-count cases redden.
+ * shown-count cases redden; drop the file-name suffix and the named case reddens.
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -22,7 +25,10 @@ import { TooltipProvider } from "@/components/ui";
 import LoadTestDetail from "./LoadTestDetail";
 import type { RunReport } from "@/types";
 
-function report(dataRowCount: number | undefined): RunReport {
+function report(
+	dataRowCount: number | undefined,
+	file: { dataFileName?: string; dataFileHash?: string } = {}
+): RunReport {
 	return {
 		metadata: {
 			runId: "r",
@@ -32,7 +38,13 @@ function report(dataRowCount: number | undefined): RunReport {
 			endTime: 1000,
 			requestUrl: "http://127.0.0.1:8080/x",
 			requestMethod: "GET",
-			configuration: { mode: "constant_rps", duration: "3s", targetRps: 200, dataRowCount },
+			configuration: {
+				mode: "constant_rps",
+				duration: "3s",
+				targetRps: 200,
+				dataRowCount,
+				...file,
+			},
 		},
 		summary: {
 			totalRequests: 600,
@@ -59,12 +71,15 @@ function report(dataRowCount: number | undefined): RunReport {
 	};
 }
 
-function mount(dataRowCount: number | undefined) {
+function mount(
+	dataRowCount: number | undefined,
+	file: { dataFileName?: string; dataFileHash?: string } = {}
+) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={qc}>
 			<TooltipProvider>
-				<LoadTestDetail report={report(dataRowCount)} runId="r" />
+				<LoadTestDetail report={report(dataRowCount, file)} runId="r" />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -76,6 +91,19 @@ describe("LoadTestDetail data row count", () => {
 
 		expect(screen.getByText("Data:")).toBeInTheDocument();
 		expect(screen.getByText("12 rows")).toBeInTheDocument();
+	});
+
+	it("names the file beside the count", () => {
+		mount(2, { dataFileName: "users.csv", dataFileHash: "a".repeat(64) });
+
+		expect(screen.getByText("2 rows · users.csv")).toBeInTheDocument();
+		expect(screen.queryByText(/a{64}/)).toBeNull();
+	});
+
+	it("keeps the bare count for a run recorded without a file name", () => {
+		mount(2);
+
+		expect(screen.getByText("2 rows")).toBeInTheDocument();
 	});
 
 	it("uses the singular for one row", () => {

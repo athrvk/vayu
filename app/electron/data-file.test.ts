@@ -16,13 +16,24 @@
  * rather than as a file the app should never have opened.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { readDataFile, DATA_FILE_EXTENSIONS, type DataFileSystem } from "./data-file";
-import { DATA_FILE_ACCEPT } from "@/services/data-files";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import {
+	hashDataFile,
+	readDataFile,
+	DATA_FILE_EXTENSIONS,
+	DATA_FILE_HASH_PATTERN,
+	type DataFileSystem,
+} from "./data-file";
+import { DATA_FILE_ACCEPT, sha256Hex } from "@/services/data-files";
+import { DATA_FILE_HASH_PATTERN as PICKER_HASH_PATTERN } from "@/services/data-files/hash";
 
 const system = (overrides: Partial<DataFileSystem> = {}): DataFileSystem => ({
 	stat: vi.fn(async () => ({ size: 10, isFile: () => true })),
 	readFile: vi.fn(async () => Buffer.from("id,email\n1,a@b.c\n")),
+	hashFile: vi.fn(async () => "f".repeat(64)),
 	fetchConfig: vi.fn(async () => ({
 		entries: [{ key: "maxScenarioDataBytes", value: "1024" }],
 	})),
@@ -104,6 +115,25 @@ describe("readDataFile - what it returns", () => {
 		expect(Array.from(bytes)).toEqual([0xff, 0xfe, 0x69, 0x00]);
 	});
 
+	it("carries the SHA-256 of those bytes, as 64 lowercase hex (#2051)", async () => {
+		// The FIPS 180-2 "abc" vector, so the digest is checked against a value
+		// this codebase did not compute.
+		const io = system({ readFile: vi.fn(async () => Buffer.from("abc")) });
+		const { hash } = await readDataFile("/home/u/abc.csv", io);
+		expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+	});
+
+	it("answers the same hash for the same bytes, and a different one when they change", async () => {
+		const first = await readDataFile("/home/u/rows.csv", system());
+		const second = await readDataFile("/home/u/rows.csv", system());
+		expect(first.hash).toBe(second.hash);
+		const edited = await readDataFile(
+			"/home/u/rows.csv",
+			system({ readFile: vi.fn(async () => Buffer.from("id,email\n1,a@b.d\n")) })
+		);
+		expect(edited.hash).not.toBe(first.hash);
+	});
+
 	it("reports a moved file as a moved file", async () => {
 		const io = system({
 			stat: vi.fn(async () => {
@@ -126,5 +156,92 @@ describe("the allowlist and the picker agree", () => {
 		// the user to tell why. Duplicated across the process boundary out of
 		// necessity - this is what keeps the two copies honest.
 		expect([...DATA_FILE_EXTENSIONS].sort()).toEqual(DATA_FILE_ACCEPT.split(",").sort());
+	});
+});
+
+describe("the hash and the picker's agree (#2051)", () => {
+	it("answers the digest the picker computes for the same bytes", async () => {
+		// A hand-picked file is hashed in the renderer and never comes through
+		// here, so a run is only comparable to another if both answer one digest.
+		// A UTF-16 BOM and a non-ASCII cell, so a digest taken over decoded text
+		// rather than the raw bytes on either side would disagree.
+		const bytes = Uint8Array.from([0xff, 0xfe, 0x69, 0x00, 0x64, 0x00, 0xe9, 0x00]);
+		const { hash } = await readDataFile(
+			"/home/u/rows.csv",
+			system({ readFile: vi.fn(async () => Buffer.from(bytes)) })
+		);
+		expect(hash).toBe(await sha256Hex(bytes.buffer));
+	});
+
+	it("checks a stored hash against the same shape", () => {
+		expect(DATA_FILE_HASH_PATTERN.source).toBe(PICKER_HASH_PATTERN.source);
+	});
+});
+
+/*
+ * `dataFile:hash` (#2051): the digest of the file as it is now, so a run's
+ * `dataFileHash` can be compared with the file on disk without carrying its
+ * bytes. Driven against a real file, because the streamed digest is the one
+ * part the injected system would otherwise stand in for.
+ *
+ * Mutation check: hash anything but the file's whole contents (drop a chunk,
+ * or digest the path) and the first case fails; drop the path gates and the
+ * refusal case reads the disk.
+ */
+describe("hashDataFile", () => {
+	let dir: string;
+
+	beforeEach(async () => {
+		dir = await fs.mkdtemp(path.join(os.tmpdir(), "vayu-data-file-"));
+	});
+
+	afterEach(async () => {
+		await fs.rm(dir, { recursive: true, force: true });
+	});
+
+	it("answers the digest a read of the same file answers, from the disk", async () => {
+		const file = path.join(dir, "abc.csv");
+		await fs.writeFile(file, "abc");
+
+		const hash = await hashDataFile(file);
+
+		// The FIPS 180-2 "abc" vector, a value this codebase did not compute.
+		expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+		const read = await readDataFile(
+			file,
+			system({ stat: (p) => fs.stat(p), readFile: (p) => fs.readFile(p) })
+		);
+		expect(read.hash).toBe(hash);
+	});
+
+	it("answers a different digest once the file is edited", async () => {
+		const file = path.join(dir, "rows.csv");
+		await fs.writeFile(file, "id\n1\n");
+		const before = await hashDataFile(file);
+		await fs.writeFile(file, "id\n2\n");
+		expect(await hashDataFile(file)).not.toBe(before);
+	});
+
+	it("reports a missing file the way a read does", async () => {
+		await expect(hashDataFile(path.join(dir, "gone.csv"))).rejects.toThrow(
+			/The file is no longer at .*gone\.csv - pick it again\./
+		);
+	});
+
+	it("passes the read's path gates before touching the disk", async () => {
+		const io = system();
+		await expect(hashDataFile("/home/u/.ssh/id_rsa", io)).rejects.toThrow(
+			/only opens data files/
+		);
+		await expect(hashDataFile("", io)).rejects.toThrow(/No data file path/);
+		expect(io.stat).not.toHaveBeenCalled();
+		expect(io.hashFile).not.toHaveBeenCalled();
+	});
+
+	it("needs no engine: a hash fetches no byte cap", async () => {
+		const io = system();
+		await expect(hashDataFile("/home/u/rows.csv", io)).resolves.toBe("f".repeat(64));
+		expect(io.fetchConfig).not.toHaveBeenCalled();
+		expect(io.readFile).not.toHaveBeenCalled();
 	});
 });

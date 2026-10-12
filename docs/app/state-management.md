@@ -365,14 +365,15 @@ dialog can pre-fill it instead of asking for it every run (issue #599).
 **State:**
 ```typescript
 {
-  locations: Record<string, { path: string; fileName: string }>  // keyed by collection id
+  locations: Record<string, { path: string; fileName: string; hash?: string }>  // keyed by collection id
 }
 ```
 
 **Key Methods:**
 ```typescript
-const { setDataFile, clearDataFile } = useDataFileStore();
-setDataFile(collectionId, { path, fileName });
+const { setDataFile, clearDataFile, recordDataFileHash } = useDataFileStore();
+setDataFile(collectionId, { path, fileName, hash });
+recordDataFileHash(path, hash);  // every location at that path
 ```
 
 **Persistence:** `vayu.data-files` (v1)
@@ -392,17 +393,27 @@ it never holds **rows**: a data file's contents are user data of unknown
 sensitivity and are persisted nowhere in Vayu, which `data-file-store.test.ts`
 asserts against the persisted payload rather than against the store's surface.
 
-The path is written when the user declares a contract in the Data tab by
-picking a file (`CollectionDetail/DataTab.tsx`), obtained through the preload's
+The path is written when the user declares a contract by picking a file, on
+the Data tab or in either run dialog (`hooks/useDataContractWriter.ts`), obtained through the preload's
 existing `getFilePath` bridge, and dropped when the collection is deleted or
 purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
 (`electron/data-file.ts`), because the renderer otherwise cannot name a path.
+
+`hash` is the SHA-256 of the file's bytes the last time the app read it (issue
+#2051), the same digest a run records as `dataFileHash`. A pick writes it with
+the path; every re-read through `readDeclaredDataFile` refreshes it, keyed by
+path, so a file edited on disk is not described by the digest it had when it
+was declared. It is optional because a location remembered before hashes were
+recorded has none until its next read. Nothing that only *compares* writes it:
+`useDataFileChanged` and MCP's `list_collections` ask the main process for the
+file's current digest (`dataFile:hash`) and fall back to this one only when
+they cannot.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
 `migrate` runs only on a version mismatch, and the common case is a
 same-version payload, so an entry that is not a `{path, fileName}` pair of
 strings would otherwise reach the read IPC *as a path*. A bad entry is dropped
-rather than repaired - there is nothing to repair a path to, and the picker is
+(a malformed `hash` drops only the hash) rather than repaired - there is nothing to repair a path to, and the picker is
 one click away.
 
 #### `spec-file-store.ts` - Where Each Collection's Spec File Lives

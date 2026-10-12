@@ -90,6 +90,7 @@ import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
+import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
@@ -402,8 +403,15 @@ export default function RunCollectionDialog({
 						? { iterations: explicitIterations }
 						: {}),
 					// The parsed rows themselves - the same array the preview
-					// showed, never a re-parse.
-					...(dataFile ? { data: dataFile.parsed.rows } : {}),
+					// showed, never a re-parse - and which file they came from, by
+					// name and content hash, never path (#2051).
+					...(dataFile
+						? {
+								data: dataFile.parsed.rows,
+								dataFileName: runDataFileName(dataFile.fileName),
+								dataFileHash: dataFile.hash,
+							}
+						: {}),
 				},
 				// The environment the rest of the app sends against - a run that
 				// resolved `{{variables}}` against a different one than Send does
@@ -445,6 +453,8 @@ export default function RunCollectionDialog({
 							concurrency: virtualUserCount,
 							duration: `${durationSeconds.trim()}s`,
 							dataRowCount: dataFile?.parsed.rows.length,
+							dataFileName: dataFile?.fileName,
+							dataFileHash: dataFile?.hash,
 						});
 						loadTestService.startMonitoring(runId);
 						openTab({ type: "dashboard", entityId: null });

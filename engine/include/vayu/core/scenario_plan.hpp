@@ -188,8 +188,9 @@ ScriptsOverrideMode scripts_mode);
  * structural rather than a convention to remember: this is the object
  * `build_scenario_manifest` serializes into `runs.config_snapshot`, and the
  * rows are user data of unknown sensitivity that the snapshot never records.
- * They live on `ScenarioExecution`, which nothing writes to disk; only their
- * count survives into the snapshot.
+ * They live on `ScenarioExecution`, which nothing writes to disk; what survives
+ * into the snapshot is their count plus the file's name and content hash
+ * (issue #2051), never its path or rows.
  *
  * That is a statement about the row *set*, not about every value in it: a cell
  * bound into a request is stored with that request in the step's trace, the
@@ -209,6 +210,10 @@ struct ScenarioRequest {
     /// Resolved: an explicit count wins, otherwise the data row count, else 1.
     size_t iterations     = 1;
     size_t data_row_count = 0;
+    /// The file `data` came from, as the caller named it - see
+    /// @ref read_data_file_fields. Empty when none was named.
+    std::string data_file_name;
+    std::string data_file_hash;
 };
 
 /**
@@ -435,6 +440,32 @@ vayu::Request& request);
 const ScenarioLimits& limits,
 std::string_view field,
 std::vector<nlohmann::json>& rows_out);
+
+/**
+ * Read which file a run's `data` rows came from (issue #2051): `dataFileName`,
+ * a display name, and `dataFileHash`, the SHA-256 of the file's bytes as 64
+ * lowercase hex characters. Each is optional and independent of the other;
+ * absent or `null` leaves its output empty. Both are stored verbatim and never
+ * opened; a name holding a `/` or `\` is refused, so the engine never stores
+ * a path.
+ *
+ * One reader for both shapes, like @ref read_data_rows: @p prefix is
+ * `"scenario."` for a collection run's block and empty for a single-request
+ * run's top level, and every refusal names the field with it. A key sent
+ * without rows (@p has_data false) is refused rather than ignored (#1503).
+ */
+[[nodiscard]] std::optional<std::string> read_data_file_fields (const nlohmann::json& block,
+std::string_view prefix,
+bool has_data,
+std::string& name_out,
+std::string& hash_out);
+
+/// Write @p name and @p hash into @p snapshot as `dataFileName` /
+/// `dataFileHash`, each only when non-empty: absent for a run that named no
+/// file, never `null`.
+void stamp_data_file_fields (nlohmann::json& snapshot,
+const std::string& name,
+const std::string& hash);
 
 /**
  * Validate a `scenario` block and resolve it into a plan.

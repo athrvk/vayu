@@ -37,6 +37,8 @@ export interface VayuMcpServiceOptions {
 	log?: Logger;
 	/** Where a collection's declared data file lives on this machine (#1742). */
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
+	/** The SHA-256 of a remembered data file as it is now (#2051); rejects when unreadable. */
+	currentDataFileHash?: (filePath: string) => Promise<string>;
 	/** Which tab and environment the app window has open (#2045). */
 	appFocus?: () => AppFocus | undefined;
 }
@@ -60,6 +62,7 @@ export class VayuMcpService {
 				onDataChanged: opts.onDataChanged,
 				log: opts.log,
 				dataFileLocation: opts.dataFileLocation,
+				currentDataFileHash: opts.currentDataFileHash,
 				appFocus: opts.appFocus,
 			}),
 		});

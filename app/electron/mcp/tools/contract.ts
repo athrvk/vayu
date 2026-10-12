@@ -196,6 +196,12 @@ export interface ToolContext {
 	 */
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 	/**
+	 * The SHA-256 hex of a remembered data file's bytes as they are now (#2051),
+	 * rejecting when the file cannot be read. Absent in the stdio CLI, like
+	 * `dataFileLocation`, so a listed `dataFile.hash` falls back to the stored one.
+	 */
+	currentDataFileHash?: (filePath: string) => Promise<string>;
+	/**
 	 * Which tab and environment the app window has open (#2045). Absent in the
 	 * stdio CLI, which has no window, and undefined until a window has published.
 	 */

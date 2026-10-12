@@ -291,6 +291,8 @@ export default function LoadTestDashboard() {
 				rampUpDuration: loadTestConfig.rampUpDuration,
 				startConcurrency: loadTestConfig.startConcurrency,
 				dataRowCount: loadTestConfig.dataRowCount,
+				dataFileName: loadTestConfig.dataFileName,
+				dataFileHash: loadTestConfig.dataFileHash,
 			};
 		}
 		return undefined;

@@ -2102,7 +2102,8 @@ reports the row, and with a wrap the two deliberately disagree.
 Rows are validated before the run row exists: a `data` that is present and empty,
 a row that is not an object (the message names its index), or a set over
 `maxScenarioDataRows` is a `400`. Rows are never persisted - the run's snapshot
-records `dataRowCount` and nothing else.
+records the row count (`dataRowCount`) plus the file's name and content hash
+(`dataFileName`, `dataFileHash`), never its path or rows.
 
 ## Console Output
 

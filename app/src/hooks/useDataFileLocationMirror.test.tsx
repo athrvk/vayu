@@ -44,6 +44,19 @@ describe("useDataFileLocationMirror", () => {
 		expect(publish).toHaveBeenCalledTimes(2);
 	});
 
+	it("republishes when a re-read records a new hash, carrying it to main (#2051)", () => {
+		renderHook(() => useDataFileLocationMirror());
+		const hash = "9".repeat(64);
+
+		act(() => useDataFileStore.getState().recordDataFileHash(USERS.path, hash));
+
+		expect(publish).toHaveBeenLastCalledWith({ col_1: { ...USERS, hash } });
+		expect(publish).toHaveBeenCalledTimes(2);
+		// The same hash again changes nothing, so nothing is sent.
+		act(() => useDataFileStore.getState().recordDataFileHash(USERS.path, hash));
+		expect(publish).toHaveBeenCalledTimes(2);
+	});
+
 	it("does nothing outside Electron, on mount or on a change", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		// Mutation check: drop the `if (!publish) return` guard and the mount

@@ -145,8 +145,9 @@ The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
 and handing the daemon a user-supplied path would be a new trust boundary. The
 row set itself is never stored on either side - a run's snapshot records its
-count alone - but a cell bound into a request travels with that request, and a
-run stores the requests it sent. See [What is stored](#what-is-stored).
+count plus the file's name and content hash, never its path or a row - but a
+cell bound into a request travels with that request, and a run stores the
+requests it sent. See [What is stored](#what-is-stored).
 
 ## Reading a row: `{{data.column}}` vs `pm.iterationData`
 
@@ -413,8 +414,12 @@ run:
   `dataSchema` (columns, file name, when it was declared), so an agent building
   the `data` rows for `run_collection` or `start_load_run` knows which columns
   to supply. Where the app remembers the file, the row also carries
-  `dataFile: { path, fileName }`, so an agent on this machine can open the file
-  itself, the way you would. A collection that declares nothing has neither -
+  `dataFile: { path, fileName, hash }`, so an agent on this machine can open the
+  file itself, the way you would; `hash` is the SHA-256 of the file's bytes as
+  they are on disk when the agent asks (the digest the app last read when the
+  file cannot be read), the same digest a run records, so an agent can tell
+  whether the file is still the one a past run used. A run's file name is a
+  name, never a path: one holding a `/` or `\` is refused. A collection that declares nothing has neither -
   the ancestor walk above is left to the reader, the same as it is for
   variables. The rows never go over MCP: Vayu does not read the file for the
   agent. The path is named only by the MCP server inside the running app, which
@@ -434,7 +439,7 @@ collection whose contract the run binds against: the nearest declaring
 ancestor, or the collection being run (the request's own, for a load test) when
 nothing above it declares. A request in no collection has no contract, so a
 file picked for its load test is only that run's input. The pre-fill is a read
-of the declared file, never a pick, so opening a dialog writes nothing. A
+of the declared file, never a pick, so opening a dialog declares nothing. A
 declare that fails is a warning beside the picker and nothing more: the file
 stays selected, the run still sends its rows, and picking it again retries. On
 the Data tab, the buttons beside the picker cover what a gesture does not: **Re-declare from this file** appears when the re-opened file
@@ -515,10 +520,21 @@ itself is read fresh every time - whether you pick it or the dialog pre-fills it
 from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
-and nothing else, and that count is what a reader sees afterwards: the
-dashboard's header prints "N rows" in its config summary, live from the launch
-config and then from the report, and History's Test config row lists it as
-`Data:`.
+plus the file's name and content hash (the SHA-256 of its bytes, so two runs
+can be told apart by the file that drove them), never its path or a row. The
+count and the file's name are what a reader sees afterwards: the
+dashboard's header prints "N rows from users.csv" in its config summary, live
+from the launch config and then from the report, and History's Test config row
+lists it as `Data: N rows · users.csv`. A collection run's tab says
+`Data: users.csv` in its header, the History row's hover card has a `Data file`
+line, and a run tab's tooltip ends with the name. Where the file the run's
+collection remembers now differs on disk from the one the run read, the
+collection run's header adds "(file changed since this run)": the app hashes
+the file when the tab opens and again whenever its window regains focus, so an
+edit made in another program shows up on return. A file that has moved or been
+deleted adds nothing, since there is nothing to compare; the hash itself is
+never shown. A file whose name holds a `\` (legal on macOS and Linux) is run
+without its name, because a name with a path separator is refused as a path.
 
 **A cell that binds into a request is stored with that request.** A collection
 run keeps one row per step execution, and each holds the exchange as it
@@ -534,7 +550,7 @@ That is the design-mode trace rule, not an oversight of this feature: a trace
 records what was **sent** rather than a redacted account of it, since a
 redaction guess is wrong in both directions and reassuring when it is wrong.
 The run's step view carries that disclosure where the steps are listed, and
-names the data file when one was bound.
+names the data file when the run's snapshot recorded one.
 
 The expiry is the run's: step rows are deleted when their run is, so
 `maxRunsRetained` and `runRetentionDays` (Settings, Data & retention) are what

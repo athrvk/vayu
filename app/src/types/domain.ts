@@ -1093,6 +1093,13 @@ export interface RunConfigSnapshot {
 	startConcurrency?: number;
 	comment?: string;
 	/**
+	 * The data file that drove a **load** run (issue #2051): its name and the
+	 * SHA-256 of its bytes, never a path. A collection run keeps the pair inside
+	 * its `scenario` block - read both through `dataFileFromSnapshot`.
+	 */
+	dataFileName?: string;
+	dataFileHash?: string;
+	/**
 	 * Requested protocol the run executed with - `build_run_report_config` in
 	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
 	 * key to `"auto"` before this ever reaches the client, so it is always
@@ -1568,6 +1575,9 @@ export interface RunScenarioSummary {
 	recursive?: boolean;
 	/** Steps in one pass - the plan's length, not the executions. */
 	stepCount?: number;
+	/** The data file that drove the run (issue #2051): its name and content hash, never a path. */
+	dataFileName?: string;
+	dataFileHash?: string;
 }
 
 /**
@@ -1629,6 +1639,13 @@ export interface RunSummary {
 	 * show for one.
 	 */
 	scenario?: RunScenarioSummary;
+	/**
+	 * The data file that drove a **load** run (issue #2051): its name and the
+	 * SHA-256 of its bytes, never a path. A collection run's pair rides
+	 * {@link RunScenarioSummary} instead.
+	 */
+	dataFileName?: string;
+	dataFileHash?: string;
 	/**
 	 * Whether the run's terminal report carries a non-empty `warnings` array
 	 * (issue #1527, extending #1503). Omitted, not `false`, for a run with
@@ -1912,6 +1929,13 @@ export interface LoadTestConfig {
 	 * `ParsedDataFile` has already answered. Absent exactly when `data` is.
 	 */
 	dataColumns?: string[];
+	/**
+	 * The picked file's name and the SHA-256 of its bytes (issue #2051),
+	 * forwarded beside `data` so the run records which file drove it - a
+	 * display name, never a path. Absent exactly when `data` is.
+	 */
+	dataFileName?: string;
+	dataFileHash?: string;
 	/**
 	 * The `elements` run override (issue #1594), single-request runs only:
 	 * whether an inherited `script.*` element's own `config.inline` decides
@@ -2299,6 +2323,13 @@ export interface RunReport {
 			 * are never stored. Absent for a run without a data file.
 			 */
 			dataRowCount?: number;
+			/**
+			 * The file's display name and the SHA-256 of its bytes (issue #2051).
+			 * Never a path. Absent for a run without a data file, and for one
+			 * recorded before the pair was.
+			 */
+			dataFileName?: string;
+			dataFileHash?: string;
 		};
 		/**
 		 * The document this run was measured against (issue #637), echoed from

@@ -99,4 +99,67 @@ describe("data-file-store", () => {
 
 		expect(Object.keys(useDataFileStore.getState().locations)).toEqual(["col_4"]);
 	});
+
+	it("persists the hash of the file's bytes beside its path (#2051)", () => {
+		const hash = "b".repeat(64);
+		useDataFileStore
+			.getState()
+			.setDataFile("col_1", { path: "/home/u/users.csv", fileName: "users.csv", hash });
+
+		expect(persisted().state.locations.col_1).toEqual({
+			path: "/home/u/users.csv",
+			fileName: "users.csv",
+			hash,
+		});
+	});
+
+	it("keeps a well-formed hash across a rehydrate and drops a malformed one, not its location", async () => {
+		const hash = "c".repeat(64);
+		localStorage.setItem(
+			STORAGE_KEYS.DATA_FILE_STORE,
+			JSON.stringify({
+				version: 1,
+				state: {
+					locations: {
+						col_1: { path: "/p/a.csv", fileName: "a.csv", hash },
+						col_2: { path: "/p/b.csv", fileName: "b.csv", hash: "not-a-digest" },
+					},
+				},
+			})
+		);
+
+		await useDataFileStore.persist.rehydrate();
+
+		const { locations } = useDataFileStore.getState();
+		expect(locations.col_1).toEqual({ path: "/p/a.csv", fileName: "a.csv", hash });
+		expect(locations.col_2).toEqual({ path: "/p/b.csv", fileName: "b.csv" });
+	});
+
+	it("records a re-read's hash on every location at that path, and only there", () => {
+		const { setDataFile, recordDataFileHash } = useDataFileStore.getState();
+		setDataFile("col_1", { path: "/p/users.csv", fileName: "users.csv", hash: "a".repeat(64) });
+		setDataFile("col_2", { path: "/p/users.csv", fileName: "users.csv" });
+		setDataFile("col_3", { path: "/p/plans.csv", fileName: "plans.csv" });
+
+		recordDataFileHash("/p/users.csv", "d".repeat(64));
+
+		const { locations } = useDataFileStore.getState();
+		expect(locations.col_1.hash).toBe("d".repeat(64));
+		expect(locations.col_2.hash).toBe("d".repeat(64));
+		expect(locations.col_3).not.toHaveProperty("hash");
+	});
+
+	it("leaves the map untouched when the hash has not changed", () => {
+		const { setDataFile, recordDataFileHash } = useDataFileStore.getState();
+		setDataFile("col_1", { path: "/p/users.csv", fileName: "users.csv", hash: "a".repeat(64) });
+		const before = useDataFileStore.getState().locations;
+
+		recordDataFileHash("/p/users.csv", "a".repeat(64));
+		recordDataFileHash("/p/elsewhere.csv", "e".repeat(64));
+		// Nor is a value that is not a digest written over a good one.
+		recordDataFileHash("/p/users.csv", "users.csv");
+
+		// The same object: the mirror republishes on a new one.
+		expect(useDataFileStore.getState().locations).toBe(before);
+	});
 });

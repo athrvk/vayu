@@ -25,6 +25,7 @@
  */
 
 import type { Run } from "@/types";
+import { dataFileFromBlock } from "@/lib/run-data-file";
 
 /** One resolved step of the plan, as the snapshot's manifest records it. */
 export interface ScenarioSnapshotStep {
@@ -41,6 +42,9 @@ export interface ScenarioSnapshot {
 	collectionId?: string;
 	recursive?: boolean;
 	iterations?: number;
+	/** The data file that drove the run (issue #2051): name and content hash, never a path. */
+	dataFileName?: string;
+	dataFileHash?: string;
 	steps?: ScenarioSnapshotStep[];
 }
 
@@ -78,12 +82,15 @@ export function scenarioFromSnapshot(run: Run | undefined): ScenarioSnapshot | n
 				url: str(step.url),
 			}))
 		: undefined;
+	const dataFile = dataFileFromBlock(block);
 
 	return {
 		source: str(block.source),
 		collectionId: str(block.collectionId),
 		recursive: typeof block.recursive === "boolean" ? block.recursive : undefined,
 		iterations: num(block.iterations),
+		dataFileName: dataFile?.fileName,
+		dataFileHash: dataFile?.hash,
 		steps,
 	};
 }

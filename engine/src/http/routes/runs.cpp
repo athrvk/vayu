@@ -91,7 +91,8 @@ void add_accept_encoding (nlohmann::json& dst, const nlohmann::json& src) {
 // A collection run has no `url` and no `method` - its work is a sequence, not a
 // request - so without this a list row carries nothing that identifies it at
 // all, and the history sidebar draws a scenario run as a bare status and a
-// timestamp. What a row needs is which collection ran and how big the run was.
+// timestamp. What a row needs is which collection ran, how big the run was, and
+// which data file drove it (issue #2051).
 //
 // `stepCount`, not the manifest's `steps` array: the array carries a name, a
 // method and a URL per step, and a list row that shipped it would undo the
@@ -103,7 +104,8 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     const auto& scenario = src["scenario"];
 
     nlohmann::json row = nlohmann::json::object ();
-    for (const char* key : { "collectionId", "iterations", "recursive" }) {
+    for (const char* key :
+    { "collectionId", "iterations", "recursive", "dataFileName", "dataFileHash" }) {
         add_if_present (row, scenario, key);
     }
     if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
@@ -114,16 +116,18 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the twelve keys the history/dashboard
+// The compact list-row summary: exactly the fourteen keys the history/dashboard
 // list UIs read, each omitted when absent from the snapshot (httpVersion
 // excepted - see add_http_version), plus `acceptEncoding` (issue #1488) and
 // `scenario` on a collection run only, both omitted rather than defaulted
-// when the snapshot carries neither. The ramp-up knobs `startConcurrency` /
-// `rampUpDuration` (issue #1935) are in the list so a row agrees with the
-// report's `configuration` (build_run_report_config). A malformed
-// config_snapshot yields an empty object, never an error. This builds the
-// list rows and the PUT /runs/:id/baseline row; GET /runs/:id does not use
-// it and returns the full snapshot. `hasWarnings` (issue #1527) is not built
+// when the snapshot carries neither. `dataFileName` / `dataFileHash` (issue
+// #2051) are a single-request run's; a collection run's ride `scenario`. The
+// ramp-up knobs `startConcurrency` / `rampUpDuration` (issue #1935) are in the
+// list so a row agrees with the report's `configuration`
+// (build_run_report_config). A malformed config_snapshot yields an empty
+// object, never an error. This builds the list rows and the
+// PUT /runs/:id/baseline row; GET /runs/:id does not use it and returns the
+// full snapshot. `hasWarnings` (issue #1527) is not built
 // here and never cached with the rest of this object - it is a completion-time
 // fact, not part of the immutable config_snapshot this function reads, so it
 // is merged into the row by `get_runs_response` after this (possibly cached)
@@ -144,9 +148,9 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     try {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
-            for (const char* key : { "url", "method", "mode", "duration",
-                 "concurrency", "startConcurrency", "rampUpDuration", "comment",
-                 "followRedirects", "maxRedirects", "requestName" }) {
+            for (const char* key : { "url", "method", "mode", "duration", "concurrency",
+                 "startConcurrency", "rampUpDuration", "comment", "followRedirects",
+                 "maxRedirects", "requestName", "dataFileName", "dataFileHash" }) {
                 add_if_present (summary, config, key);
             }
             add_http_version (summary, config);
@@ -897,11 +901,11 @@ int64_t offset) {
 
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
- * knobs plus httpVersion/followRedirects/maxRedirects (ten keys total) and,
- * when the snapshot carries one, `acceptEncoding` (issue #1488), built from
- * an already-parsed config_snapshot. `rps`/`targetRps` is the one rename, so
- * it stays as an inline branch in the caller rather than living in this key
- * list.
+ * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
+ * bound (thirteen keys total) and, when the snapshot carries one,
+ * `acceptEncoding` (issue #1488), built from an already-parsed
+ * config_snapshot. `rps`/`targetRps` is the one rename, so it stays as an
+ * inline branch in the caller rather than living in this key list.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
  * runs_route_test.cpp - without the full report handler's DB/metrics reads.
@@ -915,8 +919,9 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
          // and this is what carries it to the reader: the dashboard's run
          // metadata prints it, so "this run was data-driven, over N rows" is
          // recoverable from the report rather than only from the payload the
-         // caller no longer has.
-         "dataRowCount" }) {
+         // caller no longer has. The file's name and content hash beside it
+         // (issue #2051), never its path.
+         "dataRowCount", "dataFileName", "dataFileHash" }) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
@@ -1126,10 +1131,8 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["bodyFile"] = *file;
         }
 
-        // Eleven keys, built by build_run_report_config above - the seven
-        // load-test tuning knobs, httpVersion/followRedirects/maxRedirects, and
-        // the bound row count. `rps` is the one rename (-> targetRps) and stays
-        // inline here rather than in that key list.
+        // Built by build_run_report_config above. `rps` is the one rename
+        // (-> targetRps) and stays inline here rather than in that key list.
         nlohmann::json config_obj = build_run_report_config (config);
         if (config.contains ("rps"))
             config_obj["targetRps"] = config["rps"];
@@ -1151,6 +1154,15 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             if (auto openapi = scenario->find ("openapi");
             openapi != scenario->end () && openapi->is_object ()) {
                 metadata["openapi"] = *openapi;
+            }
+            // A collection run's data file sits in its manifest, not at the
+            // snapshot's top level (issue #2051); `configuration` names it for
+            // every shape, so a reader looks in one place.
+            for (const char* key : { "dataFileName", "dataFileHash" }) {
+                if (auto value = scenario->find (key);
+                value != scenario->end () && !value->is_null ()) {
+                    metadata["configuration"][key] = *value;
+                }
             }
         }
     } catch (...) {

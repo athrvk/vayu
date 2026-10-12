@@ -48,6 +48,15 @@ export interface DashboardHeaderProps {
 		 * launch config while live. Absent for a run without a data file.
 		 */
 		dataRowCount?: number;
+		/**
+		 * The data file's display name and the SHA-256 of its bytes (issue
+		 * #2051), from the same two places as {@link dataRowCount}. The name
+		 * is printed beside the count; the hash is never shown, it only lets
+		 * a surface that can resolve a collection say the file has since
+		 * changed. Never a path.
+		 */
+		dataFileName?: string;
+		dataFileHash?: string;
 	};
 }
 

@@ -40,10 +40,21 @@ export interface StoredExchangeWarningProps {
 	 * run has finished.
 	 */
 	dataBound: boolean;
+	/**
+	 * The bound file's display name (issue #2051), named in the sentence when
+	 * the run's snapshot recorded one. Absent for a run recorded before the
+	 * field, which keeps the unnamed sentence.
+	 */
+	dataFileName?: string;
 	className?: string;
 }
 
-export function StoredExchangeWarning({ steps, dataBound, className }: StoredExchangeWarningProps) {
+export function StoredExchangeWarning({
+	steps,
+	dataBound,
+	dataFileName,
+	className,
+}: StoredExchangeWarningProps) {
 	if (steps <= 0) return null;
 
 	return (
@@ -54,10 +65,16 @@ export function StoredExchangeWarning({ steps, dataBound, className }: StoredExc
 			{dataBound && (
 				<>
 					{" "}
-					This run bound a data file, and a bound value is part of the request that
-					carried it: those cells are stored in these steps, though the file itself was
-					never read by Vayu&apos;s engine and the collection&apos;s contract keeps none
-					of them.
+					This run bound a data file
+					{dataFileName && (
+						<>
+							{" "}
+							(<code>{dataFileName}</code>)
+						</>
+					)}
+					, and a bound value is part of the request that carried it: those cells are
+					stored in these steps, though the file itself was never read by Vayu&apos;s
+					engine and the collection&apos;s contract keeps none of them.
 				</>
 			)}{" "}
 			It is deleted when the run is, so the <code>maxRunsRetained</code> setting is its

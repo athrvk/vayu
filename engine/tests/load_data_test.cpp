@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <httplib.h>
@@ -324,6 +325,91 @@ TEST (ReadLoadDataSet, TopLevelRowsBesideAScenarioBlockAreRefusedByName) {
     EXPECT_NE (read.error.find ("scenario.data"), std::string::npos)
     << "the refusal must say where a collection run's rows belong: " << read.error;
     EXPECT_EQ (read.set, nullptr);
+}
+
+/// A well-formed value for each of the two data-file keys (issue #2051).
+std::vector<std::pair<std::string, std::string>> data_file_fields () {
+    return { { "dataFileName", "users.csv" }, { "dataFileHash", std::string (64, 'c') } };
+}
+
+// Issue #2051: the file the rows came from rides the set, by name and content
+// hash, through the reader the scenario block uses.
+TEST (ReadLoadDataSet, TheDataFileNameAndHashRideTheSet) {
+    const json payload = { { "url", "https://example.test/" },
+        { "data", json::array ({ json{ { "id", "a" } } }) },
+        { "dataFileName", "users.csv" }, { "dataFileHash", std::string (64, 'b') } };
+
+    const auto read = read_load_data_set (payload, stock_limits (), false);
+    ASSERT_TRUE (read.ok) << read.error;
+    ASSERT_NE (read.set, nullptr);
+    EXPECT_EQ (read.set->file_name, "users.csv");
+    EXPECT_EQ (read.set->file_hash, std::string (64, 'b'));
+}
+
+// The same rule as the rows above it: a collection run names its file inside
+// the block. Mutation check: drop the `refuse_top_level_data_file` call in
+// `read_load_data_set` and the refusal stops saying where the field belongs.
+TEST (ReadLoadDataSet, TopLevelDataFileFieldsBesideAScenarioBlockAreRefusedByName) {
+    const json block = { { "source", "collection" }, { "collectionId", "c" },
+        { "data", json::array ({ json{ { "id", "a" } } }) } };
+    for (const auto& [key, value] : data_file_fields ()) {
+        json payload = { { "scenario", block } };
+        payload[key] = value;
+
+        const auto read =
+        read_load_data_set (payload, stock_limits (), /*is_scenario=*/true);
+        EXPECT_FALSE (read.ok) << key;
+        EXPECT_NE (read.error.find ("'scenario." + key + "'"), std::string::npos)
+        << "the refusal must say where a collection run's file belongs: "
+        << read.error;
+    }
+}
+
+// Refused rather than ignored (#1503): a name stored for a run that bound no
+// rows would describe a data set that never existed. Mutation check: drop the
+// `has_data` check in `read_data_file_string` and both cases red.
+TEST (ReadLoadDataSet, TheDataFileFieldsWithoutRowsAreRefused) {
+    for (const auto& [key, value] : data_file_fields ()) {
+        json payload = { { "url", "https://example.test/" } };
+        payload[key] = value;
+
+        const auto read = read_load_data_set (payload, stock_limits (), false);
+        EXPECT_FALSE (read.ok) << key;
+        EXPECT_NE (read.error.find ("'" + key + "'"), std::string::npos) << read.error;
+        EXPECT_NE (read.error.find ("'data'"), std::string::npos) << read.error;
+        EXPECT_EQ (read.error.find ("scenario."), std::string::npos)
+        << "a single-request refusal names this payload's field: " << read.error;
+    }
+}
+
+TEST (ReadLoadDataSet, AMalformedDataFileHashIsRefused) {
+    const json payload = { { "url", "https://example.test/" },
+        { "data", json::array ({ json{ { "id", "a" } } }) },
+        { "dataFileHash", "not-a-digest" } };
+
+    const auto read = read_load_data_set (payload, stock_limits (), false);
+    EXPECT_FALSE (read.ok);
+    EXPECT_NE (read.error.find ("'dataFileHash' must be the SHA-256"), std::string::npos)
+    << read.error;
+    EXPECT_EQ (read.set, nullptr);
+}
+
+// A display name, never a path (#2051), on the single-request payload too.
+// Mutation check: drop the separator check in `read_data_file_fields` and
+// both cases red.
+TEST (ReadLoadDataSet, ADataFileNameHoldingAPathIsRefused) {
+    for (const auto* path : { "/home/u/users.csv", "C:\\data\\users.csv" }) {
+        const json payload = { { "url", "https://example.test/" },
+            { "data", json::array ({ json{ { "id", "a" } } }) },
+            { "dataFileName", path } };
+
+        const auto read = read_load_data_set (payload, stock_limits (), false);
+        EXPECT_FALSE (read.ok) << path;
+        EXPECT_NE (
+        read.error.find ("'dataFileName' is the file's name, never a path"), std::string::npos)
+        << path << ": " << read.error;
+        EXPECT_EQ (read.set, nullptr);
+    }
 }
 
 TEST (ReadLoadDataSet, CredentialsCarryingATokenDeferTheBuild) {

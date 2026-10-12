@@ -45,7 +45,7 @@ function ctxWith(
 	};
 }
 
-const USERS_FILE = { path: "/data/users.csv", fileName: "users.csv" };
+const USERS_FILE = { path: "/data/users.csv", fileName: "users.csv", hash: "c".repeat(64) };
 /** What the Electron host hands a tool: the app remembers a file for `col_data` only. */
 const remembered = (id: string) => (id === "col_data" ? USERS_FILE : undefined);
 
@@ -130,6 +130,95 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(rows[1]).not.toHaveProperty("dataFile");
 	});
 
+	test("names the hash the app last read the file with, and none before it has (#2051)", async () => {
+		const listed = async (location: Record<string, string>) =>
+			(
+				parsed(
+					await dispatchTool(
+						"list_collections",
+						{},
+						ctxWith(
+							{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
+							{ dataFileLocation: () => location as typeof USERS_FILE }
+						)
+					)
+				) as Array<Record<string, unknown>>
+			)[0].dataFile;
+
+		// Mutation check: drop the hash from presentLocation and this fails.
+		expect(await listed(USERS_FILE)).toEqual(USERS_FILE);
+		// A location remembered before hashes were recorded: absent, not `undefined`.
+		const unhashed = { path: USERS_FILE.path, fileName: USERS_FILE.fileName };
+		expect(await listed(unhashed)).toEqual(unhashed);
+		expect(Object.keys((await listed(unhashed)) as object)).toEqual(["path", "fileName"]);
+	});
+
+	/*
+	 * The hash a list answers is the file's as it is at call time (#2051), so
+	 * an edit made after a run shows up without the app re-reading the file.
+	 * Mutation check: list without `withCurrentDataFileHashes` and the fresh
+	 * cases fail; let a rejection escape it and the fallback cases fail.
+	 */
+	describe("a list hashes the file as it is now", () => {
+		const FRESH = "d".repeat(64);
+		const unhashed = { path: USERS_FILE.path, fileName: USERS_FILE.fileName };
+		const ctxHashing = (
+			location: Record<string, string>,
+			currentDataFileHash: (filePath: string) => Promise<string>
+		) =>
+			ctxWith(
+				{ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) },
+				{ dataFileLocation: () => location as typeof USERS_FILE, currentDataFileHash }
+			);
+		const viaTool = async (ctx: ToolContext) =>
+			(
+				parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
+					Record<string, unknown>
+				>
+			)[0].dataFile;
+		const viaResource = async (ctx: ToolContext) =>
+			(
+				(await STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!.read(
+					ctx
+				)) as Array<Record<string, unknown>>
+			)[0].dataFile;
+
+		test.each([
+			["list_collections", viaTool],
+			["vayu://collections", viaResource],
+		])("%s answers the current digest over the stored one", async (_, list) => {
+			const hashOf = vi.fn(async () => FRESH);
+			expect(await list(ctxHashing(USERS_FILE, hashOf))).toEqual({
+				...USERS_FILE,
+				hash: FRESH,
+			});
+			expect(hashOf).toHaveBeenCalledWith(USERS_FILE.path);
+			// A location remembered before any read gains one, in the same place.
+			const gained = await list(ctxHashing(unhashed, hashOf));
+			expect(Object.keys(gained as object)).toEqual(["path", "fileName", "hash"]);
+		});
+
+		test.each([
+			["list_collections", viaTool],
+			["vayu://collections", viaResource],
+		])("%s falls back to the stored hash for a file it cannot read", async (_, list) => {
+			const missing = async (): Promise<string> => {
+				throw new Error("The file is no longer at /data/users.csv - pick it again.");
+			};
+			expect(await list(ctxHashing(USERS_FILE, missing))).toEqual(USERS_FILE);
+			expect(await list(ctxHashing(unhashed, missing))).toEqual(unhashed);
+		});
+
+		test("a missing file is never an error", async () => {
+			const result = await dispatchTool(
+				"list_collections",
+				{},
+				ctxHashing(USERS_FILE, () => Promise.reject(new Error("gone")))
+			);
+			expect(result.isError).toBeFalsy();
+		});
+	});
+
 	test("the resource and the write tools' results carry it the same way", async () => {
 		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
 		const listed = (await resource.read(
@@ -177,6 +266,6 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		// A path, never contents: nothing in the answer holds a row.
 		expect(
 			Object.keys((parsed(result) as Array<Record<string, unknown>>)[0].dataFile as object)
-		).toEqual(["path", "fileName"]);
+		).toEqual(["path", "fileName", "hash"]);
 	});
 });

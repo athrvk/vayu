@@ -302,6 +302,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								<span className="text-muted-foreground">Data:</span>
 								<span className="text-foreground font-mono">
 									{config.dataRowCount} {pluralize(config.dataRowCount, "row")}
+									{config.dataFileName ? ` · ${config.dataFileName}` : ""}
 								</span>
 							</div>
 						)}

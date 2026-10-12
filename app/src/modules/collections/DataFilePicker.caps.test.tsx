@@ -184,6 +184,25 @@ describe("the file's encoding", () => {
 	});
 });
 
+describe("the file's content hash (#2051)", () => {
+	it("hands the host the SHA-256 of the picked bytes beside the rows", async () => {
+		const { onSelect, pick } = renderPicker();
+
+		pick(new File(["user\nada"], "users.csv"));
+
+		// The digest Node's `crypto` answers for the same bytes, which is what
+		// the main process records for a re-read of this file.
+		await waitFor(() =>
+			expect(onSelect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					fileName: "users.csv",
+					hash: "e690cb6f2007dd9d52439eaff4e84ce93f9a1a691c8a0946d17308723839b242",
+				})
+			)
+		);
+	});
+});
+
 describe("an unterminated quote", () => {
 	it("is refused rather than folded into one tall cell", async () => {
 		const { onSelect, onRemove, onError, pick } = renderPicker();
@@ -204,6 +223,7 @@ describe("Remove", () => {
 	const selected = {
 		fileName: "users.csv",
 		parsed: parseDataFile("id\n1", "users.csv"),
+		hash: "0".repeat(64),
 	};
 
 	it("drops the selection and tells the host it was a Remove", () => {

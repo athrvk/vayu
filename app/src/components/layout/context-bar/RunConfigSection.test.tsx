@@ -106,6 +106,20 @@ describe("RunConfigSection", () => {
 	 * of a run that recorded a whole plan. Mutation-check: drop the scenario
 	 * branch and the first case below reddens on that exact string.
 	 */
+	it("names a collection run's data file, and leaves the row out without one", () => {
+		run = makeRun("scenario", {
+			scenario: { collectionId: "col_1", steps: [], dataFileName: "users.csv" },
+		});
+		const { unmount } = render(<RunConfigSection tab={TAB} />);
+		expect(screen.getByText("Data file")).toBeInTheDocument();
+		expect(screen.getByText("users.csv")).toBeInTheDocument();
+		unmount();
+
+		run = makeRun("scenario", { scenario: { collectionId: "col_1", steps: [] } });
+		render(<RunConfigSection tab={TAB} />);
+		expect(screen.queryByText("Data file")).not.toBeInTheDocument();
+	});
+
 	it("describes a collection run from its scenario block, not as unrecorded", () => {
 		run = makeRun("scenario", {
 			scenario: {

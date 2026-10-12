@@ -16,7 +16,8 @@
  * of it is the same as not having disclosed it at all.
  *
  * Mutation check: drop the `steps <= 0` guard and the "says nothing" case
- * fails; drop the `dataBound` branch and the data-file case fails.
+ * fails; drop the `dataBound` branch and the data-file case fails; drop the
+ * `dataFileName` clause and the named-file case fails (#2051).
  */
 
 import { describe, it, expect } from "vitest";
@@ -41,6 +42,25 @@ describe("StoredExchangeWarning", () => {
 	it("names the bound cells when the run had a data file", () => {
 		render(<StoredExchangeWarning steps={2} dataBound />);
 		expect(screen.getByText(/those cells are stored in these steps/)).toBeTruthy();
+	});
+
+	it("names the file when the run's snapshot recorded one", () => {
+		const { container } = render(
+			<StoredExchangeWarning steps={2} dataBound dataFileName="users.csv" />
+		);
+		expect(container.textContent).toContain("This run bound a data file (users.csv), and");
+	});
+
+	it("keeps the unnamed sentence for a run recorded before the file name", () => {
+		const { container } = render(<StoredExchangeWarning steps={2} dataBound />);
+		expect(container.textContent).toContain("This run bound a data file, and");
+	});
+
+	it("does not name a file for a run that bound none", () => {
+		const { container } = render(
+			<StoredExchangeWarning steps={2} dataBound={false} dataFileName="users.csv" />
+		);
+		expect(container.textContent).not.toContain("users.csv");
 	});
 
 	it("does not mention data cells for a run that bound none", () => {

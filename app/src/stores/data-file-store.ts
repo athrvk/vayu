@@ -9,9 +9,9 @@
  * Data File Store
  *
  * Where a collection's data file lives on **this machine** - one
- * `{path, fileName}` per collection id, so the Run dialog can re-read the file
- * the user declared their contract from instead of asking for it every time
- * (issue #599).
+ * `{path, fileName, hash?}` per collection id, so the Run dialog can re-read the
+ * file the user declared their contract from instead of asking for it every
+ * time (issue #599).
  *
  * Two things this store is deliberately not:
  *
@@ -24,14 +24,16 @@
  *   (`useDataFileLocationMirror` publishes it, issue #1742).
  * - **It never holds rows.** A data file's rows are user data of unknown
  *   sensitivity and are persisted nowhere in Vayu - not here, not engine-side,
- *   not in a run snapshot (which records `dataRowCount` and nothing else). Only
- *   the path and the file's name are stored, and `data-file-store.test.ts`
- *   asserts the persisted payload against that rule rather than trusting it.
+ *   not in a run snapshot (which records the row count, the file's name and its
+ *   content hash). Only the path, the file's name and the hash of its bytes are
+ *   stored, and `data-file-store.test.ts` asserts the persisted payload against
+ *   that rule rather than trusting it.
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { DATA_FILE_HASH_PATTERN } from "@/services/data-files/hash";
 
 /** Where a collection's data file was last picked from, on this machine. */
 export interface DataFileLocation {
@@ -39,6 +41,12 @@ export interface DataFileLocation {
 	path: string;
 	/** The file's own name, for a message about a file that has since moved. */
 	fileName: string;
+	/**
+	 * SHA-256 of the file's bytes the last time the app read it (issue #2051),
+	 * the digest a run records as `dataFileHash`. Absent on a location
+	 * remembered before hashes were recorded, until the next read.
+	 */
+	hash?: string;
 }
 
 interface DataFileState {
@@ -47,6 +55,12 @@ interface DataFileState {
 
 	setDataFile: (collectionId: string, location: DataFileLocation) => void;
 	clearDataFile: (collectionId: string) => void;
+	/**
+	 * A read of `path` answered `hash`: every location at that path takes it.
+	 * Keyed by path rather than collection because a read is of a path, and a
+	 * file whose bytes changed changed for every collection remembering it.
+	 */
+	recordDataFileHash: (path: string, hash: string) => void;
 }
 
 interface PersistedDataFiles {
@@ -74,9 +88,14 @@ function normalizeDataFiles(persisted: unknown): PersistedDataFiles {
 	if (stored.locations && typeof stored.locations === "object") {
 		for (const [collectionId, value] of Object.entries(stored.locations)) {
 			const entry = value as Partial<DataFileLocation> | null;
-			if (typeof entry?.path === "string" && typeof entry?.fileName === "string") {
-				locations[collectionId] = { path: entry.path, fileName: entry.fileName };
-			}
+			if (typeof entry?.path !== "string" || typeof entry?.fileName !== "string") continue;
+			// A malformed hash drops the hash, not the location: the next read
+			// of the path records a good one.
+			const hash =
+				typeof entry.hash === "string" && DATA_FILE_HASH_PATTERN.test(entry.hash)
+					? { hash: entry.hash }
+					: {};
+			locations[collectionId] = { path: entry.path, fileName: entry.fileName, ...hash };
 		}
 	}
 	return { locations };
@@ -95,6 +114,22 @@ export const useDataFileStore = create<DataFileState>()(
 					// back as an entry whose path is not a string.
 					const next = { ...state.locations };
 					delete next[collectionId];
+					return { locations: next };
+				}),
+			recordDataFileHash: (path, hash) =>
+				set((state) => {
+					// The normalizer's rule, applied on the way in as well.
+					if (!DATA_FILE_HASH_PATTERN.test(hash)) return state;
+					const stale = Object.entries(state.locations).filter(
+						([, location]) => location.path === path && location.hash !== hash
+					);
+					// Unchanged state when nothing moved, so a re-read of an
+					// unchanged file does not republish the map to the main process.
+					if (stale.length === 0) return state;
+					const next = { ...state.locations };
+					for (const [collectionId, location] of stale) {
+						next[collectionId] = { ...location, hash };
+					}
 					return { locations: next };
 				}),
 		}),

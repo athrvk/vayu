@@ -15,6 +15,13 @@
  * which is the very value the pre-fill effect reads. So the case pinned here is
  * the one where the store changes *because of* the pick: the hook must not take
  * that as a remembered file to re-read over the file the user just chose.
+ *
+ * The other store write the effect sees is the read's own (#2051):
+ * `readDeclaredDataFile` records the file's hash against the remembered path,
+ * replacing the location object while the read is still pending. The effect
+ * depends on the location's path and name, not on the object, or that
+ * replacement cancels the read and the dialog opens on an empty picker with no
+ * note.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -53,7 +60,7 @@ function collection(id: string, columns?: string[]): Collection {
 }
 
 function picked(fileName: string, text: string, path?: string): SelectedDataFile {
-	return { fileName, parsed: parseDataFile(text, fileName), path };
+	return { fileName, parsed: parseDataFile(text, fileName), hash: "d".repeat(64), path };
 }
 
 /** The `readDataFile` bridge, answering every path with `text` as `fileName`. */
@@ -253,5 +260,58 @@ describe("useDeclaredDataFile", () => {
 
 		await waitFor(() => expect(result.current.file?.fileName).toBe("users.csv"));
 		expect(read).toHaveBeenCalledWith("/home/u/users.csv");
+	});
+});
+
+const STORED = "a".repeat(64);
+const ON_DISK = "b".repeat(64);
+
+/** The `readDataFile` bridge answering `users.csv` with `hash` as its digest. */
+function stubHashedRead(hash: string) {
+	vi.stubGlobal("electronAPI", {
+		readDataFile: async () => ({
+			bytes: new TextEncoder().encode("user\nada"),
+			fileName: "users.csv",
+			hash,
+		}),
+	});
+}
+
+describe("useDeclaredDataFile: the read's own hash record (#2051)", () => {
+	it.each([
+		["no stored hash", undefined],
+		["a stale stored hash", STORED],
+	])("pre-fills the remembered file when the read records a new hash (%s)", async (_, stored) => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			...(stored ? { hash: stored } : {}),
+		});
+		stubHashedRead(ON_DISK);
+		const onPrefill = vi.fn();
+
+		const { result } = renderHook(() =>
+			useDeclaredDataFile("col_1", { collection: collection("col_1", ["user"]), onPrefill })
+		);
+
+		// Mutation check: put `rememberedFile` back in the effect's dependencies
+		// and the file never arrives, `onPrefill` never fires.
+		await waitFor(() => expect(result.current.file?.fileName).toBe("users.csv"));
+		expect(onPrefill).toHaveBeenCalledTimes(1);
+		expect(result.current.note).toBeNull();
+		expect(useDataFileStore.getState().locations.col_1?.hash).toBe(ON_DISK);
+	});
+
+	it("pre-fills when the stored hash already matches, leaving the location untouched", async () => {
+		const location = { path: "/data/users.csv", fileName: "users.csv", hash: ON_DISK };
+		useDataFileStore.getState().setDataFile("col_1", location);
+		stubHashedRead(ON_DISK);
+
+		const { result } = renderHook(() =>
+			useDeclaredDataFile("col_1", { collection: collection("col_1", ["user"]) })
+		);
+
+		await waitFor(() => expect(result.current.file?.fileName).toBe("users.csv"));
+		expect(useDataFileStore.getState().locations.col_1).toBe(location);
 	});
 });

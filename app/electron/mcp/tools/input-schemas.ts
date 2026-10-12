@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { DATA_FILE_HASH_PATTERN } from "../../data-file.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import {
 	DEFAULT_STREAM_BUDGET_MS,
@@ -257,7 +258,36 @@ export const scenarioDataInput = z
 	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
-		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. The row set is not persisted - only its count is recorded on the run, with `dataFileName` / `dataFileHash` when given - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
+	);
+
+/**
+ * Which file a run's rows came from (issue #2051), declared once for every
+ * place a data set is accepted: `run_collection`'s `data`, and `start_load_run`'s
+ * top-level `data` and `scenario.data`. Stored verbatim on the run and served
+ * back on `list_runs` and the report, so an agent re-running "with the same
+ * file" can check it before it sends the rows. A name, never a path: the engine
+ * opens nothing, and refuses a separator in it as this schema does. Either one
+ * without rows is refused engine-side, by name.
+ */
+export const dataFileNameInput = z
+	.string()
+	.regex(
+		/^[^/\\]*$/,
+		"dataFileName is the file's name, never a path: send list_collections' `dataFile.fileName`, not `dataFile.path`"
+	)
+	.optional()
+	.describe(
+		"The data file's display name (e.g. \"users.csv\", list_collections' `dataFile.fileName`), recorded on the run beside its row count. A name, never a path: one holding a `/` or `\\` is refused - Vayu opens nothing. Only beside data rows; sent alone it is refused."
+	);
+
+/** The SHA-256 of that file's bytes, in the one spelling the engine accepts. */
+export const dataFileHashInput = z
+	.string()
+	.regex(DATA_FILE_HASH_PATTERN, "dataFileHash must be 64 lowercase hex characters (SHA-256)")
+	.optional()
+	.describe(
+		"SHA-256 of the data file's raw bytes as 64 lowercase hex characters, recorded on the run so a later run can be checked against the same content (list_collections' `dataFile.hash` is the declared file's digest as it is on disk now). Only beside data rows; sent alone it is refused."
 	);
 
 /**
