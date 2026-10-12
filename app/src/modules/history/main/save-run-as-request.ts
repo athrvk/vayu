@@ -53,7 +53,8 @@ export function savedFromRunDescription(run: Run, options: FormatOptions = {}): 
  * withheld names nothing, so the method alone stands in for it.
  */
 export function requestNameFromRun(run: Run, seed: DesignRunSeed): string {
-	const named = run.summary?.requestName?.trim();
+	// `GET /runs/:id` sends the snapshot and no `summary` (that is list rows only).
+	const named = (run.configSnapshot?.requestName ?? run.summary?.requestName)?.trim();
 	if (named && named !== DEFAULT_REQUEST_NAME) return named;
 	const method = seed.request.method ?? "GET";
 	const path = seed.withheld.url ? "" : (seed.request.url ?? "").split(/[?#]/)[0].trim();

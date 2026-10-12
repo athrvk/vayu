@@ -124,6 +124,15 @@ describe("requestNameFromRun", () => {
 		expect(requestNameFromRun(run, seedFromRun(run, null))).toBe("Create user");
 	});
 
+	it("reads the name off the snapshot, as GET /runs/:id sends it with no summary", () => {
+		const base = agentRun();
+		const run = agentRun({
+			configSnapshot: { ...base.configSnapshot, requestName: "Create order" },
+		} as Partial<Run>);
+		expect(run.summary).toBeUndefined();
+		expect(requestNameFromRun(run, seedFromRun(run, null))).toBe("Create order");
+	});
+
 	it("falls back to METHOD url, without the query or fragment", () => {
 		const run = agentRun({ summary: { requestName: "New Request" } } as Partial<Run>);
 		expect(requestNameFromRun(run, seedFromRun(run, null))).toBe(
