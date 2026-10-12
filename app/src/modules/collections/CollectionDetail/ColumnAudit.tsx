@@ -25,8 +25,8 @@
  * its name at run time, so the scan finds literals only and says so.
  *
  * **What a request sends, not what it holds** (issue #729). Two of the audited
- * surfaces are resolved here rather than read off the row, because the run
- * resolves them the same way: a request's `inherit` auth becomes the chain's
+ * surfaces are resolved by `useColumnAudit` rather than read off the row,
+ * because the run resolves them the same way: a request's `inherit` auth becomes the chain's
  * credentials (`resolveEffectiveAuth`), which a data row binds per iteration
  * since #591, and the collection chain's own scripts run for every step ahead
  * of the request's. Auditing the rows as stored called a column bound into a
@@ -45,12 +45,9 @@
 import { useMemo } from "react";
 
 import { Callout } from "@/components/shared";
-import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries";
-import { auditDataColumns, type AuditableRequest } from "@/services/data-files";
+import { useCollectionsQuery } from "@/queries";
 import { collectionsUnderContract } from "@/lib/data-contract";
-import { scriptTextFor } from "@/lib/elements";
-import { resolveEffectiveAuth } from "@/modules/request-builder/utils/auth-resolution";
-import { walkAncestors } from "@/modules/collections/tree-utils";
+import { useColumnAudit } from "@/hooks/useColumnAudit";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import type { Collection } from "@/types";
 import { SectionLabel } from "./shared";
@@ -117,38 +114,7 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 		() => collectionsUnderContract(collection.id, collections),
 		[collection.id, collections]
 	);
-	const { requestsByCollection, isLoading } = useMultipleCollectionRequests(auditedCollectionIds);
-
-	/**
-	 * Every collection whose scripts a run of these requests executes: each
-	 * audited collection *and its ancestors*, since the chain's scripts run
-	 * root-to-leaf around every step. Deduplicated by id - a shared ancestor is
-	 * one collection however many audited children sit under it.
-	 */
-	const chainCollections = useMemo(() => {
-		const byId = new Map<string, Collection>();
-		for (const id of auditedCollectionIds) {
-			for (const ancestor of walkAncestors(id, collections)) byId.set(ancestor.id, ancestor);
-		}
-		return [...byId.values()];
-	}, [auditedCollectionIds, collections]);
-
-	const audit = useMemo(() => {
-		const requests: AuditableRequest[] = auditedCollectionIds.flatMap((id) => {
-			// One walk per collection rather than per request: every request in a
-			// collection inherits down the same chain.
-			const ancestors = walkAncestors(id, collections);
-			return (requestsByCollection.get(id) ?? []).map((request) => ({
-				...request,
-				resolvedAuth: resolveEffectiveAuth(request.auth, ancestors),
-			}));
-		});
-		const collectionScripts = chainCollections.flatMap((collection) => [
-			scriptTextFor(collection.elements, "script.pre") ?? "",
-			scriptTextFor(collection.elements, "script.post") ?? "",
-		]);
-		return auditDataColumns(declared, requests, collectionScripts);
-	}, [auditedCollectionIds, requestsByCollection, declared, collections, chainCollections]);
+	const { audit, isLoading } = useColumnAudit(auditedCollectionIds, declared);
 
 	return (
 		<div>
