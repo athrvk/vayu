@@ -1380,8 +1380,10 @@ durations in `docs/design-system.md` -> Toasts.
 ## Run Status Pill (`components/shared/RunStatusPill.tsx`)
 
 A run's status as a word and a glyph, tinted by its status family: `Running`
-(spinner), `Completed`, `Stopped`, `Failed`. The dashboard header draws it; the
-history row draws only the glyph (`RunStatusGlyph`). Both read `RUN_STATUS` in
+(spinner), `Completed`, `Stopped`, `Failed`. The dashboard header and the history
+run tab's header (`HistoryDetail`, #1944) draw it; the history row draws only the
+glyph (`RunStatusGlyph`). Welcome's recent runs and the collection context bar's
+last-run row take the label and `-text` token alone. All read `RUN_STATUS` in
 `components/shared/run-status.ts`, so the label, glyph and `-text` token exist
 once per status. The header's `mode` includes `failed` (#1932), set when the
 engine reports the run failed, so a failed run no longer reads as Completed.

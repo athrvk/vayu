@@ -208,9 +208,39 @@ describe("HistoryDetail routing", () => {
 		render(<HistoryDetail />);
 
 		expect(screen.getByText("run-1")).toBeTruthy();
-		expect(screen.getByText(/completed/i)).toBeTruthy();
+		expect(screen.getByText("Completed")).toBeTruthy();
 		// The builder below owns the URL bar; showing it here too was two of them.
 		expect(screen.queryByText(/https:\/\//)).toBeNull();
+	});
+
+	/*
+	 * The header badge reads the one status map the sidebar row and the
+	 * dashboard header read (#1944), so a status is the same hue and word on
+	 * every surface. It had been a hand-rolled Badge: a completed run as the
+	 * accent-filled `default` variant, running and pending as a bare outline.
+	 *
+	 * Mutation check: put the old `Badge variant="default"` back for
+	 * `completed` and the first assertion reddens on `bg-primary-fill`; draw
+	 * `running` without `RunStatusGlyph` and the spinner assertion reddens.
+	 */
+	it.each([
+		["completed", "Completed", "text-status-success-text"],
+		["failed", "Failed", "text-status-error-text"],
+		["stopped", "Stopped", "text-status-stopped-text"],
+		["running", "Running", "text-status-running-text"],
+		["pending", "Pending", "text-muted-foreground"],
+	] as const)("draws a %s run as %s in its status family", (status, label, textClass) => {
+		runQuery.data = { id: "run-1", type: "design", status };
+
+		render(<HistoryDetail />);
+
+		const pill = screen.getByText(label).closest("[data-status]");
+		expect(pill).not.toBeNull();
+		expect(pill!.getAttribute("data-status")).toBe(status);
+		expect(pill!.className).toContain(textClass);
+		expect(pill!.className).not.toContain("bg-primary-fill");
+		const spinning = pill!.querySelector("svg")!.getAttribute("class") ?? "";
+		expect(spinning.includes("animate-spin")).toBe(status === "running");
 	});
 });
 

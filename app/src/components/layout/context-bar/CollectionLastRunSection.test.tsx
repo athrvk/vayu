@@ -96,6 +96,16 @@ describe("CollectionLastRunSection", () => {
 		expect(screen.queryByText("Completed")).not.toBeInTheDocument();
 	});
 
+	it("words a pending run Queued, in the running colour", () => {
+		// The one status this section words itself: `RUN_STATUS` says "Pending".
+		response = envelope([run("run_1", { status: "pending" })]);
+		render(<CollectionLastRunSection tab={TAB} />);
+
+		const label = screen.getByText("Queued");
+		expect(label.className).toContain("text-status-running-text");
+		expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+	});
+
 	it("opens the run in a History tab, leaving the collection tab open", () => {
 		response = envelope([run("run_1")]);
 		render(<CollectionLastRunSection tab={TAB} />);

@@ -27,7 +27,7 @@
 
 import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
-import { MethodBadge, TruncatedText } from "@/components/shared";
+import { MethodBadge, RUN_STATUS, TruncatedText } from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { Run } from "@/types";
@@ -35,31 +35,21 @@ import type { Run } from "@/types";
 const RECENT_RUN_LIMIT = 5;
 
 /**
- * Status text is shown only for terminal states worth calling out.
- *
- * The `--status-*` family, in the same mapping `RunItem` (the history sidebar)
- * paints the identical three words with: a run status is what that family is
- * for, and two lists of the same runs answering in two different colours is the
- * drift it exists to prevent.
- *
- * This is the one place the move is visible rather than a rename: "Stopped" is
- * the family's orange rather than the general amber, which is what its own
- * left-bar (`--status-stopped`) and the sidebar row have always been, and
- * "Failed" shifts a shade (`--destructive-text` 0 60% 48% to
- * `--status-error-text` 0 70% 45% in light). Both pairs are tuned to clear
- * 4.5:1; only "Completed" is byte-identical to what it replaced.
+ * Only a terminal status is called out here: the welcome screen lists what
+ * happened, not what is in flight, so `running` and `pending` get no label.
+ */
+const SETTLED_STATUSES: ReadonlySet<Run["status"]> = new Set(["completed", "stopped", "failed"]);
+
+/**
+ * The word and `--status-*-text` token come from `RUN_STATUS`, the map the
+ * history sidebar's `RunItem` and the run tab header draw with: two lists of the
+ * same runs answering in two different colours is the drift it exists to prevent
+ * (#1225).
  */
 function statusLabel(status: Run["status"]): { text: string; className: string } | null {
-	switch (status) {
-		case "completed":
-			return { text: "Completed", className: "text-status-success-text" };
-		case "stopped":
-			return { text: "Stopped", className: "text-status-stopped-text" };
-		case "failed":
-			return { text: "Failed", className: "text-status-error-text" };
-		default:
-			return null;
-	}
+	if (!SETTLED_STATUSES.has(status)) return null;
+	const { label, text } = RUN_STATUS[status];
+	return { text: label, className: text };
 }
 
 export function RecentRuns({ runs }: { runs: Run[] }) {

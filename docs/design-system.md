@@ -3008,7 +3008,8 @@ group by.
 run's status, rendered as a `Badge variant="chip"` (it paints its own
 background) with a glyph and the word - `Running` (spinner), `Completed`,
 `Stopped`, `Failed`. The dashboard header draws it for the settled modes and
-for a streaming run, and nothing for idle.
+for a streaming run, and nothing for idle; the history run tab's header draws it
+for every status, `Pending` included (#1944).
 
 ```tsx
 <RunStatusPill status="failed" />
@@ -3025,9 +3026,11 @@ glyph; the history row carries the shape.
 per status - label, one lucide glyph, the family's `-text` token (the bare token
 is a fill and fails AA as a small foreground - see "The bare token is the fill")
 and the pill's tint. It replaced a bare coloured dot, which was five identical
-circles in five colours. **One map feeds the dashboard header's pill and the
-history row's glyph** (`RunStatusGlyph`), so a status cannot be green in one and
-neutral in the other; a second status-to-token table in a module is the defect
+circles in five colours. **One map feeds the dashboard header's pill, the
+history run tab's pill and the history row's glyph** (`RunStatusGlyph`), and the
+Welcome screen's recent-runs word and the collection context bar's last-run word
+read its label and `-text` token too, so a status cannot be green in one and
+neutral in another; a second status-to-token table in a module is the defect
 it removed (#1932, a failed run drawn as Completed).
 
 ```tsx

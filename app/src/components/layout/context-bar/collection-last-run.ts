@@ -12,24 +12,24 @@
  * makes for the run tab's sections.
  */
 
+import { RUN_STATUS } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Run } from "@/types";
 
+/** From here `pending` is "Queued" in the running token: both say "no outcome yet". */
+const QUEUED_TONE = { label: "Queued", className: RUN_STATUS.running.text };
+
 /**
- * The status word and the token that colours it.
- *
- * The `--status-*-text` family, which is the one meant for the colour *being*
- * the text (see app/CLAUDE.md) - `--status-*` is the dot/tint and would fail
- * contrast at this size. `pending` and `running` deliberately share the running
- * token: from here they are the same answer, "no outcome yet".
+ * The status word and the token that colours it, read from `RUN_STATUS` so this
+ * section cannot disagree with the other status surfaces. `RUN_STATUS.text` is
+ * the `--status-*-text` token, the one meant for the colour *being* the text
+ * (see app/CLAUDE.md); `pending` is the only status this section words itself.
  */
-export const RUN_STATUS_TONE: Record<Run["status"], { label: string; className: string }> = {
-	completed: { label: "Completed", className: "text-status-success-text" },
-	failed: { label: "Failed", className: "text-status-error-text" },
-	stopped: { label: "Stopped", className: "text-status-stopped-text" },
-	running: { label: "Running", className: "text-status-running-text" },
-	pending: { label: "Queued", className: "text-status-running-text" },
-};
+export function runStatusTone(status: Run["status"]): { label: string; className: string } {
+	if (status === "pending") return QUEUED_TONE;
+	const { label, text } = RUN_STATUS[status];
+	return { label, className: text };
+}
 
 /**
  * "3 steps", and "× 2" only when more than one pass ran - one pass is the
