@@ -203,6 +203,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
+| `get_app_focus`        | read     | The renderer's last snapshot over `app:focus` (app window only; no engine call) | - (names and ids only: the open tab's type, entity id and label, and the active environment's id and name; an error saying the window is not connected from the stdio CLI or before a window has published) |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
@@ -1918,7 +1919,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 75 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 76 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
