@@ -32,13 +32,14 @@
  * back differs.
  */
 
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, Loader2, Trash2 } from "lucide-react";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
 import {
 	Badge,
 	Button,
 	DeleteConfirmDialog,
+	IconSwap,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -48,11 +49,15 @@ import {
 	ToggleGroupItem,
 } from "@/components/ui";
 import {
+	useCollectionsQuery,
 	useDeleteRequestExampleMutation,
 	useRequestExamplesQuery,
 	useRequestQuery,
 	useUpdateRequestMutation,
 } from "@/queries";
+import { useCopy } from "@/hooks/useCopy";
+import { exampleReference } from "@/lib/agent-reference";
+import { collectionNamePath } from "@/modules/collections/tree-utils";
 import { useRequestBuilderContext } from "../../../context";
 import type { MockResponseMode, Request, RequestExample } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
@@ -76,14 +81,18 @@ function headerMap(example: RequestExample): Record<string, string> {
 
 function ExampleRow({
 	example,
+	reference,
 	onDelete,
 	deleting,
 }: {
 	example: RequestExample;
+	/** The agent reference line, or null while the saved request it names is loading. */
+	reference: string | null;
 	onDelete: () => void;
 	deleting: boolean;
 }) {
 	const [open, setOpen] = useState(false);
+	const { copy, copied } = useCopy({ feedback: "icon" });
 	const Chevron = open ? ChevronDown : ChevronRight;
 
 	return (
@@ -150,6 +159,24 @@ function ExampleRow({
 						</Badge>
 					)}
 				</button>
+				{reference !== null && (
+					<Button
+						size="icon"
+						variant="ghost"
+						onClick={() => void copy(reference, "Reference")}
+						aria-label={`Copy example ${example.name} for agent`}
+						title="Copy for agent"
+						className="shrink-0"
+					>
+						<IconSwap
+							state={copied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" />,
+								copied: <Check className="size-icon-sm text-status-success-text" />,
+							}}
+						/>
+					</Button>
+				)}
 				<Button
 					size="icon"
 					variant="ghost"
@@ -278,8 +305,17 @@ export default function ExamplesPanel() {
 	const { request } = useRequestBuilderContext();
 	const { data: examples, isLoading, isError } = useRequestExamplesQuery(request.id ?? null);
 	const { data: savedRequest } = useRequestQuery(request.id ?? null);
+	const { data: collections = [] } = useCollectionsQuery();
 	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
 	const deleteExample = useDeleteRequestExampleMutation();
+
+	// The saved row, not the builder's draft: an unsaved rename would put a name
+	// in the line that the engine and the agent's tools do not know yet.
+	const exampleLine = useMemo(() => {
+		if (!savedRequest) return null;
+		const path = collectionNamePath(savedRequest.collectionId, collections);
+		return (example: RequestExample) => exampleReference(example, savedRequest, path);
+	}, [savedRequest, collections]);
 
 	const confirmDelete = () => {
 		if (!request.id || !pendingDelete) return;
@@ -324,6 +360,7 @@ export default function ExamplesPanel() {
 				<ExampleRow
 					key={example.id}
 					example={example}
+					reference={exampleLine ? exampleLine(example) : null}
 					onDelete={() => {
 						// Clears the previous refusal, so reopening does not lead
 						// with the error from the attempt before it.

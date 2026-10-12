@@ -5,11 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Check, Copy, Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
-import { Button, ICON_MOTION } from "@/components/ui";
+import { Button, IconSwap, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
+import { useCopy } from "@/hooks/useCopy";
+import { trashReference } from "@/lib/agent-reference";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { TrashEntry } from "@/types";
 
@@ -42,7 +44,8 @@ function cascadeSummary(entry: TrashEntry): string | null {
 }
 
 /**
- * One deleted root, with the two things that can happen to it.
+ * One deleted root, with the two things that can happen to it and a copy of
+ * its reference for an agent.
  *
  * **The actions are always visible, and that is deliberate.** The design
  * system hover-reveals row actions because a drawer row has a primary action of
@@ -62,6 +65,7 @@ export default function TrashItem({
 	const KindIcon = entry.kind === "collection" ? Folder : FileJson;
 	const cascade = cascadeSummary(entry);
 	const busy = isRestoring || isPurging;
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	return (
 		// `surface-card` + `border-rule` rather than a border token: `--border` on
@@ -71,7 +75,7 @@ export default function TrashItem({
 		// hook with nothing hanging off it.
 		<div
 			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row
-			// a target for `.focus()` without adding a tab stop in front of the two
+			// a target for `.focus()` without adding a tab stop in front of the
 			// buttons, and it holds even while they are disabled by the purge in
 			// flight - which is exactly when focus needs somewhere to be.
 			data-trash-id={entry.id}
@@ -102,6 +106,21 @@ export default function TrashItem({
 				</div>
 
 				<div className="flex items-center gap-1 shrink-0">
+					<Button
+						variant="rowAction"
+						size="icon"
+						onClick={() => void copy(trashReference(entry), "Reference")}
+						aria-label={`Copy ${entry.name} for agent`}
+						title="Copy for agent"
+					>
+						<IconSwap
+							state={copied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" />,
+								copied: <Check className="size-icon-sm text-status-success-text" />,
+							}}
+						/>
+					</Button>
 					<Button
 						variant="rowAction"
 						size="icon"

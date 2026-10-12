@@ -61,6 +61,7 @@ import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
+import { inboxReference } from "@/lib/agent-reference";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -334,6 +335,15 @@ export default function InboxView() {
 					onClick={() => void copy(inbox.url, "Inbox URL")}
 				>
 					<Copy className="size-icon-sm" aria-hidden="true" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-control-sm gap-1.5 px-2 text-xs"
+					onClick={() => void copy(inboxReference(inbox), "Reference")}
+				>
+					<Copy className="size-icon-sm" aria-hidden="true" />
+					Copy for agent
 				</Button>
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}

@@ -45,6 +45,7 @@ vi.mock("@/queries", () => ({
 	// through this hook rather than context; undefined data keeps it from
 	// rendering here, which is fine - these tests are about the chip.
 	useRequestQuery: () => ({ data: undefined }),
+	useCollectionsQuery: () => ({ data: undefined }),
 	useUpdateRequestMutation: () => ({ mutate: vi.fn() }),
 }));
 

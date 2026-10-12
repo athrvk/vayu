@@ -15,10 +15,12 @@
  * you received should read like a request you sent.
  */
 
-import { Inbox } from "lucide-react";
-import { Badge } from "@/components/ui";
+import { Check, Copy, Inbox } from "lucide-react";
+import { Badge, Button, IconSwap } from "@/components/ui";
 import { EmptyState, UnifiedResponseViewer } from "@/components/shared";
 import { buildRawRequest } from "@/components/shared/response-viewer/utils";
+import { useCopy } from "@/hooks/useCopy";
+import { captureReference } from "@/lib/agent-reference";
 import type { InboxCapture } from "@/types";
 import { captureUrl } from "./utils";
 
@@ -28,6 +30,8 @@ interface CaptureDetailProps {
 }
 
 export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
+	const { copy, copied } = useCopy({ feedback: "icon" });
+
 	if (!capture) {
 		return (
 			<EmptyState
@@ -47,6 +51,21 @@ export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
 					{capture.method}
 				</Badge>
 				<span className="font-mono text-xs text-muted-foreground break-all">{url}</span>
+				<Button
+					variant="ghost"
+					size="icon"
+					aria-label="Copy capture for agent"
+					title="Copy for agent"
+					onClick={() => void copy(captureReference(capture), "Reference")}
+				>
+					<IconSwap
+						state={copied ? "copied" : "copy"}
+						icons={{
+							copy: <Copy className="size-icon-sm" />,
+							copied: <Check className="size-icon-sm text-status-success-text" />,
+						}}
+					/>
+				</Button>
 				{capture.remoteAddr && (
 					<span className="text-xs text-muted-foreground">from {capture.remoteAddr}</span>
 				)}
