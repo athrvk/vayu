@@ -59,6 +59,7 @@ vi.mock("@/queries", async () => {
 			return reportQuery;
 		},
 		isRunNotFound: runs.isRunNotFound,
+		useCollectionsQuery: () => ({ data: [] }),
 	};
 });
 

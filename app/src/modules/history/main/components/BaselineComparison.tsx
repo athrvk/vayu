@@ -27,15 +27,19 @@ import {
 	AlertTriangle,
 	ArrowDownRight,
 	ArrowUpRight,
+	Copy,
 	GitCompareArrows,
 	Minus,
 	Pin,
 } from "lucide-react";
-import { Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { compareReports, deltaVerdict, type MetricDelta } from "@/lib/run-compare";
+import { runComparisonReference } from "@/lib/agent-reference";
+import { runReferenceInput } from "@/lib/run-reference-input";
+import { useCopy } from "@/hooks/useCopy";
 import { useBaselineRunQuery, useRunQuery, useRunReportQuery } from "@/queries";
 import type { RunReport } from "@/types";
 
@@ -126,6 +130,8 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 	 * prop through every LoadTestDetail call site for one child to read.
 	 */
 	const { data: run } = useRunQuery(runId || null);
+	const target = run ? runReferenceInput(run) : null;
+	const { copy } = useCopy();
 
 	// A saved request is matched by id; a run of an unsaved request has only the
 	// url and method its row recorded (see `useBaselineRunQuery`).
@@ -133,8 +139,8 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 		run
 			? {
 					requestId: run.requestId,
-					url: run.summary?.url ?? report.metadata?.requestUrl ?? null,
-					method: run.summary?.method ?? report.metadata?.requestMethod ?? null,
+					url: target?.summary?.url ?? report.metadata?.requestUrl ?? null,
+					method: target?.summary?.method ?? report.metadata?.requestMethod ?? null,
 				}
 			: null
 	);
@@ -157,7 +163,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 		[baselineId, baselineReport, runId, report]
 	);
 
-	if (!comparison) return null;
+	if (!comparison || !baselineRun || !target) return null;
 
 	const headline = [
 		...comparison.latency,
@@ -177,8 +183,22 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-micro font-semibold"
 				>
 					<Pin className="w-2.5 h-2.5" />
-					<TimeValue value={baselineRun!.startTime} />
+					<TimeValue value={baselineRun.startTime} />
 				</Badge>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="ml-auto h-control-sm gap-1.5 px-2 text-xs"
+					onClick={() =>
+						void copy(
+							runComparisonReference(runReferenceInput(baselineRun), target),
+							"Reference"
+						)
+					}
+				>
+					<Copy className="size-icon-sm" aria-hidden="true" />
+					Copy comparison for agent
+				</Button>
 			</div>
 			<div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
 				{headline.map((metric) => (
