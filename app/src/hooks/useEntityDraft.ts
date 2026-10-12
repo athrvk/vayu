@@ -10,13 +10,13 @@
  *
  * Two save models exist in this app. `useSaveManager` is the autosave one the
  * request builder uses. This is the other one: an editable draft, a Save button
- * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` is its
- * one remaining button user.
+ * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
+ * `ElementsTab` are its button users.
  *
  * `InfoTab` and `ScriptTab` take the draft, the resync and the mutation reset
  * from here and render no Save button at all - they commit when focus leaves
- * the field, like the request builder. `reset` therefore has one caller, where
- * `draft` has three.
+ * the field, like the request builder. `reset` therefore has fewer callers
+ * than `draft`; `InfoTab` reaches the discard path through `adopt`.
  *
  * **Why auth alone kept the button (#446).** Not because a credential is
  * grander than a script - the request builder autosaves its own auth. Because a
@@ -95,8 +95,15 @@ interface EntityDraft<T> {
 	/** Throw the draft away and go back to the persisted value. */
 	reset: () => void;
 	/**
-	 * Whether the draft going clean was a `reset` rather than a save landing, and
-	 * clears that answer. Pass it to `useDraftSaveContext` so the Dock reports a
+	 * `setDraft` for taking a persisted value into the draft (`InfoTab`'s per-key
+	 * Take theirs). When that leaves the draft equal to the persisted value, the
+	 * clean edge is a discard, not a save: `consumeDiscard` reports it. Leaves
+	 * `baseline` and `externalValue` alone.
+	 */
+	adopt: Dispatch<SetStateAction<T>>;
+	/**
+	 * Whether the draft going clean was a `reset` or an `adopt` rather than a save
+	 * landing, and clears that answer. Pass it to `useDraftSaveContext` so the Dock reports a
 	 * discard as idle instead of "Saved" (#1931).
 	 */
 	consumeDiscard: () => boolean;
@@ -227,6 +234,25 @@ export function useEntityDraft<T>({
 		syncTo(valueRef.current);
 	}, [syncTo]);
 
+	// Takes a value from the persisted side into the draft (`InfoTab`'s per-key
+	// Take theirs). Marked a discard only when it lands exactly on the persisted
+	// value from a dirty draft: with another field still dirty no clean edge
+	// follows to consume the mark, and the later real save would read as a
+	// discard. `draftRef` is advanced here as well because its own effect runs
+	// after the render, so two adopts in one batch would otherwise both read the
+	// pre-batch draft. No `syncTo`: `baseline` and `externalValue` still drive
+	// the other fields' conflicts.
+	const adopt = useCallback((next: SetStateAction<T>) => {
+		const previous = draftRef.current;
+		const resolved = typeof next === "function" ? (next as (prev: T) => T)(previous) : next;
+		const persisted = JSON.stringify(valueRef.current);
+		if (JSON.stringify(previous) !== persisted && JSON.stringify(resolved) === persisted) {
+			discardedRef.current = true;
+		}
+		draftRef.current = resolved;
+		setDraft(resolved);
+	}, []);
+
 	const consumeDiscard = useCallback(() => {
 		const discarded = discardedRef.current;
 		discardedRef.current = false;
@@ -238,6 +264,7 @@ export function useEntityDraft<T>({
 		setDraft,
 		isDirty: JSON.stringify(draft) !== serializedValue,
 		reset,
+		adopt,
 		consumeDiscard,
 		baseline,
 		externalValue,

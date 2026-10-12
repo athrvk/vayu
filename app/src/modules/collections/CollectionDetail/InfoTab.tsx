@@ -81,11 +81,12 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
 	// draft with trailing whitespace would otherwise stay dirty against the
 	// trimmed saved value forever.
-	const { draft, setDraft, isDirty, baseline, externalValue } = useEntityDraft<InfoDraft>({
-		entityKey: collection.id,
-		value: { name: collection.name, description: collection.description ?? "" },
-		mutation: updateCollection,
-	});
+	const { draft, setDraft, adopt, consumeDiscard, isDirty, baseline, externalValue } =
+		useEntityDraft<InfoDraft>({
+			entityKey: collection.id,
+			value: { name: collection.name, description: collection.description ?? "" },
+			mutation: updateCollection,
+		});
 
 	// Merged per key rather than as one value (#1437): a field the user has not
 	// touched adopts an agent's change silently, the way a clean tab always
@@ -96,11 +97,13 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	const { value: name, conflict: nameConflict } = nameMerge;
 	const { value: description, conflict: descriptionConflict } = descriptionMerge;
 
+	// `adopt`, not `setDraft`: taking the agent's value is not a save, and when it
+	// leaves nothing to save the Dock must not report one (#2033).
 	const takeTheirName = () => {
-		if (externalValue) setDraft((d) => ({ ...d, name: externalValue.name }));
+		if (externalValue) adopt((d) => ({ ...d, name: externalValue.name }));
 	};
 	const takeTheirDescription = () => {
-		if (externalValue) setDraft((d) => ({ ...d, description: externalValue.description }));
+		if (externalValue) adopt((d) => ({ ...d, description: externalValue.description }));
 	};
 
 	// A collection must keep a name, so a blank one is not saveable - and the
@@ -123,6 +126,7 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 		isDirty: canSave,
 		isActive: active,
 		save: persist,
+		consumeDiscard,
 	});
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths

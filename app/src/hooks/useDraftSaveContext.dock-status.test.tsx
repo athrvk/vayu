@@ -176,6 +176,68 @@ describe("a discarded draft is not a save (#1931)", () => {
 		expect(useSaveStore.getState().status).toBe("pending");
 	});
 
+	describe("taking the persisted side's value (adopt)", () => {
+		interface Named {
+			name: string;
+			description: string;
+		}
+		const stored: Named = { name: "Acme", description: "Payouts" };
+
+		/** `InfoTab`'s wiring: an object draft, the real context hook, `consumeDiscard` passed. */
+		function mountObjectEditor() {
+			const statuses: string[] = [];
+			const unsubscribe = useSaveStore.subscribe((s) => statuses.push(s.status));
+			const view = renderHook(
+				({ value }: { value: Named }) => {
+					const draft = useEntityDraft<Named>({
+						entityKey: "a",
+						value,
+						mutation: { reset: () => {} },
+					});
+					useDraftSaveContext({
+						id: "a",
+						name: "Test editor",
+						isDirty: draft.isDirty,
+						isActive: true,
+						save: () => Promise.resolve(),
+						consumeDiscard: draft.consumeDiscard,
+					});
+					return draft;
+				},
+				{ initialProps: { value: stored } }
+			);
+			return { ...view, statuses, unsubscribe };
+		}
+
+		it("adopting the only edited field reports idle, not saved", () => {
+			const { result, rerender, statuses, unsubscribe } = mountObjectEditor();
+			act(() => result.current.setDraft((d) => ({ ...d, name: "Mine" })));
+			rerender({ value: { ...stored, name: "Theirs" } });
+			expect(useSaveStore.getState().status).toBe("pending");
+
+			act(() => result.current.adopt((d) => ({ ...d, name: "Theirs" })));
+
+			unsubscribe();
+			expect(useSaveStore.getState().status).toBe("idle");
+			expect(statuses).not.toContain("saved");
+		});
+
+		it("adopting one field while another is still edited leaves the later save reading as a save", () => {
+			const { result, rerender } = mountObjectEditor();
+			act(() => {
+				result.current.setDraft({ name: "Mine", description: "My notes" });
+			});
+			rerender({ value: { ...stored, name: "Theirs" } });
+
+			act(() => result.current.adopt((d) => ({ ...d, name: "Theirs" })));
+			expect(useSaveStore.getState().status).toBe("pending");
+
+			rerender({ value: { name: "Theirs", description: "My notes" } });
+
+			expect(useSaveStore.getState().status).toBe("saved");
+		});
+	});
+
 	it("reports a clean edge as a save when the editor offers no discard signal", () => {
 		const { rerender } = mount({ id: "a", isDirty: true });
 
