@@ -196,7 +196,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
 ```typescript
 const {
   drawerOpen, setDrawerOpen, toggleDrawer,
-  drawerView, setDrawerView, activateDrawerView,
+  drawerView, setDrawerView, activateDrawerView, revealDrawerView,
   drawerWidth, setDrawerWidth,
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
@@ -205,6 +205,7 @@ const {
   setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
+revealDrawerView("variables"); // Open drawer to variables, never closes it - for anything that points at a view
 setDrawerWidth(300); // Clamped to [PANEL_MIN_WIDTH, PANEL_MAX_WIDTH] (constants/layout.ts)
 toggleResponsePosition(); // beside <-> below; from auto, the opposite of what auto currently shows
 setRequestSplitRatio("below", 0.6); // Into the ratio for the arrangement that was dragged, clamped 0.2..0.8

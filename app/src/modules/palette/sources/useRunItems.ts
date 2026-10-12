@@ -129,8 +129,7 @@ export function useRunItems(query: string): PaletteItem[] {
 					// could hide the very run this row just promised to show.
 					history.resetFilters();
 					history.setSearchQuery(search);
-					useLayoutStore.getState().setDrawerOpen(true);
-					useLayoutStore.getState().setDrawerView("history");
+					useLayoutStore.getState().revealDrawerView("history");
 				},
 			});
 		}

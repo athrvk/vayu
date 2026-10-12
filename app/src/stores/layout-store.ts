@@ -191,11 +191,9 @@ interface LayoutState {
 	 *
 	 * `activateDrawerView` toggles when the drawer is already on that view,
 	 * which is right for a switcher pressed twice and wrong for anything that
-	 * *points at* a view: a palette result, or an ambient status chip that says
-	 * something is running. Both of those had hand-rolled the pair
-	 * (`setDrawerOpen(true)` then `setDrawerView`), and the Dock's
-	 * running-services indicator had not - so clicking it with the drawer
-	 * already on Services closed the one surface that could act on them.
+	 * *points at* a view: a palette result, a welcome tile, or an ambient status
+	 * chip that says something is running. Such a caller uses this, never
+	 * `activateDrawerView` and never a hand-written open-then-select pair.
 	 */
 	revealDrawerView: (view: DrawerView) => void;
 	setDrawerWidth: (width: number) => void;

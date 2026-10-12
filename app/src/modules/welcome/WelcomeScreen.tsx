@@ -30,7 +30,7 @@ import { LauncherSkeleton } from "./LauncherSkeleton";
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
 	const openTab = useTabsStore((s) => s.openTab);
-	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	// The flow itself lives in `useNewRequest`, shared with the command palette's
 	// "New request" - this screen renders its picker, nothing more.
@@ -107,9 +107,9 @@ export default function WelcomeScreen() {
 						onNewRequest={newRequest}
 						onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
 						onSearch={() => setPaletteOpen(true)}
-						onHistory={() => activateDrawerView("history")}
+						onHistory={() => revealDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
-						onServices={() => activateDrawerView("services")}
+						onServices={() => revealDrawerView("services")}
 					/>
 				)}
 			</div>

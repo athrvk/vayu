@@ -99,8 +99,7 @@ export function useSettingsItems(query: string): PaletteItem[] {
 					// The sidebar's box reads this, so the drawer opens already
 					// filtered - the palette finds, the destination browses.
 					useSettingsStore.getState().setSearchQuery(needle);
-					useLayoutStore.getState().setDrawerOpen(true);
-					useLayoutStore.getState().setDrawerView("settings");
+					useLayoutStore.getState().revealDrawerView("settings");
 					useTabsStore.getState().openTab({ type: "settings", entityId: null });
 				},
 			});

@@ -187,8 +187,7 @@ export default function Shell() {
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const toggleContextBar = useLayoutStore((s) => s.toggleContextBar);
 	const toggleResponsePosition = useLayoutStore((s) => s.toggleResponsePosition);
-	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
-	const setDrawerView = useLayoutStore((s) => s.setDrawerView);
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const triggerSave = useSaveStore((s) => s.triggerSave);
 	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -204,14 +203,11 @@ export default function Shell() {
 	// lives in a drawer (collections tree for requests/collections, variables list).
 	useEffect(() => {
 		if (activeTab?.type === "variables") {
-			setDrawerOpen(true);
-			setDrawerView("variables");
+			revealDrawerView("variables");
 		} else if (activeTab?.type === "settings") {
-			setDrawerOpen(true);
-			setDrawerView("settings");
+			revealDrawerView("settings");
 		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
-			setDrawerOpen(true);
-			setDrawerView("collections");
+			revealDrawerView("collections");
 		} else if (activeTab?.type === "run") {
 			/*
 			 * A run's list is History, so a run tab belongs with it - and with the
@@ -224,8 +220,7 @@ export default function Shell() {
 			 * that rather than violating it - the failure then was landing
 			 * somewhere else.
 			 */
-			setDrawerOpen(true);
-			setDrawerView("history");
+			revealDrawerView("history");
 		} else if (activeTab?.type === "dashboard") {
 			/*
 			 * Deliberately nothing. Written out rather than left to fall off the
@@ -247,7 +242,7 @@ export default function Shell() {
 			 * nonsensical - just contrary to the flow.
 			 */
 		}
-	}, [activeTab?.type, setDrawerOpen, setDrawerView]);
+	}, [activeTab?.type, revealDrawerView]);
 
 	useEffect(() => {
 		/*
