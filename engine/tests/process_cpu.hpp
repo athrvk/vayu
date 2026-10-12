@@ -38,10 +38,10 @@ namespace vayu::tests {
 inline int64_t process_cpu_ms () {
 #ifdef _WIN32
     FILETIME creation{};
-    FILETIME exit{};
+    FILETIME exit_time{};
     FILETIME kernel{};
     FILETIME user{};
-    if (!GetProcessTimes (GetCurrentProcess (), &creation, &exit, &kernel, &user)) {
+    if (!GetProcessTimes (GetCurrentProcess (), &creation, &exit_time, &kernel, &user)) {
         return 0;
     }
     auto to_ms = [] (const FILETIME& ft) -> int64_t {

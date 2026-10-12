@@ -83,8 +83,8 @@ bool RateLimiter::try_acquire () {
     std::lock_guard<std::mutex> lock (mutex_);
     refill_tokens ();
 
-    if (tokens_ >= 1.0) {
-        tokens_ -= 1.0;
+    if (tokens_ >= vayu::core::constants::http::TOKEN_COST) {
+        tokens_ -= vayu::core::constants::http::TOKEN_COST;
         return true;
     }
 
@@ -99,8 +99,8 @@ bool RateLimiter::try_acquire_unlocked () {
     // No lock - caller guarantees single-threaded access
     refill_tokens ();
 
-    if (tokens_ >= 1.0) {
-        tokens_ -= 1.0;
+    if (tokens_ >= vayu::core::constants::http::TOKEN_COST) {
+        tokens_ -= vayu::core::constants::http::TOKEN_COST;
         return true;
     }
 

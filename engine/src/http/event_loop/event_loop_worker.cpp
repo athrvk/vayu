@@ -511,8 +511,22 @@ void EventLoopWorker::wait_for_next_token () {
     // 0 would return at once - the spin this wait exists to replace.
     const double wait_ms =
     std::ceil (std::chrono::duration<double, std::milli> (wait).count ());
-    const int timeout_ms = static_cast<int> (std::min (wait_ms,
-    static_cast<double> (core::constants::event_loop::TOKEN_WAIT_CAP_MS)));
+    double park_ms = std::min (wait_ms,
+    static_cast<double> (core::constants::event_loop::TOKEN_WAIT_CAP_MS));
+
+    // A bounded drain must not outlive its deadline by the park: nothing wakes
+    // this poll when a deadline passes.
+    const int64_t deadline_ticks = drain_deadline_ticks.load (std::memory_order_relaxed);
+    if (deadline_ticks != 0) {
+        const auto remaining = std::chrono::steady_clock::duration (deadline_ticks) -
+        std::chrono::steady_clock::now ().time_since_epoch ();
+        if (remaining <= std::chrono::steady_clock::duration::zero ()) {
+            return; // run_loop's deadline check ends the drain
+        }
+        park_ms = std::min (park_ms,
+        std::ceil (std::chrono::duration<double, std::milli> (remaining).count ()));
+    }
+    const int timeout_ms = static_cast<int> (park_ms);
     curl_multi_poll (multi_handle, nullptr, 0, timeout_ms, nullptr);
 }
 

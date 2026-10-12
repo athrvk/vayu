@@ -316,9 +316,10 @@ TEST_F (RateLimiterTest, AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin) 
 }
 
 // A worker parked for its next token still answers stop () at once:
-// stop(false) through curl_multi_wakeup, and a bounded drain within
-// TOKEN_WAIT_CAP_MS of its deadline rather than up to a token interval late.
-// Mutation check: dropping the cap in wait_for_next_token reds the drain case.
+// stop(false) through curl_multi_wakeup, and a bounded drain at its deadline
+// rather than up to a token interval late. Mutation check: dropping the
+// drain-deadline clamp in wait_for_next_token reds the drain case (the park
+// then runs to TOKEN_WAIT_CAP_MS or the token, whichever is first).
 TEST_F (RateLimiterTest, AWorkerParkedForItsNextTokenStopsPromptly) {
     EXPECT_LT (seconds_to_stop_a_parked_worker (
                mock->fast_url (), false, std::chrono::milliseconds::zero ()),
@@ -328,7 +329,8 @@ TEST_F (RateLimiterTest, AWorkerParkedForItsNextTokenStopsPromptly) {
 
 TEST_F (RateLimiterTest, ABoundedDrainEndsOnTimeWhileWaitingForAToken) {
     EXPECT_LT (seconds_to_stop_a_parked_worker (
-               mock->fast_url (), true, std::chrono::milliseconds (200)),
-    0.6)
-    << "a 200ms drain outlived its deadline waiting for a 2s token";
+               mock->fast_url (), true, std::chrono::milliseconds (30)),
+    0.08)
+    << "a 30ms drain outlived its deadline: the park ran its whole "
+       "TOKEN_WAIT_CAP_MS slice past it";
 }

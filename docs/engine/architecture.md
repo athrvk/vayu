@@ -269,7 +269,7 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
   one-token burst floor, since a sub-token bucket could never start a transfer). A
   worker the bucket refuses with requests queued and nothing in flight parks in
   `curl_multi_poll` until its next token (at most `TOKEN_WAIT_CAP_MS`, and cut short by a
-  submit or a stop) instead of asking the bucket again in a loop (#1915)
+  submit, a stop or a bounded drain's deadline) instead of asking the bucket again in a loop (#1915)
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 

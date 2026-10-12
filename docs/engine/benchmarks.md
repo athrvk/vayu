@@ -783,8 +783,9 @@ included (issue #1915). A low `targetRps` against a fast target was the worst
 case: almost every moment is spent waiting for the next token with nothing in
 flight. The worker now parks in `curl_multi_poll` until its next token
 (`RateLimiter::time_until_token_unlocked`), capped at
-`event_loop::TOKEN_WAIT_CAP_MS` (100 ms) so a drain deadline is still noticed
-on time; a submit or a stop wakes it as before.
+`event_loop::TOKEN_WAIT_CAP_MS` (100 ms) and by a bounded drain's remaining
+time, so a drain deadline is met rather than overshot by the park; a submit or
+a stop wakes it as before.
 
 One worker at 4 RPS with a one-token burst, nine requests submitted at once to
 the in-process mock's `/fast` (the first on the burst token, eight more 250 ms
@@ -801,9 +802,11 @@ The pacing is unchanged: the window still lasts 2.0 s, and the
 `EnforcesTargetRPS` pair (100 RPS, one and four workers) holds its ±25%
 window either side. With the worker parked for a token 2 s away, `stop
 (false)` returned at once (the test bounds it at 0.5 s; a hand-timed run
-was well under a millisecond) and a bounded drain (`stop (true, 200 ms)`)
-in 0.20 s; without the cap that drain took 1.95 s, which is what the cap is
-for.
+was well under a millisecond) and a bounded drain (`stop (true, 30 ms)`)
+ended at its deadline, 0.03 s. The park is bounded by the drain's remaining
+time as well as by `TOKEN_WAIT_CAP_MS`: without that clamp the same drain ran
+a whole 100 ms slice past its deadline (0.10 s), and with neither bound it
+waited out the 2 s token.
 
 ## Prior results (2026-07, CLI, unreconciled)
 
