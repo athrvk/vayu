@@ -1823,7 +1823,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **21 directives across 16 files**, listed
+file that provides the missing half. **22 directives across 17 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1845,6 +1845,10 @@ not rule names - two of these lines silence two rules at once.
   `tabindex` for Up/Down between the six view buttons, the same shape
   `TabStrip`'s tablist uses for Left/Right, on a landmark rather than a widget
   role because the rail is deliberately `role="toolbar"`-free (#1615).
+- `components/layout/ContextRail.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions` on the `<nav>`: the same
+  roving `tabindex` for Up/Down as `ActivityRail` above, between the section
+  buttons, on a landmark because the rail is `role="toolbar"`-free.
 - `components/layout/Dock.tsx` (3) - `jsx-a11y/no-noninteractive-tabindex`
   three times: the Radix `TooltipTrigger` wires focus and blur to the tooltip
   holding the engine error text, the same shape again on the save-error
@@ -2674,6 +2678,11 @@ switcher living there is the one target on screen the system can cover mid-use.
 rail's own bottom (a bottom cluster is the same Dock problem in miniature).
 `ContextRail` (`ContextRail.tsx`) is the same shape on the right edge: one
 button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
+Both rails share one keyboard model: a single Tab stop (`useRovingStop`, so the
+stop is state and cannot be left stray by an arrow) with `ArrowUp`/`ArrowDown`
+moving focus, wrapping, without activating. `ActivityRail`'s stop is the
+selected view; `ContextRail`'s is the first expanded section, or the first
+section when all are collapsed.
 
 - **`RailButton` (`RailButton.tsx`) is `w-full h-band` with a `size-icon` icon**,
   icon-only so `aria-label` is the accessible name and the chord (where there
