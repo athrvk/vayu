@@ -10,13 +10,13 @@
  *
  * Two save models exist in this app. `useSaveManager` is the autosave one the
  * request builder uses. This is the other one: an editable draft, a Save button
- * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` is its
- * one remaining button user.
+ * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
+ * `ElementsTab` are its button users.
  *
  * `InfoTab` and `ScriptTab` take the draft, the resync and the mutation reset
  * from here and render no Save button at all - they commit when focus leaves
- * the field, like the request builder. `reset` therefore has one caller, where
- * `draft` has three; `InfoTab` reaches the discard path through `adopt`.
+ * the field, like the request builder. `reset` therefore has fewer callers
+ * than `draft`; `InfoTab` reaches the discard path through `adopt`.
  *
  * **Why auth alone kept the button (#446).** Not because a credential is
  * grander than a script - the request builder autosaves its own auth. Because a
@@ -102,8 +102,8 @@ interface EntityDraft<T> {
 	 */
 	adopt: Dispatch<SetStateAction<T>>;
 	/**
-	 * Whether the draft going clean was a `reset` or an `adopt` rather than a save landing, and
-	 * clears that answer. Pass it to `useDraftSaveContext` so the Dock reports a
+	 * Whether the draft going clean was a `reset` or an `adopt` rather than a save
+	 * landing, and clears that answer. Pass it to `useDraftSaveContext` so the Dock reports a
 	 * discard as idle instead of "Saved" (#1931).
 	 */
 	consumeDiscard: () => boolean;
