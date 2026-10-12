@@ -124,7 +124,7 @@ beforeEach(() => {
  * would pass for the wrong reason - no menu, no click, no toast.
  */
 function openMenu() {
-	const trigger = screen.getByRole("button", { name: /switch environment/i });
+	const trigger = screen.getByRole("button", { name: /^environment:/i });
 	fireEvent.keyDown(trigger, { key: "Enter" });
 	// Fail loudly here rather than letting a silent no-op look like a pass.
 	const menu = screen.getByRole("menu");
@@ -212,7 +212,7 @@ describe("environment selector tokens", () => {
 	 * documented solid-text-on-a-/10-tint convention. The control that *selects*
 	 * an environment was the one surface not saying it.
 	 */
-	const trigger = () => screen.getByRole("button", { name: /switch environment/i });
+	const trigger = () => screen.getByRole("button", { name: /^environment:/i });
 
 	it("tracks the accent once an environment is selected", () => {
 		// Every other selected surface follows the scheme - the Appearance cards,

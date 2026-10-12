@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useLayoutStore, useTabsStore, type TabType } from "@/stores";
@@ -93,6 +93,80 @@ describe("ContextRail - visibility", () => {
 		expect(
 			screen.queryByRole("navigation", { name: "Context sections" })
 		).not.toBeInTheDocument();
+	});
+});
+
+describe("ContextRail - roving tabindex", () => {
+	const requestSections = () =>
+		sectionsForTab({ id: "t1", type: "request", entityId: null }).map((s) => s.id);
+	const railButtons = () =>
+		Array.from(
+			screen
+				.getByRole("navigation", { name: "Context sections" })
+				.querySelectorAll<HTMLButtonElement>("button")
+		);
+	const stops = () => railButtons().filter((b) => b.tabIndex === 0);
+
+	beforeEach(() => openTabOfType("request"));
+
+	it("keeps exactly one tab stop, on the first section", () => {
+		renderRail();
+		expect(railButtons().length).toBeGreaterThan(2);
+		expect(stops()).toEqual([railButtons()[0]]);
+	});
+
+	it("puts the stop on the first expanded section when the leading ones are collapsed", () => {
+		useLayoutStore.setState({ contextBarCollapsedSections: [requestSections()[0]] });
+		renderRail();
+		expect(stops()).toEqual([railButtons()[1]]);
+	});
+
+	it("falls back to the first section when every section is collapsed", () => {
+		useLayoutStore.setState({ contextBarCollapsedSections: requestSections() });
+		renderRail();
+		expect(stops()).toEqual([railButtons()[0]]);
+	});
+
+	it("ArrowDown moves focus to the next section and promotes its tab stop", () => {
+		renderRail();
+		const [first, second] = railButtons();
+		first.focus();
+
+		fireEvent.keyDown(screen.getByRole("navigation", { name: "Context sections" }), {
+			key: "ArrowDown",
+		});
+
+		expect(document.activeElement).toBe(second);
+		expect(stops()).toEqual([second]);
+		// Focus moved without activating: arrowing past a section must not toggle it.
+		expect(useLayoutStore.getState().contextBarOpen).toBe(false);
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual([]);
+	});
+
+	it("ArrowUp from the first section wraps to the last", () => {
+		renderRail();
+		const buttons = railButtons();
+		buttons[0].focus();
+
+		fireEvent.keyDown(screen.getByRole("navigation", { name: "Context sections" }), {
+			key: "ArrowUp",
+		});
+
+		expect(document.activeElement).toBe(buttons[buttons.length - 1]);
+		expect(stops()).toEqual([buttons[buttons.length - 1]]);
+	});
+
+	it("drops an arrowed-to stop for the first expanded section once that changes", () => {
+		renderRail();
+		const nav = screen.getByRole("navigation", { name: "Context sections" });
+		railButtons()[0].focus();
+		fireEvent.keyDown(nav, { key: "ArrowDown" });
+		fireEvent.keyDown(nav, { key: "ArrowDown" });
+		expect(stops()).toEqual([railButtons()[2]]);
+
+		act(() => useLayoutStore.setState({ contextBarCollapsedSections: [requestSections()[0]] }));
+
+		expect(stops()).toEqual([railButtons()[1]]);
 	});
 });
 

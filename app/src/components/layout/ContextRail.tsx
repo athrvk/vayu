@@ -23,6 +23,10 @@
  * this rail's answer to a dedicated close button - ⌘I still toggles the bar
  * outright.
  *
+ * One Tab stop for the whole rail, Up/Down between the section buttons - the
+ * roving model `ActivityRail` uses (`useRovingStop`), so a page with several
+ * sections is not several Tab presses to get past.
+ *
  * Present in both `ContextBar` layout modes: below 1200px the bar overlays
  * `main` rather than pushing it, but the rail is a normal flex child beside
  * that overlay (`Shell.tsx`), never inside the positioned box the bar
@@ -41,6 +45,7 @@ import { contextBarHasContent } from "./context-bar-content";
 import { sectionsForTab } from "./context-bar/registry";
 import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
 import { RailButton } from "./RailButton";
+import { useRovingStop } from "./useRovingStop";
 
 /** A section that declares no relevance hook has content by definition - the
  *  same fallback `ContextBarSectionSlot` (`ContextBar.tsx`) uses, duplicated
@@ -93,6 +98,36 @@ export function ContextRail() {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const sections = sectionsForTab(activeTab);
+	const navRef = useRef<HTMLElement>(null);
+
+	// The stop follows the first expanded section, or the first section when the
+	// user has collapsed them all - the rail must never be left with no stop.
+	const sectionIds = sections.map((s) => s.id);
+	const firstExpanded = sectionIds.find((id) => !contextBarCollapsedSections.includes(id));
+	const [rovingSection, setRovingSection] = useRovingStop(
+		firstExpanded ?? sectionIds[0] ?? null,
+		sectionIds
+	);
+
+	/** Up/Down move focus along the rail without activating, as `ActivityRail`'s
+	 *  handler does: arrowing past a section must not toggle it. */
+	const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+		if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+		const buttons = Array.from(navRef.current?.querySelectorAll<HTMLElement>("button") ?? []);
+		const current = buttons.findIndex((el) => el === document.activeElement);
+		if (current === -1) return;
+
+		const next =
+			e.key === "ArrowDown"
+				? (current + 1) % buttons.length
+				: (current - 1 + buttons.length) % buttons.length;
+
+		e.preventDefault();
+		setRovingSection(sectionIds[next]);
+		buttons[next].focus();
+	};
 
 	// Read by `onSectionClick` only, never for rendering - a ref rather than
 	// state, so a relevance answer settling does not itself cost a render.
@@ -172,10 +207,12 @@ export function ContextRail() {
 	// Non-null past the guard above: `contextBarHasContent` is false without
 	// one, the same reasoning `ContextBar.tsx`'s identical guard uses.
 	const tab = activeTab!;
-	const sections = sectionsForTab(activeTab);
 
 	return (
+		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- roving tabindex for Up/Down between the section buttons, the same shape ActivityRail uses on the left edge; the rail is deliberately `role="toolbar"`-free, so this lands on a landmark rather than a widget role
 		<nav
+			ref={navRef}
+			onKeyDown={onKeyDown}
 			className="flex flex-col items-center gap-1 w-[var(--rail-width)] shrink-0 pt-2 border-l border-border bg-panel"
 			aria-label="Context sections"
 		>
@@ -202,6 +239,7 @@ export function ContextRail() {
 						label={section.title}
 						side="right"
 						variant="tile"
+						tabIndex={section.id === rovingSection ? 0 : -1}
 					>
 						<Icon className="size-icon" />
 					</RailButton>

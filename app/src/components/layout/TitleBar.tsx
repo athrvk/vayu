@@ -440,9 +440,12 @@ function EnvSwitcher() {
 					// in place with no wrapper node, so the declaration lands on the
 					// real element.
 					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-					aria-label="Switch environment"
 				>
 					<Cloud className="size-icon-sm shrink-0" />
+					{/* A prefix, not an `aria-label`: a label replaces the visible
+					    text, so a speech-control user saying "click Staging" matched
+					    nothing (WCAG 2.5.3 Label in Name). */}
+					<span className="sr-only">Environment: </span>
 					<span className="truncate">{activeEnv?.name ?? "No environment"}</span>
 					{/* Inherits the control's colour: the old `opacity-60` was a magic
 					    number that fought the tinted state, dimming an already-tinted

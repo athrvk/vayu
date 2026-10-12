@@ -36,9 +36,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PALETTE_CHORD } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
 
+const env = vi.hoisted(() => ({ list: [] as { id: string; name: string }[] }));
+
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
-	useEnvironmentsQuery: () => ({ data: [] }),
+	useEnvironmentsQuery: () => ({ data: env.list }),
 }));
 
 /**
@@ -89,19 +91,17 @@ function stubPlatform(platform: string | null) {
  * the one the rendered bar writes to - it would sit at `false` for ever while
  * the click worked perfectly.
  */
-async function renderFor(platform: string | null) {
+async function renderFor(platform: string | null, activeEnvironmentId: string | null = null) {
 	stubPlatform(platform);
 	vi.resetModules();
 	// The row now holds tooltip-bearing controls (the navigation buttons), which
 	// rely on the app-level provider `main.tsx` supplies. It is imported from the
 	// same fresh graph as the bar: after `resetModules` a statically imported one
 	// is a different Radix instance, and the tooltip context would not match.
-	const [{ default: TitleBar }, { useLayoutStore }, { TooltipProvider }] = await Promise.all([
-		import("./TitleBar"),
-		import("@/stores"),
-		import("@/components/ui"),
-	]);
+	const [{ default: TitleBar }, { useLayoutStore, useSessionStore }, { TooltipProvider }] =
+		await Promise.all([import("./TitleBar"), import("@/stores"), import("@/components/ui")]);
 	useLayoutStore.setState({ paletteOpen: false });
+	useSessionStore.setState({ activeEnvironmentId });
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return {
 		...render(
@@ -116,8 +116,12 @@ async function renderFor(platform: string | null) {
 }
 
 const searchBar = () => screen.getByRole("button", { name: /search everything/i });
+const envSwitcher = () => screen.getByRole("button", { name: /^environment:/i });
 
-beforeEach(cleanup);
+beforeEach(() => {
+	cleanup();
+	env.list = [];
+});
 afterEach(() => vi.resetModules());
 
 describe("title-row search bar", () => {
@@ -164,6 +168,27 @@ describe("title-row search bar", () => {
 	});
 });
 
+describe("title-row environment switcher", () => {
+	it("is named by the environment it shows, so speaking the visible name reaches it", async () => {
+		env.list = [{ id: "env_1", name: "Staging" }];
+		await renderFor("linux", "env_1");
+		// Resolves by the visible name: an `aria-label` over it would replace the
+		// name and leave "Staging" matching nothing (WCAG 2.5.3).
+		const button = screen.getByRole("button", { name: /Staging/ });
+		expect(button).toBe(envSwitcher());
+		expect(button).not.toHaveAttribute("aria-label");
+		// `\s*`, not a literal space: jsdom's name computation drops the space a
+		// browser adds between a flex container's blockified children.
+		expect(button).toHaveAccessibleName(/^Environment:\s*Staging$/);
+	});
+
+	it("says there is no environment when none is active", async () => {
+		env.list = [{ id: "env_1", name: "Staging" }];
+		await renderFor("linux", null);
+		expect(envSwitcher()).toHaveAccessibleName(/^Environment:\s*No environment$/);
+	});
+});
+
 describe("title-row drag regions", () => {
 	it("drags by the row and not by its controls", async () => {
 		// Linux, because it is the platform that draws its own window buttons in
@@ -174,17 +199,16 @@ describe("title-row drag regions", () => {
 
 		const controls = [
 			searchBar(),
-			screen.getByRole("button", { name: /switch environment/i }),
+			envSwitcher(),
 			screen.getByRole("button", { name: /minimize/i }),
 			screen.getByRole("button", { name: /close/i }),
 		];
 		// A loop over an empty list passes every assertion inside it.
 		expect(controls).toHaveLength(4);
 		for (const el of controls) {
-			expect(
-				effectiveRegion(el),
-				`${el.getAttribute("aria-label")} is inside the drag region`
-			).toBe("no-drag");
+			expect(effectiveRegion(el), `${el.textContent} is inside the drag region`).toBe(
+				"no-drag"
+			);
 		}
 	});
 
@@ -205,7 +229,7 @@ describe("title-row drag regions", () => {
 		// drag on all three.
 		for (const platform of ["win32", "darwin", "linux"]) {
 			await renderFor(platform);
-			const envButton = screen.getByRole("button", { name: /switch environment/i });
+			const envButton = envSwitcher();
 			// `DropdownMenuTrigger asChild` renders the button in place, so its DOM
 			// parent is the row's right-hand wrapper, not a Radix-inserted node.
 			const wrapper = envButton.parentElement;
