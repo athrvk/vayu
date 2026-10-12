@@ -298,6 +298,10 @@ describe("a data file", () => {
 				{ user: "ada", id: "1" },
 				{ user: "grace", id: "2" },
 			],
+			// Which file drove the run (issue #2051): its name and the SHA-256
+			// of its bytes, never its path.
+			dataFileName: "users.csv",
+			dataFileHash: "2db0eca7622a0202096a0e1ee4af0bf2a4f91d3f6c6a1e593900962549927551",
 		});
 		// Omitted, not computed: the engine owns "absent means one pass per row".
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
@@ -473,7 +477,7 @@ describe("running the sequence as a load test", () => {
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
 	});
 
-	it("hands the dashboard the row count, and nothing for a run without a file (#1940)", async () => {
+	it("hands the dashboard the row count and the file's name and hash, and nothing for a run without a file (#1940, #2051)", async () => {
 		const { unmount } = render(
 			<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
 		);
@@ -486,7 +490,11 @@ describe("running the sequence as a load test", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		succeedWith("run_load_8");
 
-		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBe(2);
+		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+			dataRowCount: 2,
+			dataFileName: "users.csv",
+			dataFileHash: "eefb4557a05007a7651f212036cde499da3c25508761ba78de983a521b7446e5",
+		});
 		unmount();
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
@@ -495,6 +503,8 @@ describe("running the sequence as a load test", () => {
 		succeedWith("run_load_9");
 
 		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBeUndefined();
+		expect(useDashboardStore.getState().loadTestConfig?.dataFileName).toBeUndefined();
+		expect(useDashboardStore.getState().loadTestConfig?.dataFileHash).toBeUndefined();
 	});
 
 	it("describes the rows as a load run binds them, not as iterations", async () => {

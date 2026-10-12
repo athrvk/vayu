@@ -342,8 +342,10 @@ interface ElectronAPI {
 	 * Bytes rather than text: `services/data-files/decode.ts` owns decoding, and
 	 * a file re-read here must not disagree with the same file read through the
 	 * picker. Absent outside Electron, so every caller has a no-Electron path.
+	 * `hash` is the SHA-256 of `bytes` as 64 lowercase hex (issue #2051), the
+	 * same digest the picker computes for a hand-picked file.
 	 */
-	readDataFile: (path: string) => Promise<{ bytes: Uint8Array; fileName: string }>;
+	readDataFile: (path: string) => Promise<{ bytes: Uint8Array; fileName: string; hash: string }>;
 
 	/**
 	 * Hand the main process every remembered data-file location (issue #1742),
@@ -351,7 +353,7 @@ interface ElectronAPI {
 	 * each time, never a diff: the main process keeps no copy of its own.
 	 */
 	publishDataFileLocations: (
-		locations: Record<string, { path: string; fileName: string }>
+		locations: Record<string, { path: string; fileName: string; hash?: string }>
 	) => void;
 
 	/**

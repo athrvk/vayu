@@ -17,8 +17,17 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { readDataFile, DATA_FILE_EXTENSIONS, type DataFileSystem } from "./data-file";
-import { DATA_FILE_ACCEPT } from "@/services/data-files";
+import {
+	readDataFile,
+	DATA_FILE_EXTENSIONS,
+	DATA_FILE_HASH_PATTERN,
+	type DataFileSystem,
+} from "./data-file";
+import {
+	DATA_FILE_ACCEPT,
+	DATA_FILE_HASH_PATTERN as PICKER_HASH_PATTERN,
+	sha256Hex,
+} from "@/services/data-files";
 
 const system = (overrides: Partial<DataFileSystem> = {}): DataFileSystem => ({
 	stat: vi.fn(async () => ({ size: 10, isFile: () => true })),
@@ -104,6 +113,25 @@ describe("readDataFile - what it returns", () => {
 		expect(Array.from(bytes)).toEqual([0xff, 0xfe, 0x69, 0x00]);
 	});
 
+	it("carries the SHA-256 of those bytes, as 64 lowercase hex (#2051)", async () => {
+		// The FIPS 180-2 "abc" vector, so the digest is checked against a value
+		// this codebase did not compute.
+		const io = system({ readFile: vi.fn(async () => Buffer.from("abc")) });
+		const { hash } = await readDataFile("/home/u/abc.csv", io);
+		expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+	});
+
+	it("answers the same hash for the same bytes, and a different one when they change", async () => {
+		const first = await readDataFile("/home/u/rows.csv", system());
+		const second = await readDataFile("/home/u/rows.csv", system());
+		expect(first.hash).toBe(second.hash);
+		const edited = await readDataFile(
+			"/home/u/rows.csv",
+			system({ readFile: vi.fn(async () => Buffer.from("id,email\n1,a@b.d\n")) })
+		);
+		expect(edited.hash).not.toBe(first.hash);
+	});
+
 	it("reports a moved file as a moved file", async () => {
 		const io = system({
 			stat: vi.fn(async () => {
@@ -126,5 +154,24 @@ describe("the allowlist and the picker agree", () => {
 		// the user to tell why. Duplicated across the process boundary out of
 		// necessity - this is what keeps the two copies honest.
 		expect([...DATA_FILE_EXTENSIONS].sort()).toEqual(DATA_FILE_ACCEPT.split(",").sort());
+	});
+});
+
+describe("the hash and the picker's agree (#2051)", () => {
+	it("answers the digest the picker computes for the same bytes", async () => {
+		// A hand-picked file is hashed in the renderer and never comes through
+		// here, so a run is only comparable to another if both answer one digest.
+		// A UTF-16 BOM and a non-ASCII cell, so a digest taken over decoded text
+		// rather than the raw bytes on either side would disagree.
+		const bytes = Uint8Array.from([0xff, 0xfe, 0x69, 0x00, 0x64, 0x00, 0xe9, 0x00]);
+		const { hash } = await readDataFile(
+			"/home/u/rows.csv",
+			system({ readFile: vi.fn(async () => Buffer.from(bytes)) })
+		);
+		expect(hash).toBe(await sha256Hex(bytes.buffer));
+	});
+
+	it("checks a stored hash against the same shape", () => {
+		expect(DATA_FILE_HASH_PATTERN.source).toBe(PICKER_HASH_PATTERN.source);
 	});
 });

@@ -316,7 +316,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// engine's fetched byte cap); see electron/data-file.ts for why that gate is
 	// the whole answer. Bytes, not text: the renderer decodes with the same
 	// module the picker uses, so the two paths cannot disagree about a file.
-	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string }> =>
+	// `hash` is the SHA-256 of those bytes (issue #2051), what a run records.
+	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string; hash: string }> =>
 		ipcRenderer.invoke("dataFile:read", path).catch((e: unknown) => {
 			throw unwrapIpcError(e);
 		}),

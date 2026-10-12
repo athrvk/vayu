@@ -3534,6 +3534,51 @@ describe("run_collection", () => {
 		expect(payload).not.toHaveProperty("mode");
 	});
 
+	test("forwards the rows' file name and hash into the scenario block (#2051)", async () => {
+		const client = scenarioClient();
+		const rows = [{ id: "1" }];
+		const hash = "c".repeat(64);
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", data: rows, dataFileName: "users.csv", dataFileHash: hash },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		// Inside the block, where the engine reads them; top level beside a
+		// scenario is refused engine-side.
+		expect(payload.scenario).toMatchObject({
+			data: rows,
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+		expect(payload).not.toHaveProperty("dataFileName");
+		expect(payload).not.toHaveProperty("dataFileHash");
+	});
+
+	test("the schema refuses a hash that is not 64 lowercase hex, on every tool that takes one", () => {
+		const schemaOf = (name: string) =>
+			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+		const hash = "c".repeat(64);
+		const cases = [
+			["run_collection", (dataFileHash: string) => ({ collectionId: "c1", dataFileHash })],
+			["start_load_run", (dataFileHash: string) => ({ dataFileHash })],
+			[
+				"start_load_run",
+				(dataFileHash: string) => ({ scenario: { collectionId: "c1", dataFileHash } }),
+			],
+		] as const;
+		for (const [name, args] of cases) {
+			expect(schemaOf(name).safeParse(args(hash)).success, name).toBe(true);
+			for (const bad of ["C".repeat(64), "abc", "/home/u/users.csv"]) {
+				expect(schemaOf(name).safeParse(args(bad)).success, `${name} ${bad}`).toBe(false);
+			}
+		}
+	});
+
 	test("omits iterations and data when the caller named neither", async () => {
 		const client = scenarioClient();
 		await dispatchTool(
@@ -3897,6 +3942,33 @@ describe("start_load_run scenario runs", () => {
 		});
 	});
 
+	test("forwards scenario.dataFileName and scenario.dataFileHash inside the block (#2051)", async () => {
+		const client = scenarioLoadClient();
+		const rows = [{ id: "1" }];
+		const hash = "c".repeat(64);
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: {
+					collectionId: "c1",
+					data: rows,
+					dataFileName: "users.csv",
+					dataFileHash: hash,
+				},
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.scenario).toMatchObject({
+			data: rows,
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+		expect(payload).not.toHaveProperty("dataFileName");
+	});
+
 	test("an un-allowlisted step's refusal names the host and withholds the resolved URL (#1892)", async () => {
 		const client = scenarioLoadClient({
 			getGlobals: vi.fn().mockResolvedValue({
@@ -3946,6 +4018,10 @@ describe("start_load_run scenario runs", () => {
 			// per request sent, so a payload carrying both would have one of the
 			// two silently dropped.
 			["data", [{ id: "1" }]],
+			// And the single-target file name and hash beside it (issue #2051):
+			// a sequence names its rows' file inside the block.
+			["dataFileName", "users.csv"],
+			["dataFileHash", "c".repeat(64)],
 			// The send's default-header refusals (issue #1337): the engine reads
 			// them off one request's payload, and a scenario's steps are each
 			// composed from their own saved request, so a run-level list would be
@@ -4226,7 +4302,13 @@ describe("start_load_run scenario runs", () => {
 		const shape = (
 			tool!.inputSchema.scenario as z.ZodOptional<z.ZodObject<Record<string, z.ZodType>>>
 		)._def.innerType.shape;
-		expect(Object.keys(shape).sort()).toEqual(["collectionId", "data", "recursive"]);
+		expect(Object.keys(shape).sort()).toEqual([
+			"collectionId",
+			"data",
+			"dataFileHash",
+			"dataFileName",
+			"recursive",
+		]);
 	});
 });
 
@@ -8517,6 +8599,25 @@ describe("start_load_run recording knobs", () => {
 	test("sends no `data` key when the caller named no rows", async () => {
 		const { client } = await start({ comment: "just a note" });
 		expect(started(client)).not.toHaveProperty("data");
+		expect(started(client)).not.toHaveProperty("dataFileName");
+		expect(started(client)).not.toHaveProperty("dataFileHash");
+	});
+
+	test("forwards the rows' file name and hash at the top level (#2051)", async () => {
+		const rows = [{ id: "1" }];
+		const hash = "c".repeat(64);
+		const { res, client } = await start({
+			data: rows,
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({
+			data: rows,
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
 	});
 
 	test("a knob the caller did not name is absent, not defaulted", async () => {
@@ -11175,6 +11276,10 @@ describe("secret withholding", () => {
 		summary: {
 			url: `https://api.example.com/v1?key=${PERCENT_FORM}`,
 			comment: "after rotating col-secret-9",
+			// The rows' file (issue #2051): a name and a digest, no secret in
+			// either, so withholding passes both through.
+			dataFileName: "users.csv",
+			dataFileHash: "c".repeat(64),
 		},
 	};
 
@@ -11186,6 +11291,8 @@ describe("secret withholding", () => {
 		expect(withheld.body.data[0].summary).toEqual({
 			url: "https://api.example.com/v1?key=<redacted>",
 			comment: "after rotating <redacted>",
+			dataFileName: "users.csv",
+			dataFileHash: "c".repeat(64),
 		});
 		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
 	});

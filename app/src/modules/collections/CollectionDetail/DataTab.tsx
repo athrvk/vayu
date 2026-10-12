@@ -187,6 +187,7 @@ export default function DataTab({ collection }: DataTabProps) {
 						setDataFile(collection.id, {
 							path: source.path,
 							fileName: source.fileName,
+							hash: source.hash,
 						});
 					} else {
 						clearDataFile(collection.id);

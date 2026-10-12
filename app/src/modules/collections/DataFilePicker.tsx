@@ -54,6 +54,7 @@ import {
 	describeRowCapRefusal,
 	parseDataFile,
 	resolveIterationCount,
+	sha256Hex,
 	type ParsedDataFile,
 } from "@/services/data-files";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -64,6 +65,11 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 export interface SelectedDataFile {
 	fileName: string;
 	parsed: ParsedDataFile;
+	/**
+	 * SHA-256 of the file's bytes, 64 lowercase hex (issue #2051). Sent with the
+	 * rows so the run records which file drove it, never the path.
+	 */
+	hash: string;
 	/**
 	 * Where the file is on this machine, when Electron could say (issue #599).
 	 *
@@ -171,10 +177,9 @@ export default function DataFilePicker({
 			return;
 		}
 
-		const reader = new FileReader();
-		reader.onload = () => {
+		const accept = async (bytes: ArrayBuffer) => {
 			try {
-				const { text } = decodeDataFile(reader.result as ArrayBuffer);
+				const { text } = decodeDataFile(bytes);
 				const parsed = parseDataFile(text, file.name);
 				// The same sentence a re-read of a remembered path refuses with
 				// (`read-declared.ts`), from one place - the two used to be one
@@ -188,7 +193,10 @@ export default function DataFilePicker({
 				// and is absent in a browser or for remote drag-and-drop, so it
 				// is carried when there is one and simply not when there is not.
 				const path = window.electronAPI?.getFilePath(file) || undefined;
-				onSelect({ fileName: file.name, parsed, path });
+				// The raw bytes, not the decoded text: the main process hashes a
+				// re-read the same way, so one file is one digest either way.
+				const hash = await sha256Hex(bytes);
+				onSelect({ fileName: file.name, parsed, path, hash });
 				onError(null);
 			} catch (e) {
 				refuse(
@@ -197,6 +205,11 @@ export default function DataFilePicker({
 						: `Couldn't read the file: ${(e as Error).message}`
 				);
 			}
+		};
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			void accept(reader.result as ArrayBuffer);
 		};
 		reader.onerror = () => {
 			refuse("Couldn't read the file.");

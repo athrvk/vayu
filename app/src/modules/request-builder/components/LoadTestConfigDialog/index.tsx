@@ -611,6 +611,8 @@ export default function LoadTestConfigDialog({
 		if (dataFile) {
 			config.data = dataFile.parsed.rows;
 			config.dataColumns = dataFile.parsed.columns;
+			config.dataFileName = dataFile.fileName;
+			config.dataFileHash = dataFile.hash;
 		}
 
 		// Streaming requests only. Always sent when the request streams, never

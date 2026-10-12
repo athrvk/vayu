@@ -143,8 +143,9 @@ The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
 and handing the daemon a user-supplied path would be a new trust boundary. The
 row set itself is never stored on either side - a run's snapshot records its
-count alone - but a cell bound into a request travels with that request, and a
-run stores the requests it sent. See [What is stored](#what-is-stored).
+count plus the file's name and content hash, never its path or a row - but a
+cell bound into a request travels with that request, and a run stores the
+requests it sent. See [What is stored](#what-is-stored).
 
 ## Reading a row: `{{data.column}}` vs `pm.iterationData`
 
@@ -408,8 +409,10 @@ run:
   `dataSchema` (columns, file name, when it was declared), so an agent building
   the `data` rows for `run_collection` or `start_load_run` knows which columns
   to supply. Where the app remembers the file, the row also carries
-  `dataFile: { path, fileName }`, so an agent on this machine can open the file
-  itself, the way you would. A collection that declares nothing has neither -
+  `dataFile: { path, fileName, hash }`, so an agent on this machine can open the
+  file itself, the way you would; `hash` is the SHA-256 of the file's bytes the
+  last time the app read it, the same digest a run records, so an agent can
+  tell whether the file is still the one a past run used. A collection that declares nothing has neither -
   the ancestor walk above is left to the reader, the same as it is for
   variables. The rows never go over MCP: Vayu does not read the file for the
   agent. The path is named only by the MCP server inside the running app, which
@@ -503,7 +506,9 @@ itself is read fresh every time - whether you pick it or the dialog pre-fills it
 from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
-and nothing else, and that count is what a reader sees afterwards: the
+plus the file's name and content hash (the SHA-256 of its bytes, so two runs
+can be told apart by the file that drove them), never its path or a row. The
+count is what a reader sees afterwards: the
 dashboard's header prints "N rows" in its config summary, live from the launch
 config and then from the report, and History's Test config row lists it as
 `Data:`.

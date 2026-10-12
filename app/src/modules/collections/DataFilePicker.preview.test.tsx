@@ -38,6 +38,7 @@ function selection(count: number): SelectedDataFile {
 	const columns = ["userId", "email", "plan", "quantity", "orderRef", "city", "delayMs"];
 	return {
 		fileName: "orders.csv",
+		hash: "0".repeat(64),
 		parsed: {
 			format: "csv",
 			columns,

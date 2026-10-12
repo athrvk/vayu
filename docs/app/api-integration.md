@@ -725,11 +725,14 @@ apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 `startLoadTest` and `startScenarioRun` are the **same `POST /runs` endpoint and
 the same `202 {runId}` answer** - the payload is what selects the executor. A
 scenario states its work as an ordered collection
-(`{scenario: {source: "collection", collectionId, recursive?, iterations?, data?}}`),
+(`{scenario: {source: "collection", collectionId, recursive?, iterations?, data?,
+dataFileName?, dataFileHash?}}`),
 so it carries no `method`/`url`, and its iteration count lives
 inside the block rather than beside a load-test mode. `data` is the parsed rows
 of a data file (`services/data-files/`), sent inline because the engine never
-opens a file; `iterations` is **omitted** when the user left it blank, so the
+opens a file, and `dataFileName` / `dataFileHash` name that file beside them
+(issue #2051): the picked file's name and the SHA-256 of its bytes, never its
+path, so the run records which file drove it. `iterations` is **omitted** when the user left it blank, so the
 engine's "absent means one pass per row" rule stays in one place. Both send `allowScriptRequests`,
 for the same reason: every step runs the scripts a Send of that request would
 run. The engine resolves the whole plan before answering, so an empty
@@ -1499,7 +1502,11 @@ await apiService.startLoadTest({
   thresholds: { latencyP99Ms: 50, maxErrorRatePct: 0.1 },
   // Optional data rows, bound one per request sent. Omitted when the dialog's
   // picker holds no file.
-  data: [{ id: "1" }, { id: "2" }]
+  data: [{ id: "1" }, { id: "2" }],
+  // The file those rows came from: its name and the SHA-256 of its bytes,
+  // never its path (issue #2051). Undefined exactly when `data` is.
+  dataFileName: "users.csv",
+  dataFileHash: "<64 lowercase hex>"
 });
 ```
 

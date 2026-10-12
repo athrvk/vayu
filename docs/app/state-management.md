@@ -365,14 +365,15 @@ dialog can pre-fill it instead of asking for it every run (issue #599).
 **State:**
 ```typescript
 {
-  locations: Record<string, { path: string; fileName: string }>  // keyed by collection id
+  locations: Record<string, { path: string; fileName: string; hash?: string }>  // keyed by collection id
 }
 ```
 
 **Key Methods:**
 ```typescript
-const { setDataFile, clearDataFile } = useDataFileStore();
-setDataFile(collectionId, { path, fileName });
+const { setDataFile, clearDataFile, recordDataFileHash } = useDataFileStore();
+setDataFile(collectionId, { path, fileName, hash });
+recordDataFileHash(path, hash);  // every location at that path
 ```
 
 **Persistence:** `vayu.data-files` (v1)
@@ -395,11 +396,18 @@ existing `getFilePath` bridge, and dropped when the collection is deleted or
 purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
 (`electron/data-file.ts`), because the renderer otherwise cannot name a path.
 
+`hash` is the SHA-256 of the file's bytes the last time the app read it (issue
+#2051), the same digest a run records as `dataFileHash`. A pick writes it with
+the path; every re-read through `readDeclaredDataFile` refreshes it, keyed by
+path, so a file edited on disk is not described by the digest it had when it
+was declared. It is optional because a location remembered before hashes were
+recorded has none until its next read.
+
 The persisted payload is normalized through **both** `migrate` and `merge`:
 `migrate` runs only on a version mismatch, and the common case is a
 same-version payload, so an entry that is not a `{path, fileName}` pair of
 strings would otherwise reach the read IPC *as a path*. A bad entry is dropped
-rather than repaired - there is nothing to repair a path to, and the picker is
+(a malformed `hash` drops only the hash) rather than repaired - there is nothing to repair a path to, and the picker is
 one click away.
 
 #### `spec-file-store.ts` - Where Each Collection's Spec File Lives

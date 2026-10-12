@@ -42,6 +42,7 @@
  * read through this channel could disagree about their own contents.
  */
 
+import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -69,7 +70,21 @@ export const DATA_FILE_EXTENSIONS: readonly string[] = [
 export interface DataFileReadResult {
 	bytes: Uint8Array;
 	fileName: string;
+	/**
+	 * SHA-256 of `bytes`, as 64 lowercase hex characters (issue #2051): what a
+	 * run records as the file it was driven by. A hand-picked file never comes
+	 * through here, so the picker hashes its own bytes (`sha256Hex` in
+	 * `services/data-files`) and the two are held to one digest by its test.
+	 */
+	hash: string;
 }
+
+/**
+ * The shape of a data file's content hash, wherever one is read back from
+ * renderer input (`data-file-locations.ts`) or an MCP argument. The engine
+ * refuses any other spelling of the digest.
+ */
+export const DATA_FILE_HASH_PATTERN = /^[0-9a-f]{64}$/;
 
 /** The I/O this module performs, injected so the gates are testable without a disk. */
 export interface DataFileSystem {
@@ -151,5 +166,6 @@ export async function readDataFile(
 	return {
 		bytes: new Uint8Array(buffer),
 		fileName: path.basename(filePath),
+		hash: createHash("sha256").update(buffer).digest("hex"),
 	};
 }

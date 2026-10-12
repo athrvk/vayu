@@ -36,6 +36,8 @@ import {
 	ENGINE_DEFAULT_HEADERS_SENTENCE,
 	failOnSchemaErrorInput,
 	scenarioDataInput,
+	dataFileNameInput,
+	dataFileHashInput,
 	scenarioRecursiveInput,
 	thresholdsInput,
 } from "./input-schemas.js";
@@ -258,6 +260,8 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					"How many passes over the sequence (default 1, or the row count when `data` is given). With more passes than rows the row index wraps."
 				),
 			data: scenarioDataInput,
+			dataFileName: dataFileNameInput,
+			dataFileHash: dataFileHashInput,
 			// The Run Collection dialog's checkbox, which had no MCP writer at all
 			// (issue #766). Design-mode only, because only this runner demotes a
 			// step on a schema failure - see the refusal on `start_load_run`.
@@ -291,6 +295,8 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			const recursive = args.recursive === true;
 			const iterations = typeof args.iterations === "number" ? args.iterations : undefined;
 			const data = Array.isArray(args.data) ? (args.data as unknown[]) : undefined;
+			const dataFileName = str(args, "dataFileName");
+			const dataFileHash = str(args, "dataFileHash");
 
 			let plannedSteps: number;
 			try {
@@ -305,7 +311,11 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			}
 
 			const payload: Record<string, unknown> = {
-				scenario: scenarioBlock({ collectionId, data }, recursive, iterations),
+				scenario: scenarioBlock(
+					{ collectionId, data, dataFileName, dataFileHash },
+					recursive,
+					iterations
+				),
 				...(environmentId !== undefined ? { environmentId } : {}),
 				// Top-level, beside `scenario` rather than inside it: that is where
 				// `read_fail_on_schema_error` looks, and where the app's dialog puts

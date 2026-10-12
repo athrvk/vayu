@@ -185,13 +185,21 @@ export async function preflightScenarioSteps(
 	return rows.length;
 }
 
+/** The scenario block's fields an agent states, as both scenario tools read them. */
+export interface ScenarioArg {
+	collectionId: string;
+	recursive?: boolean;
+	data?: unknown[];
+	/** The rows' file by name and content hash (issue #2051); never a path. */
+	dataFileName?: string;
+	dataFileHash?: string;
+}
+
 /** The scenario block an agent passed to `start_load_run`, if it passed one. */
-export function readScenarioArg(
-	args: Record<string, unknown>
-): { collectionId: string; recursive?: boolean; data?: unknown[] } | undefined {
+export function readScenarioArg(args: Record<string, unknown>): ScenarioArg | undefined {
 	const block = args.scenario;
 	if (!block || typeof block !== "object" || Array.isArray(block)) return undefined;
-	return block as { collectionId: string; recursive?: boolean; data?: unknown[] };
+	return block as ScenarioArg;
 }
 
 /**
@@ -225,6 +233,8 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 		"data",
 		"a collection run states its rows as `scenario.data`, where one row is bound per iteration and shared by every step",
 	],
+	["dataFileName", "a collection run names its rows' file as `scenario.dataFileName`"],
+	["dataFileHash", "a collection run states its rows' file hash as `scenario.dataFileHash`"],
 	[
 		"disabledDefaultHeaders",
 		"the engine reads a send's default-header refusals off one request's payload, and a scenario's steps are each composed from their own saved request",
@@ -291,7 +301,7 @@ function scenarioModeRefusal(mode: string): string | null {
  */
 export async function startScenarioLoadRun(
 	args: Record<string, unknown>,
-	scenario: { collectionId: string; recursive?: boolean; data?: unknown[] },
+	scenario: ScenarioArg,
 	ctx: ToolContext,
 	signal?: AbortSignal
 ): Promise<ToolResult> {
@@ -419,7 +429,7 @@ export async function startScenarioLoadRun(
 
 /** The `scenario` block `POST /runs` reads, from the arguments an agent gave. */
 export function scenarioBlock(
-	scenario: { collectionId: string; data?: unknown[] },
+	scenario: ScenarioArg,
 	recursive: boolean,
 	iterations?: number
 ): Record<string, unknown> {
@@ -432,6 +442,10 @@ export function scenarioBlock(
 		// its own would be a second copy of a rule only one side enforces.
 		...(iterations !== undefined ? { iterations } : {}),
 		...(scenario.data !== undefined ? { data: scenario.data } : {}),
+		// Forwarded as given, rows or not: the engine refuses either one sent
+		// without `data`, by name, rather than this layer dropping it.
+		...(scenario.dataFileName !== undefined ? { dataFileName: scenario.dataFileName } : {}),
+		...(scenario.dataFileHash !== undefined ? { dataFileHash: scenario.dataFileHash } : {}),
 	};
 }
 

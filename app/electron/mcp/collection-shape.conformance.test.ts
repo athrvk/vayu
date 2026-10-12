@@ -45,7 +45,7 @@ function ctxWith(
 	};
 }
 
-const USERS_FILE = { path: "/data/users.csv", fileName: "users.csv" };
+const USERS_FILE = { path: "/data/users.csv", fileName: "users.csv", hash: "c".repeat(64) };
 /** What the Electron host hands a tool: the app remembers a file for `col_data` only. */
 const remembered = (id: string) => (id === "col_data" ? USERS_FILE : undefined);
 
@@ -130,6 +130,29 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(rows[1]).not.toHaveProperty("dataFile");
 	});
 
+	test("names the hash the app last read the file with, and none before it has (#2051)", async () => {
+		const listed = async (location: Record<string, string>) =>
+			(
+				parsed(
+					await dispatchTool(
+						"list_collections",
+						{},
+						ctxWith(
+							{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
+							{ dataFileLocation: () => location as typeof USERS_FILE }
+						)
+					)
+				) as Array<Record<string, unknown>>
+			)[0].dataFile;
+
+		// Mutation check: drop the hash from presentLocation and this fails.
+		expect(await listed(USERS_FILE)).toEqual(USERS_FILE);
+		// A location remembered before hashes were recorded: absent, not `undefined`.
+		const unhashed = { path: USERS_FILE.path, fileName: USERS_FILE.fileName };
+		expect(await listed(unhashed)).toEqual(unhashed);
+		expect(Object.keys((await listed(unhashed)) as object)).toEqual(["path", "fileName"]);
+	});
+
 	test("the resource and the write tools' results carry it the same way", async () => {
 		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
 		const listed = (await resource.read(
@@ -177,6 +200,6 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		// A path, never contents: nothing in the answer holds a row.
 		expect(
 			Object.keys((parsed(result) as Array<Record<string, unknown>>)[0].dataFile as object)
-		).toEqual(["path", "fileName"]);
+		).toEqual(["path", "fileName", "hash"]);
 	});
 });

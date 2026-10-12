@@ -28,6 +28,25 @@ describe("normalizeDataFileLocations", () => {
 		expect(locations.get("col_1")).toEqual({ path: ABSOLUTE, fileName: "users.csv" });
 	});
 
+	it("keeps the hash the app last read the file with (#2051)", () => {
+		const hash = "a".repeat(64);
+		const locations = normalizeDataFileLocations({
+			col_1: { path: ABSOLUTE, fileName: "users.csv", hash },
+		});
+		expect(locations.get("col_1")).toEqual({ path: ABSOLUTE, fileName: "users.csv", hash });
+	});
+
+	it.each([
+		["not a digest", "users.csv"],
+		["upper-case hex", "A".repeat(64)],
+		["a non-string", 42],
+	])("drops a hash that is %s, keeping the location", (_label, hash) => {
+		const locations = normalizeDataFileLocations({
+			col_1: { path: ABSOLUTE, fileName: "users.csv", hash },
+		});
+		expect(locations.get("col_1")).toEqual({ path: ABSOLUTE, fileName: "users.csv" });
+	});
+
 	it.each([
 		["a relative path", { path: "users.csv", fileName: "users.csv" }],
 		[

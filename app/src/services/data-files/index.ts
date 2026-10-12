@@ -351,6 +351,7 @@ export function resolveIterationCount(
 export { parseDelimited } from "./tabular";
 export { DataFileError } from "./errors";
 export { decodeDataFile, type DecodedDataFile } from "./decode";
+export { sha256Hex, DATA_FILE_HASH_PATTERN } from "./hash";
 export { describeRowCapRefusal } from "./row-cap";
 export { dataCellText } from "./cell-text";
 export { diffDataSchema, describeDataSchemaDiff, type DataSchemaDiff } from "./schema-diff";

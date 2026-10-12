@@ -1913,6 +1913,13 @@ export interface LoadTestConfig {
 	 */
 	dataColumns?: string[];
 	/**
+	 * The picked file's name and the SHA-256 of its bytes (issue #2051),
+	 * forwarded beside `data` so the run records which file drove it - a
+	 * display name, never a path. Absent exactly when `data` is.
+	 */
+	dataFileName?: string;
+	dataFileHash?: string;
+	/**
 	 * The `elements` run override (issue #1594), single-request runs only:
 	 * whether an inherited `script.*` element's own `config.inline` decides
 	 * ("asMarked"), or every one runs inline / stays deferred regardless of

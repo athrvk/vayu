@@ -20,10 +20,14 @@
  * list), restated because `electron/` cannot import from `app/src`;
  * `collection-shape.conformance.test.ts` holds the two to the same answers.
  *
- * Beside it, `dataFile: { path, fileName }` names the file the app remembers
- * for that collection on this machine, when the host has that record (the
- * Electron-hosted server; never the stdio CLI). Why a path may be named at
- * all is in `data-file-locations.ts`. The rows are never read here.
+ * Beside it, `dataFile: { path, fileName, hash? }` names the file the app
+ * remembers for that collection on this machine, when the host has that record
+ * (the Electron-hosted server; never the stdio CLI). `hash` is the SHA-256 of
+ * the file's bytes when the app last read it (issue #2051), the digest a run
+ * records as `dataFileHash`, so an agent can tell whether the file still is the
+ * one a past run used; absent until the app has read the file once. Why a path
+ * may be named at all is in `data-file-locations.ts`. The rows are never read
+ * here.
  */
 
 import type { DataFileLocation } from "../data-file-locations.js";
@@ -70,7 +74,16 @@ export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
 	return {
 		...rest,
 		...(contract ? { dataSchema: contract } : {}),
-		...(location ? { dataFile: { path: location.path, fileName: location.fileName } } : {}),
+		...(location ? { dataFile: presentLocation(location) } : {}),
+	};
+}
+
+/** A remembered location as MCP names it: a path, a name and a digest, never contents. */
+function presentLocation(location: DataFileLocation): DataFileLocation {
+	return {
+		path: location.path,
+		fileName: location.fileName,
+		...(location.hash !== undefined ? { hash: location.hash } : {}),
 	};
 }
 
@@ -81,4 +94,4 @@ export function presentCollections(list: unknown, ctx?: DataFileLookup): unknown
 
 /** What list_collections and `vayu://collections` say about the field. */
 export const DATA_CONTRACT_SENTENCE =
-	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName }`: read the file yourself to build the `data` rows. Vayu never returns the file's rows.";
+	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName, hash }`, `hash` being the SHA-256 of the file's bytes when the app last read it: read the file yourself to build the `data` rows, and send its name and hash with them as `dataFileName` / `dataFileHash`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. Vayu never returns the file's rows.";
