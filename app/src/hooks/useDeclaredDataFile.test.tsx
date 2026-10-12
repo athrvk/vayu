@@ -114,6 +114,39 @@ describe("useDeclaredDataFile", () => {
 		expect(result.current.declaringCollectionId).toBe("col_p");
 	});
 
+	it("keeps declaring on the sub-collection after Remove exposes an ancestor's contract", () => {
+		collections.push(collection("col_p", ["id"]), {
+			...collection("col_1", ["plan"]),
+			parentId: "col_p",
+		});
+		const { result, rerender } = renderHook(() => useDeclaredDataFile("col_1"));
+		expect(result.current.declaringCollectionId).toBe("col_1");
+
+		// What the clear's cache write leaves behind: col_1 declares nothing, so
+		// the walk now resolves the ancestor's contract.
+		collections[1] = { ...collection("col_1"), parentId: "col_p" };
+		rerender();
+
+		// The pick after a Remove must replace col_1's contract, not the ancestor's.
+		// Mutation check: follow the live contract again and this reads col_p.
+		expect(result.current.contract?.collectionId).toBe("col_p");
+		expect(result.current.declaringCollectionId).toBe("col_1");
+	});
+
+	it("holds the declarer that resolves once the query answers after mount", () => {
+		const snapshot = collection("col_1");
+		const { result, rerender } = renderHook(() =>
+			useDeclaredDataFile("col_1", { collection: snapshot })
+		);
+		// Nothing resolved yet: the caller's own collection stands in.
+		expect(result.current.declaringCollectionId).toBe("col_1");
+
+		collections.push(collection("col_p", ["id"]), { ...snapshot, parentId: "col_p" });
+		rerender();
+
+		expect(result.current.declaringCollectionId).toBe("col_p");
+	});
+
 	it("reads the contract off the query once it has the caller's row", () => {
 		// The caller's row is a snapshot from when the dialog opened, before the
 		// pick that declared.

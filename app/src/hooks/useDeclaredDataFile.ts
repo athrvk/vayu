@@ -116,7 +116,7 @@ export interface DeclaredDataFileState {
 	 * offers Remove in place of Choose file, so every swap is Remove (which
 	 * clears the contract) then a pick, and that pick re-declares where the
 	 * cleared contract was rather than moving it down to the caller's own
-	 * collection.
+	 * collection, or up to an ancestor whose contract the walk now reaches.
 	 */
 	declaringCollectionId: string;
 }
@@ -179,18 +179,20 @@ export function useDeclaredDataFile(
 		() => resolveDataContract(collectionId, chain) ?? undefined,
 		[collectionId, chain]
 	);
-	// Adjusted during render rather than in an effect: it is derived from the
-	// contract, and the render that drops the contract must already declare
-	// against the held id.
+	// The first declarer that resolves, kept for the life of the hook. Only ever
+	// set from null: once Remove clears a sub-collection's contract the walk
+	// resolves its ancestor's, and following that would make the next pick
+	// replace the ancestor's contract. Adjusted during render rather than in an
+	// effect, so the render that drops the contract already declares against it.
 	const [heldDeclarer, setHeldDeclarer] = useState<string | null>(null);
-	if (contract && contract.collectionId !== heldDeclarer) {
+	if (contract && heldDeclarer === null) {
 		setHeldDeclarer(contract.collectionId);
 	}
 	// The store is keyed by the collection that *declares* the contract, which
 	// is the whole point of rule 1 above. Falling back to the caller's id keeps
 	// a collection that declares its own contract working before the query
 	// answers, and finds nothing otherwise - which is the correct answer.
-	const declaringCollectionId = contract?.collectionId ?? heldDeclarer ?? collectionId ?? "";
+	const declaringCollectionId = heldDeclarer ?? contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
 	const { maxRows } = useDataFileLimits();
 
