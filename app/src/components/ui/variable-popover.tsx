@@ -8,60 +8,45 @@
 /**
  * Variable Popover
  *
- * What opens when you click a `{{token}}`. Three states:
+ * What opens when you click a `{{token}}`, and the switch between its states:
  *
- *   resolved   the value, editable, with the environment or collection it came
- *              from and every other definition that lost
- *   undefined  a value field and a scope to create it in
+ *   resolved   the value, editable (`ResolvedValueEditor`), with the environment
+ *              or collection it came from and every other definition that lost
+ *   undefined  a value field and a scope to create it in (`CreateVariableForm`)
  *   read-only  the value, when there is no way to change it from here
  *
- * **A bound data row outranks all of them** (D18, issue #1007). While one is
- * picked its column answers a bare name above every scope, so the popover names
- * the row as the origin and strikes the definitions beneath it (issue #1064).
- * Without that it explained, in full detail, a value the send was not going to
- * use - the one question this popover exists to answer, answered wrongly.
+ * **A bound data row outranks all of them** (#1007, #1064). While one is picked
+ * its column answers a bare name above every scope, so the popover names the row
+ * as the origin and strikes the definitions beneath it.
  *
- * **Not resolving is not the same as not being defined** (issue #1083). A name
- * whose every definition is switched off has no winner, so it arrives here
- * unresolved and used to be offered a form to create what it already has. The
- * list of definitions is drawn under every state rather than under the resolved
- * one alone, because "the value you set is being skipped" is the question it was
- * added to answer and that is the state which asks it.
+ * **Not resolving is not the same as not being defined** (#1083). A name whose
+ * every definition is switched off arrives unresolved, so the list of
+ * definitions is drawn under every state rather than under the resolved one
+ * alone.
  *
- * **It used to show the value twice.** A "Current Value" block sat above an
- * "Edit Value" input holding the same string, each with its own label and its
- * own secret-reveal button - about 90px and two labels spent restating what the
- * editable field already said. The editable field *is* the current value, so
- * that block now renders only where it does real work: a secret, which must be
- * masked until deliberately revealed, and the not-editable case.
+ * **A create writes only into a scope the caller says is writable**:
+ * `updateVariable` silently no-ops when the target scope has no active target
+ * (no environment selected, no collection), so offering any other scope is a
+ * Create button that does nothing.
  *
- * The space it freed goes to the two things the popover is opened to find out
- * and previously could not answer - *which* environment this came from, and why
- * this value won over the others.
- *
- * **Undefined variables used to be a dead end.** The popover said "Define it in
- * Globals, an Environment, or Collection variables" and offered no way to do
- * any of that, which is unhelpful for what is by far the most common reason to
- * click a red token. It can now create one - but only into a scope the caller
- * says is writable, because `updateVariable` silently no-ops when the target
- * scope has no active target (no environment selected, no collection). Offering
- * a scope that cannot be written is a Create button that does nothing.
+ * The edit buffer, the reveal flag, the picked scope and the Escape/auto-save
+ * flow stay here rather than in the two children, which `PopoverContent`
+ * unmounts on close: the close path saves or discards the buffer and re-masks
+ * the secret, and a picked scope survives a re-open.
  */
 
-import { useState, useRef, useMemo, useId, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
-import { Button } from "./button";
-import { DialogCancelButton } from "./dialog-cancel-button";
-import { TooltipIconButton } from "./tooltip-icon-button";
-import { Input } from "./input";
-import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
+import { Badge } from "./badge";
+import { CreateVariableForm } from "./create-variable-form";
+import { ResolvedValueEditor, SECRET_MASK } from "./resolved-value-editor";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
 import { MENU_TRIGGERED_CLICK_DETAIL } from "@/lib/context-menu";
-import { Eye, EyeOff, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 import { Eyebrow } from "./eyebrow";
 import { Callout } from "@/components/shared/Callout";
@@ -73,29 +58,17 @@ export type { ResolvedVariable as VariableInfo };
 const SCOPE_PREFERENCE: VariableScope[] = ["environment", "collection", "global"];
 
 /**
- * A **fixed-width** stand-in for a hidden secret.
- *
- * Deliberately not `"•".repeat(value.length)` and deliberately not a
- * `type="password"` input holding the real string: both draw one dot per
- * character, which tells anyone looking how long the secret is. A two-character
- * value rendering as two dots is a meaningful leak, and it was also visibly
- * inconsistent with the fixed eight-dot box that used to sit above it.
- */
-const SECRET_MASK = "••••••••";
-
-/**
  * What a `"row"` origin calls itself. A row has no `sourceName` to give - it is
  * the one row currently picked, not a file or an environment someone named.
  */
 const BOUND_ROW_LABEL = "Bound row";
 
 /**
- * The chip beside the name when there is no scope badge to show. Shared rather
- * than spelled out per state: it was already written twice, and the third copy
- * is where a shape or radius fix starts reaching only two of them.
+ * The shape of every chip beside the name (a `Badge variant="chip"` with its
+ * colour added per state). Shared so a shape fix reaches all of them; pinned to
+ * 18px, the scope badge's height, so no chip drifts when it gains an icon.
  */
-const NAME_CHIP =
-	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-micro font-semibold leading-none";
+const NAME_CHIP = "h-[18px] px-1.5 py-0 text-micro leading-none";
 
 /**
  * The bare spelling's own sentence, and deliberately not the `data.*` one.
@@ -120,28 +93,6 @@ const BOUND_ROW_NOTE =
  */
 const BOUND_ROW_NOTE_ALL_OFF =
 	"While a row is picked, its column answers this name. Every definition below is switched off, so a send that carries no row resolves nothing.";
-
-/** The eye that swaps a hidden secret field for an editable one. */
-function RevealButton({
-	revealed,
-	onToggle,
-	autoFocus,
-}: {
-	revealed: boolean;
-	onToggle: () => void;
-	/** See the hidden-secret branch below - this is its only entry point. */
-	autoFocus?: boolean;
-}) {
-	return (
-		<TooltipIconButton
-			label={revealed ? "Hide value" : "Reveal value"}
-			icon={revealed ? <EyeOff className="size-icon-sm" /> : <Eye className="size-icon-sm" />}
-			onClick={onToggle}
-			autoFocus={autoFocus}
-			className="absolute right-0 top-0 size-control-sm text-muted-foreground hover:text-foreground"
-		/>
-	);
-}
 
 export interface VariablePopoverProps {
 	/** Variable name */
@@ -365,33 +316,9 @@ export function VariablePopover({
 	);
 	const canCreate =
 		!resolved && !isDataName && !!onValueChange && !disabled && creatableScopes.length > 0;
+	// Held here rather than in the form, which unmounts on close: a scope picked
+	// once survives a re-open of the same token.
 	const [createScope, setCreateScope] = useState<VariableScope | null>(null);
-	// Falls back rather than storing a default, so a scope that stops being
-	// writable (the environment was deselected) cannot leave a stale selection
-	// pointing at a no-op.
-	const activeCreateScope =
-		createScope && creatableScopes.includes(createScope) ? createScope : creatableScopes[0];
-	const createValueRef = useRef<HTMLInputElement>(null);
-	const createScopeLabelId = useId();
-
-	/**
-	 * Picking a scope is a modifier on the value, not a destination (issue #1380).
-	 *
-	 * A segment is a `<button>`, so clicking one takes focus the way any button
-	 * does, and the field's `autoFocus` only ever ran at mount - so choosing the
-	 * scope first and then typing put the keystrokes nowhere and left Enter
-	 * re-pressing the segment. The click hands focus back to the value it
-	 * qualifies.
-	 *
-	 * Radix clears the value when the active segment is pressed again; a scope has
-	 * no "off", so the empty string means "keep what is chosen" and only the
-	 * refocus is left to do.
-	 */
-	const selectCreateScope = (value: string) => {
-		const next = creatableScopes.find((s) => s === value);
-		if (next) setCreateScope(next);
-		createValueRef.current?.focus();
-	};
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
@@ -422,22 +349,9 @@ export function VariablePopover({
 		closePopover();
 	};
 
-	/**
-	 * An empty field is not a variable worth writing (issue #1380).
-	 *
-	 * `mergeVariable` stores what it is handed, so an empty value defines the name
-	 * as `""` - a definition that resolves, so the token stops reading as
-	 * undefined and answers with nothing. That is worse than the state it
-	 * replaced, and it is one stray click away while the field is still empty, so
-	 * the write is refused here and the Create button is disabled for the same
-	 * reason. Refused rather than trimmed: a value of spaces is a value the user
-	 * typed, and this popover is not the place to have an opinion about it.
-	 */
-	const canSubmitCreate = editValue.length > 0;
-
-	const handleCreate = () => {
-		if (!onValueChange || !activeCreateScope || !canSubmitCreate) return;
-		onValueChange(name, editValue, activeCreateScope);
+	const handleCreate = (scope: VariableScope) => {
+		if (!onValueChange) return;
+		onValueChange(name, editValue, scope);
 		closePopover();
 	};
 
@@ -475,12 +389,6 @@ export function VariablePopover({
 		}
 	};
 
-	/*
-	 * A secret keeps the two-stage display the rest of the popover dropped: it
-	 * is masked until revealed, so the editable field cannot simply *be* the
-	 * value on screen. This is the one case the old duplicate block was earning
-	 * its space.
-	 */
 	const isSecret = !!varInfo?.secret;
 
 	/**
@@ -605,13 +513,17 @@ export function VariablePopover({
 							 * variable, like its scope - not a section.
 							 */}
 							{isSecret && (
-								<span
+								<Badge
+									variant="chip"
 									title="Secret - hidden until revealed"
-									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-micro font-semibold leading-none text-warning-text"
+									className={cn(
+										NAME_CHIP,
+										"gap-1 border-warning-text/40 text-warning-text"
+									)}
 								>
 									<KeyRound className="h-2.5 w-2.5" />
 									Secret
-								</span>
+								</Badge>
 							)}
 							{varInfo ? (
 								<VariableScopeBadge
@@ -620,14 +532,15 @@ export function VariablePopover({
 									className="h-[18px] leading-none"
 								/>
 							) : isDataName ? (
-								<span
+								<Badge
+									variant="chip"
 									className={cn(
 										NAME_CHIP,
 										"border-muted-foreground/40 text-muted-foreground"
 									)}
 								>
 									data
-								</span>
+								</Badge>
 							) : boundRowOrigin ? (
 								/*
 								 * Answered, so not "undefined" - and in the accent rather
@@ -635,18 +548,22 @@ export function VariablePopover({
 								 * reach the server with its braces still on. This one will
 								 * not: the row carries the column.
 								 */
-								<span className={cn(NAME_CHIP, "border-primary/40 text-primary")}>
+								<Badge
+									variant="chip"
+									className={cn(NAME_CHIP, "border-primary/40 text-primary")}
+								>
 									row
-								</span>
+								</Badge>
 							) : (
-								<span
+								<Badge
+									variant="chip"
 									className={cn(
 										NAME_CHIP,
 										"border-destructive-text/40 text-destructive-text"
 									)}
 								>
 									undefined
-								</span>
+								</Badge>
 							)}
 						</div>
 					</div>
@@ -683,276 +600,34 @@ export function VariablePopover({
 								</span>
 							</p>
 
-							{/*
-							 * One field for a secret too.
-							 *
-							 * It used to be two, and they disagreed: a read-only box
-							 * printing a fixed `••••••••` sat above a `type="password"`
-							 * input printing the *real* value masked - so a two-character
-							 * secret showed eight dots in one box and two in the other,
-							 * and the second **leaked the length**. That is the same
-							 * duplicate the rest of this popover dropped, reintroduced
-							 * with a disclosure bug on top.
-							 *
-							 * Hidden, the field is read-only and shows a fixed-width mask,
-							 * so nothing about the value is inferable and it cannot be
-							 * edited blind. Revealing turns it into an ordinary editable
-							 * field - one control, two states, and the eye is the only
-							 * thing that moves between them.
-							 */}
-							{canEdit ? (
-								isSecret && !isSecretRevealed ? (
-									<div className="relative">
-										<Input
-											size="sm"
-											/*
-											 * Keyed against the revealed field below,
-											 * which is otherwise the same `<Input>` in
-											 * the same slot: React would reconcile the
-											 * two rather than remount, and `autoFocus`
-											 * fires on mount - so revealing left focus
-											 * behind on the eye and the field the reveal
-											 * exists to open had to be tabbed back to.
-											 */
-											key="secret-masked"
-											readOnly
-											value={varInfo.value ? SECRET_MASK : ""}
-											placeholder="not set"
-											aria-label={`Value of ${name} (hidden)`}
-											className="select-none pr-8 font-mono text-sm"
-										/>
-										<RevealButton
-											revealed={false}
-											onToggle={() => setIsSecretRevealed(true)}
-											/*
-											 * The popover suppresses its own open-autofocus, and every
-											 * other branch compensates with `autoFocus` on the field it
-											 * opens onto. This one had nothing: the masked field is
-											 * `readOnly`, and the popover is non-modal and portalled, so
-											 * Tab from the token did not enter it and focus-outside
-											 * dismissed it - a secret was the one variable a keyboard
-											 * user could not read (issue #1215). The eye is the right
-											 * landing: revealing is the only action here, and it hands
-											 * focus on to the editable field.
-											 *
-											 * Gated on `focusOnOpen` (issue #1220 hover redesign): this
-											 * `autoFocus` is a real DOM attribute, so it fires on mount
-											 * whatever Radix's own `onOpenAutoFocus` decided - a hover
-											 * that opens this same branch unfocused would otherwise
-											 * still land the caret here.
-											 */
-											autoFocus={focusOnOpen}
-										/>
-									</div>
-								) : (
-									<div className="relative">
-										<Input
-											size="sm"
-											key="secret-revealed"
-											value={editValue}
-											onChange={(e) => setEditValue(e.target.value)}
-											onKeyDown={handleKeyDown}
-											className={cn("font-mono text-sm", isSecret && "pr-8")}
-											aria-label={`Value of ${name}`}
-											// See the masked branch above: a real DOM attribute,
-											// gated the same way for the same reason.
-											autoFocus={focusOnOpen}
-										/>
-										{isSecret && (
-											<RevealButton
-												revealed
-												onToggle={() => setIsSecretRevealed(false)}
-											/>
-										)}
-									</div>
-								)
-							) : (
-								<div className="rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
-									{isSecret && !isSecretRevealed ? (
-										<span className="select-none">{SECRET_MASK}</span>
-									) : (
-										varInfo.value || (
-											<span className="italic text-muted-foreground">
-												empty
-											</span>
-										)
-									)}
-								</div>
-							)}
-
-							{/*
-							 * What the two keys did, as a sentence rather than as chips.
-							 *
-							 * The chips were `↵ save` and `esc cancel`, pinned right and
-							 * unshrinkable, and they cost the source name its width. They
-							 * also said less than they looked: Enter is not what saves an
-							 * auto-mode edit - clicking away does, and Enter is one way of
-							 * doing that - so the keycaps advertised a commit key beside a
-							 * mode that commits on blur. The sentence states the behaviour
-							 * the chips only pointed at, and leaves the row to itself.
-							 */}
-							{canEdit && saveMode === "auto" && (
-								<p className="text-micro text-muted-foreground">
-									Saves when you click away. Esc discards.
-								</p>
-							)}
-
-							{/* Action Buttons (manual mode only) */}
-							{saveMode === "manual" && canEdit && (
-								<div className="flex justify-end gap-2">
-									<DialogCancelButton size="sm" onClick={handleCancel} />
-									<Button size="sm" onClick={handleSave}>
-										Save
-									</Button>
-								</div>
-							)}
+							<ResolvedValueEditor
+								name={name}
+								varInfo={varInfo}
+								canEdit={canEdit}
+								editValue={editValue}
+								onEditValueChange={setEditValue}
+								onKeyDown={handleKeyDown}
+								saveMode={saveMode}
+								revealed={isSecretRevealed}
+								onRevealChange={setIsSecretRevealed}
+								autoFocus={focusOnOpen}
+								onSave={handleSave}
+								onCancel={handleCancel}
+							/>
 						</>
 					) : canCreate ? (
-						<>
-							<Input
-								size="sm"
-								ref={createValueRef}
-								value={editValue}
-								onChange={(e) => setEditValue(e.target.value)}
-								onKeyDown={(e) => {
-									// `isCommitEnter`, not a bare Enter (#939): an IME
-									// commits its composition with the same keydown, and
-									// the app's Send chord is Ctrl/Cmd+Enter.
-									if (isCommitEnter(e)) {
-										e.preventDefault();
-										handleCreate();
-									}
-								}}
-								placeholder="value…"
-								className="font-mono text-sm"
-								aria-label={`Value for new variable ${name}`}
-								// See the resolved branch's own `autoFocus={focusOnOpen}`: a
-								// real DOM attribute fires on mount regardless of Radix's own
-								// `onOpenAutoFocus`, so an inert (hover) open of an undefined
-								// variable must gate this the same way.
-								autoFocus={focusOnOpen}
-							/>
-							{/*
-							 * The label sits above the control, not beside it, which is
-							 * how `LoadTestConfigDialog` labels its own segmented control -
-							 * kept even as the popover has widened, so a narrower one (a
-							 * future width change, or a small window's `max-w` clamp) does
-							 * not put "Environment Collection Global" beside a label with
-							 * nowhere to shrink to.
-							 */}
-							<div className="space-y-1.5">
-								<span
-									id={createScopeLabelId}
-									className="block text-micro text-muted-foreground"
-								>
-									Create in
-								</span>
-								{/*
-								 * One choice out of a few, all of them visible, so the
-								 * app's segmented control - not a third hand-rolled copy
-								 * of one (issue #1391). `ToggleGroup` is single-select,
-								 * so Radix supplies the `radiogroup`/`radio` roles, the
-								 * roving tab stop and the arrow keys; the chips it
-								 * replaces spelled all four out by hand, one file over
-								 * from the primitive whose header names that shape as
-								 * the defect it exists to end.
-								 *
-								 * The Enter handler sits on the group rather than on each
-								 * segment: the keydown bubbles either way, and the group
-								 * is a component here, not the bare unfocusable div that
-								 * `jsx-a11y` would ask to be silenced about at the line.
-								 */}
-								<ToggleGroup
-									value={activeCreateScope ?? ""}
-									aria-labelledby={createScopeLabelId}
-									onValueChange={selectCreateScope}
-									onKeyDown={(e) => {
-										// A segment that has focus and a value already
-										// typed leaves Enter nothing else to mean.
-										if (isCommitEnter(e)) {
-											e.preventDefault();
-											handleCreate();
-										}
-									}}
-								>
-									{/*
-									 * Only writable scopes appear. A picker offering
-									 * "Environment" with none selected would produce a
-									 * Create button that silently does nothing.
-									 */}
-									{creatableScopes.map((scope) => (
-										<ToggleGroupItem
-											key={scope}
-											value={scope}
-											/*
-											 * Selection follows focus, which is the radio
-											 * group's own pattern and what the arrows did
-											 * before: Radix moves the roving tab stop and
-											 * leaves selection to a press, so an arrow
-											 * would otherwise light one segment while
-											 * Enter created in another. Focus stays on the
-											 * segments rather than returning to the field,
-											 * or the second arrow press would have nothing
-											 * to move from.
-											 */
-											onFocus={() => setCreateScope(scope)}
-										>
-											{VARIABLE_SCOPE_CONFIG[scope].full}
-										</ToggleGroupItem>
-									))}
-								</ToggleGroup>
-							</div>
-							{/*
-							 * The primary action sits where the edit branch above puts
-							 * Cancel and Save, so the two branches read as one component
-							 * - and so the button is not the thing that pushes a row past
-							 * the card's edge.
-							 */}
-							<div className="flex justify-end gap-2">
-								<Button
-									size="sm"
-									disabled={!canSubmitCreate}
-									onClick={handleCreate}
-								>
-									Create
-								</Button>
-							</div>
-							{/*
-							 * A create offer must not imply the token is unanswered. The
-							 * row carries a column the declared contract does not, so the
-							 * painter never diverted this token and the send resolves it
-							 * anyway - creating a variable here is still worth doing, but
-							 * for the sends that carry no row, not for this one.
-							 */}
-							{boundRowOrigin && (
-								<p className="text-micro text-muted-foreground">
-									The bound row already answers this name with{" "}
-									<span className="font-mono">
-										{boundRowOrigin.value || "empty"}
-									</span>
-									. A variable created here answers a send that carries no row.
-								</p>
-							)}
-							{/*
-							 * The create offer stays, and says what it is doing (issue
-							 * #1083). Replacing it with a switch would be the closer
-							 * answer, and this popover cannot give it: it writes values
-							 * through `onValueChange`, which carries no enabled flag, so
-							 * the toggle lives in the variables editor. Offering to
-							 * create in silence is the part that misleads - the reader
-							 * is one toggle away from a value and is being handed a
-							 * form that adds a second definition instead.
-							 */}
-							{switchedOffDefinitions.length > 0 && (
-								<p className="text-micro text-muted-foreground">
-									{switchedOffDefinitions.length === 1
-										? "This name is already defined below, switched off."
-										: `This name is already defined ${switchedOffDefinitions.length} times below, every one switched off.`}{" "}
-									Switching one back on answers the token; creating here adds
-									another definition and leaves it off.
-								</p>
-							)}
-						</>
+						<CreateVariableForm
+							name={name}
+							scopes={creatableScopes}
+							selectedScope={createScope}
+							onSelectedScopeChange={setCreateScope}
+							value={editValue}
+							onValueChange={setEditValue}
+							onCreate={handleCreate}
+							autoFocus={focusOnOpen}
+							boundRowOrigin={boundRowOrigin}
+							switchedOffCount={switchedOffDefinitions.length}
+						/>
 					) : isDataName ? (
 						<div className="text-sm text-muted-foreground">
 							Bound per iteration by the run&rsquo;s data file. Not a variable -
