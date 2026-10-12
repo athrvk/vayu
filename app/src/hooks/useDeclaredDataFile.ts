@@ -169,6 +169,11 @@ export function useDeclaredDataFile(
 	// answers, and finds nothing otherwise - which is the correct answer.
 	const declaringCollectionId = contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
+	// The read below depends on these strings, never on the location object:
+	// the read itself records the file's hash, which replaces that object, and
+	// an object dependency would cancel the very read that replaced it (#2051).
+	const rememberedPath = rememberedFile?.path;
+	const rememberedName = rememberedFile?.fileName;
 	const { maxRows } = useDataFileLimits();
 
 	const [file, setFile] = useState<SelectedDataFile | null>(null);
@@ -177,14 +182,14 @@ export function useDeclaredDataFile(
 
 	useEffect(() => {
 		if (attempted.current) return;
-		if (!rememberedFile?.path) return;
+		if (!rememberedPath) return;
 		attempted.current = true;
 		let cancelled = false;
 		// No Electron, no path to re-read - the picker stands, and this is not
 		// a failure worth a note: it is a state that will never resolve.
 		if (!canReadDeclaredDataFile()) return;
 
-		void readDeclaredDataFile(rememberedFile.path, { maxRows })
+		void readDeclaredDataFile(rememberedPath, { maxRows })
 			.then((read) => {
 				if (cancelled) return;
 				setFile(read);
@@ -195,14 +200,14 @@ export function useDeclaredDataFile(
 				setNote(
 					e instanceof DataFileError || e instanceof Error
 						? e.message
-						: `The declared file is no longer at ${rememberedFile.fileName} - pick it again.`
+						: `The declared file is no longer at ${rememberedName} - pick it again.`
 				);
 			});
 
 		return () => {
 			cancelled = true;
 		};
-	}, [rememberedFile, maxRows]);
+	}, [rememberedPath, rememberedName, maxRows]);
 
 	const dismissNote = useCallback(() => setNote(null), []);
 

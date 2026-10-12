@@ -775,10 +775,14 @@ describe("pre-filling from the declared data file", () => {
 	});
 
 	it("re-reads the remembered file and sends its rows", async () => {
+		// Stored with no hash, read back with one: the read records the hash,
+		// which replaces the stored location while the read is still in flight
+		// (#2051). The pre-fill must land anyway.
 		remember("/home/u/users.csv", "users.csv");
 		stubReadDataFile(async () => ({
 			bytes: bytesOf("user,id\nada,1\ngrace,2"),
 			fileName: "users.csv",
+			hash: "a".repeat(64),
 		}));
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
@@ -793,6 +797,7 @@ describe("pre-filling from the declared data file", () => {
 			{ user: "ada", id: "1" },
 			{ user: "grace", id: "2" },
 		]);
+		expect(useDataFileStore.getState().locations.col_1?.hash).toBe("a".repeat(64));
 	});
 
 	it("warns when the pre-filled file does not match the declared columns", async () => {
