@@ -125,3 +125,6 @@ export * from "./ScriptReferencesRow";
 export * from "./RowContextMenu";
 export * from "./RowActionBody";
 export * from "./row-actions";
+
+// The 2px line a drag draws at the edge it would drop on, either axis
+export * from "./DropIndicator";
