@@ -263,7 +263,7 @@ const INVALIDATORS: Record<
 	 * All three lists are invalidated on every `service` event rather than one
 	 * per kind, because the entity is deliberately one family: the drawer and
 	 * the Dock count ask "what is listening", not "which kind" (see
-	 * `MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`). Three refetches of a
+	 * `MCP_DATA_ENTITIES` in `electron/mcp/tools/contract.ts`). Three refetches of a
 	 * short list is the price of not carrying a discriminator no reader wants.
 	 *
 	 * The captures are the half that cannot be handled by invalidation.

@@ -1,0 +1,69 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * @file mock-server.ts
+ * @brief The payload `start_mock_server` sends, and the caveat on its answer.
+ */
+
+import { isRecord, requireStr } from "./kit.js";
+
+/**
+ * The fields `POST /mock/start` accepts (`parse_mock_start`,
+ * engine/src/http/routes/mock_server.cpp). `collectionId` is required and is
+ * validated by {@link requireStr} before the body is built; the other three are
+ * optional knobs.
+ */
+const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct"] as const;
+
+/**
+ * The start body. `collectionId` always travels; a knob the caller did not name
+ * stays absent, for the reason {@link mockIssuerStartPayload} records - the
+ * engine reads a present field with a bad value as a 400 rather than falling
+ * back to its default.
+ *
+ * The engine's `latencyMs` ceiling is not restated in the schema (the same
+ * division of labour the issuer tools document): it lives in
+ * `core/constants.hpp`, an out-of-range value comes back as a 400 naming the
+ * bound, and a copy here would refuse values the engine accepts the moment
+ * either side moves. `port` and `errorRatePct` are bounded in the schema
+ * because their bounds are the *shape* - a port is 0-65535 everywhere and a
+ * percentage is 0-100 by definition, not by an engine constant.
+ */
+export function mockServerStartPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload: Record<string, unknown> = { collectionId: requireStr(args, "collectionId") };
+	for (const key of MOCK_SERVER_START_KEYS) {
+		if (args[key] !== undefined) payload[key] = args[key];
+	}
+	return payload;
+}
+
+/**
+ * What a started mock could not serve, or "" when every route has an example.
+ *
+ * A mock with routes but no examples answers `501` to each of them, which reads
+ * as a broken mock rather than as an empty collection - so the count the engine
+ * already reports (`routesWithoutExample`) is turned into a sentence instead of
+ * being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
+ * case and gets its own line: there is nothing to point a client at.
+ */
+export function mockServerCaveat(started: unknown): string {
+	if (!isRecord(started)) return "";
+	const routes = Number(started.routeCount);
+	const without = Number(started.routesWithoutExample);
+	if (Number.isFinite(routes) && routes === 0) {
+		return (
+			"\nThis mock serves no routes: the collection has no requests the mock could map. " +
+			"Every path answers 404."
+		);
+	}
+	if (!Number.isFinite(without) || without <= 0) return "";
+	return (
+		`\n${without} of ${routes} route(s) have no saved example, and answer 501 rather than a body. ` +
+		"Save an example on those requests (or check get_mock_routes for which they are) before pointing a client at them."
+	);
+}

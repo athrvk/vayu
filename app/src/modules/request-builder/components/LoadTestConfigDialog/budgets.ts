@@ -26,7 +26,7 @@
  * does not cross-check `<name>` against the run's `metric.record` elements, and
  * an unmatched name is simply `evaluated: false` in the report. MCP's
  * `thresholdsInput` made the same call for the same key family
- * (`electron/mcp/tools.ts`, `catchall`).
+ * (`electron/mcp/tools/input-schemas.ts`, `catchall`).
  */
 
 import type { RunThresholdBudgets, RunThresholds } from "@/types";

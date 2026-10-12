@@ -1263,8 +1263,9 @@ export class EngineClient {
 	// The inbox routes take a `bind` and a `confirmNonLoopback` flag; nothing
 	// here sends either, so every inbox an MCP call starts listens on the
 	// engine's loopback default. That is a stated non-goal of epic #753 rather
-	// than an omission, and it is enforced by the payload builder in `tools.ts`
-	// (`inboxStartPayload`) - this client takes the payload it is given.
+	// than an omission, and it is enforced by the payload builder in
+	// `tools/webhook-inbox.ts` (`inboxStartPayload`) - this client takes the
+	// payload it is given.
 
 	/**
 	 * Start an inbox: `POST /inbox/start`. Every field of the body is optional;

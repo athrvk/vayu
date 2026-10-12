@@ -2152,7 +2152,7 @@ starts no watcher; `run_collection_smoke` sends its requests one at a time and
 has no run to watch at all.
 
 The entity list is duplicated across the process boundary
-(`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
+(`MCP_DATA_ENTITIES` in `electron/mcp/tools/contract.ts`, `McpDataEntity` in
 `types/domain.ts`) because production code under `electron/` cannot import from
 `app/src`; `data-changed.conformance.test.ts` is what keeps the copies equal,
 and the map above is a `Record` over the union so a new family fails to compile

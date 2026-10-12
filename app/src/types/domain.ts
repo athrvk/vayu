@@ -3061,9 +3061,10 @@ export interface McpConnectResult {
 
 /**
  * A data family an MCP call can change. Mirrors `MCP_DATA_ENTITIES` in
- * `electron/mcp/tools.ts` - the main process owns the list, and production code
- * there cannot import from here (see `tsconfig.node.json`), so the duplication
- * is deliberate and pinned by `electron/mcp/data-changed.conformance.test.ts`.
+ * `electron/mcp/tools/contract.ts` - the main process owns the list, and
+ * production code there cannot import from here (see `tsconfig.node.json`), so
+ * the duplication is deliberate and pinned by
+ * `electron/mcp/data-changed.conformance.test.ts`.
  */
 export type McpDataEntity =
 	| "collection"

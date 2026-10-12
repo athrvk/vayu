@@ -930,7 +930,7 @@ of a script kind (`script.pre`, `script.post`, `script.setup`, `script.teardown`
 matched case- and whitespace-insensitively), and `start_load_run` refuses
 `postRequestScript` and `tests` (it has no pre-request script; its run-level
 `elements` object carries no script text). The refusal is a `ToolArgError` from
-`tools.ts::refuseAgentScripts`, raised before the call is composed or sent, and
+`tools/compose.ts::refuseAgentScripts`, raised before the call is composed or sent, and
 names every offending argument and the setting. Nothing else changes: a blank
 script (empty or whitespace-only) is not refused, because the engine composes
 and compiles none (`is_blank_script_element`); extractors, assertions and
@@ -950,7 +950,7 @@ fold it the same way too (issue #1594 caught `start_load_run` up to #1517's
 `run_request` shape): an ad-hoc `script.post` element, appended to
 `requestElements`. `start_load_run` **replaces** rather than joins - the
 composed chain's own `script.post` elements are filtered out first
-(`tools.ts::composeLoadRunRequest`), because with no way to know which
+(`tools/compose.ts::composeLoadRunRequest`), because with no way to know which
 assertions the agent meant, running both would add ones they never asked for.
 `tests` stays accepted on both as the engine's own spelling for the run
 tool - a Zod object strips keys it does not declare, so removing it would turn
@@ -960,7 +960,7 @@ one slot, and dropping either would report a run as validated by assertions
 that never ran. Under load the script runs against *sampled* responses
 (`max_response_samples` / `response_sample_rate`), not every one.
 
-How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
+How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
 
 - **Variables** - the engine resolves URL, headers, and body with the app's
   precedence (environment > collection chain, leaf→root > globals; enabled
@@ -1894,7 +1894,10 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
-| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`, the one dispatch path `server.ts` and the tests share. |
+| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext`, `ToolResult`), the elicitation seam and `MCP_DATA_ENTITIES`. |
+| `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` marks dispatch reads. |
+| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
