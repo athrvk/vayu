@@ -1341,7 +1341,9 @@ toward the cap, and neither are runs whose `baseline` is set: a pin that retenti
 not a pin, and pins counting toward the cap would let a handful of them evict the recent history
 the cap exists to keep. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
 their `monitor_samples` + their `results`), batched inside transactions that release the DB mutex between batches so a large
-backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
+backlog cannot stall `/health`, SSE, or the runs poll. Because victims are chosen under an
+earlier acquisition, each batch re-reads its rows under its own lock and spares one that has
+since been pinned, gone back in flight or been deleted (issue #1906). The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
 is wired into both at once. `prune_runs_configured()` reads the two
 knobs (config, `data_retention`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
