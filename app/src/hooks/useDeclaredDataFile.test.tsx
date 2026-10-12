@@ -28,7 +28,9 @@ import type { Collection } from "@/types";
 const collections: Collection[] = [];
 
 vi.mock("@/queries", () => ({
-	useCollectionsQuery: () => ({ data: collections }),
+	// A copy, so a case that edits `collections` and rerenders reads a new
+	// answer, the way a cache write hands TanStack's subscribers a new array.
+	useCollectionsQuery: () => ({ data: [...collections] }),
 	// Read by `useDataFileLimits`; no entries leaves the seeded caps standing.
 	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
@@ -91,6 +93,50 @@ describe("useDeclaredDataFile", () => {
 		expect(
 			renderHook(() => useDeclaredDataFile(undefined)).result.current.declaringCollectionId
 		).toBe("");
+	});
+
+	it("keeps declaring for the ancestor after a Remove clears its contract", () => {
+		collections.push(collection("col_p", ["id"]), {
+			...collection("col_1"),
+			parentId: "col_p",
+		});
+		const { result, rerender } = renderHook(() => useDeclaredDataFile("col_1"));
+		expect(result.current.declaringCollectionId).toBe("col_p");
+
+		// What the clear's cache write leaves behind: the ancestor, declaring nothing.
+		collections[0] = collection("col_p");
+		rerender();
+
+		// Remove then pick is the only way to swap a file, so the pick after a
+		// Remove must land where the cleared contract was. Mutation check: drop
+		// the held id and this reads col_1.
+		expect(result.current.contract).toBeUndefined();
+		expect(result.current.declaringCollectionId).toBe("col_p");
+	});
+
+	it("reads the contract off the query once it has the caller's row", () => {
+		// The caller's row is a snapshot from when the dialog opened, before the
+		// pick that declared.
+		const snapshot = collection("col_1");
+		const { result, rerender } = renderHook(() =>
+			useDeclaredDataFile("col_1", { collection: snapshot })
+		);
+		expect(result.current.contract).toBeUndefined();
+
+		collections.push(collection("col_1", ["plan", "price"]));
+		rerender();
+
+		// Mutation check: put the snapshot ahead of the query's row again and the
+		// declare that just landed is invisible here.
+		expect(result.current.contract?.columns).toEqual(["plan", "price"]);
+	});
+
+	it("resolves the caller's row before the query has it", () => {
+		const { result } = renderHook(() =>
+			useDeclaredDataFile("col_1", { collection: collection("col_1", ["id"]) })
+		);
+
+		expect(result.current.contract?.columns).toEqual(["id"]);
 	});
 
 	it("does not re-read over a pick when the pick's declare writes the store", async () => {

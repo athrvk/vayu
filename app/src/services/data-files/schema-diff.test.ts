@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { diffDataSchema, describeDataSchemaDiff } from "./schema-diff";
+import { diffDataSchema, describeDataSchemaDiff, describeUnboundReferences } from "./schema-diff";
 
 describe("diffDataSchema", () => {
 	it("reports both directions", () => {
@@ -52,5 +52,23 @@ describe("describeDataSchemaDiff", () => {
 
 	it("says nothing at all when the file matches", () => {
 		expect(describeDataSchemaDiff(["id", "email"], ["id", "email"])).toEqual([]);
+	});
+});
+
+describe("describeUnboundReferences", () => {
+	it("names one column, in the singular", () => {
+		expect(describeUnboundReferences(["email"])).toEqual([
+			"The requests reference 1 column this file does not carry: email. Every iteration that binds it fails before anything is sent.",
+		]);
+	});
+
+	it("names several as a list, in the plural", () => {
+		expect(describeUnboundReferences(["email", "id", "plan"])).toEqual([
+			"The requests reference 3 columns this file does not carry: email, id and plan. Every iteration that binds them fails before anything is sent.",
+		]);
+	});
+
+	it("says nothing when the file carries every referenced column", () => {
+		expect(describeUnboundReferences([])).toEqual([]);
 	});
 });

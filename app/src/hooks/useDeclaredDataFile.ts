@@ -111,6 +111,12 @@ export interface DeclaredDataFileState {
 	 * The collection a pick declares for: the one whose contract the run binds
 	 * against, or the caller's own when nothing above it declares. Empty for a
 	 * run scoped to no collection, which declares nothing.
+	 *
+	 * Held for the life of the caller once a contract has resolved: the picker
+	 * offers Remove in place of Choose file, so every swap is Remove (which
+	 * clears the contract) then a pick, and that pick re-declares where the
+	 * cleared contract was rather than moving it down to the caller's own
+	 * collection.
 	 */
 	declaringCollectionId: string;
 }
@@ -123,10 +129,12 @@ export interface DeclaredDataFileState {
  *        collection is fine, since the contract walk finds the declaring
  *        ancestor from it.
  * @param options.collection The caller's own row for that collection, when it
- *        holds one. It stands *ahead* of the query's copy of itself: the Run
- *        collection dialog is opened with a row and must resolve a contract it
- *        declares even on a render where the collections query has not
- *        answered. Ancestors can only ever come from the query.
+ *        holds one. It stands in for the query's copy only while the query has
+ *        none: the Run collection dialog is opened with a row and must resolve
+ *        a contract it declares even on a render where the collections query
+ *        has not answered, but the row is a snapshot from the moment the dialog
+ *        opened, and a declare made since lands in the query, not in it.
+ *        Ancestors can only ever come from the query.
  * @param options.onPrefill Called once, with the file, if the pre-fill lands.
  *        This is the seam for what a *caller* concludes from a file arriving,
  *        as opposed to what the file is: the Run collection dialog turns a
@@ -162,8 +170,8 @@ export function useDeclaredDataFile(
 	 */
 	const chain = useMemo(
 		() =>
-			collection
-				? [collection, ...collections.filter((row) => row.id !== collection.id)]
+			collection && !collections.some((row) => row.id === collection.id)
+				? [collection, ...collections]
 				: collections,
 		[collection, collections]
 	);
@@ -171,11 +179,18 @@ export function useDeclaredDataFile(
 		() => resolveDataContract(collectionId, chain) ?? undefined,
 		[collectionId, chain]
 	);
+	// Adjusted during render rather than in an effect: it is derived from the
+	// contract, and the render that drops the contract must already declare
+	// against the held id.
+	const [heldDeclarer, setHeldDeclarer] = useState<string | null>(null);
+	if (contract && contract.collectionId !== heldDeclarer) {
+		setHeldDeclarer(contract.collectionId);
+	}
 	// The store is keyed by the collection that *declares* the contract, which
 	// is the whole point of rule 1 above. Falling back to the caller's id keeps
 	// a collection that declares its own contract working before the query
 	// answers, and finds nothing otherwise - which is the correct answer.
-	const declaringCollectionId = contract?.collectionId ?? collectionId ?? "";
+	const declaringCollectionId = contract?.collectionId ?? heldDeclarer ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
 	const { maxRows } = useDataFileLimits();
 

@@ -9,12 +9,12 @@
  * DataTab - where a collection declares which columns its data files carry
  * (issue #599, phase 1 of #598).
  *
- * The problem it exists for: a data file is picked in the Run dialog, parsed,
- * sent and forgotten, so at *authoring* time - exactly when someone writes
- * `{{data.email}}` - nothing in the app knows that column exists. Declaring the
- * contract here is what later lets the builder validate and complete those
- * tokens, and what lets the engine's no-data refusal name the columns a run
- * needs.
+ * The problem it exists for: until a file is declared, nothing in the app knows
+ * at *authoring* time - exactly when someone writes `{{data.email}}` - that the
+ * column exists. Declaring the contract is what lets the builder validate and
+ * complete those tokens, and what lets the engine's no-data refusal name the
+ * columns a run needs. A pick in either run dialog declares too (issue #2050);
+ * this tab is where it is done without starting a run.
  *
  * Two halves, stored in two places on purpose:
  *

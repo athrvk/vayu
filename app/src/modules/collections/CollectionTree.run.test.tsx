@@ -28,13 +28,22 @@ import CollectionTree from "./CollectionTree";
 
 const startScenarioRun = vi.fn();
 
+// `elements` and `auth` because every stored row carries them, and the run
+// dialog's data-column audit (issue #2050) reads both.
 const collections = [
-	{ id: "root", name: "Acme", order: 0 },
-	{ id: "mid", name: "Billing", parentId: "root", order: 0 },
+	{ id: "root", name: "Acme", order: 0, elements: [] },
+	{ id: "mid", name: "Billing", parentId: "root", order: 0, elements: [] },
 ];
+const stored = { elements: [], auth: { mode: "none" } };
 const requests = new Map([
-	["root", [{ id: "r-root", collectionId: "root", name: "Ping", method: "GET", order: 0 }]],
-	["mid", [{ id: "r-mid", collectionId: "mid", name: "Charge", method: "POST", order: 0 }]],
+	[
+		"root",
+		[{ id: "r-root", collectionId: "root", name: "Ping", method: "GET", order: 0, ...stored }],
+	],
+	[
+		"mid",
+		[{ id: "r-mid", collectionId: "mid", name: "Charge", method: "POST", order: 0, ...stored }],
+	],
 ]);
 
 vi.mock("@/queries", () => ({

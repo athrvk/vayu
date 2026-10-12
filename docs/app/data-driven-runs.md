@@ -11,11 +11,13 @@ the requests themselves and from scripts.
 Two runs take one:
 
 - **A collection run.** Pick the file in the **Run collection** dialog, beside
-  Iterations and Load test - or declare it once on the collection's **Data** tab
-  and have the dialog pre-fill it.
+  Iterations and Load test. Picking it declares it for the collection too, so
+  the next run pre-fills it; the collection's **Data** tab declares one without
+  starting a run.
 - **A single request's load test** (issue #993). Pick the file in the **Run a
-  load test** dialog, under the profile fields - or, again, declare it on the
-  collection's **Data** tab and have the dialog pre-fill it (issue #1039). The
+  load test** dialog, under the profile fields. Picking it there declares it for
+  the request's collection the same way, and a file declared anywhere is
+  pre-filled here too (issue #1039). The
   request needs no collection
   wrapper: `N` users each sending the same request with different data is the
   canonical load shape, and until this it was expressible only by wrapping the
@@ -318,11 +320,12 @@ each iteration of the run exactly once, and a generator is fresh at every send.
 
 ## Declaring the contract: the Data tab
 
-A file picked in the Run dialog is parsed, sent and forgotten, so at the moment
-you write `{{data.email}}` in a URL nothing in Vayu knows that column exists.
-The collection's **Data** tab is where you say so: pick the file, and its
-columns are declared the moment it loads - the preview underneath is what was
-written.
+Until a file is declared, nothing in Vayu knows a column exists at the moment
+you write `{{data.email}}` in a URL. Picking a file declares it, in any of the
+three places a file is picked: the collection's **Data** tab, the **Run
+collection** dialog and the **Load test** dialog (issue #2050). Its columns are
+declared the moment it loads, and the preview underneath is what was written.
+The Data tab is the place to do it without starting a run.
 
 What that stores, and what it does not:
 
@@ -350,10 +353,7 @@ run:
     collection run with rows and no explicit count runs one pass per row, so
     picking a file there clears an untouched `iterations` of `1`. A load run's
     length is its profile's - a duration, a request count, a search - so nothing
-    about picking or pre-filling a file changes a single field of it. Picking a
-    file in the load dialog also does not re-declare it: the Data tab is where a
-    collection says which file its contract came from, and one load run started
-    against a different file is not a change to that.
+    about picking or pre-filling a file changes a single field of it.
 - **The Data tab re-opens it too.** Coming back to the tab reads the declared
   file again and lines it up against the contract with no re-pick: comparing
   them is what the tab is for, so it does not wait to be handed the same file a
@@ -367,7 +367,12 @@ run:
   against it would fail to bind at iteration 1) and a column the file carries
   that the contract does not declare (usually the sign of a contract that has
   drifted, or of the wrong file). Both are warnings; the run is still yours to
-  start.
+  start. The two run dialogs also compare the file with the requests the run
+  sends, and name any column a request references that the file does not carry
+  ("The requests reference 1 column this file does not carry: email"), because
+  every iteration that binds one fails before anything is sent. **Run
+  collection** checks the collection's requests, and its whole subtree under
+  **Include nested collections**; **Load test** checks the one request.
 - **The engine's refusal names the columns.** Starting a run whose requests
   carry `{{data.*}}` with no file is already refused before anything is sent;
   with a contract declared, that message lists the columns the collection
@@ -420,12 +425,19 @@ run:
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
 
-On the Data tab the two gestures that name a file are the saves: **picking** a
-file declares its columns, and **Remove** clears the contract and forgets the
-remembered path, so removing a file and picking another leaves the second one's
-columns declared, not the first's. A file the picker refuses - over the row
-cap, a ragged CSV - changes nothing. The buttons beside the picker cover what a
-gesture does not: **Re-declare from this file** appears when the re-opened file
+In all three places the two gestures that name a file are the saves:
+**picking** a file declares its columns, and **Remove** clears the contract and
+forgets the remembered path, so removing a file and picking another leaves the
+second one's columns declared, not the first's. A file the picker refuses - over
+the row cap, a ragged CSV - changes nothing. A run dialog declares for the
+collection whose contract the run binds against: the nearest declaring
+ancestor, or the collection being run (the request's own, for a load test) when
+nothing above it declares. A request in no collection has no contract, so a
+file picked for its load test is only that run's input. The pre-fill is a read
+of the declared file, never a pick, so opening a dialog writes nothing. A
+declare that fails is a warning beside the picker and nothing more: the file
+stays selected, the run still sends its rows, and picking it again retries. On
+the Data tab, the buttons beside the picker cover what a gesture does not: **Re-declare from this file** appears when the re-opened file
 has changed shape on disk (or a save failed and the preview is still there to
 retry from), and **Clear** removes a contract whose remembered file is gone,
 where the picker offers no Remove.

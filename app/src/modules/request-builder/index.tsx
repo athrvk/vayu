@@ -43,7 +43,7 @@ import {
 } from "@/queries";
 import { EmptyState, ErrorState } from "@/components/shared";
 import { Button } from "@/components/ui";
-import { useCopy, useEngine, useVariableResolver } from "@/hooks";
+import { useCopy, useEngine, useVariableResolver, type ColumnAuditRequest } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import { ApiError } from "@/services/http-client";
@@ -312,6 +312,24 @@ export default function RequestBuilder() {
 		if (!auth || auth.mode !== "oauth2") return null;
 		return resolveObject(auth.config) as OAuth2Config;
 	}, [pendingLoadTestRequest, collectionAncestors, resolveObject]);
+
+	// The pending request in the stored row's shapes, for the load dialog's
+	// data-column audit (issue #2050). The draft rather than the stored row,
+	// because the draft is what the run sends.
+	const pendingLoadTestAuditRequest = useMemo<ColumnAuditRequest | undefined>(
+		() =>
+			pendingLoadTestRequest
+				? {
+						url: pendingLoadTestRequest.url,
+						params: toKeyValueEntries(pendingLoadTestRequest.params),
+						headers: toKeyValueEntries(pendingLoadTestRequest.headers),
+						body: toBodyPayload(pendingLoadTestRequest),
+						elements: pendingLoadTestRequest.elements,
+						auth: pendingLoadTestRequest.auth,
+					}
+				: undefined,
+		[pendingLoadTestRequest]
+	);
 
 	// Convert fetched request to RequestState format
 	const initialRequest = useMemo((): Partial<RequestState> | undefined => {
@@ -1033,6 +1051,7 @@ export default function RequestBuilder() {
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}
+					request={pendingLoadTestAuditRequest}
 				/>
 			)}
 		</>
