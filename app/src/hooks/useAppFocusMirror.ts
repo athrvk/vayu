@@ -18,14 +18,14 @@ interface AppFocusPayload {
 /**
  * What an agent may be told a tab is called.
  *
- * `useTabDescriptors` names an unnamed request and a design or load run by a
- * URL path, and that path is resolved (a request's against the live variables,
- * a run's as sent), so a secret variable used in a URL would reach an agent in
- * a label while Reveal secrets is off. `isPath` marks exactly those labels; they
+ * `useTabDescriptors` titles an unnamed request and a design or load run by a
+ * URL, and that URL is resolved (a request's against the live variables, a
+ * run's as sent), so a secret variable used in it would reach an agent in a
+ * label while Reveal secrets is off. `fromUrl` marks exactly those labels; they
  * give way to the tab's kind, and every other label is a saved name.
  */
-export function focusTabLabel(tab: Tab, descriptor: { label: string; isPath?: boolean }): string {
-	if (!descriptor.isPath) return descriptor.label;
+export function focusTabLabel(tab: Tab, descriptor: { label: string; fromUrl?: boolean }): string {
+	if (!descriptor.fromUrl) return descriptor.label;
 	return tab.type === "run" ? "Run" : "Request";
 }
 

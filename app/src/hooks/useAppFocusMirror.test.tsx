@@ -23,7 +23,7 @@ vi.mock("@/services/api", () => ({
 }));
 
 /** The label each tab resolves to, set per test; the real hook needs a query client full of requests. */
-const descriptors = new Map<string, { label: string; isPath?: boolean }>();
+const descriptors = new Map<string, { label: string; isPath?: boolean; fromUrl?: boolean }>();
 vi.mock("@/components/layout/tab-descriptors", () => ({
 	useTabDescriptors: (tabs: Tab[]) =>
 		tabs.map((tab) => descriptors.get(tab.id) ?? { label: tab.type }),
@@ -132,7 +132,7 @@ describe("useAppFocusMirror", () => {
 	});
 
 	it("never publishes URL-derived text, which carries resolved variable values", async () => {
-		descriptors.set("t1", { label: "/orders/s3cret-token", isPath: true });
+		descriptors.set("t1", { label: "/orders/s3cret-token", isPath: true, fromUrl: true });
 		renderHook(() => useAppFocusMirror(), { wrapper: wrapper() });
 		await waitFor(() => expect(publish).toHaveBeenCalled());
 		// Mutation check: return `descriptor.label` unconditionally and this fails.
@@ -150,9 +150,24 @@ describe("useAppFocusMirror", () => {
 describe("focusTabLabel", () => {
 	it.each([
 		["a saved name", REQUEST_TAB, { label: "Create order" }, "Create order"],
-		["a request labelled by its path", REQUEST_TAB, { label: "/a/b", isPath: true }, "Request"],
-		["a run labelled by its path", RUN_TAB, { label: "/a/b", isPath: true }, "Run"],
-		["a run labelled by its kind", RUN_TAB, { label: "Load test", isPath: false }, "Load test"],
+		[
+			"a request labelled by its URL",
+			REQUEST_TAB,
+			{ label: "/a/b", isPath: true, fromUrl: true },
+			"Request",
+		],
+		[
+			"a run labelled by its URL",
+			RUN_TAB,
+			{ label: "/a/b", isPath: true, fromUrl: true },
+			"Run",
+		],
+		[
+			"a run labelled by its kind",
+			RUN_TAB,
+			{ label: "Load test", fromUrl: false },
+			"Load test",
+		],
 	])("%s", (_name, tab, descriptor, expected) => {
 		expect(focusTabLabel(tab, descriptor)).toBe(expected);
 	});

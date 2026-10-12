@@ -1668,8 +1668,7 @@ configurable in **Settings → MCP** and persisted.
   setting to turn on; the SDK would otherwise reject the unregistered name with
   `Tool <name> not found`, which tells an agent nothing it can act on. The
   server instructions say the same thing up front, in the sessions where the
-  toggle is off. (The reference-line grammar and the two discovery rules are
-  stated in every session; see [Naming what the user means](#naming-what-the-user-means).) Withholding the schema rather than only the call is what makes
+  toggle is off. Withholding the schema rather than only the call is what makes
   the toggle free: those tools are ~40% of the tool payload
   an agent is sent, and on a default install none of them could have succeeded.
   Write access is a separate grant from reveal: a script stored by a write tool
