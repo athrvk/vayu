@@ -315,6 +315,31 @@ TEST_F (RateLimiterTest, AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin) 
     EXPECT_LE (elapsed, 3.0) << "the token wait overshoots the token";
 }
 
+// Issue #2032: a pass over an empty queue took a token before finding nothing
+// to pop, so a one-token worker sat idle with an empty bucket and the first
+// request to arrive waited a whole token interval. Mutation check: taking the
+// token before peeking the queue reds this (about 700ms here).
+TEST_F (RateLimiterTest, AnIdleWorkerKeepsItsTokenForTheNextRequest) {
+    EventLoop loop (one_token_worker (1.0)); // a token per second
+    loop.start ();
+    std::this_thread::sleep_for (std::chrono::milliseconds (300));
+
+    Request req;
+    req.method = HttpMethod::GET;
+    req.url    = mock->fast_url ();
+
+    const auto submitted = std::chrono::steady_clock::now ();
+    auto handle          = loop.submit_async (req);
+    EXPECT_TRUE (handle.future.get ().is_ok ());
+    const double seconds =
+    std::chrono::duration<double> (std::chrono::steady_clock::now () - submitted)
+    .count ();
+    loop.stop ();
+
+    EXPECT_LT (seconds, 0.5) << "the request waited " << seconds
+                             << "s for a token an empty pass had spent";
+}
+
 // A worker parked for its next token still answers stop () at once:
 // stop(false) through curl_multi_wakeup, and a bounded drain at its deadline
 // rather than up to a token interval late. Mutation check: dropping the
