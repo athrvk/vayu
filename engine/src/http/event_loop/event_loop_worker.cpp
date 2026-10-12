@@ -355,17 +355,21 @@ EventLoopWorker::SubmitPass EventLoopWorker::submit_pending_transfers (size_t& l
     // waited out here; wait_for_work parks for the next token when nothing is
     // in flight.
     while (local_active < config.max_concurrent) {
+        // Peek before taking a token: a token spent on an empty queue is gone,
+        // and at a one-token burst the next request then waits a whole token
+        // interval (#2032). This worker is the queue's only consumer, so an
+        // item seen here is still there for the pop.
+        if (pending_queue.read_available () == 0) {
+            break;
+        }
+
         // Single-threaded access, no lock needed
         if (!rate_limiter.try_acquire_unlocked ()) {
             pass.rate_limited = true;
             break;
         }
 
-        // Have token, try get data
         if (!pending_queue.pop (data)) {
-            // Queue empty, but we acquired a token.
-            // It's a small inefficiency (wasted token) but simpler code path.
-            // Given 60k RPS, a few wasted tokens are negligible noise.
             break;
         }
 

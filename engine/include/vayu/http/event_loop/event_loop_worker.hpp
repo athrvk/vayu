@@ -218,8 +218,8 @@ class EventLoopWorker {
     /// What one submit_pending_transfers pass did.
     struct SubmitPass {
         bool took_work = false; ///< Something came off the pending queue.
-        /// The pass stopped because the rate limiter refused a token, which
-        /// it asks for before looking at the queue.
+        /// The pass stopped because the rate limiter refused a token while
+        /// work was queued; an empty queue never asks it for one.
         bool rate_limited = false;
     };
 
