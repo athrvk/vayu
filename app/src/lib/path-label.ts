@@ -16,10 +16,19 @@
 export function pathLabel(url: string): string {
 	if (!url) return "";
 	try {
-		return decodeURIComponent(new URL(url).pathname) || "/";
+		return safeDecode(new URL(url).pathname) || "/";
 	} catch {
 		// Strip scheme+host if present, otherwise show the raw string
 		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
-		return decodeURIComponent(stripped) || decodeURIComponent(url);
+		return safeDecode(stripped) || safeDecode(url);
+	}
+}
+
+/** A literal `%` mid-edit (`/sale/50%`) is a malformed escape; keep the text as typed. */
+function safeDecode(text: string): string {
+	try {
+		return decodeURIComponent(text);
+	} catch {
+		return text;
 	}
 }
