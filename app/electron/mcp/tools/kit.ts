@@ -1,0 +1,412 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * @file kit.ts
+ * @brief The helpers every tool shares: result builders, argument coercion and
+ *        the write and confirmation gates.
+ *
+ * The bottom of the `tools/` import graph beside `contract.ts`: a section file
+ * may import from here and this file imports from no section, so a helper two
+ * sections need lives here rather than in either of them. `NOTHING_CHANGED` and
+ * `STARTED_RUNS` are module state the dispatch path reads after a handler
+ * returns; they are defined here and nowhere else, so the handlers that mark a
+ * result and the dispatcher that reads the mark share one instance.
+ */
+
+import { z } from "zod";
+import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
+import { presentCollection } from "../collection-shape.js";
+import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
+import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
+
+// --- Result helpers ----------------------------------------------------------
+
+export function jsonResult(value: unknown): ToolResult {
+	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+}
+
+/** Result that carries both a text rendering and structured content. */
+export function structuredResult(value: Record<string, unknown>): ToolResult {
+	return {
+		content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+		structuredContent: value,
+	};
+}
+
+export function textResult(text: string): ToolResult {
+	return { content: [{ type: "text", text }] };
+}
+
+export function errorResult(message: string): ToolResult {
+	return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/**
+ * Append a note to a result's text without disturbing its structured content.
+ * For telling an agent what a call could *not* do - a caveat printed nowhere is
+ * the same as not having noticed it.
+ */
+export function withCaveat(result: ToolResult, caveat: string): ToolResult {
+	if (!caveat) return result;
+	return {
+		...result,
+		content: [...result.content, { type: "text" as const, text: caveat.trimStart() }],
+	};
+}
+
+export function engineErrorResult(err: unknown): ToolResult {
+	if (err instanceof EngineRequestError) {
+		return errorResult(`Engine error (${err.status}): ${err.body || err.message}`);
+	}
+	const msg = err instanceof Error ? err.message : String(err);
+	// An abort means the engine was reachable and working - the opposite of the
+	// "not running, retry" advice below. Whatever was in flight may well have
+	// completed engine-side, so say so instead of inviting a second send.
+	if (err instanceof EngineTimeoutError) {
+		return errorResult(
+			`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget. ` +
+				`It may still have completed the call - check run history (list_runs) before retrying. ` +
+				`For a target that is legitimately this slow, raise the engine's "defaultTimeout" ` +
+				`with update_engine_config.`
+		);
+	}
+	if (err instanceof Error && (err.name === "AbortError" || /abort/i.test(msg))) {
+		return errorResult(
+			`The call was cancelled before the engine answered. It may still have completed - ` +
+				`check run history (list_runs) before retrying. (${msg})`
+		);
+	}
+	if (/ECONNREFUSED|fetch failed/i.test(msg)) {
+		return errorResult(
+			`Could not reach the Vayu engine. Make sure the Vayu app is running, then retry. (${msg})`
+		);
+	}
+	return errorResult(`Unexpected error: ${msg}`);
+}
+
+/**
+ * Wrap an engine call so transport errors surface as tool errors, not crashes.
+ *
+ * `shape` runs on the engine's answer before it becomes a result - the one seam
+ * where a passthrough tool can bound what it hands an agent (issue #767).
+ */
+export async function callEngine(
+	fn: () => Promise<unknown>,
+	shape?: (value: unknown) => unknown
+): Promise<ToolResult> {
+	try {
+		const answer = await fn();
+		return jsonResult(shape ? shape(answer) : answer);
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+}
+
+/**
+ * `callEngine`'s `shape` for a write tool that echoes the stored row: withheld
+ * exactly as the read of that row is, because writing does not grant reading
+ * (#1809). A tool whose answer is a collection row also presents it as
+ * `list_collections` does.
+ */
+export function echoShape(ctx: ToolContext): (row: unknown) => unknown {
+	return secretsShape(ctx, withholdRowSecrets);
+}
+
+export function collectionEchoShape(ctx: ToolContext): (row: unknown) => unknown {
+	return (row) => echoShape(ctx)(presentCollection(row, ctx));
+}
+
+/**
+ * {@link callEngine} for what a run recorded: the answer withheld by
+ * {@link runOutputShape} first and only then bounded, because a cut through an
+ * unmasked secret leaves a prefix no form matches (#1809). The projection is
+ * read once the engine has answered, so a secret the call itself wrote - a
+ * pre-request script's `pm.environment.set` - is among the values masked.
+ */
+export async function callEngineForRunOutput(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	options: {
+		bound?: (value: unknown) => unknown;
+		signal?: AbortSignal;
+		/** An auth block sent inline, whose API-key header no stored row names. */
+		auth?: unknown;
+	} = {}
+): Promise<ToolResult> {
+	let answer: unknown;
+	try {
+		answer = await fn();
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
+	const withheld = withhold(answer);
+	return jsonResult(options.bound ? options.bound(withheld) : withheld);
+}
+
+// --- Argument coercion helpers ----------------------------------------------
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function str(args: Record<string, unknown>, key: string): string | undefined {
+	const v = args[key];
+	return typeof v === "string" ? v : undefined;
+}
+
+/** An optional boolean argument, absent when the caller stated nothing. */
+export function bool(args: Record<string, unknown>, key: string): boolean | undefined {
+	const v = args[key];
+	return typeof v === "boolean" ? v : undefined;
+}
+
+export function requireStr(args: Record<string, unknown>, key: string): string {
+	const v = str(args, key);
+	if (v === undefined || v === "") throw new ToolArgError(`"${key}" is required.`);
+	return v;
+}
+
+/**
+ * An optional array-of-strings argument. A non-array, or an array carrying
+ * anything but strings, is the caller's mistake rather than an empty selection:
+ * silently dropping the bad entries would answer a different question than the
+ * one asked and look like the names simply were not defined.
+ */
+export function stringArray(args: Record<string, unknown>, key: string): string[] | undefined {
+	const v = args[key];
+	if (v === undefined) return undefined;
+	if (!Array.isArray(v) || v.some((entry) => typeof entry !== "string")) {
+		throw new ToolArgError(`"${key}" must be an array of strings.`);
+	}
+	return v as string[];
+}
+
+export class ToolArgError extends Error {}
+
+/**
+ * An optional `elements` argument: an array of `{ id?, kind, enabled?, name?,
+ * config }` objects (see {@link elementSchema}). The SDK validates a call
+ * against the Zod schema before the handler runs, but `dispatchTool` is also
+ * called directly (tests, and any future non-SDK transport), so the shape is
+ * re-checked here the same defensive way `headers` and `auth` already are -
+ * a non-array or an entry with no string `kind` is the caller's mistake
+ * rather than an empty list.
+ */
+export function elementsArg(
+	args: Record<string, unknown>,
+	key = "elements"
+): unknown[] | undefined {
+	const v = args[key];
+	if (v === undefined) return undefined;
+	if (
+		!Array.isArray(v) ||
+		v.some(
+			(entry) =>
+				!entry ||
+				typeof entry !== "object" ||
+				typeof (entry as Record<string, unknown>).kind !== "string"
+		)
+	) {
+		throw new ToolArgError(`"${key}" must be an array of { kind, config } objects.`);
+	}
+	return v as unknown[];
+}
+
+/**
+ * A whole number greater than zero, or `fallback` when the caller omitted the
+ * argument.
+ *
+ * Rejects rather than clamps. The values this guards feed `Array.slice(-limit)`,
+ * where a non-positive number does not mean "fewer rows" but *more* than asked
+ * for - `0` returns everything, `-3` returns all but the three oldest - so a
+ * silent repair would hand back a plausible-looking result built on an argument
+ * the caller got wrong.
+ */
+export function optionalPositiveInt(
+	args: Record<string, unknown>,
+	key: string,
+	fallback: number
+): number {
+	const v = args[key];
+	if (v === undefined || v === null) return fallback;
+	if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+		throw new ToolArgError(`"${key}" must be a whole number greater than 0.`);
+	}
+	return v;
+}
+
+/**
+ * A page size, refused above @p max rather than clamped to it (the #319
+ * precedent): an agent that asked for 5000 rows and silently got 500 reads the
+ * short page as the whole answer, which is the one failure a bound must not
+ * produce.
+ */
+export function optionalPageLimit(
+	args: Record<string, unknown>,
+	key: string,
+	fallback: number,
+	max: number
+): number {
+	const value = optionalPositiveInt(args, key, fallback);
+	if (value > max) {
+		throw new ToolArgError(
+			`"${key}" must be ${max} or less. Read further rows with "offset" instead.`
+		);
+	}
+	return value;
+}
+
+/** A row offset: whole and non-negative, since 0 is the first page. */
+export function optionalOffset(args: Record<string, unknown>, key: string): number {
+	const v = args[key];
+	if (v === undefined || v === null) return 0;
+	if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+		throw new ToolArgError(`"${key}" must be a whole number of 0 or more.`);
+	}
+	return v;
+}
+
+/**
+ * The refusal a data-mutating tool returns while the write toggle is off, or
+ * null when writes are allowed. One wording for the collection / request /
+ * environment tools: which of them was called does not change what the user has
+ * to do about it, and a copy per tool is a copy per tool to drift.
+ * `update_engine_config` keeps its own sentence, which names config.
+ */
+export function writesDisabled(ctx: ToolContext): ToolResult | null {
+	if (ctx.config.allowWrites) return null;
+	return errorResult(
+		"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+	);
+}
+
+// --- Confirmation gate -------------------------------------------------------
+
+/**
+ * Results that reported success while changing nothing - a confirmation
+ * preview, or a prompt the user declined.
+ *
+ * Dispatch's rule is "a call that did not error changed what its tool
+ * declares", and a gated tool is the one shape that breaks it: the preview's
+ * whole point is that nothing happened, so emitting for it would refetch the
+ * collection tree every time an agent asked what a delete would destroy - and
+ * would say a run started when `start_load_run` only described one.
+ *
+ * A WeakSet rather than a field on {@link ToolResult}: the result object is
+ * handed to the SDK verbatim (`server.ts`), so an extra property would be
+ * serialized to the client as though it were part of the MCP result shape.
+ */
+export const NOTHING_CHANGED = new WeakSet<ToolResult>();
+
+/** Mark a successful result as having changed nothing (see {@link NOTHING_CHANGED}). */
+export function unchanged(result: ToolResult): ToolResult {
+	NOTHING_CHANGED.add(result);
+	return result;
+}
+
+/**
+ * Results that started a run the app should watch (#1419), keyed by the run.
+ *
+ * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet: the result
+ * object is handed to the SDK verbatim (`server.ts`), so a field here would be
+ * serialized to the client as though it were part of the MCP result shape.
+ */
+export const STARTED_RUNS = new WeakMap<ToolResult, StartedRun>();
+
+/**
+ * Mark a result as having started `kind`'s run, taking the id from the engine's
+ * own answer (see {@link STARTED_RUNS}).
+ *
+ * An answer without a `runId` marks nothing: the engine's 202 body is what says
+ * a run exists, and a body shaped some other way is handed back to the agent as
+ * it came rather than announced to the renderer as a run to attach to.
+ */
+export function watchedRun(
+	result: ToolResult,
+	kind: StartedRun["kind"],
+	started: unknown
+): ToolResult {
+	const runId =
+		started && typeof started === "object" && !Array.isArray(started)
+			? (started as Record<string, unknown>).runId
+			: undefined;
+	if (typeof runId === "string" && runId !== "") STARTED_RUNS.set(result, { runId, kind });
+	return result;
+}
+
+/**
+ * What the user is being asked to agree to. The two halves are worded per tool
+ * because a load run and a cascade delete are agreed to for different reasons -
+ * but the *mechanism* below is one implementation, so a fix to the elicitation
+ * path reaches every gated tool.
+ */
+interface ConfirmationPrompt {
+	/** The question, shown in the client's dialog and repeated in the preview. */
+	message: string;
+	/** Label of the boolean the client renders. */
+	acceptTitle: string;
+	acceptDescription: string;
+	/** Returned when the human declines - states that nothing happened. */
+	declined: string;
+	/** Full text returned when the client cannot elicit and no flag was set. */
+	preview: string;
+}
+
+/**
+ * Ask the human before something destructive, however the client can manage it.
+ *
+ * Preferred path is elicitation - a real prompt to a real person. A client that
+ * cannot elicit falls back to the agent-side flag: the first call returns a
+ * preview and does nothing, and only a second call carrying `confirmed: true`
+ * proceeds. Anti-accident rather than anti-adversary (an agent can set the flag
+ * itself), which is the same posture `start_load_run` has always had; the
+ * elicitation path is what upgrades it to a human decision.
+ *
+ * Returns `null` when the caller may proceed, or the result to return instead.
+ */
+export async function confirmDestructive(
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	prompt: ConfirmationPrompt
+): Promise<ToolResult | null> {
+	if (ctx.elicit) {
+		try {
+			const outcome = await ctx.elicit({
+				message: prompt.message,
+				requestedSchema: {
+					type: "object",
+					properties: {
+						proceed: {
+							type: "boolean",
+							title: prompt.acceptTitle,
+							description: prompt.acceptDescription,
+						},
+					},
+					required: ["proceed"],
+				},
+			});
+			if (outcome.action !== "accept" || outcome.content?.proceed === false) {
+				return unchanged(textResult(prompt.declined));
+			}
+			return null;
+		} catch {
+			// Client can't elicit - fall through to the flag-based gate.
+		}
+	}
+	if (args.confirmed !== true) return unchanged(textResult(prompt.preview));
+	return null;
+}
+
+/** The `confirmed` fallback flag, declared identically on every gated tool. */
+export function confirmedInput(action: string) {
+	return z
+		.boolean()
+		.optional()
+		.describe(`Fallback confirmation for clients without elicitation: set true to ${action}.`);
+}

@@ -13,7 +13,7 @@
  * rather than imported because `electron/` shares no module graph with
  * `app/src/` (no `@/` alias). Lived in `resolve.ts` until issue #226 deleted
  * MCP's composition copy; the value list is all that had to survive, because
- * `tools.ts` builds its Zod enums from it.
+ * the tool schemas under `tools/` build their Zod enums from it.
  *
  * The two arrays hold the same *values* but deliberately differ in *shape*:
  * the renderer's is `{value, label}[]` because it populates a picker, this one
