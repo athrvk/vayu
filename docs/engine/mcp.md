@@ -897,13 +897,42 @@ Vayu <kind> "<name>" (<id>)
 `<name>` is what the app calls the entity, for a person to recognise; the `<id>`
 in parentheses is the key every tool takes (`requestId`, `collectionId`,
 `runId`, `inboxId`, `mockId`). Look up the id, never the name: names repeat.
+An entity the app labels by something other than a name is named by that: an
+inbox, a mock server and a mock issuer by their port (a mock server also by its
+collection), a capture by its method and path.
+
+Most kinds add a tail after the id. ` in <A / B>` places an entity in the
+collection tree, root first, and is left off at the root. ` - <detail>` describes
+what the id alone does not: a run's kind, target, start time and status, a trash
+entry's kind. A `"` or `\` in a name is escaped with a backslash and a line break
+becomes a space, so a name never ends its own quotes or starts a second line.
+**A reference carries no value**: a run's URL is cut to its path, with no query
+string or credentials, and no header, body, variable, token or secret is ever
+printed. A run comparison is the one multi-line reference: a header naming the
+two run ids, then each run's own line.
+
+Every line below is the app's formatter (`app/src/lib/agent-reference.ts`) run
+over one fixture, the entities in `app/src/lib/agent-reference.docs.test.ts`,
+which fails when a line here stops matching its output. The run times are shown
+as `en-US` in UTC; the app prints the user's own locale and zone.
 
 ```
-Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
+Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders
+Vayu example "Created" (exa_2d4f6a81-3c5e-4b79-8a1c-6e8f0a2b4c6d) of request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders
+Vayu collection "Orders" (col_4a6c8e02-9b1d-4f35-a7c8-1d3e5f708192) in Checkout
 Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
-Vayu run "Design run" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8)
-Vayu inbox "Stripe webhooks" (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
-Vayu mock server "Orders mock" (mock_1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d)
+Vayu environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
+Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
+Vayu run "GET /v1/orders" (run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7) - design run, GET /v1/orders, 10/5/26, 9:30:00 AM, failed
+Vayu run "Checkout" (run_c3e5a7b9-1d2f-4c40-8e6a-0b1c2d3e4f50) - collection run, collection "Checkout", 10/6/26, 7:00:00 AM, completed
+Vayu run comparison base (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) target (run_e8f0a2b4-6c7d-4e91-b3a5-c7d9e1f30415)
+Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
+Vayu run "Create order" (run_e8f0a2b4-6c7d-4e91-b3a5-c7d9e1f30415) - load test, POST /v1/orders, 10/7/26, 8:10:00 AM, stopped
+Vayu inbox "port 8099" (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
+Vayu capture "POST /stripe/events" (7) in inbox (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
+Vayu mock server "Orders on port 4010" (mock_1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d)
+Vayu mock issuer "port 9100" (issuer_6f8a0c2e-4b5d-4e71-9a3c-5e7f9b1d3a45)
+Vayu trash entry "Legacy \"v1\" orders" (col_a1b3c5d7-e9f0-4a2b-8c4d-6e8f0a1b3c5e) - collection
 ```
 
 Two rules for the cases where the user did not paste one:
