@@ -53,7 +53,7 @@ export function diffDataSchema(declared: string[], actual: string[]): DataSchema
 }
 
 /** `a, b and c` - the list as a sentence reads it. */
-function list(columns: string[]): string {
+function list(columns: readonly string[]): string {
 	if (columns.length <= 1) return columns.join("");
 	return `${columns.slice(0, -1).join(", ")} and ${columns[columns.length - 1]}`;
 }
@@ -80,4 +80,21 @@ export function describeDataSchemaDiff(declared: string[], actual: string[]): st
 		);
 	}
 	return messages;
+}
+
+/**
+ * The columns the run's requests reference and the picked file lacks
+ * (`auditDataColumns(file.parsed.columns, ...).undeclared`, issue #2050), as the
+ * sentence the run dialogs show beside the preview.
+ *
+ * The file-versus-contract diff above cannot answer this once a pick declares:
+ * the contract becomes the file, and the diff goes empty while a request still
+ * names a column the file never had. The engine ends every step that binds one
+ * before sending it, so this is the failure the run would meet at iteration 1.
+ */
+export function describeUnboundReferences(missing: readonly string[]): string[] {
+	if (missing.length === 0) return [];
+	return [
+		`The requests reference ${missing.length} ${pluralize(missing.length, "column")} this file does not carry: ${list(missing)}. Every iteration that binds ${missing.length === 1 ? "it" : "them"} fails before anything is sent.`,
+	];
 }

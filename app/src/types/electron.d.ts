@@ -366,6 +366,17 @@ interface ElectronAPI {
 	) => void;
 
 	/**
+	 * Hand the main process which tab and environment the user has open (issue
+	 * #2045), so the MCP server can answer "the request I have open". The whole
+	 * snapshot each time, never a diff. Names and ids only: `label` is never
+	 * derived from a resolved URL, which would carry variable values.
+	 */
+	publishAppFocus: (focus: {
+		activeTab: { type: string; entityId: string | null; label: string } | null;
+		activeEnvironment: { id: string; name: string } | null;
+	}) => void;
+
+	/**
 	 * Read a file an imported OpenAPI document references (issue #649), given the
 	 * picked document's path and the `$ref` target as the document wrote it - the
 	 * main process resolves the second against the first's directory. Rejects

@@ -24,6 +24,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
 	walkAncestors,
 	collectionPath,
+	collectionNamePath,
 	isDescendant,
 	collectDescendantEntityIds,
 	type TreeNode,
@@ -221,6 +222,26 @@ describe("collectDescendantEntityIds", () => {
 	it("returns just the collection when it holds nothing", () => {
 		expect([...collectDescendantEntityIds("elsewhere", tree(), () => [])]).toEqual([
 			"elsewhere",
+		]);
+	});
+});
+
+describe("collectionNamePath", () => {
+	it("is the names root first, the start node included", () => {
+		const nodes = budgeted([named("leaf", "mid"), named("mid", "root"), named("root")]);
+
+		expect(collectionNamePath("leaf", nodes)).toEqual(["root", "mid", "leaf"]);
+		expect(collectionNamePath("root", nodes)).toEqual(["root"]);
+	});
+
+	it("is empty for an id that is not loaded", () => {
+		expect(collectionNamePath("ghost", budgeted([named("root")]))).toEqual([]);
+	});
+
+	it("terminates on a cycle, naming each node once", () => {
+		expect(collectionNamePath("a", budgeted([named("a", "b"), named("b", "a")]))).toEqual([
+			"b",
+			"a",
 		]);
 	});
 });

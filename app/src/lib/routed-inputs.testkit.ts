@@ -153,6 +153,16 @@ export const DOC_READING_GUARDS = {
 		],
 	},
 	/*
+	 * The reference lines the app copies for an agent (#2046): the page prints
+	 * one example per kind, and the guard holds each to what the formatters
+	 * produce, so a separator changed in `agent-reference.ts` or a line edited
+	 * on the page alone reddens the edit that did it.
+	 */
+	agentReference: {
+		reader: "app/src/lib/agent-reference.docs.test.ts",
+		paths: ["docs/engine/mcp.md"],
+	},
+	/*
 	 * The app-side logger (#1558) is a from-scratch port of the engine's
 	 * `LogRecord`, and this is the one schema both sides claim to match: every
 	 * line `log.ts` writes validates against it, hand-checked rather than with

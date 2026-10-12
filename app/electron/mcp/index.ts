@@ -19,6 +19,7 @@ import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { McpDataChangedEvent, ToolContext } from "./tools.js";
 import type { Logger } from "../log.js";
+import type { AppFocus } from "../app-focus.js";
 import type { DataFileLocation } from "../data-file-locations.js";
 
 export interface VayuMcpServiceOptions {
@@ -38,6 +39,8 @@ export interface VayuMcpServiceOptions {
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 	/** The SHA-256 of a remembered data file as it is now (#2051); rejects when unreadable. */
 	currentDataFileHash?: (filePath: string) => Promise<string>;
+	/** Which tab and environment the app window has open (#2045). */
+	appFocus?: () => AppFocus | undefined;
 }
 
 export class VayuMcpService {
@@ -60,6 +63,7 @@ export class VayuMcpService {
 				log: opts.log,
 				dataFileLocation: opts.dataFileLocation,
 				currentDataFileHash: opts.currentDataFileHash,
+				appFocus: opts.appFocus,
 			}),
 		});
 	}

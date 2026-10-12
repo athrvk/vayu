@@ -16,6 +16,13 @@ export { useActiveEnvironmentGuard } from "./useActiveEnvironmentGuard";
 export { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 export { useDataContract } from "./useDataContract";
 export { useDeclaredDataFile, type DeclaredDataFileState } from "./useDeclaredDataFile";
+export { useDataContractWriter, type DataContractWriter } from "./useDataContractWriter";
+export {
+	useColumnAudit,
+	type ColumnAuditRequest,
+	type ColumnAuditResult,
+	type ColumnAuditSubject,
+} from "./useColumnAudit";
 export { useElectronTheme } from "./useElectronTheme";
 export { useOverflowTitle } from "./useOverflowTitle";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";

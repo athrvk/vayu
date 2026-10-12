@@ -66,9 +66,11 @@ import {
 } from "@/components/ui";
 import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
-import { describeDataSchemaDiff } from "@/services/data-files";
+import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import { runDataFileName } from "@/lib/run-data-file";
+import { useDataContractWriter } from "@/hooks/useDataContractWriter";
+import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
@@ -165,6 +167,8 @@ function saveConfig(config: SavedLoadTestConfig): void {
  */
 const SCRIPTS_DEFAULT = "asMarked";
 
+const NO_COLUMNS: string[] = [];
+
 export interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
@@ -185,15 +189,23 @@ export interface LoadTestConfigDialogProps {
 	isStreamingRequest: boolean;
 	/**
 	 * The collection the request being load-tested belongs to, for the data
-	 * file's column audit (issue #993).
+	 * file's contract (issues #993, #2050).
 	 *
 	 * Only the *contract* is resolved from it - the nearest declaring ancestor,
 	 * the rule every other surface applies (`resolveDataContract`) - so a file
 	 * missing a column the collection declares is said here rather than at the
-	 * first bind. Undefined for a request that belongs to no collection, which
-	 * simply audits nothing.
+	 * first bind, and a picked file declares for that ancestor. Undefined for a
+	 * request that belongs to no collection, which has no contract: a pick there
+	 * declares nothing and stays a plain run input.
 	 */
 	collectionId?: string;
+	/**
+	 * The request being load-tested, as the editor holds it - the draft, not the
+	 * stored row - for the audit of which `{{data.*}}` columns it references
+	 * that a picked file lacks (issue #2050). Memoise it: it is a dependency of
+	 * the audit.
+	 */
+	request?: ColumnAuditRequest;
 }
 
 export default function LoadTestConfigDialog({
@@ -204,6 +216,7 @@ export default function LoadTestConfigDialog({
 	oauth2Config,
 	isStreamingRequest,
 	collectionId,
+	request,
 }: LoadTestConfigDialogProps) {
 	const saved = loadSavedConfig();
 
@@ -370,24 +383,48 @@ export default function LoadTestConfigDialog({
 		note: prefillNote,
 		contract,
 		dismissNote,
+		declaringCollectionId,
 	} = useDeclaredDataFile(collectionId);
+	const writer = useDataContractWriter(declaringCollectionId);
 
 	/*
-	 * Picking by hand replaces whatever was pre-filled, so the note about a file
-	 * that could not be re-read has nothing left to say. Deliberately *not* a
-	 * write back to `useDataFileStore`: the Data tab is where a contract is
-	 * declared, and starting one load run with a different file is not a
-	 * redeclaration of it for every collection run that follows. And no
+	 * A pick declares the contract from the picked file (issue #2050), the same
+	 * rule as the Run collection dialog and the Data tab: for the collection whose
+	 * contract this request binds against, and for nothing when the request is in
+	 * no collection. Remove clears it through the picker's `onRemove`, never
+	 * here, because a file the picker refuses also arrives as `null`. A declare
+	 * that fails leaves the selection alone, so Start still sends the rows.
+	 *
+	 * Picking by hand also replaces whatever was pre-filled, so the note about a
+	 * file that could not be re-read has nothing left to say. And no
 	 * `onPrefill`: a load run's length is its profile's, so a file arriving
 	 * changes no field of it.
 	 */
 	const handleSelectDataFile = (next: SelectedDataFile | null) => {
 		setDataFile(next);
-		if (next) dismissNote();
+		if (next) {
+			dismissNote();
+			writer.declare(next);
+		}
 	};
 
-	const schemaDiff = dataFile
-		? describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns)
+	/*
+	 * The one request this run sends, audited under its collection's chain (its
+	 * `inherit` auth and the chain's scripts are part of what it sends) against
+	 * the picked file's columns. The contract diff beside it is for a pre-filled
+	 * file that drifted on disk; once a pick's declare lands it is empty by
+	 * construction, and the request is what is left to compare against.
+	 */
+	const auditSubject = useMemo(
+		() => ({ collectionId: collectionId ?? null, requests: request ? [request] : [] }),
+		[collectionId, request]
+	);
+	const { audit } = useColumnAudit(auditSubject, dataFile?.parsed.columns ?? NO_COLUMNS);
+	const fileWarnings = dataFile
+		? [
+				...describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns),
+				...describeUnboundReferences(audit.undeclared),
+			]
 		: [];
 
 	/*
@@ -940,14 +977,26 @@ export default function LoadTestConfigDialog({
 						</Callout>
 					)}
 
+					{writer.isError && (
+						<Callout severity="warning" title="Couldn't update the data contract">
+							{writer.error?.message ?? "The engine did not accept the change."}
+							<span className="block">
+								The run is unaffected. Pick the file again to retry.
+							</span>
+						</Callout>
+					)}
+
 					<DataFilePicker
 						selected={dataFile}
 						onSelect={handleSelectDataFile}
+						// Only with a contract to clear: Remove on a collection that
+						// declares nothing has nothing to write.
+						onRemove={contract ? writer.clear : undefined}
 						error={dataFileError}
 						onError={setDataFileError}
 						iterations={undefined}
 						loadTest
-						additionalWarnings={schemaDiff}
+						additionalWarnings={fileWarnings}
 						disabled={isStarting}
 					/>
 

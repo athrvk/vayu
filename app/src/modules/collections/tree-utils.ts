@@ -53,6 +53,19 @@ export function walkAncestors<T extends TreeNode>(startId: string, nodes: readon
 }
 
 /**
+ * The names from the root down to `collectionId`, its own included: the parts
+ * of a breadcrumb, for a caller that joins them itself or hands them on as a
+ * list (the Copy path menu item, the agent reference lines). `[]` when the id is
+ * not loaded. Built on `walkAncestors`, so it carries the cycle guard.
+ */
+export function collectionNamePath(
+	collectionId: string,
+	collections: readonly (TreeNode & { name: string })[]
+): string[] {
+	return walkAncestors(collectionId, collections).map((collection) => collection.name);
+}
+
+/**
  * "Payments / Auth" for a nested collection: the names from the root down, the
  * start node's own included. A root yields just its name, an unloaded id "".
  *

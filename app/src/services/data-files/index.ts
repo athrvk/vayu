@@ -354,5 +354,10 @@ export { decodeDataFile, type DecodedDataFile } from "./decode";
 export { sha256Hex } from "./hash";
 export { describeRowCapRefusal } from "./row-cap";
 export { dataCellText } from "./cell-text";
-export { diffDataSchema, describeDataSchemaDiff, type DataSchemaDiff } from "./schema-diff";
+export {
+	diffDataSchema,
+	describeDataSchemaDiff,
+	describeUnboundReferences,
+	type DataSchemaDiff,
+} from "./schema-diff";
 export { auditDataColumns, type AuditableRequest, type ColumnAudit } from "./column-audit";

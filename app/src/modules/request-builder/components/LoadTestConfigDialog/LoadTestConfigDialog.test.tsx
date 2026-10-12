@@ -15,7 +15,7 @@
  * payload contains, and that the profile picker is one keyboard control.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
 	render as renderBare,
 	screen,
@@ -72,11 +72,39 @@ vi.mock("@/queries", () => ({
 	// the collection chain (issue #993); with no collections there is nothing to
 	// audit against, which is what every case here wants except the one that
 	// declares its own.
-	useCollectionsQuery: () => ({ data: collectionRows }),
+	// `elements` filled in because every stored row carries the list, and the
+	// requests' audit (issue #2050) scans the chain's scripts out of it.
+	useCollectionsQuery: () => ({
+		data: collectionRows.map((row) => ({ elements: [], ...row })),
+	}),
+	// The audit of the one request being load-tested names it explicitly, so
+	// nothing is fetched; the hook is still called.
+	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 	useRequestDefaultsQuery: (scope: "design" | "load" = "design") => ({
 		data: { headers: scope === "load" ? loadHeaders : designHeaders },
 	}),
 }));
+
+/**
+ * The contract write a pick or a Remove makes (issue #2050). Mutable, so a case
+ * can make it fail.
+ */
+const updateCollection = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+vi.mock("@/queries/collections", () => ({
+	useUpdateCollectionMutation: () => updateCollection,
+}));
+
+/** Land the last contract write the way TanStack would, running its onSuccess. */
+function succeedContractWrite() {
+	const calls = updateCollection.mutate.mock.calls;
+	const [, options] = calls[calls.length - 1];
+	act(() => options?.onSuccess?.({}));
+}
 
 /** Collections the contract walk sees. Mutable, like `configEntries` above. */
 let collectionRows: {
@@ -151,6 +179,10 @@ beforeEach(() => {
 	collectionRows = [];
 	designHeaders = [];
 	loadHeaders = [];
+	updateCollection.mutate.mockReset();
+	updateCollection.isPending = false;
+	updateCollection.isError = false;
+	updateCollection.error = null;
 	// The ceilings store is module-level and persists across tests in this
 	// file; clearing localStorage does not roll it back.
 	useClientSettingsStore.getState().setLoadTestCeilings(DEFAULT_LOAD_TEST_CEILINGS);
@@ -382,6 +414,10 @@ describe("the declared file pre-fills (issue #1039)", () => {
 		// And it is a real selection, not just a label: the rows reach the run.
 		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		expect(onStart.mock.calls[0][0].data).toEqual([{ id: "a" }]);
+		// A read of what was declared, not a pick: opening the dialog writes
+		// nothing (issue #2050). Mutation check: declare from the pre-fill and
+		// this reds.
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
 	});
 
 	it("shows a note and leaves Start working when the file has moved", async () => {
@@ -1192,5 +1228,153 @@ describe("a saved config missing a field a newer build added", () => {
 		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
 		expect(screen.getByLabelText(/p99 latency at most/i)).toHaveValue(500);
 		expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(2);
+	});
+});
+
+/*
+ * A pick in this dialog declares the contract from the picked file (issue
+ * #2050), the same rule as the Run collection dialog and the Data tab: for the
+ * collection whose contract the request binds against, Remove clearing it, a
+ * refused file touching nothing and the pre-fill writing nothing.
+ */
+describe("a pick declares the contract (issue #2050)", () => {
+	const pick = async (name: string, text: string) => {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([text], name)] } });
+		await screen.findByText(name);
+	};
+
+	/** The request being load-tested, binding `{{data.<column>}}` in its URL. */
+	const requestBinding = (column: string) => ({
+		url: `https://api.test/users/{{data.${column}}}`,
+		params: [],
+		headers: [],
+		body: { mode: "none" as const },
+		elements: [],
+		auth: { mode: "none" as const },
+	});
+
+	beforeEach(() => {
+		useDataFileStore.setState({ locations: {} });
+		readDeclared.mockReset();
+		bridgePresent = true;
+		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/u/plans.csv" });
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("picking a file declares its columns for the request's collection", async () => {
+		open({ collectionId: "col_1" });
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: drop `writer.declare(next)` from the handler and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			{
+				id: "col_1",
+				dataSchema: {
+					columns: ["plan", "price"],
+					fileName: "plans.csv",
+					declaredAt: expect.any(Number),
+				},
+			},
+			expect.anything()
+		);
+		succeedContractWrite();
+		expect(useDataFileStore.getState().locations.col_1?.path).toBe("/home/u/plans.csv");
+	});
+
+	it("declares for the ancestor that holds the contract", async () => {
+		collectionRows = [
+			{ id: "col_p", name: "Orders", dataSchema: { columns: ["id"] } },
+			{ id: "col_1", name: "Checkout", parentId: "col_p" },
+		];
+		open({ collectionId: "col_1" });
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: declare against the `collectionId` prop instead of
+		// `declaringCollectionId` and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "col_p" }),
+			expect.anything()
+		);
+	});
+
+	it("Remove clears the contract, forgets the path and sends no rows", async () => {
+		collectionRows = [
+			{ id: "col_1", name: "Orders", dataSchema: { columns: ["id", "email"] } },
+		];
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/data/users.csv", fileName: "users.csv" } },
+		});
+		readDeclared.mockResolvedValue(declared("users.csv", [{ id: "1", email: "ada@test" }]));
+		const { onStart } = open({ collectionId: "col_1" });
+		await screen.findByText(/users\.csv/);
+
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+		// Mutation check: drop `onRemove={writer.clear}` and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			{ id: "col_1", dataSchema: null },
+			expect.anything()
+		);
+		succeedContractWrite();
+		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(started(onStart)).not.toHaveProperty("data");
+	});
+
+	it("a refused file leaves the contract alone", async () => {
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id", "name"] } }];
+		open({ collectionId: "col_1" });
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File(["id,name\na"], "ragged.csv")] } });
+		await screen.findByText(/couldn.t read the data file/i);
+
+		// The refusal reaches `onSelect(null)`, as Remove does, with a contract in
+		// scope to clear. Mutation check: call `onRemove` from the picker's
+		// `refuse()` and this reds.
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+	});
+
+	it("names the columns the request references that the file lacks", async () => {
+		const { onStart } = open({ collectionId: "col_1", request: requestBinding("email") });
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: drop the audit from `additionalWarnings` and this reds.
+		expect(
+			screen.getByText(
+				"The requests reference 1 column this file does not carry: email. Every iteration that binds it fails before anything is sent."
+			)
+		).toBeInTheDocument();
+		// A warning, never a blocker.
+		expect(started(onStart).data).toEqual([{ plan: "free", price: "0" }]);
+	});
+
+	it("a declare that fails does not block Start", async () => {
+		updateCollection.mutate.mockImplementation(() => {
+			updateCollection.isError = true;
+			updateCollection.error = new Error("The engine is not running.");
+		});
+		const { onStart } = open({ collectionId: "col_1" });
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		expect(screen.getByText(/couldn't update the data contract/i)).toBeInTheDocument();
+		expect(screen.getByText(/the engine is not running/i)).toBeInTheDocument();
+		// Mutation check: gate Start on `writer.isPending || writer.isError` and
+		// this reds.
+		expect(started(onStart).data).toEqual([{ plan: "free", price: "0" }]);
+	});
+
+	it("a request in no collection declares nothing", async () => {
+		const { onStart } = open({ request: requestBinding("email") });
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: drop the writer's no-collection guard and the update is
+		// sent with an empty id; this reds.
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+		expect(started(onStart).data).toEqual([{ plan: "free", price: "0" }]);
+		// The audit still runs: a request in no collection binds rows all the same.
+		expect(screen.getByText(/requests reference 1 column/i)).toBeInTheDocument();
 	});
 });

@@ -20,7 +20,8 @@
 import { Folder, Zap, Braces, Clock, Settings, Inbox, Radio } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
-import { walkAncestors } from "@/modules/collections/tree-utils";
+import { collectionNamePath } from "@/modules/collections/tree-utils";
+import { pathLabel } from "@/lib/path-label";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
@@ -28,28 +29,23 @@ import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { dataFileFromSnapshot } from "@/lib/run-data-file";
 
 /**
- * Extract a short display path from a request URL. URLs may contain
- * {{variables}} or be malformed mid-edit, so this never throws.
- */
-export function pathLabel(url: string): string {
-	if (!url) return "";
-	try {
-		return decodeURIComponent(new URL(url).pathname) || "/";
-	} catch {
-		// Strip scheme+host if present, otherwise show the raw string
-		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
-		return decodeURIComponent(stripped) || decodeURIComponent(url);
-	}
-}
-
-/**
  * Title for a request tab: the user-set name when there is one, otherwise the
  * request path. A blank or still-default placeholder name counts as "not set".
  */
 export function requestTabTitle(name: string, resolvedUrl: string): string {
 	const trimmed = name.trim();
-	if (trimmed && trimmed !== DEFAULT_REQUEST_NAME) return trimmed;
+	if (hasOwnName(name)) return trimmed;
 	return pathLabel(resolvedUrl) || trimmed;
+}
+
+/**
+ * Whether a request carries a name the user set. The one rule for when a tab
+ * is titled by the request's own name and when it falls back to its URL, so
+ * `fromUrl` below cannot disagree with the title it describes.
+ */
+export function hasOwnName(name: string): boolean {
+	const trimmed = name.trim();
+	return trimmed !== "" && trimmed !== DEFAULT_REQUEST_NAME;
 }
 
 /**
@@ -69,6 +65,14 @@ export interface TabDescriptor {
 	icon?: typeof Folder;
 	/** True when the label is a URL path, which is cut from the left instead. */
 	isPath?: boolean;
+	/**
+	 * True when the label was taken from a URL. Provenance, not shape: `isPath`
+	 * is a display hint (a request the user named "/orders" has it), and a URL
+	 * that does not parse is shown as written without a leading slash. A URL
+	 * here is resolved - a secret variable's value is in it - so a surface that
+	 * leaves the window (the MCP focus mirror) must not repeat such a label.
+	 */
+	fromUrl?: boolean;
 	/**
 	 * Where the request lives, as the breadcrumb reads it: its collection chain
 	 * and then its own name. Request tabs only, and absent until the request has
@@ -231,12 +235,10 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					// A request with no name of its own falls back to its path, so
 					// path labels are not confined to run tabs.
 					isPath: name.startsWith("/"),
-					// `walkAncestors` returns the chain root-first and carries the
-					// cycle guard a hand-rolled parent walk would not.
-					path: [
-						...walkAncestors(request.collectionId, collections).map((c) => c.name),
-						name,
-					].join(" / "),
+					fromUrl: !hasOwnName(request.name),
+					path: [...collectionNamePath(request.collectionId, collections), name].join(
+						" / "
+					),
 				};
 			}
 			case "run": {
@@ -272,6 +274,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 						...(snapshot?.method ? { method: snapshot.method } : {}),
 						icon,
 						isPath: Boolean(path),
+						fromUrl: Boolean(path),
 					};
 				}
 				// Still loading, or a run with no snapshot to name it by.

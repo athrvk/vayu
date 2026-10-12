@@ -62,7 +62,7 @@
  * arrival-rate executor, which Vayu does not implement - so it is not offered.
  */
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -85,12 +85,14 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { Callout, NumberField } from "@/components/shared";
-import { useStartScenarioRunMutation } from "@/queries";
+import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
 import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
-import { describeDataSchemaDiff } from "@/services/data-files";
+import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import { runDataFileName } from "@/lib/run-data-file";
+import { useDataContractWriter } from "@/hooks/useDataContractWriter";
+import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
 import {
 	BUDGET_FIELDS,
@@ -106,6 +108,7 @@ import {
 	CustomBudgetRows,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/CustomBudgetRows";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
+import { collectSubtreeIds } from "./tree-utils";
 
 export interface RunCollectionDialogProps {
 	/**
@@ -152,6 +155,8 @@ const DEFAULT_DURATION_SECONDS = "30";
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
+
+const NO_COLUMNS: string[] = [];
 
 export default function RunCollectionDialog({
 	collection,
@@ -218,8 +223,8 @@ export default function RunCollectionDialog({
 	 * time: running a sub-collection under a declaring parent binds the parent's
 	 * rows, so the file to pre-fill and the columns to diff against are the
 	 * parent's too. Keyed the way `useSendWithRow` keys its own read - by the
-	 * collection that *declared* the contract, since that is whose Data tab the
-	 * file was picked in - and falling back to this collection's own id, which
+	 * collection that *declared* the contract, since that is the collection a
+	 * pick declares for - and falling back to this collection's own id, which
 	 * is what the store holds when no contract is in scope at all.
 	 *
 	 * ...and the file that contract was last run with, pre-filled (issue #599;
@@ -243,6 +248,7 @@ export default function RunCollectionDialog({
 		note: prefillNote,
 		contract,
 		dismissNote,
+		declaringCollectionId,
 	} = useDeclaredDataFile(collection.id, {
 		collection,
 		// Same rule as a hand-picked file: a pristine `1` becomes "one pass per
@@ -255,6 +261,22 @@ export default function RunCollectionDialog({
 			}
 		},
 	});
+
+	const writer = useDataContractWriter(declaringCollectionId);
+
+	/*
+	 * The requests this run sends: the collection's own, and with Recursive every
+	 * descendant's - including one that declares a contract of its own, because
+	 * a run binds one data set to every step it sends whatever each folder
+	 * declares. Which is why this is not `collectionsUnderContract`.
+	 */
+	const { data: collections = [] } = useCollectionsQuery();
+	const auditedCollectionIds = useMemo(
+		() => (recursive ? collectSubtreeIds(collection.id, collections) : [collection.id]),
+		[recursive, collection.id, collections]
+	);
+	const fileColumns = dataFile?.parsed.columns ?? NO_COLUMNS;
+	const { audit } = useColumnAudit(auditedCollectionIds, fileColumns);
 
 	/*
 	 * Empty is a meaningful value only with a data file: it means "one pass per
@@ -288,27 +310,45 @@ export default function RunCollectionDialog({
 		: iterationsValid && !dataFileError && !budgetsError;
 
 	/*
-	 * The chosen file against the contract the collection declares (issue #599).
-	 * A mismatch is a warning and never blocks: a missing column fails loudly
-	 * engine-side at bind time, and a file that carries extra columns is simply
-	 * a file with extra columns. What it buys is hearing about it here rather
-	 * than at iteration 1.
+	 * The chosen file against the contract in scope (issue #599), and against
+	 * the requests this run sends (issue #2050). Warnings, never blockers: a
+	 * column a request references and the file lacks fails loudly engine-side
+	 * at bind time, and a file that carries extra columns is simply a file with
+	 * extra columns. What they buy is hearing about it here rather than at
+	 * iteration 1. The contract diff is for a pre-filled file that drifted on
+	 * disk; once a pick's declare lands it is empty by construction, and the
+	 * requests are what is left to compare against.
 	 */
-	const schemaDiff = dataFile
-		? describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns)
+	const fileWarnings = dataFile
+		? [
+				...describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns),
+				...describeUnboundReferences(audit.undeclared),
+			]
 		: [];
 
 	/*
-	 * Picking a file clears the *pristine* `1`, so the field shows what the run
-	 * will do (one pass per row) instead of quietly contradicting the preview
+	 * A pick declares the contract from the picked file (issue #2050), for the
+	 * collection whose contract this run binds against; Remove clears it, through
+	 * the picker's `onRemove` below, since a file the picker refuses also arrives
+	 * here as `null` and must leave the contract alone. The pre-fill never comes
+	 * through here, so reopening the dialog writes nothing. A declare that fails
+	 * does not touch the selection: the run still sends the previewed rows, and
+	 * picking again is the retry.
+	 *
+	 * Picking a file also clears the *pristine* `1`, so the field shows what the
+	 * run will do (one pass per row) instead of quietly contradicting the preview
 	 * above it. A count the user typed is theirs and is left alone - including a
 	 * typed `1`, which is why this reads the touched flag and not the value.
 	 */
 	const handleSelectDataFile = (next: SelectedDataFile | null) => {
 		setDataFile(next);
-		// A file the user picks by hand replaces whatever was pre-filled, so the
-		// note about a file that could not be re-read has nothing left to say.
-		if (next) dismissNote();
+		if (next) {
+			// A file the user picks by hand replaces whatever was pre-filled, so
+			// the note about a file that could not be re-read has nothing left to
+			// say.
+			dismissNote();
+			writer.declare(next);
+		}
 		if (next && !iterationsTouched.current && iterations === "1") setIterations("");
 		if (!next && iterationsBlank) setIterations("1");
 	};
@@ -766,14 +806,26 @@ export default function RunCollectionDialog({
 						</Callout>
 					)}
 
+					{writer.isError && (
+						<Callout severity="warning" title="Couldn't update the data contract">
+							{writer.error?.message ?? "The engine did not accept the change."}
+							<span className="block">
+								The run is unaffected. Pick the file again to retry.
+							</span>
+						</Callout>
+					)}
+
 					<DataFilePicker
 						selected={dataFile}
 						onSelect={handleSelectDataFile}
+						// Only with a contract to clear: Remove on a collection that
+						// declares nothing has nothing to write.
+						onRemove={contract ? writer.clear : undefined}
 						error={dataFileError}
 						onError={setDataFileError}
 						iterations={explicitIterations}
 						loadTest={loadTest}
-						additionalWarnings={schemaDiff}
+						additionalWarnings={fileWarnings}
 						disabled={startRun.isPending}
 					/>
 

@@ -268,6 +268,18 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await server.close();
 	});
 
+	it("states the reference-line grammar and the two discovery rules in every session", async () => {
+		const sessions = [{}, { allowWrites: true, revealSecretsToAgents: true }];
+		for (const safety of sessions) {
+			const { client, server } = await connectClient({ safety });
+			const instructions = client.getInstructions() ?? "";
+			expect(instructions).toContain('Vayu <kind> "<name>" (<id>)');
+			expect(instructions).toMatch(/ask the user for a reference line/);
+			expect(instructions).toMatch(/first row of the run list, which is newest first/);
+			await server.close();
+		}
+	});
+
 	it("does not name individual tools in the server instructions", async () => {
 		const { client, server } = await connectClient();
 		const instructions = client.getInstructions() ?? "";

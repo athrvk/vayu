@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { hashDataFile, readDataFile } from "./data-file.js";
+import { AppFocusStore } from "./app-focus.js";
 import { DataFileLocations } from "./data-file-locations.js";
 import { readSpecFile } from "./spec-file.js";
 import {
@@ -199,6 +200,8 @@ let mcpService: VayuMcpService | null = null;
  * MCP service is built lazily and a renderer reload re-publishes into it.
  */
 const dataFileLocations = new DataFileLocations();
+/** The tab and environment the renderer has open, published over `app:focus` (#2045). */
+const appFocus = new AppFocusStore();
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -988,6 +991,7 @@ async function startMcp() {
 					onDataChanged: sendMcpDataChanged,
 					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
 					currentDataFileHash: (filePath) => hashDataFile(filePath),
+					appFocus: () => appFocus.get(),
 					log: mcpLogger(),
 				});
 				mcpService = service;
@@ -1425,6 +1429,12 @@ function setupIpcHandlers() {
 	// trusted - see data-file-locations.ts.
 	ipcMain.on("dataFile:locations", (_event, locations: unknown) => {
 		dataFileLocations.replace(locations);
+	});
+
+	// The tab and environment the user has open, on launch and on every change
+	// (#2045). Only MCP reads it; rebuilt, not trusted - see app-focus.ts.
+	ipcMain.on("app:focus", (_event, focus: unknown) => {
+		appFocus.replace(focus);
 	});
 
 	// Read a file an imported OpenAPI document references (issue #649). The

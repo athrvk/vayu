@@ -16,6 +16,7 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { EngineClient } from "../engine-client.js";
 import type { McpSafetyConfig } from "../config.js";
 import type { Logger } from "../../log.js";
+import type { AppFocus } from "../../app-focus.js";
 import type { DataFileLocation } from "../../data-file-locations.js";
 
 // --- Elicitation -------------------------------------------------------------
@@ -200,6 +201,11 @@ export interface ToolContext {
 	 * `dataFileLocation`, so a listed `dataFile.hash` falls back to the stored one.
 	 */
 	currentDataFileHash?: (filePath: string) => Promise<string>;
+	/**
+	 * Which tab and environment the app window has open (#2045). Absent in the
+	 * stdio CLI, which has no window, and undefined until a window has published.
+	 */
+	appFocus?: () => AppFocus | undefined;
 	/**
 	 * The `clientInfo.name` the connected client gave in its `initialize`
 	 * handshake, stamped on every run this server starts (#1817). A function

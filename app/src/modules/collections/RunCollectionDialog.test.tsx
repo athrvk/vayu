@@ -18,11 +18,11 @@
  * run, or the user watches a run they cannot see.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
-import type { Collection } from "@/types";
+import type { Collection, Request } from "@/types";
 
 const mutate = vi.fn();
 const startRunState = {
@@ -47,12 +47,40 @@ const configEntries: { key: string; value: string }[] = [];
  */
 const collections: Collection[] = [];
 
+/**
+ * The stored requests per collection, for the audit of which columns they
+ * reference that a picked file lacks (issue #2050). Empty by default.
+ */
+const requestsByCollection = new Map<string, Request[]>();
+
 vi.mock("@/queries", () => ({
 	useStartScenarioRunMutation: () => startRunState,
 	// The picker and the pre-fill both read the caps through `useDataFileLimits`.
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
 	useCollectionsQuery: () => ({ data: collections }),
+	useMultipleCollectionRequests: () => ({ requestsByCollection, isLoading: false }),
 }));
+
+/**
+ * The contract write a pick or a Remove makes (issue #2050) - the collection
+ * update, not the start-run `mutate` above. Mutable, so a case can make it fail.
+ */
+const updateCollection = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+vi.mock("@/queries/collections", () => ({
+	useUpdateCollectionMutation: () => updateCollection,
+}));
+
+/** Land the last contract write the way TanStack would, running its onSuccess. */
+function succeedContractWrite() {
+	const calls = updateCollection.mutate.mock.calls;
+	const [, options] = calls[calls.length - 1];
+	act(() => options?.onSuccess?.({}));
+}
 
 const startMonitoring = vi.fn();
 const startLoadMonitoring = vi.fn();
@@ -77,7 +105,12 @@ function succeedWith(runId: string) {
 beforeEach(() => {
 	configEntries.length = 0;
 	collections.length = 0;
+	requestsByCollection.clear();
 	mutate.mockClear();
+	updateCollection.mutate.mockReset();
+	updateCollection.isPending = false;
+	updateCollection.isError = false;
+	updateCollection.error = null;
 	startMonitoring.mockClear();
 	startLoadMonitoring.mockClear();
 	startRunState.isPending = false;
@@ -812,6 +845,9 @@ describe("pre-filling from the declared data file", () => {
 			{ user: "grace", id: "2" },
 		]);
 		expect(useDataFileStore.getState().locations.col_1?.hash).toBe("a".repeat(64));
+		// A read of what was declared, not a pick: reopening the dialog writes
+		// nothing (issue #2050).
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
 	});
 
 	it("warns when the pre-filled file does not match the declared columns", async () => {
@@ -1014,5 +1050,191 @@ describe("pre-filling from the declared data file", () => {
 
 		expect(read).not.toHaveBeenCalled();
 		expect(screen.getByText(/choose file/i)).toBeTruthy();
+	});
+});
+
+/*
+ * A pick in this dialog declares the contract from the picked file (issue
+ * #2050), the way the Data tab does: for the collection whose contract the run
+ * binds against, with Remove clearing it, a refused file touching nothing and
+ * the pre-fill (above) writing nothing.
+ */
+describe("a pick declares the contract", () => {
+	async function pickFile(name: string, text: string) {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([text], name)] } });
+		await waitFor(() => expect(screen.queryByText(name)).toBeTruthy());
+	}
+
+	const withContract = (columns: string[]) =>
+		({ ...COLLECTION, dataSchema: { columns } }) as unknown as Collection;
+
+	/** A stored request of `collectionId` whose URL binds `{{data.<column>}}`. */
+	const requestBinding = (collectionId: string, column: string) =>
+		({
+			id: `req_${collectionId}`,
+			collectionId,
+			url: `https://api.test/users/{{data.${column}}}`,
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			elements: [],
+			auth: { mode: "none" },
+		}) as unknown as Request;
+
+	beforeEach(() => {
+		useDataFileStore.setState({ locations: {} });
+		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/u/plans.csv" });
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("picking a file declares its columns for the collection", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: drop `writer.declare(next)` from the handler and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			{
+				id: "col_1",
+				dataSchema: {
+					columns: ["plan", "price"],
+					fileName: "plans.csv",
+					declaredAt: expect.any(Number),
+				},
+			},
+			expect.anything()
+		);
+		succeedContractWrite();
+		expect(useDataFileStore.getState().locations.col_1?.path).toBe("/home/u/plans.csv");
+	});
+
+	it("declares for the ancestor that holds the contract", async () => {
+		collections.push({
+			id: "col_p",
+			name: "Parent",
+			parentId: null,
+			dataSchema: { columns: ["id"] },
+		} as unknown as Collection);
+		const child = { ...COLLECTION, parentId: "col_p" } as Collection;
+
+		render(<RunCollectionDialog collection={child} onOpenChange={vi.fn()} />);
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: declare against `collection.id` instead of
+		// `declaringCollectionId` and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "col_p" }),
+			expect.anything()
+		);
+	});
+
+	it("Remove clears the contract, forgets the path and puts Iterations back to 1", async () => {
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/home/u/users.csv", fileName: "users.csv" } },
+		});
+		vi.stubGlobal("electronAPI", {
+			getFilePath: () => "",
+			readDataFile: async () => ({
+				bytes: new TextEncoder().encode("id,email\n1,ada@test"),
+				fileName: "users.csv",
+			}),
+		});
+		render(
+			<RunCollectionDialog
+				collection={withContract(["id", "email"])}
+				onOpenChange={vi.fn()}
+			/>
+		);
+		await waitFor(() => expect(screen.getByText("users.csv")).toBeTruthy());
+
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+		// Mutation check: drop `onRemove={writer.clear}` and this reds.
+		expect(updateCollection.mutate).toHaveBeenCalledWith(
+			{ id: "col_1", dataSchema: null },
+			expect.anything()
+		);
+		succeedContractWrite();
+		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty(
+			"value",
+			"1"
+		);
+	});
+
+	it("a refused file leaves the contract alone", async () => {
+		render(
+			<RunCollectionDialog collection={withContract(["user", "id"])} onOpenChange={vi.fn()} />
+		);
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [new File(["user,id\nada"], "ragged.csv")] },
+		});
+		await waitFor(() => expect(screen.getByText(/Row 1 has 1 value/i)).toBeTruthy());
+
+		// The refusal reaches `onSelect(null)`, as Remove does, with a contract in
+		// scope to clear. Mutation check: call `onRemove` from the picker's
+		// `refuse()` and this reds.
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+	});
+
+	it("names the columns the requests reference that the file lacks", async () => {
+		requestsByCollection.set("col_1", [requestBinding("col_1", "email")]);
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		// Mutation check: drop the audit from `additionalWarnings` and this reds.
+		expect(
+			screen.getByText(
+				"The requests reference 1 column this file does not carry: email. Every iteration that binds it fails before anything is sent."
+			)
+		).toBeTruthy();
+		// A warning, never a blocker.
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
+	});
+
+	it("audits every nested collection under Recursive, one with its own contract included", async () => {
+		// A run binds one data set to every step it sends, whatever a folder
+		// declares - so the audit is the run's subtree, not `collectionsUnderContract`.
+		collections.push({
+			id: "col_child",
+			name: "Child",
+			parentId: "col_1",
+			elements: [],
+			dataSchema: { columns: ["sku"] },
+		} as unknown as Collection);
+		requestsByCollection.set("col_child", [requestBinding("col_child", "email")]);
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		// Not run, so not audited.
+		expect(screen.queryByText(/requests reference/i)).toBeNull();
+
+		// Mutation check: audit `collectionsUnderContract` (or the collection
+		// alone) and this reds.
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
+		expect(
+			screen.getByText(/requests reference 1 column this file does not carry: email/i)
+		).toBeTruthy();
+	});
+
+	it("a declare that fails does not block Run", async () => {
+		updateCollection.mutate.mockImplementation(() => {
+			updateCollection.isError = true;
+			updateCollection.error = new Error("The engine is not running.");
+		});
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		expect(screen.getByText(/couldn't update the data contract/i)).toBeTruthy();
+		expect(screen.getByText(/the engine is not running/i)).toBeTruthy();
+
+		// Mutation check: gate `canRun` on `writer.isPending || writer.isError` and
+		// this reds.
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ plan: "free", price: "0" }]);
 	});
 });

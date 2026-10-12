@@ -335,6 +335,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	publishDataFileLocations: (locations: unknown): void =>
 		ipcRenderer.send("dataFile:locations", locations),
 
+	// Which tab and environment the user has open, published whole on launch and
+	// on each change so the MCP server can answer "the request I have open"
+	// (#2045). One-way; the main process rebuilds the payload (app-focus.ts).
+	publishAppFocus: (focus: unknown): void => ipcRenderer.send("app:focus", focus),
+
 	// Read a file an imported OpenAPI document references (issue #649). Two
 	// arguments and not a composed path: the renderer holds the picked
 	// document's path and the ref's text, and the main process resolves one
