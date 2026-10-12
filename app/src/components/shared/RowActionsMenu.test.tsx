@@ -24,14 +24,14 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { Copy, Trash2 } from "lucide-react";
+import { CopyPlus, Trash2 } from "lucide-react";
 import { RowActionsMenu } from "./RowActionsMenu";
 
 const duplicate = vi.fn();
 const remove = vi.fn();
 
 const actions = [
-	{ label: "Duplicate", icon: Copy, onSelect: duplicate },
+	{ label: "Duplicate", icon: CopyPlus, onSelect: duplicate },
 	{ label: "Delete", icon: Trash2, onSelect: remove, destructive: true },
 ];
 
