@@ -151,7 +151,9 @@ HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to 
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
-holds that record. See [Data files](#data-files).
+holds that record. See [Data files](#data-files). `get_app_focus` is the same
+shape: the open tab and environment are renderer state, so it answers an error
+saying the window is not connected on stdio.
 
 ### How History names the client
 
@@ -882,6 +884,48 @@ Notes:
   tool says the call may still have completed and points at `list_runs`; it is
   never reported as an unreachable engine, because a retry could re-send a
   request that already went out.
+
+### Naming what the user means
+
+A user points an agent at an entity with a **reference line**, the text the app's
+*Copy for agent* puts on the clipboard:
+
+```
+Vayu <kind> "<name>" (<id>)
+```
+
+`<name>` is what the app calls the entity, for a person to recognise; the `<id>`
+in parentheses is the key every tool takes (`requestId`, `collectionId`,
+`runId`, `inboxId`, `mockId`). Look up the id, never the name: names repeat.
+
+```
+Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
+Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
+Vayu run "Design run" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8)
+Vayu inbox "Stripe webhooks" (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
+Vayu mock server "Orders mock" (mock_1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d)
+```
+
+Two rules for the cases where the user did not paste one:
+
+- **The request the user means:** ask the user for a Vayu reference line, or call
+  `get_app_focus`. It reports the tab and environment open in the app window
+  right now - `activeTab` (`type`, `entityId`, `label`), `run` (`{ runId }`,
+  set only when the open tab is a run) and `activeEnvironment` (`id`, `name`) -
+  and nothing else: no variable value, header or credential. Read the entity
+  itself with its own tool (`get_request` for a request).
+- **The latest run:** `list_runs` is newest-first, so it is the first row.
+
+`get_app_focus` is served from the renderer's last report and answers an error
+saying the Vayu window is not connected where there is none: the stdio CLI, and
+the app before its window has published. A tab's `label` is a saved name or a
+kind word (`Request`, `Run`), never text derived from a URL, because an unnamed
+request and a design or load run are titled by their resolved URL path in the app
+and that path can hold a secret variable's value.
+
+The server instructions carry the grammar and both rules in every session, without
+tool names (the instructions never name a tool; each tool's description is its one
+contract).
 
 ### Request composition
 
@@ -1624,7 +1668,8 @@ configurable in **Settings → MCP** and persisted.
   setting to turn on; the SDK would otherwise reject the unregistered name with
   `Tool <name> not found`, which tells an agent nothing it can act on. The
   server instructions say the same thing up front, in the sessions where the
-  toggle is off. Withholding the schema rather than only the call is what makes
+  toggle is off. (The reference-line grammar and the two discovery rules are
+  stated in every session; see [Naming what the user means](#naming-what-the-user-means).) Withholding the schema rather than only the call is what makes
   the toggle free: those tools are ~40% of the tool payload
   an agent is sent, and on a default install none of them could have succeeded.
   Write access is a separate grant from reveal: a script stored by a write tool
@@ -1944,11 +1989,12 @@ One channel runs the other way, main → renderer:
 | ------------------ | ------------------------------------------------------------- |
 | `mcp:data-changed` | A successful call changed engine data; invalidate its queries. |
 
-And one runs renderer → main for MCP's sake:
+And two run renderer → main for MCP's sake:
 
 | Channel              | Purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
 | `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
+| `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the
 main process, which no renderer query can observe (`refetchOnWindowFocus` is off

@@ -91,6 +91,11 @@ const RESOURCE_URIS = [...STATIC_RESOURCES.map((r) => r.uri), RUN_REPORT_RESOURC
 
 const INSTRUCTIONS_TAIL =
 	"`tools/list` is authoritative for what this session actually has. " +
+	"A user names an entity with a Vayu reference line, " +
+	'`Vayu <kind> "<name>" (<id>)`, and the id in parentheses is the one to look up. ' +
+	'For "the request I mean", ask the user for a reference line (the app\'s Copy for ' +
+	"agent) or read the app's current focus; the latest run is the first row of the " +
+	"run list, which is newest first. " +
 	`Vayu data is also available as resources (${RESOURCE_URIS.slice(0, -1).join(", ")}, ` +
 	`and ${RESOURCE_URIS[RESOURCE_URIS.length - 1]}) to attach as ` +
 	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +

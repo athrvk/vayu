@@ -81,6 +81,11 @@ real values; the engine fills them in. Clearing a variable's secret flag, the
 one write that would hand the value back on the next read, is refused while
 reveal is off.
 
+An agent can also ask which tab and environment you have open (`get_app_focus`).
+The answer is names and ids only - a tab's type, id and saved name, and the
+environment's id and name - never a variable value, and never text derived from a
+URL, which could hold one.
+
 While reveal is off, an agent also cannot send a script of its own with
 `run_request` or `start_load_run` (a pre-request, post-request or `tests`
 script, or a script element): a script reads every variable, secret ones
