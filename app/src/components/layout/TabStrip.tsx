@@ -46,7 +46,14 @@ import { useTabsStore } from "@/stores";
 import { TAB_NEW_BUTTON_WIDTH } from "@/constants/layout";
 // The hint an empty strip shows names a chord, so it reads the one definition
 // of it rather than spelling a modifier that is wrong on half the platforms.
-import { NEW_REQUEST_CHORD } from "@/constants/shortcuts";
+import {
+	MOVE_TAB_END_CHORD,
+	MOVE_TAB_LEFT_CHORD,
+	MOVE_TAB_RIGHT_CHORD,
+	MOVE_TAB_START_CHORD,
+	NEW_REQUEST_CHORD,
+	matchesChord,
+} from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
 import {
 	DropdownMenu,
@@ -63,6 +70,32 @@ import { getMethodColor } from "@/lib/method-display";
 // One tab, in its own module so a test can `vi.mock` it (#1714).
 import TabItem from "./TabItem";
 import { useRovingStop } from "./useRovingStop";
+import { moveTabAndFocus } from "./tab-focus";
+
+/**
+ * Which place the Alt chord sends the focused tab to, or `null` when the event
+ * is not one of the four move chords.
+ *
+ * The index is the tab's place in the *store's* `openTabs`, not among the
+ * rendered tabs: the strip draws only those that fit, and a move is a statement
+ * about the whole list. Past an end the target is out of range and `moveTab`
+ * clamps it.
+ */
+function focusedTabMove(
+	e: React.KeyboardEvent,
+	tabId: string | undefined
+): { tabId: string; toIndex: number } | null {
+	if (!tabId) return null;
+	const { openTabs } = useTabsStore.getState();
+	const from = openTabs.findIndex((t) => t.id === tabId);
+	if (from === -1) return null;
+
+	if (matchesChord(e, MOVE_TAB_LEFT_CHORD)) return { tabId, toIndex: from - 1 };
+	if (matchesChord(e, MOVE_TAB_RIGHT_CHORD)) return { tabId, toIndex: from + 1 };
+	if (matchesChord(e, MOVE_TAB_START_CHORD)) return { tabId, toIndex: 0 };
+	if (matchesChord(e, MOVE_TAB_END_CHORD)) return { tabId, toIndex: openTabs.length - 1 };
+	return null;
+}
 
 export function TabStrip() {
 	const openTabs = useTabsStore((s) => s.openTabs);
@@ -121,6 +154,10 @@ export function TabStrip() {
 	 * would fire a mount for every tab you skate past. The Tab stop moves with
 	 * the focus, as state: a DOM write would leave the tabs' `tabIndex` props
 	 * disagreeing with the page.
+	 *
+	 * Alt+Arrow / Home / End move the focused tab instead (`focusedTabMove`), and
+	 * stop the event here: off macOS Alt+←/→ is also Go back, which `Shell` would
+	 * otherwise take from the window.
 	 */
 	const onKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -134,6 +171,18 @@ export function TabStrip() {
 
 			const current = tabs.findIndex((el) => el === document.activeElement);
 			if (current === -1) return;
+
+			const move = e.altKey ? focusedTabMove(e, tabs[current].dataset.tabId) : null;
+			if (move) {
+				// Taken here so `Shell`'s window listener, which reads the same Alt+Arrow
+				// as Go back off macOS, never sees it. At an end the move is a no-op and
+				// the key is still ours.
+				e.preventDefault();
+				e.stopPropagation();
+				moveTabAndFocus(move.tabId, move.toIndex);
+				setRovingId(move.tabId);
+				return;
+			}
 
 			let next = current;
 			if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;

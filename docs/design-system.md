@@ -2259,6 +2259,9 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   Up/Down among its siblings, Right into the folder rendered above it, Left out
   to after its parent. Alt because the tree owns the bare arrows and the app owns
   Ctrl/Cmd; every move is announced in the live region below.
+  The tab strip answers the same chord on a focused tab (Alt+Arrow one place,
+  Alt+Home/End to an end), and like the tree stops the event so it never reaches
+  the window's Go back.
 - **The row menu carries the same moves with no chord at all**: **Move up**,
   **Move down** and **"Move to..."** (issue #1690). A chord has to be known
   before it can be used, so until these existed a keyboard user who had not read

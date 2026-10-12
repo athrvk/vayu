@@ -146,8 +146,9 @@ function regionStep(e: KeyboardEvent): 1 | -1 | null {
  * input keeps it: Back from the URL bar is what a browser does, and neither ⌘[
  * nor Alt+← edits text in a field.
  *
- * The collection tree's Alt+Arrow reorder needs no check here: its handler stops
- * the event at the tree, so it never reaches this listener.
+ * The collection tree's Alt+Arrow reorder and the tab strip's Alt+Arrow move
+ * need no check here: each handler stops the event at its own widget, so it
+ * never reaches this listener.
  */
 function navigationStep(e: KeyboardEvent): NavDirection | null {
 	if (e.target instanceof HTMLElement && ownsEnterKey(e.target)) return null;

@@ -32,6 +32,8 @@ import {
 	CheckCheck,
 	ChevronsRight,
 	Download,
+	MoveLeft,
+	MoveRight,
 	PanelBottom,
 	PanelLeft,
 	PanelRight,
@@ -51,6 +53,8 @@ import {
 	GO_BACK_CHORD,
 	GO_FORWARD_CHORD,
 	LOAD_TEST_CHORD,
+	MOVE_TAB_LEFT_CHORD,
+	MOVE_TAB_RIGHT_CHORD,
 	NEW_REQUEST_CHORD,
 	SAVE_CHORD,
 	SEND_CHORD,
@@ -88,6 +92,19 @@ function openSettingsTab(): void {
 function revealSettingsCategory(category: SettingsCategory): void {
 	useSettingsStore.getState().setSelectedCategory(category);
 	openSettingsTab();
+}
+
+/** Where the active tab sits in the strip, or -1 when none is active. */
+function activeTabIndex(ctx: CommandContext): number {
+	if (!ctx.activeTab) return -1;
+	return useTabsStore.getState().openTabs.findIndex((t) => t.id === ctx.activeTab?.id);
+}
+
+/** Move the active tab `step` places along the strip. */
+function moveActiveTab(ctx: CommandContext, step: number): void {
+	const index = activeTabIndex(ctx);
+	if (!ctx.activeTab || index === -1) return;
+	useTabsStore.getState().moveTab(ctx.activeTab.id, index + step);
 }
 
 const ACTION_COMMANDS: readonly Command[] = [
@@ -226,6 +243,38 @@ const ACTION_COMMANDS: readonly Command[] = [
 		perform: (ctx) => {
 			if (ctx.activeTab) useTabsStore.getState().closeTabsToRight(ctx.activeTab.id);
 		},
+	},
+	/*
+	 * Reordering the strip. The chord moves the *focused* tab, which only the
+	 * strip's own key handler can know; a palette row has no focus to read, so
+	 * these move the *active* tab - the same split `close-other-tabs` records.
+	 * The chord's Home / End variants are repeats of these and have no row of
+	 * their own (`palette-parity.test.ts`).
+	 */
+	{
+		id: "move-tab-left",
+		title: (ctx) =>
+			ctx.activeTabLabel ? `Move "${ctx.activeTabLabel}" left` : "Move tab left",
+		keywords: ["reorder", "tab", "strip", "shift", "earlier"],
+		group: "action",
+		icon: MoveLeft,
+		shortcut: MOVE_TAB_LEFT_CHORD,
+		available: (ctx) => activeTabIndex(ctx) > 0,
+		perform: (ctx) => moveActiveTab(ctx, -1),
+	},
+	{
+		id: "move-tab-right",
+		title: (ctx) =>
+			ctx.activeTabLabel ? `Move "${ctx.activeTabLabel}" right` : "Move tab right",
+		keywords: ["reorder", "tab", "strip", "shift", "later"],
+		group: "action",
+		icon: MoveRight,
+		shortcut: MOVE_TAB_RIGHT_CHORD,
+		available: (ctx) => {
+			const index = activeTabIndex(ctx);
+			return index !== -1 && index < useTabsStore.getState().openTabs.length - 1;
+		},
+		perform: (ctx) => moveActiveTab(ctx, 1),
 	},
 	{
 		id: "close-saved-tabs",

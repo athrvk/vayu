@@ -320,6 +320,147 @@ describe("TabStrip keyboard navigation", () => {
 	});
 });
 
+/*
+ * Alt+Arrow / Home / End reorder the strip by moving the *focused* tab. Off
+ * macOS Alt+←/→ is also Go back, which `Shell` reads from the window, so the
+ * strip has to take the chord for itself - the window-listener case below is
+ * the one that proves it did. Nothing here asserts which platform it runs on:
+ * the window listener sees no Alt+Arrow either way.
+ */
+describe("moving the focused tab", () => {
+	/** Press a chord on the focused element; `false` means `preventDefault` ran. */
+	function chord(key: string, code = key) {
+		return fireEvent.keyDown(document.activeElement ?? document.body, {
+			key,
+			code,
+			altKey: true,
+		});
+	}
+
+	const order = () => useTabsStore.getState().openTabs.map((t) => t.id);
+
+	function stops() {
+		return screen.getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0");
+	}
+
+	function focusTab(id: string) {
+		const el = document.getElementById(tabElementId(id));
+		if (!el) throw new Error(`No tab element for ${id}`);
+		el.focus();
+		return el;
+	}
+
+	/*
+	 * Chromium drops focus to <body> when React reinserts the moved tab; jsdom
+	 * keeps it, so the test does what the browser does: blur on the store write,
+	 * before the render commits. Without `moveTabAndFocus`'s refocus the next
+	 * arrow key would reach no handler.
+	 */
+	it("puts focus back on the moved tab when the reorder drops it", () => {
+		renderStrip();
+		focusTab("t2");
+		const unsubscribe = useTabsStore.subscribe((state, prev) => {
+			if (state.openTabs !== prev.openTabs) (document.activeElement as HTMLElement).blur();
+		});
+
+		try {
+			chord("ArrowRight");
+		} finally {
+			unsubscribe();
+		}
+
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+	});
+
+	it("moves the focused tab right and keeps focus and the single Tab stop on it", () => {
+		renderStrip();
+		focusTab("t2");
+
+		chord("ArrowRight");
+
+		expect(order()).toEqual(["t1", "t3", "t2"]);
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+		expect(stops().map((t) => t.getAttribute("data-tab-id"))).toEqual(["t2"]);
+	});
+
+	it("moves the focused tab left", () => {
+		renderStrip();
+		focusTab("t2");
+		chord("ArrowRight");
+
+		chord("ArrowLeft");
+
+		expect(order()).toEqual(["t1", "t2", "t3"]);
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+	});
+
+	it("sends the focused tab to either end with Home and End", () => {
+		renderStrip();
+		focusTab("t2");
+
+		chord("End");
+		expect(order()).toEqual(["t1", "t3", "t2"]);
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+
+		chord("Home");
+		expect(order()).toEqual(["t2", "t1", "t3"]);
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+		expect(stops().map((t) => t.getAttribute("data-tab-id"))).toEqual(["t2"]);
+	});
+
+	it("takes the key at an end, where the move is a no-op", () => {
+		renderStrip();
+		focusTab("t1");
+
+		const proceeded = chord("ArrowLeft");
+
+		expect(proceeded).toBe(false);
+		expect(order()).toEqual(["t1", "t2", "t3"]);
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t1")));
+	});
+
+	it("does not activate the tab it moves", () => {
+		renderStrip();
+		focusTab("t2");
+
+		chord("ArrowRight");
+
+		expect(useTabsStore.getState().activeTabId).toBe("t1");
+	});
+
+	it("keeps the event inside the tablist, away from Shell's window listener", () => {
+		renderStrip();
+		focusTab("t2");
+		const seen: string[] = [];
+		const onWindow = (e: KeyboardEvent) => seen.push(e.key);
+		window.addEventListener("keydown", onWindow);
+
+		try {
+			chord("ArrowLeft");
+			chord("ArrowRight");
+			chord("Home");
+			// Control: a key the strip does not take still reaches the window, so an
+			// empty `seen` above is the strip's doing and not a dead listener.
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowUp" });
+		} finally {
+			window.removeEventListener("keydown", onWindow);
+		}
+
+		expect(seen).toEqual(["ArrowUp"]);
+	});
+
+	it("still only moves focus on a bare arrow", () => {
+		renderStrip();
+		const tabs = screen.getAllByRole("tab");
+		tabs[0].focus();
+
+		fireEvent.keyDown(tabs[0], { key: "ArrowRight", code: "ArrowRight" });
+
+		expect(order()).toEqual(["t1", "t2", "t3"]);
+		expect(document.activeElement).toBe(tabs[1]);
+	});
+});
+
 /**
  * The strip declared `role="tablist"` and `aria-selected` and stopped there: no
  * tab named the region it switches, and the region named no tab. A screen reader
