@@ -190,6 +190,14 @@ interface TabsState {
 	/** Close every tab after this one in the strip. Nothing to its left moves. */
 	closeTabsToRight: (tabId: string) => void;
 	/**
+	 * Put `tabId` at `toIndex` in the strip, the index it occupies afterwards,
+	 * clamped to the list. Reorders `openTabs` only: the active tab, the focus
+	 * stamps and the navigation history name tabs by id and location, never by
+	 * position, so none of them changes. The `Tab` objects are reused, not
+	 * copied: `tabItemPropsEqual` compares `prev.tab === next.tab`.
+	 */
+	moveTab: (tabId: string, toIndex: number) => void;
+	/**
 	 * Close every tab that holds no unsaved edits, keeping the dirty ones.
 	 *
 	 * "Saved" is `isTabDirty` read backwards - the same answer that decides
@@ -720,6 +728,17 @@ export const useTabsStore = create<TabsState>()(
 				const closing = new Set(openTabs.slice(index + 1).map((t) => t.id));
 				const next = closeTabs(get(), closing);
 				if (next) set(next);
+			},
+
+			moveTab: (tabId, toIndex) => {
+				const { openTabs } = get();
+				const fromIndex = openTabs.findIndex((t) => t.id === tabId);
+				if (fromIndex === -1) return;
+				const to = Math.max(0, Math.min(Math.trunc(toIndex), openTabs.length - 1));
+				if (to === fromIndex) return;
+				const next = openTabs.filter((t) => t.id !== tabId);
+				next.splice(to, 0, openTabs[fromIndex]);
+				set({ openTabs: next });
 			},
 
 			closeSavedTabs: () => {
