@@ -1992,8 +1992,9 @@ will be pasted before choosing it. Request, collection, environment, history,
 inbox, mock-issuer and mock-server rows carry it, placed after the row's
 primary actions and above the destructive one. The line comes from a formatter
 in `lib/agent-reference.ts` and goes out through `useCopy()` with the name
-"Reference". **Duplicate takes `CopyPlus`**, not `Copy`: two copy-shaped items
-in one menu need glyphs that tell them apart.
+"Reference". **Duplicate takes `CopyPlus`**, not `Copy`, so the plain glyph means
+"puts something on the clipboard". The clipboard items themselves (Copy path,
+Copy URL, Copy for agent) share it and are told apart by label and `hint`.
 
 ---
 
