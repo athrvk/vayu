@@ -803,12 +803,15 @@ yet.
 
 What comes back for one differs in two places worth knowing. `GET /runs/:id`
 returns the **resolved manifest** in place of the block that was sent
-(`{source, collectionId, recursive, iterations, dataRowCount, steps[]}`, each
+(`{source, collectionId, recursive, iterations, dataRowCount, dataFileName?,
+dataFileHash?, steps[]}`, the two file keys present only when the run named
+its data file, each
 step `{index, requestId, name, method, url}` with the *stored* url, never a
 composed one) - that is what the run tab's context bar reads, through
 `run-scenario.ts`. The paginated `GET /runs` list row cannot carry the manifest
 and instead carries `summary.scenario`
-(`{collectionId, iterations, recursive, stepCount}`), present on any row whose
+(`{collectionId, iterations, recursive, stepCount, dataFileName?,
+dataFileHash?}`), present on any row whose
 snapshot carries a scenario block - so a scenario *load* run gets it too. The
 history row reads it because a run whose work is a sequence has no `url` or
 `method` for the ordinary row to show, and that is true of both executors.

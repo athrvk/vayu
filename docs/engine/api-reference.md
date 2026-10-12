@@ -6063,6 +6063,8 @@ Start a load test run (Vayu Mode).
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
   "data": [],                // Optional data rows, one object per row - see below
+  "dataFileName": "users.csv",  // Optional, only beside data: the file's display name - see below
+  "dataFileHash": "<sha256>",   // Optional, only beside data: 64 lowercase hex chars - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
   "elements": {},            // Optional element-pipeline override, either run shape - see below
   "lifecycleElements": [],   // Optional script.setup/script.teardown for THIS run only - see below
@@ -6184,10 +6186,21 @@ Two differences from `scenario.data` worth stating:
   submission here, per iteration and shared by every step there), so a payload
   carrying both would have one of them silently dropped.
 
-The rows are **never persisted**: the stored run snapshot carries
-`dataRowCount` in their place, exactly as a scenario manifest does. A cell that
-*binds* travels in the request that carried it, so it is stored with whatever
-traces the run retains.
+**Which file the rows came from** (issue #2051) rides beside them as two
+optional, independent strings: `dataFileName`, a display name (the app sends
+the picked file's name), and `dataFileHash`, the SHA-256 of the file's bytes as
+64 lowercase hex characters. The engine stores both verbatim and opens nothing;
+no path is ever sent or stored. Each is a `400` `invalid_run_config` when it is
+not a non-empty string, `dataFileHash` also when it is not that digest shape,
+and either one is a `400` when sent without `data` (refused, not ignored). A
+top-level one beside a `scenario` block is a `400` naming its
+`scenario.dataFileName` / `scenario.dataFileHash` counterpart, as `data` is.
+
+The rows are **never persisted**: the stored run snapshot records the row count
+(`dataRowCount`) plus the file's `dataFileName` and `dataFileHash` when they
+were sent, never its path or rows, exactly as a scenario manifest does. A cell
+that *binds* travels in the request that carried it, so it is stored with
+whatever traces the run retains.
 
 #### The `thresholds` block (pass/fail budgets)
 
@@ -6574,7 +6587,9 @@ inside the block rather than through `mode` / `duration` / `iterations`:
     "collectionId": "col_123",      // required
     "recursive": false,             // optional, default false - descend into sub-collections
     "iterations": 1,                // optional; defaults to the data row count, else 1
-    "data": [ { "user": "a" } ]     // optional inline rows; see maxScenarioDataRows
+    "data": [ { "user": "a" } ],    // optional inline rows; see maxScenarioDataRows
+    "dataFileName": "users.csv",    // optional, only beside data: the file's display name, never a path
+    "dataFileHash": "<sha256>"      // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
   },
   "environmentId": "env_123"        // optional, and what {{variables}} resolve against
 }
@@ -6624,7 +6639,9 @@ as a smaller one:
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
-| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
+| `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
+| `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
+| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -6707,8 +6724,9 @@ iteration `i`, and the run's scripts read it as `pm.iterationData` -
 `get(name)` and `toObject()`, read-only, and `undefined` for a run sent without
 `data`. With `iterations` absent the row count *is* the iteration count; with
 both given the explicit count wins and the index wraps. The rows reach the run's
-worker and nowhere else: they are not persisted, and the snapshot records
-`dataRowCount` only. The full contract is in
+worker and nowhere else: they are not persisted, and the snapshot records the
+row count (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash`
+when they were sent, never its path or rows. The full contract is in
 [scripting.md](scripting.md#data-rows-pmiterationdata).
 
 **`{{data.column}}` puts the row into the request itself.** `pm.iterationData`
@@ -7890,10 +7908,11 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these twelve snapshot keys: `url`, `method`,
+**`summary`** carries exactly these fourteen snapshot keys: `url`, `method`,
 `mode`, `duration`, `concurrency`, `startConcurrency`, `rampUpDuration`,
-`comment`, `followRedirects`, `maxRedirects`, `requestName`, and `httpVersion`.
-The first eleven are each **omitted** when absent from the snapshot (a
+`comment`, `followRedirects`, `maxRedirects`, `requestName`, `dataFileName`,
+`dataFileHash`, and `httpVersion`.
+The first thirteen are each **omitted** when absent from the snapshot (a
 malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
 alone is always present. `startConcurrency` and `rampUpDuration` (issue #1935)
 are the ramp-up knobs, so only a `ramp_up` run has them, e.g.
@@ -7908,8 +7927,11 @@ fabricated name. It reaches `config_snapshot` the same way `url`/`method` do:
 whatever the client's `POST /runs` or `POST /execute` body carried; the
 renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
 [POST /compose](#post-compose)'s `requestId` path already stamps for the
-script sandbox's `pm.info.requestName`. Every run since issue #1488 adds a
-thirteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+script sandbox's `pm.info.requestName`. `dataFileName` and `dataFileHash`
+(issue #2051) name the file a single-request run's `data` rows came from, by
+display name and SHA-256 of its bytes (64 lowercase hex), never its path; a run
+sent without a file name has neither. Every run since issue #1488 adds a
+fifteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -7925,30 +7947,34 @@ lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
-the full `configSnapshot`, which already holds every key above. The same twelve
+the full `configSnapshot`, which already holds every key above. The same fourteen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
 with, since both are built by one function.
 
 A **collection run** (`type: "scenario"`) carries none of the single-request
-keys above (`url` through `requestName`): its work is a sequence, so there is no
+keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
 single `url`, `method` or `mode` to report. Its row instead carries a
-fourteenth key, `scenario`, present on scenario runs only:
+sixteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
   "collectionId": "col_1234567890",
   "iterations": 3,
   "recursive": true,
-  "stepCount": 12
+  "stepCount": 12,
+  "dataFileName": "users.csv",
+  "dataFileHash": "<sha256>"
 }
 ```
 
 `stepCount` is the length of the snapshot's step manifest, not the manifest
 itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
-four keys is omitted when the stored snapshot has no such key.
+six keys is omitted when the stored snapshot has no such key: `dataFileName` and
+`dataFileHash` (issue #2051) are the data file a run's `scenario.data` came
+from, so a run sent without one has neither.
 
-**`hasWarnings`** (issue #1527) is `summary`'s fifteenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s seventeenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
@@ -8311,6 +8337,8 @@ named it.
       "maxRedirects": 10,
       "httpVersion": "auto",
       "dataRowCount": 2,
+      "dataFileName": "users.csv",
+      "dataFileHash": "<sha256>",
       "acceptEncoding": true
     },
     "openapi": {
@@ -8664,6 +8692,12 @@ same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
 above), and `acceptEncoding` (issue #1488), read out of the snapshot's
 `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
 of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
+`dataRowCount` is the size of the data set a run bound, and `dataFileName` /
+`dataFileHash` (issue #2051) the file it came from, by display name and
+SHA-256 of its bytes, never its path. A single-request run's are read off the
+snapshot's top level; a collection run's off its `scenario` manifest, so every
+report of a run that named a file carries them here, and a run that named none
+has neither key.
 
 ### GET /runs/:runId/samples
 

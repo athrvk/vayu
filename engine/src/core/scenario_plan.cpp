@@ -170,8 +170,8 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
  *
  * They reach the run's worker (as `pm.iterationData`) but never the plan or the
  * snapshot - the app owns parsing the file they came from, and only their count
- * is persisted. A rejected set leaves no rows behind, never the ones before the
- * bad one, which would be a partial data set.
+ * (beside the file's name and hash) is persisted. A rejected set leaves no rows
+ * behind, never the ones before the bad one, which would be a partial data set.
  */
 std::optional<std::string> read_scenario_data (const nlohmann::json& data,
 const ScenarioLimits& limits,
@@ -252,15 +252,16 @@ std::vector<nlohmann::json>& rows_out) {
         out.recursive = recursive->get<bool> ();
     }
 
-    // `data` rows reach the run's worker (as `pm.iterationData`) but never the
-    // plan or the snapshot - the app owns parsing the file they came from, and
-    // only their count is persisted.
     bool has_data = false;
     if (auto data = scenario.find ("data"); data != scenario.end () && !data->is_null ()) {
         if (auto reason = read_scenario_data (*data, limits, out, rows_out)) {
             return reason;
         }
         has_data = true;
+    }
+    if (auto reason = read_data_file_fields (scenario, "scenario.", has_data,
+        out.data_file_name, out.data_file_hash)) {
+        return reason;
     }
 
     if (auto reason = read_scenario_iterations (scenario, has_data, out)) {
@@ -270,16 +271,17 @@ std::vector<nlohmann::json>& rows_out) {
     // Refused rather than ignored (issue #1503): a key this block does not
     // read - a typo, or a knob from a version of the client ahead of this
     // engine - used to change nothing and answer 202 anyway, which is a
-    // silence every future scenario field would inherit.
+    // silence every future scenario field would inherit. The refusal lists
+    // this set by hand, so the two change together.
     static const std::unordered_set<std::string> known_scenario_keys = {
-        "source", "collectionId", "recursive", "data", "iterations"
+        "source", "collectionId", "recursive", "data", "dataFileName", "dataFileHash", "iterations"
     };
     for (const auto& [key, value] : scenario.items ()) {
         (void)value;
         if (!known_scenario_keys.contains (key)) {
             return "'scenario." + key +
             "' is not a known field - expected one of source, collectionId, "
-            "recursive, data, iterations";
+            "recursive, data, dataFileName, dataFileHash, iterations";
         }
     }
 
@@ -612,6 +614,78 @@ std::vector<nlohmann::json>& rows_out) {
     return std::nullopt;
 }
 
+namespace {
+
+/// A SHA-256 digest as 64 lowercase hex characters. Lowercase only, so one
+/// file's digest has exactly one spelling and two runs compare as strings.
+bool is_sha256_hex (std::string_view text) {
+    constexpr size_t SHA256_HEX_LENGTH = 64;
+    return text.size () == SHA256_HEX_LENGTH &&
+    std::all_of (text.begin (), text.end (),
+    [] (char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+/// One of the two data-file keys as a non-empty string, or the refusal. Absent
+/// or `null` leaves @p out empty.
+std::optional<std::string> read_data_file_string (const nlohmann::json& block,
+std::string_view prefix,
+const std::string& key,
+bool has_data,
+std::string& out) {
+    const auto field = block.find (key);
+    if (field == block.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    const std::string name = "'" + std::string (prefix) + key + "'";
+    if (!field->is_string () || field->get_ref<const std::string&> ().empty ()) {
+        return name + " must be a non-empty string (got " +
+        (field->is_string () ? std::string ("an empty one") :
+                               std::string (field->type_name ())) +
+        ")";
+    }
+    if (!has_data) {
+        return name + " describes the file '" + std::string (prefix) +
+        "data' came from, and was sent without it - send the rows beside it, "
+        "or drop the field.";
+    }
+    out = field->get<std::string> ();
+    return std::nullopt;
+}
+
+} // namespace
+
+std::optional<std::string> read_data_file_fields (const nlohmann::json& block,
+std::string_view prefix,
+bool has_data,
+std::string& name_out,
+std::string& hash_out) {
+    if (auto reason =
+        read_data_file_string (block, prefix, "dataFileName", has_data, name_out)) {
+        return reason;
+    }
+    if (auto reason =
+        read_data_file_string (block, prefix, "dataFileHash", has_data, hash_out)) {
+        return reason;
+    }
+    if (!hash_out.empty () && !is_sha256_hex (hash_out)) {
+        return "'" + std::string (prefix) +
+        "dataFileHash' must be the SHA-256 of the file's bytes as 64 "
+        "lowercase hex characters";
+    }
+    return std::nullopt;
+}
+
+void stamp_data_file_fields (nlohmann::json& snapshot,
+const std::string& name,
+const std::string& hash) {
+    if (!name.empty ()) {
+        snapshot["dataFileName"] = name;
+    }
+    if (!hash.empty ()) {
+        snapshot["dataFileHash"] = hash;
+    }
+}
+
 std::optional<std::string> plan_request_files (vayu::http::FilePlan& files,
 vayu::Request& request,
 const std::vector<nlohmann::json>& rows,
@@ -792,6 +866,7 @@ const SpecBinding& spec) {
         { "collectionId", request.collection_id },
         { "recursive", request.recursive }, { "iterations", request.iterations },
         { "dataRowCount", request.data_row_count }, { "steps", std::move (steps) } };
+    stamp_data_file_fields (manifest, request.data_file_name, request.data_file_hash);
     // Absent for an unbound collection, never `null` or `{}` - see the header.
     if (spec.bound ()) {
         manifest["openapi"] =

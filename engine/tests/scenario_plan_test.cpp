@@ -494,19 +494,26 @@ TEST_F (ScenarioPlanTest, ManifestCarriesStoredUrlsAndNoCredentialMaterial) {
     EXPECT_EQ (manifest["dataRowCount"], 0);
 }
 
-TEST_F (ScenarioPlanTest, ManifestRecordsOnlyTheDataRowCount) {
+// Issue #2051 added the file's name and content hash beside the count. Mutation
+// check: drop the `stamp_data_file_fields` call in `build_scenario_manifest`
+// and the two file assertions red.
+TEST_F (ScenarioPlanTest, ManifestRecordsTheDataRowCountAndFileButNeverTheRows) {
     seed_collection ("col", "");
     seed_request ("req", "col");
 
     json scenario = block ("col");
     scenario["data"] =
     json::array ({ json{ { "user", "alice" } }, json{ { "user", "bob" } } });
+    scenario["dataFileName"] = "users.csv";
+    scenario["dataFileHash"] = std::string (64, 'a');
     const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     const json manifest =
     vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
     EXPECT_EQ (manifest["dataRowCount"], 2);
+    EXPECT_EQ (manifest.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (manifest.value ("dataFileHash", ""), std::string (64, 'a'));
     // Absent `iterations` with a data set means one pass per row.
     EXPECT_EQ (manifest["iterations"], 2);
     EXPECT_EQ (manifest.dump ().find ("alice"), std::string::npos);
@@ -517,6 +524,94 @@ TEST_F (ScenarioPlanTest, ManifestRecordsOnlyTheDataRowCount) {
     ASSERT_EQ (resolved.data_rows.size (), 2u);
     EXPECT_EQ (resolved.data_rows[0]["user"], "alice");
     EXPECT_EQ (resolved.data_rows[1]["user"], "bob");
+}
+
+// A run that named no file stores no key at all: absent, never `null` or an
+// empty string a reader would print as a blank file name. Mutation check: stamp
+// the two keys unconditionally in `stamp_data_file_fields` and this reds.
+TEST_F (ScenarioPlanTest, ManifestOmitsTheDataFileWhenNoneWasNamed) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+
+    const json manifest =
+    vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
+    EXPECT_EQ (manifest["dataRowCount"], 1);
+    EXPECT_FALSE (manifest.contains ("dataFileName")) << manifest.dump ();
+    EXPECT_FALSE (manifest.contains ("dataFileHash")) << manifest.dump ();
+}
+
+// Each refusal is a 400 in the block's own wording, never a dropped field
+// (#1503). Mutation check: make `read_data_file_fields` return nothing and
+// every case reds; drop its `has_data` check and the two "without" cases red.
+TEST_F (ScenarioPlanTest, TheDataFileFieldsAreRefusedWhenMalformedOrWithoutRows) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    const auto refusal = [this] (const json& scenario) {
+        const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+        EXPECT_FALSE (resolved.ok) << "accepted: " << scenario.dump ();
+        return resolved.error;
+    };
+    const auto with_rows = [] () {
+        json scenario    = block ("col");
+        scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+        return scenario;
+    };
+
+    json scenario            = with_rows ();
+    scenario["dataFileName"] = 7;
+    auto error               = refusal (scenario);
+    EXPECT_NE (
+    error.find ("'scenario.dataFileName' must be a non-empty string"), std::string::npos)
+    << error;
+
+    scenario                 = with_rows ();
+    scenario["dataFileName"] = "";
+    error                    = refusal (scenario);
+    EXPECT_NE (error.find ("'scenario.dataFileName'"), std::string::npos) << error;
+
+    scenario                 = block ("col");
+    scenario["dataFileName"] = "users.csv";
+    error                    = refusal (scenario);
+    EXPECT_NE (error.find ("'scenario.dataFileName'"), std::string::npos) << error;
+    EXPECT_NE (error.find ("without it"), std::string::npos) << error;
+
+    // Uppercase is a second spelling of the same digest, so it is refused
+    // rather than stored as one that never compares equal.
+    for (const auto& bad : { std::string (63, 'a'), std::string (64, 'A'),
+         std::string (63, 'a') + "g", std::string (65, 'a') }) {
+        scenario                 = with_rows ();
+        scenario["dataFileHash"] = bad;
+        error                    = refusal (scenario);
+        EXPECT_NE (error.find ("'scenario.dataFileHash' must be the SHA-256"),
+        std::string::npos)
+        << bad << ": " << error;
+    }
+
+    scenario                 = block ("col");
+    scenario["dataFileHash"] = std::string (64, '0');
+    error                    = refusal (scenario);
+    EXPECT_NE (error.find ("'scenario.dataFileHash'"), std::string::npos) << error;
+    EXPECT_NE (error.find ("without it"), std::string::npos) << error;
+}
+
+// `null` is absent, on this block's existing rule for `recursive` and `data`.
+TEST_F (ScenarioPlanTest, NullDataFileFieldsAreAbsent) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario            = block ("col");
+    scenario["dataFileName"] = nullptr;
+    scenario["dataFileHash"] = nullptr;
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_TRUE (resolved.request.data_file_name.empty ());
+    EXPECT_TRUE (resolved.request.data_file_hash.empty ());
 }
 
 TEST_F (ScenarioPlanTest, ARunWithoutDataResolvesToNoRows) {

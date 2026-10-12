@@ -384,9 +384,10 @@ rows backfill to `{}` (the same migration shape as `config_entries.keywords`).
 
 The **schema** is stored; the **rows** never are. A data file's contents are
 user data of unknown sensitivity and are persisted nowhere - not here, not in a
-run snapshot (which records `dataRowCount` only). The file's path is likewise
-not stored engine-side: it is true of one machine, so the app keeps it in a
-local store. See [Data-driven runs](../app/data-driven-runs.md).
+run snapshot, which records the row count (`dataRowCount`) plus the file's name
+and content hash (`dataFileName`, `dataFileHash`, issue #2051), never its path
+or rows. The file's path is not stored engine-side: it is true of one machine,
+so the app keeps it in a local store. See [Data-driven runs](../app/data-driven-runs.md).
 
 **openapi** - the OpenAPI document this collection is bound to (issue #637):
 
@@ -1302,6 +1303,7 @@ sitting beside it (`scenario_snapshot`, `http/routes/execution.cpp`).
 {
   "source": "collection", "collectionId": "col_123", "recursive": false,
   "iterations": 3, "dataRowCount": 2,
+  "dataFileName": "users.csv", "dataFileHash": "<sha256 hex>",
   "steps": [
     { "index": 0, "requestId": "req_1", "name": "Log in",
       "url": "https://{{host}}/login", "method": "POST" }
@@ -1315,7 +1317,9 @@ it carries resolved `Authorization` headers, and an `apikey` auth with
 reads one composed request, not a plan's steps or the auth built for them. The plan lives in
 memory for the run's life and nowhere else. Inline `data` rows are not
 snapshotted either: they are user data of unknown sensitivity, and the manifest
-records only their count. The writer is `vayu::core::build_scenario_manifest`
+records only their count plus the file's name and content hash (`dataFileName`
+and `dataFileHash`, each absent when the run named no file; issue #2051), never
+its path. The writer is `vayu::core::build_scenario_manifest`
 (`core/scenario_plan.cpp`).
 
 **`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
@@ -1524,7 +1528,7 @@ than assuming all eight are there and flat:
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`, plus **`dataRowIndex`** for a scenario load run given `scenario.data`. A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing. |
 | Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
-| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps `dataRowCount` alone. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
+| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
 A **streaming** design run (`POST /execute` with `"stream": true`, issue #573)
 adds one node the others never carry: **`events`**, holding `items` (the first

@@ -466,6 +466,20 @@ read_run_scope_ids (const nlohmann::json& json, vayu::db::Run& run) {
     return std::nullopt;
 }
 
+/// A top-level `dataFileName` / `dataFileHash` on a collection run, refused by
+/// name for the reason a top-level `data` is: the block holds its own.
+std::optional<std::string> refuse_top_level_data_file (const nlohmann::json& json) {
+    for (const char* key : { "dataFileName", "dataFileHash" }) {
+        if (auto field = json.find (key); field != json.end () && !field->is_null ()) {
+            return std::string ("'") + key +
+            "' is the single-request form. A collection run names its data "
+            "file inside the block, as 'scenario." +
+            key + "' beside 'scenario.data' - move it there, or drop the 'scenario' block.";
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -573,8 +587,21 @@ bool is_scenario) {
                     "move them there, or drop the 'scenario' block.";
         return out;
     }
+    if (auto refusal = is_scenario ? refuse_top_level_data_file (json) : std::nullopt) {
+        out.ok    = false;
+        out.error = std::move (*refusal);
+        return out;
+    }
 
     std::unique_ptr<vayu::core::LoadDataSet> set;
+    std::string file_name;
+    std::string file_hash;
+    if (auto reason = vayu::core::read_data_file_fields (
+        json, "", carries_set, file_name, file_hash)) {
+        out.ok    = false;
+        out.error = std::move (*reason);
+        return out;
+    }
     if (carries_set) {
         set = std::make_unique<vayu::core::LoadDataSet> ();
         // The same reader the scenario block goes through, so the two shapes
@@ -587,6 +614,8 @@ bool is_scenario) {
             return out;
         }
         set->bound_columns = vayu::core::bound_columns_of (set->rows);
+        set->file_name     = std::move (file_name);
+        set->file_hash     = std::move (file_hash);
     }
 
     // A scenario load run's credentials are its steps', resolved when the plan
@@ -629,7 +658,9 @@ bool is_scenario) {
  * exists: the rows are user data of unknown sensitivity and are deliberately
  * never snapshotted. `dataRowCount` is what survives, exactly as it does on a
  * scenario manifest, so a stored run still says it was data-driven and how
- * large the set was.
+ * large the set was - beside the file's `dataFileName` / `dataFileHash` when
+ * the caller named one (issue #2051), written from the validated set rather
+ * than left to whatever the sanitizer kept of the body.
  *
  * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
  * verbatim) is left alone - there is nothing in it to rewrite.
@@ -638,7 +669,8 @@ bool is_scenario) {
  * `scenario_snapshot`, because "the rows are never persisted" is a privacy
  * property and deserves a test that does not need a run to exist.
  */
-std::string load_data_snapshot (const std::string& sanitized, size_t row_count) {
+std::string load_data_snapshot (const std::string& sanitized,
+const vayu::core::LoadDataSet& data) {
     nlohmann::json parsed;
     try {
         parsed = nlohmann::json::parse (sanitized);
@@ -649,7 +681,8 @@ std::string load_data_snapshot (const std::string& sanitized, size_t row_count) 
         return sanitized;
     }
     parsed.erase ("data");
-    parsed["dataRowCount"] = row_count;
+    parsed["dataRowCount"] = data.rows.size ();
+    vayu::core::stamp_data_file_fields (parsed, data.file_name, data.file_hash);
     return parsed.dump ();
 }
 
@@ -741,7 +774,7 @@ const std::vector<std::string>& secret_values) {
     } else if (data != nullptr && !data->rows.empty ()) {
         // The rows out, their count in - the same rule the scenario manifest
         // keeps, and for the same reason (issue #993).
-        shaped = load_data_snapshot (sanitized, data->rows.size ());
+        shaped = load_data_snapshot (sanitized, *data);
     }
     return with_default_headers_snapshot (shaped, header_policy);
 }

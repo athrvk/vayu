@@ -777,8 +777,9 @@ filesystem and the engine reads a user's file only under the request-body
 trust rule (see [Security](#security)) - binds row
 `i % rows` to iteration `i`, read by the run's scripts as `pm.iterationData`.
 The rows ride the `ScenarioExecution` the worker holds and are never
-persisted: the snapshot keeps
-`dataRowCount`, and every step's stored row and `step` event keeps
+persisted: the snapshot keeps the row
+count (`dataRowCount`) plus the file's name and content hash (`dataFileName`,
+`dataFileHash`), never its path or rows, and every step's stored row and `step` event keeps
 `dataRowIndex`, so which row a wrapped pass re-used stays answerable without
 storing the row itself.
 
