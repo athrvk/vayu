@@ -87,7 +87,7 @@ import { registerFileIpc } from "./file-ipc.js";
  *
  * `mcp/index.js` re-exports `toolCatalog` from the tool registry, `tools.ts`, and
  * constructs its facade over `http.js`, so importing *anything* runtime from it
- * evaluates the MCP SDK, zod and all 67 tool schemas - ~250-300ms of serial
+ * evaluates the MCP SDK, zod and every tool schema - ~250-300ms of serial
  * main-process evaluation, before `app.whenReady` and therefore ahead of the
  * window, on every launch including the ones where MCP is switched off.
  *

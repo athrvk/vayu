@@ -8,18 +8,22 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "mock_server.hpp"
+#include "process_cpu.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/event_loop_impl.hpp"
+#include "vayu/http/rate_limiter.hpp"
 #include "vayu/types.hpp"
 
 using namespace vayu::http;
 using namespace vayu;
+using vayu::tests::process_cpu_ms;
 using vayu::tests::SlowMockServer;
 
 class RateLimiterTest : public ::testing::Test {
@@ -190,4 +194,143 @@ TEST_F (RateLimiterTest, EnforcesTargetRPSAcrossMultipleWorkers) {
     double submission_rps = 200.0 / submission_duration;
     EXPECT_GE (submission_rps, 75.0) << "Submission rate too slow";
     EXPECT_LE (submission_rps, 125.0) << "Submission rate too fast";
+}
+
+TEST (RateLimiterTokenWaitTest, IsZeroWhenRateLimitingIsDisabled) {
+    RateLimiter limiter;
+    EXPECT_EQ (limiter.time_until_token_unlocked ().count (), 0.0);
+}
+
+TEST (RateLimiterTokenWaitTest, IsZeroWhileATokenIsAvailableAndConsumesNothing) {
+    RateLimiter limiter (RateLimiterConfig{ 10.0, 1.0 });
+    EXPECT_EQ (limiter.time_until_token_unlocked ().count (), 0.0);
+    EXPECT_TRUE (limiter.try_acquire_unlocked ())
+    << "asking how long until a token spent the one that was there";
+}
+
+TEST (RateLimiterTokenWaitTest, IsTheTimeTheMissingTokenTakesToRefill) {
+    RateLimiter limiter (RateLimiterConfig{ 20.0, 1.0 }); // a token every 50ms
+    ASSERT_TRUE (limiter.try_acquire_unlocked ());
+    ASSERT_FALSE (limiter.try_acquire_unlocked ());
+
+    const auto wait = limiter.time_until_token_unlocked ();
+    EXPECT_GT (wait.count (), 0.0);
+    EXPECT_LE (wait.count (), 0.05);
+
+    std::this_thread::sleep_for (wait);
+    EXPECT_TRUE (limiter.try_acquire_unlocked ())
+    << "waiting the reported time did not yield a token";
+}
+
+namespace {
+
+/// One worker whose one-token bucket refills at @p rps: every request after
+/// the first waits for a token of its own, and against the fast mock the one
+/// before it has long been answered, so the worker waits with nothing in
+/// flight.
+EventLoopConfig one_token_worker (double rps) {
+    EventLoopConfig config;
+    config.target_rps  = rps;
+    config.burst_size  = 1.0;
+    config.num_workers = 1;
+    return config;
+}
+
+/// Parks a worker for its next token with three requests still queued, times
+/// stop (@p wait_for_pending, @p drain_timeout), and checks the queued three
+/// were cancelled rather than left unanswered.
+double seconds_to_stop_a_parked_worker (const std::string& url,
+bool wait_for_pending,
+std::chrono::milliseconds drain_timeout) {
+    EventLoop loop (one_token_worker (0.5)); // the next token is 2s away
+    loop.start ();
+
+    Request req;
+    req.method = HttpMethod::GET;
+    req.url    = url;
+
+    constexpr int REQUESTS = 4;
+    std::vector<RequestHandle> handles;
+    handles.reserve (REQUESTS);
+    for (int i = 0; i < REQUESTS; ++i) {
+        handles.push_back (loop.submit_async (req));
+    }
+    EXPECT_TRUE (handles.front ().future.get ().is_ok ());
+    std::this_thread::sleep_for (std::chrono::milliseconds (50));
+
+    const auto started = std::chrono::steady_clock::now ();
+    loop.stop (wait_for_pending, drain_timeout);
+    const double seconds =
+    std::chrono::duration<double> (std::chrono::steady_clock::now () - started).count ();
+
+    for (size_t i = 1; i < handles.size (); ++i) {
+        EXPECT_FALSE (handles[i].future.get ().is_ok ())
+        << "queued request " << i << " was sent instead of cancelled";
+    }
+    return seconds;
+}
+
+} // namespace
+
+// Issue #1915: with nothing in flight and items queued, a worker the bucket
+// refused fell through wait_for_work without parking and asked the bucket
+// again in a hot loop, a full core for the whole rate-limited stretch. The
+// sent count is the same either side of the fix, so CPU is the assertion.
+// Mutation check: making wait_for_work skip wait_for_next_token reds the CPU
+// bound alone.
+TEST_F (RateLimiterTest, AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin) {
+    EventLoop loop (one_token_worker (4.0));
+    loop.start ();
+
+    Request req;
+    req.method = HttpMethod::GET;
+    req.url    = mock->fast_url ();
+
+    // The first on the burst token, then eight more 250ms apart: 2s.
+    constexpr int REQUESTS = 9;
+
+    const int64_t cpu_before = process_cpu_ms ();
+    const auto started       = std::chrono::steady_clock::now ();
+    std::vector<RequestHandle> handles;
+    handles.reserve (REQUESTS);
+    for (int i = 0; i < REQUESTS; ++i) {
+        handles.push_back (loop.submit_async (req));
+    }
+    for (auto& handle : handles) {
+        EXPECT_TRUE (handle.future.get ().is_ok ());
+    }
+    const double elapsed =
+    std::chrono::duration<double> (std::chrono::steady_clock::now () - started).count ();
+    const int64_t cpu_ms = process_cpu_ms () - cpu_before;
+    loop.stop ();
+
+    // Loose on purpose: the mock server shares this process. A spinning
+    // worker costs about one core, so roughly 2,000ms over this window.
+    EXPECT_LT (cpu_ms, 300) << "the worker spun on the bucket instead of "
+                               "parking for its next token - consumed "
+                            << cpu_ms << "ms of CPU over " << elapsed << "s";
+
+    // The pacing must not move: the wait is the token's own interval.
+    EXPECT_GE (elapsed, 1.8) << "requests went out faster than 4 rps";
+    EXPECT_LE (elapsed, 3.0) << "the token wait overshoots the token";
+}
+
+// A worker parked for its next token still answers stop () at once:
+// stop(false) through curl_multi_wakeup, and a bounded drain at its deadline
+// rather than up to a token interval late. Mutation check: dropping the
+// drain-deadline clamp in wait_for_next_token reds the drain case (the park
+// then runs to TOKEN_WAIT_CAP_MS or the token, whichever is first).
+TEST_F (RateLimiterTest, AWorkerParkedForItsNextTokenStopsPromptly) {
+    EXPECT_LT (seconds_to_stop_a_parked_worker (
+               mock->fast_url (), false, std::chrono::milliseconds::zero ()),
+    0.5)
+    << "stop(false) waited for the parked worker's token";
+}
+
+TEST_F (RateLimiterTest, ABoundedDrainEndsOnTimeWhileWaitingForAToken) {
+    EXPECT_LT (seconds_to_stop_a_parked_worker (
+               mock->fast_url (), true, std::chrono::milliseconds (30)),
+    0.08)
+    << "a 30ms drain outlived its deadline: the park ran its whole "
+       "TOKEN_WAIT_CAP_MS slice past it";
 }

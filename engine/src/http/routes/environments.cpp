@@ -125,8 +125,8 @@ const std::function<void ()>& before_write) {
  * fields the body did not name, so a read that is not held to the write loses
  * whichever writer read first. This resource is the one with a second reader
  * inside its own window - MCP's `update_environment` merges across two HTTP
- * round trips (`app/electron/mcp/tools.ts`), which this lock cannot close;
- * what it closes is the engine's own.
+ * round trips (`app/electron/mcp/tools/environments.tools.ts`), which this
+ * lock cannot close; what it closes is the engine's own.
  *
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see

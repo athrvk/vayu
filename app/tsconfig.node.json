@@ -12,8 +12,9 @@
 		 * `true` because it is what the repo already believed: `app/CLAUDE.md`
 		 * states "strict TypeScript" as the convention, `tsconfig.json` sets it for
 		 * the renderer, and `electron/` is written as if it held - the `!`
-		 * assertions on guard-proved values through `mcp/tools.ts` are no-ops
-		 * without it. Turning it on cost one real fix, not a migration.
+		 * assertions on guard-proved values through `mcp/tools.ts` and
+		 * `mcp/tools/` are no-ops without it. Turning it on cost one real fix,
+		 * not a migration.
 		 */
 		"strict": true,
 		/*

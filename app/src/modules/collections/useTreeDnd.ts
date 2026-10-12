@@ -8,7 +8,7 @@
 /**
  * The drag machinery behind the collection tree - phase 3 of #364.
  *
- * Everything decidable without a DOM already lives elsewhere: `drag-gesture.ts`
+ * Everything decidable without a DOM already lives elsewhere: `lib/drag/drag-gesture.ts`
  * owns press-versus-drag and the trailing click, `drop-position.ts` owns the
  * zones and the folders-first block rule, `reorder-math.ts` owns which rows a
  * move rewrites, and `useReorderMutation` owns the one atomic write. What is
@@ -43,7 +43,7 @@ import {
 	releaseGesture,
 	IDLE_GESTURE,
 	type DragGesture,
-} from "./drag-gesture";
+} from "@/lib/drag/drag-gesture";
 import { resolveDrop, zoneAt, type DropDestination, type TreeEntity } from "./drop-position";
 import type { CollectionTreeDnd, CollectionTreeDropTarget } from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";

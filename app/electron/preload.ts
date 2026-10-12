@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.invoke("mcp:connectClient", client),
 	// An agent's write reached the engine from the main process, so the renderer
 	// is told which data family to invalidate. One-way and data-free; the shape
-	// mirrors `McpDataChangedEvent` in electron/mcp/tools.ts, inlined because
+	// mirrors `McpDataChangedEvent` in electron/mcp/tools/contract.ts, inlined because
 	// this file is a CommonJS script and must not grow imports.
 	onMcpDataChanged: (
 		callback: (event: {

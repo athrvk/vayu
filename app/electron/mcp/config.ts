@@ -202,7 +202,7 @@ const MCP_SWITCH_KEYS: readonly McpSwitchKey[] = [
  *
  * Literals rather than an import because production code in `electron/` may not
  * reach into `src/` - `tsconfig.node.json` withholds the `@/*` mapping on
- * purpose - the same reason `MAX_IN_FLIGHT_BOUND` in `tools.ts` is a literal.
+ * purpose - the same reason `MAX_IN_FLIGHT_BOUND` in `tools/compose.ts` is a literal.
  * The copies are kept honest from the test side: `config.test.ts` ties these to
  * the renderer constant, and `load-test.engine-parity.test.ts` ties that to the
  * engine header.

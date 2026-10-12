@@ -174,10 +174,10 @@ export interface CollectionLike {
  *
  * `null`, absent and the empty string all mean top-level, and comparing raw
  * values would file a root collection under a parent named "". Exported because
- * `tools.ts` walks the same rows for its cascade accounting: the rule has to
- * have one definition, and this module is the one of the two that can be
- * imported by the other (`tools.ts` already imports from here; the reverse would
- * be a cycle).
+ * `tools/cascade.ts` walks the same rows for its cascade accounting: the rule
+ * has to have one definition, and this module is the one of the two that can be
+ * imported by the other (the tool registry already imports from here; the
+ * reverse would be a cycle).
  */
 export function collectionParentId(row: CollectionLike): string | null {
 	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;

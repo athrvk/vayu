@@ -47,7 +47,9 @@ struct RateLimiterConfig {
  * - If no tokens available, request blocks until a token is available
  * - Burst size allows temporary bursts above the target rate
  *
- * Thread-safe for concurrent access from multiple worker threads.
+ * Thread-safe for concurrent access from multiple worker threads, except the
+ * `_unlocked` members, which are for a limiter only one thread touches (each
+ * EventLoopWorker owns one).
  *
  * Example:
  * @code
@@ -99,6 +101,16 @@ class RateLimiter {
     bool try_acquire_unlocked ();
 
     /**
+     * @brief How long until try_acquire_unlocked() would succeed (NOT thread-safe)
+     *
+     * Refills the bucket first and consumes nothing. Zero when a token is
+     * available now or rate limiting is disabled. Same single-thread contract
+     * as try_acquire_unlocked(): a worker the bucket refused parks this long
+     * instead of asking again in a loop (issue #1915).
+     */
+    std::chrono::duration<double> time_until_token_unlocked ();
+
+    /**
      * @brief Reset the rate limiter state
      */
     void reset ();
@@ -117,6 +129,11 @@ class RateLimiter {
 
     private:
     void refill_tokens ();
+
+    /// The time the bucket's shortfall below one token takes to refill at
+    /// target_rps; zero when a token is there. Reads the bucket as it stands,
+    /// so the caller refills first.
+    std::chrono::duration<double> token_shortfall_wait () const;
 
     RateLimiterConfig config_;
     mutable std::mutex mutex_;

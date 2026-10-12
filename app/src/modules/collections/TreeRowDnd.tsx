@@ -15,6 +15,7 @@
  * `tree-row-dnd.ts`; this file is only what renders.
  */
 
+import { DropIndicator } from "@/components/shared";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 
@@ -38,16 +39,7 @@ export function RowDropIndicator({
 	indentPx: number;
 }) {
 	if (!edge) return null;
-	return (
-		<span
-			aria-hidden="true"
-			data-drop-indicator={edge}
-			className={`pointer-events-none absolute right-2 h-0.5 bg-primary ${
-				edge === "before" ? "top-0" : "bottom-0"
-			}`}
-			style={{ left: indentPx }}
-		/>
-	);
+	return <DropIndicator edge={edge} orientation="horizontal" indentPx={indentPx} />;
 }
 
 /**
