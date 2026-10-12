@@ -535,8 +535,9 @@ edit made in another program shows up on return. A file that has moved or been
 deleted adds "(file no longer at that path)" instead, whether or not the run
 recorded a hash; the desktop app is the only place that can tell, so the
 browser build never shows it. A file the app cannot hash for any other reason
-adds nothing; the hash itself is never shown. A file whose name holds a `\` (legal on macOS and Linux) is run
-without its name, because a name with a path separator is refused as a path.
+adds nothing; the hash itself is never shown. A file whose name holds a `\`
+(legal on macOS and Linux) is run without its name, because a name with a
+path separator is refused as a path.
 
 **A cell that binds into a request is stored with that request.** A collection
 run keeps one row per step execution, and each holds the exchange as it
