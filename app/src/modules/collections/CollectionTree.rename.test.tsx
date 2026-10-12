@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, fireEvent, act, waitFor, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useSaveStore, useToastStore } from "@/stores";
@@ -99,6 +99,7 @@ const ROW_KINDS = [
 		update: updateCollection,
 		id: "c1",
 		newName: "Payments",
+		storedName: "Acme API",
 	},
 	{
 		kind: "request",
@@ -106,10 +107,11 @@ const ROW_KINDS = [
 		update: updateRequest,
 		id: "r1",
 		newName: "List users",
+		storedName: "Get users",
 	},
 ];
 
-describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName }) => {
+describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName, storedName }) => {
 	it("sends nothing when the name is unchanged", async () => {
 		renderTree();
 		const field = startRename(selector);
@@ -134,6 +136,30 @@ describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName })
 
 		await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
 		expect(update).toHaveBeenCalledWith({ id, name: newName });
+	});
+
+	it("keeps the field mounted until a rejected PUT is reported, then reverts the row", async () => {
+		update.mockRejectedValue(new Error("database is locked"));
+		renderTree();
+		const field = startRename(selector);
+
+		// Recorded when the status flips, which is the moment the failure is reported.
+		let fieldMountedWhenReported: boolean | null = null;
+		const unsubscribe = useSaveStore.subscribe((state) => {
+			if (state.status === "error" && fieldMountedWhenReported === null) {
+				fieldMountedWhenReported = screen.queryByDisplayValue(newName) !== null;
+			}
+		});
+
+		fireEvent.change(field, { target: { value: newName } });
+		fireEvent.keyDown(field, { key: "Enter" });
+
+		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
+		unsubscribe();
+		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
+		expect(fieldMountedWhenReported).toBe(true);
+		await waitFor(() => expect(screen.queryByDisplayValue(newName)).toBeNull());
+		expect(document.querySelector(selector)).toHaveTextContent(storedName);
 	});
 });
 

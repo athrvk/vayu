@@ -291,12 +291,11 @@ export function useTreeCrud({
 			// `useInlineRename`; this path still refuses a rename to the name the
 			// collection already has, which is a PUT with nothing in it.
 			const trimmedValue = name.trim();
-			// Clearing the rename state *before* awaiting unmounts the field, so the
-			// blur that follows Enter has nothing left to submit.
-			setRenamingId(null);
-
 			const original = collections.find((c) => c.id === collectionId);
-			if (!trimmedValue || original?.name === trimmedValue) return;
+			if (!trimmedValue || original?.name === trimmedValue) {
+				setRenamingId(null);
+				return;
+			}
 
 			startSaving();
 			try {
@@ -308,6 +307,11 @@ export function useTreeCrud({
 			} catch (error) {
 				const fallback = "Couldn't rename the collection";
 				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+			} finally {
+				// The field stays mounted until the PUT settles so a failure is reported
+				// over the typed name. Functional: a rename started on another row
+				// meanwhile keeps its field.
+				setRenamingId((current) => (current === collectionId ? null : current));
 			}
 		},
 		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
@@ -324,10 +328,6 @@ export function useTreeCrud({
 	const handleRequestRenameSubmit = useCallback(
 		async (requestId: string, name: string) => {
 			const trimmedValue = name.trim();
-			// Cleared before the await for the same reason as the collection path:
-			// while the field is still mounted, the blur that follows Enter submits a
-			// second time.
-			setRenamingRequestId(null);
 
 			// Find the original request to check if name actually changed
 			// Search through all collections to find the request
@@ -341,7 +341,10 @@ export function useTreeCrud({
 			}
 
 			// Empty name, or a name that did not change: nothing to save.
-			if (!trimmedValue || originalRequest?.name === trimmedValue) return;
+			if (!trimmedValue || originalRequest?.name === trimmedValue) {
+				setRenamingRequestId(null);
+				return;
+			}
 
 			startSaving();
 			try {
@@ -353,6 +356,10 @@ export function useTreeCrud({
 			} catch (error) {
 				const fallback = "Couldn't rename the request";
 				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+			} finally {
+				// Same as the collection path: held until the PUT settles, and a rename
+				// started on another row meanwhile keeps its field.
+				setRenamingRequestId((current) => (current === requestId ? null : current));
 			}
 		},
 		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
