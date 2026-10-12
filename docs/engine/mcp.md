@@ -151,7 +151,9 @@ HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to 
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
-holds that record. See [Data files](#data-files).
+holds that record. See [Data files](#data-files). `get_app_focus` is the same
+shape: the open tab and environment are renderer state, so it answers an error
+saying the window is not connected on stdio.
 
 ### How History names the client
 
@@ -203,8 +205,10 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
+| `get_app_focus`        | read     | The renderer's last snapshot over `app:focus` (app window only; no engine call) | - (names and ids only: the open tab's type, entity id and label, and the active environment's id and name; an error saying the window is not connected from the stdio CLI or before a window has published) |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
+| `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
@@ -880,6 +884,48 @@ Notes:
   tool says the call may still have completed and points at `list_runs`; it is
   never reported as an unreachable engine, because a retry could re-send a
   request that already went out.
+
+### Naming what the user means
+
+A user points an agent at an entity with a **reference line**, the text the app's
+*Copy for agent* puts on the clipboard:
+
+```
+Vayu <kind> "<name>" (<id>)
+```
+
+`<name>` is what the app calls the entity, for a person to recognise; the `<id>`
+in parentheses is the key every tool takes (`requestId`, `collectionId`,
+`runId`, `inboxId`, `mockId`). Look up the id, never the name: names repeat.
+
+```
+Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
+Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
+Vayu run "Design run" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8)
+Vayu inbox "Stripe webhooks" (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
+Vayu mock server "Orders mock" (mock_1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d)
+```
+
+Two rules for the cases where the user did not paste one:
+
+- **The request the user means:** ask the user for a Vayu reference line, or call
+  `get_app_focus`. It reports the tab and environment open in the app window
+  right now - `activeTab` (`type`, `entityId`, `label`), `run` (`{ runId }`,
+  set only when the open tab is a run) and `activeEnvironment` (`id`, `name`) -
+  and nothing else: no variable value, header or credential. Read the entity
+  itself with its own tool (`get_request` for a request).
+- **The latest run:** `list_runs` is newest-first, so it is the first row.
+
+`get_app_focus` is served from the renderer's last report and answers an error
+saying the Vayu window is not connected where there is none: the stdio CLI, and
+the app before its window has published. A tab's `label` is a saved name or a
+kind word (`Request`, `Run`), never text derived from a URL, because an unnamed
+request and a design or load run are titled by their resolved URL path in the app
+and that path can hold a secret variable's value.
+
+The server instructions carry the grammar and both rules in every session, without
+tool names (the instructions never name a tool; each tool's description is its one
+contract).
 
 ### Request composition
 
@@ -1738,10 +1784,10 @@ cannot read a missing value as an empty one.
 | What | Withheld as | Read by |
 | ---- | ----------- | ------- |
 | A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
-| An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `list_collections`, `vayu://collections` |
-| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `list_collections`, `vayu://collections` |
-| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `list_request_examples` |
-| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks) |
+| An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
+| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
+| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `list_request_examples` |
+| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks) |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
@@ -1917,7 +1963,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 74 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 76 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
@@ -1942,11 +1988,12 @@ One channel runs the other way, main → renderer:
 | ------------------ | ------------------------------------------------------------- |
 | `mcp:data-changed` | A successful call changed engine data; invalidate its queries. |
 
-And one runs renderer → main for MCP's sake:
+And two run renderer → main for MCP's sake:
 
 | Channel              | Purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
 | `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
+| `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the
 main process, which no renderer query can observe (`refetchOnWindowFocus` is off

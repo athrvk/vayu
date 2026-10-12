@@ -26,12 +26,14 @@ import {
 	WITHHELD_VARIABLE_SENTENCE,
 	withholdConfigCredentials,
 	withholdRowListSecrets,
+	withholdRowSecrets,
 } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
 	engineErrorResult,
+	errorResult,
 	optionalOffset,
 	optionalPageLimit,
 	requireStr,
@@ -88,6 +90,36 @@ export const READ_TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "get_app_focus",
+		category: "read",
+		invalidates: [],
+		description:
+			'Which tab and environment the user has open in the Vayu app right now, for "this request", "the run I have open" or "my current environment". Returns `activeTab` (`type`, `entityId`, `label`; `entityId` is the request, collection, run, inbox or mock server id by `type`, null for a tab with no entity), `run` (`{ runId }`, set only when the open tab is a run) and `activeEnvironment` (`id`, `name`); each is null when nothing of that kind is open. Names and ids only, never a variable value: read the entity with its own tool (get_request for a request). A `label` is a saved name or a kind word such as "Request", never text taken from a URL. The copy is the app window\'s last report, so it can lag a click by a moment. An error saying the Vayu window is not connected means there is no app window to ask - the standalone stdio server has none, and the app may not be open yet - so ask the user for a Vayu reference line instead.',
+		annotations: {
+			title: "Get the app's open tab and environment",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: async (_args, ctx) => {
+			const focus = ctx.appFocus?.();
+			if (!focus) {
+				return errorResult(
+					"The Vayu window is not connected, so there is no open tab or environment to report. " +
+						"Ask the user for a Vayu reference line instead."
+				);
+			}
+			const { activeTab, activeEnvironment } = focus;
+			const runId = activeTab?.type === "run" ? activeTab.entityId : null;
+			return structuredResult({
+				activeTab,
+				run: runId === null ? null : { runId },
+				activeEnvironment,
+			});
+		},
+	},
+	{
 		name: "list_collections",
 		category: "read",
 		invalidates: [],
@@ -137,6 +169,34 @@ export const READ_TOOLS: McpTool[] = [
 			callEngine(
 				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
 				secretsShape(ctx, withholdRowListSecrets)
+			),
+	},
+	{
+		name: "get_request",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the same shape list_requests returns for each of its rows. An id that names no saved request is an error naming 404. " +
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
+		annotations: {
+			title: "Get a request",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z
+				.string()
+				.describe("Saved request ID, the (req_...) of a Vayu reference line."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
+				secretsShape(ctx, withholdRowSecrets)
 			),
 	},
 	{

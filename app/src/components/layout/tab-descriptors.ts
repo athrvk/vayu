@@ -47,8 +47,18 @@ export function pathLabel(url: string): string {
  */
 export function requestTabTitle(name: string, resolvedUrl: string): string {
 	const trimmed = name.trim();
-	if (trimmed && trimmed !== DEFAULT_REQUEST_NAME) return trimmed;
+	if (hasOwnName(name)) return trimmed;
 	return pathLabel(resolvedUrl) || trimmed;
+}
+
+/**
+ * Whether a request carries a name the user set. The one rule for when a tab
+ * is titled by the request's own name and when it falls back to its URL, so
+ * `fromUrl` below cannot disagree with the title it describes.
+ */
+export function hasOwnName(name: string): boolean {
+	const trimmed = name.trim();
+	return trimmed !== "" && trimmed !== DEFAULT_REQUEST_NAME;
 }
 
 /**
@@ -68,6 +78,14 @@ export interface TabDescriptor {
 	icon?: typeof Folder;
 	/** True when the label is a URL path, which is cut from the left instead. */
 	isPath?: boolean;
+	/**
+	 * True when the label was taken from a URL. Provenance, not shape: `isPath`
+	 * is a display hint (a request the user named "/orders" has it), and a URL
+	 * that does not parse is shown as written without a leading slash. A URL
+	 * here is resolved - a secret variable's value is in it - so a surface that
+	 * leaves the window (the MCP focus mirror) must not repeat such a label.
+	 */
+	fromUrl?: boolean;
 	/**
 	 * Where the request lives, as the breadcrumb reads it: its collection chain
 	 * and then its own name. Request tabs only, and absent until the request has
@@ -225,6 +243,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					// A request with no name of its own falls back to its path, so
 					// path labels are not confined to run tabs.
 					isPath: name.startsWith("/"),
+					fromUrl: !hasOwnName(request.name),
 					// `walkAncestors` returns the chain root-first and carries the
 					// cycle guard a hand-rolled parent walk would not.
 					path: [
@@ -264,6 +283,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 						...(snapshot?.method ? { method: snapshot.method } : {}),
 						icon,
 						isPath: Boolean(path),
+						fromUrl: Boolean(path),
 					};
 				}
 				// Still loading, or a run with no snapshot to name it by.

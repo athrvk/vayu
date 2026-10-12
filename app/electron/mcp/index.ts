@@ -19,6 +19,7 @@ import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { McpDataChangedEvent, ToolContext } from "./tools.js";
 import type { Logger } from "../log.js";
+import type { AppFocus } from "../app-focus.js";
 import type { DataFileLocation } from "../data-file-locations.js";
 
 export interface VayuMcpServiceOptions {
@@ -36,6 +37,8 @@ export interface VayuMcpServiceOptions {
 	log?: Logger;
 	/** Where a collection's declared data file lives on this machine (#1742). */
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
+	/** Which tab and environment the app window has open (#2045). */
+	appFocus?: () => AppFocus | undefined;
 }
 
 export class VayuMcpService {
@@ -57,6 +60,7 @@ export class VayuMcpService {
 				onDataChanged: opts.onDataChanged,
 				log: opts.log,
 				dataFileLocation: opts.dataFileLocation,
+				appFocus: opts.appFocus,
 			}),
 		});
 	}

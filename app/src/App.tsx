@@ -32,6 +32,7 @@ import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
+import { useAppFocusMirror } from "./hooks/useAppFocusMirror";
 import { useRunWatchers } from "./hooks/useRunWatchers";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useLiveWindowSync } from "./hooks/useLiveChartSettings";
@@ -116,6 +117,10 @@ function App() {
 	// The other direction on the same seam: the data-file paths the app
 	// remembers live in renderer storage, and MCP names them (#1742).
 	useDataFileLocationMirror();
+
+	// And which tab and environment are open, so an agent can be asked "the
+	// request I have open" without the user pasting its id (#2045).
+	useAppFocusMirror();
 
 	// A run an agent started reaches no surface of this app, so nothing used to
 	// watch it: no taskbar bar, no wake lock and no notification when it ended,
