@@ -53,6 +53,17 @@ vi.mock("@/queries", () => ({
 	// The dialog resolves the contract in scope through the tree (issue #729);
 	// this file is about the panel's box, so an empty tree is the whole answer.
 	useCollectionsQuery: () => ({ data: [] as Collection[] }),
+	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
+}));
+
+// A pick declares the contract (issue #2050); nothing here picks a file.
+vi.mock("@/queries/collections", () => ({
+	useUpdateCollectionMutation: () => ({
+		mutate: vi.fn(),
+		isPending: false,
+		isError: false,
+		error: null,
+	}),
 }));
 
 vi.mock("@/services", () => ({

@@ -54,20 +54,49 @@ import { RECENT_LIMIT } from "./ranking";
  */
 const MOD = isMac ? { metaKey: true } : { ctrlKey: true };
 
+// `elements` and `auth` because every stored row carries them, and the run
+// dialog's data-column audit (issue #2050) reads both.
 const COLLECTIONS = [
-	{ id: "c1", name: "Payments", parentId: undefined },
-	{ id: "c2", name: "Auth", parentId: "c1" },
+	{ id: "c1", name: "Payments", parentId: undefined, elements: [] },
+	{ id: "c2", name: "Auth", parentId: "c1", elements: [] },
 ];
 
+const stored = { elements: [], auth: { mode: "none" } };
 const REQUESTS = new Map([
 	[
 		"c1",
 		[
-			{ id: "r1", collectionId: "c1", name: "Charge card", method: "POST", url: "/charges" },
-			{ id: "r2", collectionId: "c1", name: "Refund", method: "POST", url: "/refunds" },
+			{
+				id: "r1",
+				collectionId: "c1",
+				name: "Charge card",
+				method: "POST",
+				url: "/charges",
+				...stored,
+			},
+			{
+				id: "r2",
+				collectionId: "c1",
+				name: "Refund",
+				method: "POST",
+				url: "/refunds",
+				...stored,
+			},
 		],
 	],
-	["c2", [{ id: "r3", collectionId: "c2", name: "Issue token", method: "GET", url: "/token" }]],
+	[
+		"c2",
+		[
+			{
+				id: "r3",
+				collectionId: "c2",
+				name: "Issue token",
+				method: "GET",
+				url: "/token",
+				...stored,
+			},
+		],
+	],
 ]);
 
 /** Runs, newest-first, as the infinite query hands them over. */

@@ -24,11 +24,12 @@
  *    contract, so the remembered location is filed under `contract.collectionId`
  *    and reading the store at the id the caller passed in finds nothing for
  *    exactly the users the chain walk exists to serve.
- * 2. **One attempt.** The collections query may answer a render *after* the
- *    dialog mounts, so a mount-only effect would read an empty chain and never
- *    look again; the ref keeps what the mount-only spelling was there for -
- *    writing the store while the dialog is open must not yank the user's own
- *    selection back to what was remembered.
+ * 2. **One attempt, and none after a pick.** The collections query may answer
+ *    a render *after* the dialog mounts, so a mount-only effect would read an
+ *    empty chain and never look again; the refs keep what the mount-only
+ *    spelling was there for - writing the store while the dialog is open,
+ *    which a pick's own declare does, must not yank the user's selection back
+ *    to what was remembered.
  * 3. **The row cap applies to a pre-filled file too** (issue #751), against the
  *    live setting. Without it, the remembered path is the one way past a
  *    refusal the picker makes on every hand-picked file - the file would
@@ -45,9 +46,10 @@
  * about what is on the other side of it, which is what lets the load dialog
  * share the pre-fill and share none of the consequence.
  *
- * It writes nothing to the store either: the Data tab is where a contract is
- * declared, and one run started against a different file is not a
- * redeclaration of it for every run that follows.
+ * It writes nothing either (#2050). A pick in a run dialog declares the contract
+ * from the picked file, but that is the dialog calling `useDataContractWriter`
+ * against `declaringCollectionId`; the pre-fill is a read of what was declared,
+ * not a pick, and never writes.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -105,6 +107,18 @@ export interface DeclaredDataFileState {
 	 * second flag beside a note it cannot reach.
 	 */
 	dismissNote: () => void;
+	/**
+	 * The collection a pick declares for: the one whose contract the run binds
+	 * against, or the caller's own when nothing above it declares. Empty for a
+	 * run scoped to no collection, which declares nothing.
+	 *
+	 * Held for the life of the caller once a contract has resolved: the picker
+	 * offers Remove in place of Choose file, so every swap is Remove (which
+	 * clears the contract) then a pick, and that pick re-declares where the
+	 * cleared contract was rather than moving it down to the caller's own
+	 * collection, or up to an ancestor whose contract the walk now reaches.
+	 */
+	declaringCollectionId: string;
 }
 
 /**
@@ -115,10 +129,12 @@ export interface DeclaredDataFileState {
  *        collection is fine, since the contract walk finds the declaring
  *        ancestor from it.
  * @param options.collection The caller's own row for that collection, when it
- *        holds one. It stands *ahead* of the query's copy of itself: the Run
- *        collection dialog is opened with a row and must resolve a contract it
- *        declares even on a render where the collections query has not
- *        answered. Ancestors can only ever come from the query.
+ *        holds one. It stands in for the query's copy only while the query has
+ *        none: the Run collection dialog is opened with a row and must resolve
+ *        a contract it declares even on a render where the collections query
+ *        has not answered, but the row is a snapshot from the moment the dialog
+ *        opened, and a declare made since lands in the query, not in it.
+ *        Ancestors can only ever come from the query.
  * @param options.onPrefill Called once, with the file, if the pre-fill lands.
  *        This is the seam for what a *caller* concludes from a file arriving,
  *        as opposed to what the file is: the Run collection dialog turns a
@@ -154,8 +170,8 @@ export function useDeclaredDataFile(
 	 */
 	const chain = useMemo(
 		() =>
-			collection
-				? [collection, ...collections.filter((row) => row.id !== collection.id)]
+			collection && !collections.some((row) => row.id === collection.id)
+				? [collection, ...collections]
 				: collections,
 		[collection, collections]
 	);
@@ -163,20 +179,40 @@ export function useDeclaredDataFile(
 		() => resolveDataContract(collectionId, chain) ?? undefined,
 		[collectionId, chain]
 	);
+	// The first declarer that resolves, kept for the life of the hook. Only ever
+	// set from null: once Remove clears a sub-collection's contract the walk
+	// resolves its ancestor's, and following that would make the next pick
+	// replace the ancestor's contract. Adjusted during render rather than in an
+	// effect, so the render that drops the contract already declares against it.
+	const [heldDeclarer, setHeldDeclarer] = useState<string | null>(null);
+	if (contract && heldDeclarer === null) {
+		setHeldDeclarer(contract.collectionId);
+	}
 	// The store is keyed by the collection that *declares* the contract, which
 	// is the whole point of rule 1 above. Falling back to the caller's id keeps
 	// a collection that declares its own contract working before the query
 	// answers, and finds nothing otherwise - which is the correct answer.
-	const declaringCollectionId = contract?.collectionId ?? collectionId ?? "";
+	const declaringCollectionId = heldDeclarer ?? contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
 	const { maxRows } = useDataFileLimits();
 
 	const [file, setFile] = useState<SelectedDataFile | null>(null);
 	const [note, setNote] = useState<string | null>(null);
 	const attempted = useRef(false);
+	/*
+	 * Once the user has picked (or removed), the pre-fill has nothing left to
+	 * do. A pick declares, and the declare writes the store this effect reads,
+	 * so without this a first-time declare re-reads the picked file over the
+	 * pick, and a read still in flight lands on top of it.
+	 */
+	const picked = useRef(false);
+	const pick = useCallback((next: SelectedDataFile | null) => {
+		picked.current = true;
+		setFile(next);
+	}, []);
 
 	useEffect(() => {
-		if (attempted.current) return;
+		if (attempted.current || picked.current) return;
 		if (!rememberedFile?.path) return;
 		attempted.current = true;
 		let cancelled = false;
@@ -186,12 +222,12 @@ export function useDeclaredDataFile(
 
 		void readDeclaredDataFile(rememberedFile.path, { maxRows })
 			.then((read) => {
-				if (cancelled) return;
+				if (cancelled || picked.current) return;
 				setFile(read);
 				onPrefillRef.current?.(read);
 			})
 			.catch((e: unknown) => {
-				if (cancelled) return;
+				if (cancelled || picked.current) return;
 				setNote(
 					e instanceof DataFileError || e instanceof Error
 						? e.message
@@ -206,5 +242,5 @@ export function useDeclaredDataFile(
 
 	const dismissNote = useCallback(() => setNote(null), []);
 
-	return { file, setFile, note, contract, dismissNote };
+	return { file, setFile: pick, note, contract, dismissNote, declaringCollectionId };
 }

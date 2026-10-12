@@ -9,12 +9,12 @@
  * DataTab - where a collection declares which columns its data files carry
  * (issue #599, phase 1 of #598).
  *
- * The problem it exists for: a data file is picked in the Run dialog, parsed,
- * sent and forgotten, so at *authoring* time - exactly when someone writes
- * `{{data.email}}` - nothing in the app knows that column exists. Declaring the
- * contract here is what later lets the builder validate and complete those
- * tokens, and what lets the engine's no-data refusal name the columns a run
- * needs.
+ * The problem it exists for: until a file is declared, nothing in the app knows
+ * at *authoring* time - exactly when someone writes `{{data.email}}` - that the
+ * column exists. Declaring the contract is what lets the builder validate and
+ * complete those tokens, and what lets the engine's no-data refusal name the
+ * columns a run needs. A pick in either run dialog declares too (issue #2050);
+ * this tab is where it is done without starting a run.
  *
  * Two halves, stored in two places on purpose:
  *
@@ -47,11 +47,11 @@ import { Check, Loader2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui";
 import { Callout } from "@/components/shared";
-import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useDataFileStore } from "@/stores";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
 import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
+import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { hasDataContract, type Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "../DataFilePicker";
 import ColumnAudit from "./ColumnAudit";
@@ -97,9 +97,7 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * than compared against the contract and then refused at Run.
 	 */
 	const { maxRows } = useDataFileLimits();
-	const updateCollection = useUpdateCollectionMutation();
-	const setDataFile = useDataFileStore((s) => s.setDataFile);
-	const clearDataFile = useDataFileStore((s) => s.clearDataFile);
+	const writer = useDataContractWriter(collection.id);
 	const remembered = useDataFileStore((s) => s.locations[collection.id]);
 
 	const declared = collection.dataSchema?.columns ?? [];
@@ -118,7 +116,7 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * hand since. The store is therefore read here for what it held on mount; the
 	 * reactive value above is for the name the render shows.
 	 *
-	 * Preview only: this read goes through `setFile` and never `declareFrom`, so
+	 * Preview only: this read goes through `setFile` and never `writer.declare`, so
 	 * reopening the tab to compare a file that drifted writes nothing. Only a
 	 * pick the user made declares.
 	 *
@@ -160,61 +158,13 @@ export default function DataTab({ collection }: DataTabProps) {
 	// side of the comparison does not exist.
 	const diff = file ? describeDataSchemaDiff(declared, file.parsed.columns) : [];
 
-	/**
-	 * Declare the contract from `source`. Takes the file as an argument because
-	 * a pick calls it in the same tick as `setFile`, when `file` is still the
-	 * previous render's.
-	 */
-	const declareFrom = (source: SelectedDataFile) => {
-		updateCollection.mutate(
-			{
-				id: collection.id,
-				dataSchema: {
-					columns: source.parsed.columns,
-					declaredAt: Date.now(),
-					fileName: source.fileName,
-				},
-			},
-			{
-				onSuccess: () => {
-					// Remembered only after the contract is stored: a path pointing
-					// at a file whose columns were never declared would pre-fill the
-					// Run dialog with a file nothing can be checked against. A file
-					// with no path (a browser, a remote drop) forgets the previous
-					// one instead, so the store never names a file the contract was
-					// not read from.
-					if (source.path) {
-						setDataFile(collection.id, {
-							path: source.path,
-							fileName: source.fileName,
-						});
-					} else {
-						clearDataFile(collection.id);
-					}
-				},
-			}
-		);
-	};
-
 	const handleSelect = (next: SelectedDataFile | null) => {
 		setFile(next);
-		if (next) declareFrom(next);
+		if (next) writer.declare(next);
 	};
 
 	const handleRedeclare = () => {
-		if (file) declareFrom(file);
-	};
-
-	const handleClear = () => {
-		// `null`, not `{}`: the engine reads absent as "keep" and null as "reset
-		// to the default", and the default is no contract. The remembered path
-		// goes with it - a file remembered for a collection that declares nothing
-		// would pre-fill a run with a file the user has stopped asserting is the
-		// right one.
-		updateCollection.mutate(
-			{ id: collection.id, dataSchema: null },
-			{ onSuccess: () => clearDataFile(collection.id) }
-		);
+		if (file) writer.declare(file);
 	};
 
 	return (
@@ -272,24 +222,24 @@ export default function DataTab({ collection }: DataTabProps) {
 				onSelect={handleSelect}
 				// Not through `onSelect(null)`: a refused pick reaches that too, and a
 				// file the picker turns away must leave the contract as it was.
-				onRemove={declaredContract ? handleClear : undefined}
+				onRemove={declaredContract ? writer.clear : undefined}
 				error={fileError}
 				onError={setFileError}
 				iterations={undefined}
 				mode="declare"
 				additionalWarnings={diff}
-				disabled={updateCollection.isPending}
+				disabled={writer.isPending}
 			/>
 
-			<SaveFailed mutation={updateCollection} what="the data contract" />
+			<SaveFailed mutation={writer} what="the data contract" />
 
 			<div className="flex items-center gap-2">
 				{/* A pick has already declared, so this is for the file that is
 				    here and the contract is not: the re-read file drifted, or the
 				    save that the pick made failed and left the preview to retry. */}
 				{file && (!declaredContract || diff.length > 0) && (
-					<Button onClick={handleRedeclare} disabled={updateCollection.isPending}>
-						{updateCollection.isPending ? (
+					<Button onClick={handleRedeclare} disabled={writer.isPending}>
+						{writer.isPending ? (
 							<Loader2 className="mr-2 size-icon animate-spin" />
 						) : (
 							<Check className="mr-2 size-icon" />
@@ -298,11 +248,7 @@ export default function DataTab({ collection }: DataTabProps) {
 					</Button>
 				)}
 				{declaredContract && (
-					<Button
-						variant="outline"
-						onClick={handleClear}
-						disabled={updateCollection.isPending}
-					>
+					<Button variant="outline" onClick={writer.clear} disabled={writer.isPending}>
 						<Trash2 className="mr-2 size-icon" />
 						Clear
 					</Button>
