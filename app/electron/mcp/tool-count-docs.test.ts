@@ -58,7 +58,9 @@ describe("published tool counts", () => {
 describe("the published write roster", () => {
 	const text = readFileSync(fromRepoRoot("docs/engine/mcp.md"), "utf8");
 	// The sentence between the rule and the first thing the category does not gate.
-	const roster = text.match(/declared `category: "write"` in `tools\.ts`([\s\S]*?)Does not gate/);
+	const roster = text.match(
+		/declared `category: "write"` in `tools\/\*\.tools\.ts`([\s\S]*?)Does not gate/
+	);
 
 	it("names exactly the tools declared category: write", () => {
 		expect(roster).not.toBeNull();

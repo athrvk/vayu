@@ -54,7 +54,14 @@ const SURFACES = {
 	),
 	// The MCP `data` descriptions: the single-target one on `start_load_run`, and
 	// the shared `scenario.data` fragment.
-	"electron/mcp/tools.ts": join(repoRoot, "app", "electron", "mcp", "tools.ts"),
+	"electron/mcp/tools/load.tools.ts": join(
+		repoRoot,
+		"app",
+		"electron",
+		"mcp",
+		"tools",
+		"load.tools.ts"
+	),
 	"electron/mcp/tools/input-schemas.ts": join(
 		repoRoot,
 		"app",
@@ -73,7 +80,7 @@ const SURFACES = {
 const RETIRED: ReadonlyArray<{ claim: RegExp; where: keyof typeof SURFACES }> = [
 	{ claim: /rows are never saved anywhere/i, where: "DataTab.tsx" },
 	{ claim: /rows stay on this machine and are never saved/i, where: "DataFilePicker.tsx" },
-	{ claim: /Rows are never persisted/i, where: "electron/mcp/tools.ts" },
+	{ claim: /Rows are never persisted/i, where: "electron/mcp/tools/load.tools.ts" },
 	{ claim: /Rows are never persisted/i, where: "electron/mcp/tools/input-schemas.ts" },
 	{ claim: /Rows are never persisted on either side/i, where: "docs/app/data-driven-runs.md" },
 	{ claim: /## Nothing is stored/, where: "docs/app/data-driven-runs.md" },
