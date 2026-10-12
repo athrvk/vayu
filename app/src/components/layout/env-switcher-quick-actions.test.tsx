@@ -63,7 +63,7 @@ function renderTitleBar() {
 }
 
 function openMenu() {
-	const trigger = screen.getByRole("button", { name: /switch environment/i });
+	const trigger = screen.getByRole("button", { name: /^environment:/i });
 	fireEvent.keyDown(trigger, { key: "Enter" });
 	const menu = screen.getByRole("menu");
 	expect(menu).toBeInTheDocument();

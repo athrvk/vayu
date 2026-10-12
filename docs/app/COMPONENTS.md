@@ -94,6 +94,8 @@ Custom window title bar (Electron frameless window, `--titlebar-height`). Render
 
 The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag` - a drag area ignores every pointer event, so a control that forgets is dead rather than merely awkward. Opting out per control or per cluster is fine; opting out a wrapper that spans the row's slack is not, because that slack is what the window is dragged by. → `TitleBar.search-bar.test.tsx`.
 
+The env switcher's accessible name is its visible text behind an `sr-only` "Environment: " prefix ("Environment: Staging"), never an `aria-label`: a label replaces the visible name, so a speech-control user saying "click Staging" matched nothing (WCAG 2.5.3). → `TitleBar.search-bar.test.tsx`.
+
 `NavigationControls` puts Back and Forward at the leading edge, each a `TooltipIconButton` with its own `no-drag`, disabled when its half of `navHistory` is empty (`canGoBack` / `canGoForward`), and a tooltip naming its chord (`GO_BACK_CHORD` / `GO_FORWARD_CHORD`).
 
 The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load - it only appears to work in dev, where Vite serves it over HTTP.
