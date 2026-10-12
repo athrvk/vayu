@@ -306,10 +306,30 @@ describe("no value reaches a line", () => {
 
 	it("is not reachable from a formatter's parameter types", () => {
 		type Params<F extends (...args: never[]) => unknown> = Parameters<F>[0];
-		for (const key of ["headers", "auth", "body", "url"] as const) {
+		const FORBIDDEN = [
+			"value",
+			"token",
+			"secret",
+			"signingKey",
+			"headers",
+			"body",
+			"variables",
+			"auth",
+			"url",
+			"query",
+		] as const;
+		// Run is the one formatter that reads a URL, and it prints the path only.
+		for (const key of FORBIDDEN) {
 			expectTypeOf<Params<typeof requestReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof exampleReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof collectionReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof environmentReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof inboxReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof captureReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof mockServerReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof mockIssuerReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof trashReference>>().not.toHaveProperty(key);
+			if (key !== "url") expectTypeOf<Params<typeof runReference>>().not.toHaveProperty(key);
 		}
-		expectTypeOf<Params<typeof environmentReference>>().not.toHaveProperty("variables");
-		expectTypeOf<Params<typeof mockIssuerReference>>().not.toHaveProperty("signingKey");
 	});
 });

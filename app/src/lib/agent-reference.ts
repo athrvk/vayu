@@ -152,7 +152,7 @@ export function runReference(run: RunReferenceInput, collectionName?: string): s
 			: ""
 		: methodAndPath(run.summary);
 	// The history row's rule: a still-default name says nothing, so the target does.
-	const ownName = run.summary?.requestName;
+	const ownName = run.summary?.requestName?.trim();
 	const title =
 		ownName && ownName !== DEFAULT_REQUEST_NAME
 			? ownName

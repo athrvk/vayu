@@ -908,8 +908,8 @@ entry's kind. A `"` or `\` in a name is escaped with a backslash and a line brea
 becomes a space, so a name never ends its own quotes or starts a second line.
 **A reference carries no value**: a run's URL is cut to its path, with no query
 string or credentials, and no header, body, variable, token or secret is ever
-printed. A run comparison is the one multi-line reference: a header naming the
-two run ids, then each run's own line.
+printed. A run comparison is the one multi-line reference, and the one with no
+quoted name: a header naming the two run ids, then each run's own line.
 
 Every line below is the app's formatter (`app/src/lib/agent-reference.ts`) run
 over one fixture, the entities in `app/src/lib/agent-reference.docs.test.ts`,
