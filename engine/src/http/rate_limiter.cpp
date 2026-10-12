@@ -50,14 +50,29 @@ void RateLimiter::acquire () {
             return;
         }
 
-        // Calculate how long to wait for next token
-        double tokens_needed = 1.0 - tokens_;
-        double wait_seconds  = tokens_needed / config_.target_rps;
-
+        const auto wait = token_shortfall_wait ();
         lock.unlock ();
-        std::this_thread::sleep_for (std::chrono::duration<double> (wait_seconds));
+        std::this_thread::sleep_for (wait);
         lock.lock ();
     }
+}
+
+std::chrono::duration<double> RateLimiter::token_shortfall_wait () const {
+    const double shortfall = vayu::core::constants::http::TOKEN_COST - tokens_;
+    if (shortfall <= 0.0) {
+        return std::chrono::duration<double>::zero ();
+    }
+    return std::chrono::duration<double> (shortfall / config_.target_rps);
+}
+
+std::chrono::duration<double> RateLimiter::time_until_token_unlocked () {
+    if (!config_.enabled ()) {
+        return std::chrono::duration<double>::zero ();
+    }
+
+    // No lock - caller guarantees single-threaded access
+    refill_tokens ();
+    return token_shortfall_wait ();
 }
 
 bool RateLimiter::try_acquire () {

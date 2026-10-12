@@ -772,6 +772,38 @@ documented ~50 us default timer slack plus scheduler-wakeup margin, with no
 `actual - requested` table behind it. [Issue #1667](https://github.com/athrvk/vayu/issues/1667)
 still tracks that Linux measurement.
 
+### A rate-limited worker no longer spins between tokens (2026-10-12, engine 0.41.x, Linux)
+
+An event-loop worker asks its token bucket for a token before it looks at its
+queue. When the bucket refused it and nothing was in flight, `wait_for_work`
+skipped both of its parks - the `curl_multi_poll` is only for a worker with
+transfers, and the idle park only for an empty queue - so the loop asked the
+bucket again at once, for as long as the rate held items back, draining
+included (issue #1915). A low `targetRps` against a fast target was the worst
+case: almost every moment is spent waiting for the next token with nothing in
+flight. The worker now parks in `curl_multi_poll` until its next token
+(`RateLimiter::time_until_token_unlocked`), capped at
+`event_loop::TOKEN_WAIT_CAP_MS` (100 ms) so a drain deadline is still noticed
+on time; a submit or a stop wakes it as before.
+
+One worker at 4 RPS with a one-token burst, nine requests submitted at once to
+the in-process mock's `/fast` (the first on the burst token, eight more 250 ms
+apart), whole-process `getrusage` sampled around the window
+(`RateLimiterTest.AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin`;
+Debug build, a 4-vCPU cloud VM):
+
+| | CPU over the 2 s window | % of one core |
+|---|---:|---:|
+| Before | ~1,994 ms | ~100% |
+| After | 26-32 ms (3 runs) | ~1.5% |
+
+The pacing is unchanged: the window still lasts 2.0 s, and the
+`EnforcesTargetRPS` pair (100 RPS, one and four workers) holds its ±25%
+window either side. With the worker parked for a token 2 s away, `stop
+(false)` returned in under 0.5 ms and a bounded drain (`stop (true, 200 ms)`)
+in 0.20 s; without the cap that drain took 1.95 s, which is what the cap is
+for.
+
 ## Prior results (2026-07, CLI, unreconciled)
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a
