@@ -43,11 +43,11 @@ import { VariablePopover } from "./variable-popover";
 import { TooltipProvider } from "./tooltip";
 import type { VariableOrigin } from "@/types";
 
-/** The component's own source, for the guard that a role is not written here. */
-const SOURCE = readFileSync(
-	join(dirname(fileURLToPath(import.meta.url)), "variable-popover.tsx"),
-	"utf8"
-);
+/** The popover's sources, for the guard that a role is not written by hand. */
+const sourceOf = (file: string) =>
+	readFileSync(join(dirname(fileURLToPath(import.meta.url)), file), "utf8");
+const POPOVER_SOURCE = sourceOf("variable-popover.tsx");
+const CREATE_FORM_SOURCE = sourceOf("create-variable-form.tsx");
 
 /** Radix opens on pointerdown, which jsdom does not synthesise - use the key. */
 function open() {
@@ -162,6 +162,14 @@ describe("the value appears once", () => {
 		const field = within(panel).getByRole("textbox") as HTMLInputElement;
 		expect(field.value).toBe("sk_live_abc");
 		expect(field).not.toHaveAttribute("readonly");
+	});
+
+	it("marks a secret with the shared chip, not a hand-drawn one", () => {
+		// A hand-rolled copy of `Badge` receives none of its fixes (#1887).
+		renderPopover({ varInfo: { value: "sk_live_abc", scope: "environment", secret: true } });
+		const chip = within(open()).getByText("Secret");
+		expect(chip).toHaveAttribute("data-slot", "badge");
+		expect(chip).toHaveAttribute("title", "Secret - hidden until revealed");
 	});
 
 	it("says a secret is not set rather than drawing dots for nothing", () => {
@@ -488,9 +496,11 @@ describe("the create row is composed from the app's primitives", () => {
 		 * inside `ToggleGroupItem`, which is why the tests above can still query
 		 * by it.
 		 */
-		expect(SOURCE.length).toBeGreaterThan(0);
-		expect(SOURCE).not.toContain('role="radio"');
-		expect(SOURCE).toContain("<ToggleGroupItem");
+		expect(POPOVER_SOURCE.length).toBeGreaterThan(0);
+		expect(CREATE_FORM_SOURCE.length).toBeGreaterThan(0);
+		expect(POPOVER_SOURCE).not.toContain('role="radio"');
+		expect(CREATE_FORM_SOURCE).not.toContain('role="radio"');
+		expect(CREATE_FORM_SOURCE).toContain("<ToggleGroupItem");
 	});
 });
 

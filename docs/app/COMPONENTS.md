@@ -2487,7 +2487,7 @@ the scopes first would show a resolved token carrying a value the engine will
 never send. The create offer is out of reach for both - a variable of either
 name can never resolve, so offering to make one is a dead end that leaves the
 token exactly as it was - but by two different mechanisms: `VariablePopover`
-refuses it for a `data.*` name itself (`isDataVariableName`, `:217`), while an
+refuses it for a `data.*` name itself (`isDataVariableName`), while an
 identity name never reaches the popover at all, the branch above returning
 before `EditableVariable` is rendered.
 
@@ -2553,6 +2553,20 @@ resolves on a send that carries no row" is exactly what a switched-off
 definition does not do, so a row shadowing only off definitions gets the other
 sentence - dropping the pick there resolves nothing.
 
+**`VariablePopover` is the mode switch; its two editing branches are their own
+components** (issue #1887). `ResolvedValueEditor` (`ui/resolved-value-editor.tsx`)
+is the resolved branch: the masked or revealed field, the secret's eye, the
+auto-save sentence and manual mode's Save/Cancel, plus `SECRET_MASK`, the
+fixed-width mask the origin list reuses. `CreateVariableForm`
+(`ui/create-variable-form.tsx`) is the create offer: the value field, the scope
+`ToggleGroup`, Create, and the bound-row and switched-off notes. Both are
+controlled. The popover keeps the edit buffer, the reveal flag, the picked scope
+and the Enter/Escape and auto-save-on-close flow, because `PopoverContent`
+unmounts its children on close and the close path is what saves, discards and
+resets them; held in the form, a picked scope would not survive a re-open. The
+chips beside the name (Secret, `data`, `row`, `undefined`) are `Badge
+variant="chip"`.
+
 It sits beside `KeyValueEditor` rather than inside the request builder because
 every row of that table renders one: a shared table reaching into a feature
 module for its cell input is the same inversion one level down (issue #567).
@@ -2591,7 +2605,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover` (with its two branches, `resolved-value-editor` and `create-variable-form`), `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ### `input`
 
