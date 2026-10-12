@@ -33,10 +33,13 @@
  * asked for a manual re-pick was the one surface unable to answer its own
  * question.
  *
- * Saves are explicit - Declare and Clear - rather than autosaved, because
- * declaring a contract is a statement about the collection, not a keystroke.
- * That is also why this tab is absent from `TABS_HOLDING_DRAFTS`: it holds no
- * draft to survive a switch away.
+ * The saves are the two gestures that name a file: picking one declares its
+ * columns, and Remove clears the contract and the remembered path. Anything
+ * subtler than a gesture is a button beside the picker - Re-declare when the
+ * re-read file has drifted from the contract, or a save failed and the preview
+ * is still there to retry from; Clear when the remembered file is gone and the
+ * picker offers no Remove. There is no draft: every change is written when it
+ * is made, which is why this tab is absent from `TABS_HOLDING_DRAFTS`.
  */
 
 import { useEffect, useState } from "react";
@@ -110,10 +113,14 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * DataTab, so there is no stale file, error or note to clear here.
 	 *
 	 * Deliberately not re-run when the store changes. `remembered` is written by
-	 * Declare and Clear below, and re-reading on it would re-read the file the
-	 * user just declared *from* - and would replace a file they had picked by hand
-	 * since. The store is therefore read here for what it held on mount; the
+	 * declaring and clearing below, and re-reading on it would re-read the file
+	 * the user just declared *from* - and would replace a file they had picked by
+	 * hand since. The store is therefore read here for what it held on mount; the
 	 * reactive value above is for the name the render shows.
+	 *
+	 * Preview only: this read goes through `setFile` and never `declareFrom`, so
+	 * reopening the tab to compare a file that drifted writes nothing. Only a
+	 * pick the user made declares.
 	 *
 	 * Only with a contract: without one there is nothing to compare a file
 	 * against, and the store should hold no path either (Clear takes it with it),
@@ -153,28 +160,49 @@ export default function DataTab({ collection }: DataTabProps) {
 	// side of the comparison does not exist.
 	const diff = file ? describeDataSchemaDiff(declared, file.parsed.columns) : [];
 
-	const handleDeclare = () => {
-		if (!file) return;
+	/**
+	 * Declare the contract from `source`. Takes the file as an argument because
+	 * a pick calls it in the same tick as `setFile`, when `file` is still the
+	 * previous render's.
+	 */
+	const declareFrom = (source: SelectedDataFile) => {
 		updateCollection.mutate(
 			{
 				id: collection.id,
 				dataSchema: {
-					columns: file.parsed.columns,
+					columns: source.parsed.columns,
 					declaredAt: Date.now(),
-					fileName: file.fileName,
+					fileName: source.fileName,
 				},
 			},
 			{
 				onSuccess: () => {
 					// Remembered only after the contract is stored: a path pointing
 					// at a file whose columns were never declared would pre-fill the
-					// Run dialog with a file nothing can be checked against.
-					if (file.path) {
-						setDataFile(collection.id, { path: file.path, fileName: file.fileName });
+					// Run dialog with a file nothing can be checked against. A file
+					// with no path (a browser, a remote drop) forgets the previous
+					// one instead, so the store never names a file the contract was
+					// not read from.
+					if (source.path) {
+						setDataFile(collection.id, {
+							path: source.path,
+							fileName: source.fileName,
+						});
+					} else {
+						clearDataFile(collection.id);
 					}
 				},
 			}
 		);
+	};
+
+	const handleSelect = (next: SelectedDataFile | null) => {
+		setFile(next);
+		if (next) declareFrom(next);
+	};
+
+	const handleRedeclare = () => {
+		if (file) declareFrom(file);
 	};
 
 	const handleClear = () => {
@@ -234,14 +262,17 @@ export default function DataTab({ collection }: DataTabProps) {
 					</div>
 				) : (
 					<p className="text-xs text-muted-foreground">
-						No contract yet. Pick a file below and declare its columns.
+						No contract yet. Picking a file below declares its columns.
 					</p>
 				)}
 			</div>
 
 			<DataFilePicker
 				selected={file}
-				onSelect={setFile}
+				onSelect={handleSelect}
+				// Not through `onSelect(null)`: a refused pick reaches that too, and a
+				// file the picker turns away must leave the contract as it was.
+				onRemove={declaredContract ? handleClear : undefined}
 				error={fileError}
 				onError={setFileError}
 				iterations={undefined}
@@ -253,14 +284,19 @@ export default function DataTab({ collection }: DataTabProps) {
 			<SaveFailed mutation={updateCollection} what="the data contract" />
 
 			<div className="flex items-center gap-2">
-				<Button onClick={handleDeclare} disabled={!file || updateCollection.isPending}>
-					{updateCollection.isPending ? (
-						<Loader2 className="mr-2 size-icon animate-spin" />
-					) : (
-						<Check className="mr-2 size-icon" />
-					)}
-					{declaredContract ? "Re-declare from this file" : "Declare columns"}
-				</Button>
+				{/* A pick has already declared, so this is for the file that is
+				    here and the contract is not: the re-read file drifted, or the
+				    save that the pick made failed and left the preview to retry. */}
+				{file && (!declaredContract || diff.length > 0) && (
+					<Button onClick={handleRedeclare} disabled={updateCollection.isPending}>
+						{updateCollection.isPending ? (
+							<Loader2 className="mr-2 size-icon animate-spin" />
+						) : (
+							<Check className="mr-2 size-icon" />
+						)}
+						{declaredContract ? "Re-declare from this file" : "Declare columns"}
+					</Button>
+				)}
 				{declaredContract && (
 					<Button
 						variant="outline"

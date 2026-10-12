@@ -402,8 +402,9 @@ contract is `{}` and not `undefined`.
 
 On `updateCollection` the field is `CollectionDataSchema | null`, like
 `parentId`: the engine reads absent as "keep the declared contract" and an
-explicit `null` as "reset to none", so the Data tab's **Clear** is only
-expressible as a null that survives to the wire. The rows behind the schema are
+explicit `null` as "reset to none", so the Data tab's **Clear** and its picker's
+**Remove** (the two writers of it) are only expressible as a null that survives
+to the wire. The rows behind the schema are
 never sent by these calls at all - they ride only the `POST /runs` payload, and
 are persisted by neither side.
 

@@ -11,12 +11,16 @@
 /**
  * Declaring a collection's data contract (issue #599).
  *
- * Three things have to be true for the contract to be worth having, and each is
+ * Four things have to be true for the contract to be worth having, and each is
  * one a later phase builds on rather than a detail of this tab:
  *
- *  - **Declare writes the columns of the file that was previewed** - not a
- *    re-parse, not the file name. Phase 2 validates `{{data.*}}` against exactly
- *    this list, so a list assembled from anywhere else validates the wrong file.
+ *  - **Picking a file declares the columns of the file that was picked** - not
+ *    a re-parse, not the file name, and with no button between the pick and the
+ *    write. Phase 2 validates `{{data.*}}` against exactly this list, so a list
+ *    assembled from anywhere else validates the wrong file.
+ *  - **Remove clears the contract, a refusal does not.** Both end in the
+ *    picker's `onSelect(null)`; only Remove is the user withdrawing the file
+ *    (#2043).
  *  - **Clear sends `null`, not `{}`.** The engine reads absent as "keep"; a
  *    cleared contract is only expressible as an explicit null that survives to
  *    the wire, and `{}` would read as "keep" too.
@@ -27,7 +31,7 @@
  * And then what the remembered path is *for*, here (issue #727): the tab whose
  * job is the comparison reads the file back itself, rather than rendering
  * "Declared from users.csv" beside "Nothing to compare yet" and waiting to be
- * handed the same file again.
+ * handed the same file again. That re-read is a preview: it never declares.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -114,11 +118,9 @@ beforeEach(() => {
 });
 
 describe("declaring a contract", () => {
-	it("writes the previewed file's columns and remembers where the file is", async () => {
+	it("declares the picked file's columns with no button press, and remembers where it is", async () => {
 		render(<DataTab collection={collection()} />);
 		await pickFile("users.csv", "id,email\n1,a@b.c");
-
-		fireEvent.click(screen.getByRole("button", { name: /declare columns/i }));
 
 		const [payload] = mutation.mutate.mock.calls[0];
 		expect(payload.id).toBe("col_1");
@@ -140,8 +142,6 @@ describe("declaring a contract", () => {
 	it("never puts a row anywhere that persists", async () => {
 		render(<DataTab collection={collection()} />);
 		await pickFile("users.csv", "id,email\n1,secret@example.test");
-
-		fireEvent.click(screen.getByRole("button", { name: /declare columns/i }));
 		succeed();
 
 		// Neither the payload nor the store may carry a cell of the file.
@@ -153,29 +153,125 @@ describe("declaring a contract", () => {
 		);
 	});
 
-	it("cannot declare before a file has been previewed", () => {
+	it("offers no declare button before a file has been picked", () => {
 		render(<DataTab collection={collection()} />);
-		expect(screen.getByRole("button", { name: /declare columns/i })).toHaveProperty(
-			"disabled",
-			true
-		);
+		expect(screen.queryByRole("button", { name: /declare columns|re-declare/i })).toBeNull();
 	});
 
 	it("declares without a path outside Electron, where there is none to remember", async () => {
 		vi.stubGlobal("electronAPI", undefined);
 		render(<DataTab collection={collection()} />);
 		await pickFile("users.csv", "id\n1");
-
-		fireEvent.click(screen.getByRole("button", { name: /declare columns/i }));
 		succeed();
 
 		expect(mutation.mutate.mock.calls[0][0].dataSchema.columns).toEqual(["id"]);
 		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
 	});
+
+	it("forgets a stale remembered path when the picked file carries none", async () => {
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/home/u/old.csv", fileName: "old.csv" } },
+		});
+		// No `readDataFile`: the file is not re-read, so the picker offers Choose file.
+		vi.stubGlobal("electronAPI", { getFilePath: () => "" });
+		render(<DataTab collection={collection({ columns: ["id"], fileName: "old.csv" })} />);
+		await pickFile("new.csv", "plan\nfree");
+		succeed();
+
+		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+	});
+
+	it("keeps the preview and a retry when the declare fails", async () => {
+		render(<DataTab collection={collection()} />);
+		await pickFile("users.csv", "id,email\n1,a@b.c");
+		expect(mutation.mutate).toHaveBeenCalledTimes(1);
+
+		// The first-time button is the retry path: a failed write leaves the file
+		// previewed and the contract undeclared, and it is the only way back to
+		// the write short of picking the file again.
+		fireEvent.click(screen.getByRole("button", { name: /declare columns/i }));
+
+		expect(mutation.mutate).toHaveBeenCalledTimes(2);
+		expect(mutation.mutate.mock.calls[1][0].dataSchema.columns).toEqual(["id", "email"]);
+	});
+});
+
+describe("removing the file", () => {
+	/** A contract from users.csv, its file remembered and re-read into the picker. */
+	function renderDeclared() {
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/home/u/users.csv", fileName: "users.csv" } },
+		});
+		vi.stubGlobal("electronAPI", {
+			readDataFile: vi.fn(() =>
+				Promise.resolve({
+					bytes: new TextEncoder().encode("id,email\n1,a@b.c"),
+					fileName: "users.csv",
+				})
+			),
+			getFilePath: () => "/home/u/plans.csv",
+		});
+		const view = render(
+			<DataTab collection={collection({ columns: ["id", "email"], fileName: "users.csv" })} />
+		);
+		return view;
+	}
+
+	it("clears the contract and forgets the remembered path", async () => {
+		renderDeclared();
+		fireEvent.click(await screen.findByRole("button", { name: /remove/i }));
+
+		expect(mutation.mutate.mock.calls[0][0]).toEqual({ id: "col_1", dataSchema: null });
+		succeed();
+		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+	});
+
+	it("then declares the next file picked, with the old columns gone", async () => {
+		const view = renderDeclared();
+		fireEvent.click(await screen.findByRole("button", { name: /remove/i }));
+		succeed();
+		// The mutation landed: the collection comes back with no contract.
+		view.rerender(<DataTab collection={collection({})} />);
+
+		await pickFile("plans.csv", "plan,price\nfree,0");
+
+		const [payload] = mutation.mutate.mock.calls[mutation.mutate.mock.calls.length - 1];
+		expect(payload.dataSchema.columns).toEqual(["plan", "price"]);
+		succeed();
+		expect(useDataFileStore.getState().locations.col_1).toEqual({
+			path: "/home/u/plans.csv",
+			fileName: "plans.csv",
+		});
+	});
+
+	it("only drops the preview when there is no contract to clear", async () => {
+		render(<DataTab collection={collection()} />);
+		await pickFile("users.csv", "id\n1");
+
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+		// The one call is the pick's own declare; Remove added none, and in
+		// particular no `dataSchema: null`.
+		expect(mutation.mutate).toHaveBeenCalledTimes(1);
+		expect(mutation.mutate.mock.calls[0][0].dataSchema).not.toBeNull();
+	});
+
+	it("leaves the contract alone when the picker refuses a file", async () => {
+		configEntries.push({ key: "maxScenarioDataRows", value: "1" });
+		render(<DataTab collection={collection({ columns: ["id"], fileName: "users.csv" })} />);
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File(["id\n1\n2"], "big.csv")] } });
+
+		await waitFor(() => expect(screen.getByText(/maxScenarioDataRows/)).toBeTruthy());
+		// A refusal ends in `onSelect(null)` too; it is not the user withdrawing
+		// the file the contract was read from.
+		expect(mutation.mutate).not.toHaveBeenCalled();
+	});
 });
 
 describe("an existing contract", () => {
-	it("shows its columns and offers to re-declare rather than to declare", () => {
+	it("shows its columns and offers no declare button until a file differs", () => {
 		render(
 			<DataTab collection={collection({ columns: ["id", "email"], fileName: "u.csv" })} />
 		);
@@ -188,7 +284,7 @@ describe("an existing contract", () => {
 		// turns out to be unreadable (issue #727), hence the two assertions.
 		expect(screen.getByText(/Declared from/)).toBeTruthy();
 		expect(screen.getByText("u.csv").className).not.toContain("line-through");
-		expect(screen.getByRole("button", { name: /re-declare/i })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /declare columns|re-declare/i })).toBeNull();
 	});
 
 	it("clears with an explicit null, and forgets the remembered file", () => {
@@ -213,10 +309,12 @@ describe("an existing contract", () => {
 	it("diffs a picked file against the declared columns, in both directions", async () => {
 		render(<DataTab collection={collection({ columns: ["id", "email"] })} />);
 		await pickFile("other.csv", "id,nickname\n1,addy");
+		expect(mutation.mutate).toHaveBeenCalledTimes(1);
 
 		expect(screen.getByText(/missing a declared column: email/i)).toBeTruthy();
 		expect(screen.getByText(/does not declare: nickname/i)).toBeTruthy();
-		// A mismatch never blocks re-declaring - re-declaring is the fix for it.
+		// Until the write lands the contract is the old one, so the mismatch shows
+		// and re-declaring stays one click away - the fix, and the retry.
 		expect(screen.getByRole("button", { name: /re-declare/i })).toHaveProperty(
 			"disabled",
 			false
@@ -229,6 +327,8 @@ describe("an existing contract", () => {
 
 		expect(screen.queryByText(/missing a declared column/i)).toBeNull();
 		expect(screen.queryByText(/does not declare/i)).toBeNull();
+		// Nothing differs, so there is nothing for a button to write.
+		expect(screen.queryByRole("button", { name: /declare columns|re-declare/i })).toBeNull();
 	});
 });
 
@@ -263,6 +363,8 @@ describe("the remembered file", () => {
 		// Mutation check for the auto-read: without it this callout is what shows,
 		// which is the reported incoherence.
 		expect(screen.queryByText(/Nothing to compare yet/i)).toBeNull();
+		// Opening the tab compares; it is never a declaration.
+		expect(mutation.mutate).not.toHaveBeenCalled();
 	});
 
 	it("says it is reading rather than claiming there is nothing to compare", async () => {
@@ -303,7 +405,8 @@ describe("the remembered file", () => {
 		expect(name.className).toContain("line-through");
 		expect(screen.queryByText(/Couldn't read the data file/i)).toBeNull();
 		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
-		expect(screen.getByRole("button", { name: /re-declare/i })).toBeTruthy();
+		// No Remove (nothing is selected), so Clear is how this contract is reset.
+		expect(screen.getByRole("button", { name: /clear/i })).toBeTruthy();
 	});
 
 	/*
@@ -366,7 +469,7 @@ describe("the remembered file", () => {
 		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
 	});
 
-	it("does not re-read, or replace the pick, when Declare writes the store", async () => {
+	it("does not re-read, or replace the pick, when a pick declares and writes the store", async () => {
 		const read = bridge(() => csv("id\n1", "users.csv"));
 		vi.stubGlobal("electronAPI", {
 			readDataFile: read,
@@ -375,8 +478,6 @@ describe("the remembered file", () => {
 
 		render(<DataTab collection={collection({ columns: ["id"] })} />);
 		await pickFile("other.csv", "id,extra\n1,x");
-
-		fireEvent.click(screen.getByRole("button", { name: /re-declare/i }));
 		succeed();
 
 		// The store now holds a path, but re-reading it here would replace the

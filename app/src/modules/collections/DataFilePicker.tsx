@@ -78,6 +78,13 @@ export interface SelectedDataFile {
 export interface DataFilePickerProps {
 	selected: SelectedDataFile | null;
 	onSelect: (file: SelectedDataFile | null) => void;
+	/**
+	 * The Remove button was pressed, as distinct from the selection going to
+	 * `null`: a file the picker refuses also calls `onSelect(null)`, and a host
+	 * that treats Remove as more than dropping a preview must not act on a
+	 * refusal. Called after `onSelect(null)`.
+	 */
+	onRemove?: () => void;
 	/** Parse failures live with the parent, beside the engine's own errors. */
 	error: string | null;
 	onError: (message: string | null) => void;
@@ -127,6 +134,7 @@ const PREVIEW_ROWS = 10;
 export default function DataFilePicker({
 	selected,
 	onSelect,
+	onRemove,
 	error,
 	onError,
 	iterations,
@@ -202,6 +210,7 @@ export default function DataFilePicker({
 		// Without this the same file cannot be re-picked: the input holds the
 		// previous value and fires no change event for an identical selection.
 		if (inputRef.current) inputRef.current.value = "";
+		onRemove?.();
 	};
 
 	const rowCount = selected?.parsed.rows.length ?? 0;
