@@ -1985,6 +1985,16 @@ and `RowActionBody` holds what an item draws, so the `⋯` dropdown and the
 context menu cannot describe a row's actions differently. Collection rows,
 request rows, environment rows and history rows all take it.
 
+**A row that names an entity offers "Copy for agent" (issue #2047).** It is the
+standard copy item: `Copy` glyph, the label "Copy for agent", and the reference
+line it will put on the clipboard as the item's `hint`, so the user reads what
+will be pasted before choosing it. Request, collection, environment, history,
+inbox, mock-issuer and mock-server rows carry it, placed after the row's
+primary actions and above the destructive one. The line comes from a formatter
+in `lib/agent-reference.ts` and goes out through `useCopy()` with the name
+"Reference". **Duplicate takes `CopyPlus`**, not `Copy`: two copy-shaped items
+in one menu need glyphs that tell them apart.
+
 ---
 
 ## Full-Width List Rows
@@ -3202,7 +3212,7 @@ copy of those four rules.
 A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
 
 - **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
-- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
+- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means. A row's "Copy for agent" item is the example: its toast reads "Reference copied", not "Copied".
 
 **One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
 

@@ -13,6 +13,8 @@ import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
+import { runReference } from "@/lib/agent-reference";
+import { useCopy } from "@/hooks/useCopy";
 import type { TimeRow } from "@/lib/time-value";
 import {
 	MethodBadge,
@@ -27,6 +29,7 @@ import { formatConcurrency } from "@/constants/load-test-modes";
 import {
 	Activity,
 	Clock,
+	Copy,
 	Loader2,
 	Trash2,
 	Zap,
@@ -82,6 +85,7 @@ export default function RunItem({
 	isSelected = false,
 	collectionName,
 }: RunItemProps) {
+	const { copy } = useCopy();
 	// Read from the compact list-row summary (paginated GET /runs). The full
 	// configSnapshot lives only on GET /runs/:id, which the list does not fetch.
 	const getRequestInfo = () => {
@@ -184,6 +188,7 @@ export default function RunItem({
 	 * list that owns them, and this is a second way to reach them rather than a
 	 * second definition of what they do.
 	 */
+	const reference = runReference(run, collectionName);
 	const rowActions: RowAction[] = [
 		...(onToggleBaseline
 			? [
@@ -195,6 +200,12 @@ export default function RunItem({
 					},
 				]
 			: []),
+		{
+			label: "Copy for agent",
+			icon: Copy,
+			hint: reference,
+			onSelect: () => void copy(reference, "Reference"),
+		},
 		{
 			label: "Delete run",
 			icon: Trash2,

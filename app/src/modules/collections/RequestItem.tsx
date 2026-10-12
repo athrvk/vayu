@@ -6,7 +6,7 @@
  */
 
 import { useMemo, useRef } from "react";
-import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
+import { Loader2, Trash2, Edit2, Copy, CopyPlus } from "lucide-react";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
@@ -14,6 +14,9 @@ import type { TreeEntity } from "./drop-position";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { useInlineRename } from "@/hooks/useInlineRename";
+import { useCopy } from "@/hooks/useCopy";
+import { requestReference } from "@/lib/agent-reference";
+import { collectionNamePath } from "./tree-utils";
 import {
 	RowActionsMenu,
 	RowContextMenu,
@@ -52,6 +55,7 @@ export default function RequestItem({
 	setSize,
 }: RequestItemProps) {
 	const {
+		allCollections,
 		selectedRequestId,
 		deletingRequestId,
 		renamingRequestId,
@@ -63,6 +67,7 @@ export default function RequestItem({
 		onDuplicateRequest,
 	} = useCollectionTreeContext();
 
+	const { copy } = useCopy();
 	const isSelected = selectedRequestId === request.id;
 	const isDeleting = deletingRequestId === request.id;
 	const isRenaming = renamingRequestId === request.id;
@@ -124,11 +129,22 @@ export default function RequestItem({
 		onRequestDeleteClick(request.id, request.name);
 	};
 
+	const reference = useMemo(
+		() => requestReference(request, collectionNamePath(request.collectionId, allCollections)),
+		[request, allCollections]
+	);
+
 	// One list, three ways in: the ⋯ button, the tree's Shift+F10 / Menu /
 	// Shift+Enter keys, and right-click (#1360).
 	const rowActions: RowAction[] = [
 		{ label: "Rename", icon: Edit2, onSelect: () => onStartRequestRename(request) },
-		{ label: "Duplicate", icon: Copy, onSelect: () => onDuplicateRequest(request) },
+		{ label: "Duplicate", icon: CopyPlus, onSelect: () => onDuplicateRequest(request) },
+		{
+			label: "Copy for agent",
+			icon: Copy,
+			hint: reference,
+			onSelect: () => void copy(reference, "Reference"),
+		},
 		...dnd.moveActions,
 		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
 	];
