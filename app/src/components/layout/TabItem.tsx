@@ -14,12 +14,12 @@
  * here - see that file for why.
  */
 
-import { memo } from "react";
+import { memo, useContext } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { ICON_MOTION } from "@/components/ui";
-import { RowContextMenu, ScrollOnOverflow } from "@/components/shared";
+import { DropIndicator, RowContextMenu, ScrollOnOverflow } from "@/components/shared";
 // Labels and icons live beside TabStrip, not in it: the command palette lists
 // the same tabs and must name them identically. See tab-descriptors.ts.
 import { type TabDescriptor } from "./tab-descriptors";
@@ -31,6 +31,7 @@ import { getMethodColor } from "@/lib/method-display";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
 import { tabItemPropsEqual } from "./tab-item-props-equal";
+import { TabStripDndContext } from "./TabStripDndContext";
 
 export interface TabItemProps {
 	tab: Tab;
@@ -53,6 +54,11 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 	// open had to press Tab a dozen times to get past the strip.
 	const rovingTabIndex = isRovingStop ? 0 : -1;
 	const Icon = descriptor.icon;
+	// Drag-to-reorder state arrives by context, not props, so `tabItemPropsEqual`
+	// is untouched: the value changes only while a drag is live.
+	const dnd = useContext(TabStripDndContext);
+	const isDragging = dnd?.draggingId === tab.id;
+	const dropEdge = dnd?.dropTabId === tab.id ? dnd.dropEdge : null;
 
 	return (
 		/*
@@ -100,6 +106,7 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 					if (e.button === 1) closeTab(tab.id);
 				}}
 				data-active={isActive}
+				{...dnd?.handlers}
 				className={cn(
 					// `key={tab.id}` (in TabStrip, where this is mapped) makes a
 					// genuinely new tab a fresh node - `.enter-fade` fades it in rather
@@ -141,7 +148,10 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 					"data-[active=false]:hover:bg-muted/50 data-[active=false]:hover:text-foreground",
 					"data-[active=true]:bg-tab-active data-[active=true]:text-foreground data-[active=true]:border-b-transparent",
 					"after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-transparent after:transition-colors",
-					"data-[active=true]:after:bg-primary"
+					"data-[active=true]:after:bg-primary",
+					// The tree's own drag-source class. The existing opacity transition
+					// is the only motion; a drop reflows instantly and adds none.
+					isDragging && "opacity-50"
 				)}
 			>
 				{/* The method, as 2px of colour rather than up to 36px of text. */}
@@ -168,6 +178,7 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 					role="button"
 					tabIndex={-1}
 					aria-label="Close tab"
+					data-tab-close
 					onClick={(e) => {
 						e.stopPropagation();
 						closeTab(tab.id);
@@ -189,6 +200,7 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 				>
 					<X className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 				</span>
+				{dropEdge && <DropIndicator orientation="vertical" edge={dropEdge} />}
 			</div>
 		</RowContextMenu>
 	);

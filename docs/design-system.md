@@ -2339,6 +2339,22 @@ between a folder and its children. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 
+**The tab strip joins the tree** (#2039), with the same rules in one dimension.
+The whole tab is the handle and a press becomes a drag at the same ~4px (the
+shared `lib/drag/drag-gesture`), so a click that wobbles still activates the tab
+and a completed drag swallows its one trailing click. The source dims with the
+same `opacity-50`. The slot is the same 2px `--primary` line (`DropIndicator`),
+drawn `vertical` on the edge of the tab beside the gap: before the first tab,
+between two, or after the last one rendered. Nothing is drawn where a drop would
+leave the tab in place, and a release above or below the strip, or Escape,
+cancels. There is **no indicator node in the tablist**: a `role="tab"` sibling
+would change the tab set the way a `treeitem` would change the tree, so the line
+is a child of an existing tab. Two things the tree has and the strip does not: no
+edge auto-scroll (the strip is `overflow-hidden` and the "+N" menu holds what
+does not fit, whose entries are not draggable) and no slide animation - the moved
+tab is re-keyed and the strip reflows, so the only motion is the opacity
+transition a tab already carries, which the reduced-motion rules collapse.
+
 **A rename must hand focus back.** The rename field replaces the row's label and
 then unmounts, so closing it from the keyboard (Enter or Escape) with nothing to
 catch focus drops the user to `<body>` and the next Tab restarts from the top of

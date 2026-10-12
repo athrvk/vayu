@@ -71,6 +71,8 @@ import { getMethodColor } from "@/lib/method-display";
 import TabItem from "./TabItem";
 import { useRovingStop } from "./useRovingStop";
 import { moveTabAndFocus } from "./tab-focus";
+import { TabStripDndContext } from "./TabStripDndContext";
+import { useTabStripDnd } from "./useTabStripDnd";
 
 /**
  * Which place the Alt chord sends the focused tab to, or `null` when the event
@@ -135,10 +137,10 @@ export function TabStrip() {
 	const activeIndex = openTabs.findIndex((t) => t.id === activeTabId);
 	const { visible, overflowed } = fitTabs(widths, available, activeIndex);
 	// The Tab stop is state so TabItem's memo sees it move; see useRovingStop.
-	const [rovingId, setRovingId] = useRovingStop(
-		activeTabId,
-		visible.map((i) => openTabs[i].id)
-	);
+	const visibleIds = visible.map((i) => openTabs[i].id);
+	const [rovingId, setRovingId] = useRovingStop(activeTabId, visibleIds);
+	// A dropped tab takes the Tab stop with it, as an Alt+Arrow move does.
+	const dnd = useTabStripDnd({ stripRef: listRef, visibleIds, onMoved: setRovingId });
 
 	/**
 	 * Arrow-key navigation across the strip.
@@ -256,16 +258,18 @@ export function TabStrip() {
 
 			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tablist is never a tab stop, the active `role="tab"` child carries `tabIndex={0}` and this onKeyDown moves it */}
 			<div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 items-stretch">
-				{visible.map((i) => (
-					<TabItem
-						key={openTabs[i].id}
-						tab={openTabs[i]}
-						isActive={openTabs[i].id === activeTabId}
-						isRovingStop={openTabs[i].id === rovingId}
-						width={widths[i]}
-						descriptor={descriptors[i]}
-					/>
-				))}
+				<TabStripDndContext.Provider value={dnd}>
+					{visible.map((i) => (
+						<TabItem
+							key={openTabs[i].id}
+							tab={openTabs[i]}
+							isActive={openTabs[i].id === activeTabId}
+							isRovingStop={openTabs[i].id === rovingId}
+							width={widths[i]}
+							descriptor={descriptors[i]}
+						/>
+					))}
+				</TabStripDndContext.Provider>
 			</div>
 
 			{/*

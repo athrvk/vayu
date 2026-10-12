@@ -38,6 +38,7 @@ import { isEmptyPlan, planCollectionMove, planRequestMove, type OrderedRow } fro
 import {
 	consumeClick,
 	cancelGesture,
+	isOwnEvent,
 	moveGesture,
 	pressGesture,
 	releaseGesture,
@@ -118,25 +119,6 @@ function entityFromRow(el: Element | null): TreeEntity | null {
 		name,
 		parentId: el.getAttribute("data-parent-id") || null,
 	};
-}
-
-/**
- * Whether an event that reached a row's handler actually happened on that row.
- *
- * A row renders its own ⋯ menu, and Radix renders the menu's items through a
- * **portal** - a React child of the row whose DOM lives on `document.body`.
- * React bubbles synthetic events through the component tree rather than the DOM
- * tree, so pressing "Delete" arrives here as a press on the row.
- *
- * Treating it as one is not a cosmetic bug: the press captures the pointer on
- * the row, and the capture retargets the `pointerup` the menu item needed, so
- * every action in every row menu silently stops working. A DOM containment
- * check is the difference between the two, and it is the *only* difference -
- * `closest("[data-tree-menu]")` cannot see it, because portalled content is not
- * inside the trigger it belongs to.
- */
-function isOwnEvent(e: { target: EventTarget | null; currentTarget: HTMLElement }): boolean {
-	return e.target instanceof Node && e.currentTarget.contains(e.target);
 }
 
 /**

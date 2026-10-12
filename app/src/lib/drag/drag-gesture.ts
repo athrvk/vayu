@@ -113,3 +113,22 @@ export function consumeClick(gesture: DragGesture): {
 	if (!gesture.suppressClick) return { gesture, suppressed: false };
 	return { gesture: { ...gesture, suppressClick: false }, suppressed: true };
 }
+
+/**
+ * Whether an event that reached a draggable item's handler actually happened on that item.
+ *
+ * An item can own a menu, and Radix renders the menu's items through a
+ * **portal** - a React child of the item whose DOM lives on `document.body`.
+ * React bubbles synthetic events through the component tree rather than the DOM
+ * tree, so pressing "Delete" arrives here as a press on the item.
+ *
+ * Treating it as one is not a cosmetic bug: the press captures the pointer on
+ * the item, and the capture retargets the `pointerup` the menu item needed, so
+ * every action in every such menu silently stops working. A DOM containment
+ * check is the difference between the two, and it is the *only* difference -
+ * `closest("[data-tree-menu]")` cannot see it, because portalled content is not
+ * inside the trigger it belongs to.
+ */
+export function isOwnEvent(e: { target: EventTarget | null; currentTarget: HTMLElement }): boolean {
+	return e.target instanceof Node && e.currentTarget.contains(e.target);
+}
