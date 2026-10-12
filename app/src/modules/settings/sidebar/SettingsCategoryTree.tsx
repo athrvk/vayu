@@ -116,6 +116,7 @@ export default function SettingsCategoryTree() {
 			<button
 				key={category}
 				data-active={isSelected}
+				aria-current={isSelected ? "true" : undefined}
 				onClick={() => selectCategory(category)}
 				className={cn(
 					// h-8: shared drawer row height (see CollectionItem).

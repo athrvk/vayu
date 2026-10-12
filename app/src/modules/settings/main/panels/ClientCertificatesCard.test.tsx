@@ -68,7 +68,7 @@ const certificates = [
 	},
 ];
 
-let queryResult: { data?: typeof certificates; isError: boolean } = {
+let queryResult: { data?: typeof certificates; isError: boolean; isLoading?: boolean } = {
 	data: certificates,
 	isError: false,
 };
@@ -296,6 +296,15 @@ describe("ClientCertificatesCard", () => {
 		// "No certificates registered" here would be a claim the card cannot
 		// make - an unreachable engine holds whatever it holds.
 		expect(screen.getByText(/did not answer/i)).toBeInTheDocument();
+		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
+	});
+
+	it("renders no verdict until the query settles", () => {
+		queryResult = { data: undefined, isLoading: true, isError: false };
+		renderCard();
+
+		// The first paint has no data yet, so "No certificates registered" would
+		// flash a claim the card cannot make before the engine has answered.
 		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
 	});
 
