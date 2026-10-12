@@ -50,8 +50,8 @@ import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useStopRun } from "@/hooks/useStopRun";
 import { isRunInProgress } from "@/lib/run-status";
-import { DATA_FILE_CHANGED_NOTE } from "@/lib/run-data-file";
-import { useDataFileChanged } from "@/hooks/useDataFileChanged";
+import { dataFileNote } from "@/lib/run-data-file";
+import { useDataFileStatus } from "@/hooks/useDataFileStatus";
 import { scenarioFromSnapshot } from "@/components/layout/context-bar/run-scenario";
 import { useScenarioRunStore } from "@/stores";
 import { Badge, Input } from "@/components/ui";
@@ -182,7 +182,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	// run recorded before the field, which then prints nothing about a file.
 	const manifest = useMemo(() => scenarioFromSnapshot(run), [run]);
 	const dataFileName = manifest?.dataFileName;
-	const dataFileChanged = useDataFileChanged(manifest?.collectionId, manifest?.dataFileHash);
+	const dataFileStatus = useDataFileStatus(manifest?.collectionId, manifest?.dataFileHash);
 
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/*
@@ -293,7 +293,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				{dataFileName && (
 					<span className="text-xs text-muted-foreground">
 						Data: {dataFileName}
-						{dataFileChanged && ` ${DATA_FILE_CHANGED_NOTE}`}
+						{dataFileNote(dataFileStatus)}
 					</span>
 				)}
 

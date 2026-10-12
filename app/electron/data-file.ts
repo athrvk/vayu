@@ -42,7 +42,9 @@
  * read through this channel could disagree about their own contents.
  *
  * `dataFile:hash` (issue #2051) is the same channel answering a digest instead
- * of bytes, behind the same path gates: `hashDataFile`.
+ * of bytes, behind the same path gates: `hashDataFile`. Its reply says
+ * "missing" as data rather than as an exception (issue #2057): an error crossing
+ * IPC keeps only its message, and a surface cannot branch on a sentence.
  */
 
 import { createHash } from "crypto";
@@ -88,6 +90,24 @@ export interface DataFileReadResult {
  * refuses any other spelling of the digest.
  */
 export const DATA_FILE_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * The file is not at the path: it was moved or deleted, or is not a regular
+ * file. Thrown only for that, so a caller that must tell "gone" from "refused"
+ * (a wrong extension, an empty path) tests the class rather than the message.
+ */
+export class DataFileMissingError extends Error {
+	constructor(filePath: string) {
+		super(`The file is no longer at ${filePath} - pick it again.`);
+		this.name = "DataFileMissingError";
+	}
+}
+
+/**
+ * What `dataFile:hash` resolves to. Mirrored by `DataFileHashReply` in
+ * `src/types/electron.d.ts`, which the preload cannot import either.
+ */
+export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
 
 /** The I/O this module performs, injected so the gates are testable without a disk. */
 export interface DataFileSystem {
@@ -180,7 +200,25 @@ export async function hashDataFile(
 	try {
 		return await system.hashFile(filePath);
 	} catch {
-		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+		throw new DataFileMissingError(filePath);
+	}
+}
+
+/**
+ * {@link hashDataFile} as the `dataFile:hash` reply: a file that is not at the
+ * path is the answer `{ status: "missing" }`, not a rejection. Every other
+ * refusal (extension, empty path) still rejects, because those are faults in
+ * the request and say nothing about the file.
+ */
+export async function hashDataFileReply(
+	filePath: string,
+	system: DataFileSystem = defaultSystem
+): Promise<DataFileHashReply> {
+	try {
+		return { status: "found", hash: await hashDataFile(filePath, system) };
+	} catch (error) {
+		if (error instanceof DataFileMissingError) return { status: "missing" };
+		throw error;
 	}
 }
 
@@ -202,6 +240,6 @@ async function statOpenableDataFile(filePath: string, system: DataFileSystem): P
 		if (!stats.isFile()) throw new Error("not a file");
 		return stats.size;
 	} catch {
-		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+		throw new DataFileMissingError(filePath);
 	}
 }

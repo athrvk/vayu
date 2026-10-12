@@ -20,6 +20,7 @@
  */
 
 import type { RunConfigSnapshot, RunSummary } from "@/types";
+import type { DataFileHashReply } from "@/types/electron";
 
 export interface RunDataFile {
 	fileName: string;
@@ -29,6 +30,9 @@ export interface RunDataFile {
 
 /** The suffix a surface appends when the collection's file no longer matches the run's. */
 export const DATA_FILE_CHANGED_NOTE = "(file changed since this run)";
+
+/** The suffix for a collection whose remembered file is no longer at its path (#2057). */
+export const DATA_FILE_MISSING_NOTE = "(file no longer at that path)";
 
 /**
  * The pair as one stored block holds it, or null. The one reader of the pair:
@@ -80,4 +84,34 @@ export function dataFileChanged(
 	rememberedHash: string | undefined
 ): boolean {
 	return runHash !== undefined && rememberedHash !== undefined && runHash !== rememberedHash;
+}
+
+/** How the collection's remembered file stands against the file a run read. */
+export type DataFileStatus = "changed" | "unchanged" | "missing" | "unknown";
+
+/**
+ * Classify the remembered file against a run (#2057). `current` is the latest
+ * answer about the file, or undefined when there is none: no remembered
+ * location, a hash still in flight, or one that failed for a reason other than
+ * the file being gone.
+ *
+ * A missing file is missing whatever the run recorded - one recorded before
+ * hashes still names a file that has moved. Every other verdict needs both
+ * hashes, per {@link dataFileChanged}.
+ */
+export function classifyDataFile(
+	runHash: string | undefined,
+	current: DataFileHashReply | undefined
+): DataFileStatus {
+	if (current === undefined) return "unknown";
+	if (current.status === "missing") return "missing";
+	if (runHash === undefined) return "unknown";
+	return dataFileChanged(runHash, current.hash) ? "changed" : "unchanged";
+}
+
+/** The suffix a header appends for a status, or "" when there is nothing to say. */
+export function dataFileNote(status: DataFileStatus): string {
+	if (status === "changed") return ` ${DATA_FILE_CHANGED_NOTE}`;
+	if (status === "missing") return ` ${DATA_FILE_MISSING_NOTE}`;
+	return "";
 }

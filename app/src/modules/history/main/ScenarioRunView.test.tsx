@@ -484,6 +484,7 @@ describe("the data file the run was driven by", () => {
 	const HASH_B = "b".repeat(64);
 
 	beforeEach(() => {
+		vi.unstubAllGlobals();
 		useDataFileStore.setState({ locations: {} });
 	});
 
@@ -532,6 +533,67 @@ describe("the data file the run was driven by", () => {
 			/>
 		);
 
+		expect(screen.getByText("Data: users.csv")).toBeTruthy();
+	});
+
+	it("says the file is no longer at its path when the main process reports it gone", async () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: HASH_A,
+		});
+		vi.stubGlobal("electronAPI", {
+			hashDataFile: vi.fn(async () => ({ status: "missing" })),
+		});
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "users.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		expect(
+			await screen.findByText("Data: users.csv (file no longer at that path)")
+		).toBeTruthy();
+		expect(screen.queryByText(/file changed/)).toBeNull();
+	});
+
+	it("keeps the changed note for a file that is there and differs, and never adds the missing one", async () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: HASH_A,
+		});
+		vi.stubGlobal("electronAPI", {
+			hashDataFile: vi.fn(async () => ({ status: "found", hash: HASH_B })),
+		});
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "users.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		expect(
+			await screen.findByText("Data: users.csv (file changed since this run)")
+		).toBeTruthy();
+		expect(screen.queryByText(/no longer at that path/)).toBeNull();
+	});
+
+	it("adds neither note for a file that is there and matches", async () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: HASH_A,
+		});
+		const hashDataFile = vi.fn(async () => ({ status: "found", hash: HASH_A }));
+		vi.stubGlobal("electronAPI", { hashDataFile });
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "users.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		await waitFor(() => expect(hashDataFile).toHaveBeenCalled());
+		await act(async () => {});
 		expect(screen.getByText("Data: users.csv")).toBeTruthy();
 	});
 });

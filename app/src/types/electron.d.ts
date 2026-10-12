@@ -190,6 +190,9 @@ export interface ContextMenuTarget {
 export type ContextMenuCommand =
 	{ type: "import-command"; text: string } | { type: "edit-variable"; name: string };
 
+/** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
+export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
+
 interface ElectronAPI {
 	// Engine management
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
@@ -350,11 +353,12 @@ interface ElectronAPI {
 	/**
 	 * The SHA-256 of a declared data file's bytes as they are now, 64 lowercase
 	 * hex (issue #2051), without transferring them: the same digest
-	 * `readDataFile` answers. Rejects like `readDataFile` for a refused
-	 * extension or a file that has moved; there is no byte cap. Absent outside
-	 * Electron.
+	 * `readDataFile` answers. A file that has moved resolves
+	 * `{ status: "missing" }` (issue #2057) rather than rejecting, since a
+	 * rejection reaches the renderer as a bare message. Rejects for a refused
+	 * extension or an empty path; there is no byte cap. Absent outside Electron.
 	 */
-	hashDataFile: (path: string) => Promise<string>;
+	hashDataFile: (path: string) => Promise<DataFileHashReply>;
 
 	/**
 	 * Hand the main process every remembered data-file location (issue #1742),

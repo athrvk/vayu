@@ -21,7 +21,9 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
+	DataFileMissingError,
 	hashDataFile,
+	hashDataFileReply,
 	readDataFile,
 	DATA_FILE_EXTENSIONS,
 	DATA_FILE_HASH_PATTERN,
@@ -186,7 +188,9 @@ describe("the hash and the picker's agree (#2051)", () => {
  *
  * Mutation check: hash anything but the file's whole contents (drop a chunk,
  * or digest the path) and the first case fails; drop the path gates and the
- * refusal case reads the disk.
+ * refusal case reads the disk. Throw a plain `Error` at either not-found site
+ * and the `DataFileMissingError` cases fail; throw `DataFileMissingError` for
+ * a refused extension or empty path and the refusal cases fail.
  */
 describe("hashDataFile", () => {
 	let dir: string;
@@ -228,6 +232,50 @@ describe("hashDataFile", () => {
 		);
 	});
 
+	it("throws DataFileMissingError when the stat finds nothing", async () => {
+		const io = system({
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+		expect(io.hashFile).not.toHaveBeenCalled();
+	});
+
+	it("throws DataFileMissingError for a path that is not a regular file", async () => {
+		const io = system({ stat: vi.fn(async () => ({ size: 0, isFile: () => false })) });
+		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+	});
+
+	it("throws DataFileMissingError when the file vanishes between the stat and the hash", async () => {
+		const io = system({
+			hashFile: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+	});
+
+	it("keeps the sentence a read shows for a file that has moved", async () => {
+		const io = system({
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toThrow(
+			"The file is no longer at /home/u/rows.csv - pick it again."
+		);
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+	});
+
 	it("passes the read's path gates before touching the disk", async () => {
 		const io = system();
 		await expect(hashDataFile("/home/u/.ssh/id_rsa", io)).rejects.toThrow(
@@ -238,10 +286,64 @@ describe("hashDataFile", () => {
 		expect(io.hashFile).not.toHaveBeenCalled();
 	});
 
+	it("does not call a refused request a missing file", async () => {
+		const io = system();
+		for (const refused of ["/home/u/.ssh/id_rsa", ""]) {
+			const error = await hashDataFile(refused, io).catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(DataFileMissingError);
+		}
+	});
+
 	it("needs no engine: a hash fetches no byte cap", async () => {
 		const io = system();
 		await expect(hashDataFile("/home/u/rows.csv", io)).resolves.toBe("f".repeat(64));
 		expect(io.fetchConfig).not.toHaveBeenCalled();
 		expect(io.readFile).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * The `dataFile:hash` reply (#2057): a file that is gone is data the renderer can
+ * branch on, because an error crossing IPC keeps only its message.
+ *
+ * Mutation check: map every error to `missing` and the refusal cases fail;
+ * rethrow `DataFileMissingError` and the missing cases fail.
+ */
+describe("hashDataFileReply", () => {
+	it("answers found with the digest", async () => {
+		await expect(hashDataFileReply("/home/u/rows.csv", system())).resolves.toEqual({
+			status: "found",
+			hash: "f".repeat(64),
+		});
+	});
+
+	it("answers missing when the stat finds nothing", async () => {
+		const io = system({
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(hashDataFileReply("/home/u/rows.csv", io)).resolves.toEqual({
+			status: "missing",
+		});
+	});
+
+	it("answers missing when the hash cannot read the file", async () => {
+		const io = system({
+			hashFile: vi.fn(async () => {
+				throw new Error("EACCES");
+			}),
+		});
+		await expect(hashDataFileReply("/home/u/rows.csv", io)).resolves.toEqual({
+			status: "missing",
+		});
+	});
+
+	it("still rejects a refused request, which says nothing about the file", async () => {
+		await expect(hashDataFileReply("/home/u/.ssh/id_rsa", system())).rejects.toThrow(
+			/only opens data files/
+		);
+		await expect(hashDataFileReply("", system())).rejects.toThrow(/No data file path/);
 	});
 });

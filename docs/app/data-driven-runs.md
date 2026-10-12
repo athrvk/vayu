@@ -532,8 +532,10 @@ collection remembers now differs on disk from the one the run read, the
 collection run's header adds "(file changed since this run)": the app hashes
 the file when the tab opens and again whenever its window regains focus, so an
 edit made in another program shows up on return. A file that has moved or been
-deleted adds nothing, since there is nothing to compare; the hash itself is
-never shown. A file whose name holds a `\` (legal on macOS and Linux) is run
+deleted adds "(file no longer at that path)" instead, whether or not the run
+recorded a hash; the desktop app is the only place that can tell, so the
+browser build never shows it. A file the app cannot hash for any other reason
+adds nothing; the hash itself is never shown. A file whose name holds a `\` (legal on macOS and Linux) is run
 without its name, because a name with a path separator is refused as a path.
 
 **A cell that binds into a request is stored with that request.** A collection

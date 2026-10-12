@@ -46,6 +46,7 @@ import { DataFileError } from "./errors";
 import { describeRowCapRefusal } from "./row-cap";
 import { parseDataFile, type ParsedDataFile } from "./index";
 import { useDataFileStore } from "@/stores/data-file-store";
+import type { DataFileHashReply } from "@/types/electron";
 
 /** A file re-read from disk, in the shape the pickers already hold. */
 export interface DeclaredDataFile {
@@ -92,12 +93,13 @@ export function canHashDeclaredDataFile(): boolean {
 
 /**
  * The SHA-256 hex of the file at `path` as it is now, the digest a re-read
- * would answer, without its bytes crossing to the renderer. Rejects with
+ * would answer, without its bytes crossing to the renderer. A file that has
+ * moved resolves `{ status: "missing" }` (#2057); it rejects with
  * `NoDataFileBridgeError` outside Electron and with the main process's message
- * when the file is gone or refused. It records nothing in `data-file-store`,
- * whose hash stays the one the app last read the file with.
+ * when the request is refused (extension, empty path). It records nothing in
+ * `data-file-store`, whose hash stays the one the app last read the file with.
  */
-export async function hashDeclaredDataFile(path: string): Promise<string> {
+export async function hashDeclaredDataFile(path: string): Promise<DataFileHashReply> {
 	const hash = window.electronAPI?.hashDataFile;
 	if (!hash) throw new NoDataFileBridgeError();
 	return await hash(path);
