@@ -34,6 +34,7 @@ export default function PerformanceTab({
 	derived,
 	anomalies,
 	timeSeries,
+	seriesFailure,
 	monitorSamples,
 	isLoadingSeries,
 	isFetchingMore,
@@ -69,6 +70,7 @@ export default function PerformanceTab({
 			{runId && (
 				<HistoricalChartsSection
 					data={timeSeries}
+					failure={seriesFailure}
 					monitorSamples={monitorSamples}
 					isLoading={isLoadingSeries}
 					isFetchingMore={isFetchingMore}

@@ -118,6 +118,25 @@ describe("RecentRuns", () => {
 		expect([...screen.getByText("Failed").classList]).toContain("text-status-error-text");
 	});
 
+	it("names no status for a run still in flight", () => {
+		// The status text is for what happened. `RUN_STATUS` has a word for
+		// running and pending; deriving the label from it must not start listing them.
+		render(
+			<RecentRuns
+				runs={[
+					run({ id: "r", status: "running" }),
+					run({ id: "p", status: "pending", startTime: Date.now() - 120_000 }),
+				]}
+			/>
+		);
+
+		expect(screen.queryByText("Running")).not.toBeInTheDocument();
+		expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+		for (const row of screen.getAllByRole("button", { name: /Open load test run/i })) {
+			expect(row.getAttribute("aria-label")).not.toMatch(/running|pending/i);
+		}
+	});
+
 	it("renders nothing when there are no runs", () => {
 		const { container } = render(<RecentRuns runs={[]} />);
 		expect(container).toBeEmptyDOMElement();
