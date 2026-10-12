@@ -26,6 +26,7 @@ import {
 	WITHHELD_VARIABLE_SENTENCE,
 	withholdConfigCredentials,
 	withholdRowListSecrets,
+	withholdRowSecrets,
 } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -137,6 +138,34 @@ export const READ_TOOLS: McpTool[] = [
 			callEngine(
 				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
 				secretsShape(ctx, withholdRowListSecrets)
+			),
+	},
+	{
+		name: "get_request",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the same shape list_requests returns for each of its rows. An id that names no saved request is an error naming 404. " +
+			WITHHELD_AUTH_SENTENCE +
+			" " +
+			WITHHELD_HEADER_SENTENCE +
+			" " +
+			WITHHELD_URL_SENTENCE,
+		annotations: {
+			title: "Get a request",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z
+				.string()
+				.describe("Saved request ID, the (req_...) of a Vayu reference line."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
+				secretsShape(ctx, withholdRowSecrets)
 			),
 	},
 	{

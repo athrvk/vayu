@@ -10108,6 +10108,65 @@ describe("secret withholding", () => {
 		expect(body).toEqual(REQUESTS);
 	});
 
+	test("get_request withholds one row's credentials exactly as list_requests does", async () => {
+		const client = fakeClient({
+			getRequest: vi.fn(async (id: string) => REQUESTS.find((row) => row.id === id)),
+		});
+		const { text, body } = await read("get_request", client, undefined, { requestId: "req_3" });
+		expect(text).not.toContain("cs-123");
+		expect(body.auth.config.clientSecretWithheld).toBe(true);
+		expect(client.getRequest).toHaveBeenCalledWith("req_3", undefined);
+
+		const listed = await read(
+			"list_requests",
+			fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) }),
+			undefined,
+			{ collectionId: "c1" }
+		);
+		expect(body).toEqual(listed.body[2]);
+	});
+
+	test("get_request returns the row as stored with reveal on", async () => {
+		const client = fakeClient({ getRequest: vi.fn().mockResolvedValue(REQUESTS[0]) });
+		const { body } = await read("get_request", client, REVEAL, { requestId: "req_1" });
+		expect(body).toEqual(REQUESTS[0]);
+	});
+
+	test("get_request answers an unknown id as an error naming 404", async () => {
+		const client = fakeClient({
+			getRequest: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError("Engine responded 404", 404, "Request not found")
+				),
+		});
+		const res = await dispatchTool("get_request", { requestId: "req_gone" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("404");
+	});
+
+	test.each([{}, { requestId: "" }])(
+		"get_request refuses %j before the engine is called",
+		async (args) => {
+			const client = fakeClient();
+			const res = await dispatchTool("get_request", args, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/requestId.*required/i);
+			expect(client.getRequest).not.toHaveBeenCalled();
+		}
+	);
+
+	test("get_request is a read tool carrying read-only annotations", () => {
+		const tool = TOOLS.find((t) => t.name === "get_request");
+		expect(tool?.category).toBe("read");
+		expect(tool?.invalidates).toEqual([]);
+		expect(tool?.annotations).toMatchObject({
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		});
+	});
+
 	test("list_collections withholds a collection's secret variables and auth", async () => {
 		const collections = [
 			{
