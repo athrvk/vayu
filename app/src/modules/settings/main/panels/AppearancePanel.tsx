@@ -80,7 +80,7 @@ export default function AppearancePanel() {
 	const {
 		themeSource,
 		setTheme,
-		colorScheme,
+		effectiveColorScheme,
 		setColorScheme,
 		isDark,
 		isLoading,
@@ -226,7 +226,7 @@ export default function AppearancePanel() {
 									<p className="text-xs text-muted-foreground mb-3">
 										{"Current scheme: "}
 										<span className="font-semibold capitalize">
-											{colorScheme}
+											{effectiveColorScheme}
 										</span>
 									</p>
 								)}
@@ -257,7 +257,7 @@ export default function AppearancePanel() {
 											),
 										};
 									})}
-									value={colorScheme}
+									value={effectiveColorScheme}
 									onChange={matchSystemAccent ? () => {} : setColorScheme}
 									columns="grid-cols-3"
 								/>

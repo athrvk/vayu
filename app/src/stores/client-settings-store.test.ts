@@ -77,6 +77,7 @@ describe("client-settings store", () => {
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.THEME_SOURCE);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.COLOR_SCHEME);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.MATCH_SYSTEM_ACCENT);
+		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.SYSTEM_ACCENT);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.UI_RADIUS);
 		// The live chart window is engine config (`liveReplayWindowMs`), not a
 		// renderer preference, so it has no localStorage key to reset here - the

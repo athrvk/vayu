@@ -23,14 +23,25 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useElectronTheme } from "./useElectronTheme";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 
+/** Stubs the bridge; `emitAccent` plays the main process's live accent broadcast. */
 function stubElectronAPI(accentScheme: string | null) {
+	let accentListener: ((data: { accentScheme: string | null }) => void) | null = null;
 	vi.stubGlobal("electronAPI", {
 		getTheme: vi.fn().mockResolvedValue({ shouldUseDarkColors: false, themeSource: "system" }),
 		setTheme: vi.fn().mockResolvedValue({ shouldUseDarkColors: false, themeSource: "system" }),
 		onThemeChanged: vi.fn().mockReturnValue(() => {}),
 		getAccentScheme: vi.fn().mockResolvedValue({ accentScheme }),
-		onAccentSchemeChanged: vi.fn().mockReturnValue(() => {}),
+		onAccentSchemeChanged: vi.fn((cb: (data: { accentScheme: string | null }) => void) => {
+			accentListener = cb;
+			return () => {};
+		}),
 	});
+	return {
+		emitAccent: (next: string | null) =>
+			act(() => {
+				accentListener?.({ accentScheme: next });
+			}),
+	};
 }
 
 beforeEach(() => {
@@ -80,7 +91,36 @@ describe("useElectronTheme - matching the OS accent at launch", () => {
 
 		await waitFor(() => expect(result.current.isLoading).toBe(false));
 		expect(document.documentElement.dataset.colorScheme).toBe("forest");
-		expect(result.current.colorScheme).toBe("forest");
+		expect(result.current.effectiveColorScheme).toBe("forest");
+		// The manual pick is not displaced (#1861).
+		expect(result.current.colorScheme).toBe("ocean");
+		expect(localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME)).toBe("ocean");
+		expect(localStorage.getItem(STORAGE_KEYS.SYSTEM_ACCENT)).toBe("forest");
+	});
+
+	it("keeps the stored scheme when the OS reports no accent (Linux)", async () => {
+		localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, "ocean");
+		localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, "true");
+		stubElectronAPI(null);
+
+		const { result } = renderHook(() => useElectronTheme());
+
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		expect(document.documentElement.dataset.colorScheme).toBe("ocean");
+		expect(result.current.effectiveColorScheme).toBe("ocean");
+	});
+
+	it("drops a stored OS accent the platform no longer reports", async () => {
+		localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, "ocean");
+		localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, "true");
+		localStorage.setItem(STORAGE_KEYS.SYSTEM_ACCENT, "sky");
+		stubElectronAPI(null);
+
+		const { result } = renderHook(() => useElectronTheme());
+
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		expect(document.documentElement.dataset.colorScheme).toBe("ocean");
+		expect(localStorage.getItem(STORAGE_KEYS.SYSTEM_ACCENT)).toBeNull();
 	});
 
 	it("keeps the stored scheme when matching is off", async () => {
@@ -93,6 +133,72 @@ describe("useElectronTheme - matching the OS accent at launch", () => {
 		await waitFor(() => expect(result.current.isLoading).toBe(false));
 		expect(document.documentElement.dataset.colorScheme).toBe("ocean");
 		expect(result.current.colorScheme).toBe("ocean");
+		expect(result.current.effectiveColorScheme).toBe("ocean");
+	});
+});
+
+describe("useElectronTheme - match system accent keeps the manual pick (#1861)", () => {
+	const dom = () => document.documentElement.dataset.colorScheme;
+
+	async function mountWithManualPick(osAccent: string) {
+		localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, "sunset");
+		const bridge = stubElectronAPI(osAccent);
+		const hook = renderHook(() => useElectronTheme());
+		await waitFor(() => expect(hook.result.current.isLoading).toBe(false));
+		return { ...hook, ...bridge };
+	}
+
+	it("applies the OS accent on enabling, leaves the stored pick, and returns to it on disabling", async () => {
+		const { result } = await mountWithManualPick("sky");
+		expect(dom()).toBe("sunset");
+
+		act(() => result.current.setMatchAccent(true));
+		await waitFor(() => expect(dom()).toBe("sky"));
+		expect(localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME)).toBe("sunset");
+		expect(localStorage.getItem(STORAGE_KEYS.SYSTEM_ACCENT)).toBe("sky");
+		expect(result.current.colorScheme).toBe("sunset");
+		expect(result.current.effectiveColorScheme).toBe("sky");
+
+		act(() => result.current.setMatchAccent(false));
+		expect(dom()).toBe("sunset");
+		expect(result.current.effectiveColorScheme).toBe("sunset");
+	});
+
+	it("applies and persists a live OS accent change while matching", async () => {
+		const { result, emitAccent } = await mountWithManualPick("sky");
+		act(() => result.current.setMatchAccent(true));
+		await waitFor(() => expect(dom()).toBe("sky"));
+
+		emitAccent("ocean");
+
+		expect(dom()).toBe("ocean");
+		expect(localStorage.getItem(STORAGE_KEYS.SYSTEM_ACCENT)).toBe("ocean");
+		expect(localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME)).toBe("sunset");
+	});
+
+	it("records a live OS accent change while not matching, without repainting", async () => {
+		const { result, emitAccent } = await mountWithManualPick("sky");
+
+		emitAccent("ocean");
+
+		expect(dom()).toBe("sunset");
+		expect(localStorage.getItem(STORAGE_KEYS.SYSTEM_ACCENT)).toBe("ocean");
+
+		act(() => result.current.setMatchAccent(true));
+		expect(dom()).toBe("ocean");
+	});
+
+	it("remembers a manual pick made while matching without repainting", async () => {
+		const { result } = await mountWithManualPick("sky");
+		act(() => result.current.setMatchAccent(true));
+		await waitFor(() => expect(dom()).toBe("sky"));
+
+		act(() => result.current.setColorScheme("forest"));
+
+		expect(dom()).toBe("sky");
+		expect(localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME)).toBe("forest");
+		act(() => result.current.setMatchAccent(false));
+		expect(dom()).toBe("forest");
 	});
 });
 

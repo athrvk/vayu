@@ -8,9 +8,13 @@
 		<!--
 			Pre-paint appearance: apply the persisted accent, light/dark, UI font,
 			and interface scale before React mounts, so the first frame isn't a
-			flash of the wrong theme/size. Keys and font stacks mirror
-			src/constants/storage-keys.ts + src/constants/appearance.ts; the
-			useElectronTheme / useAppearance hooks remain the source of truth.
+			flash of the wrong theme/size. The accent is the last OS-reported one
+			(vayu-system-accent) while vayu-match-system-accent is "true" and that
+			key is set, the manual vayu-color-scheme otherwise - the rule of
+			effectiveColorScheme in src/stores/theme-store.ts. Keys and font
+			stacks mirror src/constants/storage-keys.ts and
+			src/constants/appearance.ts; the useElectronTheme / useAppearance
+			hooks remain the source of truth.
 		-->
 		<script>
 			(function () {
@@ -29,7 +33,12 @@
 					else if (plat === "win32") el.setAttribute("data-platform", "windows");
 					else if (plat) el.setAttribute("data-platform", "linux");
 
-					var scheme = localStorage.getItem("vayu-color-scheme");
+					var systemAccent = localStorage.getItem("vayu-system-accent");
+					var matching = localStorage.getItem("vayu-match-system-accent") === "true";
+					var scheme =
+						matching && systemAccent
+							? systemAccent
+							: localStorage.getItem("vayu-color-scheme");
 					if (scheme) el.setAttribute("data-color-scheme", scheme);
 					var source = localStorage.getItem("vayu-theme-source");
 					var dark =

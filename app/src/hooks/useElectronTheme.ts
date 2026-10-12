@@ -19,7 +19,7 @@
  */
 
 import { useEffect } from "react";
-import { useThemeStore } from "@/stores";
+import { effectiveColorScheme as effectiveSchemeOf, useThemeStore } from "@/stores";
 import type { ThemeSource } from "@/types/ui";
 import type { ColorScheme } from "@/constants/color-schemes";
 
@@ -29,6 +29,7 @@ export type { ThemeSource, ColorScheme };
 export function useElectronTheme() {
 	const themeSource = useThemeStore((s) => s.themeSource);
 	const colorScheme = useThemeStore((s) => s.colorScheme);
+	const effectiveColorScheme = useThemeStore(effectiveSchemeOf);
 	const isDark = useThemeStore((s) => s.isDark);
 	const isLoading = useThemeStore((s) => s.isLoading);
 	const matchSystemAccent = useThemeStore((s) => s.matchSystemAccent);
@@ -44,7 +45,10 @@ export function useElectronTheme() {
 	return {
 		themeSource,
 		setTheme,
+		/** The user's manual pick; it stays put while the OS accent is matched. */
 		colorScheme,
+		/** What is on screen: the OS accent while matching it, else `colorScheme`. */
+		effectiveColorScheme,
 		setColorScheme,
 		isDark,
 		isLoading,

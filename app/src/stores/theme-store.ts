@@ -22,11 +22,17 @@
  * derived from the store's current fields (`writeDocument`), so there is no
  * copy to go stale.
  *
+ * Two fields carry the accent, and neither overwrites the other (#1861):
+ * `colorScheme` is the user's manual pick and `systemAccent` is the last scheme
+ * the OS reported. The scheme on screen is derived from them
+ * (`effectiveColorScheme`), so turning "match system accent" off returns to the
+ * manual pick instead of to whatever the OS last said.
+ *
  * Persistence is one localStorage key per preference, written by the action
  * rather than zustand's `persist`: the pre-paint script in index.html reads
- * the theme-source and colour-scheme keys before React mounts, and
- * `SETTINGS_STORAGE_KEYS` clears those two on "Reset app settings".
- * `vayu-match-system-accent` is neither yet (#1857, #1861).
+ * the theme-source, colour-scheme, match-flag and system-accent keys before
+ * React mounts, and `SETTINGS_STORAGE_KEYS` clears all four on "Reset app
+ * settings".
  */
 
 import { create } from "zustand";
@@ -51,7 +57,10 @@ function browserResolvesDark(source: ThemeSource): boolean {
 
 interface ThemeState {
 	themeSource: ThemeSource;
+	/** The user's manual pick. Never overwritten by the OS accent. */
 	colorScheme: ColorScheme;
+	/** The last scheme the OS reported: null before the first, and always on Linux. */
+	systemAccent: ColorScheme | null;
 	isDark: boolean;
 	/** True until the first read of the persisted and OS state has landed. */
 	isLoading: boolean;
@@ -60,7 +69,7 @@ interface ThemeState {
 	supportsAccent: boolean;
 
 	setTheme: (source: ThemeSource) => Promise<void>;
-	/** Pick a scheme by hand: applied and remembered. */
+	/** Pick a scheme by hand: remembered, and applied unless the OS accent is in force. */
 	setColorScheme: (scheme: ColorScheme) => void;
 	setMatchAccent: (enabled: boolean) => void;
 	/**
@@ -74,6 +83,7 @@ interface ThemeState {
 const INITIAL_STATE = {
 	themeSource: "system",
 	colorScheme: DEFAULT_COLOR_SCHEME,
+	systemAccent: null,
 	isDark: false,
 	isLoading: true,
 	matchSystemAccent: false,
@@ -81,32 +91,44 @@ const INITIAL_STATE = {
 } as const satisfies Partial<ThemeState>;
 
 /**
+ * The scheme on screen: the OS accent while matching it and the OS has reported
+ * one, the manual pick otherwise. index.html's pre-paint script applies the same
+ * rule to the stored keys.
+ */
+export function effectiveColorScheme(
+	state: Pick<ThemeState, "colorScheme" | "systemAccent" | "matchSystemAccent">
+): ColorScheme {
+	return state.matchSystemAccent && state.systemAccent ? state.systemAccent : state.colorScheme;
+}
+
+/**
  * The one DOM writer. Callers pass the store's own state, never a value of
  * their own: the document follows the store, not the other way round.
  */
-function writeDocument(state: Pick<ThemeState, "isDark" | "colorScheme">): void {
+function writeDocument(
+	state: Pick<ThemeState, "isDark" | "colorScheme" | "systemAccent" | "matchSystemAccent">
+): void {
 	document.documentElement.classList.toggle("dark", state.isDark);
-	document.documentElement.setAttribute("data-color-scheme", state.colorScheme);
+	document.documentElement.setAttribute("data-color-scheme", effectiveColorScheme(state));
 }
 
-function readStoredScheme(): ColorScheme {
-	const raw = localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME);
-	return isColorScheme(raw) ? raw : DEFAULT_COLOR_SCHEME;
+function readStoredScheme(key: string): ColorScheme | null {
+	const raw = localStorage.getItem(key);
+	return isColorScheme(raw) ? raw : null;
 }
 
 interface Resolved {
 	themeSource: ThemeSource;
 	isDark: boolean;
-	colorScheme: ColorScheme;
+	/** What the OS reports now; null where it has no accent colour or there is no OS bridge. */
+	systemAccent: ColorScheme | null;
 	supportsAccent: boolean;
 }
 
 /** Launch state through the Electron bridge. */
 async function resolveFromElectron(
 	api: NonNullable<typeof window.electronAPI>,
-	savedSource: string | null,
-	scheme: ColorScheme,
-	matchAccent: boolean
+	savedSource: string | null
 ): Promise<Resolved> {
 	// Both asked at once: neither answer depends on the other, and in sequence
 	// the second round trip to the main process waited out the first while the
@@ -125,20 +147,18 @@ async function resolveFromElectron(
 	return {
 		themeSource: theme.themeSource as ThemeSource,
 		isDark: theme.shouldUseDarkColors,
-		// When matching is on and the OS gave us a scheme, it wins over the stored
-		// value for the DOM write and the state alike (#1719).
-		colorScheme: matchAccent && accentInfo.accentScheme ? accentInfo.accentScheme : scheme,
+		systemAccent: accentInfo.accentScheme,
 		supportsAccent: accentInfo.accentScheme !== null,
 	};
 }
 
 /** Launch state without Electron: localStorage, then the browser's preference. */
-function resolveFromBrowser(savedSource: string | null, scheme: ColorScheme): Resolved {
+function resolveFromBrowser(savedSource: string | null): Resolved {
 	const themeSource = isThemeSource(savedSource) ? savedSource : "system";
 	return {
 		themeSource,
 		isDark: browserResolvesDark(themeSource),
-		colorScheme: scheme,
+		systemAccent: null,
 		supportsAccent: false,
 	};
 }
@@ -150,6 +170,16 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 		writeDocument(get());
 	};
 
+	/**
+	 * Remember what the OS reported, whether or not it is being matched: the
+	 * pre-paint script and a later toggle both need the latest one. The document
+	 * only changes if matching is on.
+	 */
+	const recordSystemAccent = (accent: ColorScheme): void => {
+		localStorage.setItem(STORAGE_KEYS.SYSTEM_ACCENT, accent);
+		commit({ systemAccent: accent });
+	};
+
 	const subscribeToElectron = (api: NonNullable<typeof window.electronAPI>): (() => void) => {
 		const stopTheme = api.onThemeChanged((theme) => {
 			commit({
@@ -157,14 +187,10 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 				isDark: theme.shouldUseDarkColors,
 			});
 		});
-		// Registered unconditionally and checked at delivery: the toggle can flip
-		// after attach, and the bridge only sends where the OS has an accent.
-		// A live OS change is applied, not persisted (#1861).
+		// Registered unconditionally: the toggle can flip after attach, and the
+		// bridge only sends where the OS has an accent.
 		const stopAccent = api.onAccentSchemeChanged((data) => {
-			const { matchSystemAccent, supportsAccent } = get();
-			if (data.accentScheme && matchSystemAccent && supportsAccent) {
-				commit({ colorScheme: data.accentScheme });
-			}
+			if (data.accentScheme) recordSystemAccent(data.accentScheme);
 		});
 		return () => {
 			stopTheme();
@@ -192,19 +218,29 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 		set(INITIAL_STATE);
 
 		const savedSource = localStorage.getItem(STORAGE_KEYS.THEME_SOURCE);
-		const scheme = readStoredScheme();
+		const colorScheme = readStoredScheme(STORAGE_KEYS.COLOR_SCHEME) ?? DEFAULT_COLOR_SCHEME;
 		const matchSystemAccent = localStorage.getItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT) === "true";
 		const api = window.electronAPI;
 
 		const resolved = api
-			? await resolveFromElectron(api, savedSource, scheme, matchSystemAccent)
-			: resolveFromBrowser(savedSource, scheme);
+			? await resolveFromElectron(api, savedSource)
+			: resolveFromBrowser(savedSource);
 		if (myEpoch !== epoch) return;
 
 		// Listen from here, not before: an event ahead of the first read would
 		// apply the default scheme over the one the pre-paint script chose.
 		stopListening = api ? subscribeToElectron(api) : subscribeToBrowser();
-		commit({ ...resolved, matchSystemAccent, isLoading: false });
+		// The OS answer is authoritative: where it reports nothing (Linux, no
+		// bridge) a stored accent from another machine must not stay in force.
+		if (resolved.systemAccent)
+			localStorage.setItem(STORAGE_KEYS.SYSTEM_ACCENT, resolved.systemAccent);
+		else localStorage.removeItem(STORAGE_KEYS.SYSTEM_ACCENT);
+		commit({
+			...resolved,
+			colorScheme,
+			matchSystemAccent,
+			isLoading: false,
+		});
 	};
 
 	const stop = (): void => {
@@ -232,13 +268,13 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 		},
 
 		setMatchAccent: (enabled) => {
-			set({ matchSystemAccent: enabled });
 			localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, enabled ? "true" : "false");
+			commit({ matchSystemAccent: enabled });
 
 			const api = window.electronAPI;
 			if (!enabled || !api || !get().supportsAccent) return;
 			void api.getAccentScheme().then((data) => {
-				if (data.accentScheme) get().setColorScheme(data.accentScheme);
+				if (data.accentScheme) recordSystemAccent(data.accentScheme);
 			});
 		},
 

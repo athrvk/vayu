@@ -944,20 +944,21 @@ honest.
 
 #### `theme-store.ts` - Light/Dark Mode and Accent Scheme
 
-The theme source (`system` / `light` / `dark`), the accent colour scheme and
-the "match system accent" preference, with `isDark`, `supportsAccent` and
-`isLoading`. Like `appearance-store.ts` it is written one localStorage key per
-preference by the action (`vayu-theme-source`, `vayu-color-scheme`,
-`vayu-match-system-accent`), not through zustand's `persist`: the pre-paint
-script in `index.html` reads the first two, and `SETTINGS_STORAGE_KEYS` clears
-all three on "Reset app settings"; `vayu-match-system-accent` is not read
-pre-paint (#1861).
+The theme source (`system` / `light` / `dark`), the manual accent colour
+scheme, the last accent the OS reported and the "match system accent"
+preference, with `isDark`, `supportsAccent` and `isLoading`. Like
+`appearance-store.ts` it is written one localStorage key per preference by the
+action (`vayu-theme-source`, `vayu-color-scheme`, `vayu-match-system-accent`,
+`vayu-system-accent`), not through zustand's `persist`: the pre-paint script in
+`index.html` reads all four, and `SETTINGS_STORAGE_KEYS` clears all four on
+"Reset app settings".
 
 **State:**
 ```typescript
 {
   themeSource: ThemeSource      // "system" | "light" | "dark"
-  colorScheme: ColorScheme
+  colorScheme: ColorScheme      // the manual pick; the OS accent never overwrites it
+  systemAccent: ColorScheme | null  // last scheme the OS reported; null until one has
   isDark: boolean
   isLoading: boolean            // until the first persisted + OS read lands
   matchSystemAccent: boolean
@@ -965,9 +966,23 @@ pre-paint (#1861).
 }
 ```
 
+**Two accent fields (#1861).** The scheme on screen is derived, not stored:
+`effectiveColorScheme(state)` is `systemAccent` while `matchSystemAccent` is on
+and the OS has reported one, `colorScheme` otherwise. Turning matching on
+fetches the OS accent into `systemAccent` and never calls `setColorScheme`, so
+`vayu-color-scheme` keeps the user's pick and turning matching off returns to
+it. Every OS accent report, at launch or live through `onAccentSchemeChanged`,
+is written to `vayu-system-accent` whether or not matching is on, so a later
+toggle starts from the current accent and the pre-paint script can paint it.
+The pre-paint script applies the same rule to the stored keys: the system
+accent when `vayu-match-system-accent` is `"true"` and the accent key is set,
+`vayu-color-scheme` otherwise. `useElectronTheme` returns both `colorScheme`
+(the manual pick, what the tile grid writes) and `effectiveColorScheme` (what
+is painted, what the Appearance panel displays while matching).
+
 **One DOM writer.** Every action and every OS event updates the store and then
 calls `writeDocument` with the store's own state (`dark` class and
-`data-color-scheme` on `<html>`). Nothing passes it a value of its own, so the
+`data-color-scheme` on `<html>`, the latter from `effectiveColorScheme`). Nothing passes it a value of its own, so the
 document cannot be set from a copy.
 
 **Why a store and not `useState` in `useElectronTheme` (#1855):** the hook is
