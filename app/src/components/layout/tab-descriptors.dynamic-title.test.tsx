@@ -68,6 +68,8 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: NO_COLLECTIONS }),
 	useGlobalsQuery: () => ({ data: EMPTY_GLOBALS }),
 	useEnvironmentsQuery: () => ({ data: NO_ENVIRONMENTS }),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 
 const { useBoundRowStore } = await import("@/stores");

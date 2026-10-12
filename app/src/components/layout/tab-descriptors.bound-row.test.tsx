@@ -60,6 +60,8 @@ vi.mock("@/queries", () => ({
 			},
 		],
 	}),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 vi.mock("@/stores", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/stores")>()),

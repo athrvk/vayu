@@ -19,6 +19,8 @@ vi.mock("@/queries", () => ({
 	}),
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
 	useCollectionsQuery: () => ({ data: [] }),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/hooks/useVariableResolver", () => ({

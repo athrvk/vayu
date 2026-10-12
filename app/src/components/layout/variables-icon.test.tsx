@@ -50,6 +50,8 @@ vi.mock("@/queries", () => ({
 		enabled: false,
 	}),
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({

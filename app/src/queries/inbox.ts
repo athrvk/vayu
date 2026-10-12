@@ -129,7 +129,8 @@ function clearedCapturePage(): InboxCapturesResponse {
  * mutations refreshed could not do.
  *
  * `enabled` is for the app-level watcher (#1400), which needs the list only
- * while some inbox may notify on a capture: a root observer polling for the
+ * while some inbox may notify on a capture, and for the tab descriptors, which
+ * need it only while an inbox tab is open: a root observer polling for the
  * app's whole life with nobody reading the answer is what #1150 removed. Every
  * surface that shows the list omits it and observes unconditionally.
  */

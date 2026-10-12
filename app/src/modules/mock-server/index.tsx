@@ -41,6 +41,7 @@ import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
+import { shownService } from "@/lib/shown-service";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -59,7 +60,7 @@ export default function MockServerView() {
 	const show = (mockId: string) => openTab({ type: "mock-server", entityId: mockId });
 
 	const ordered = [...mocks].sort((a, b) => a.port - b.port);
-	const mock = mocks.find((m) => m.mockId === addressedMockId) ?? ordered[0] ?? null;
+	const mock = shownService(mocks, (m) => m.mockId === addressedMockId);
 
 	const routesQuery = useMockServerRoutesQuery(mock?.mockId ?? null);
 	const routes = routesQuery.data ?? [];

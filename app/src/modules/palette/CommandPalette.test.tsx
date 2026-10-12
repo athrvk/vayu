@@ -127,6 +127,8 @@ vi.mock("@/queries", () => ({
 	useCreateRequestMutation: () => ({ mutateAsync: vi.fn() }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 	useStartScenarioRunMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveString: (s: string) => s }),
