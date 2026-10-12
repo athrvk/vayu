@@ -24,8 +24,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 
+import { parseDataFile } from "@/services/data-files";
 import DataFilePicker from "./DataFilePicker";
 
 const configEntries: { key: string; value: string }[] = [];
@@ -58,11 +59,13 @@ function csvOfRows(count: number): string {
 
 function renderPicker() {
 	const onSelect = vi.fn();
+	const onRemove = vi.fn();
 	const onError = vi.fn();
 	const view = render(
 		<DataFilePicker
 			selected={null}
 			onSelect={onSelect}
+			onRemove={onRemove}
 			error={null}
 			onError={onError}
 			iterations={undefined}
@@ -70,7 +73,7 @@ function renderPicker() {
 	);
 	const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
 	const pick = (file: File) => fireEvent.change(input, { target: { files: [file] } });
-	return { onSelect, onError, pick };
+	return { onSelect, onRemove, onError, pick };
 }
 
 beforeEach(() => {
@@ -80,7 +83,7 @@ beforeEach(() => {
 describe("the row cap", () => {
 	it("refuses a file over it, naming the count and the setting", async () => {
 		setLimits(3, 16 * 1024 * 1024);
-		const { onSelect, onError, pick } = renderPicker();
+		const { onSelect, onRemove, onError, pick } = renderPicker();
 
 		pick(new File([csvOfRows(4)], "rows.csv"));
 
@@ -90,8 +93,10 @@ describe("the row cap", () => {
 			)
 		);
 		// Nothing half-chosen: rows the engine would refuse never become a
-		// selection the Run button can send.
+		// selection the Run button can send. A refusal is not a Remove, though:
+		// a host that clears something on Remove must not clear it here.
 		expect(onSelect).toHaveBeenCalledWith(null);
+		expect(onRemove).not.toHaveBeenCalled();
 		expect(onSelect).not.toHaveBeenCalledWith(
 			expect.objectContaining({ fileName: "rows.csv" })
 		);
@@ -114,7 +119,7 @@ describe("the row cap", () => {
 describe("the byte cap", () => {
 	it("refuses an oversized file before reading a byte of it", () => {
 		setLimits(1000, 1024);
-		const { onSelect, onError, pick } = renderPicker();
+		const { onSelect, onRemove, onError, pick } = renderPicker();
 
 		pick(fileOfSize("huge.csv", 2048));
 
@@ -123,6 +128,7 @@ describe("the byte cap", () => {
 			expect.stringMatching(/2\.0 KB, over the 1\.0 KB[\s\S]*maxScenarioDataBytes/)
 		);
 		expect(onSelect).toHaveBeenCalledWith(null);
+		expect(onRemove).not.toHaveBeenCalled();
 	});
 
 	it("follows the fetched value here too", async () => {
@@ -140,7 +146,7 @@ describe("the byte cap", () => {
 
 describe("the file's encoding", () => {
 	it("refuses bytes that are not UTF-8 rather than previewing question marks", async () => {
-		const { onSelect, onError, pick } = renderPicker();
+		const { onSelect, onRemove, onError, pick } = renderPicker();
 		// `user\nZoë`, with the ë written as Windows-1252.
 		const latin1 = new Uint8Array([0x75, 0x73, 0x65, 0x72, 0x0a, 0x5a, 0x6f, 0xeb]);
 
@@ -150,6 +156,7 @@ describe("the file's encoding", () => {
 			expect(onError).toHaveBeenCalledWith(expect.stringMatching(/isn't UTF-8/))
 		);
 		expect(onSelect).toHaveBeenCalledWith(null);
+		expect(onRemove).not.toHaveBeenCalled();
 	});
 
 	it("reads a UTF-16 export instead of turning it into garbage", async () => {
@@ -179,7 +186,7 @@ describe("the file's encoding", () => {
 
 describe("an unterminated quote", () => {
 	it("is refused rather than folded into one tall cell", async () => {
-		const { onSelect, onError, pick } = renderPicker();
+		const { onSelect, onRemove, onError, pick } = renderPicker();
 
 		pick(new File(['name\n"alice\nbob\ncarol'], "broken.csv"));
 
@@ -188,6 +195,51 @@ describe("an unterminated quote", () => {
 				expect.stringMatching(/ends inside a quoted value that starts on line 2/)
 			)
 		);
+		expect(onSelect).toHaveBeenCalledWith(null);
+		expect(onRemove).not.toHaveBeenCalled();
+	});
+});
+
+describe("Remove", () => {
+	const selected = {
+		fileName: "users.csv",
+		parsed: parseDataFile("id\n1", "users.csv"),
+	};
+
+	it("drops the selection and tells the host it was a Remove", () => {
+		const onSelect = vi.fn();
+		const onRemove = vi.fn();
+		render(
+			<DataFilePicker
+				selected={selected}
+				onSelect={onSelect}
+				onRemove={onRemove}
+				error={null}
+				onError={vi.fn()}
+				iterations={undefined}
+			/>
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+		expect(onSelect).toHaveBeenCalledWith(null);
+		expect(onRemove).toHaveBeenCalledTimes(1);
+	});
+
+	it("needs no handler: the hosts that keep a file as a run input pass none", () => {
+		const onSelect = vi.fn();
+		render(
+			<DataFilePicker
+				selected={selected}
+				onSelect={onSelect}
+				error={null}
+				onError={vi.fn()}
+				iterations={undefined}
+			/>
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
 		expect(onSelect).toHaveBeenCalledWith(null);
 	});
 });

@@ -320,8 +320,9 @@ each iteration of the run exactly once, and a generator is fresh at every send.
 
 A file picked in the Run dialog is parsed, sent and forgotten, so at the moment
 you write `{{data.email}}` in a URL nothing in Vayu knows that column exists.
-The collection's **Data** tab is where you say so: pick the file, check the
-preview, and press **Declare columns**.
+The collection's **Data** tab is where you say so: pick the file, and its
+columns are declared the moment it loads - the preview underneath is what was
+written.
 
 What that stores, and what it does not:
 
@@ -358,7 +359,9 @@ run:
   them is what the tab is for, so it does not wait to be handed the same file a
   second time. Edit the file on disk and the drift shows on the next visit. A
   file that has moved has its name struck through beside the declared columns,
-  and the picker stands - which is also how you compare a _different_ file.
+  and the picker stands. Picking a _different_ file there does not compare it,
+  it declares it: the comparison is what reopening the tab does, and that
+  never writes.
 - **A file that does not match is flagged**, in both directions and in both
   places: a declared column the file is missing (every `{{data.x}}` written
   against it would fail to bind at iteration 1) and a column the file carries
@@ -417,8 +420,15 @@ run:
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
 
-**Re-declare from this file** replaces the columns when your file changes shape;
-**Clear** removes the contract and forgets the remembered path.
+On the Data tab the two gestures that name a file are the saves: **picking** a
+file declares its columns, and **Remove** clears the contract and forgets the
+remembered path, so removing a file and picking another leaves the second one's
+columns declared, not the first's. A file the picker refuses - over the row
+cap, a ragged CSV - changes nothing. The buttons beside the picker cover what a
+gesture does not: **Re-declare from this file** appears when the re-opened file
+has changed shape on disk (or a save failed and the preview is still there to
+retry from), and **Clear** removes a contract whose remembered file is gone,
+where the picker offers no Remove.
 
 Vayu only ever re-opens a file whose extension is one of the formats above, and
 only up to the same `maxScenarioDataBytes` a run may carry - the remembered path

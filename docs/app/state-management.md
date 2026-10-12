@@ -389,10 +389,10 @@ it never holds **rows**: a data file's contents are user data of unknown
 sensitivity and are persisted nowhere in Vayu, which `data-file-store.test.ts`
 asserts against the persisted payload rather than against the store's surface.
 
-The path is written when the user declares a contract in the Data tab
-(`CollectionDetail/DataTab.tsx`), obtained through the preload's existing
-`getFilePath` bridge, and dropped when the collection is deleted or purged, or its
-contract cleared. Reading it back needs the gated `dataFile:read` IPC
+The path is written when the user declares a contract in the Data tab by
+picking a file (`CollectionDetail/DataTab.tsx`), obtained through the preload's
+existing `getFilePath` bridge, and dropped when the collection is deleted or
+purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
 (`electron/data-file.ts`), because the renderer otherwise cannot name a path.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
