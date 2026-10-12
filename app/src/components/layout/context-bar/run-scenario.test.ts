@@ -86,6 +86,21 @@ describe("scenarioFromSnapshot", () => {
 		expect(scenario?.steps?.[0].name).toBe("Log in");
 	});
 
+	it("reads the data file's name and hash, and drops a wrong-typed pair (#2051)", () => {
+		const hash = "a".repeat(64);
+		const named = scenarioFromSnapshot(
+			run("scenario", { scenario: { dataFileName: "users.csv", dataFileHash: hash } })
+		);
+		expect(named?.dataFileName).toBe("users.csv");
+		expect(named?.dataFileHash).toBe(hash);
+
+		const junk = scenarioFromSnapshot(
+			run("scenario", { scenario: { dataFileName: 7, dataFileHash: {} } })
+		);
+		expect(junk?.dataFileName).toBeUndefined();
+		expect(junk?.dataFileHash).toBeUndefined();
+	});
+
 	it("distinguishes no steps recorded from a plan of zero steps", () => {
 		// The engine refuses an empty collection with a 400, so a zero-length
 		// manifest is not a run that happened - but `undefined` (no key) and

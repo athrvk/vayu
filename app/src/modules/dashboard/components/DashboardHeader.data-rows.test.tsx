@@ -14,8 +14,12 @@
  * The rows are never stored, so the count is the only record that a file drove
  * the run. It was read by a component nothing mounted, so no run ever showed it.
  *
+ * Since #2051 the count also names the file the rows came from. The name is a
+ * display name only; a hash alone never draws anything.
+ *
  * Mutation check: drop the row-count push from `DashboardHeader`'s config
- * summary and the "12 rows" and "1 row" cases redden.
+ * summary and the "12 rows" and "1 row" cases redden; drop the `from <name>`
+ * branch and the named-file case reddens.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -55,6 +59,26 @@ describe("DashboardHeader data row count", () => {
 		mount({ ...MODE, dataRowCount: 1 });
 
 		expect(screen.getByText(/ · 1 row$/)).toBeInTheDocument();
+	});
+
+	it("names the file the rows came from", () => {
+		mount({ ...MODE, dataRowCount: 2, dataFileName: "users.csv" });
+
+		expect(screen.getByText(/ · 2 rows from users\.csv$/)).toBeInTheDocument();
+	});
+
+	it("keeps the bare count for a run that recorded no file name", () => {
+		mount({ ...MODE, dataRowCount: 2, dataFileHash: "a".repeat(64) });
+
+		expect(screen.getByText(/ · 2 rows$/)).toBeInTheDocument();
+		expect(screen.queryByText(/from/)).toBeNull();
+	});
+
+	it("never prints the hash", () => {
+		const hash = "a".repeat(64);
+		mount({ ...MODE, dataRowCount: 2, dataFileName: "users.csv", dataFileHash: hash });
+
+		expect(screen.queryByText(new RegExp(hash))).toBeNull();
 	});
 
 	it.each([

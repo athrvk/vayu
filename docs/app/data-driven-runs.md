@@ -508,10 +508,15 @@ with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
 plus the file's name and content hash (the SHA-256 of its bytes, so two runs
 can be told apart by the file that drove them), never its path or a row. The
-count is what a reader sees afterwards: the
-dashboard's header prints "N rows" in its config summary, live from the launch
-config and then from the report, and History's Test config row lists it as
-`Data:`.
+count and the file's name are what a reader sees afterwards: the
+dashboard's header prints "N rows from users.csv" in its config summary, live
+from the launch config and then from the report, and History's Test config row
+lists it as `Data: N rows · users.csv`. A collection run's tab says
+`Data: users.csv` in its header, the History row's hover card has a `Data file`
+line, and a run tab's tooltip ends with the name. Where the run's collection
+still remembers a file whose hash differs from the one the run read, the
+collection run's header adds "(file changed since this run)"; the hash itself
+is never shown.
 
 **A cell that binds into a request is stored with that request.** A collection
 run keeps one row per step execution, and each holds the exchange as it
@@ -527,7 +532,7 @@ That is the design-mode trace rule, not an oversight of this feature: a trace
 records what was **sent** rather than a redacted account of it, since a
 redaction guess is wrong in both directions and reassuring when it is wrong.
 The run's step view carries that disclosure where the steps are listed, and
-names the data file when one was bound.
+names the data file when the run's snapshot recorded one.
 
 The expiry is the run's: step rows are deleted when their run is, so
 `maxRunsRetained` and `runRetentionDays` (Settings, Data & retention) are what

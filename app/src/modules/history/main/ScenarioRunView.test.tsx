@@ -22,7 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import ScenarioRunView from "./ScenarioRunView";
-import { useScenarioRunStore, useToastStore } from "@/stores";
+import { useDataFileStore, useScenarioRunStore, useToastStore } from "@/stores";
 import type { Run, RunReport, StepOutcome } from "@/types";
 
 const reportQuery = {
@@ -474,6 +474,68 @@ describe("thinned results", () => {
 	});
 });
 
+/** A collection run whose snapshot manifest names the data file that drove it (#2051). */
+function runWithDataFile(file: { dataFileName?: string; dataFileHash?: string }): Run {
+	return { ...RUN, configSnapshot: { scenario: { collectionId: "col_1", ...file } } };
+}
+
+describe("the data file the run was driven by", () => {
+	const HASH_A = "a".repeat(64);
+	const HASH_B = "b".repeat(64);
+
+	beforeEach(() => {
+		useDataFileStore.setState({ locations: {} });
+	});
+
+	it("is named in the header from the snapshot's scenario block", () => {
+		render(<ScenarioRunView run={runWithDataFile({ dataFileName: "users.csv" })} />);
+
+		expect(screen.getByText("Data: users.csv")).toBeTruthy();
+	});
+
+	it("is silent for a run recorded before the field", () => {
+		render(<ScenarioRunView run={runWithDataFile({})} />);
+
+		expect(screen.queryByText(/Data:/)).toBeNull();
+	});
+
+	it("is silent for a run with no snapshot at all", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/Data:/)).toBeNull();
+	});
+
+	it("says the file changed when the collection's remembered hash differs", () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: HASH_B,
+		});
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "users.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		expect(screen.getByText("Data: users.csv (file changed since this run)")).toBeTruthy();
+	});
+
+	it("adds nothing when the remembered hash matches the run's", () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: HASH_A,
+		});
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "users.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		expect(screen.getByText("Data: users.csv")).toBeTruthy();
+	});
+});
+
 describe("stored-exchange disclosure", () => {
 	// Issue #731. The Data tab says a data file's "rows are never saved
 	// anywhere", which is true of the file and the contract and false of every
@@ -504,6 +566,17 @@ describe("stored-exchange disclosure", () => {
 
 		const notice = screen.getByText(/stored step data/i).closest("div")!;
 		expect(notice.textContent).not.toContain("bound a data file");
+	});
+
+	it("names the file in the notice when the snapshot recorded one", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed", { name: "Log in", dataRowIndex: 0 })],
+		});
+
+		render(<ScenarioRunView run={runWithDataFile({ dataFileName: "users.csv" })} />);
+
+		const notice = screen.getByText(/stored step data/i).closest("div")!;
+		expect(notice.textContent).toContain("bound a data file (users.csv)");
 	});
 
 	it("discloses a live run's steps before its rows are written", () => {

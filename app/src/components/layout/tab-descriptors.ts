@@ -25,6 +25,7 @@ import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
+import { dataFileFromSnapshot } from "@/lib/run-data-file";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -188,6 +189,11 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 		 */
 		const scenario = run?.configSnapshot?.scenario as { collectionId?: string } | undefined;
 		const collectionId = scenario?.collectionId;
+		// Which file drove the run (#2051), for the tooltip only: the label is
+		// the run's identity and a file name does not belong in it.
+		const dataFile = dataFileFromSnapshot(run?.configSnapshot);
+		const withDataFile = (title: string) =>
+			dataFile ? `${title} · ${dataFile.fileName}` : title;
 		const icon = iconForTab(tab, run?.type, Boolean(collectionId));
 
 		switch (tab.type) {
@@ -244,7 +250,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 						collections.find((c) => c.id === collectionId)?.name ?? collectionId;
 					return {
 						label: name,
-						title: `Collection run: ${name}`,
+						title: withDataFile(`Collection run: ${name}`),
 						icon,
 						isPath: false,
 					};
@@ -260,7 +266,9 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					const label = path || kind;
 					return {
 						label,
-						title: `${kind}: ${[snapshot?.method, path].filter(Boolean).join(" ")}`,
+						title: withDataFile(
+							`${kind}: ${[snapshot?.method, path].filter(Boolean).join(" ")}`
+						),
 						...(snapshot?.method ? { method: snapshot.method } : {}),
 						icon,
 						isPath: Boolean(path),

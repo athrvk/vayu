@@ -41,6 +41,9 @@ export interface ScenarioSnapshot {
 	collectionId?: string;
 	recursive?: boolean;
 	iterations?: number;
+	/** The data file that drove the run (issue #2051): name and content hash, never a path. */
+	dataFileName?: string;
+	dataFileHash?: string;
 	steps?: ScenarioSnapshotStep[];
 }
 
@@ -84,6 +87,8 @@ export function scenarioFromSnapshot(run: Run | undefined): ScenarioSnapshot | n
 		collectionId: str(block.collectionId),
 		recursive: typeof block.recursive === "boolean" ? block.recursive : undefined,
 		iterations: num(block.iterations),
+		dataFileName: str(block.dataFileName),
+		dataFileHash: str(block.dataFileHash),
 		steps,
 	};
 }

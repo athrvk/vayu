@@ -82,6 +82,15 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 				</Row>
 			);
 		}
+		// The file's display name (#2051), never its path; absent for a run that
+		// bound none and for one recorded before the field.
+		if (scenario.dataFileName) {
+			rows.push(
+				<Row key="data-file" label="Data file">
+					{scenario.dataFileName}
+				</Row>
+			);
+		}
 		return <div className="space-y-1">{rows}</div>;
 	}
 
