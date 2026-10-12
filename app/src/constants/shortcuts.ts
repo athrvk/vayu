@@ -195,6 +195,53 @@ export const GO_FORWARD_CHORD: Chord = isMac
 	: { alt: true, key: "→", code: "ArrowRight", label: "Go forward" };
 
 /**
+ * Move the focused tab along the strip: one place left or right, or to either
+ * end.
+ *
+ * Alt+Arrow is the reorder chord the collection tree already answers, and Alt
+ * +Home/End the same chord's jump to an end. Unlike every chord above these act
+ * on the *focused* tab, not the active one, so they are bound by the strip's
+ * own `onKeyDown` rather than at `window`, and only while a `role="tab"`
+ * element holds focus.
+ *
+ * Off macOS this is the same key as `GO_BACK_CHORD` / `GO_FORWARD_CHORD`
+ * (Alt+←/→), and `Shell` matches those before its modifier gate. The tree's
+ * precedent resolves it: the strip's handler takes the chord while a tab has
+ * focus and calls `stopPropagation`, so `Shell`'s window listener never sees
+ * it. Go back stays reachable from every other focus, from the title-bar
+ * buttons, the palette and the mouse buttons 3 and 4. On macOS Go back is ⌘[
+ * and nothing collides.
+ *
+ * Left and right carry `code` for the reason Go back does; Home and End have
+ * one character each on every layout and are matched by `key`.
+ */
+export const MOVE_TAB_LEFT_CHORD: Chord = {
+	alt: true,
+	key: "←",
+	code: "ArrowLeft",
+	label: "Move the focused tab left",
+};
+
+export const MOVE_TAB_RIGHT_CHORD: Chord = {
+	alt: true,
+	key: "→",
+	code: "ArrowRight",
+	label: "Move the focused tab right",
+};
+
+export const MOVE_TAB_START_CHORD: Chord = {
+	alt: true,
+	key: "Home",
+	label: "Move the focused tab to the start",
+};
+
+export const MOVE_TAB_END_CHORD: Chord = {
+	alt: true,
+	key: "End",
+	label: "Move the focused tab to the end",
+};
+
+/**
  * Move focus to the next region of the window - and, shifted, to the previous.
  *
  * F6 is the desktop convention for cycling panes (Windows Explorer, Firefox,
@@ -365,6 +412,10 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 			NEXT_TAB_CHORD,
 			PREVIOUS_TAB_CHORD,
 			...TAB_CHORDS,
+			MOVE_TAB_LEFT_CHORD,
+			MOVE_TAB_RIGHT_CHORD,
+			MOVE_TAB_START_CHORD,
+			MOVE_TAB_END_CHORD,
 		],
 	},
 	{

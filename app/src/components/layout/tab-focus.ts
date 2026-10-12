@@ -6,7 +6,7 @@
  */
 
 /**
- * Closing a tab from the keyboard, and the focus that has to follow it.
+ * Closing or moving a tab from the keyboard, and the focus that has to follow it.
  *
  * The element holding focus *is* the tab being closed, and it unmounts. Nothing
  * claimed focus afterwards, so it fell to `<body>` and the next Tab restarted
@@ -47,4 +47,25 @@ export function closeTabFromKeyboard(tabId: string): void {
 	// rather than the top of the document.
 	const fallback = document.querySelector<HTMLElement>("[data-tab-new]");
 	(replacement ?? fallback)?.focus();
+}
+
+/**
+ * Move `tabId` to `toIndex` and keep focus on it.
+ *
+ * The refocus is not optional. Reordering `openTabs` makes React reinsert the
+ * keyed siblings, and Chromium drops focus to `<body>` from an element that
+ * is removed and reinserted, after which the next arrow key reaches no handler
+ * and the next Tab restarts from the top of the document. jsdom keeps focus
+ * through the same reinsert, so a test has to drop it itself.
+ *
+ * The write is flushed for the reason `closeTabFromKeyboard`'s is: the strip
+ * renders only the tabs that fit, so the moved tab's element can be new after
+ * the commit and a batched write would look it up too early. Should it still
+ * be absent, focus falls back to the roving stop (`useRovingStop`: the active
+ * tab) rather than being lost.
+ */
+export function moveTabAndFocus(tabId: string, toIndex: number): void {
+	flushSync(() => useTabsStore.getState().moveTab(tabId, toIndex));
+	const moved = document.getElementById(tabElementId(tabId));
+	(moved ?? document.querySelector<HTMLElement>('[role="tab"][tabindex="0"]'))?.focus();
 }

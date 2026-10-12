@@ -261,6 +261,65 @@ describe("performing", () => {
 		expect(ids).toContain("close-saved-tabs");
 	});
 
+	/*
+	 * The palette rows act on the active tab, where the chord acts on the focused
+	 * one - so a row is offered only where the active tab has somewhere to go.
+	 */
+	describe("move tab left / right", () => {
+		const types = ["welcome", "settings", "variables"] as const;
+		const order = () => useTabsStore.getState().openTabs.map((t) => t.type);
+
+		function openAll(): string[] {
+			for (const type of types) useTabsStore.getState().openTab({ type, entityId: null });
+			return useTabsStore.getState().openTabs.map((t) => t.id);
+		}
+
+		const offered = () => availableCommands(baseCommandContext()).map((c) => c.id);
+
+		it("withholds Move left from the first tab and Move right from the last", () => {
+			const [first, , last] = openAll();
+
+			useTabsStore.getState().focusTab(first);
+			expect(offered()).not.toContain("move-tab-left");
+			expect(offered()).toContain("move-tab-right");
+
+			useTabsStore.getState().focusTab(last);
+			expect(offered()).toContain("move-tab-left");
+			expect(offered()).not.toContain("move-tab-right");
+		});
+
+		it("offers both from a middle tab", () => {
+			const [, middle] = openAll();
+			useTabsStore.getState().focusTab(middle);
+
+			expect(offered()).toEqual(expect.arrayContaining(["move-tab-left", "move-tab-right"]));
+		});
+
+		it("offers neither with no tab open", () => {
+			expect(offered()).not.toContain("move-tab-left");
+			expect(offered()).not.toContain("move-tab-right");
+		});
+
+		it("moves the active tab one place along the strip", () => {
+			const [, middle] = openAll();
+			useTabsStore.getState().focusTab(middle);
+
+			commandById("move-tab-left").perform(baseCommandContext());
+			expect(order()).toEqual(["settings", "welcome", "variables"]);
+
+			commandById("move-tab-right").perform(baseCommandContext());
+			commandById("move-tab-right").perform(baseCommandContext());
+			expect(order()).toEqual(["welcome", "variables", "settings"]);
+			expect(useTabsStore.getState().activeTabId).toBe(middle);
+		});
+
+		it("names the active tab in its title", () => {
+			const ctx: CommandContext = { ...baseCommandContext(), activeTabLabel: "Orders" };
+			expect(commandTitle(commandById("move-tab-left"), ctx)).toBe('Move "Orders" left');
+			expect(commandTitle(commandById("move-tab-right"), ctx)).toBe('Move "Orders" right');
+		});
+	});
+
 	it("keeps a tab with unsaved edits when closing the saved ones", () => {
 		useTabsStore.getState().openTab({ type: "welcome", entityId: null });
 		useTabsStore.getState().openTab({ type: "settings", entityId: null });

@@ -91,6 +91,14 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   closes: closing tabs one at a time would focus and record a visit for every
   intermediate tab on the way to the last, leaving Back to walk the user
   through places they never went.
+- Reorder (issue #2038): `moveTab(tabId, toIndex)` puts a tab at the index it
+  occupies afterwards, clamped to the list, and returns without a `set` when
+  the tab is unknown or already there. It writes `openTabs` and nothing else:
+  the active tab, `tabFocusedAt` and the navigation history name tabs by id and
+  location, never by position, so a move is not a navigation and records no
+  visit. The `Tab` objects are reused, not copied, because `TabItem`'s memo
+  compares `prev.tab === next.tab`. The order persists with no extra work:
+  `partialize` writes `openTabs` and `migrateTabs` reads it back in order.
 - Response eviction: `closeTabsForEntities` clears each id's entry in
   `response-store`. Both callers reach it after a delete - the map's own LRU
   bound would get there eventually, but a response nothing can reach again

@@ -72,6 +72,12 @@ const NO_COMMAND = new Map<Chord, string>([
 		"nine 'Focus tab N' rows would bury the actions they sit among, and " +
 			"the tabs are already listed by name",
 	]),
+	...[shortcuts.MOVE_TAB_START_CHORD, shortcuts.MOVE_TAB_END_CHORD].map(
+		(chord): [Chord, string] => [
+			chord,
+			"a repeat of Move tab left / right; two more rows would bury the actions they sit among",
+		]
+	),
 ]);
 
 /** Every chord any surface prints, in the order the panel prints them. */
