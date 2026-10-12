@@ -68,7 +68,7 @@ describe("FontPicker", () => {
 		expect(screen.getByRole("radio", { name: /^Custom/, checked: true })).toBeTruthy();
 	});
 
-	it("moves focus with the arrow keys without choosing", async () => {
+	it("chooses the next face when an arrow key moves focus to it", async () => {
 		const onChange = renderPicker("inter");
 		const inter = screen.getByRole("radio", { name: /^Inter/ });
 		inter.focus();
@@ -78,7 +78,8 @@ describe("FontPicker", () => {
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole("radio", { name: /^System/ }))
 		);
-		expect(onChange).not.toHaveBeenCalled();
+		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenCalledWith("system");
 	});
 
 	it("does not clear the choice when the chosen tile is pressed again", () => {

@@ -221,10 +221,9 @@ describe("OptionButtons", () => {
 		expect(glyph?.getAttribute("aria-hidden")).toBe("true");
 	});
 
-	it("moves focus with the arrow keys but does not choose until the tile is pressed", async () => {
-		// Radix roving focus: an arrow key moves focus only. Selection is the
-		// press (Enter and Space click a <button>), so focus alone must not
-		// call onChange.
+	it("chooses the next tile when an arrow key moves focus to it", async () => {
+		// WAI-ARIA radio pattern (issue #1865): selection follows focus, so an
+		// arrow press is a choice with no Enter or Space after it.
 		const onChange = vi.fn();
 		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={onChange} />);
 		const dark = screen.getByRole("radio", { name: "Dark" });
@@ -235,10 +234,36 @@ describe("OptionButtons", () => {
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole("radio", { name: "System" }))
 		);
-		expect(onChange).not.toHaveBeenCalled();
-
-		fireEvent.click(screen.getByRole("radio", { name: "System" }));
+		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(onChange).toHaveBeenCalledWith("system");
+	});
+
+	it("chooses nothing when Tab lands on the already chosen tile", () => {
+		const onChange = vi.fn();
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={onChange} />);
+		const group = screen.getByRole("radiogroup", { name: "Theme" });
+
+		// A Tab keydown on the control before the group, then focus entering it.
+		fireEvent.keyDown(group, { key: "Tab" });
+		screen.getByRole("radio", { name: "Dark" }).focus();
+
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("chooses a clicked tile once, not once for its focus and again for its press", () => {
+		const onChange = vi.fn();
+		render(<OptionButtons label="Theme" options={THEMES} value="dark" onChange={onChange} />);
+		const light = screen.getByRole("radio", { name: "Light" });
+
+		// A key press earlier leaves the group in keyboard mode; the pointer
+		// press that follows must take it back out before the click's focus.
+		fireEvent.keyDown(screen.getByRole("radio", { name: "Dark" }), { key: "ArrowLeft" });
+		fireEvent.pointerDown(light);
+		light.focus();
+		fireEvent.click(light);
+
+		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenCalledWith("light");
 	});
 
 	it("does not clear the choice when the chosen tile is pressed again", () => {
