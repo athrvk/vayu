@@ -19,6 +19,7 @@
 
 import type { LoadTestRequestInfo, LoadTestRunConfig } from "@/stores/dashboard-store";
 import type { RunConfigSnapshot } from "@/types";
+import { dataFileFromSnapshot } from "./run-data-file";
 
 function text(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
@@ -40,6 +41,9 @@ function duration(value: unknown): string | undefined {
  * to the config the app would have built for the same run.
  */
 export function loadConfigFromSnapshot(snapshot: RunConfigSnapshot): LoadTestRunConfig {
+	// A collection load run keeps its data keys inside the `scenario` block.
+	const scenario = (snapshot.scenario ?? {}) as Record<string, unknown>;
+	const dataFile = dataFileFromSnapshot(snapshot);
 	const fields: LoadTestRunConfig = {
 		mode: text(snapshot.mode),
 		duration: duration(snapshot.duration),
@@ -51,6 +55,9 @@ export function loadConfigFromSnapshot(snapshot: RunConfigSnapshot): LoadTestRun
 		comment: text(snapshot.comment),
 		rampUpDuration: duration(snapshot.rampUpDuration),
 		startConcurrency: count(snapshot.startConcurrency),
+		dataRowCount: count(scenario.dataRowCount) ?? count(snapshot.dataRowCount),
+		dataFileName: dataFile?.fileName,
+		dataFileHash: dataFile?.hash,
 	};
 	return Object.fromEntries(
 		Object.entries(fields).filter(([, value]) => value !== undefined)

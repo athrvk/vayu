@@ -5,26 +5,65 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect, useState } from "react";
 import { useDataFileStore } from "@/stores";
 import { dataFileChanged } from "@/lib/run-data-file";
+import { canHashDeclaredDataFile, hashDeclaredDataFile } from "@/services/data-files/read-declared";
 
 /**
  * Whether the file this machine remembers for `collectionId` no longer matches
- * the one a run read (issue #2051), from the hash the app last read it with.
+ * the one a run read (issue #2051): `runHash` against the SHA-256 of the
+ * remembered path's bytes **as they are now**, asked of the main process on
+ * mount, on a change of path, and whenever the window regains focus (the user
+ * edited the file in another program and came back).
+ *
+ * Without the hash bridge (a browser build) it compares against the hash
+ * `data-file-store` last recorded instead. False whenever an answer is
+ * unknown: no collection, no remembered location, a run recorded before
+ * hashes, a hash still in flight, or a file that cannot be hashed (moved,
+ * deleted) - see `dataFileChanged`.
  *
  * Only a collection run has a collection to ask; a load run's file has no
- * remembered location of its own, so its surfaces do not call this. False for
- * an unknown collection or either hash being unknown (see `dataFileChanged`).
- * A path that has gone missing is not detected here: the store keeps the last
- * hash it saw, and the only signal for a missing file is a read that failed,
- * which `useDeclaredDataFile` holds inside a dialog.
+ * remembered location of its own, so its surfaces do not call this.
  */
 export function useDataFileChanged(
 	collectionId: string | undefined,
 	runHash: string | undefined
 ): boolean {
-	const rememberedHash = useDataFileStore((s) =>
-		collectionId === undefined ? undefined : s.locations[collectionId]?.hash
+	const location = useDataFileStore((s) =>
+		collectionId === undefined ? undefined : s.locations[collectionId]
 	);
-	return dataFileChanged(runHash, rememberedHash);
+	const bridged = canHashDeclaredDataFile();
+	const currentHash = useCurrentDataFileHash(bridged ? location?.path : undefined);
+	return dataFileChanged(runHash, bridged ? currentHash : location?.hash);
+}
+
+type HashState = { path: string; hash: string } | null;
+
+/** The digest of the file at `path` now; undefined while unknown or for no path. */
+function useCurrentDataFileHash(path: string | undefined): string | undefined {
+	const [state, setState] = useState<HashState>(null);
+	useEffect(() => {
+		if (!path) return;
+		let current = true;
+		const check = () => {
+			hashDeclaredDataFile(path)
+				.then((hash) => {
+					if (current) setState({ path, hash });
+				})
+				.catch(() => {
+					// Unknown rather than changed: a file that cannot be hashed
+					// is not evidence about its contents.
+					if (current) setState(null);
+				});
+		};
+		check();
+		window.addEventListener("focus", check);
+		return () => {
+			current = false;
+			window.removeEventListener("focus", check);
+		};
+	}, [path]);
+	// An answer for the previous path is no answer.
+	return state && state.path === path ? state.hash : undefined;
 }

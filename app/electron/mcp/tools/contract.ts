@@ -195,6 +195,12 @@ export interface ToolContext {
 	 */
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
 	/**
+	 * The SHA-256 hex of a remembered data file's bytes as they are now (#2051),
+	 * rejecting when the file cannot be read. Absent in the stdio CLI, like
+	 * `dataFileLocation`, so a listed `dataFile.hash` falls back to the stored one.
+	 */
+	currentDataFileHash?: (filePath: string) => Promise<string>;
+	/**
 	 * The `clientInfo.name` the connected client gave in its `initialize`
 	 * handshake, stamped on every run this server starts (#1817). A function
 	 * because the stdio host builds its server before the handshake arrives;

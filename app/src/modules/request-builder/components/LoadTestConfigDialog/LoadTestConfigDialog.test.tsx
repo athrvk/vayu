@@ -300,6 +300,17 @@ describe("data rows (issue #993)", () => {
 		);
 	});
 
+	// Mutation check: send `dataFile.fileName` unfiltered and this fails.
+	it("leaves out a file name holding a path separator, keeping the hash (#2051)", async () => {
+		const { onStart } = open();
+		pick(new File(["id\na"], "odd\\rows.csv"));
+		await screen.findByText(/rows\.csv/);
+
+		const config = started(onStart);
+		expect(config.dataFileName).toBeUndefined();
+		expect(config.dataFileHash).toMatch(/^[0-9a-f]{64}$/);
+	});
+
 	it("sends no `data` key at all when no file was picked", () => {
 		// Absent rather than `[]`: the engine refuses a present-but-empty array
 		// rather than running it, so an empty array would turn "no data set"

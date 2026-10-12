@@ -16,8 +16,8 @@ const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 /**
  * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence -
  * `Error invoking remote method '<channel>': Error: <message>` - which is
- * Electron's doing, not this preload's. `readDataFile` and `readSpecFile`
- * throw already-clean, user-facing messages on the main-process side
+ * Electron's doing, not this preload's. `readDataFile`, `hashDataFile` and
+ * `readSpecFile` throw already-clean, user-facing messages on the main-process side
  * (`data-file.ts`, `spec-file.ts` - a missing file, an over-cap document, a
  * refused extension), so callers on the renderer side
  * (`read-declared.ts`, `ImportModal.tsx`) can show them as-is. Left wrapped,
@@ -319,6 +319,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// `hash` is the SHA-256 of those bytes (issue #2051), what a run records.
 	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string; hash: string }> =>
 		ipcRenderer.invoke("dataFile:read", path).catch((e: unknown) => {
+			throw unwrapIpcError(e);
+		}),
+
+	// The same file's SHA-256 as it is now, without carrying its bytes (issue
+	// #2051): what a run's `dataFileHash` is compared against. Same gates.
+	hashDataFile: (path: string): Promise<string> =>
+		ipcRenderer.invoke("dataFile:hash", path).catch((e: unknown) => {
 			throw unwrapIpcError(e);
 		}),
 

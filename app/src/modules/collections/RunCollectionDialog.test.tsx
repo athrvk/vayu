@@ -307,6 +307,20 @@ describe("a data file", () => {
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
 	});
 
+	// A POSIX file name may hold a `\`, which the engine refuses in a
+	// `dataFileName` so no path is stored (#2051): the run still starts.
+	// Mutation check: send `dataFile.fileName` unfiltered and this fails.
+	it("leaves out a file name holding a path separator, keeping the hash", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("odd\\name.csv", "user\nada");
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		const scenario = mutate.mock.calls[0][0].scenario;
+		expect(scenario.dataFileName).toBeUndefined();
+		expect(scenario.dataFileHash).toMatch(/^[0-9a-f]{64}$/);
+		expect(scenario.data).toEqual([{ user: "ada" }]);
+	});
+
 	it("keeps an explicit iteration count and says how many rows go unused", async () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		await pickFile("users.csv", "user\nada\ngrace\nalan");

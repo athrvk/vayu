@@ -16,7 +16,12 @@
 
 import { describe, it, expect } from "vitest";
 import type { RunConfigSnapshot } from "@/types";
-import { dataFileChanged, dataFileFromSnapshot, dataFileFromSummary } from "./run-data-file";
+import {
+	dataFileChanged,
+	dataFileFromSnapshot,
+	dataFileFromSummary,
+	runDataFileName,
+} from "./run-data-file";
 
 const A = "a".repeat(64);
 const B = "b".repeat(64);
@@ -88,5 +93,17 @@ describe("dataFileChanged", () => {
 		["both hashes", undefined, undefined],
 	])("is false when %s is unknown, since nothing can be compared", (_label, run, remembered) => {
 		expect(dataFileChanged(run, remembered)).toBe(false);
+	});
+});
+
+describe("runDataFileName", () => {
+	it("passes a plain file name through", () => {
+		expect(runDataFileName("users.csv")).toBe("users.csv");
+	});
+
+	it("leaves out a name the engine would refuse as a path", () => {
+		for (const name of ["odd\\name.csv", "dir/users.csv"]) {
+			expect(runDataFileName(name)).toBeUndefined();
+		}
 	});
 });

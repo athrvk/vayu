@@ -14,7 +14,11 @@
 import { z } from "zod";
 import { DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT } from "../engine-client.js";
 import { precedenceNote } from "../variable-origins.js";
-import { DATA_CONTRACT_SENTENCE, presentCollections } from "../collection-shape.js";
+import {
+	DATA_CONTRACT_SENTENCE,
+	presentCollections,
+	withCurrentDataFileHashes,
+} from "../collection-shape.js";
 import {
 	runOutputShape,
 	secretsShape,
@@ -111,8 +115,12 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
-				() => ctx.client.listCollections(signal),
-				(rows) => secretsShape(ctx, withholdRowListSecrets)(presentCollections(rows, ctx))
+				async () =>
+					withCurrentDataFileHashes(
+						presentCollections(await ctx.client.listCollections(signal), ctx),
+						ctx
+					),
+				secretsShape(ctx, withholdRowListSecrets)
 			),
 	},
 	{

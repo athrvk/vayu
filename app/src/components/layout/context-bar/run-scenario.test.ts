@@ -99,6 +99,15 @@ describe("scenarioFromSnapshot", () => {
 		);
 		expect(junk?.dataFileName).toBeUndefined();
 		expect(junk?.dataFileHash).toBeUndefined();
+
+		// The lib's one reader, and its rule: an empty name is no file, and a
+		// hash without a name describes nothing. Mutation check: read the block
+		// with a local `str` again and both fail.
+		const unnamed = scenarioFromSnapshot(
+			run("scenario", { scenario: { dataFileName: "", dataFileHash: hash } })
+		);
+		expect(unnamed?.dataFileName).toBeUndefined();
+		expect(unnamed?.dataFileHash).toBeUndefined();
 	});
 
 	it("distinguishes no steps recorded from a plan of zero steps", () => {

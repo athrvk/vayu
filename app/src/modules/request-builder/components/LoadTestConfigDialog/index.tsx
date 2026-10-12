@@ -68,6 +68,7 @@ import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/component
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
+import { runDataFileName } from "@/lib/run-data-file";
 import { useRequestDefaultsQuery } from "@/queries";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
@@ -611,7 +612,7 @@ export default function LoadTestConfigDialog({
 		if (dataFile) {
 			config.data = dataFile.parsed.rows;
 			config.dataColumns = dataFile.parsed.columns;
-			config.dataFileName = dataFile.fileName;
+			config.dataFileName = runDataFileName(dataFile.fileName);
 			config.dataFileHash = dataFile.hash;
 		}
 

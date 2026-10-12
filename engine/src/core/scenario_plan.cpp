@@ -667,6 +667,13 @@ std::string& hash_out) {
         read_data_file_string (block, prefix, "dataFileHash", has_data, hash_out)) {
         return reason;
     }
+    // A display name, never a path: the engine opens nothing, and a path here
+    // would be stored and listed back to every reader of the run.
+    if (name_out.find_first_of ("/\\") != std::string::npos) {
+        return "'" + std::string (prefix) +
+        "dataFileName' is the file's name, never a path: send the name alone "
+        "(got one containing a path separator)";
+    }
     if (!hash_out.empty () && !is_sha256_hex (hash_out)) {
         return "'" + std::string (prefix) +
         "dataFileHash' must be the SHA-256 of the file's bytes as 64 "

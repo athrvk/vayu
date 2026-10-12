@@ -45,9 +45,12 @@
  * about what is on the other side of it, which is what lets the load dialog
  * share the pre-fill and share none of the consequence.
  *
- * It writes nothing to the store either: the Data tab is where a contract is
+ * It changes no declaration either: the Data tab is where a contract is
  * declared, and one run started against a different file is not a
- * redeclaration of it for every run that follows.
+ * redeclaration of it for every run that follows. The one store write is the
+ * read's own: `readDeclaredDataFile` records the hash of the bytes it read
+ * against the remembered path (#2051), which is why the read below depends on
+ * the location's path and name rather than on the location object.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -169,9 +172,8 @@ export function useDeclaredDataFile(
 	// answers, and finds nothing otherwise - which is the correct answer.
 	const declaringCollectionId = contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
-	// The read below depends on these strings, never on the location object:
-	// the read itself records the file's hash, which replaces that object, and
-	// an object dependency would cancel the very read that replaced it (#2051).
+	// Strings, not the object: the read's hash record replaces the object, and
+	// an object dependency would cancel the very read that replaced it.
 	const rememberedPath = rememberedFile?.path;
 	const rememberedName = rememberedFile?.fileName;
 	const { maxRows } = useDataFileLimits();

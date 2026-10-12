@@ -600,6 +600,27 @@ TEST_F (ScenarioPlanTest, TheDataFileFieldsAreRefusedWhenMalformedOrWithoutRows)
     EXPECT_NE (error.find ("without it"), std::string::npos) << error;
 }
 
+// A display name, never a path (#2051): a caller that sends the path it read
+// the file from is refused, so no path is stored. Mutation check: drop the
+// separator check in `read_data_file_fields` and every case reds.
+TEST_F (ScenarioPlanTest, ADataFileNameHoldingAPathIsRefused) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    for (const auto* path :
+    { "/home/u/users.csv", "exports/users.csv", "C:\\data\\users.csv", "users\\" }) {
+        json scenario    = block ("col");
+        scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+        scenario["dataFileName"] = path;
+        const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+        EXPECT_FALSE (resolved.ok) << "accepted: " << path;
+        EXPECT_NE (resolved.error.find (
+                   "'scenario.dataFileName' is the file's name, never a path"),
+        std::string::npos)
+        << path << ": " << resolved.error;
+    }
+}
+
 // `null` is absent, on this block's existing rule for `recursive` and `data`.
 TEST_F (ScenarioPlanTest, NullDataFileFieldsAreAbsent) {
     seed_collection ("col", "");

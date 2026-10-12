@@ -6190,9 +6190,10 @@ Two differences from `scenario.data` worth stating:
 optional, independent strings: `dataFileName`, a display name (the app sends
 the picked file's name), and `dataFileHash`, the SHA-256 of the file's bytes as
 64 lowercase hex characters. The engine stores both verbatim and opens nothing;
-no path is ever sent or stored. Each is a `400` `invalid_run_config` when it is
-not a non-empty string, `dataFileHash` also when it is not that digest shape,
-and either one is a `400` when sent without `data` (refused, not ignored). A
+no path is ever stored. Each is a `400` `invalid_run_config` when it is not a
+non-empty string, `dataFileName` also when it holds a `/` or `\` (a path, not a
+name), `dataFileHash` also when it is not that digest shape, and either one is
+a `400` when sent without `data` (refused, not ignored). A
 top-level one beside a `scenario` block is a `400` naming its
 `scenario.dataFileName` / `scenario.dataFileHash` counterpart, as `data` is.
 
@@ -6641,6 +6642,7 @@ as a smaller one:
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
+| `dataFileName` holding a `/` or `\` | A display name, never a path (issue #2051): a path would be stored and listed back to every reader of the run. Send the file's name alone. |
 | A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather

@@ -28,7 +28,7 @@ import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
-import { readDataFile } from "./data-file.js";
+import { hashDataFile, readDataFile } from "./data-file.js";
 import { DataFileLocations } from "./data-file-locations.js";
 import { readSpecFile } from "./spec-file.js";
 import {
@@ -987,6 +987,7 @@ async function startMcp() {
 					safety: loadPersistedSafety(),
 					onDataChanged: sendMcpDataChanged,
 					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
+					currentDataFileHash: (filePath) => hashDataFile(filePath),
 					log: mcpLogger(),
 				});
 				mcpService = service;
@@ -1411,6 +1412,12 @@ function setupIpcHandlers() {
 	// alternative that was rejected, are in data-file.ts.
 	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
 		return await readDataFile(String(filePath ?? ""));
+	});
+
+	// The same file's SHA-256 as it is now, without its bytes (#2051): what a
+	// run's `dataFileHash` is compared against. Same path gates as the read.
+	ipcMain.handle("dataFile:hash", async (_event, filePath: unknown) => {
+		return await hashDataFile(String(filePath ?? ""));
 	});
 
 	// The renderer's whole map of remembered data-file paths, on launch and on

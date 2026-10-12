@@ -3579,6 +3579,30 @@ describe("run_collection", () => {
 		}
 	});
 
+	// A display name, never a path (#2051), refused before the engine has to.
+	// Mutation check: drop the regex from `dataFileNameInput` and every path
+	// case passes the schema.
+	test("the schema refuses a path as a file name, pointing at dataFile.fileName", () => {
+		const schemaOf = (name: string) =>
+			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+		const cases = [
+			["run_collection", (dataFileName: string) => ({ collectionId: "c1", dataFileName })],
+			["start_load_run", (dataFileName: string) => ({ dataFileName })],
+			[
+				"start_load_run",
+				(dataFileName: string) => ({ scenario: { collectionId: "c1", dataFileName } }),
+			],
+		] as const;
+		for (const [name, args] of cases) {
+			expect(schemaOf(name).safeParse(args("users.csv")).success, name).toBe(true);
+			for (const path of ["/home/u/users.csv", "exports/users.csv", "C:\\data\\users.csv"]) {
+				const parsed = schemaOf(name).safeParse(args(path));
+				expect(parsed.success, `${name} ${path}`).toBe(false);
+				expect(parsed.error?.issues[0].message).toMatch(/never a path.*dataFile\.fileName/);
+			}
+		}
+	});
+
 	test("omits iterations and data when the caller named neither", async () => {
 		const client = scenarioClient();
 		await dispatchTool(

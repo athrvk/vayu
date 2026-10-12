@@ -1223,8 +1223,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     verbatim rather than re-derived in the schema. `dataFileName` and
     `dataFileHash` (issue #2051) name the file the rows came from - a display
     name and the SHA-256 of its bytes as 64 lowercase hex, which the schema
-    checks - and are forwarded as given; the engine refuses either one sent
-    without rows, by name. See [Data files](#data-files).
+    checks, refusing a name holding a `/` or `\` as a path - and are forwarded
+    as given; the engine refuses either one sent without rows, by name. See [Data files](#data-files).
   - `scenario.iterations` is offered on `run_collection` only. A load run reads
     the **top-level** `iterations` (total passes across all virtual users); the
     in-block count is the design runner's and the load executor never reads it,
@@ -1409,10 +1409,16 @@ and comes from the app's renderer (`stores/data-file-store.ts`), which publishes
 its whole map to the main process over `dataFile:locations`
 (`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
 keeping only an absolute path with an extension `dataFile:read` would open).
-`hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex,
-the last time the app read it - picked in the Data tab or re-read by a run
-dialog, Send-with-row or the Data tab - and is absent for a location the app
-has not read since hashes were recorded.
+`hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex.
+`list_collections` and `vayu://collections` hash the file as it is **at call
+time** (`hashDataFile` in `electron/data-file.ts`, behind the same path gates
+as `dataFile:read`, streamed and never returned), so an edit made after a run
+shows up without the app re-reading anything. A file that cannot be read -
+moved, deleted - is never an error: the row keeps the hash the app last read
+the file with (picked in the Data tab, or re-read by a run dialog,
+Send-with-row or the Data tab), or none for a location it has not read since
+hashes were recorded. A write tool's echoed collection row carries that stored
+hash too; it does not read the disk.
 
 A path is true of one filesystem only, which is why it never reaches the engine
 or an export. It may reach MCP because the Electron-hosted server listens on
@@ -1431,10 +1437,12 @@ run, read the run row for the file's name and hash, then `list_collections` for
 the file's current `dataFile.path` and `hash`, and compare the two hashes
 *before* reading the file and sending its rows - a mismatch means the file has
 changed since that run (hash the bytes you read yourself to be certain they are
-the ones the app last saw). Then pass the rows with the same `dataFileName` and
+the ones you send). Then pass the rows with the same `dataFileName` and
 `dataFileHash`: `data` / `dataFileName` / `dataFileHash` on `run_collection`,
 `scenario.*` or the top-level trio on `start_load_run`. The run tools take rows,
-never a path.
+never a path: `dataFileName` is `dataFile.fileName`, and a value holding a `/`
+or `\` is refused by the tool schema (pointing at `dataFile.fileName`) and by
+the engine alike.
 
 ## Resources
 

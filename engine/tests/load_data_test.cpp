@@ -394,6 +394,24 @@ TEST (ReadLoadDataSet, AMalformedDataFileHashIsRefused) {
     EXPECT_EQ (read.set, nullptr);
 }
 
+// A display name, never a path (#2051), on the single-request payload too.
+// Mutation check: drop the separator check in `read_data_file_fields` and
+// both cases red.
+TEST (ReadLoadDataSet, ADataFileNameHoldingAPathIsRefused) {
+    for (const auto* path : { "/home/u/users.csv", "C:\\data\\users.csv" }) {
+        const json payload = { { "url", "https://example.test/" },
+            { "data", json::array ({ json{ { "id", "a" } } }) },
+            { "dataFileName", path } };
+
+        const auto read = read_load_data_set (payload, stock_limits (), false);
+        EXPECT_FALSE (read.ok) << path;
+        EXPECT_NE (
+        read.error.find ("'dataFileName' is the file's name, never a path"), std::string::npos)
+        << path << ": " << read.error;
+        EXPECT_EQ (read.set, nullptr);
+    }
+}
+
 TEST (ReadLoadDataSet, CredentialsCarryingATokenDeferTheBuild) {
     const json payload = { { "url", "https://example.test/" },
         { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "pw" } } },

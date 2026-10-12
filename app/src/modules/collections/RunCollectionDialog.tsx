@@ -90,6 +90,7 @@ import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
+import { runDataFileName } from "@/lib/run-data-file";
 import type { Collection } from "@/types";
 import {
 	BUDGET_FIELDS,
@@ -367,7 +368,7 @@ export default function RunCollectionDialog({
 					...(dataFile
 						? {
 								data: dataFile.parsed.rows,
-								dataFileName: dataFile.fileName,
+								dataFileName: runDataFileName(dataFile.fileName),
 								dataFileHash: dataFile.hash,
 							}
 						: {}),

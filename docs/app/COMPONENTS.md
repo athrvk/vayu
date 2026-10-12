@@ -207,7 +207,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 
 | Section (`id`) | What it shows |
 |---|---|
-| Run config (`run-config`) | `RunConfigSection.tsx` - mode, duration, target RPS, concurrency, iterations, ramp and requested protocol, read from the run's stored `configSnapshot`. Words come from `loadTestModeLabel` / `formatConcurrency`. A design run has no `mode` key and reads as "Single send". A **collection run** has none of those keys at all - it reads its `scenario` block instead (`run-scenario.ts`) and shows "Collection run", the plan's step count, iterations, and whether sub-folders were included. |
+| Run config (`run-config`) | `RunConfigSection.tsx` - mode, duration, target RPS, concurrency, iterations, ramp and requested protocol, read from the run's stored `configSnapshot`. Words come from `loadTestModeLabel` / `formatConcurrency`. A design run has no `mode` key and reads as "Single send". A **collection run** has none of those keys at all - it reads its `scenario` block instead (`run-scenario.ts`) and shows "Collection run", the plan's step count, iterations, whether sub-folders were included, and a **Data file** row naming the file the run's rows came from (issue #2051; the display name, never a path, read through `lib/run-data-file.ts`'s one reader of the name/hash pair). |
 | Source (`run-source`) | `RunSourceSection.tsx` - the environment the run used (`Run.environmentId`, which nothing rendered before) and a link opening the request it ran from. A deleted environment is named as deleted rather than folded into "No environment"; a deleted request (`isRequestNotFound`, never a transport failure) drops the link. A **collection run** links no request - its source is the folder - so the row names the collection and opens *that* tab. |
 
 `run-scenario.ts` is the one place the snapshot's `scenario` block is narrowed
@@ -544,6 +544,8 @@ Its list has two sources and `scenario-steps.ts` collapses both to one `Scenario
 | `RunReport.results[]`, each with the step identity the engine stamps onto its trace | The stored design-mode trace, so the row expands into a response | Once the run is over |
 
 Stored rows win the moment there are any, which is also what makes a re-opened tab honest: a completed run has no live steps and reads entirely from storage. `ScenarioRunService` refetches the report on `complete`, which is the changeover.
+
+The header names the data file the run's rows came from (issue #2051), from the snapshot's manifest, and appends `(file changed since this run)` when `hooks/useDataFileChanged.ts` says the file the collection remembers no longer matches: the run's `dataFileHash` against the file's digest as it is on disk now (`dataFile:hash`, asked on mount and on window focus), or against the hash the app last recorded when there is no hash bridge. An unknown answer - a file that cannot be read, a hash still in flight, a run recorded before hashes - shows no suffix. `lib/run-data-file.ts` holds the reads of the name/hash pair out of every stored shape and the comparison rule.
 
 Three rules the list holds, each pinned by a mutation-checked test:
 
@@ -1617,7 +1619,10 @@ a promise about the cells that reach a request, which bind-before-auth (#591)
 puts inside the `Authorization` header. When any listed step carries a
 `dataRowIndex` the notice says the run's rows are in these steps, so a reader is
 not left reconciling two true-sounding claims. `ScenarioRunView` reads the flag
-off the steps rather than the report, so a live run discloses it too.
+off the steps rather than the report, so a live run discloses it too. Its
+optional `dataFileName` prop names the bound file in that sentence (issue
+#2051), from the run's snapshot; a run recorded before the field keeps the
+unnamed sentence.
 
 Silent when the surface lists no steps - nothing on screen, nothing to disclose.
 

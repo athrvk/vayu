@@ -446,7 +446,8 @@ std::vector<nlohmann::json>& rows_out);
  * a display name, and `dataFileHash`, the SHA-256 of the file's bytes as 64
  * lowercase hex characters. Each is optional and independent of the other;
  * absent or `null` leaves its output empty. Both are stored verbatim and never
- * opened, so the engine never learns a path.
+ * opened; a name holding a `/` or `\` is refused, so the engine never stores
+ * a path.
  *
  * One reader for both shapes, like @ref read_data_rows: @p prefix is
  * `"scenario."` for a collection run's block and empty for a single-request

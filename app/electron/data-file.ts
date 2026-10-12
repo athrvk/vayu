@@ -40,10 +40,13 @@
  * than a UTF-8 decode - a UTF-16 BOM sniff, a replacement-character refusal. A
  * second decode here would mean a file read through the picker and the same file
  * read through this channel could disagree about their own contents.
+ *
+ * `dataFile:hash` (issue #2051) is the same channel answering a digest instead
+ * of bytes, behind the same path gates: `hashDataFile`.
  */
 
 import { createHash } from "crypto";
-import { promises as fs } from "fs";
+import { createReadStream, promises as fs } from "fs";
 import path from "path";
 
 import { ENGINE_HOST, ENGINE_PORT, DATA_FILE_MAX_BYTES_SEED } from "./constants.js";
@@ -90,12 +93,19 @@ export const DATA_FILE_HASH_PATTERN = /^[0-9a-f]{64}$/;
 export interface DataFileSystem {
 	stat: (filePath: string) => Promise<{ size: number; isFile: () => boolean }>;
 	readFile: (filePath: string) => Promise<Buffer>;
+	/** SHA-256 hex of the file's bytes, streamed rather than read whole. */
+	hashFile: (filePath: string) => Promise<string>;
 	fetchConfig: () => Promise<unknown>;
 }
 
 const defaultSystem: DataFileSystem = {
 	stat: (filePath) => fs.stat(filePath),
 	readFile: (filePath) => fs.readFile(filePath),
+	hashFile: async (filePath) => {
+		const hash = createHash("sha256");
+		for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+		return hash.digest("hex");
+	},
 	fetchConfig: async () => {
 		const response = await engineFetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
@@ -135,25 +145,7 @@ export async function readDataFile(
 	filePath: string,
 	system: DataFileSystem = defaultSystem
 ): Promise<DataFileReadResult> {
-	if (typeof filePath !== "string" || filePath.trim() === "") {
-		throw new Error("No data file path was given.");
-	}
-
-	const extension = path.extname(filePath).toLowerCase();
-	if (!DATA_FILE_EXTENSIONS.includes(extension)) {
-		throw new Error(
-			`Vayu only opens data files (${DATA_FILE_EXTENSIONS.join(", ")}), and this one is "${extension || "extensionless"}".`
-		);
-	}
-
-	let size: number;
-	try {
-		const stats = await system.stat(filePath);
-		if (!stats.isFile()) throw new Error("not a file");
-		size = stats.size;
-	} catch {
-		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
-	}
+	const size = await statOpenableDataFile(filePath, system);
 
 	const maxBytes = await maxDataFileBytes(system);
 	if (size > maxBytes) {
@@ -168,4 +160,48 @@ export async function readDataFile(
 		fileName: path.basename(filePath),
 		hash: createHash("sha256").update(buffer).digest("hex"),
 	};
+}
+
+/**
+ * The SHA-256 hex of a declared data file's bytes as they are now (issue
+ * #2051), the digest {@link readDataFile} answers for the same bytes, without
+ * carrying them: what a surface compares a run's `dataFileHash` against.
+ *
+ * The same path gates as a read, so this channel answers about no file the
+ * read channel would refuse to open. No byte cap: nothing crosses to the
+ * renderer and the stream hashes in constant memory, and a file that has
+ * outgrown the cap has still changed.
+ */
+export async function hashDataFile(
+	filePath: string,
+	system: DataFileSystem = defaultSystem
+): Promise<string> {
+	await statOpenableDataFile(filePath, system);
+	try {
+		return await system.hashFile(filePath);
+	} catch {
+		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+	}
+}
+
+/** The gates both channels pass before a byte is touched; answers the file's size. */
+async function statOpenableDataFile(filePath: string, system: DataFileSystem): Promise<number> {
+	if (typeof filePath !== "string" || filePath.trim() === "") {
+		throw new Error("No data file path was given.");
+	}
+
+	const extension = path.extname(filePath).toLowerCase();
+	if (!DATA_FILE_EXTENSIONS.includes(extension)) {
+		throw new Error(
+			`Vayu only opens data files (${DATA_FILE_EXTENSIONS.join(", ")}), and this one is "${extension || "extensionless"}".`
+		);
+	}
+
+	try {
+		const stats = await system.stat(filePath);
+		if (!stats.isFile()) throw new Error("not a file");
+		return stats.size;
+	} catch {
+		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+	}
 }

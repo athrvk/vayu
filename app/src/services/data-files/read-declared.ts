@@ -81,6 +81,28 @@ export function canReadDeclaredDataFile(): boolean {
 	return typeof window.electronAPI?.readDataFile === "function";
 }
 
+/**
+ * Whether this build can hash a remembered path without reading it (#2051).
+ * Separate from {@link canReadDeclaredDataFile} because a caller falls back to
+ * the stored hash when it cannot, rather than to nothing.
+ */
+export function canHashDeclaredDataFile(): boolean {
+	return typeof window.electronAPI?.hashDataFile === "function";
+}
+
+/**
+ * The SHA-256 hex of the file at `path` as it is now, the digest a re-read
+ * would answer, without its bytes crossing to the renderer. Rejects with
+ * `NoDataFileBridgeError` outside Electron and with the main process's message
+ * when the file is gone or refused. It records nothing in `data-file-store`,
+ * whose hash stays the one the app last read the file with.
+ */
+export async function hashDeclaredDataFile(path: string): Promise<string> {
+	const hash = window.electronAPI?.hashDataFile;
+	if (!hash) throw new NoDataFileBridgeError();
+	return await hash(path);
+}
+
 /** What a re-read has to be measured against, beyond parsing. */
 export interface DeclaredDataFileLimits {
 	/**

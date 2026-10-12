@@ -23,18 +23,21 @@
  * Beside it, `dataFile: { path, fileName, hash? }` names the file the app
  * remembers for that collection on this machine, when the host has that record
  * (the Electron-hosted server; never the stdio CLI). `hash` is the SHA-256 of
- * the file's bytes when the app last read it (issue #2051), the digest a run
- * records as `dataFileHash`, so an agent can tell whether the file still is the
- * one a past run used; absent until the app has read the file once. Why a path
- * may be named at all is in `data-file-locations.ts`. The rows are never read
- * here.
+ * the file's bytes (issue #2051), the digest a run records as `dataFileHash`,
+ * so an agent can tell whether the file still is the one a past run used. A
+ * list read (`list_collections`, `vayu://collections`) hashes the file as it
+ * is at call time through {@link withCurrentDataFileHashes}; when the file
+ * cannot be read, or on a single-row echo, it is the hash the app last read it
+ * with, absent until the app has read the file once. Why a path may be named
+ * at all is in `data-file-locations.ts`. The rows are never read here.
  */
 
 import type { DataFileLocation } from "../data-file-locations.js";
 
-/** The one piece of the tool context this module reads. */
+/** The pieces of the tool context this module reads. */
 interface DataFileLookup {
 	dataFileLocation?: (collectionId: string) => DataFileLocation | undefined;
+	currentDataFileHash?: (filePath: string) => Promise<string>;
 }
 
 export interface DataContract {
@@ -92,6 +95,34 @@ export function presentCollections(list: unknown, ctx?: DataFileLookup): unknown
 	return Array.isArray(list) ? list.map((row) => presentCollection(row, ctx)) : list;
 }
 
+/**
+ * Presented rows with each `dataFile.hash` taken from the file as it is now,
+ * when @p ctx can hash one. A file that cannot be read keeps the stored hash
+ * (or none): an unreadable file is a fact about the file, never a failed list.
+ */
+export async function withCurrentDataFileHashes(
+	rows: unknown,
+	ctx?: DataFileLookup
+): Promise<unknown> {
+	const hashOf = ctx?.currentDataFileHash;
+	if (!hashOf || !Array.isArray(rows)) return rows;
+	return Promise.all(rows.map((row) => withCurrentHash(row, hashOf)));
+}
+
+async function withCurrentHash(
+	row: unknown,
+	hashOf: (filePath: string) => Promise<string>
+): Promise<unknown> {
+	if (!isRecord(row) || !isRecord(row.dataFile) || typeof row.dataFile.path !== "string") {
+		return row;
+	}
+	try {
+		return { ...row, dataFile: { ...row.dataFile, hash: await hashOf(row.dataFile.path) } };
+	} catch {
+		return row;
+	}
+}
+
 /** What list_collections and `vayu://collections` say about the field. */
 export const DATA_CONTRACT_SENTENCE =
-	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName, hash }`, `hash` being the SHA-256 of the file's bytes when the app last read it: read the file yourself to build the `data` rows, and send its name and hash with them as `dataFileName` / `dataFileHash`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. Vayu never returns the file's rows.";
+	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName, hash }`, `hash` being the SHA-256 of the file's bytes as they are on disk now (the hash the app last read it with when the file cannot be read; never an error): read the file yourself to build the `data` rows, and send its name and hash with them as `dataFileName` / `dataFileHash`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. Vayu never returns the file's rows.";

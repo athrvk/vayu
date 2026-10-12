@@ -30,7 +30,12 @@ export interface RunDataFile {
 /** The suffix a surface appends when the collection's file no longer matches the run's. */
 export const DATA_FILE_CHANGED_NOTE = "(file changed since this run)";
 
-function readPair(source: unknown): RunDataFile | null {
+/**
+ * The pair as one stored block holds it, or null. The one reader of the pair:
+ * an empty name is no file, and a hash rides only beside a name. Exported for
+ * a caller that has already narrowed to the block (`run-scenario.ts`).
+ */
+export function dataFileFromBlock(source: unknown): RunDataFile | null {
 	if (typeof source !== "object" || source === null) return null;
 	const { dataFileName, dataFileHash } = source as Record<string, unknown>;
 	if (typeof dataFileName !== "string" || dataFileName === "") return null;
@@ -46,12 +51,22 @@ function readPair(source: unknown): RunDataFile | null {
  * one recorded before the field existed.
  */
 export function dataFileFromSnapshot(snapshot: RunConfigSnapshot | undefined): RunDataFile | null {
-	return readPair(snapshot?.scenario) ?? readPair(snapshot);
+	return dataFileFromBlock(snapshot?.scenario) ?? dataFileFromBlock(snapshot);
 }
 
 /** The same read over a `GET /runs` list row's compact summary. */
 export function dataFileFromSummary(summary: RunSummary | undefined): RunDataFile | null {
-	return readPair(summary?.scenario) ?? readPair(summary);
+	return dataFileFromBlock(summary?.scenario) ?? dataFileFromBlock(summary);
+}
+
+/**
+ * The name a run payload may carry for a picked file, or undefined. The engine
+ * refuses a `dataFileName` holding `/` or `\` so that no path is ever stored,
+ * and a POSIX file name may legally hold a `\`: such a name is left out (the
+ * run still records the hash and row count) rather than failing the run.
+ */
+export function runDataFileName(fileName: string): string | undefined {
+	return /[/\\]/.test(fileName) ? undefined : fileName;
 }
 
 /**
