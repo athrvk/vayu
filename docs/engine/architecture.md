@@ -133,6 +133,12 @@ These shapes need it, and all of them are in the code today:
   write are one lock scope; a snapshot written back would revert every edit
   another client made while the run was in flight. It takes the same
   `before_write` test seam.
+- **The import's globals merge** - `POST /import` (issue #1906), the one
+  caller that has to merge globals, because `POST /globals` replaces the
+  whole set. `merge_globals_locked` reads the stored set, lays the imported
+  variables over it and writes the result inside one `with_lock`, after the
+  tree has committed; a `POST /globals` landing between a separate read and
+  write would be overwritten. It takes the same `before_write` test seam.
 
 The same shape holds where the state being merged is not a `Database` row at
 all: **`PUT /inbox/:id`** (issue #1454) merge-patches an inbox's canned
