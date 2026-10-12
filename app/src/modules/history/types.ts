@@ -41,9 +41,8 @@ export interface TabProps {
 
 /**
  * A failed paged fetch (the time series, or the server-vitals series), with the
- * action that retries it. `retry` is the
- * owner's choice of what to re-run (the first page, or the page that failed), so
- * the charts section only offers it.
+ * action that retries it. `retry` is the owner's choice of what to re-run (the
+ * first page, or the page that failed), so the charts section only offers it.
  */
 export interface SeriesFailure {
 	message: string;
