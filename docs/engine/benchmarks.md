@@ -313,7 +313,7 @@ than either effect being looked for.
 
 Streaming under load puts a second thing on the write callback's hot path: an
 `SseFrameCounter` fed every byte of every streaming transfer. It is a per-byte
-loop over a nine-byte state machine with no allocation and no string building -
+loop over a few-byte state machine with no allocation and no string building -
 a scan, not a parse - and it runs **only** for transfers carrying
 `stream_bounds`, so an ordinary load run pays one `std::optional` check per
 callback and nothing else.
