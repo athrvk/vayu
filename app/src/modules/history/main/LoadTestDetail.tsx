@@ -144,16 +144,36 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const hasMonitorSamples = (report.monitor?.samples ?? 0) > 0;
 	const {
 		data: monitorData,
+		isError: isMonitorError,
+		error: monitorError,
 		isFetchingNextPage: isFetchingMonitorPage,
 		hasNextPage: hasMoreMonitor,
 		fetchNextPage: fetchMoreMonitor,
+		refetch: refetchMonitor,
 	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples, report.metadata?.status);
 
+	// Held back while in error for the reason the time series' effect is (#2062).
 	useEffect(() => {
-		if (hasMoreMonitor && !isFetchingMonitorPage) {
+		if (hasMoreMonitor && !isFetchingMonitorPage && !isMonitorError) {
 			fetchMoreMonitor();
 		}
-	}, [hasMoreMonitor, isFetchingMonitorPage, fetchMoreMonitor]);
+	}, [hasMoreMonitor, isFetchingMonitorPage, isMonitorError, fetchMoreMonitor]);
+
+	const monitorFailure = useMemo<SeriesFailure | undefined>(() => {
+		if (!isMonitorError) return undefined;
+		const resumable = hasMoreMonitor && !!monitorData?.pages?.length;
+		return {
+			message: monitorError?.message ?? "The engine returned no server-vitals data.",
+			retry: () => void (resumable ? fetchMoreMonitor() : refetchMonitor()),
+		};
+	}, [
+		isMonitorError,
+		monitorError,
+		hasMoreMonitor,
+		monitorData,
+		fetchMoreMonitor,
+		refetchMonitor,
+	]);
 
 	const monitorSamples = useMemo(
 		() => monitorData?.pages?.flatMap((page: MonitorSeriesResponse) => page.data) ?? [],
@@ -455,6 +475,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								timeSeries={timeSeries}
 								seriesFailure={seriesFailure}
 								monitorSamples={monitorSamples}
+								monitorFailure={monitorFailure}
 								isLoadingSeries={isLoadingSeries}
 								isFetchingMore={isFetchingNextPage}
 								progress={seriesProgress}

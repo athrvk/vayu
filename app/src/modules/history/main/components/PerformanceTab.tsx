@@ -36,6 +36,7 @@ export default function PerformanceTab({
 	timeSeries,
 	seriesFailure,
 	monitorSamples,
+	monitorFailure,
 	isLoadingSeries,
 	isFetchingMore,
 	progress,
@@ -72,6 +73,7 @@ export default function PerformanceTab({
 					data={timeSeries}
 					failure={seriesFailure}
 					monitorSamples={monitorSamples}
+					monitorFailure={monitorFailure}
 					isLoading={isLoadingSeries}
 					isFetchingMore={isFetchingMore}
 					progress={progress}
