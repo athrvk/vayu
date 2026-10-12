@@ -80,7 +80,9 @@ class SseParser {
      * A frame the chunk ends in the middle of is held until a later call
      * completes it, so an event split across TCP reads dispatches exactly once
      * and with its whole payload. Line terminators may be LF, CRLF or a lone
-     * CR, including a CRLF whose halves land in different chunks.
+     * CR, including a CRLF whose halves land in different chunks. One UTF-8 BOM
+     * at the very start of the stream is dropped (the EventSource spec ignores
+     * a leading U+FEFF), however its three bytes are split across chunks.
      */
     std::vector<SseEvent> feed (std::string_view chunk);
 
@@ -100,6 +102,9 @@ class SseParser {
     /// Append @p text to the line being assembled, dropping whatever exceeds
     /// the cap and counting what was dropped.
     void hold (std::string_view text);
+    /// While the stream's first line is still being decided, erase a BOM that
+    /// has fully arrived at its front, or stop watching once it cannot be one.
+    void drop_leading_bom ();
     void consume_line (std::string_view line, std::vector<SseEvent>& out);
     void apply_field (std::string_view field, std::string_view value);
     void dispatch (std::vector<SseEvent>& out);
@@ -116,6 +121,8 @@ class SseParser {
     /// True when the previous chunk ended in CR, so a leading LF in the next
     /// one is the other half of a CRLF and not an empty line.
     bool pending_cr_ = false;
+    /// True until the stream's first line is decided: a BOM is only a BOM there.
+    bool at_stream_start_ = true;
 
     std::string event_type_;
     std::string data_;

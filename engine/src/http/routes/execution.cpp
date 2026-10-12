@@ -52,7 +52,8 @@ namespace vayu::http::routes {
 // An explicit per-request "timeout" wins; otherwise fall back to the engine's
 // user-configurable `defaultTimeout` setting (passed in by the caller) rather
 // than the compile-time DEFAULT_TIMEOUT_MS, so raising the setting actually
-// extends how long a slow request is allowed to run.
+// extends how long a slow request is allowed to run. Reads, never validates:
+// both routes range-check `timeout` (REQUEST_TIMEOUT_FIELD) before it gets here.
 int resolve_request_timeout_ms (const nlohmann::json& json, int configured_default) {
     if (json.contains ("timeout") && json["timeout"].is_number ()) {
         return json["timeout"].get<int> ();
@@ -431,6 +432,42 @@ std::expected<RunOrigin, std::string> read_run_origin (const nlohmann::json& jso
     return origin;
 }
 
+std::expected<std::optional<std::string>, std::string>
+read_optional_string_field (const nlohmann::json& json, const char* key) {
+    const auto field = json.find (key);
+    if (field == json.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    if (!field->is_string ()) {
+        return std::unexpected (std::string ("'") + key +
+        "' must be a string (got " + field->type_name () + ")");
+    }
+    return field->get<std::string> ();
+}
+
+namespace {
+
+/**
+ * Stamp the `requestId` and `environmentId` the payload names onto @p run.
+ * @return the 400's message when either is not a string, or nothing.
+ */
+std::optional<std::string>
+read_run_scope_ids (const nlohmann::json& json, vayu::db::Run& run) {
+    auto request_id = read_optional_string_field (json, "requestId");
+    if (!request_id) {
+        return request_id.error ();
+    }
+    auto environment_id = read_optional_string_field (json, "environmentId");
+    if (!environment_id) {
+        return environment_id.error ();
+    }
+    run.request_id     = std::move (*request_id);
+    run.environment_id = std::move (*environment_id);
+    return std::nullopt;
+}
+
+} // namespace
+
 /**
  * @brief Read `POST /execute`'s `data` row (issue #601).
  *
@@ -793,6 +830,11 @@ struct NumericRunField {
     int64_t max;
     const char* why; // appended to the message, explains the bound
 };
+
+// The `timeout` bound both `POST /execute` and `POST /runs` hold a payload to.
+constexpr NumericRunField REQUEST_TIMEOUT_FIELD{ "timeout", 1, 86400000,
+    "A transfer with no timeout never completes, so the run can never reach a "
+    "terminal status." };
 
 // Reject a numeric field that is present but of the wrong JSON type or outside
 // its range. Absent is always fine - every field has a default.
@@ -1183,10 +1225,7 @@ const vayu::core::MonitorLimits& monitor_limits) {
     "It is the latency budget a capacity search looks for the edge of; a "
     "non-positive budget has no edge, and one past a minute is longer than "
     "the transfers any realistic run measures." },
-    { "timeout", 1, 86400000,
-    "A transfer with no timeout never completes, so the run can never "
-    "reach "
-    "a terminal status." },
+    REQUEST_TIMEOUT_FIELD,
     { "iterations", 1, limits::MAX_ITERATIONS,
     "An iterations run stops on its request count alone, read as a size_t, "
     "so a negative count is ~1.8e19 requests and a run that never ends." },
@@ -1404,6 +1443,13 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
         return row_auth.error;
     }
 
+    // Refused here, not clamped: `0` is libcurl's "no timeout" and a negative
+    // value is a rejected option, so either would send with no deadline.
+    if (auto reason = check_numeric_field (json, REQUEST_TIMEOUT_FIELD)) {
+        vayu::utils::log_warning ("http", "POST /execute - " + *reason);
+        return reason;
+    }
+
     // Build the request once: deserialize + timeout + auth. A malformed
     // payload fails here (before any run record is created); an auth
     // failure is surfaced after the run exists (below). Credentials
@@ -1495,11 +1541,9 @@ DesignSend& send) {
     send.run.status = vayu::RunStatus::Running;
     seed_run_times (send.run, now_ms ());
 
-    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
-        send.run.request_id = json["requestId"].get<std::string> ();
-    }
-    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
-        send.run.environment_id = json["environmentId"].get<std::string> ();
+    if (auto refusal = read_run_scope_ids (json, send.run)) {
+        vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
+        return refusal;
     }
     send.run.origin        = payload.origin.kind;
     send.run.origin_client = payload.origin.client;
@@ -2557,11 +2601,10 @@ httplib::Response& res) {
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
     // Ahead of the snapshot, which reads the scopes these two name.
-    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
-        run.request_id = json["requestId"].get<std::string> ();
-    }
-    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
-        run.environment_id = json["environmentId"].get<std::string> ();
+    if (auto refusal = read_run_scope_ids (json, run)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + *refusal);
+        send_error (res, 400, *refusal);
+        return;
     }
     run.origin        = std::move (origin.kind);
     run.origin_client = std::move (origin.client);

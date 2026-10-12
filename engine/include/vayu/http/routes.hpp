@@ -1120,6 +1120,19 @@ inline constexpr std::size_t MAX_RUN_ORIGIN_CLIENT_CHARS = 128;
 std::expected<RunOrigin, std::string> read_run_origin (const nlohmann::json& json);
 
 /**
+ * Read an optional string member off a `POST /execute` or `POST /runs` payload
+ * (`requestId`, `environmentId`), before any run row exists.
+ *
+ * Absent or `null` is no value. Any other type is the 400's message, naming the
+ * field: nlohmann's `get<std::string>` would otherwise throw a `type_error` that
+ * the server answers as a 500 with an empty body.
+ *
+ * Non-static so transient_execute_test.cpp can drive it directly.
+ */
+std::expected<std::optional<std::string>, std::string>
+read_optional_string_field (const nlohmann::json& json, const char* key);
+
+/**
  * The outcome of reading `POST /execute`'s `data` row (issue #601).
  *
  * `value` is the row itself when the payload carried one, and `nullopt` when it

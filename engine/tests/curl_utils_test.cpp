@@ -65,13 +65,13 @@ TEST (ExtractPort, ExplicitPortInRangeIsReturned) {
     EXPECT_EQ (extract_port ("h:3000/path"), 3000);
 }
 
-// No explicit port: scheme decides, and an unknown scheme keeps the historical
-// HTTPS default.
+// No explicit port: the scheme decides, and a URL with none is dialled as http
+// by libcurl (#1917), so it reads 80 like `http://` does.
 TEST (ExtractPort, NoExplicitPortUsesSchemeDefault) {
     EXPECT_EQ (extract_port ("https://example.com/"), 443);
     EXPECT_EQ (extract_port ("http://example.com/path?q=1"), 80);
-    EXPECT_EQ (extract_port ("example.com/path"), 443);
-    EXPECT_EQ (extract_port (""), 443);
+    EXPECT_EQ (extract_port ("example.com/path"), 80);
+    EXPECT_EQ (extract_port (""), 80);
 }
 
 // ============================================================================
@@ -95,6 +95,24 @@ TEST (ParseAuthority, UserinfoIsNotTheHost) {
     auto user_only = parse_authority ("http://user@example.com:8080/");
     EXPECT_EQ (user_only.host, "example.com");
     EXPECT_EQ (user_only.port, 8080);
+}
+
+// libcurl folds a scheme's case and dials a scheme-less URL as http, so the
+// default port that keys the DNS pin and the client-certificate match must agree
+// (#1917). Mutation-check: restore the case-sensitive `find ("http://")` with a
+// 443 fallback and the upper-case and scheme-less rows read 443.
+TEST (ParseAuthority, DefaultPortFollowsTheSchemeWhateverItsCase) {
+    EXPECT_EQ (parse_authority ("https://x/").port, 443);
+    EXPECT_EQ (parse_authority ("HTTPS://x/").port, 443);
+    EXPECT_EQ (parse_authority ("hTtPs://x/").port, 443);
+    EXPECT_EQ (parse_authority ("http://x/").port, 80);
+    EXPECT_EQ (parse_authority ("HTTP://x/").port, 80);
+}
+
+TEST (ParseAuthority, ASchemeLessUrlDefaultsToTheHttpPort) {
+    EXPECT_EQ (parse_authority ("example.com/path").port, 80);
+    EXPECT_EQ (parse_authority ("example.com").port, 80);
+    EXPECT_EQ (parse_authority ("example.com:8080/path").port, 8080);
 }
 
 // An IPv6 literal's colons belong to the address. The old parse returned the

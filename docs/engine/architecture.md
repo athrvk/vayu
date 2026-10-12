@@ -993,7 +993,7 @@ settings - with no zero-means-unbounded spelling for either.
 The two caps are enforced in the two places that can see them:
 
 - **Events** in the curl write callback, by `SseFrameCounter`
-  (`http/sse_frame_counter.hpp`) - a nine-byte state machine that counts frames
+  (`http/sse_frame_counter.hpp`) - a few-byte state machine that counts frames
   without assembling one. It agrees with `SseParser` about what an event is (a
   frame carrying no `data` field is not one), so a load run and a design run
   report the same count for the same stream; `sse_frame_counter_test.cpp` drives

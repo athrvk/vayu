@@ -5363,6 +5363,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by scripts as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, uses environment variables
+  "timeout": 30000,                    // Optional, ms, 1-86400000 - see below
   "elements": [                        // Optional, typed behaviours - see Elements. The only
                                        // script source; preRequestScript/postRequestScript(s)/tests
                                        // are refused (400, naming "elements")
@@ -5389,6 +5390,20 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "bodyModeHeaders": ["Content-Type"]  // Optional, which `headers` the body mode wrote - see below
 }
 ```
+
+**`timeout` is the whole-transfer deadline in milliseconds** (issue #1917), held
+to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
+`null`. A number outside that range, or a value that is not a number, is a `400`
+naming `'timeout'` before any run row exists and with nothing sent: libcurl
+reads `0` as "no timeout", and a negative value is a rejected option the
+transfer then runs without. `POST /runs` holds the same bound (see its
+[run config table](#post-runs)). A streaming send does not apply it to the
+transfer (see `stream` below) but refuses a malformed one all the same.
+
+**`requestId` and `environmentId` must be strings** (issue #1917): an id of any
+other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
+must be a string (got number)` - before any run row exists. Absent and `null`
+mean no link. `POST /runs` reads the same two fields under the same rule.
 
 **`disabledDefaultHeaders` refuses what the engine would add** (issue #1229).
 The engine adds a small declared set to every request that does not name it -
@@ -5445,6 +5460,11 @@ The worker parses SSE frames into a bounded in-memory ring that
 [`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
 `events` node into the run's stored trace when the stream ends, so History
 restores the timeline.
+
+A UTF-8 byte-order mark at the very start of the stream is dropped, as the
+EventSource specification requires (issue #1917); without that the first line's
+field name would carry the mark and the first event would be lost. One mark is
+dropped, however its three bytes are split across reads, and only at the start.
 
 **Every stream ends, and the run says why.** Five terminations, never "the
 timeout happened to fire":
@@ -6067,6 +6087,10 @@ actually depends on this field to specify a protocol in the first place. An
 explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
+
+**`requestId` / `environmentId` on `POST /runs`** are read exactly as on
+[`POST /execute`](#post-execute): a non-string is a `400` naming the field
+(`'environmentId' must be a string (got boolean)`) and no run row is created.
 
 **`origin` on `POST /runs`** is the same object, read by the same reader and
 under the same rules as on [`POST /execute`](#post-execute) (#1817): who started

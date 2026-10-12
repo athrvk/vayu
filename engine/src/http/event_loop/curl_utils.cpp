@@ -44,12 +44,10 @@ namespace {
 constexpr int kMinPort = 1;
 constexpr int kMaxPort = 65535;
 
+/// A scheme is case-insensitive (RFC 3986), and curl dials a scheme-less URL as
+/// http, so only an explicit `https` takes 443.
 int scheme_default_port (const std::string& url) {
-    if (url.find ("https://") == 0)
-        return 443;
-    if (url.find ("http://") == 0)
-        return 80;
-    return 443; // Default to HTTPS
+    return vayu::utils::ascii_lower_equal (vayu::http::url_scheme (url), "https") ? 443 : 80;
 }
 
 /// A digit run from a user-supplied URL can exceed any integer type.
