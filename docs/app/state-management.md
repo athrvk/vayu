@@ -2617,7 +2617,7 @@ const { forceSave, status, isSaving } = useSaveManager({
 
 The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. `CollectionDetail`'s `AuthTab` and `ElementsTab` (issue #1512) are its button users.
 
-`InfoTab` uses the hook without the button: it wants the draft, the resync and the mutation reset, but commits when focus leaves the field, like the request builder. `reset` therefore has fewer callers than `draft` has.
+`InfoTab` uses the hook without the button: it wants the draft, the resync and the mutation reset, but commits when focus leaves the field, like the request builder. `reset` therefore has fewer callers than `draft` has; `InfoTab` reaches the discard path through `adopt` instead.
 
 **Why auth - and now Elements - keep the button (#446, #1512).** Not because a credential or an element list outranks a plain field - the request builder autosaves its own auth through `useSaveManager`, and used to autosave its scripts the same way `InfoTab` still does. Because a blur is not a completion signal once a tab is more than one focus stop: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them non-value controls, and clicking reveal to check a half-typed password fires `focusout` while the draft is dirty - so a blur-commit would write half a credential to the record every descendant request inherits from. The old `ScriptTab` had exactly one focus stop (its Monaco editor), so leaving it meant what leaving a description means - but `ElementsTab`'s `ElementList` is adding a kind, naming a row, toggling it, reordering it and editing its form, each a separate stop, and a `script.*` element's own editor inside the list would fire the identical half-typed-value blur. The fields only make sense saved together, which is what the button means on both tabs now. Should collection auth or elements ever persist by themselves, the mechanism is the debounce, not a blur - a different change from this one. Both tabs state their save model above the fields, since they are the ones on that screen that differ.
 
@@ -2628,7 +2628,8 @@ const {
   setDraft: Dispatch<SetStateAction<T>>    // Standard setState signature
   isDirty: boolean                         // Draft differs from the persisted value
   reset: () => void                        // Discard the draft, adopting the persisted value
-  consumeDiscard: () => boolean            // Was the last clean edge a reset? Clears the answer (#1931)
+  adopt: Dispatch<SetStateAction<T>>       // setDraft for taking a persisted value; landing on it from a dirty draft is a discard (#2033)
+  consumeDiscard: () => boolean            // Was the last clean edge a reset or an adopt? Clears the answer (#1931)
   baseline: T                              // The value the draft last agreed with the server on
   externalValue: T | null                  // A persisted change pending while the draft is dirty
 } = useEntityDraft<T>({
@@ -2640,7 +2641,7 @@ const {
 
 **Behaviour:**
 - **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
-- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
+- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose. Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too): `adopt` leaves `baseline` and `externalValue` alone, so the other key's conflict survives, and it marks a discard only when the result equals the persisted value and the draft differed from it before - with the other field still dirty no clean edge follows to consume the mark, and the later real save would read as a discard.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
 - **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ElementsTab` passes `${collection.id}:elements`, one entity key for the whole element list under one collection id (the retired `ScriptTab` passed `${collection.id}:${fieldKey}`, since pre- and post-request scripts were two separate things to edit).
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
@@ -2714,9 +2715,11 @@ useDraftSaveContext({
   reset rather than fired across an `id` change, so switching the entity a
   mounted editor describes never reports the previous entity's save as this
   one's.
-- **A discard is not a save (#1931).** The clean edge is a save landing or a
-  `useEntityDraft` `reset` (the Reset button, an external change's "Take
-  theirs"). The editors pass the draft's `consumeDiscard` as the hook's
+- **A discard is not a save (#1931, #2033).** The clean edge is a save landing,
+  a `useEntityDraft` `reset` (the Reset button, an external change's "Take
+  theirs") or an `adopt` that lands on the persisted value (`InfoTab`'s
+  per-field Take theirs). All three editors (`InfoTab`, `AuthTab`,
+  `ElementsTab`) pass the draft's `consumeDiscard` as the hook's
   `consumeDiscard` option; when it says the edge was a discard the hook calls
   `discardPendingSave(id)` instead, so the Dock returns to idle rather than
   flashing "Saved" for a write that never happened. `discardPendingSave` leaves

@@ -25,6 +25,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { useSaveStore } from "@/stores/save-store";
 import type { Collection } from "@/types";
 
 const mutation = {
@@ -64,6 +65,7 @@ async function renderTab(props: Partial<Collection> = {}) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	useSaveStore.setState({ status: "idle", lastErrorMessage: null });
 });
 
 describe("InfoTab - a background rename or edit while the tab is dirty", () => {
@@ -154,6 +156,31 @@ describe("InfoTab - a background rename or edit while the tab is dirty", () => {
 
 		expect(nameField().value).toBe("Renamed by agent");
 		expect(screen.queryByText(/Changed elsewhere/)).not.toBeInTheDocument();
+	});
+
+	it("Take theirs is a discard, not a save: the Dock never reports Saved (#2033)", async () => {
+		const { rerender } = await renderTab();
+
+		fireEvent.change(nameField(), { target: { value: "Renamed by user" } });
+		await act(async () => {
+			rerender(
+				<TooltipProvider>
+					<InfoTab
+						collection={{ ...collection, name: "Renamed by agent" }}
+						requestCount={0}
+					/>
+				</TooltipProvider>
+			);
+		});
+
+		const statuses: string[] = [];
+		const unsubscribe = useSaveStore.subscribe((s) => statuses.push(s.status));
+		fireEvent.click(screen.getByRole("button", { name: /take theirs/i }));
+		await act(async () => {});
+		unsubscribe();
+
+		expect(statuses).not.toContain("saved");
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 
 	it("a clean tab still adopts an agent's change immediately, as before", async () => {

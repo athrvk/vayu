@@ -219,6 +219,51 @@ describe("useEntityDraft - telling a discard from a save", () => {
 		expect(result.current.consumeDiscard()).toBe(false);
 	});
 
+	it("reports an adoption that lands on the persisted value from a dirty draft", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft((d) => ({ ...d, name: "Mine" })));
+		rerender({ entityKey: "c1", value: { ...acme, name: "Theirs" } });
+
+		act(() => result.current.adopt((d) => ({ ...d, name: "Theirs" })));
+
+		expect(result.current.isDirty).toBe(false);
+		expect(result.current.consumeDiscard()).toBe(true);
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+
+	it("does not report an adoption that leaves the draft dirty", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft({ name: "Mine", description: "My notes" }));
+		rerender({ entityKey: "c1", value: { ...acme, name: "Theirs" } });
+
+		act(() => result.current.adopt((d) => ({ ...d, name: "Theirs" })));
+
+		expect(result.current.isDirty).toBe(true);
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+
+	it("does not report an adoption into a draft that was already clean", () => {
+		const { result } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.adopt(acme));
+
+		expect(result.current.consumeDiscard()).toBe(false);
+	});
+
+	it("evaluates two adoptions in one batch against each other, not the stale draft", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft({ name: "Mine", description: "My notes" }));
+		rerender({ entityKey: "c1", value: { name: "Theirs", description: "Theirs too" } });
+
+		act(() => {
+			result.current.adopt((d) => ({ ...d, name: "Theirs" }));
+			result.current.adopt((d) => ({ ...d, description: "Theirs too" }));
+		});
+
+		expect(result.current.draft).toEqual({ name: "Theirs", description: "Theirs too" });
+		expect(result.current.consumeDiscard()).toBe(true);
+	});
+
 	it("does not report a save landing", () => {
 		const { result, rerender } = setup({ entityKey: "c1", value: acme });
 		const saved = { ...acme, name: "Renamed" };
