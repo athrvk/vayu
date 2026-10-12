@@ -215,19 +215,33 @@ class EventLoopWorker {
 
     void run_loop ();
 
+    /// What one submit_pending_transfers pass did.
+    struct SubmitPass {
+        bool took_work = false; ///< Something came off the pending queue.
+        /// The pass stopped because the rate limiter refused a token, which
+        /// it asks for before looking at the queue.
+        bool rate_limited = false;
+    };
+
     /// Submit what the pending queue holds, up to `max_concurrent` and up to
     /// what the rate limiter allows. Worker-thread only. @p local_active is the
     /// loop's cached active count, advanced as transfers are added.
-    /// @return whether anything was taken off the queue.
-    bool submit_pending_transfers (size_t& local_active);
+    SubmitPass submit_pending_transfers (size_t& local_active);
 
     /// Deliver every transfer curl has finished. Worker-thread only.
     /// @return whether any completion was read.
     bool drain_completions ();
 
-    /// Park until there is IO or new work, spinning briefly first. Worker-thread
-    /// only; called only when a pass found nothing to do.
-    void wait_for_work (int still_running);
+    /// Park until there is IO, new work or - when @p rate_limited and items
+    /// are queued with nothing in flight - the limiter's next token. Spins
+    /// briefly before the idle park. Worker-thread only; called only when a
+    /// pass found nothing to do.
+    void wait_for_work (int still_running, bool rate_limited);
+
+    /// Park in curl_multi_poll until the rate limiter's next token, at most
+    /// TOKEN_WAIT_CAP_MS. submit() and stop() cut it short through
+    /// curl_multi_wakeup. Worker-thread only.
+    void wait_for_next_token ();
 
     /// Remove every in-flight easy handle from curl and complete it as
     /// cancelled. Worker-thread only - `active_transfers` and the handle pool

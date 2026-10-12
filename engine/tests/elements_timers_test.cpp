@@ -37,13 +37,8 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/resource.h>
-#endif
-
 #include "optional_assert.hpp"
+#include "process_cpu.hpp"
 #include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -59,40 +54,9 @@
 
 using nlohmann::json;
 using vayu::core::Registry;
+using vayu::tests::process_cpu_ms;
 
 namespace {
-
-/// This process's own CPU time (user + system, every thread), in
-/// milliseconds - what `APacedRunDoesNotBusySpinTheProducer` samples before
-/// and after a run to catch issue #1596's regression (a producer that spins
-/// its wait away instead of sleeping it). `getrusage (RUSAGE_SELF)` sums
-/// every thread on Unix; `GetProcessTimes` is its Windows equivalent.
-int64_t process_cpu_ms () {
-#ifdef _WIN32
-    FILETIME creation{};
-    FILETIME exit{};
-    FILETIME kernel{};
-    FILETIME user{};
-    if (!GetProcessTimes (GetCurrentProcess (), &creation, &exit, &kernel, &user)) {
-        return 0;
-    }
-    auto to_ms = [] (const FILETIME& ft) -> int64_t {
-        // FILETIME is a 64-bit count of 100ns intervals split across two
-        // 32-bit words.
-        const uint64_t ticks =
-        (static_cast<uint64_t> (ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
-        return static_cast<int64_t> (ticks / 10000);
-    };
-    return to_ms (kernel) + to_ms (user);
-#else
-    struct rusage usage{};
-    getrusage (RUSAGE_SELF, &usage);
-    return (static_cast<int64_t> (usage.ru_utime.tv_sec) * 1000) +
-    (usage.ru_utime.tv_usec / 1000) +
-    (static_cast<int64_t> (usage.ru_stime.tv_sec) * 1000) +
-    (usage.ru_stime.tv_usec / 1000);
-#endif
-}
 
 // ============================================================================
 // A. Registry / schema level - no run needed.
