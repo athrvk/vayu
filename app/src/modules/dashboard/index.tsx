@@ -373,7 +373,6 @@ export default function LoadTestDashboard() {
 		>
 			{/* Compact single-row header */}
 			<DashboardHeader
-				runId={currentRunId}
 				mode={mode}
 				isStreaming={isStreaming}
 				isStopping={isStopping}

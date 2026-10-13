@@ -36,7 +36,6 @@ vi.mock("@/stores", () => ({
 function mount(configuration: DashboardHeaderProps["configuration"]) {
 	return render(
 		<DashboardHeader
-			runId="run-1"
 			mode="completed"
 			isStreaming={false}
 			isStopping={false}

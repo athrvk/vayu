@@ -33,7 +33,6 @@ vi.mock("@/stores", () => ({
 const onStop = async () => {};
 const configuration = { mode: "constant_rps", targetRps: 10 };
 const base: DashboardHeaderProps = {
-	runId: "run-1",
 	mode: "running",
 	isStreaming: true,
 	isStopping: false,

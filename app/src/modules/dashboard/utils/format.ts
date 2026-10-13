@@ -42,10 +42,10 @@ export interface FormatDurationOptions {
 
 /**
  * Format a millisecond duration as a compact human-readable string, e.g.
- * "45s", "6m 12s", "1h 4m". The single formatter for every ms-to-duration
- * conversion in the dashboard module - see `formatSleepDuration` in
- * `hostSleep.ts` for the "round + omit a zero unit" case a sentence like
- * "Host asleep 2h" wants.
+ * "45s", "6m 12s", "1h 4m". The formatter for prose and labels; see
+ * `formatSleepDuration` in `hostSleep.ts` for the "round + omit a zero unit"
+ * case a sentence like "Host asleep 2h" wants, and `formatClock` for the
+ * fixed-width MM:SS readout of a ticking counter.
  */
 export function formatDuration(ms: number, options: FormatDurationOptions = {}): string {
 	const { round = false, omitZeroUnit = false } = options;
@@ -64,4 +64,17 @@ export function formatDuration(ms: number, options: FormatDurationOptions = {}):
 	const remainingMinutes = minutes % 60;
 	if (remainingMinutes === 0 && omitZeroUnit) return `${hours}h`;
 	return `${hours}h ${remainingMinutes}m`;
+}
+
+/**
+ * Format a millisecond duration as a fixed-width stopwatch, "MM:SS". Seconds
+ * truncate, so a counter ticking at sub-second resolution never skips ahead,
+ * and minutes do not roll into hours ("75:00") - the width a header slot is
+ * sized for. A negative duration reads as zero.
+ */
+export function formatClock(ms: number): string {
+	const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }

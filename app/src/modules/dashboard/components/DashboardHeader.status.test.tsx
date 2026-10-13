@@ -33,7 +33,6 @@ vi.mock("@/stores", () => ({
 
 function mount(mode: DashboardMode, isStreaming = false) {
 	const props: DashboardHeaderProps = {
-		runId: "run-1",
 		mode,
 		isStreaming,
 		isStopping: false,
