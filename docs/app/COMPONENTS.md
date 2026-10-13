@@ -407,8 +407,8 @@ the element's id, kind and name alone; the host names the owner through `referen
 Elements tab for a saved request, the collection's Elements tab for the collection) and the item is absent without
 one. A variable row takes its scope from `VariableTableEditor`'s `config` and is absent for a secret row, an
 unsaved row and a scope that is not loaded; the line is built from the name alone, so the value never reaches it.
-A run sample's button is absent without the run id (`report.metadata.runId`) or the sample's result row id.
-The remaining two are icon buttons too, drawn by the shared `components/shared/CopyForAgentButton.tsx`
+A run sample's button (the shared `CopyForAgentButton`) is absent without the run id (`report.metadata.runId`) or the sample's result row id.
+The next two are icon buttons too, drawn by the shared `components/shared/CopyForAgentButton.tsx`
 (`reference` and `label` in, the glyph swap and the `size-control-sm` hit area inside): each operation row of
 the Spec tab's Sync report (`specOperationReference`, in the collection being synced, beside the row's label and
 not inside it so a copy never ticks the row), and each budget (`thresholdReference`) - on the verdict card, of the

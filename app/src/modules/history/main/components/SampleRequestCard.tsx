@@ -26,8 +26,6 @@
  * iterations and lives once in `runs.config_snapshot`.
  */
 
-import { Check, Copy } from "lucide-react";
-import { Button, IconSwap } from "@/components/ui";
 import {
 	UnifiedResponseViewer,
 	SampledExchange,
@@ -35,7 +33,7 @@ import {
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
 import { TimeValue } from "@/components/shared/TimeValue";
-import { useCopy } from "@/hooks/useCopy";
+import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
 import { runSampleReference } from "@/lib/agent-reference";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
@@ -59,7 +57,6 @@ export default function SampleRequestCard({
 	captured,
 	runId,
 }: SampleRequestCardProps) {
-	const { copy, copied } = useCopy({ feedback: "icon" });
 	// `sample.id` is absent on a report from an engine older than 0.15.0, and
 	// the line is keyed by it.
 	const reference =
@@ -89,21 +86,10 @@ export default function SampleRequestCard({
 			onToggle={onToggle}
 			actions={
 				reference !== null && (
-					<Button
-						variant="rowAction"
-						size="icon"
-						onClick={() => void copy(reference, "Reference")}
-						aria-label={`Copy sample ${index + 1} for agent`}
-						title="Copy for agent"
-					>
-						<IconSwap
-							state={copied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" />,
-								copied: <Check className="size-icon-sm text-status-success-text" />,
-							}}
-						/>
-					</Button>
+					<CopyForAgentButton
+						reference={reference}
+						label={`Copy sample ${index + 1} for agent`}
+					/>
 				)
 			}
 			// Flat divide-y strip, matching the dashboard's live list
