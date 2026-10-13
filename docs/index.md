@@ -302,7 +302,7 @@ persists.
 
 | Document | Covers |
 |---|---|
-| [Overview](engine/architecture.md) | Core structure, thread pool, engine-side auth resolution |
+| [Overview](engine/architecture.md) | Core structure, engine-side auth resolution |
 | [HTTP API](engine/api-reference.md) | Every endpoint, payload shape, and status code |
 | [Test Scripting](engine/scripting.md) | The QuickJS sandbox, script globals, hooks, limits |
 | [Local Database](engine/db-schema.md) | SQLite tables and the JSON shapes stored in them |

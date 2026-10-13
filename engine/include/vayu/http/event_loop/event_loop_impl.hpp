@@ -59,7 +59,6 @@ class EventLoopImpl {
 
     size_t submit (const Request& request, RequestCallback callback, ProgressCallback progress);
     RequestHandle submit_async (const Request& request);
-    bool cancel (size_t request_id);
     BatchResult execute_batch (const std::vector<Request>& requests);
 
     size_t active_count () const;

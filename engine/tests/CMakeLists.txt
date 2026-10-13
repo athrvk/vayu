@@ -493,7 +493,7 @@ if(vayu_unrepresented_database_files)
 endif()
 
 # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
-# deadlock (e.g. a thread-pool teardown hang) is reported as a failure
+# deadlock (e.g. a worker-thread teardown hang) is reported as a failure
 # instead of blocking the suite indefinitely; healthy tests finish in <10s
 # in an ordinary build, and the slowest measured is ~10s.
 #

@@ -45,10 +45,6 @@ RequestHandle EventLoop::submit_async (const Request& request) {
     return impl_->submit_async (request);
 }
 
-bool EventLoop::cancel (size_t request_id) {
-    return impl_->cancel (request_id);
-}
-
 BatchResult EventLoop::execute_batch (const std::vector<Request>& requests) {
     return impl_->execute_batch (requests);
 }

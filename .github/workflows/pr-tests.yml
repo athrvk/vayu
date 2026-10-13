@@ -931,7 +931,9 @@ jobs:
           changed=()
           while IFS= read -r file; do
             changed+=("$file")
-          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+          # --diff-filter=d: a file the pull request deletes is not on disk to
+          # lint, and handing it to clang-tidy fails the step (#2089).
+          done < <(git diff --name-only --diff-filter=d HEAD^1 HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
           # **This gate lints translation units. A header is never an input**,
