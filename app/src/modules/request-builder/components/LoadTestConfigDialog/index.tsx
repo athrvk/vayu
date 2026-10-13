@@ -6,54 +6,21 @@
  */
 
 /**
- * Load test configuration.
- *
- * Re-cut from a single 450-line scrolling column. Three things drove it:
- *
- *   - **Fields now follow the profile.** Each mode is a different form, and
- *     they used to share one column with Duration pinned second regardless -
- *     which hid a field that does nothing (see NumberField "duration" below).
- *   - **Recording options fold away.** Sampling, slow threshold, timing
- *     breakdown, in-flight cap and comment are five controls most runs never
- *     touch, and they sat between the profile and the Start button.
- *   - **One notice component.** Up to four notices can be on screen at once and
- *     they had four different designs; now severity is a prop and blocking ones
- *     sort above advisory ones, because with a stack that is the only thing
- *     saying which one is stopping you.
- *
- * Every field is kept, along with the defaults, the persistence and the
- * validation. The exception is documented where it happens.
+ * Load test configuration: the dialog shell, the mode row and the Start
+ * handler. Each profile's fields, the three disclosures, the data file, the
+ * notices, the saved memo and the payload are the files beside it.
  */
 
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
-import {
-	validateCapacityRange,
-	validateRampDuration,
-	validateStartConcurrency,
-	validateStartConcurrencyFloor,
-} from "../../utils/loadTestValidation";
-import {
-	LOAD_TEST_DEFAULTS,
-	clampToRange,
-	resolveLoadTestLimits,
-	successSamplePeriod,
-} from "@/constants/load-test";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
 import {
 	Button,
 	Input,
 	Label,
-	Switch,
-	Textarea,
-	ToggleGroup,
-	ToggleGroupItem,
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
 	Dialog,
 	DialogContent,
 	DialogBody,
@@ -64,110 +31,24 @@ import {
 	DialogCancelButton,
 	DisabledHint,
 } from "@/components/ui";
-import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/components/shared";
-import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
-import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
-import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
-import { runDataFileName } from "@/lib/run-data-file";
-import { useDataContractWriter } from "@/hooks/useDataContractWriter";
-import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
+import type { ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
+import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTestConfig";
+import { buildNotices } from "./notices";
+import { RecordingSection } from "./RecordingSection";
+import { BudgetsSection } from "./BudgetsSection";
+import { MonitoringSection } from "./MonitoringSection";
+import { SCRIPTS_DEFAULT, buildLoadTestConfig, type ScriptsOverride } from "./buildLoadTestConfig";
+import { DataFileSection } from "./DataFileSection";
+import { useLoadTestDataFile } from "./useLoadTestDataFile";
+import { ScriptsOverrideToggle } from "./ScriptsOverrideToggle";
+import { ProfileFields } from "./ProfileFields";
+import { usesDuration } from "./profile";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
-import {
-	BUDGET_FIELDS,
-	type BudgetDraft,
-	type CustomBudgetDraft,
-	budgetError,
-	buildThresholds,
-	customBudgetsError,
-	emptyBudgetDraft,
-} from "./budgets";
-import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
-import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
-import { MONITOR_INTERVAL_MS } from "@/constants/monitor";
+import { firstBlockingError, validateLoadTestDraft } from "./validation";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
-
-interface SavedLoadTestConfig {
-	mode: LoadTestConfig["mode"];
-	duration: number;
-	rps: number;
-	concurrency: number;
-	iterations: number;
-	rampDuration: number;
-	startConcurrency: number;
-	stepDuration: number;
-	sloMs: number;
-	maxInFlight: number | null;
-	sampleRate: number;
-	slowThreshold: number;
-	saveTimingBreakdown: boolean;
-	/**
-	 * The stream caps (issue #576), memoed like every other field so a second
-	 * run of the same stream does not have to be re-bounded by hand. Stored
-	 * even for a non-streaming request: the memo is one object, and dropping
-	 * keys per request kind would make "what did I set last time" depend on
-	 * which request happened to run last.
-	 */
-	streamDuration: number;
-	streamMaxEvents: number;
-	/**
-	 * Budgets are memoed as typed, blanks included, so a cleared field stays
-	 * cleared. A restored draft is also what tells the p99 prefill it has
-	 * already had its turn - without it, declining the SLO budget once would be
-	 * undone by the next dialog open.
-	 */
-	budgets: BudgetDraft;
-	/**
-	 * The `custom.<name>.<stat>` rows (issue #1579), memoed for the same reason
-	 * and in the same shape as the fixed budgets above: a metric name is a
-	 * property of the plan, not of one run, so retyping it per run is friction
-	 * the memo exists to remove. Absent from a memo written before this field
-	 * existed, which restores as no rows.
-	 */
-	customBudgets: CustomBudgetDraft[];
-	/**
-	 * Whether a missed budget above should fail the run, not only report it -
-	 * memoed alongside `budgets` for the same reason.
-	 */
-	failRun: boolean;
-	/**
-	 * The monitoring endpoint, memoed for the same reason the budgets are: it is
-	 * a property of the *target* rather than of one run, so retyping a
-	 * `/metrics` URL and its metric names for every run is the same friction the
-	 * memo exists to remove.
-	 */
-	monitor: MonitorDraft;
-}
-
-function loadSavedConfig(): Partial<SavedLoadTestConfig> {
-	try {
-		const saved = localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
-		if (saved) return JSON.parse(saved);
-	} catch {
-		// Corrupt or unavailable storage - fall back to defaults.
-	}
-	return {};
-}
-
-function saveConfig(config: SavedLoadTestConfig): void {
-	try {
-		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(config));
-	} catch {
-		// Quota or private mode - losing the memo is not worth failing the run.
-	}
-}
-
-/**
- * The `elements.scripts` run override (issue #1594), the same three values
- * and the same default `RunCollectionDialog`'s Scripts toggle uses - "As
- * marked" leaves each inherited `script.*` element's own `config.inline` to
- * decide, the other two force every one of this run's elements regardless.
- */
-const SCRIPTS_DEFAULT = "asMarked";
-
-const NO_COLUMNS: string[] = [];
 
 export interface LoadTestConfigDialogProps {
 	onClose: () => void;
@@ -218,214 +99,47 @@ export default function LoadTestConfigDialog({
 	collectionId,
 	request,
 }: LoadTestConfigDialogProps) {
-	const saved = loadSavedConfig();
-
 	/**
-	 * The ceilings are a user setting (Settings -> Load testing), so every
-	 * range below is resolved rather than read off the constant. Restored
-	 * values are clamped into it: the memo is written by a past run, and a
-	 * ceiling lowered since then would otherwise seed a field above its own
-	 * `max` - which a number input shows without complaint.
+	 * The ceilings are a user setting (Settings -> Load testing), so every range
+	 * below is resolved rather than read off the constant.
 	 */
 	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
 	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
-	const restore = (value: number | undefined, fallback: number, key: keyof typeof limits) =>
-		clampToRange(value ?? fallback, limits[key]);
-
-	const [mode, setMode] = useState<LoadTestConfig["mode"]>(saved.mode ?? LOAD_TEST_DEFAULTS.MODE);
-	const [duration, setDuration] = useState(() =>
-		restore(saved.duration, LOAD_TEST_DEFAULTS.DURATION_S, "DURATION_S")
-	);
-	const [rps, setRps] = useState(() => restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS"));
-	const [concurrency, setConcurrency] = useState(() =>
-		restore(saved.concurrency, LOAD_TEST_DEFAULTS.CONCURRENCY, "CONCURRENCY")
-	);
-	const [iterations, setIterations] = useState(() =>
-		restore(saved.iterations, LOAD_TEST_DEFAULTS.ITERATIONS, "ITERATIONS")
-	);
-	const [rampDuration, setRampDuration] = useState(() =>
-		restore(saved.rampDuration, LOAD_TEST_DEFAULTS.RAMP_DURATION_S, "RAMP_DURATION_S")
-	);
-	const [startConcurrency, setStartConcurrency] = useState(() =>
-		restore(saved.startConcurrency, LOAD_TEST_DEFAULTS.START_CONCURRENCY, "START_CONCURRENCY")
-	);
-	const [stepDuration, setStepDuration] = useState(() =>
-		restore(saved.stepDuration, LOAD_TEST_DEFAULTS.STEP_DURATION_S, "STEP_DURATION_S")
-	);
-	const [streamDuration, setStreamDuration] = useState(() =>
-		restore(saved.streamDuration, LOAD_TEST_DEFAULTS.STREAM_DURATION_S, "STREAM_DURATION_S")
-	);
-	const [streamMaxEvents, setStreamMaxEvents] = useState(() =>
-		restore(saved.streamMaxEvents, LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS, "STREAM_MAX_EVENTS")
-	);
-	const [maxInFlight, setMaxInFlight] = useState<string>(
-		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
-	);
-	// Clamped like the rest, and load-bearing for a second reason: a config
-	// saved when the slider's floor was 0 restores that 0, because
-	// `saved.sampleRate ?? DEFAULT` keeps a present 0.
-	const [sampleRate, setSampleRate] = useState(() =>
-		restore(saved.sampleRate, LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT, "SAMPLE_RATE_PCT")
-	);
-	const [slowThreshold, setSlowThreshold] = useState(
-		saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS
-	);
-	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(
-		saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN
-	);
 	/**
-	 * Pass/fail budgets. The p99 field is seeded from the capacity SLO the user
-	 * already set (Settings -> `sloThresholdMs`), which until now only annotated
-	 * a chart - so the setting becomes the run's default budget rather than a
-	 * second, parallel notion of "too slow". Seeded only on a first run: once a
-	 * draft has been memoed, a cleared p99 stays cleared.
+	 * The p99 budget and Capacity Discovery's latency budget both start from the
+	 * capacity SLO the user already set (Settings -> `sloThresholdMs`), which
+	 * until now only annotated a chart.
 	 */
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
-	/**
-	 * Capacity Discovery searches for the edge of this budget. Seeded from the
-	 * same `sloThresholdMs` setting the p99 budget below is - the search and the
-	 * chart annotation are two readings of one number, and giving the mode its
-	 * own default would be a third notion of "too slow".
-	 */
-	const [sloMs, setSloMs] = useState(() =>
-		restore(saved.sloMs ?? sloThresholdMs, sloThresholdMs, "SLO_MS")
-	);
-	const [budgets, setBudgets] = useState<BudgetDraft>(() =>
-		// Merged onto `emptyBudgetDraft()` rather than swapped wholesale: a
-		// budget saved by an older build predates whatever field this build
-		// added since (`maxAssertionFailureRatePct` did not always exist),
-		// and `budgetError` reads every current `BUDGET_FIELDS` key
-		// unconditionally - a stale saved object missing one crashed the
-		// dialog outright on `undefined.trim()` rather than just carrying a
-		// blank for the field it never knew about.
-		({
-			...emptyBudgetDraft(),
-			latencyP99Ms: String(sloThresholdMs),
-			...saved.budgets,
-		})
-	);
-	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>(
-		() => saved.customBudgets ?? []
-	);
-	const [failRun, setFailRun] = useState(saved.failRun ?? false);
-	const [budgetsOpen, setBudgetsOpen] = useState(false);
 	/**
 	 * Server monitoring. The cadence and the metric cap are engine settings
 	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
 	 * itself from them rather than from its own numbers - otherwise the cadence
 	 * setting would never apply to a run started here (this dialog always sends
 	 * an explicit interval) and a raised cap would still be refused locally.
-	 * Seeded only on a first run, like the p99 budget above: once a draft has
-	 * been memoed, the interval the user set stays set.
 	 */
 	const monitorSettings = useMonitorSettings();
-	const [monitor, setMonitor] = useState<MonitorDraft>(
-		// Merged onto `emptyMonitorDraft()`, the same reason `budgets` above is:
-		// a field `MonitorDraft` adds later would otherwise be missing from a
-		// block an older build saved, and `monitorError` reads `draft.url`
-		// unconditionally.
-		() => ({
-			...emptyMonitorDraft(monitorSettings.defaultIntervalMs),
-			...saved.monitor,
-		})
-	);
-	const [monitorOpen, setMonitorOpen] = useState(false);
+	const { initial, save } = useSavedLoadTestConfig(limits, {
+		sloThresholdMs,
+		monitorIntervalMs: monitorSettings.defaultIntervalMs,
+	});
+
+	const [profile, setProfile] = useState(initial.profile);
+	const updateProfile = (patch: Partial<LoadTestProfile>) =>
+		setProfile((prev) => ({ ...prev, ...patch }));
+	const [maxInFlight, setMaxInFlight] = useState(initial.maxInFlight);
+	const [sampleRate, setSampleRate] = useState(initial.sampleRate);
+	const [slowThreshold, setSlowThreshold] = useState(initial.slowThreshold);
+	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(initial.saveTimingBreakdown);
+	const [budgets, setBudgets] = useState(initial.budgets);
+	const [customBudgets, setCustomBudgets] = useState(initial.customBudgets);
+	const [failRun, setFailRun] = useState(initial.failRun);
+	const [monitor, setMonitor] = useState(initial.monitor);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
-	/**
-	 * The data set this run binds (issue #993), and the parse failure that
-	 * blocks starting one.
-	 *
-	 * Per-run and deliberately not memoed like the numbers above: rows are user
-	 * data of unknown sensitivity, and neither side stores the set - the same
-	 * rule the collection run dialog keeps. Picking a file again is the whole
-	 * cost of that - which is what the declared-file pre-fill below spares the
-	 * user, without the rows ever being what is remembered.
-	 */
-	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
-	const [recordingOpen, setRecordingOpen] = useState(false);
-	const [scriptsOverride, setScriptsOverride] = useState<
-		"asMarked" | "allInline" | "allDeferred"
-	>(SCRIPTS_DEFAULT);
+	const [scriptsOverride, setScriptsOverride] = useState<ScriptsOverride>(SCRIPTS_DEFAULT);
 
-	/**
-	 * Duration is meaningless in `iterations`: the engine stops on
-	 * `requests_sent < iterations` and its branch in `load_strategy.cpp` never
-	 * reads duration - `docs/engine/api-reference.md` documents the field as
-	 * "constant_rps / constant_concurrency / ramp_up". The old dialog showed it
-	 * anyway, second on screen, and persisted whatever you typed. It already
-	 * half-knew: the OAuth guard is handed `null` in this mode precisely because
-	 * a duration-based warning would be nonsense.
-	 */
-	const usesDuration = mode !== "iterations";
-
-	/*
-	 * The chosen file against the contract in scope for this request's
-	 * collection - the nearest declaring ancestor, as everywhere else in the
-	 * feature (issue #729). A mismatch is a warning and never blocks: a missing
-	 * column fails loudly engine-side at bind time, and a file carrying extra
-	 * columns is simply a file with extra columns. What it buys is hearing about
-	 * it here rather than at the first submission.
-	 */
-	/*
-	 * ...and the file that contract was last run with, pre-filled (issue #1039).
-	 *
-	 * The same hook the Run collection dialog reads, so the two cannot drift on
-	 * which ancestor is consulted or on what a moved file says. What does *not*
-	 * come across with it is that dialog's iterations coupling: a load run's
-	 * length is its profile's, so nothing about a data file may touch the fields
-	 * below. `contract` comes back from the same call because the audit and the
-	 * pre-fill are answers about the same declaration.
-	 */
-	const {
-		file: dataFile,
-		setFile: setDataFile,
-		note: prefillNote,
-		contract,
-		dismissNote,
-		declaringCollectionId,
-	} = useDeclaredDataFile(collectionId);
-	const writer = useDataContractWriter(declaringCollectionId);
-
-	/*
-	 * A pick declares the contract from the picked file (issue #2050), the same
-	 * rule as the Run collection dialog and the Data tab: for the collection whose
-	 * contract this request binds against, and for nothing when the request is in
-	 * no collection. Remove clears it through the picker's `onRemove`, never
-	 * here, because a file the picker refuses also arrives as `null`. A declare
-	 * that fails leaves the selection alone, so Start still sends the rows.
-	 *
-	 * Picking by hand also replaces whatever was pre-filled, so the note about a
-	 * file that could not be re-read has nothing left to say. And no
-	 * `onPrefill`: a load run's length is its profile's, so a file arriving
-	 * changes no field of it.
-	 */
-	const handleSelectDataFile = (next: SelectedDataFile | null) => {
-		setDataFile(next);
-		if (next) {
-			dismissNote();
-			writer.declare(next);
-		}
-	};
-
-	/*
-	 * The one request this run sends, audited under its collection's chain (its
-	 * `inherit` auth and the chain's scripts are part of what it sends) against
-	 * the picked file's columns. The contract diff beside it is for a pre-filled
-	 * file that drifted on disk; once a pick's declare lands it is empty by
-	 * construction, and the request is what is left to compare against.
-	 */
-	const auditSubject = useMemo(
-		() => ({ collectionId: collectionId ?? null, requests: request ? [request] : [] }),
-		[collectionId, request]
-	);
-	const { audit } = useColumnAudit(auditSubject, dataFile?.parsed.columns ?? NO_COLUMNS);
-	const fileWarnings = dataFile
-		? [
-				...describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns),
-				...describeUnboundReferences(audit.undeclared),
-			]
-		: [];
+	const dataFile = useLoadTestDataFile(collectionId, request);
 
 	/*
 	 * The Headers tab renders the design answer, and it is the tab a user reads
@@ -439,259 +153,61 @@ export default function LoadTestConfigDialog({
 	const { data: loadDefaults } = useRequestDefaultsQuery("load");
 	const defaultHeaderDifference = describeDefaultHeaderDifference(designDefaults, loadDefaults);
 
-	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
-	// Checked before the two range rules, which both compare the start against
-	// the target: a start below the floor is wrong on its own terms, and saying
-	// so is more useful than "this would ramp down".
-	const startFloorError = validateStartConcurrencyFloor(mode, startConcurrency);
-	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
-	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
-	// One message slot for both budget families: a custom row is refused on the
-	// same terms a fixed field is, so the notice below reads the same either way.
-	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
-	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
-	const blockingError =
-		rampDurationError ??
-		startFloorError ??
-		startConcurrencyError ??
-		capacityRangeError ??
-		budgetsError ??
-		monitoringError ??
-		// A file the parser refused leaves no rows behind, so starting the run
-		// would send the request with its `{{data.*}}` tokens written as they
-		// stand - the failure the whole namespace exists to prevent. The picker
-		// prints the reason; this is what stops the Start button.
-		dataFileError;
+	const errors = validateLoadTestDraft({
+		profile,
+		budgets,
+		customBudgets,
+		monitor,
+		maxSeries: monitorSettings.maxSeries,
+	});
+	// A file the parser refused leaves no rows behind, so starting the run would
+	// send the request with its `{{data.*}}` tokens written as they stand - the
+	// failure the whole namespace exists to prevent. The picker prints the
+	// reason; this is what stops the Start button.
+	const blockingError = firstBlockingError(errors) ?? dataFile.error;
 
-	const notices = useMemo(() => {
-		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
-
-		if (rampDurationError) {
-			list.push({
-				key: "ramp",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Ramp is longer than the run">
-						{rampDurationError}
-					</Callout>
-				),
-			});
-		}
-
-		if (budgetsError) {
-			list.push({
-				key: "budgets",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="A budget is out of range">
-						{budgetsError}
-					</Callout>
-				),
-			});
-		}
-
-		if (monitoringError) {
-			list.push({
-				key: "monitor",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Server monitoring is incomplete">
-						{monitoringError}
-					</Callout>
-				),
-			});
-		}
-
-		if (capacityRangeError) {
-			list.push({
-				key: "capacity-range",
-				severity: "blocking",
-				node: (
-					<Callout
-						severity="blocking"
-						title="Start concurrency is at or above the maximum"
-					>
-						{capacityRangeError}
-					</Callout>
-				),
-			});
-		}
-
-		if (startFloorError) {
-			list.push({
-				key: "start-floor",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Start is below one connection">
-						{startFloorError}
-					</Callout>
-				),
-			});
-		}
-
-		if (startConcurrencyError) {
-			list.push({
-				key: "start-concurrency",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Ramp would run downwards">
-						{startConcurrencyError}
-					</Callout>
-				),
-			});
-		}
-
-		// Unconditional before issue #1594: the load path ran no element at all,
-		// so a pre-request script never reached the wire regardless of what the
-		// run asked for. Now `elements.scripts: "allInline"` makes it run per
-		// submission, so the warning is only true at the other two settings.
-		if (hasPreRequestScript && scriptsOverride !== "allInline") {
-			list.push({
-				key: "pre-script",
-				severity: "warning",
-				node: (
-					<Callout severity="warning" title="Pre-request script won't run">
-						Running JS per request would cap throughput, so the load engine skips it
-						unless Scripts below is set to All inline. Your post-request script still
-						runs once afterwards, against sampled responses.
-					</Callout>
-				),
-			});
-		}
-
-		if (defaultHeaderDifference) {
-			list.push({
-				key: "default-headers",
-				severity: "info",
-				node: (
-					<Callout severity="info" title="This load run's default headers differ">
-						{defaultHeaderDifference}
-					</Callout>
-				),
-			});
-		}
-
-		return list.sort(
-			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
-		);
-	}, [
-		rampDurationError,
-		startFloorError,
-		startConcurrencyError,
-		capacityRangeError,
-		budgetsError,
-		monitoringError,
+	const notices = buildNotices({
+		...errors,
 		hasPreRequestScript,
 		scriptsOverride,
 		defaultHeaderDifference,
-	]);
+	});
 
 	const handleStart = () => {
 		if (blockingError) return;
 
 		const maxInFlightValue = maxInFlight.trim() !== "" ? Number(maxInFlight) : null;
 
-		saveConfig({
-			mode,
-			duration,
-			rps,
-			concurrency,
-			iterations,
-			rampDuration,
-			startConcurrency,
-			stepDuration,
-			sloMs,
+		save({
+			...profile,
 			maxInFlight: maxInFlightValue,
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
-			streamDuration,
-			streamMaxEvents,
 			budgets,
 			customBudgets,
 			failRun,
 			monitor,
 		});
 
-		const config: LoadTestConfig = {
-			mode,
-			// The slider is a percentage; the engine's field is a period. The
-			// memo above keeps the percentage, so the control restores to what
-			// the user set rather than to a converted number.
-			success_sample_period: successSamplePeriod(sampleRate),
-			slow_threshold_ms: slowThreshold,
-			save_timing_breakdown: saveTimingBreakdown,
-			comment: comment || undefined,
-			// Absent when nothing was declared - the engine rejects an empty
-			// object rather than starting a run no verdict can be computed for.
-			thresholds: buildThresholds(budgets, failRun, customBudgets),
-			// Absent when no endpoint was given, for the same reason.
-			monitor: buildMonitor(monitor),
-			// Absent at the default, the same "absent already means what the
-			// user asked for" rule `failOnSchemaError` follows on the
-			// collection-run dialog (issue #1594).
-			...(scriptsOverride !== SCRIPTS_DEFAULT
-				? { elements: { scripts: scriptsOverride } }
-				: {}),
-		};
-
-		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
-		// discards makes the stored run config claim something untrue about it.
-		if (usesDuration) config.duration_seconds = duration;
-
-		// The parsed rows themselves - the same array the preview showed, never
-		// a re-parse (issue #993). Absent when no file was picked, which is what
-		// keeps a run without data on exactly the path it took before.
-		//
-		// Their column names travel with them (issue #1007): the run composes
-		// before it starts, and composition has to be told which bare names a row
-		// will bind or it resolves them from the variable scopes first.
-		if (dataFile) {
-			config.data = dataFile.parsed.rows;
-			config.dataColumns = dataFile.parsed.columns;
-			config.dataFileName = runDataFileName(dataFile.fileName);
-			config.dataFileHash = dataFile.hash;
-		}
-
-		// Streaming requests only. Always sent when the request streams, never
-		// elided as "the engine has defaults": the engine's default is the
-		// user's `sseMaxStreamDurationMs` setting, which the dialog does not
-		// show, so eliding would mean the run is bounded by a number the user
-		// was never told about while the dialog displayed two others.
-		if (isStreamingRequest) {
-			config.stream_duration_seconds = streamDuration;
-			config.stream_max_events = streamMaxEvents;
-		}
-
-		if (mode === "constant_rps") {
-			config.rps = rps;
-			if (maxInFlightValue != null && maxInFlightValue > 0) {
-				config.max_in_flight = maxInFlightValue;
-			}
-		} else if (mode === "constant_concurrency") {
-			config.concurrency = concurrency;
-		} else if (mode === "iterations") {
-			config.iterations = iterations;
-			config.concurrency = concurrency;
-		} else if (mode === "ramp_up") {
-			config.concurrency = concurrency;
-			config.ramp_duration_seconds = rampDuration;
-			config.start_concurrency = startConcurrency;
-		} else if (mode === "capacity") {
-			// `concurrency` is the ceiling the search will not climb past and
-			// `start_concurrency` is where it begins - the same two fields the
-			// ramp owns, reused rather than respelled, so one cap in Settings
-			// bounds both modes.
-			config.concurrency = concurrency;
-			config.start_concurrency = startConcurrency;
-			config.slo_ms = sloMs;
-			config.step_duration_seconds = stepDuration;
-		}
-
-		onStart(config);
+		onStart(
+			buildLoadTestConfig({
+				profile,
+				sampleRate,
+				slowThreshold,
+				saveTimingBreakdown,
+				maxInFlight: maxInFlightValue,
+				budgets,
+				customBudgets,
+				failRun,
+				monitor,
+				comment,
+				scriptsOverride,
+				dataFile: dataFile.file,
+				isStreamingRequest,
+			})
+		);
 	};
-
-	const num = (set: (n: number) => void) => (raw: string) => set(Number(raw));
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -734,586 +250,67 @@ export default function LoadTestConfigDialog({
 
 					<div className="space-y-1.5">
 						<Label className="text-xs">Load profile</Label>
-						<ProfilePicker value={mode} onChange={setMode} disabled={isStarting} />
+						<ProfilePicker
+							value={profile.mode}
+							onChange={(next) => updateProfile({ mode: next })}
+							disabled={isStarting}
+						/>
 					</div>
 
-					{/* Only the fields this profile actually uses. */}
-					<div className="grid grid-cols-2 gap-3">
-						{mode === "constant_rps" && (
-							<NumberField
-								id="lt-rps"
-								label="Target rate"
-								unit="req/s"
-								value={rps}
-								onChange={num(setRps)}
-								min={limits.RPS.MIN}
-								max={limits.RPS.MAX}
-							/>
-						)}
-
-						{mode !== "constant_rps" && (
-							<NumberField
-								id="lt-concurrency"
-								label={
-									mode === "ramp_up"
-										? "Target connections"
-										: mode === "capacity"
-											? "Stop climbing at"
-											: "Connections"
-								}
-								value={concurrency}
-								onChange={num(setConcurrency)}
-								min={limits.CONCURRENCY.MIN}
-								max={limits.CONCURRENCY.MAX}
-								hint={
-									mode === "capacity"
-										? "The ceiling the search will not climb past. Reaching it ends the run."
-										: undefined
-								}
-							/>
-						)}
-
-						{mode === "iterations" && (
-							<NumberField
-								id="lt-iterations"
-								label="Requests"
-								value={iterations}
-								onChange={num(setIterations)}
-								min={limits.ITERATIONS.MIN}
-								max={limits.ITERATIONS.MAX}
-							/>
-						)}
-
-						{usesDuration && (
-							<NumberField
-								id="lt-duration"
-								label={
-									mode === "ramp_up"
-										? "Total duration"
-										: mode === "capacity"
-											? "Give up after"
-											: "Duration"
-								}
-								unit="s"
-								value={duration}
-								onChange={num(setDuration)}
-								min={limits.DURATION_S.MIN}
-								max={limits.DURATION_S.MAX}
-							/>
-						)}
-
-						{mode === "capacity" && (
-							<NumberField
-								id="lt-slo"
-								label="Latency budget"
-								unit="ms"
-								value={sloMs}
-								onChange={num(setSloMs)}
-								min={limits.SLO_MS.MIN}
-								max={limits.SLO_MS.MAX}
-								hint="The p99 the search looks for the edge of. Prefilled from your SLO setting."
-							/>
-						)}
-
-						{mode === "capacity" && (
-							<NumberField
-								id="lt-step-duration"
-								label="Hold each level for"
-								unit="s"
-								value={stepDuration}
-								onChange={num(setStepDuration)}
-								min={limits.STEP_DURATION_S.MIN}
-								max={limits.STEP_DURATION_S.MAX}
-								hint="Longer steps measure each level more steadily; shorter ones search faster."
-							/>
-						)}
-
-						{(mode === "ramp_up" || mode === "capacity") && (
-							<NumberField
-								id="lt-start-concurrency"
-								label="Start from"
-								value={startConcurrency}
-								onChange={num(setStartConcurrency)}
-								min={limits.START_CONCURRENCY.MIN}
-								max={limits.START_CONCURRENCY.MAX}
-								hint={
-									mode === "capacity"
-										? "The first level the search measures. It steps up from here while latency holds."
-										: "Connections at the start of the ramp. The engine climbs from here to the target."
-								}
-							/>
-						)}
-
-						{mode === "ramp_up" && (
-							<NumberField
-								id="lt-ramp"
-								label="Ramp duration"
-								unit="s"
-								value={rampDuration}
-								onChange={num(setRampDuration)}
-								min={limits.RAMP_DURATION_S.MIN}
-								max={limits.RAMP_DURATION_S.MAX}
-							/>
-						)}
-
-						{/*
-						 * The stream caps sit with the other run parameters, not
-						 * under Advanced: for a streaming request they are what
-						 * decides when each transfer ends, which is the same kind
-						 * of decision Duration makes for the run. Reaching either
-						 * is a *completed* stream, so the hints say so - a user
-						 * who read them as timeouts would read the run's 0% error
-						 * rate as luck.
-						 */}
-						{isStreamingRequest && (
-							<>
-								<NumberField
-									id="lt-stream-duration"
-									label="Stop each stream after"
-									unit="s"
-									value={streamDuration}
-									onChange={num(setStreamDuration)}
-									min={limits.STREAM_DURATION_S.MIN}
-									max={limits.STREAM_DURATION_S.MAX}
-									hint="A stream that reaches this counts as completed, not as a timeout."
-								/>
-								<NumberField
-									id="lt-stream-events"
-									label="Or after this many events"
-									value={streamMaxEvents}
-									onChange={num(setStreamMaxEvents)}
-									min={limits.STREAM_MAX_EVENTS.MIN}
-									max={limits.STREAM_MAX_EVENTS.MAX}
-									hint="Whichever comes first ends the stream. Under load a stream is always bounded."
-								/>
-							</>
-						)}
-					</div>
+					<ProfileFields
+						profile={profile}
+						onChange={updateProfile}
+						limits={limits}
+						isStreamingRequest={isStreamingRequest}
+					/>
 
 					<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
-						{summarise(
-							{
-								mode,
-								duration,
-								rps,
-								concurrency,
-								iterations,
-								rampDuration,
-								startConcurrency,
-								stepDuration,
-								sloMs,
-							},
-							blockingError !== null
-						)}
+						{summarise(profile, blockingError !== null)}
 					</p>
 
 					{/*
-					 * The `elements.scripts` run override (issue #1594), the same
-					 * control and the same three values `RunCollectionDialog`'s
-					 * Scripts toggle offers. No Timers control here, unlike that
-					 * dialog - not because the engine ignores `elements.timers` on
-					 * this path (it applies it the same way, `load_strategy.cpp`'s
-					 * `step.before` / `step.between` contexts), but because this
-					 * dialog offers nothing to override it with yet: a single
-					 * request's own `timer.think` is the only timer kind
-					 * `requestElements` accepts, and there is no UI here for it at
-					 * all, marked or not.
-					 *
-					 * After the profile summary, not before it: the summary is
-					 * still describing the profile fields directly above it, and
-					 * Scripts is the first control that is not about the profile.
+					 * After the profile summary, not before it: the summary is still
+					 * describing the profile fields directly above it, and Scripts is the
+					 * first control that is not about the profile.
 					 */}
-					<div className="flex items-center justify-between gap-4">
-						<Label className="leading-snug">
-							Scripts
-							<span className="block text-xs font-normal text-muted-foreground">
-								As marked runs a script inline only where its own element says to;
-								the other two override every script this run.
-							</span>
-						</Label>
-						<ToggleGroup
-							size="sm"
-							aria-label="Scripts"
-							value={scriptsOverride}
-							onValueChange={(value) => {
-								// Radix emits "" when the active segment is clicked
-								// again; a choice is not optional here.
-								if (
-									value === "asMarked" ||
-									value === "allInline" ||
-									value === "allDeferred"
-								) {
-									setScriptsOverride(value);
-								}
-							}}
-						>
-							<ToggleGroupItem value="asMarked">As marked</ToggleGroupItem>
-							<ToggleGroupItem value="allInline">All inline</ToggleGroupItem>
-							<ToggleGroupItem value="allDeferred">All deferred</ToggleGroupItem>
-						</ToggleGroup>
-					</div>
+					<ScriptsOverrideToggle value={scriptsOverride} onChange={setScriptsOverride} />
 
-					{/*
-					    A data file, for a run that parameterises its request
-					    (issue #993). Beside the profile rather than under
-					    Recording & limits: rows change what each submission
-					    *sends*, which is the same kind of decision the profile
-					    fields are, while everything folded away below changes
-					    only what the run keeps.
+					<DataFileSection dataFile={dataFile} disabled={isStarting} />
 
-					    `loadTest` is set, so the picker describes what a row
-					    means here - one per submission off a shared cursor that
-					    wraps - rather than the design-mode "one row is one
-					    iteration" reading, which would be wrong for every run
-					    this dialog starts.
-					 */}
-					{/* A file that could not be re-read is a warning, not a blocker -
-					    the run is startable without one, and picking the file again
-					    is the whole remedy. Same rule, same words, as the Run
-					    collection dialog (issue #1039). */}
-					{prefillNote && (
-						<Callout severity="warning" title="The remembered data file">
-							{prefillNote}
-						</Callout>
-					)}
+					<RecordingSection
+						mode={profile.mode}
+						limits={limits}
+						sampleRate={sampleRate}
+						onSampleRateChange={setSampleRate}
+						slowThreshold={slowThreshold}
+						onSlowThresholdChange={setSlowThreshold}
+						maxInFlight={maxInFlight}
+						onMaxInFlightChange={setMaxInFlight}
+						saveTimingBreakdown={saveTimingBreakdown}
+						onSaveTimingBreakdownChange={setSaveTimingBreakdown}
+					/>
 
-					{writer.isError && (
-						<Callout severity="warning" title="Couldn't update the data contract">
-							{writer.error?.message ?? "The engine did not accept the change."}
-							<span className="block">
-								The run is unaffected. Pick the file again to retry.
-							</span>
-						</Callout>
-					)}
-
-					<DataFilePicker
-						selected={dataFile}
-						onSelect={handleSelectDataFile}
-						// Only with a contract to clear: Remove on a collection that
-						// declares nothing has nothing to write.
-						onRemove={contract ? writer.clear : undefined}
-						error={dataFileError}
-						onError={setDataFileError}
-						iterations={undefined}
-						loadTest
-						additionalWarnings={fileWarnings}
+					<BudgetsSection
+						budgets={budgets}
+						onBudgetsChange={setBudgets}
+						customBudgets={customBudgets}
+						onCustomBudgetsChange={setCustomBudgets}
+						failRun={failRun}
+						onFailRunChange={setFailRun}
 						disabled={isStarting}
 					/>
 
-					{/*
-					 * Header and contents are one card, not a bordered header with
-					 * loose fields under it. The surface used to sit on the trigger,
-					 * so opening the disclosure dropped five controls onto the dialog
-					 * background with nothing tying them to the row that revealed
-					 * them. The card is the design system's panel pattern (`bg-card`
-					 * + `border-border` + `rounded-md`, docs/design-system.md
-					 * "Cards"), at the same `px-3` inset as the summary box above so
-					 * the two read as one column. `panel-clip` is required by the
-					 * `overflow-hidden` that keeps the trigger's hover fill inside the
-					 * rounded corners - it tucks focus rings inward so the clip cannot
-					 * eat them.
-					 */}
-					<Collapsible
-						open={recordingOpen}
-						onOpenChange={setRecordingOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
-					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Recording &amp; limits</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{recordingOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						{/*
-						    `border-rule`: a divider *inside* the card, so the surface
-						    decides its colour rather than this line doing so. `--border`
-						    is tuned for the canvas and is the same colour as `--card` in
-						    dark (1.003), which is why the divider was not there at all;
-						    `surface-card` above resolves it to 1.278 dark / 1.304 light.
-
-						    The card's own outline stays `border-border` - that edge faces
-						    the dialog background, where the canvas token is correct.
-						 */}
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-sample" className="text-xs">
-									Success sample rate
-									<span className="ml-1.5 font-normal text-muted-foreground">
-										keeping {sampleRate}% of successful responses
-									</span>
-								</Label>
-								<input
-									id="lt-sample"
-									type="range"
-									value={sampleRate}
-									onChange={(e) => setSampleRate(Number(e.target.value))}
-									min={limits.SAMPLE_RATE_PCT.MIN}
-									max={limits.SAMPLE_RATE_PCT.MAX}
-									className="w-full accent-primary"
-								/>
-								{/*
-								    The left stop is 1%, not 0%. The value is
-								    converted to the engine's sampling period, and
-								    no period expresses "none" - that is the Save
-								    timing breakdown toggle below, which gates
-								    storage outright. Errors are never sampled
-								    either way; they are always kept.
-								 */}
-								<div className="flex justify-between text-label text-muted-foreground">
-									<span>1% - a trickle</span>
-									<span>100% - everything</span>
-								</div>
-							</div>
-
-							<NumberField
-								id="lt-slow"
-								label="Slow request threshold"
-								unit="ms"
-								value={slowThreshold}
-								onChange={num(setSlowThreshold)}
-								min={limits.SLOW_THRESHOLD_MS.MIN}
-								max={limits.SLOW_THRESHOLD_MS.MAX}
-								// Outlier capture has its own budget, so it neither spends
-								// nor is spent by the sample rate above - but it is still
-								// bounded (max_slow_results, 1000), because under
-								// saturation nearly every request crosses the threshold.
-								// 0 disables the capture rather than flagging everything.
-								hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
-							/>
-
-							{mode === "constant_rps" && (
-								<NumberField
-									id="lt-max-inflight"
-									label="Max in-flight requests"
-									optional
-									value={maxInFlight}
-									onChange={setMaxInFlight}
-									min={limits.MAX_IN_FLIGHT.MIN}
-									max={limits.MAX_IN_FLIGHT.MAX}
-									placeholder="Auto"
-									hint="Hard cap on concurrent in-flight requests. Blank derives it from the target rate. Lowering it drops requests sooner under backpressure; raising it queues instead."
-								/>
-							)}
-
-							<div className="flex items-start justify-between gap-3">
-								<Label
-									htmlFor="lt-timing"
-									className="text-xs font-normal leading-snug"
-								>
-									Save timing breakdown
-									<span className="block text-label text-muted-foreground">
-										DNS, TLS, connect and first-byte, per sampled request.
-									</span>
-								</Label>
-								<Switch
-									id="lt-timing"
-									checked={saveTimingBreakdown}
-									onCheckedChange={setSaveTimingBreakdown}
-								/>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
-
-					{/*
-					 * Budgets, in the same card treatment as "Recording & limits"
-					 * above and for the same reason - a disclosure whose contents
-					 * sit on the dialog background reads as loose fields rather
-					 * than as the section that revealed them.
-					 */}
-					<Collapsible
-						open={budgetsOpen}
-						onOpenChange={setBudgetsOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
-					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Pass/fail budgets</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{budgetsOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-label leading-relaxed text-muted-foreground">
-								The run is judged against whatever you declare here and reports a
-								verdict. Leave a field blank to skip that budget; leave them all
-								blank and the run is measured but not judged, as before.
-							</p>
-							{BUDGET_FIELDS.map((field) => (
-								<NumberField
-									key={field.key}
-									id={field.id}
-									label={field.label}
-									unit={field.unit}
-									optional
-									value={budgets[field.key]}
-									onChange={(raw) =>
-										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-									}
-									min={field.min}
-									max={field.max}
-									placeholder="No budget"
-									hint={field.hint}
-								/>
-							))}
-
-							{/*
-							 * The custom rows sit below the fixed six and above the
-							 * flag, which is the reading order of the section: the
-							 * six every run can declare, then the ones this plan
-							 * records, then what a miss does.
-							 */}
-							<div className="space-y-1.5">
-								<Label className="text-xs">
-									Custom metric budgets
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<CustomBudgetHint />
-								<CustomBudgetRows
-									rows={customBudgets}
-									onChange={setCustomBudgets}
-									idPrefix="lt"
-									disabled={isStarting}
-								/>
-							</div>
-
-							<div className="flex items-start justify-between gap-3">
-								<Label
-									htmlFor="lt-fail-run"
-									className="text-xs font-normal leading-snug"
-								>
-									Fail the run when a budget is missed
-									<span className="block text-label text-muted-foreground">
-										Otherwise a missed budget is reported but the run still ends
-										Completed.
-									</span>
-								</Label>
-								<Switch
-									id="lt-fail-run"
-									checked={failRun}
-									onCheckedChange={setFailRun}
-								/>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
-
-					{/*
-					 * Server monitoring, in the same card treatment as the two
-					 * disclosures above. Last of the three because it is about the
-					 * *target* rather than about the load: a run is fully specified
-					 * without it, and it adds a second series to the charts rather
-					 * than changing what is sent.
-					 */}
-					<Collapsible
-						open={monitorOpen}
-						onOpenChange={setMonitorOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
-					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Server monitoring</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{monitorOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-label leading-relaxed text-muted-foreground">
-								Scrape the target&apos;s own metrics during the run and chart them
-								on the same timeline as p99 and throughput - so a climb in latency
-								can be read against the server&apos;s CPU or memory. Leave the URL
-								blank to run without it.
-							</p>
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-monitor-url" className="text-xs">
-									Metrics endpoint
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<Input
-									id="lt-monitor-url"
-									type="text"
-									value={monitor.url}
-									onChange={(e) =>
-										setMonitor((prev) => ({ ...prev, url: e.target.value }))
-									}
-									placeholder="http://localhost:9100/metrics"
-									className="text-sm"
-								/>
-							</div>
-
-							<NumberField
-								id="lt-monitor-interval"
-								label="Scrape interval"
-								unit="ms"
-								value={monitor.intervalMs}
-								onChange={(raw) =>
-									setMonitor((prev) => ({ ...prev, intervalMs: Number(raw) }))
-								}
-								min={MONITOR_INTERVAL_MS.MIN}
-								max={MONITOR_INTERVAL_MS.MAX}
-								hint="Each scrape is one request to the endpoint, on its own thread - it never delays the run's own metrics."
-							/>
-
-							<div className="space-y-1.5">
-								<Label className="text-xs">Response format</Label>
-								{/*
-								    A segmented control rather than a two-row select:
-								    it is a binary choice, and `ToggleGroup` is the
-								    app's primitive for one (roving focus and the
-								    `data-[state=]` variants come with it).
-								 */}
-								<ToggleGroup
-									size="sm"
-									value={monitor.format}
-									onValueChange={(value) => {
-										// Radix emits "" when the active item is
-										// clicked again; a format is not optional, so
-										// that deselection is ignored rather than
-										// leaving the draft with no format at all.
-										if (value === "prometheus" || value === "json") {
-											setMonitor((prev) => ({ ...prev, format: value }));
-										}
-									}}
-								>
-									<ToggleGroupItem value="prometheus">
-										Prometheus text
-									</ToggleGroupItem>
-									<ToggleGroupItem value="json">Flat JSON</ToggleGroupItem>
-								</ToggleGroup>
-							</div>
-
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-monitor-series" className="text-xs">
-									Metrics to chart
-									<span className="ml-1.5 font-normal text-muted-foreground">
-										one name per line, up to {monitorSettings.maxSeries}
-									</span>
-								</Label>
-								<Textarea
-									id="lt-monitor-series"
-									value={monitor.series}
-									onChange={(e) =>
-										setMonitor((prev) => ({ ...prev, series: e.target.value }))
-									}
-									rows={3}
-									placeholder={
-										"node_cpu_seconds_total\nprocess_resident_memory_bytes"
-									}
-									className="font-mono text-xs"
-								/>
-								<p className="text-label text-muted-foreground">
-									A Prometheus name is matched across its labels and the values
-									summed, so a whole family charts as one line.
-								</p>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
+					<MonitoringSection
+						monitor={monitor}
+						onMonitorChange={setMonitor}
+						maxSeries={monitorSettings.maxSeries}
+					/>
 
 					{/* Sits last because it gates Start, so it reads immediately above it. */}
 					{oauth2Config && (
 						<OAuth2LoadTestGuard
 							config={oauth2Config}
-							durationSeconds={usesDuration ? duration : null}
+							durationSeconds={usesDuration(profile.mode) ? profile.duration : null}
 							onGateChange={setOauthGated}
 						/>
 					)}

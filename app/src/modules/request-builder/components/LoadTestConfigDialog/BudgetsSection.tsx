@@ -1,0 +1,91 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { Label, Switch } from "@/components/ui";
+import { NumberField } from "@/components/shared";
+import { DisclosureCard } from "./DisclosureCard";
+import { BUDGET_FIELDS, type BudgetDraft, type CustomBudgetDraft } from "./budgets";
+import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
+
+interface BudgetsSectionProps {
+	budgets: BudgetDraft;
+	onBudgetsChange: Dispatch<SetStateAction<BudgetDraft>>;
+	customBudgets: CustomBudgetDraft[];
+	onCustomBudgetsChange: (rows: CustomBudgetDraft[]) => void;
+	failRun: boolean;
+	onFailRunChange: (value: boolean) => void;
+	/** Locks the custom rows while the run is starting. */
+	disabled: boolean;
+}
+
+/** The run's pass/fail limits: the fixed fields, the custom rows, and what a miss does. */
+export function BudgetsSection({
+	budgets,
+	onBudgetsChange,
+	customBudgets,
+	onCustomBudgetsChange,
+	failRun,
+	onFailRunChange,
+	disabled,
+}: BudgetsSectionProps) {
+	const [open, setOpen] = useState(false);
+
+	return (
+		<DisclosureCard open={open} onOpenChange={setOpen} title="Pass/fail budgets">
+			<p className="text-label leading-relaxed text-muted-foreground">
+				The run is judged against whatever you declare here and reports a verdict. Leave a
+				field blank to skip that budget; leave them all blank and the run is measured but
+				not judged, as before.
+			</p>
+			{BUDGET_FIELDS.map((field) => (
+				<NumberField
+					key={field.key}
+					id={field.id}
+					label={field.label}
+					unit={field.unit}
+					optional
+					value={budgets[field.key]}
+					onChange={(raw) => onBudgetsChange((prev) => ({ ...prev, [field.key]: raw }))}
+					min={field.min}
+					max={field.max}
+					placeholder="No budget"
+					hint={field.hint}
+				/>
+			))}
+
+			{/*
+			 * The custom rows sit below the fixed six and above the flag, which is
+			 * the reading order of the section: the six every run can declare, then
+			 * the ones this plan records, then what a miss does.
+			 */}
+			<div className="space-y-1.5">
+				<Label className="text-xs">
+					Custom metric budgets
+					<span className="ml-1 font-normal text-muted-foreground">(optional)</span>
+				</Label>
+				<CustomBudgetHint />
+				<CustomBudgetRows
+					rows={customBudgets}
+					onChange={onCustomBudgetsChange}
+					idPrefix="lt"
+					disabled={disabled}
+				/>
+			</div>
+
+			<div className="flex items-start justify-between gap-3">
+				<Label htmlFor="lt-fail-run" className="text-xs font-normal leading-snug">
+					Fail the run when a budget is missed
+					<span className="block text-label text-muted-foreground">
+						Otherwise a missed budget is reported but the run still ends Completed.
+					</span>
+				</Label>
+				<Switch id="lt-fail-run" checked={failRun} onCheckedChange={onFailRunChange} />
+			</div>
+		</DisclosureCard>
+	);
+}
