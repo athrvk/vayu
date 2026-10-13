@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { BookmarkPlus } from "lucide-react";
+import { BookmarkPlus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
 	Tabs,
@@ -257,7 +257,7 @@ export default function ResponseViewer() {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
-					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
+					<Loader2 className="size-icon animate-spin mx-auto text-primary" />
 					<p className="text-xs text-muted-foreground">
 						{isStreaming ? "Opening the event stream…" : "Sending request…"}
 					</p>

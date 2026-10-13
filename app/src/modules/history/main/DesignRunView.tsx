@@ -49,7 +49,7 @@ import {
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
-import { ErrorState, SentBodyFileNote } from "@/components/shared";
+import { DetailSkeleton, ErrorState, SentBodyFileNote } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import { bodyModeHeaders, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
@@ -375,15 +375,11 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 * Hold the whole pane until the lookup settles, rather than mounting the
 	 * builder on a seed that says "deleted" and hoping to correct it. There is
 	 * no correction available: the provider seeds once per `initialRequest.id`,
-	 * and that id is null for every detached copy. Same spinner as the request
-	 * builder's own loading state, because this *is* the request builder.
+	 * and that id is null for every detached copy. The same skeleton as the
+	 * request builder's own loading state, because this *is* the request builder.
 	 */
 	if (isResolvingRequest) {
-		return (
-			<div className="flex-1 flex items-center justify-center h-full">
-				<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite]" />
-			</div>
-		);
+		return <DetailSkeleton label="Loading run" />;
 	}
 
 	/*
