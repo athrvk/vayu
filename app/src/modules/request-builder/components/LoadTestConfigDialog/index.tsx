@@ -35,13 +35,7 @@ import {
 	validateStartConcurrency,
 	validateStartConcurrencyFloor,
 } from "../../utils/loadTestValidation";
-import {
-	LOAD_TEST_DEFAULTS,
-	clampToRange,
-	resolveLoadTestLimits,
-	successSamplePeriod,
-} from "@/constants/load-test";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { resolveLoadTestLimits, successSamplePeriod } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
 import {
 	Button,
@@ -67,92 +61,16 @@ import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
+import { useSavedLoadTestConfig } from "./useSavedLoadTestConfig";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
-import {
-	type BudgetDraft,
-	type CustomBudgetDraft,
-	budgetError,
-	buildThresholds,
-	customBudgetsError,
-	emptyBudgetDraft,
-} from "./budgets";
-import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
+import { budgetError, buildThresholds, customBudgetsError } from "./budgets";
+import { buildMonitor, monitorError } from "./monitor";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
-
-interface SavedLoadTestConfig {
-	mode: LoadTestConfig["mode"];
-	duration: number;
-	rps: number;
-	concurrency: number;
-	iterations: number;
-	rampDuration: number;
-	startConcurrency: number;
-	stepDuration: number;
-	sloMs: number;
-	maxInFlight: number | null;
-	sampleRate: number;
-	slowThreshold: number;
-	saveTimingBreakdown: boolean;
-	/**
-	 * The stream caps (issue #576), memoed like every other field so a second
-	 * run of the same stream does not have to be re-bounded by hand. Stored
-	 * even for a non-streaming request: the memo is one object, and dropping
-	 * keys per request kind would make "what did I set last time" depend on
-	 * which request happened to run last.
-	 */
-	streamDuration: number;
-	streamMaxEvents: number;
-	/**
-	 * Budgets are memoed as typed, blanks included, so a cleared field stays
-	 * cleared. A restored draft is also what tells the p99 prefill it has
-	 * already had its turn - without it, declining the SLO budget once would be
-	 * undone by the next dialog open.
-	 */
-	budgets: BudgetDraft;
-	/**
-	 * The `custom.<name>.<stat>` rows (issue #1579), memoed for the same reason
-	 * and in the same shape as the fixed budgets above: a metric name is a
-	 * property of the plan, not of one run, so retyping it per run is friction
-	 * the memo exists to remove. Absent from a memo written before this field
-	 * existed, which restores as no rows.
-	 */
-	customBudgets: CustomBudgetDraft[];
-	/**
-	 * Whether a missed budget above should fail the run, not only report it -
-	 * memoed alongside `budgets` for the same reason.
-	 */
-	failRun: boolean;
-	/**
-	 * The monitoring endpoint, memoed for the same reason the budgets are: it is
-	 * a property of the *target* rather than of one run, so retyping a
-	 * `/metrics` URL and its metric names for every run is the same friction the
-	 * memo exists to remove.
-	 */
-	monitor: MonitorDraft;
-}
-
-function loadSavedConfig(): Partial<SavedLoadTestConfig> {
-	try {
-		const saved = localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
-		if (saved) return JSON.parse(saved);
-	} catch {
-		// Corrupt or unavailable storage - fall back to defaults.
-	}
-	return {};
-}
-
-function saveConfig(config: SavedLoadTestConfig): void {
-	try {
-		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(config));
-	} catch {
-		// Quota or private mode - losing the memo is not worth failing the run.
-	}
-}
 
 /**
  * The `elements.scripts` run override (issue #1594), the same three values
@@ -213,116 +131,50 @@ export default function LoadTestConfigDialog({
 	collectionId,
 	request,
 }: LoadTestConfigDialogProps) {
-	const saved = loadSavedConfig();
-
 	/**
-	 * The ceilings are a user setting (Settings -> Load testing), so every
-	 * range below is resolved rather than read off the constant. Restored
-	 * values are clamped into it: the memo is written by a past run, and a
-	 * ceiling lowered since then would otherwise seed a field above its own
-	 * `max` - which a number input shows without complaint.
+	 * The ceilings are a user setting (Settings -> Load testing), so every range
+	 * below is resolved rather than read off the constant.
 	 */
 	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
 	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
-	const restore = (value: number | undefined, fallback: number, key: keyof typeof limits) =>
-		clampToRange(value ?? fallback, limits[key]);
-
-	const [mode, setMode] = useState<LoadTestConfig["mode"]>(saved.mode ?? LOAD_TEST_DEFAULTS.MODE);
-	const [duration, setDuration] = useState(() =>
-		restore(saved.duration, LOAD_TEST_DEFAULTS.DURATION_S, "DURATION_S")
-	);
-	const [rps, setRps] = useState(() => restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS"));
-	const [concurrency, setConcurrency] = useState(() =>
-		restore(saved.concurrency, LOAD_TEST_DEFAULTS.CONCURRENCY, "CONCURRENCY")
-	);
-	const [iterations, setIterations] = useState(() =>
-		restore(saved.iterations, LOAD_TEST_DEFAULTS.ITERATIONS, "ITERATIONS")
-	);
-	const [rampDuration, setRampDuration] = useState(() =>
-		restore(saved.rampDuration, LOAD_TEST_DEFAULTS.RAMP_DURATION_S, "RAMP_DURATION_S")
-	);
-	const [startConcurrency, setStartConcurrency] = useState(() =>
-		restore(saved.startConcurrency, LOAD_TEST_DEFAULTS.START_CONCURRENCY, "START_CONCURRENCY")
-	);
-	const [stepDuration, setStepDuration] = useState(() =>
-		restore(saved.stepDuration, LOAD_TEST_DEFAULTS.STEP_DURATION_S, "STEP_DURATION_S")
-	);
-	const [streamDuration, setStreamDuration] = useState(() =>
-		restore(saved.streamDuration, LOAD_TEST_DEFAULTS.STREAM_DURATION_S, "STREAM_DURATION_S")
-	);
-	const [streamMaxEvents, setStreamMaxEvents] = useState(() =>
-		restore(saved.streamMaxEvents, LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS, "STREAM_MAX_EVENTS")
-	);
-	const [maxInFlight, setMaxInFlight] = useState<string>(
-		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
-	);
-	// Clamped like the rest, and load-bearing for a second reason: a config
-	// saved when the slider's floor was 0 restores that 0, because
-	// `saved.sampleRate ?? DEFAULT` keeps a present 0.
-	const [sampleRate, setSampleRate] = useState(() =>
-		restore(saved.sampleRate, LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT, "SAMPLE_RATE_PCT")
-	);
-	const [slowThreshold, setSlowThreshold] = useState(
-		saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS
-	);
-	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(
-		saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN
-	);
 	/**
-	 * Pass/fail budgets. The p99 field is seeded from the capacity SLO the user
-	 * already set (Settings -> `sloThresholdMs`), which until now only annotated
-	 * a chart - so the setting becomes the run's default budget rather than a
-	 * second, parallel notion of "too slow". Seeded only on a first run: once a
-	 * draft has been memoed, a cleared p99 stays cleared.
+	 * The p99 budget and Capacity Discovery's latency budget both start from the
+	 * capacity SLO the user already set (Settings -> `sloThresholdMs`), which
+	 * until now only annotated a chart.
 	 */
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
-	/**
-	 * Capacity Discovery searches for the edge of this budget. Seeded from the
-	 * same `sloThresholdMs` setting the p99 budget below is - the search and the
-	 * chart annotation are two readings of one number, and giving the mode its
-	 * own default would be a third notion of "too slow".
-	 */
-	const [sloMs, setSloMs] = useState(() =>
-		restore(saved.sloMs ?? sloThresholdMs, sloThresholdMs, "SLO_MS")
-	);
-	const [budgets, setBudgets] = useState<BudgetDraft>(() =>
-		// Merged onto `emptyBudgetDraft()` rather than swapped wholesale: a
-		// budget saved by an older build predates whatever field this build
-		// added since (`maxAssertionFailureRatePct` did not always exist),
-		// and `budgetError` reads every current `BUDGET_FIELDS` key
-		// unconditionally - a stale saved object missing one crashed the
-		// dialog outright on `undefined.trim()` rather than just carrying a
-		// blank for the field it never knew about.
-		({
-			...emptyBudgetDraft(),
-			latencyP99Ms: String(sloThresholdMs),
-			...saved.budgets,
-		})
-	);
-	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>(
-		() => saved.customBudgets ?? []
-	);
-	const [failRun, setFailRun] = useState(saved.failRun ?? false);
 	/**
 	 * Server monitoring. The cadence and the metric cap are engine settings
 	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
 	 * itself from them rather than from its own numbers - otherwise the cadence
 	 * setting would never apply to a run started here (this dialog always sends
 	 * an explicit interval) and a raised cap would still be refused locally.
-	 * Seeded only on a first run, like the p99 budget above: once a draft has
-	 * been memoed, the interval the user set stays set.
 	 */
 	const monitorSettings = useMonitorSettings();
-	const [monitor, setMonitor] = useState<MonitorDraft>(
-		// Merged onto `emptyMonitorDraft()`, the same reason `budgets` above is:
-		// a field `MonitorDraft` adds later would otherwise be missing from a
-		// block an older build saved, and `monitorError` reads `draft.url`
-		// unconditionally.
-		() => ({
-			...emptyMonitorDraft(monitorSettings.defaultIntervalMs),
-			...saved.monitor,
-		})
-	);
+	const { initial, save } = useSavedLoadTestConfig(limits, {
+		sloThresholdMs,
+		monitorIntervalMs: monitorSettings.defaultIntervalMs,
+	});
+
+	const [mode, setMode] = useState(initial.mode);
+	const [duration, setDuration] = useState(initial.duration);
+	const [rps, setRps] = useState(initial.rps);
+	const [concurrency, setConcurrency] = useState(initial.concurrency);
+	const [iterations, setIterations] = useState(initial.iterations);
+	const [rampDuration, setRampDuration] = useState(initial.rampDuration);
+	const [startConcurrency, setStartConcurrency] = useState(initial.startConcurrency);
+	const [stepDuration, setStepDuration] = useState(initial.stepDuration);
+	const [streamDuration, setStreamDuration] = useState(initial.streamDuration);
+	const [streamMaxEvents, setStreamMaxEvents] = useState(initial.streamMaxEvents);
+	const [maxInFlight, setMaxInFlight] = useState(initial.maxInFlight);
+	const [sampleRate, setSampleRate] = useState(initial.sampleRate);
+	const [slowThreshold, setSlowThreshold] = useState(initial.slowThreshold);
+	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(initial.saveTimingBreakdown);
+	const [sloMs, setSloMs] = useState(initial.sloMs);
+	const [budgets, setBudgets] = useState(initial.budgets);
+	const [customBudgets, setCustomBudgets] = useState(initial.customBudgets);
+	const [failRun, setFailRun] = useState(initial.failRun);
+	const [monitor, setMonitor] = useState(initial.monitor);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
 	/**
 	 * The data set this run binds (issue #993), and the parse failure that
@@ -583,7 +435,7 @@ export default function LoadTestConfigDialog({
 
 		const maxInFlightValue = maxInFlight.trim() !== "" ? Number(maxInFlight) : null;
 
-		saveConfig({
+		save({
 			mode,
 			duration,
 			rps,
