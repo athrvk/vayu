@@ -51,9 +51,6 @@ import {
 	Textarea,
 	ToggleGroup,
 	ToggleGroupItem,
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
 	Dialog,
 	DialogContent,
 	DialogBody,
@@ -72,6 +69,7 @@ import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
+import { DisclosureCard } from "./DisclosureCard";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
@@ -1000,58 +998,28 @@ export default function LoadTestConfigDialog({
 						disabled={isStarting}
 					/>
 
-					{/*
-					 * Header and contents are one card, not a bordered header with
-					 * loose fields under it. The surface used to sit on the trigger,
-					 * so opening the disclosure dropped five controls onto the dialog
-					 * background with nothing tying them to the row that revealed
-					 * them. The card is the design system's panel pattern (`bg-card`
-					 * + `border-border` + `rounded-md`, docs/design-system.md
-					 * "Cards"), at the same `px-3` inset as the summary box above so
-					 * the two read as one column. `panel-clip` is required by the
-					 * `overflow-hidden` that keeps the trigger's hover fill inside the
-					 * rounded corners - it tucks focus rings inward so the clip cannot
-					 * eat them.
-					 */}
-					<Collapsible
+					<DisclosureCard
 						open={recordingOpen}
 						onOpenChange={setRecordingOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+						title="Recording & limits"
 					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Recording &amp; limits</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{recordingOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						{/*
-						    `border-rule`: a divider *inside* the card, so the surface
-						    decides its colour rather than this line doing so. `--border`
-						    is tuned for the canvas and is the same colour as `--card` in
-						    dark (1.003), which is why the divider was not there at all;
-						    `surface-card` above resolves it to 1.278 dark / 1.304 light.
-
-						    The card's own outline stays `border-border` - that edge faces
-						    the dialog background, where the canvas token is correct.
-						 */}
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-sample" className="text-xs">
-									Success sample rate
-									<span className="ml-1.5 font-normal text-muted-foreground">
-										keeping {sampleRate}% of successful responses
-									</span>
-								</Label>
-								<input
-									id="lt-sample"
-									type="range"
-									value={sampleRate}
-									onChange={(e) => setSampleRate(Number(e.target.value))}
-									min={limits.SAMPLE_RATE_PCT.MIN}
-									max={limits.SAMPLE_RATE_PCT.MAX}
-									className="w-full accent-primary"
-								/>
-								{/*
+						<div className="space-y-1.5">
+							<Label htmlFor="lt-sample" className="text-xs">
+								Success sample rate
+								<span className="ml-1.5 font-normal text-muted-foreground">
+									keeping {sampleRate}% of successful responses
+								</span>
+							</Label>
+							<input
+								id="lt-sample"
+								type="range"
+								value={sampleRate}
+								onChange={(e) => setSampleRate(Number(e.target.value))}
+								min={limits.SAMPLE_RATE_PCT.MIN}
+								max={limits.SAMPLE_RATE_PCT.MAX}
+								className="w-full accent-primary"
+							/>
+							{/*
 								    The left stop is 1%, not 0%. The value is
 								    converted to the engine's sampling period, and
 								    no period expresses "none" - that is the Save
@@ -1059,255 +1027,222 @@ export default function LoadTestConfigDialog({
 								    storage outright. Errors are never sampled
 								    either way; they are always kept.
 								 */}
-								<div className="flex justify-between text-label text-muted-foreground">
-									<span>1% - a trickle</span>
-									<span>100% - everything</span>
-								</div>
+							<div className="flex justify-between text-label text-muted-foreground">
+								<span>1% - a trickle</span>
+								<span>100% - everything</span>
 							</div>
+						</div>
 
+						<NumberField
+							id="lt-slow"
+							label="Slow request threshold"
+							unit="ms"
+							value={slowThreshold}
+							onChange={num(setSlowThreshold)}
+							min={limits.SLOW_THRESHOLD_MS.MIN}
+							max={limits.SLOW_THRESHOLD_MS.MAX}
+							// Outlier capture has its own budget, so it neither spends
+							// nor is spent by the sample rate above - but it is still
+							// bounded (max_slow_results, 1000), because under
+							// saturation nearly every request crosses the threshold.
+							// 0 disables the capture rather than flagging everything.
+							hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
+						/>
+
+						{mode === "constant_rps" && (
 							<NumberField
-								id="lt-slow"
-								label="Slow request threshold"
-								unit="ms"
-								value={slowThreshold}
-								onChange={num(setSlowThreshold)}
-								min={limits.SLOW_THRESHOLD_MS.MIN}
-								max={limits.SLOW_THRESHOLD_MS.MAX}
-								// Outlier capture has its own budget, so it neither spends
-								// nor is spent by the sample rate above - but it is still
-								// bounded (max_slow_results, 1000), because under
-								// saturation nearly every request crosses the threshold.
-								// 0 disables the capture rather than flagging everything.
-								hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
+								id="lt-max-inflight"
+								label="Max in-flight requests"
+								optional
+								value={maxInFlight}
+								onChange={setMaxInFlight}
+								min={limits.MAX_IN_FLIGHT.MIN}
+								max={limits.MAX_IN_FLIGHT.MAX}
+								placeholder="Auto"
+								hint="Hard cap on concurrent in-flight requests. Blank derives it from the target rate. Lowering it drops requests sooner under backpressure; raising it queues instead."
 							/>
+						)}
 
-							{mode === "constant_rps" && (
-								<NumberField
-									id="lt-max-inflight"
-									label="Max in-flight requests"
-									optional
-									value={maxInFlight}
-									onChange={setMaxInFlight}
-									min={limits.MAX_IN_FLIGHT.MIN}
-									max={limits.MAX_IN_FLIGHT.MAX}
-									placeholder="Auto"
-									hint="Hard cap on concurrent in-flight requests. Blank derives it from the target rate. Lowering it drops requests sooner under backpressure; raising it queues instead."
-								/>
-							)}
+						<div className="flex items-start justify-between gap-3">
+							<Label htmlFor="lt-timing" className="text-xs font-normal leading-snug">
+								Save timing breakdown
+								<span className="block text-label text-muted-foreground">
+									DNS, TLS, connect and first-byte, per sampled request.
+								</span>
+							</Label>
+							<Switch
+								id="lt-timing"
+								checked={saveTimingBreakdown}
+								onCheckedChange={setSaveTimingBreakdown}
+							/>
+						</div>
+					</DisclosureCard>
 
-							<div className="flex items-start justify-between gap-3">
-								<Label
-									htmlFor="lt-timing"
-									className="text-xs font-normal leading-snug"
-								>
-									Save timing breakdown
-									<span className="block text-label text-muted-foreground">
-										DNS, TLS, connect and first-byte, per sampled request.
-									</span>
-								</Label>
-								<Switch
-									id="lt-timing"
-									checked={saveTimingBreakdown}
-									onCheckedChange={setSaveTimingBreakdown}
-								/>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
-
-					{/*
-					 * Budgets, in the same card treatment as "Recording & limits"
-					 * above and for the same reason - a disclosure whose contents
-					 * sit on the dialog background reads as loose fields rather
-					 * than as the section that revealed them.
-					 */}
-					<Collapsible
+					<DisclosureCard
 						open={budgetsOpen}
 						onOpenChange={setBudgetsOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+						title="Pass/fail budgets"
 					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Pass/fail budgets</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{budgetsOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-label leading-relaxed text-muted-foreground">
-								The run is judged against whatever you declare here and reports a
-								verdict. Leave a field blank to skip that budget; leave them all
-								blank and the run is measured but not judged, as before.
-							</p>
-							{BUDGET_FIELDS.map((field) => (
-								<NumberField
-									key={field.key}
-									id={field.id}
-									label={field.label}
-									unit={field.unit}
-									optional
-									value={budgets[field.key]}
-									onChange={(raw) =>
-										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-									}
-									min={field.min}
-									max={field.max}
-									placeholder="No budget"
-									hint={field.hint}
-								/>
-							))}
+						<p className="text-label leading-relaxed text-muted-foreground">
+							The run is judged against whatever you declare here and reports a
+							verdict. Leave a field blank to skip that budget; leave them all blank
+							and the run is measured but not judged, as before.
+						</p>
+						{BUDGET_FIELDS.map((field) => (
+							<NumberField
+								key={field.key}
+								id={field.id}
+								label={field.label}
+								unit={field.unit}
+								optional
+								value={budgets[field.key]}
+								onChange={(raw) =>
+									setBudgets((prev) => ({ ...prev, [field.key]: raw }))
+								}
+								min={field.min}
+								max={field.max}
+								placeholder="No budget"
+								hint={field.hint}
+							/>
+						))}
 
-							{/*
-							 * The custom rows sit below the fixed six and above the
-							 * flag, which is the reading order of the section: the
-							 * six every run can declare, then the ones this plan
-							 * records, then what a miss does.
-							 */}
-							<div className="space-y-1.5">
-								<Label className="text-xs">
-									Custom metric budgets
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<CustomBudgetHint />
-								<CustomBudgetRows
-									rows={customBudgets}
-									onChange={setCustomBudgets}
-									idPrefix="lt"
-									disabled={isStarting}
-								/>
-							</div>
+						{/*
+						 * The custom rows sit below the fixed six and above the
+						 * flag, which is the reading order of the section: the
+						 * six every run can declare, then the ones this plan
+						 * records, then what a miss does.
+						 */}
+						<div className="space-y-1.5">
+							<Label className="text-xs">
+								Custom metric budgets
+								<span className="ml-1 font-normal text-muted-foreground">
+									(optional)
+								</span>
+							</Label>
+							<CustomBudgetHint />
+							<CustomBudgetRows
+								rows={customBudgets}
+								onChange={setCustomBudgets}
+								idPrefix="lt"
+								disabled={isStarting}
+							/>
+						</div>
 
-							<div className="flex items-start justify-between gap-3">
-								<Label
-									htmlFor="lt-fail-run"
-									className="text-xs font-normal leading-snug"
-								>
-									Fail the run when a budget is missed
-									<span className="block text-label text-muted-foreground">
-										Otherwise a missed budget is reported but the run still ends
-										Completed.
-									</span>
-								</Label>
-								<Switch
-									id="lt-fail-run"
-									checked={failRun}
-									onCheckedChange={setFailRun}
-								/>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
+						<div className="flex items-start justify-between gap-3">
+							<Label
+								htmlFor="lt-fail-run"
+								className="text-xs font-normal leading-snug"
+							>
+								Fail the run when a budget is missed
+								<span className="block text-label text-muted-foreground">
+									Otherwise a missed budget is reported but the run still ends
+									Completed.
+								</span>
+							</Label>
+							<Switch
+								id="lt-fail-run"
+								checked={failRun}
+								onCheckedChange={setFailRun}
+							/>
+						</div>
+					</DisclosureCard>
 
-					{/*
-					 * Server monitoring, in the same card treatment as the two
-					 * disclosures above. Last of the three because it is about the
-					 * *target* rather than about the load: a run is fully specified
-					 * without it, and it adds a second series to the charts rather
-					 * than changing what is sent.
-					 */}
-					<Collapsible
+					<DisclosureCard
 						open={monitorOpen}
 						onOpenChange={setMonitorOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+						title="Server monitoring"
 					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Server monitoring</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{monitorOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-label leading-relaxed text-muted-foreground">
-								Scrape the target&apos;s own metrics during the run and chart them
-								on the same timeline as p99 and throughput - so a climb in latency
-								can be read against the server&apos;s CPU or memory. Leave the URL
-								blank to run without it.
-							</p>
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-monitor-url" className="text-xs">
-									Metrics endpoint
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<Input
-									id="lt-monitor-url"
-									type="text"
-									value={monitor.url}
-									onChange={(e) =>
-										setMonitor((prev) => ({ ...prev, url: e.target.value }))
-									}
-									placeholder="http://localhost:9100/metrics"
-									className="text-sm"
-								/>
-							</div>
-
-							<NumberField
-								id="lt-monitor-interval"
-								label="Scrape interval"
-								unit="ms"
-								value={monitor.intervalMs}
-								onChange={(raw) =>
-									setMonitor((prev) => ({ ...prev, intervalMs: Number(raw) }))
+						<p className="text-label leading-relaxed text-muted-foreground">
+							Scrape the target&apos;s own metrics during the run and chart them on
+							the same timeline as p99 and throughput - so a climb in latency can be
+							read against the server&apos;s CPU or memory. Leave the URL blank to run
+							without it.
+						</p>
+						<div className="space-y-1.5">
+							<Label htmlFor="lt-monitor-url" className="text-xs">
+								Metrics endpoint
+								<span className="ml-1 font-normal text-muted-foreground">
+									(optional)
+								</span>
+							</Label>
+							<Input
+								id="lt-monitor-url"
+								type="text"
+								value={monitor.url}
+								onChange={(e) =>
+									setMonitor((prev) => ({ ...prev, url: e.target.value }))
 								}
-								min={MONITOR_INTERVAL_MS.MIN}
-								max={MONITOR_INTERVAL_MS.MAX}
-								hint="Each scrape is one request to the endpoint, on its own thread - it never delays the run's own metrics."
+								placeholder="http://localhost:9100/metrics"
+								className="text-sm"
 							/>
+						</div>
 
-							<div className="space-y-1.5">
-								<Label className="text-xs">Response format</Label>
-								{/*
+						<NumberField
+							id="lt-monitor-interval"
+							label="Scrape interval"
+							unit="ms"
+							value={monitor.intervalMs}
+							onChange={(raw) =>
+								setMonitor((prev) => ({ ...prev, intervalMs: Number(raw) }))
+							}
+							min={MONITOR_INTERVAL_MS.MIN}
+							max={MONITOR_INTERVAL_MS.MAX}
+							hint="Each scrape is one request to the endpoint, on its own thread - it never delays the run's own metrics."
+						/>
+
+						<div className="space-y-1.5">
+							<Label className="text-xs">Response format</Label>
+							{/*
 								    A segmented control rather than a two-row select:
 								    it is a binary choice, and `ToggleGroup` is the
 								    app's primitive for one (roving focus and the
 								    `data-[state=]` variants come with it).
 								 */}
-								<ToggleGroup
-									size="sm"
-									value={monitor.format}
-									onValueChange={(value) => {
-										// Radix emits "" when the active item is
-										// clicked again; a format is not optional, so
-										// that deselection is ignored rather than
-										// leaving the draft with no format at all.
-										if (value === "prometheus" || value === "json") {
-											setMonitor((prev) => ({ ...prev, format: value }));
-										}
-									}}
-								>
-									<ToggleGroupItem value="prometheus">
-										Prometheus text
-									</ToggleGroupItem>
-									<ToggleGroupItem value="json">Flat JSON</ToggleGroupItem>
-								</ToggleGroup>
-							</div>
+							<ToggleGroup
+								size="sm"
+								value={monitor.format}
+								onValueChange={(value) => {
+									// Radix emits "" when the active item is
+									// clicked again; a format is not optional, so
+									// that deselection is ignored rather than
+									// leaving the draft with no format at all.
+									if (value === "prometheus" || value === "json") {
+										setMonitor((prev) => ({ ...prev, format: value }));
+									}
+								}}
+							>
+								<ToggleGroupItem value="prometheus">
+									Prometheus text
+								</ToggleGroupItem>
+								<ToggleGroupItem value="json">Flat JSON</ToggleGroupItem>
+							</ToggleGroup>
+						</div>
 
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-monitor-series" className="text-xs">
-									Metrics to chart
-									<span className="ml-1.5 font-normal text-muted-foreground">
-										one name per line, up to {monitorSettings.maxSeries}
-									</span>
-								</Label>
-								<Textarea
-									id="lt-monitor-series"
-									value={monitor.series}
-									onChange={(e) =>
-										setMonitor((prev) => ({ ...prev, series: e.target.value }))
-									}
-									rows={3}
-									placeholder={
-										"node_cpu_seconds_total\nprocess_resident_memory_bytes"
-									}
-									className="font-mono text-xs"
-								/>
-								<p className="text-label text-muted-foreground">
-									A Prometheus name is matched across its labels and the values
-									summed, so a whole family charts as one line.
-								</p>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
+						<div className="space-y-1.5">
+							<Label htmlFor="lt-monitor-series" className="text-xs">
+								Metrics to chart
+								<span className="ml-1.5 font-normal text-muted-foreground">
+									one name per line, up to {monitorSettings.maxSeries}
+								</span>
+							</Label>
+							<Textarea
+								id="lt-monitor-series"
+								value={monitor.series}
+								onChange={(e) =>
+									setMonitor((prev) => ({ ...prev, series: e.target.value }))
+								}
+								rows={3}
+								placeholder={
+									"node_cpu_seconds_total\nprocess_resident_memory_bytes"
+								}
+								className="font-mono text-xs"
+							/>
+							<p className="text-label text-muted-foreground">
+								A Prometheus name is matched across its labels and the values
+								summed, so a whole family charts as one line.
+							</p>
+						</div>
+					</DisclosureCard>
 
 					{/* Sits last because it gates Start, so it reads immediately above it. */}
 					{oauth2Config && (
