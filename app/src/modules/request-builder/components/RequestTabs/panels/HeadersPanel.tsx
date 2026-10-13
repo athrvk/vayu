@@ -26,6 +26,7 @@
 import { useCallback } from "react";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { KEY_VALUE_GRID } from "@/components/shared/KeyValueEditor/grid";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import type { KeyValueItem, RequestDefaultHeader } from "@/types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
@@ -65,7 +66,7 @@ function DefaultHeaderRow({
 	return (
 		// The table's own column track, so name and value line up with the rows
 		// above rather than starting a second, narrower grid.
-		<div className="grid grid-cols-[24px_1fr_1fr_20px_28px] gap-2 items-center px-1 py-0.5">
+		<div className={cn("grid gap-2 items-center px-1 py-0.5", KEY_VALUE_GRID)}>
 			<Checkbox
 				checked={sent && !storedOff}
 				disabled={storedOff}

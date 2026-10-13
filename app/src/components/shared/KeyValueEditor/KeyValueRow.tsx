@@ -34,6 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { isBlankRow } from "./key-value";
+import { keyValueGrid } from "./grid";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
 import { TimeMarker } from "../TimeValue";
@@ -194,13 +195,7 @@ function KeyValueRow({
 		<div
 			className={cn(
 				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
-				// The leading column reads the `target` floor (issue #1679) rather
-				// than a literal 24px, so it grows to 28px at Comfortable along with
-				// the checkbox inside it instead of leaving a 24px column around a
-				// 28px control.
-				allowFiles
-					? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_var(--spacing-target)_28px]"
-					: "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_28px]",
+				keyValueGrid(allowFiles),
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}

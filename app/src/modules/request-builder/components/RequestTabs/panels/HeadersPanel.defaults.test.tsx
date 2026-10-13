@@ -154,6 +154,22 @@ describe("the checkbox's own hit target", () => {
 	});
 });
 
+describe("the column track (#2071)", () => {
+	const gridClass = (el: HTMLElement | null) =>
+		el?.className.split(/\s+/).find((c) => c.startsWith("grid-cols-"));
+
+	// A literal 24px / 20px track here drifted from the table's
+	// `var(--spacing-target)` one, so the checkbox, name and value columns sat
+	// off the rows above them. Mutation check: put the literal back and this fails.
+	it("is the one the table's header band renders", () => {
+		const ui = mount(harness());
+
+		const tableTrack = gridClass(screen.getByText("Key").parentElement);
+		expect(tableTrack).toContain("var(--spacing-target)");
+		expect(gridClass(ui.tick("User-Agent").closest<HTMLElement>(".grid"))).toBe(tableTrack);
+	});
+});
+
 describe("switching one off", () => {
 	it("sends its name and only its name on the wire", () => {
 		const h = harness();

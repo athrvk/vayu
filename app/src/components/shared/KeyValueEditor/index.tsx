@@ -47,6 +47,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { KeyValueItem, KeyValueEditorProps } from "@/types";
 import { withTrailingBlank } from "./key-value";
 import KeyValueRow from "./KeyValueRow";
+import { keyValueGrid } from "./grid";
 import type { PickedFile } from "../file-pick";
 import { EYEBROW_CLASS } from "@/components/ui/eyebrow";
 import { cn } from "@/lib/utils";
@@ -207,11 +208,8 @@ export default function KeyValueEditor({
 			<div
 				className={cn(
 					EYEBROW_CLASS,
-					`grid gap-2 ${
-						allowFiles
-							? "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_var(--spacing-target)_28px]"
-							: "grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_28px]"
-					} px-1 text-subtle-foreground`
+					"grid gap-2 px-1 text-subtle-foreground",
+					keyValueGrid(allowFiles)
 				)}
 			>
 				<div />
