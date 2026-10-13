@@ -25,6 +25,7 @@ import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
 import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
+import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress } from "@/lib/run-status";
 import type { DashboardView, DisplayMetrics } from "./types";
 
@@ -272,13 +273,13 @@ export default function LoadTestDashboard() {
 	const runConfiguration = runMetadata?.configuration;
 	const displayConfiguration = useMemo(() => {
 		if (runConfiguration) {
-			// The final report's config omits the ramp fields, so the ramp_up
-			// Current Concurrency card would read "-s ramp" once complete. Backfill
-			// them from the run's own loadTestConfig (the config we started with).
+			// The report carries the ramp fields; the config we started with only
+			// fills what an older report lacks.
 			return {
 				...runConfiguration,
-				rampUpDuration: loadTestConfig?.rampUpDuration,
-				startConcurrency: loadTestConfig?.startConcurrency,
+				rampUpDuration: runConfiguration.rampUpDuration ?? loadTestConfig?.rampUpDuration,
+				startConcurrency:
+					runConfiguration.startConcurrency ?? loadTestConfig?.startConcurrency,
 			};
 		}
 		if (loadTestConfig) {
@@ -372,7 +373,6 @@ export default function LoadTestDashboard() {
 		>
 			{/* Compact single-row header */}
 			<DashboardHeader
-				runId={currentRunId}
 				mode={mode}
 				isStreaming={isStreaming}
 				isStopping={isStopping}
@@ -471,7 +471,7 @@ export default function LoadTestDashboard() {
 					mode={displayConfiguration?.mode}
 					rampConfig={{
 						rampUpDurationSeconds:
-							parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) || undefined,
+							durationSeconds(rampCfg?.rampUpDuration) ?? undefined,
 						startConcurrency: rampCfg?.startConcurrency,
 						targetConcurrency: rampCfg?.concurrency,
 					}}

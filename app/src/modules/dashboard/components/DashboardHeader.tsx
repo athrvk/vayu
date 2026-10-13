@@ -19,14 +19,7 @@ import type { Run } from "@/types";
 import type { DashboardHeaderProps, DashboardMode } from "../types";
 import { MethodBadge, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
-import { pluralize } from "../utils/format";
-
-function formatElapsed(ms: number): string {
-	const totalSeconds = Math.floor(ms / 1000);
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
+import { formatClock, pluralize } from "../utils/format";
 
 /**
  * What the status pill says. Streaming wins over the mode. Idle, and a run that
@@ -98,7 +91,7 @@ function DashboardHeader({
 		const rows = `${rowCount} ${pluralize(rowCount, "row")}`;
 		configParts.push(fileName ? `${rows} from ${fileName}` : rows);
 	}
-	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
+	if (displayMs > 0) configParts.push(`${formatClock(displayMs)} elapsed`);
 	const configSummary = configParts.join(" · ");
 
 	return (

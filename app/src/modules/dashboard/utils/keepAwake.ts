@@ -16,6 +16,7 @@
  * a preference first.
  */
 
+import { durationSeconds } from "@/constants/load-test";
 import type { LoadTestRunConfig } from "@/stores/dashboard-store";
 import { pluralize } from "./format";
 
@@ -40,15 +41,6 @@ import { pluralize } from "./format";
  */
 export const LONG_RUN_SECONDS = 600;
 
-/** Parse the `"600s"` form the run config carries; plain digits too. */
-function seconds(value: string | undefined): number | null {
-	if (!value) return null;
-	const match = /^\s*(\d+)\s*s?\s*$/.exec(value);
-	if (!match) return null;
-	const parsed = Number.parseInt(match[1], 10);
-	return Number.isFinite(parsed) ? parsed : null;
-}
-
 /**
  * How long the run says it will take, or `null` when it does not say.
  *
@@ -59,7 +51,7 @@ function seconds(value: string | undefined): number | null {
  */
 export function runLengthSeconds(config: LoadTestRunConfig | null | undefined): number | null {
 	if (!config) return null;
-	return seconds(config.duration) ?? seconds(config.rampUpDuration);
+	return durationSeconds(config.duration) ?? durationSeconds(config.rampUpDuration);
 }
 
 /** Is this a run the user is likely to walk away from? */

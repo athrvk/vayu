@@ -27,7 +27,6 @@ export type DashboardView = "metrics" | "request-response";
 // ============================================================================
 
 export interface DashboardHeaderProps {
-	runId: string;
 	mode: DashboardMode;
 	isStreaming: boolean;
 	isStopping: boolean;

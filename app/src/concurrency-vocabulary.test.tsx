@@ -91,7 +91,6 @@ function sidebarRow(): string[] {
 function detailHeader(): string[] {
 	const { container } = render(
 		<DashboardHeader
-			runId="run_1"
 			mode="completed"
 			isStreaming={false}
 			isStopping={false}
