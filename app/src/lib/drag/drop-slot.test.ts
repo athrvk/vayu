@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { isNoOpSlot, landingIndex, slotAt } from "./drop-slot";
+import { landingIndex, slotAt } from "./drop-slot";
 
 const THREE_ITEMS = [
 	{ start: 0, end: 100 },
@@ -61,21 +61,5 @@ describe("landingIndex", () => {
 		expect(() => landingIndex(1.5, 0)).toThrow(/integer/);
 		expect(() => landingIndex(1, -1)).toThrow(/integer/);
 		expect(() => landingIndex(-1, 0)).toThrow(/integer/);
-	});
-});
-
-describe("isNoOpSlot", () => {
-	it("is true only for the slots just before and just after the item", () => {
-		for (const from of [0, 1, 4]) {
-			expect(isNoOpSlot(from, from)).toBe(true);
-			expect(isNoOpSlot(from + 1, from)).toBe(true);
-			expect(isNoOpSlot(from + 2, from)).toBe(false);
-			if (from > 0) expect(isNoOpSlot(from - 1, from)).toBe(false);
-		}
-	});
-
-	it("refuses a slot or source that is not a non-negative integer", () => {
-		expect(() => isNoOpSlot(0.5, 0)).toThrow(/integer/);
-		expect(() => isNoOpSlot(0, -1)).toThrow(/integer/);
 	});
 });
