@@ -287,33 +287,3 @@ export function operationNames(query: string): string[] {
 		return [];
 	}
 }
-
-/**
- * A GraphQL body for a document that arrived without an envelope.
- *
- * Insomnia's `application/graphql` body is the bare query text, and storing it
- * verbatim shipped it as the whole HTTP body - not JSON, so a GraphQL server
- * reads no query at all. The editor's raw-string fallback made it look healthy,
- * which is why this normalizes at import rather than at display.
- *
- * A body that already *is* an envelope is returned unchanged, so an import that
- * mislabels a JSON envelope as `application/graphql` is not double-wrapped.
- */
-export function toGraphQLEnvelope(body: string): string {
-	const trimmed = body.trim();
-	if (!trimmed) return serializeGraphQLBody(EMPTY_PARTS(""));
-	try {
-		const parsed: unknown = JSON.parse(trimmed);
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			!Array.isArray(parsed) &&
-			typeof (parsed as Record<string, unknown>).query === "string"
-		) {
-			return trimmed;
-		}
-	} catch {
-		// Not JSON at all - the bare-document case this exists for.
-	}
-	return serializeGraphQLBody(EMPTY_PARTS(body));
-}

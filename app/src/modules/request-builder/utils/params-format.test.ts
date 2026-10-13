@@ -139,16 +139,6 @@ describe("lines that name nothing", () => {
 	});
 });
 
-describe("system params", () => {
-	it("are never offered for editing", () => {
-		const withSystem: KeyValueItem[] = [
-			{ id: "1", key: "page", value: "1", enabled: true },
-			{ id: "2", key: "internal", value: "x", enabled: true, system: true },
-		];
-		expect(formatParamsToText(withSystem)).toBe("page=1");
-	});
-});
-
 describe("a disabled row round-trips disabled (issue #1480)", () => {
 	it("writes a disabled row with a leading `// `", () => {
 		const rows: KeyValueItem[] = [
@@ -191,14 +181,6 @@ describe("isNoOpParamsEdit", () => {
 
 	it("is true for the exact text the panel would offer for these rows", () => {
 		expect(isNoOpParamsEdit(formatParamsToText(rows), rows)).toBe(true);
-	});
-
-	it("ignores a system row on either side", () => {
-		const withSystem: KeyValueItem[] = [
-			...rows,
-			{ id: "3", key: "internal", value: "x", enabled: true, system: true },
-		];
-		expect(isNoOpParamsEdit(formatParamsToText(rows), withSystem)).toBe(true);
 	});
 
 	it("is false when a row's enabled state actually changed", () => {

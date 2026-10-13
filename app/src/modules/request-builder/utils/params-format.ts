@@ -28,11 +28,8 @@ import { writesBareKey } from "./url";
 export const formatParamsToText = (params: KeyValueItem[]): string => {
 	return (
 		queryRowsOf(params)
-			.filter((p) => {
-				// Filter out empty params and system params
-				const hasContent = p.key.trim() || p.value.trim();
-				return hasContent && !p.system;
-			})
+			// Empty rows are not offered for editing.
+			.filter((p) => p.key.trim() || p.value.trim())
 			// Each line is spelled the way `buildUrlWithParams` sends it: a
 			// valueless row as a bare `page`, an empty value as `page=`.
 			.map(
@@ -70,7 +67,7 @@ export const parseParamsFromText = (
 ): KeyValueItem[] => {
 	const lines = text.split("\n").filter((line) => line.trim());
 	const params: KeyValueItem[] = [];
-	const carried = queryRowsOf(previous).filter((p) => !p.system);
+	const carried = queryRowsOf(previous);
 	const consumed = new Array<boolean>(carried.length).fill(false);
 	const idFor = (key: string, value: string, valueless: boolean): string => {
 		const match = carried.findIndex(
@@ -100,14 +97,14 @@ export const parseParamsFromText = (
 };
 
 /**
- * Whether committing `text` would change nothing about the enabled, non-system
+ * Whether committing `text` would change nothing about the enabled
  * query `params` (issue #1480) - see `isNoOpHeadersEdit`, same rule. Path rows
  * are not what the text describes, so they never make an edit look like one.
  */
 export const isNoOpParamsEdit = (text: string, params: KeyValueItem[]): boolean => {
 	const normalize = (list: KeyValueItem[]) =>
 		queryRowsOf(list)
-			.filter((p) => (p.key.trim() || p.value.trim()) && !p.system)
+			.filter((p) => p.key.trim() || p.value.trim())
 			.map((p) => ({
 				key: p.key,
 				value: p.value,

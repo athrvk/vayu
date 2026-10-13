@@ -47,11 +47,6 @@ export function castByType(value: string, type?: VariableType): unknown {
 	}
 }
 
-/** Cast a VariableValue using its declared `type` field (defaults to string). */
-export function castVariable(v: VariableValue): unknown {
-	return castByType(v.value, v.type);
-}
-
 function parseBoolean(value: string): boolean {
 	const lowered = value.trim().toLowerCase();
 	if (lowered === "true" || lowered === "1" || lowered === "yes") return true;

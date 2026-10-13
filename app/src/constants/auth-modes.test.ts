@@ -23,7 +23,6 @@ import {
 	COLLECTION_AUTH_MODES,
 	EDITABLE_AUTH_MODES,
 	isCollectionAuthMode,
-	isEditableAuthMode,
 	isUneditableAuthMode,
 	uneditableAuthLabel,
 } from "./auth-modes";
@@ -75,7 +74,6 @@ describe("auth mode registry", () => {
 			"jwt",
 		] as const) {
 			expect(isUneditableAuthMode(mode)).toBe(true);
-			expect(isEditableAuthMode(mode)).toBe(false);
 			expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain(mode);
 		}
 	});
@@ -94,7 +92,6 @@ describe("auth mode registry", () => {
 			"oauth2",
 		]);
 		expect(isCollectionAuthMode("noauth")).toBe(true);
-		expect(isEditableAuthMode("noauth")).toBe(false);
 		// Distinguishable in a picker: the labels must not be the same string.
 		expect(AUTH_MODE_LABELS.noauth).not.toBe(AUTH_MODE_LABELS.none);
 	});

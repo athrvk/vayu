@@ -128,9 +128,8 @@ export default function ParamsPanel() {
 	// rows itself, so the `:name` segments are left as they are.
 	const handleParamsChange = useCallback(
 		(newParams: KeyValueItem[]) => {
-			// Filter out any system headers that shouldn't be in params (separation of concerns)
 			const { params: before, url, disableUrlEncoding } = latest.current;
-			const queryParams = newParams.filter((param) => !param.system && !isPathRow(param));
+			const queryParams = newParams.filter((param) => !isPathRow(param));
 			const params = [...queryParams, ...pathRowsOf(before)];
 
 			updateField("params", params);
@@ -186,7 +185,7 @@ export default function ParamsPanel() {
 		undefined,
 		SECRET_UI_MASK
 	).apply(resolvedUrl);
-	const displayParams = queryRowsOf(request.params).filter((param) => !param.system);
+	const displayParams = queryRowsOf(request.params);
 
 	return (
 		<BulkEditor

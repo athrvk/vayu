@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { asArray, asRecord, asStr, prop } from "./json-node";
+import { asRecord, asStr, prop } from "./json-node";
 
 describe("asRecord", () => {
 	it("accepts a plain object", () => {
@@ -22,19 +22,6 @@ describe("asRecord", () => {
 		expect(asRecord(undefined)).toBeUndefined();
 		expect(asRecord("{}")).toBeUndefined();
 		expect(asRecord(7)).toBeUndefined();
-	});
-});
-
-describe("asArray", () => {
-	it("returns the array it was given", () => {
-		const rows = [1];
-		expect(asArray(rows)).toBe(rows);
-	});
-
-	it("answers a non-array with an empty list rather than throwing", () => {
-		expect(asArray(undefined)).toEqual([]);
-		expect(asArray({ length: 2 })).toEqual([]);
-		expect(asArray("ab")).toEqual([]);
 	});
 });
 

@@ -9,7 +9,6 @@ import { describe, expect, test } from "vitest";
 import {
 	DYNAMIC_VARIABLES,
 	isDynamicVariableName,
-	isKnownDynamicVariable,
 	resolveDynamicVariable,
 } from "./dynamic-variables";
 
@@ -233,11 +232,10 @@ describe("unknown and non-dynamic names", () => {
 		expect(resolveDynamicVariable("$guidd")).toBeNull();
 	});
 
-	test("isDynamicVariableName is about the prefix, isKnownDynamicVariable about the table", () => {
+	test("isDynamicVariableName is about the prefix, not the table", () => {
 		expect(isDynamicVariableName("$anything")).toBe(true);
 		expect(isDynamicVariableName("baseUrl")).toBe(false);
-		expect(isKnownDynamicVariable("$anything")).toBe(false);
-		expect(isKnownDynamicVariable("$guid")).toBe(true);
+		expect(resolveDynamicVariable("$anything")).toBeNull();
 	});
 
 	test("resolving a plain name is not this table's job", () => {

@@ -101,12 +101,3 @@ export function Stat({ label, value }: { label: string; value: ReactNode }) {
 		</div>
 	);
 }
-
-export function ComingSoon({ label }: { label: string }) {
-	return (
-		<div className="max-w-[540px] rounded-md border border-dashed border-border bg-panel/40 p-8 text-center">
-			<div className="text-sm font-medium text-foreground">{label}</div>
-			<div className="text-xs text-muted-foreground mt-1">Coming soon.</div>
-		</div>
-	);
-}

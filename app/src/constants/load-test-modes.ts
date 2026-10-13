@@ -77,11 +77,6 @@ export function loadTestModeLabel(mode: string | undefined | null): string {
 	return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** The mode's one-line description, or `""` when it is not one we know. */
-export function loadTestModeDescription(mode: string | undefined | null): string {
-	return (mode && BY_VALUE.get(mode)?.description) || "";
-}
-
 /**
  * A run's concurrency, in words.
  *

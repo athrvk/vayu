@@ -34,6 +34,8 @@ import {
 	DEFAULT_SLO_THRESHOLD_MS,
 	DEFAULT_LIVE_REFRESH_MS,
 	clampSloThresholdMs,
+	isChartBucketSeconds,
+	isLiveRefreshMs,
 	type EditorPrefs,
 	type AutoSavePrefs,
 	nearestAutoSaveDelay,
@@ -278,6 +280,17 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 					const snapped = nearestAutoSaveDelay(state.autoSave.delayMs);
 					if (snapped !== state.autoSave.delayMs) {
 						state.autoSave = { ...state.autoSave, delayMs: snapped };
+					}
+
+					// The same for the two pickers whose options are a closed list
+					// (chart granularity, live refresh): a value outside it - a
+					// retired option, a hand-edited payload - would leave the picker
+					// blank while the old figure kept driving the charts.
+					if (!isChartBucketSeconds(state.chartBucketSeconds)) {
+						state.chartBucketSeconds = DEFAULT_CHART_BUCKET_SECONDS;
+					}
+					if (!isLiveRefreshMs(state.liveRefreshMs)) {
+						state.liveRefreshMs = DEFAULT_LIVE_REFRESH_MS;
 					}
 
 					// Re-clamp on the way out of storage. The bounds are the
