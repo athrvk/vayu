@@ -35,7 +35,7 @@ import {
 	validateStartConcurrency,
 	validateStartConcurrencyFloor,
 } from "../../utils/loadTestValidation";
-import { resolveLoadTestLimits, successSamplePeriod } from "@/constants/load-test";
+import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
 import {
 	Button,
@@ -57,7 +57,6 @@ import { Callout } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
-import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
@@ -66,22 +65,15 @@ import { buildNotices } from "./notices";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
+import { SCRIPTS_DEFAULT, buildLoadTestConfig, type ScriptsOverride } from "./buildLoadTestConfig";
 import { ProfileFields } from "./ProfileFields";
 import { usesDuration } from "./profile";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
-import { budgetError, buildThresholds, customBudgetsError } from "./budgets";
-import { buildMonitor, monitorError } from "./monitor";
+import { budgetError, customBudgetsError } from "./budgets";
+import { monitorError } from "./monitor";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
-
-/**
- * The `elements.scripts` run override (issue #1594), the same three values
- * and the same default `RunCollectionDialog`'s Scripts toggle uses - "As
- * marked" leaves each inherited `script.*` element's own `config.inline` to
- * decide, the other two force every one of this run's elements regardless.
- */
-const SCRIPTS_DEFAULT = "asMarked";
 
 const NO_COLUMNS: string[] = [];
 
@@ -183,23 +175,9 @@ export default function LoadTestConfigDialog({
 	 */
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
-	const [scriptsOverride, setScriptsOverride] = useState<
-		"asMarked" | "allInline" | "allDeferred"
-	>(SCRIPTS_DEFAULT);
+	const [scriptsOverride, setScriptsOverride] = useState<ScriptsOverride>(SCRIPTS_DEFAULT);
 
-	const {
-		mode,
-		duration,
-		rps,
-		concurrency,
-		iterations,
-		rampDuration,
-		startConcurrency,
-		stepDuration,
-		sloMs,
-		streamDuration,
-		streamMaxEvents,
-	} = profile;
+	const { mode, duration, concurrency, rampDuration, startConcurrency } = profile;
 
 	/*
 	 * The chosen file against the contract in scope for this request's
@@ -337,103 +315,34 @@ export default function LoadTestConfigDialog({
 		const maxInFlightValue = maxInFlight.trim() !== "" ? Number(maxInFlight) : null;
 
 		save({
-			mode,
-			duration,
-			rps,
-			concurrency,
-			iterations,
-			rampDuration,
-			startConcurrency,
-			stepDuration,
-			sloMs,
+			...profile,
 			maxInFlight: maxInFlightValue,
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
-			streamDuration,
-			streamMaxEvents,
 			budgets,
 			customBudgets,
 			failRun,
 			monitor,
 		});
 
-		const config: LoadTestConfig = {
-			mode,
-			// The slider is a percentage; the engine's field is a period. The
-			// memo above keeps the percentage, so the control restores to what
-			// the user set rather than to a converted number.
-			success_sample_period: successSamplePeriod(sampleRate),
-			slow_threshold_ms: slowThreshold,
-			save_timing_breakdown: saveTimingBreakdown,
-			comment: comment || undefined,
-			// Absent when nothing was declared - the engine rejects an empty
-			// object rather than starting a run no verdict can be computed for.
-			thresholds: buildThresholds(budgets, failRun, customBudgets),
-			// Absent when no endpoint was given, for the same reason.
-			monitor: buildMonitor(monitor),
-			// Absent at the default, the same "absent already means what the
-			// user asked for" rule `failOnSchemaError` follows on the
-			// collection-run dialog (issue #1594).
-			...(scriptsOverride !== SCRIPTS_DEFAULT
-				? { elements: { scripts: scriptsOverride } }
-				: {}),
-		};
-
-		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
-		// discards makes the stored run config claim something untrue about it.
-		if (usesDuration(mode)) config.duration_seconds = duration;
-
-		// The parsed rows themselves - the same array the preview showed, never
-		// a re-parse (issue #993). Absent when no file was picked, which is what
-		// keeps a run without data on exactly the path it took before.
-		//
-		// Their column names travel with them (issue #1007): the run composes
-		// before it starts, and composition has to be told which bare names a row
-		// will bind or it resolves them from the variable scopes first.
-		if (dataFile) {
-			config.data = dataFile.parsed.rows;
-			config.dataColumns = dataFile.parsed.columns;
-			config.dataFileName = runDataFileName(dataFile.fileName);
-			config.dataFileHash = dataFile.hash;
-		}
-
-		// Streaming requests only. Always sent when the request streams, never
-		// elided as "the engine has defaults": the engine's default is the
-		// user's `sseMaxStreamDurationMs` setting, which the dialog does not
-		// show, so eliding would mean the run is bounded by a number the user
-		// was never told about while the dialog displayed two others.
-		if (isStreamingRequest) {
-			config.stream_duration_seconds = streamDuration;
-			config.stream_max_events = streamMaxEvents;
-		}
-
-		if (mode === "constant_rps") {
-			config.rps = rps;
-			if (maxInFlightValue != null && maxInFlightValue > 0) {
-				config.max_in_flight = maxInFlightValue;
-			}
-		} else if (mode === "constant_concurrency") {
-			config.concurrency = concurrency;
-		} else if (mode === "iterations") {
-			config.iterations = iterations;
-			config.concurrency = concurrency;
-		} else if (mode === "ramp_up") {
-			config.concurrency = concurrency;
-			config.ramp_duration_seconds = rampDuration;
-			config.start_concurrency = startConcurrency;
-		} else if (mode === "capacity") {
-			// `concurrency` is the ceiling the search will not climb past and
-			// `start_concurrency` is where it begins - the same two fields the
-			// ramp owns, reused rather than respelled, so one cap in Settings
-			// bounds both modes.
-			config.concurrency = concurrency;
-			config.start_concurrency = startConcurrency;
-			config.slo_ms = sloMs;
-			config.step_duration_seconds = stepDuration;
-		}
-
-		onStart(config);
+		onStart(
+			buildLoadTestConfig({
+				profile,
+				sampleRate,
+				slowThreshold,
+				saveTimingBreakdown,
+				maxInFlight: maxInFlightValue,
+				budgets,
+				customBudgets,
+				failRun,
+				monitor,
+				comment,
+				scriptsOverride,
+				dataFile,
+				isStreamingRequest,
+			})
+		);
 	};
 
 	return (
