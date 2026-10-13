@@ -875,11 +875,11 @@ against the backend's stored run, whose body the engine truncated at
 
 **Non-persisted** (responses are reloadable from backend).
 
-#### `tab-selection-store.ts` - Active Sub-Tab Per Entity
+#### `tab-selection-store.ts` - Active Sub-Tab And Open Element Rows Per Entity
 
-Three independent maps remembering which sub-tab is showing, per entity id:
-the request builder's tab, the response pane's tab, and the collection
-screen's tab.
+Four independent maps remembering per entity id which sub-tab is showing (the
+request builder's tab, the response pane's tab, the collection screen's tab) and
+which `ElementList` rows are expanded.
 
 **State:**
 ```typescript
@@ -887,6 +887,7 @@ screen's tab.
   requestTab: Map<string, RequestTab>       // keyed by request id
   responseTab: Map<string, ResponseTab>     // keyed by request id
   collectionTab: Map<string, CollectionTab> // keyed by collection id
+  openElementRows: Map<string, ReadonlySet<string>> // request or collection id -> expanded element ids
 }
 ```
 
@@ -895,13 +896,21 @@ screen's tab.
 const { getRequestTab, setRequestTab } = useTabSelectionStore();
 const { getResponseTab, setResponseTab } = useTabSelectionStore();
 const { getCollectionTab, setCollectionTab } = useTabSelectionStore();
-useTabSelectionStore.getState().clearEntity(id); // drops id from all three maps
+const { getOpenElementRows, setElementRowOpen } = useTabSelectionStore();
+useTabSelectionStore.getState().clearEntity(id); // drops id from all four maps
 useTabSelectionStore.getState().clearAll();
 ```
 
+`setElementRowOpen(entityId, elementId, open)` replaces the entity's set with a
+copy (a subscriber holds it by reference) and is a no-op when the row is already
+in that state. `ElementsPanel` and the collection's `ElementsTab` read the set
+by selector through `useOpenElementRows` and hand it to `ElementList` as
+`openIds`; a host with no entity id passes nothing and the list keeps local
+state.
+
 **Why a store at all.** `Shell.tsx` mounts one workspace tab's surface at a
-time, so `RequestBuilderProvider`, `ResponseViewer` and `CollectionDetail` all
-unmount whenever the user looks at a different tab and remount when they come
+time, so `RequestBuilderProvider`, `ResponseViewer`, `CollectionDetail` and the
+`ElementList` rows inside the Elements tabs all unmount whenever the user looks at a different tab and remount when they come
 back - and each held its active sub-tab in a bare `useState`, which is gone
 the moment the component is. The same three components also serve *every*
 open tab of their own type without remounting (`RequestBuilder` is not
@@ -911,16 +920,18 @@ mount-time initializer already had to do - both call sites read and write
 through this store rather than through two different mechanisms.
 
 **In memory only, like `response-store.ts` above**, and for the same reason: a
-sub-tab pick is not worth persisting across a relaunch. Unlike that store,
-this one carries no LRU cap - an entry is one enum value rather than a
-response body, so bounding it buys nothing.
+sub-tab pick, or which cards are open, is not worth persisting across a
+relaunch (a persisted set would also carry ids of elements deleted in an earlier
+session). Unlike that store, this one carries no LRU cap - an entry is one enum
+value or a handful of element ids rather than a response body, so bounding it
+buys nothing.
 
 **Eviction by identity:** `clearEntity` runs from `tabs-store`'s
 `closeTabsForEntities`, unconditionally rather than gated on `type` the way
 the response clear is - a collection id keys `collectionTab` exactly as a
 request id keys `requestTab` / `responseTab`, so a collection cascade has to
 evict here too, and `clearEntity` is a harmless no-op for whichever of the
-three maps never held a given id.
+four maps never held a given id.
 
 #### `appearance-store.ts` - Pre-Paint Interface Preferences
 

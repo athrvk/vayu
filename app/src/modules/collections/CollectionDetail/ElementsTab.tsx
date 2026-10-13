@@ -32,6 +32,7 @@ import { useCallback, useMemo } from "react";
 import { Button, DisabledHint, LabelSwap } from "@/components/ui";
 import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
+import { useOpenElementRows } from "@/components/shared/ElementList/useOpenElementRows";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 import {
 	useDataContract,
@@ -111,6 +112,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		mutation: updateCollection,
 	});
 
+	const openRows = useOpenElementRows(collection.id);
 	const kindsList = kinds ?? [];
 	const incomplete = hasIncompleteElement(elements, kindsList);
 
@@ -159,6 +161,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 					elements={elements}
 					onChange={setElements}
 					kinds={kindsList}
+					{...openRows}
 					referenceOwner={{ type: "collection", collection }}
 					renderAboveForm={(element) => {
 						if (element.kind !== "script.pre" && element.kind !== "script.post")

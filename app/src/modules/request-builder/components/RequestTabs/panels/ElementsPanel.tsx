@@ -23,6 +23,7 @@
 
 import { useElementKindsQuery, useRequestQuery } from "@/queries";
 import { ElementList } from "@/components/shared/ElementList";
+import { useOpenElementRows } from "@/components/shared/ElementList/useOpenElementRows";
 import { ScriptReferencesRow } from "@/components/shared";
 import { useRequestBuilderContext } from "../../../context";
 import InheritedElementsNotice from "./InheritedElementsNotice";
@@ -43,6 +44,7 @@ export default function ElementsPanel() {
 	// The saved row, not the builder's draft: an unsaved rename would put a name
 	// in the line that the engine and the agent's tools do not know yet.
 	const { data: savedRequest } = useRequestQuery(request.id ?? null);
+	const openRows = useOpenElementRows(request.id);
 	// `script.setup` / `script.teardown` are collection-only (issue #1499):
 	// the engine refuses them on a request's own `elements`, so a request's
 	// Add menu never offers them - `InheritedElementsNotice` below still shows
@@ -67,6 +69,7 @@ export default function ElementsPanel() {
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
 				kinds={addableKinds}
+				{...openRows}
 				referenceOwner={
 					savedRequest ? { type: "request", request: savedRequest } : undefined
 				}

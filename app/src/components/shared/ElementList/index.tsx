@@ -107,6 +107,20 @@ export interface ElementListProps {
 	 * owner to name leaves this out and the item is absent.
 	 */
 	referenceOwner?: ElementOwner;
+	/**
+	 * Controlled disclosure: the ids of the rows shown expanded. A host that
+	 * keeps this set outside the list (`useOpenElementRows`) gets rows that
+	 * stay open across the list unmounting; left out, each row holds its own
+	 * state and starts collapsed unless it was added or duplicated this session.
+	 */
+	openIds?: ReadonlySet<string>;
+	/**
+	 * Called with a row's id and its next state on every toggle, and with
+	 * `true` for a row the list just added or duplicated, `false` for one it
+	 * just removed. With `openIds` given the list changes nothing until the
+	 * host answers by updating that set.
+	 */
+	onOpenChange?: (elementId: string, open: boolean) => void;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -191,6 +205,8 @@ function ElementRow({
 	isFirst,
 	isLast,
 	isNew,
+	open: controlledOpen,
+	onOpenChange,
 	onUpdate,
 	onRemove,
 	onMove,
@@ -204,6 +220,9 @@ function ElementRow({
 	isLast: boolean;
 	/** Seeds this row's initial collapse state only - added or duplicated this session opens expanded. */
 	isNew: boolean;
+	/** The host's answer when the list is controlled; `undefined` leaves the row's own state in charge. */
+	open: boolean | undefined;
+	onOpenChange: (open: boolean) => void;
 	onUpdate: (element: ElementDef) => void;
 	onRemove: () => void;
 	onMove: (direction: -1 | 1) => void;
@@ -230,7 +249,12 @@ function ElementRow({
 		(key) => schema?.configSchema.properties?.[key]?.title ?? key
 	);
 
-	const [open, setOpen] = useState(isNew);
+	const [localOpen, setLocalOpen] = useState(isNew);
+	const open = controlledOpen ?? localOpen;
+	const setOpen = (next: boolean) => {
+		if (controlledOpen === undefined) setLocalOpen(next);
+		onOpenChange(next);
+	};
 	const [renaming, setRenaming] = useState(false);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	// Flipped by `startRename`, consumed by `RowActionsMenu`'s
@@ -347,7 +371,7 @@ function ElementRow({
 						type="button"
 						aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
 						aria-expanded={open}
-						onClick={() => setOpen((o) => !o)}
+						onClick={() => setOpen(!open)}
 						onKeyDown={handleRowKeyDown}
 						className="flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 					>
@@ -372,7 +396,7 @@ function ElementRow({
 					) : (
 						<button
 							type="button"
-							onClick={() => setOpen((o) => !o)}
+							onClick={() => setOpen(!open)}
 							onKeyDown={handleRowKeyDown}
 							className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left"
 						>
@@ -502,6 +526,8 @@ export function ElementList({
 	kinds,
 	renderAboveForm,
 	referenceOwner,
+	openIds,
+	onOpenChange,
 }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
@@ -525,6 +551,7 @@ export function ElementList({
 			config: defaultConfigFor(kind),
 		};
 		setJustAddedId(next.id);
+		onOpenChange?.(next.id, true);
 		onChange([...elements, next]);
 		addRecentElementKind(kind.kind);
 		setPickerOpen(false);
@@ -535,6 +562,7 @@ export function ElementList({
 	}
 
 	function removeAt(index: number) {
+		onOpenChange?.(elements[index].id, false);
 		onChange(elements.filter((_, i) => i !== index));
 	}
 
@@ -554,6 +582,7 @@ export function ElementList({
 			name: `${original.name ?? kindLabel(original.kind, kinds)} copy`,
 		};
 		setJustAddedId(copy.id);
+		onOpenChange?.(copy.id, true);
 		// A duplicated script element starts at its source's own editor height,
 		// not the shared default (issue #1608) - a no-op for every other kind,
 		// since only a script element ever has an entry in `scriptEditorHeights`.
@@ -592,6 +621,8 @@ export function ElementList({
 						isFirst={index === 0}
 						isLast={index === elements.length - 1}
 						isNew={element.id === justAddedId}
+						open={openIds?.has(element.id)}
+						onOpenChange={(open) => onOpenChange?.(element.id, open)}
 						onUpdate={(next) => updateAt(index, next)}
 						onRemove={() => removeAt(index)}
 						onMove={(direction) => moveAt(index, direction)}

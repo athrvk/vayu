@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render as renderBare, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
-import { useLayoutStore } from "@/stores";
+import { useLayoutStore, useTabSelectionStore } from "@/stores";
 import { useEditorVariableTokensContext } from "@/components/shared/EditorVariableTokens/context";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
@@ -212,6 +212,8 @@ beforeEach(() => {
 	// one test's pick does not surface as a duplicate "Recently used" row
 	// in the next.
 	useLayoutStore.setState({ recentElementKinds: [] });
+	// Open rows are kept per collection id, and every case here is `c1`.
+	useTabSelectionStore.getState().clearAll();
 });
 
 describe("ElementsTab - what it renders", () => {
@@ -233,6 +235,58 @@ describe("ElementsTab - what it renders", () => {
 		renderTab(makeCollection([]));
 
 		expect(screen.getByText(/no elements yet/i)).toBeInTheDocument();
+	});
+});
+
+describe("ElementsTab - expanded rows survive Shell unmounting the surface", () => {
+	it("reopens a row left expanded when the tab is mounted again for the same collection", () => {
+		const collection = makeCollection([extractElement("e1")]);
+		const first = renderTab(collection);
+		expandRow("Extract JSON");
+		expect(screen.getByRole("button", { name: "Collapse Extract JSON" })).toHaveAttribute(
+			"aria-expanded",
+			"true"
+		);
+
+		first.unmount();
+		renderTab(collection);
+
+		expect(screen.getByRole("button", { name: "Collapse Extract JSON" })).toHaveAttribute(
+			"aria-expanded",
+			"true"
+		);
+	});
+
+	it("keeps a collapsed row collapsed, and a collection seen for the first time collapsed", () => {
+		const collection = makeCollection([extractElement("e1")]);
+		const first = renderTab(collection);
+		expandRow("Extract JSON");
+		fireEvent.click(screen.getByRole("button", { name: "Collapse Extract JSON" }));
+
+		first.unmount();
+		renderTab(collection);
+
+		expect(screen.getByRole("button", { name: "Expand Extract JSON" })).toHaveAttribute(
+			"aria-expanded",
+			"false"
+		);
+	});
+
+	it("does not open the same element id under another collection", () => {
+		const first = renderTab(makeCollection([extractElement("e1")]));
+		expandRow("Extract JSON");
+		first.unmount();
+
+		renderTab({ ...makeCollection([extractElement("e1")]), id: "c2" });
+
+		expect(screen.getByRole("button", { name: "Expand Extract JSON" })).toBeInTheDocument();
+	});
+
+	it("keeps the open set under the collection's id", () => {
+		renderTab(makeCollection([extractElement("e1")]));
+		expandRow("Extract JSON");
+
+		expect(useTabSelectionStore.getState().getOpenElementRows("c1")).toEqual(new Set(["e1"]));
 	});
 });
 
