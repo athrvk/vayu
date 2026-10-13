@@ -405,9 +405,10 @@ the path; every re-read through `readDeclaredDataFile` refreshes it, keyed by
 path, so a file edited on disk is not described by the digest it had when it
 was declared. It is optional because a location remembered before hashes were
 recorded has none until its next read. Nothing that only *compares* writes it:
-`useDataFileChanged` and MCP's `list_collections` ask the main process for the
-file's current digest (`dataFile:hash`) and fall back to this one only when
-they cannot.
+`useDataFileStatus` and MCP's `list_collections` ask the main process for the
+file's current digest (`dataFile:hash`, which answers `{ status: "found", hash }`
+or `{ status: "missing" }` for a file that has moved) and fall back to this one
+only when they cannot.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
 `migrate` runs only on a version mismatch, and the common case is a

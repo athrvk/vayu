@@ -11,13 +11,20 @@
  *
  * Mutation check: make `dataFileChanged` return `runHash !== rememberedHash`
  * and the "cannot be compared" cases fail; drop the `scenario` read from either
- * extractor and the collection-run cases fail.
+ * extractor and the collection-run cases fail. For `classifyDataFile` (#2057),
+ * require the run's hash before answering `missing` and the "recorded before
+ * hashes" case fails; answer `unknown` for a missing reply and the missing
+ * cases fail.
  */
 
 import { describe, it, expect } from "vitest";
 import type { RunConfigSnapshot } from "@/types";
 import {
+	classifyDataFile,
 	dataFileChanged,
+	dataFileNote,
+	DATA_FILE_CHANGED_NOTE,
+	DATA_FILE_MISSING_NOTE,
 	dataFileFromSnapshot,
 	dataFileFromSummary,
 	runDataFileName,
@@ -93,6 +100,36 @@ describe("dataFileChanged", () => {
 		["both hashes", undefined, undefined],
 	])("is false when %s is unknown, since nothing can be compared", (_label, run, remembered) => {
 		expect(dataFileChanged(run, remembered)).toBe(false);
+	});
+});
+
+describe("classifyDataFile", () => {
+	it("is missing when the file is gone, with or without a hash on the run", () => {
+		expect(classifyDataFile(A, { status: "missing" })).toBe("missing");
+		expect(classifyDataFile(undefined, { status: "missing" })).toBe("missing");
+	});
+
+	it("is changed or unchanged by comparing the hashes of a file that is there", () => {
+		expect(classifyDataFile(A, { status: "found", hash: B })).toBe("changed");
+		expect(classifyDataFile(A, { status: "found", hash: A })).toBe("unchanged");
+	});
+
+	it("is unknown when there is no answer about the file", () => {
+		expect(classifyDataFile(A, undefined)).toBe("unknown");
+		expect(classifyDataFile(undefined, undefined)).toBe("unknown");
+	});
+
+	it("is unknown for a file that is there when the run recorded no hash to compare", () => {
+		expect(classifyDataFile(undefined, { status: "found", hash: A })).toBe("unknown");
+	});
+});
+
+describe("dataFileNote", () => {
+	it("says something only for a changed or a missing file", () => {
+		expect(dataFileNote("changed")).toBe(` ${DATA_FILE_CHANGED_NOTE}`);
+		expect(dataFileNote("missing")).toBe(` ${DATA_FILE_MISSING_NOTE}`);
+		expect(dataFileNote("unchanged")).toBe("");
+		expect(dataFileNote("unknown")).toBe("");
 	});
 });
 

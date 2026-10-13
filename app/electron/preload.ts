@@ -16,13 +16,13 @@ const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 /**
  * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence -
  * `Error invoking remote method '<channel>': Error: <message>` - which is
- * Electron's doing, not this preload's. `readDataFile`, `hashDataFile` and
- * `readSpecFile` throw already-clean, user-facing messages on the main-process side
- * (`data-file.ts`, `spec-file.ts` - a missing file, an over-cap document, a
- * refused extension), so callers on the renderer side
- * (`read-declared.ts`, `ImportModal.tsx`) can show them as-is. Left wrapped,
- * that promise breaks: this strips Electron's own prefix back off so the
- * message a caller sees is the one the handler actually threw.
+ * Electron's doing, not this preload's. `readDataFile`, `hashDataFile` (for a
+ * refused request) and `readSpecFile` throw already-clean, user-facing
+ * messages on the main-process side (`data-file.ts`, `spec-file.ts` - a
+ * missing file, an over-cap document, a refused extension), so callers on the
+ * renderer side (`read-declared.ts`, `ImportModal.tsx`) can show them as-is.
+ * Left wrapped, that promise breaks: this strips Electron's own prefix back
+ * off so the message a caller sees is the one the handler actually threw.
  */
 function unwrapIpcError(error: unknown): Error {
 	const message = error instanceof Error ? error.message : String(error);
@@ -323,8 +323,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		}),
 
 	// The same file's SHA-256 as it is now, without carrying its bytes (issue
-	// #2051): what a run's `dataFileHash` is compared against. Same gates.
-	hashDataFile: (path: string): Promise<string> =>
+	// #2051): what a run's `dataFileHash` is compared against. Same gates. A file
+	// that is no longer at the path resolves `{ status: "missing" }` (#2057) and
+	// does not reject: an IPC rejection arrives as a bare message (see
+	// `unwrapIpcError`), so the renderer could not tell "gone" from "refused".
+	hashDataFile: (
+		path: string
+	): Promise<{ status: "found"; hash: string } | { status: "missing" }> =>
 		ipcRenderer.invoke("dataFile:hash", path).catch((e: unknown) => {
 			throw unwrapIpcError(e);
 		}),

@@ -28,7 +28,7 @@ import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
-import { hashDataFile, readDataFile } from "./data-file.js";
+import { hashDataFile, hashDataFileReply, readDataFile } from "./data-file.js";
 import { AppFocusStore } from "./app-focus.js";
 import { DataFileLocations } from "./data-file-locations.js";
 import { readSpecFile } from "./spec-file.js";
@@ -1419,9 +1419,11 @@ function setupIpcHandlers() {
 	});
 
 	// The same file's SHA-256 as it is now, without its bytes (#2051): what a
-	// run's `dataFileHash` is compared against. Same path gates as the read.
+	// run's `dataFileHash` is compared against. Same path gates as the read. A
+	// file that has moved is a reply, `{ status: "missing" }` (#2057), because an
+	// error would reach the renderer as a bare message.
 	ipcMain.handle("dataFile:hash", async (_event, filePath: unknown) => {
-		return await hashDataFile(String(filePath ?? ""));
+		return await hashDataFileReply(String(filePath ?? ""));
 	});
 
 	// The renderer's whole map of remembered data-file paths, on launch and on
