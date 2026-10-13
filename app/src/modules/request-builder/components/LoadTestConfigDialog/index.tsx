@@ -6,43 +6,21 @@
  */
 
 /**
- * Load test configuration.
- *
- * Re-cut from a single 450-line scrolling column. Three things drove it:
- *
- *   - **Fields now follow the profile.** Each mode is a different form, and
- *     they used to share one column with Duration pinned second regardless -
- *     which hid a field that does nothing (see NumberField "duration" below).
- *   - **Recording options fold away.** Sampling, slow threshold, timing
- *     breakdown, in-flight cap and comment are five controls most runs never
- *     touch, and they sat between the profile and the Start button.
- *   - **One notice component.** Up to four notices can be on screen at once and
- *     they had four different designs; now severity is a prop and blocking ones
- *     sort above advisory ones, because with a stack that is the only thing
- *     saying which one is stopping you.
- *
- * Every field is kept, along with the defaults, the persistence and the
- * validation. The exception is documented where it happens.
+ * Load test configuration: the dialog shell, the mode row and the Start
+ * handler. Each profile's fields, the three disclosures, the data file, the
+ * notices, the saved memo and the payload are the files beside it.
  */
 
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
-import {
-	validateCapacityRange,
-	validateRampDuration,
-	validateStartConcurrency,
-	validateStartConcurrencyFloor,
-} from "../../utils/loadTestValidation";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
 import {
 	Button,
 	Input,
 	Label,
-	ToggleGroup,
-	ToggleGroupItem,
 	Dialog,
 	DialogContent,
 	DialogBody,
@@ -53,12 +31,7 @@ import {
 	DialogCancelButton,
 	DisabledHint,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
-import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
-import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
-import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
-import { useDataContractWriter } from "@/hooks/useDataContractWriter";
-import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
+import type { ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
 import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTestConfig";
 import { buildNotices } from "./notices";
@@ -66,16 +39,16 @@ import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
 import { SCRIPTS_DEFAULT, buildLoadTestConfig, type ScriptsOverride } from "./buildLoadTestConfig";
+import { DataFileSection } from "./DataFileSection";
+import { useLoadTestDataFile } from "./useLoadTestDataFile";
+import { ScriptsOverrideToggle } from "./ScriptsOverrideToggle";
 import { ProfileFields } from "./ProfileFields";
 import { usesDuration } from "./profile";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
-import { budgetError, customBudgetsError } from "./budgets";
-import { monitorError } from "./monitor";
+import { firstBlockingError, validateLoadTestDraft } from "./validation";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
-
-const NO_COLUMNS: string[] = [];
 
 export interface LoadTestConfigDialogProps {
 	onClose: () => void;
@@ -163,89 +136,10 @@ export default function LoadTestConfigDialog({
 	const [failRun, setFailRun] = useState(initial.failRun);
 	const [monitor, setMonitor] = useState(initial.monitor);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
-	/**
-	 * The data set this run binds (issue #993), and the parse failure that
-	 * blocks starting one.
-	 *
-	 * Per-run and deliberately not memoed like the numbers above: rows are user
-	 * data of unknown sensitivity, and neither side stores the set - the same
-	 * rule the collection run dialog keeps. Picking a file again is the whole
-	 * cost of that - which is what the declared-file pre-fill below spares the
-	 * user, without the rows ever being what is remembered.
-	 */
-	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
 	const [scriptsOverride, setScriptsOverride] = useState<ScriptsOverride>(SCRIPTS_DEFAULT);
 
-	const { mode, duration, concurrency, rampDuration, startConcurrency } = profile;
-
-	/*
-	 * The chosen file against the contract in scope for this request's
-	 * collection - the nearest declaring ancestor, as everywhere else in the
-	 * feature (issue #729). A mismatch is a warning and never blocks: a missing
-	 * column fails loudly engine-side at bind time, and a file carrying extra
-	 * columns is simply a file with extra columns. What it buys is hearing about
-	 * it here rather than at the first submission.
-	 */
-	/*
-	 * ...and the file that contract was last run with, pre-filled (issue #1039).
-	 *
-	 * The same hook the Run collection dialog reads, so the two cannot drift on
-	 * which ancestor is consulted or on what a moved file says. What does *not*
-	 * come across with it is that dialog's iterations coupling: a load run's
-	 * length is its profile's, so nothing about a data file may touch the fields
-	 * below. `contract` comes back from the same call because the audit and the
-	 * pre-fill are answers about the same declaration.
-	 */
-	const {
-		file: dataFile,
-		setFile: setDataFile,
-		note: prefillNote,
-		contract,
-		dismissNote,
-		declaringCollectionId,
-	} = useDeclaredDataFile(collectionId);
-	const writer = useDataContractWriter(declaringCollectionId);
-
-	/*
-	 * A pick declares the contract from the picked file (issue #2050), the same
-	 * rule as the Run collection dialog and the Data tab: for the collection whose
-	 * contract this request binds against, and for nothing when the request is in
-	 * no collection. Remove clears it through the picker's `onRemove`, never
-	 * here, because a file the picker refuses also arrives as `null`. A declare
-	 * that fails leaves the selection alone, so Start still sends the rows.
-	 *
-	 * Picking by hand also replaces whatever was pre-filled, so the note about a
-	 * file that could not be re-read has nothing left to say. And no
-	 * `onPrefill`: a load run's length is its profile's, so a file arriving
-	 * changes no field of it.
-	 */
-	const handleSelectDataFile = (next: SelectedDataFile | null) => {
-		setDataFile(next);
-		if (next) {
-			dismissNote();
-			writer.declare(next);
-		}
-	};
-
-	/*
-	 * The one request this run sends, audited under its collection's chain (its
-	 * `inherit` auth and the chain's scripts are part of what it sends) against
-	 * the picked file's columns. The contract diff beside it is for a pre-filled
-	 * file that drifted on disk; once a pick's declare lands it is empty by
-	 * construction, and the request is what is left to compare against.
-	 */
-	const auditSubject = useMemo(
-		() => ({ collectionId: collectionId ?? null, requests: request ? [request] : [] }),
-		[collectionId, request]
-	);
-	const { audit } = useColumnAudit(auditSubject, dataFile?.parsed.columns ?? NO_COLUMNS);
-	const fileWarnings = dataFile
-		? [
-				...describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns),
-				...describeUnboundReferences(audit.undeclared),
-			]
-		: [];
+	const dataFile = useLoadTestDataFile(collectionId, request);
 
 	/*
 	 * The Headers tab renders the design answer, and it is the tab a user reads
@@ -259,55 +153,25 @@ export default function LoadTestConfigDialog({
 	const { data: loadDefaults } = useRequestDefaultsQuery("load");
 	const defaultHeaderDifference = describeDefaultHeaderDifference(designDefaults, loadDefaults);
 
-	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
-	// Checked before the two range rules, which both compare the start against
-	// the target: a start below the floor is wrong on its own terms, and saying
-	// so is more useful than "this would ramp down".
-	const startFloorError = validateStartConcurrencyFloor(mode, startConcurrency);
-	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
-	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
-	// One message slot for both budget families: a custom row is refused on the
-	// same terms a fixed field is, so the notice below reads the same either way.
-	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
-	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
-	const blockingError =
-		rampDurationError ??
-		startFloorError ??
-		startConcurrencyError ??
-		capacityRangeError ??
-		budgetsError ??
-		monitoringError ??
-		// A file the parser refused leaves no rows behind, so starting the run
-		// would send the request with its `{{data.*}}` tokens written as they
-		// stand - the failure the whole namespace exists to prevent. The picker
-		// prints the reason; this is what stops the Start button.
-		dataFileError;
+	const errors = validateLoadTestDraft({
+		profile,
+		budgets,
+		customBudgets,
+		monitor,
+		maxSeries: monitorSettings.maxSeries,
+	});
+	// A file the parser refused leaves no rows behind, so starting the run would
+	// send the request with its `{{data.*}}` tokens written as they stand - the
+	// failure the whole namespace exists to prevent. The picker prints the
+	// reason; this is what stops the Start button.
+	const blockingError = firstBlockingError(errors) ?? dataFile.error;
 
-	const notices = useMemo(
-		() =>
-			buildNotices({
-				rampDurationError,
-				startFloorError,
-				startConcurrencyError,
-				capacityRangeError,
-				budgetsError,
-				monitoringError,
-				hasPreRequestScript,
-				scriptsOverride,
-				defaultHeaderDifference,
-			}),
-		[
-			rampDurationError,
-			startFloorError,
-			startConcurrencyError,
-			capacityRangeError,
-			budgetsError,
-			monitoringError,
-			hasPreRequestScript,
-			scriptsOverride,
-			defaultHeaderDifference,
-		]
-	);
+	const notices = buildNotices({
+		...errors,
+		hasPreRequestScript,
+		scriptsOverride,
+		defaultHeaderDifference,
+	});
 
 	const handleStart = () => {
 		if (blockingError) return;
@@ -339,7 +203,7 @@ export default function LoadTestConfigDialog({
 				monitor,
 				comment,
 				scriptsOverride,
-				dataFile,
+				dataFile: dataFile.file,
 				isStreamingRequest,
 			})
 		);
@@ -387,7 +251,7 @@ export default function LoadTestConfigDialog({
 					<div className="space-y-1.5">
 						<Label className="text-xs">Load profile</Label>
 						<ProfilePicker
-							value={mode}
+							value={profile.mode}
 							onChange={(next) => updateProfile({ mode: next })}
 							disabled={isStarting}
 						/>
@@ -405,100 +269,16 @@ export default function LoadTestConfigDialog({
 					</p>
 
 					{/*
-					 * The `elements.scripts` run override (issue #1594), the same
-					 * control and the same three values `RunCollectionDialog`'s
-					 * Scripts toggle offers. No Timers control here, unlike that
-					 * dialog - not because the engine ignores `elements.timers` on
-					 * this path (it applies it the same way, `load_strategy.cpp`'s
-					 * `step.before` / `step.between` contexts), but because this
-					 * dialog offers nothing to override it with yet: a single
-					 * request's own `timer.think` is the only timer kind
-					 * `requestElements` accepts, and there is no UI here for it at
-					 * all, marked or not.
-					 *
-					 * After the profile summary, not before it: the summary is
-					 * still describing the profile fields directly above it, and
-					 * Scripts is the first control that is not about the profile.
+					 * After the profile summary, not before it: the summary is still
+					 * describing the profile fields directly above it, and Scripts is the
+					 * first control that is not about the profile.
 					 */}
-					<div className="flex items-center justify-between gap-4">
-						<Label className="leading-snug">
-							Scripts
-							<span className="block text-xs font-normal text-muted-foreground">
-								As marked runs a script inline only where its own element says to;
-								the other two override every script this run.
-							</span>
-						</Label>
-						<ToggleGroup
-							size="sm"
-							aria-label="Scripts"
-							value={scriptsOverride}
-							onValueChange={(value) => {
-								// Radix emits "" when the active segment is clicked
-								// again; a choice is not optional here.
-								if (
-									value === "asMarked" ||
-									value === "allInline" ||
-									value === "allDeferred"
-								) {
-									setScriptsOverride(value);
-								}
-							}}
-						>
-							<ToggleGroupItem value="asMarked">As marked</ToggleGroupItem>
-							<ToggleGroupItem value="allInline">All inline</ToggleGroupItem>
-							<ToggleGroupItem value="allDeferred">All deferred</ToggleGroupItem>
-						</ToggleGroup>
-					</div>
+					<ScriptsOverrideToggle value={scriptsOverride} onChange={setScriptsOverride} />
 
-					{/*
-					    A data file, for a run that parameterises its request
-					    (issue #993). Beside the profile rather than under
-					    Recording & limits: rows change what each submission
-					    *sends*, which is the same kind of decision the profile
-					    fields are, while everything folded away below changes
-					    only what the run keeps.
-
-					    `loadTest` is set, so the picker describes what a row
-					    means here - one per submission off a shared cursor that
-					    wraps - rather than the design-mode "one row is one
-					    iteration" reading, which would be wrong for every run
-					    this dialog starts.
-					 */}
-					{/* A file that could not be re-read is a warning, not a blocker -
-					    the run is startable without one, and picking the file again
-					    is the whole remedy. Same rule, same words, as the Run
-					    collection dialog (issue #1039). */}
-					{prefillNote && (
-						<Callout severity="warning" title="The remembered data file">
-							{prefillNote}
-						</Callout>
-					)}
-
-					{writer.isError && (
-						<Callout severity="warning" title="Couldn't update the data contract">
-							{writer.error?.message ?? "The engine did not accept the change."}
-							<span className="block">
-								The run is unaffected. Pick the file again to retry.
-							</span>
-						</Callout>
-					)}
-
-					<DataFilePicker
-						selected={dataFile}
-						onSelect={handleSelectDataFile}
-						// Only with a contract to clear: Remove on a collection that
-						// declares nothing has nothing to write.
-						onRemove={contract ? writer.clear : undefined}
-						error={dataFileError}
-						onError={setDataFileError}
-						iterations={undefined}
-						loadTest
-						additionalWarnings={fileWarnings}
-						disabled={isStarting}
-					/>
+					<DataFileSection dataFile={dataFile} disabled={isStarting} />
 
 					<RecordingSection
-						mode={mode}
+						mode={profile.mode}
 						limits={limits}
 						sampleRate={sampleRate}
 						onSampleRateChange={setSampleRate}
@@ -530,7 +310,7 @@ export default function LoadTestConfigDialog({
 					{oauth2Config && (
 						<OAuth2LoadTestGuard
 							config={oauth2Config}
-							durationSeconds={usesDuration(mode) ? duration : null}
+							durationSeconds={usesDuration(profile.mode) ? profile.duration : null}
 							onGateChange={setOauthGated}
 						/>
 					)}

@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import type { DraftErrors } from "./validation";
 
 export interface Notice {
 	key: string;
@@ -14,17 +15,8 @@ export interface Notice {
 	node: ReactNode;
 }
 
-/**
- * What the notices are built from: each validation message (null when the
- * field is fine) and the two facts that raise an advisory.
- */
-export interface NoticeInputs {
-	rampDurationError: string | null;
-	startFloorError: string | null;
-	startConcurrencyError: string | null;
-	capacityRangeError: string | null;
-	budgetsError: string | null;
-	monitoringError: string | null;
+/** The validation messages, plus the two facts that raise an advisory. */
+export interface NoticeInputs extends DraftErrors {
 	hasPreRequestScript: boolean;
 	scriptsOverride: string;
 	/** What differs between the design and load default headers, or null. */
