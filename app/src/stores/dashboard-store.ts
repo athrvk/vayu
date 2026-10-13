@@ -43,6 +43,9 @@ export interface LoadTestRunConfig {
 	startConcurrency?: number;
 	/** How many `data` rows the run was started with; absent without a data file. */
 	dataRowCount?: number;
+	/** The data file's name and content hash (issue #2051); absent without one. */
+	dataFileName?: string;
+	dataFileHash?: string;
 }
 
 /**

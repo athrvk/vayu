@@ -68,6 +68,7 @@ import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/component
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
+import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
@@ -648,6 +649,8 @@ export default function LoadTestConfigDialog({
 		if (dataFile) {
 			config.data = dataFile.parsed.rows;
 			config.dataColumns = dataFile.parsed.columns;
+			config.dataFileName = runDataFileName(dataFile.fileName);
+			config.dataFileHash = dataFile.hash;
 		}
 
 		// Streaming requests only. Always sent when the request streams, never

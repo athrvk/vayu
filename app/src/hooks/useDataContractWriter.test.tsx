@@ -35,10 +35,13 @@ vi.mock("@/queries/collections", () => ({
 
 const { useDataContractWriter } = await import("./useDataContractWriter");
 
+const HASH = "c".repeat(64);
+
 function file(path?: string): SelectedDataFile {
 	return {
 		fileName: "plans.csv",
 		parsed: parseDataFile("plan,price\nfree,0", "plans.csv"),
+		hash: HASH,
 		path,
 	};
 }
@@ -72,9 +75,12 @@ describe("useDataContractWriter", () => {
 		});
 		expect(useDataFileStore.getState().locations.col_1.fileName).toBe("users.csv");
 		succeed();
+		// Mutation check: drop `hash` from the remembered location and MCP's
+		// `list_collections` names the file's path with no content digest (#2051).
 		expect(useDataFileStore.getState().locations.col_1).toEqual({
 			path: "/home/u/plans.csv",
 			fileName: "plans.csv",
+			hash: HASH,
 		});
 	});
 

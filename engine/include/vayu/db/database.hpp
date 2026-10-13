@@ -688,8 +688,19 @@ class Database {
      * pinned as a baseline (`Run::baseline`). Deletion goes through the
      * `delete_run` cascade in start_time-batched transactions, releasing the DB
      * mutex between batches so a large backlog cannot stall other endpoints.
+     *
+     * Selection and deletion are separate acquisitions, so each victim is
+     * re-read inside its batch's lock and spared when it has since been pinned,
+     * gone back in flight, or been deleted (#1906). `delete_run` is the
+     * explicit verb and deletes whatever it names.
+     *
+     * @param after_selection Test seam, invoked once victims are chosen, with
+     *        the mutex released and before the first batch - the window a
+     *        competing pin lands in.
      */
-    void prune_runs (int max_runs, int max_age_days);
+    void prune_runs (int max_runs,
+    int max_age_days,
+    const std::function<void ()>& after_selection = nullptr);
 
     /**
      * @brief Prune runs using the configured `maxRunsRetained` /

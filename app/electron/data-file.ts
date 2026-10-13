@@ -40,9 +40,13 @@
  * than a UTF-8 decode - a UTF-16 BOM sniff, a replacement-character refusal. A
  * second decode here would mean a file read through the picker and the same file
  * read through this channel could disagree about their own contents.
+ *
+ * `dataFile:hash` (issue #2051) is the same channel answering a digest instead
+ * of bytes, behind the same path gates: `hashDataFile`.
  */
 
-import { promises as fs } from "fs";
+import { createHash } from "crypto";
+import { createReadStream, promises as fs } from "fs";
 import path from "path";
 
 import { ENGINE_HOST, ENGINE_PORT, DATA_FILE_MAX_BYTES_SEED } from "./constants.js";
@@ -69,18 +73,39 @@ export const DATA_FILE_EXTENSIONS: readonly string[] = [
 export interface DataFileReadResult {
 	bytes: Uint8Array;
 	fileName: string;
+	/**
+	 * SHA-256 of `bytes`, as 64 lowercase hex characters (issue #2051): what a
+	 * run records as the file it was driven by. A hand-picked file never comes
+	 * through here, so the picker hashes its own bytes (`sha256Hex` in
+	 * `services/data-files`) and the two are held to one digest by its test.
+	 */
+	hash: string;
 }
+
+/**
+ * The shape of a data file's content hash, wherever one is read back from
+ * renderer input (`data-file-locations.ts`) or an MCP argument. The engine
+ * refuses any other spelling of the digest.
+ */
+export const DATA_FILE_HASH_PATTERN = /^[0-9a-f]{64}$/;
 
 /** The I/O this module performs, injected so the gates are testable without a disk. */
 export interface DataFileSystem {
 	stat: (filePath: string) => Promise<{ size: number; isFile: () => boolean }>;
 	readFile: (filePath: string) => Promise<Buffer>;
+	/** SHA-256 hex of the file's bytes, streamed rather than read whole. */
+	hashFile: (filePath: string) => Promise<string>;
 	fetchConfig: () => Promise<unknown>;
 }
 
 const defaultSystem: DataFileSystem = {
 	stat: (filePath) => fs.stat(filePath),
 	readFile: (filePath) => fs.readFile(filePath),
+	hashFile: async (filePath) => {
+		const hash = createHash("sha256");
+		for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+		return hash.digest("hex");
+	},
 	fetchConfig: async () => {
 		const response = await engineFetch(`http://${ENGINE_HOST}:${ENGINE_PORT}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
@@ -120,25 +145,7 @@ export async function readDataFile(
 	filePath: string,
 	system: DataFileSystem = defaultSystem
 ): Promise<DataFileReadResult> {
-	if (typeof filePath !== "string" || filePath.trim() === "") {
-		throw new Error("No data file path was given.");
-	}
-
-	const extension = path.extname(filePath).toLowerCase();
-	if (!DATA_FILE_EXTENSIONS.includes(extension)) {
-		throw new Error(
-			`Vayu only opens data files (${DATA_FILE_EXTENSIONS.join(", ")}), and this one is "${extension || "extensionless"}".`
-		);
-	}
-
-	let size: number;
-	try {
-		const stats = await system.stat(filePath);
-		if (!stats.isFile()) throw new Error("not a file");
-		size = stats.size;
-	} catch {
-		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
-	}
+	const size = await statOpenableDataFile(filePath, system);
 
 	const maxBytes = await maxDataFileBytes(system);
 	if (size > maxBytes) {
@@ -151,5 +158,50 @@ export async function readDataFile(
 	return {
 		bytes: new Uint8Array(buffer),
 		fileName: path.basename(filePath),
+		hash: createHash("sha256").update(buffer).digest("hex"),
 	};
+}
+
+/**
+ * The SHA-256 hex of a declared data file's bytes as they are now (issue
+ * #2051), the digest {@link readDataFile} answers for the same bytes, without
+ * carrying them: what a surface compares a run's `dataFileHash` against.
+ *
+ * The same path gates as a read, so this channel answers about no file the
+ * read channel would refuse to open. No byte cap: nothing crosses to the
+ * renderer and the stream hashes in constant memory, and a file that has
+ * outgrown the cap has still changed.
+ */
+export async function hashDataFile(
+	filePath: string,
+	system: DataFileSystem = defaultSystem
+): Promise<string> {
+	await statOpenableDataFile(filePath, system);
+	try {
+		return await system.hashFile(filePath);
+	} catch {
+		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+	}
+}
+
+/** The gates both channels pass before a byte is touched; answers the file's size. */
+async function statOpenableDataFile(filePath: string, system: DataFileSystem): Promise<number> {
+	if (typeof filePath !== "string" || filePath.trim() === "") {
+		throw new Error("No data file path was given.");
+	}
+
+	const extension = path.extname(filePath).toLowerCase();
+	if (!DATA_FILE_EXTENSIONS.includes(extension)) {
+		throw new Error(
+			`Vayu only opens data files (${DATA_FILE_EXTENSIONS.join(", ")}), and this one is "${extension || "extensionless"}".`
+		);
+	}
+
+	try {
+		const stats = await system.stat(filePath);
+		if (!stats.isFile()) throw new Error("not a file");
+		return stats.size;
+	} catch {
+		throw new Error(`The file is no longer at ${filePath} - pick it again.`);
+	}
 }

@@ -1322,6 +1322,47 @@ import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
     return { 200, nlohmann::json{ { "document", read.root } } };
 }
 
+namespace {
+
+/**
+ * Merge @p imported over the stored globals and write the result. The caller
+ * holds the DB mutex across the whole call.
+ *
+ * Merged from a fresh read rather than written over: the engine has no merge
+ * verb, and writing the import's globals alone would silently delete every
+ * global the user already had.
+ *
+ * @param before_write Test seam, invoked with the merged row staged and
+ *        immediately before it is written.
+ */
+void merge_globals_locked (vayu::db::Database& db,
+const nlohmann::json& imported,
+const std::function<void ()>& before_write) {
+    nlohmann::json merged = nlohmann::json::object ();
+    if (const auto stored = db.get_globals ()) {
+        const nlohmann::json existing =
+        nlohmann::json::parse (stored->variables, nullptr, false);
+        if (existing.is_object ()) {
+            merged = existing;
+        }
+    }
+    for (auto entry = imported.begin (); entry != imported.end (); ++entry) {
+        merged[entry.key ()] = entry.value ();
+    }
+    vayu::db::Globals row;
+    // The singleton's id, always - a row saved without it is a row
+    // `get_globals` will never find, which is the silent write this whole
+    // resource has a history of (see `save_globals_response`).
+    row.id         = "globals";
+    row.variables  = merged.dump ();
+    row.updated_at = now_ms ();
+    if (before_write) {
+        before_write ();
+    }
+    db.save_globals (row);
+}
+
+} // namespace
 
 /**
  * Testable core of POST /import - parse a document and persist it.
@@ -1343,9 +1384,20 @@ import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
  * leaves the user's globals half-rewritten. On a key collision the imported
  * value wins - the caller asked for this file's variables, and skipping them
  * would be the silent no-op.
+ *
+ * **The globals read, merge and write are one lock scope** (#1906): a
+ * `POST /globals` landing between the read and the write would be overwritten
+ * by a merge computed without it. The client-certificate candidates are not
+ * inside it; `import_apply_response` has already applied them under their own
+ * lock.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        globals staged and immediately before they are written; see
+ *        `update_request_response` for why it is an overload.
  */
-std::pair<int, nlohmann::json>
-import_response (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json> import_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::function<void ()>& before_write) {
     auto [status, parsed] = import_parse_response (db, body);
     if (status != 200) {
         return { status, parsed };
@@ -1359,28 +1411,7 @@ import_response (vayu::db::Database& db, const nlohmann::json& body) {
 
     const nlohmann::json& globals = parsed.at ("globals");
     if (!globals.empty ()) {
-        // Merged from a fresh read rather than written over: the engine has no
-        // merge verb, and writing the import's globals alone would silently
-        // delete every global the user already had.
-        nlohmann::json merged = nlohmann::json::object ();
-        if (const auto stored = db.get_globals ()) {
-            const nlohmann::json existing =
-            nlohmann::json::parse (stored->variables, nullptr, false);
-            if (existing.is_object ()) {
-                merged = existing;
-            }
-        }
-        for (auto entry = globals.begin (); entry != globals.end (); ++entry) {
-            merged[entry.key ()] = entry.value ();
-        }
-        vayu::db::Globals row;
-        // The singleton's id, always - a row saved without it is a row
-        // `get_globals` will never find, which is the silent write this whole
-        // resource has a history of (see `save_globals_response`).
-        row.id         = "globals";
-        row.variables  = merged.dump ();
-        row.updated_at = now_ms ();
-        db.save_globals (row);
+        db.with_lock ([&] { merge_globals_locked (db, globals, before_write); });
     }
 
     return { 200,
@@ -1389,6 +1420,11 @@ import_response (vayu::db::Database& db, const nlohmann::json& body) {
         { "requests", payload.at ("requests").size () },
         { "environments", payload.at ("environments").size () },
         { "globals", globals.size () } } };
+}
+
+std::pair<int, nlohmann::json>
+import_response (vayu::db::Database& db, const nlohmann::json& body) {
+    return import_response (db, body, nullptr);
 }
 
 namespace {

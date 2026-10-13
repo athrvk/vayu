@@ -253,6 +253,36 @@ describe("a load run started with a data file", () => {
 		expect(launched).not.toHaveProperty("data");
 	});
 
+	it("forwards the file's name and hash to the run and the dashboard (#2051)", async () => {
+		const hash = "a".repeat(64);
+		await startLoadRun({
+			...LOAD_CONFIG,
+			data: [{ username: "ada" }],
+			dataColumns: ["username"],
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+
+		expect(startLoadTest).toHaveBeenCalledTimes(1);
+		expect(startLoadTest.mock.calls[0][0]).toMatchObject({
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+			dataFileName: "users.csv",
+			dataFileHash: hash,
+		});
+	});
+
+	it("sends no file name or hash for a run without a file (#2051)", async () => {
+		await startLoadRun(LOAD_CONFIG);
+
+		// Undefined, which JSON drops: the engine refuses either key without `data`.
+		const sent = startLoadTest.mock.calls[0][0] as Record<string, unknown>;
+		expect(sent.dataFileName).toBeUndefined();
+		expect(sent.dataFileHash).toBeUndefined();
+	});
+
 	it("leaves the row count off a run with no file (#1940)", async () => {
 		await startLoadRun(LOAD_CONFIG);
 

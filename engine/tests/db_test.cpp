@@ -1151,6 +1151,31 @@ TEST_F (DatabaseTest, PruneRunsByAgeSparesABaselineRun) {
     EXPECT_FALSE (ids.count ("stale"));
 }
 
+// Victims are chosen under one acquisition and deleted under another (#1906).
+// A pin that lands between them answered its caller 200, so the delete batch
+// has to read the row again rather than trust the selection's copy.
+TEST_F (DatabaseTest, PruneRunsSparesARunPinnedAfterSelection) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (db, "oldest", 1000);
+    seed_run_with_children (db, "old", 2000);
+    seed_run_with_children (db, "recent", 3000);
+
+    // Cap of one selects "oldest" and "old"; "oldest" is pinned in the window.
+    db.prune_runs (
+    1, 0, [&db] { ASSERT_HAS_VALUE (db.set_run_baseline ("oldest", true)); });
+
+    const auto pinned = db.get_run ("oldest");
+    ASSERT_HAS_VALUE (pinned)
+    << "retention deleted a run pinned after selection";
+    EXPECT_TRUE (pinned->baseline);
+    EXPECT_EQ (db.count_metric_ticks ("oldest"), 1);
+    EXPECT_EQ (db.get_results ("oldest").size (), 1u);
+    // The rest of the selection is still pruned.
+    EXPECT_EQ (run_ids (db), (std::set<std::string>{ "oldest", "recent" }));
+}
+
 // ============================================================================
 // OpenAPI document reclamation (sweep_orphaned_spec_documents, issue #718)
 // ============================================================================

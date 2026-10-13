@@ -61,6 +61,11 @@ struct LoadDataSet {
     /// rather than sent as the literal token - and a run without rows carries
     /// no set at all, so it is told nothing and splits as it always did.
     vayu::http::BoundColumnNames bound_columns;
+    /// The file @ref rows came from, as the caller named it (issue #2051,
+    /// `core::read_data_file_fields`). Empty when none was named; recorded in
+    /// the run's snapshot, never read by the run itself.
+    std::string file_name;
+    std::string file_hash;
 };
 
 /**

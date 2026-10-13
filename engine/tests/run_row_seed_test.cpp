@@ -38,6 +38,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/load_strategy.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/types.hpp"
 
@@ -45,7 +46,8 @@ namespace vayu::http::routes {
 // Both declared in execution.cpp.
 void seed_run_times (vayu::db::Run& run, int64_t started_at);
 std::string scenario_snapshot (const std::string& sanitized, const nlohmann::json& manifest);
-std::string load_data_snapshot (const std::string& sanitized, size_t row_count);
+std::string load_data_snapshot (const std::string& sanitized,
+const vayu::core::LoadDataSet& data);
 std::string with_default_headers_snapshot (const std::string& snapshot,
 const vayu::http::DefaultHeaderPolicy& header_policy);
 vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type);
@@ -135,20 +137,56 @@ TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
     payload["data"]          = rows;
     payload["environmentId"] = "env_1";
 
-    const auto stored = json::parse (load_data_snapshot (payload.dump (), 2));
+    vayu::core::LoadDataSet set;
+    set.rows          = rows;
+    const auto stored = json::parse (load_data_snapshot (payload.dump (), set));
 
     EXPECT_FALSE (stored.contains ("data"));
     EXPECT_EQ (stored["dataRowCount"], 2);
     EXPECT_EQ (stored.dump ().find ("hunter2"), std::string::npos)
     << "a row's cell reached the run store";
+    // A set sent without a file name stores no key, never an empty one.
+    EXPECT_FALSE (stored.contains ("dataFileName"));
+    EXPECT_FALSE (stored.contains ("dataFileHash"));
     // Everything else the client sent is left alone.
     EXPECT_EQ (stored["environmentId"], "env_1");
     EXPECT_EQ (stored["url"], "https://api.test/login");
 }
 
+// Issue #2051: the file the rows came from is recorded beside their count, by
+// name and content hash, while the rows themselves still never are. Written
+// from the validated set, so a body whose copy the sanitizer altered cannot
+// decide it. Mutation check: drop the `stamp_data_file_fields` call in
+// `load_data_snapshot` and the name and hash assertions red.
+TEST (LoadDataSnapshot, RecordsTheFilesNameAndHashBesideTheCount) {
+    json rows = json::array ();
+    rows.push_back (json{ { "password", "hunter2" } });
+
+    json payload;
+    payload["method"] = "POST";
+    payload["url"]    = "https://api.test/login";
+    payload["data"]   = rows;
+
+    vayu::core::LoadDataSet set;
+    set.rows      = rows;
+    set.file_name = "users.csv";
+    set.file_hash = std::string (64, 'f');
+
+    const auto stored = json::parse (load_data_snapshot (payload.dump (), set));
+
+    EXPECT_EQ (stored.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (stored.value ("dataFileHash", ""), std::string (64, 'f'));
+    EXPECT_EQ (stored["dataRowCount"], 1);
+    EXPECT_FALSE (stored.contains ("data"));
+    EXPECT_EQ (stored.dump ().find ("hunter2"), std::string::npos)
+    << "a row's cell reached the run store";
+}
+
 TEST (LoadDataSnapshot, LeavesANonObjectSnapshotAlone) {
-    EXPECT_EQ (load_data_snapshot ("not json at all", 1), "not json at all");
-    EXPECT_EQ (load_data_snapshot ("[1,2,3]", 1), "[1,2,3]");
+    vayu::core::LoadDataSet set;
+    set.rows.push_back (json::object ());
+    EXPECT_EQ (load_data_snapshot ("not json at all", set), "not json at all");
+    EXPECT_EQ (load_data_snapshot ("[1,2,3]", set), "[1,2,3]");
 }
 
 // A baseline pinned before loadNegotiateCompression's 0.26 default flip (or

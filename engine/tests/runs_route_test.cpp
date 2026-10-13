@@ -47,6 +47,8 @@ vayu::http::RunSummaryCache& summaries);
 // object from an already-parsed config_snapshot, extracted so it is testable
 // without the report handler's DB/metrics dependencies.
 nlohmann::json build_run_report_config (const nlohmann::json& config);
+// Defined in runs.cpp; the report's `metadata` object for one stored run.
+nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db::Run& run);
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
 run_report_response (vayu::db::Database& db, const std::string& run_id);
@@ -59,6 +61,10 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
 } // namespace vayu::http::routes
 
 namespace {
+
+/// A well-formed `dataFileHash` (issue #2051), as the seeded snapshots spell it.
+constexpr const char* DATA_FILE_HASH =
+"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 class RunsRouteTest : public ::testing::Test {
     protected:
@@ -312,9 +318,14 @@ TEST_F (RunsRouteTest, SummaryCarriesAcceptEncodingWhenSnapshotHasIt) {
 // so `scenario` is the only thing on it that says what ran. The step manifest
 // itself stays off the row: it is the size of the plan, and the row is the part
 // that has to stay cheap as history grows.
+//
+// Which data file drove the run rides the descriptor too (issue #2051).
+// Mutation check: drop `dataFileName` from `add_scenario`'s key list and this
+// reds.
 TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
     seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
-    "recursive":true,"iterations":3,"dataRowCount":0,
+    "recursive":true,"iterations":3,"dataRowCount":2,"dataFileName":"users.csv",
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "steps":[{"index":0,"requestId":"req_1","name":"login","method":"POST","url":"https://a/login"},
              {"index":1,"requestId":"req_2","name":"checkout","method":"GET","url":"https://a/cart"}]}})" });
 
@@ -333,10 +344,36 @@ TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
     // and URL would be the full snapshot wearing another name.
     EXPECT_EQ (scenario["stepCount"], 2);
     EXPECT_FALSE (scenario.contains ("steps"));
+    EXPECT_EQ (scenario.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (scenario.value ("dataFileHash", ""), DATA_FILE_HASH);
     // A scenario has no url/method/mode to report, and nothing invents one.
     EXPECT_FALSE (summary.contains ("url"));
     EXPECT_FALSE (summary.contains ("method"));
     EXPECT_FALSE (summary.contains ("mode"));
+    // Nor a top-level file: a collection run's is on `scenario` alone.
+    EXPECT_FALSE (summary.contains ("dataFileName"));
+}
+
+// A single-request load run's file sits at the snapshot's top level, beside
+// `dataRowCount`, and so does its row's (issue #2051); a run without one has
+// neither key. Mutation check: drop `dataFileName` from `build_run_summary`'s
+// key list and this reds.
+TEST_F (RunsRouteTest, SummaryCarriesALoadRunsDataFileOnlyWhenItNamedOne) {
+    seed ({ .id = "run_data", .config_snapshot = R"({"url":"https://a/","mode":"constant","dataRowCount":2,
+    "dataFileName":"users.csv","dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})" });
+    seed ({ .id = "run_plain", .start_time = 1, .config_snapshot = R"({"url":"https://b/","mode":"constant"})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    // Newest first: run_plain, then run_data.
+    EXPECT_EQ (body["data"][0]["id"], "run_plain");
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("dataFileName"));
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("dataFileHash"));
+
+    EXPECT_EQ (body["data"][1]["id"], "run_data");
+    const auto& summary = body["data"][1]["summary"];
+    EXPECT_EQ (summary.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (summary.value ("dataFileHash", ""), DATA_FILE_HASH);
+    EXPECT_FALSE (summary.contains ("scenario"));
 }
 
 // The key is a scenario's alone: a load run must not grow one, or the app's
@@ -890,6 +927,50 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
     vayu::http::routes::build_run_report_config (negotiated)["acceptEncoding"], true);
     EXPECT_FALSE (vayu::http::routes::build_run_report_config (pre_1488).contains (
     "acceptEncoding"));
+}
+
+// A single-request run's data file, beside the row count it describes (issue
+// #2051). Mutation check: drop `dataFileName` from `build_run_report_config`'s
+// key list and this reds.
+TEST (RunReportConfigTest, CarriesTheDataFileBesideTheRowCount) {
+    auto config = json::parse (R"({"mode":"once","dataRowCount":2,"dataFileName":"users.csv",
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})");
+
+    const auto config_obj = vayu::http::routes::build_run_report_config (config);
+    EXPECT_EQ (config_obj.value ("dataRowCount", 0), 2);
+    EXPECT_EQ (config_obj.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (config_obj.value ("dataFileHash", ""), DATA_FILE_HASH);
+
+    const auto unnamed = vayu::http::routes::build_run_report_config (
+    json::parse (R"({"mode":"once","dataRowCount":2})"));
+    EXPECT_FALSE (unnamed.contains ("dataFileName"));
+    EXPECT_FALSE (unnamed.contains ("dataFileHash"));
+}
+
+// A collection run's file is in its manifest, not the snapshot's top level, so
+// `metadata.configuration` reaches into `scenario` for it and every report that
+// had a file names it in one place (issue #2051). Mutation check: drop the
+// fallback loop in `build_report_metadata` and this reds.
+TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
+    vayu::db::Run run;
+    run.type = vayu::RunType::Scenario;
+    run.config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
+    "dataRowCount":2,"dataFileName":"users.csv",
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "steps":[]}})";
+
+    const auto metadata = vayu::http::routes::build_report_metadata ("run_1", run);
+    ASSERT_TRUE (metadata.contains ("configuration")) << metadata.dump ();
+    const auto& configuration = metadata["configuration"];
+    EXPECT_EQ (configuration.value ("dataFileName", ""), "users.csv");
+    EXPECT_EQ (configuration.value ("dataFileHash", ""), DATA_FILE_HASH);
+
+    run.config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
+    "dataRowCount":0,"steps":[]}})";
+    const auto unnamed = vayu::http::routes::build_report_metadata ("run_2", run);
+    ASSERT_TRUE (unnamed.contains ("configuration")) << unnamed.dump ();
+    EXPECT_FALSE (unnamed["configuration"].contains ("dataFileName"));
+    EXPECT_FALSE (unnamed["configuration"].contains ("dataFileHash"));
 }
 
 // ============================================================================

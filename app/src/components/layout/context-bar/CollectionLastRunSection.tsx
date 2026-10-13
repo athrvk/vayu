@@ -29,7 +29,7 @@ import { useTabsStore } from "@/stores";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { formatInstant } from "@/lib/time-value";
 import { SectionEmpty, SectionLoading } from "./Section";
-import { RUN_STATUS_TONE, scenarioSizeLabel } from "./collection-last-run";
+import { runStatusTone, scenarioSizeLabel } from "./collection-last-run";
 import type { ContextBarSectionProps } from "./types";
 
 export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
@@ -43,7 +43,7 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 		return <SectionEmpty>This collection has not been run yet</SectionEmpty>;
 	}
 
-	const tone = RUN_STATUS_TONE[run.status];
+	const tone = runStatusTone(run.status);
 	const size = scenarioSizeLabel(run);
 
 	return (

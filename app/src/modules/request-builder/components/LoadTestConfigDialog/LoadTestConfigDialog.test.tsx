@@ -324,6 +324,23 @@ describe("data rows (issue #993)", () => {
 		// starts, and composition has to leave a bare `{{id}}` for the per-row
 		// bind instead of resolving it from the variable scopes (issue #1007).
 		expect(config.dataColumns).toEqual(["id"]);
+		// And which file they came from (issue #2051): its name and the SHA-256
+		// of its bytes, never its path.
+		expect(config.dataFileName).toBe("rows.csv");
+		expect(config.dataFileHash).toBe(
+			"47084569d953e21c1461d202a7e698a28ff349bd3a5cd6df5230b2f40e3a6f6c"
+		);
+	});
+
+	// Mutation check: send `dataFile.fileName` unfiltered and this fails.
+	it("leaves out a file name holding a path separator, keeping the hash (#2051)", async () => {
+		const { onStart } = open();
+		pick(new File(["id\na"], "odd\\rows.csv"));
+		await screen.findByText(/rows\.csv/);
+
+		const config = started(onStart);
+		expect(config.dataFileName).toBeUndefined();
+		expect(config.dataFileHash).toMatch(/^[0-9a-f]{64}$/);
 	});
 
 	it("sends no `data` key at all when no file was picked", () => {
@@ -334,6 +351,8 @@ describe("data rows (issue #993)", () => {
 		const config = started(onStart);
 		expect(config).not.toHaveProperty("data");
 		expect(config).not.toHaveProperty("dataColumns");
+		expect(config).not.toHaveProperty("dataFileName");
+		expect(config).not.toHaveProperty("dataFileHash");
 	});
 
 	it("refuses to start while the picked file cannot be read", async () => {

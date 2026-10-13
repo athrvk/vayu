@@ -13,12 +13,14 @@
  * them - read RPS, connections and status composition at the same instant.
  */
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Callout, ErrorState } from "@/components/shared";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 import type { HostSleep } from "@/stores/host-sleep-store";
+import type { SeriesFailure } from "../../types";
 import {
 	RequestRateChart,
 	ConnectionsChart,
@@ -31,6 +33,12 @@ import { hasCustomMetrics } from "@/modules/dashboard/utils/metricsTransforms";
 
 interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
+	/**
+	 * The series fetch failed. With too little data to plot it replaces the
+	 * "insufficient data" sentence, which would blame the run for the network;
+	 * with an unfinished series it sits above the charts that did load.
+	 */
+	failure?: SeriesFailure;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples?: MonitorSample[];
 	isLoading?: boolean;
@@ -46,6 +54,7 @@ const SYNC_KEY = CHART_SYNC.history;
 
 export default function HistoricalChartsSection({
 	data,
+	failure,
 	monitorSamples = [],
 	isLoading,
 	isFetchingMore,
@@ -67,6 +76,20 @@ export default function HistoricalChartsSection({
 		);
 	}
 
+	if (failure && data.length < 2) {
+		return (
+			<Card>
+				<CardContent className="flex items-center justify-center py-8">
+					<ErrorState
+						title="Couldn't load the time-series data"
+						detail={failure.message}
+						onRetry={failure.retry}
+					/>
+				</CardContent>
+			</Card>
+		);
+	}
+
 	if (data.length < 2) {
 		return (
 			<Card>
@@ -81,6 +104,21 @@ export default function HistoricalChartsSection({
 
 	return (
 		<div className="space-y-4">
+			{failure && !isFetchingMore && progress && progress.loaded < progress.total && (
+				<Callout
+					severity="warning"
+					title="Charts are incomplete"
+					action={
+						<Button variant="outline" size="sm" onClick={failure.retry}>
+							Try again
+						</Button>
+					}
+				>
+					Loaded {progress.loaded.toLocaleString()} of {progress.total.toLocaleString()}{" "}
+					points before the fetch failed ({failure.message}).
+				</Callout>
+			)}
+
 			{isFetchingMore && progress && (
 				<div className="enter-fade flex items-center gap-2 text-sm text-muted-foreground">
 					<Loader2 className="size-icon animate-spin" />

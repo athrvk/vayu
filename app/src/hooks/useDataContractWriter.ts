@@ -62,7 +62,11 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 						// previous one instead, so the store never names a file the
 						// contract was not read from.
 						if (file.path) {
-							setDataFile(collectionId, { path: file.path, fileName: file.fileName });
+							setDataFile(collectionId, {
+								path: file.path,
+								fileName: file.fileName,
+								hash: file.hash,
+							});
 						} else {
 							clearDataFile(collectionId);
 						}

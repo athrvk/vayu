@@ -31,12 +31,21 @@
  * the remembered path was the one way past a refusal the picker makes on every
  * hand-picked file. `maxRows` is required rather than optional so a fourth
  * surface cannot re-open the hole by omitting it.
+ *
+ * It is also where the remembered location learns the file's current content
+ * hash (issue #2051): every byte read records it against the path, so
+ * `data-file-store` (and through it MCP's `list_collections`) carries the
+ * digest of the file as the app last saw it rather than as it was first picked.
+ * Recorded before decoding, since it describes the bytes on disk whether or not
+ * they still parse; it changes no declaration, only what is known about the
+ * file the declaration already names.
  */
 
 import { decodeDataFile } from "./decode";
 import { DataFileError } from "./errors";
 import { describeRowCapRefusal } from "./row-cap";
 import { parseDataFile, type ParsedDataFile } from "./index";
+import { useDataFileStore } from "@/stores/data-file-store";
 
 /** A file re-read from disk, in the shape the pickers already hold. */
 export interface DeclaredDataFile {
@@ -45,6 +54,8 @@ export interface DeclaredDataFile {
 	parsed: ParsedDataFile;
 	/** The path it was read from, so a caller can remember it unchanged. */
 	path: string;
+	/** SHA-256 of the bytes read, 64 lowercase hex: what a run records (#2051). */
+	hash: string;
 }
 
 /**
@@ -68,6 +79,28 @@ export class NoDataFileBridgeError extends Error {
  */
 export function canReadDeclaredDataFile(): boolean {
 	return typeof window.electronAPI?.readDataFile === "function";
+}
+
+/**
+ * Whether this build can hash a remembered path without reading it (#2051).
+ * Separate from {@link canReadDeclaredDataFile} because a caller falls back to
+ * the stored hash when it cannot, rather than to nothing.
+ */
+export function canHashDeclaredDataFile(): boolean {
+	return typeof window.electronAPI?.hashDataFile === "function";
+}
+
+/**
+ * The SHA-256 hex of the file at `path` as it is now, the digest a re-read
+ * would answer, without its bytes crossing to the renderer. Rejects with
+ * `NoDataFileBridgeError` outside Electron and with the main process's message
+ * when the file is gone or refused. It records nothing in `data-file-store`,
+ * whose hash stays the one the app last read the file with.
+ */
+export async function hashDeclaredDataFile(path: string): Promise<string> {
+	const hash = window.electronAPI?.hashDataFile;
+	if (!hash) throw new NoDataFileBridgeError();
+	return await hash(path);
 }
 
 /** What a re-read has to be measured against, beyond parsing. */
@@ -95,7 +128,8 @@ export async function readDeclaredDataFile(
 	const read = window.electronAPI?.readDataFile;
 	if (!read) throw new NoDataFileBridgeError();
 
-	const { bytes, fileName } = await read(path);
+	const { bytes, fileName, hash } = await read(path);
+	useDataFileStore.getState().recordDataFileHash(path, hash);
 	// The same decode and the same parser the picker runs, so a file re-read
 	// here cannot disagree with the file as it was declared.
 	const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
@@ -108,5 +142,5 @@ export async function readDeclaredDataFile(
 	const refusal = describeRowCapRefusal(parsed.rows.length, maxRows);
 	if (refusal) throw new DataFileError(refusal);
 
-	return { fileName, parsed, path };
+	return { fileName, parsed, path, hash };
 }

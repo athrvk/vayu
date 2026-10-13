@@ -865,6 +865,10 @@ export default function RequestBuilder() {
 					// was picked: a present-but-empty array is refused engine-side,
 					// so "no data set" has to be the absent key rather than `[]`.
 					data: config.data,
+					// Which file those rows came from (issue #2051): its name and
+					// content hash, never its path. Undefined exactly when `data` is.
+					dataFileName: config.dataFileName,
+					dataFileHash: config.dataFileHash,
 					// The engine defaults this run refuses (issue #1229). A load
 					// run has to send the header set Send sends, or it measures a
 					// different request from the one the user tried.
@@ -887,6 +891,8 @@ export default function RequestBuilder() {
 						rampUpDuration: apiRequest.rampUpDuration,
 						startConcurrency: apiRequest.startConcurrency,
 						dataRowCount: config.data?.length,
+						dataFileName: config.dataFileName,
+						dataFileHash: config.dataFileHash,
 					},
 					{
 						method: apiRequest.method,

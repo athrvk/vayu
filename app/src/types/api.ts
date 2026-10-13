@@ -770,10 +770,21 @@ export interface StartLoadTestRequest {
 	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
 	 * binds per submission, and a deferred `script.post` element reads the row
 	 * its sample carried as `pm.iterationData`. The set is never persisted - the run
-	 * snapshot records `dataRowCount` alone - but a bound cell travels in the
-	 * request that carried it, which the run stores with its retained traces.
+	 * snapshot records its row count, plus the file name and hash below - but a
+	 * bound cell travels in the request that carried it, which the run stores
+	 * with its retained traces.
 	 */
 	data?: Record<string, unknown>[];
+	/**
+	 * The data file the rows came from (issue #2051): a display name, never a
+	 * path. Only beside `data`; the engine refuses it alone.
+	 */
+	dataFileName?: string;
+	/**
+	 * SHA-256 of that file's bytes, 64 lowercase hex, so two runs can be told
+	 * apart by their file's content. Only beside `data`.
+	 */
+	dataFileHash?: string;
 	/**
 	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
 	 * on every execute and run start, so a caller never sets it; declared here
@@ -869,11 +880,18 @@ export interface StartScenarioRunRequest {
 		 * (`services/data-files`) and sends the rows; the engine bounds them
 		 * with `maxScenarioDataRows` and `maxScenarioDataBytes` and rejects a
 		 * present-but-empty array. The row *set* is never persisted on either
-		 * side - the run snapshot records its count alone - but a cell bound
-		 * into a request is stored with that request, in the step trace the run
-		 * keeps (issue #731).
+		 * side - the run snapshot records its count, plus the file name and hash
+		 * below - but a cell bound into a request is stored with that request,
+		 * in the step trace the run keeps (issue #731).
 		 */
 		data?: Record<string, unknown>[];
+		/**
+		 * The data file the rows came from (issue #2051): a display name, never
+		 * a path. Only beside `data`; the engine refuses it alone.
+		 */
+		dataFileName?: string;
+		/** SHA-256 of that file's bytes, 64 lowercase hex. Only beside `data`. */
+		dataFileHash?: string;
 	};
 	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
 	environmentId?: string;

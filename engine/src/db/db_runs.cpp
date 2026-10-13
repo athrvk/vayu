@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <expected>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -228,8 +229,20 @@ std::optional<Run> Database::set_run_baseline (const std::string& id, bool basel
     return updated;
 }
 
+namespace {
+// What retention never deletes and never counts toward the cap: a run still
+// in flight, and a run pinned as a baseline. Read at selection and again,
+// per row, under each delete batch's lock.
+bool exempt_from_retention (const Run& run) {
+    return run.baseline || run.status == RunStatus::Running ||
+    run.status == RunStatus::Pending;
+}
+} // namespace
+
 // Retention: drop runs beyond the count cap and/or older than the age cap.
-void Database::prune_runs (int max_runs, int max_age_days) {
+void Database::prune_runs (int max_runs,
+int max_age_days,
+const std::function<void ()>& after_selection) {
     // Both limits off - nothing to do (0 = unlimited for each).
     if (max_runs <= 0 && max_age_days <= 0) {
         return;
@@ -254,16 +267,10 @@ void Database::prune_runs (int max_runs, int max_age_days) {
 
         int kept = 0;
         for (const auto& run : runs) {
-            // In-flight runs are never pruned and do not count toward the cap.
-            if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
-                continue;
-            }
-            // Neither is a pinned baseline: a run kept as the thing later runs
-            // are measured against is exactly the run retention must not
-            // expire. Skipped rather than merely spared, for the same reason
-            // an in-flight run is - counting it toward the cap would let a
-            // handful of pins evict the recent history the cap exists to keep.
-            if (run.baseline) {
+            // Skipped rather than merely spared: counting an exempt run toward
+            // the cap would let a handful of pins evict the recent history the
+            // cap exists to keep.
+            if (exempt_from_retention (run)) {
                 continue;
             }
             const bool over_count = (max_runs > 0) && (kept >= max_runs);
@@ -279,24 +286,39 @@ void Database::prune_runs (int max_runs, int max_age_days) {
     if (victims.empty ()) {
         return;
     }
+    if (after_selection) {
+        after_selection ();
+    }
 
     // 2. Delete via the delete_run cascade, batched so a huge backlog does not
     //    hold the DB mutex for seconds. The lock is re-taken per batch and
     //    released between them, letting /health, SSE and the runs poll interleave.
+    //    Each victim is re-read under its batch's lock (#1906): a run pinned
+    //    since selection (`set_run_baseline`) answered its caller 200, and
+    //    the selection's copy of the row no longer says so.
     constexpr size_t BATCH_SIZE = 100;
+    size_t pruned               = 0;
     for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
         const size_t end = std::min (start + BATCH_SIZE, victims.size ());
         std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
         impl_->storage.transaction ([&] {
             for (size_t i = start; i < end; ++i) {
+                const auto current = get_run (victims[i]);
+                if (!current || exempt_from_retention (*current)) {
+                    continue;
+                }
                 remove_run_cascade_locked (victims[i]);
+                ++pruned;
             }
             return true; // Commit
         });
     }
 
+    if (pruned == 0) {
+        return;
+    }
     vayu::utils::log_info ("db", "Pruned old runs",
-    { { "count", victims.size () }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
+    { { "count", pruned }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
 }
 
 size_t Database::reconcile_orphaned_runs () {

@@ -14,7 +14,11 @@
 import { z } from "zod";
 import { DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT } from "../engine-client.js";
 import { precedenceNote } from "../variable-origins.js";
-import { DATA_CONTRACT_SENTENCE, presentCollections } from "../collection-shape.js";
+import {
+	DATA_CONTRACT_SENTENCE,
+	presentCollections,
+	withCurrentDataFileHashes,
+} from "../collection-shape.js";
 import {
 	runOutputShape,
 	secretsShape,
@@ -143,8 +147,12 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
-				() => ctx.client.listCollections(signal),
-				(rows) => secretsShape(ctx, withholdRowListSecrets)(presentCollections(rows, ctx))
+				async () =>
+					withCurrentDataFileHashes(
+						presentCollections(await ctx.client.listCollections(signal), ctx),
+						ctx
+					),
+				secretsShape(ctx, withholdRowListSecrets)
 			),
 	},
 	{
@@ -229,7 +237,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
-			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. ` +
+			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\` and \`dataFileHash\` (SHA-256 of its bytes) on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` on a collection run - compare the hash with list_collections' \`dataFile.hash\` before re-running with the same file. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
 			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
 			WITHHELD_RUN_OUTPUT_SENTENCE,

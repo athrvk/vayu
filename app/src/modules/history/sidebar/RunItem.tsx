@@ -12,6 +12,7 @@ import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { truncateUrl } from "@/lib/truncate-url";
+import { dataFileFromSummary } from "@/lib/run-data-file";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import { runReference } from "@/lib/agent-reference";
 import { useCopy } from "@/hooks/useCopy";
@@ -223,6 +224,9 @@ export default function RunItem({
 	// a permanent line.
 	const cardRows: TimeRow[] = [{ label: "Status", value: RUN_STATUS[run.status].label }];
 	if (run.summary?.comment) cardRows.push({ label: "Comment", value: run.summary.comment });
+	// Which file drove the run (#2051): a name, never a path.
+	const dataFile = dataFileFromSummary(run.summary);
+	if (dataFile) cardRows.push({ label: "Data file", value: dataFile.fileName });
 
 	// A bare fallback identity for the rare row with neither a url nor a
 	// scenario descriptor (a run recorded before either existed, or one still

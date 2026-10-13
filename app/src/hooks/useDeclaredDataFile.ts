@@ -46,10 +46,13 @@
  * about what is on the other side of it, which is what lets the load dialog
  * share the pre-fill and share none of the consequence.
  *
- * It writes nothing either (#2050). A pick in a run dialog declares the contract
- * from the picked file, but that is the dialog calling `useDataContractWriter`
- * against `declaringCollectionId`; the pre-fill is a read of what was declared,
- * not a pick, and never writes.
+ * It declares nothing either (#2050). A pick in a run dialog declares the
+ * contract from the picked file, but that is the dialog calling
+ * `useDataContractWriter` against `declaringCollectionId`; the pre-fill is a
+ * read of what was declared, not a pick. The one store write is the read's
+ * own: `readDeclaredDataFile` records the hash of the bytes it read against the
+ * remembered path (#2051), which is why the read below depends on the
+ * location's path and name rather than on the location object.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -194,6 +197,10 @@ export function useDeclaredDataFile(
 	// answers, and finds nothing otherwise - which is the correct answer.
 	const declaringCollectionId = heldDeclarer ?? contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
+	// Strings, not the object: the read's hash record replaces the object, and
+	// an object dependency would cancel the very read that replaced it.
+	const rememberedPath = rememberedFile?.path;
+	const rememberedName = rememberedFile?.fileName;
 	const { maxRows } = useDataFileLimits();
 
 	const [file, setFile] = useState<SelectedDataFile | null>(null);
@@ -213,14 +220,14 @@ export function useDeclaredDataFile(
 
 	useEffect(() => {
 		if (attempted.current || picked.current) return;
-		if (!rememberedFile?.path) return;
+		if (!rememberedPath) return;
 		attempted.current = true;
 		let cancelled = false;
 		// No Electron, no path to re-read - the picker stands, and this is not
 		// a failure worth a note: it is a state that will never resolve.
 		if (!canReadDeclaredDataFile()) return;
 
-		void readDeclaredDataFile(rememberedFile.path, { maxRows })
+		void readDeclaredDataFile(rememberedPath, { maxRows })
 			.then((read) => {
 				if (cancelled || picked.current) return;
 				setFile(read);
@@ -231,14 +238,14 @@ export function useDeclaredDataFile(
 				setNote(
 					e instanceof DataFileError || e instanceof Error
 						? e.message
-						: `The declared file is no longer at ${rememberedFile.fileName} - pick it again.`
+						: `The declared file is no longer at ${rememberedName} - pick it again.`
 				);
 			});
 
 		return () => {
 			cancelled = true;
 		};
-	}, [rememberedFile, maxRows]);
+	}, [rememberedPath, rememberedName, maxRows]);
 
 	const dismissNote = useCallback(() => setNote(null), []);
 

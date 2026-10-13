@@ -50,6 +50,9 @@ import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useStopRun } from "@/hooks/useStopRun";
 import { isRunInProgress } from "@/lib/run-status";
+import { DATA_FILE_CHANGED_NOTE } from "@/lib/run-data-file";
+import { useDataFileChanged } from "@/hooks/useDataFileChanged";
+import { scenarioFromSnapshot } from "@/components/layout/context-bar/run-scenario";
 import { useScenarioRunStore } from "@/stores";
 import { Badge, Input } from "@/components/ui";
 import {
@@ -175,6 +178,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	// the `step` events carry `dataRowIndex` exactly as the stored rows do.
 	const dataBound = summary.dataBoundSteps > 0;
 
+	// The file the run read, from its snapshot's manifest (#2051). Absent for a
+	// run recorded before the field, which then prints nothing about a file.
+	const manifest = useMemo(() => scenarioFromSnapshot(run), [run]);
+	const dataFileName = manifest?.dataFileName;
+	const dataFileChanged = useDataFileChanged(manifest?.collectionId, manifest?.dataFileHash);
+
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/*
 	 * One handler for every card, not one per card. `ScenarioStepCard` is
@@ -281,6 +290,13 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					</span>
 				)}
 
+				{dataFileName && (
+					<span className="text-xs text-muted-foreground">
+						Data: {dataFileName}
+						{dataFileChanged && ` ${DATA_FILE_CHANGED_NOTE}`}
+					</span>
+				)}
+
 				{/* Beside the chips rather than above the list (issue #832): the
 				    two are one predicate, and a control that narrows the same
 				    list from somewhere else reads as narrowing something else.
@@ -381,7 +397,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    had none - which let the Data tab's "rows are never saved
 				    anywhere" be read as covering the cells those rows bound
 				    (issue #731). */}
-				<StoredExchangeWarning steps={steps.length} dataBound={dataBound} />
+				<StoredExchangeWarning
+					steps={steps.length}
+					dataBound={dataBound}
+					dataFileName={dataFileName}
+				/>
 
 				{/* Above the steps rather than after them: "which of the contract
 				    did this run exercise" is a whole-run answer, and a reader

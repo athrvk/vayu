@@ -25,7 +25,8 @@
  * `POST /runs` afterwards.
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { useDataFileStore } from "@/stores/data-file-store";
 import { DataFileError } from "./errors";
 import {
 	NoDataFileBridgeError,
@@ -33,8 +34,16 @@ import {
 	readDeclaredDataFile,
 } from "./read-declared";
 
+/** The digest a stubbed bridge answers with; main's hashing is pinned in its own suite. */
+const HASH = "f".repeat(64);
+
 /** Bytes as the `readDataFile` bridge hands them over. */
-function bridge(text: string, fileName: string, encoding: "utf-8" | "utf-16le" = "utf-8") {
+function bridge(
+	text: string,
+	fileName: string,
+	encoding: "utf-8" | "utf-16le" = "utf-8",
+	hash = HASH
+) {
 	const bytes =
 		encoding === "utf-8"
 			? new TextEncoder().encode(text)
@@ -48,7 +57,7 @@ function bridge(text: string, fileName: string, encoding: "utf-8" | "utf-16le" =
 					}
 					return out;
 				})();
-	return vi.fn(() => Promise.resolve({ bytes, fileName }));
+	return vi.fn(() => Promise.resolve({ bytes, fileName, hash }));
 }
 
 /** A cap no case below is testing, so the read turns on the file alone. */
@@ -58,6 +67,10 @@ const LIMITS = { maxRows: 1000 };
 function csvOfRows(count: number): string {
 	return `user\n${Array.from({ length: count }, (_, i) => `user-${i}`).join("\n")}`;
 }
+
+beforeEach(() => {
+	useDataFileStore.setState({ locations: {} });
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -150,5 +163,59 @@ describe("the row cap on a re-read", () => {
 		const file = await readDeclaredDataFile("/home/u/grown.csv", { maxRows: 4 });
 
 		expect(file.parsed.rows).toHaveLength(4);
+	});
+});
+
+describe("the content hash on a re-read (#2051)", () => {
+	const OLD = "a".repeat(64);
+	const NEW = "b".repeat(64);
+
+	it("hands back the bridge's digest beside the rows", async () => {
+		vi.stubGlobal("electronAPI", { readDataFile: bridge("id\n1", "users.csv", "utf-8", NEW) });
+
+		const file = await readDeclaredDataFile("/home/u/users.csv", LIMITS);
+
+		expect(file.hash).toBe(NEW);
+	});
+
+	it("refreshes the remembered location's hash, and only the one at that path", async () => {
+		const { setDataFile } = useDataFileStore.getState();
+		setDataFile("col_1", { path: "/home/u/users.csv", fileName: "users.csv", hash: OLD });
+		setDataFile("col_2", { path: "/home/u/plans.csv", fileName: "plans.csv", hash: OLD });
+		vi.stubGlobal("electronAPI", { readDataFile: bridge("id\n1", "users.csv", "utf-8", NEW) });
+
+		await readDeclaredDataFile("/home/u/users.csv", LIMITS);
+
+		const { locations } = useDataFileStore.getState();
+		expect(locations.col_1.hash).toBe(NEW);
+		expect(locations.col_2.hash).toBe(OLD);
+	});
+
+	it("records the bytes' hash even when they no longer parse", async () => {
+		// The digest describes the file on disk; a file that changed into one the
+		// parser refuses has still changed, and a stale hash would say it had not.
+		useDataFileStore
+			.getState()
+			.setDataFile("col_1", { path: "/home/u/dupes.csv", fileName: "dupes.csv", hash: OLD });
+		vi.stubGlobal("electronAPI", {
+			readDataFile: bridge("id,id\n1,2", "dupes.csv", "utf-8", NEW),
+		});
+
+		await expect(readDeclaredDataFile("/home/u/dupes.csv", LIMITS)).rejects.toBeInstanceOf(
+			DataFileError
+		);
+		expect(useDataFileStore.getState().locations.col_1.hash).toBe(NEW);
+	});
+
+	it("records nothing when the read itself fails", async () => {
+		useDataFileStore
+			.getState()
+			.setDataFile("col_1", { path: "/home/u/gone.csv", fileName: "gone.csv", hash: OLD });
+		vi.stubGlobal("electronAPI", {
+			readDataFile: () => Promise.reject(new Error("ENOENT: no such file or directory")),
+		});
+
+		await expect(readDeclaredDataFile("/home/u/gone.csv", LIMITS)).rejects.toThrow(/ENOENT/);
+		expect(useDataFileStore.getState().locations.col_1.hash).toBe(OLD);
 	});
 });

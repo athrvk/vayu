@@ -32,8 +32,8 @@ import { isRunInProgress } from "@/lib/run-status";
 import { loadedRunReference } from "@/lib/run-reference-input";
 import { useCopy } from "@/hooks/useCopy";
 import { useTabsStore } from "@/stores";
-import { Badge, Button } from "@/components/ui";
-import { EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
+import { Button } from "@/components/ui";
+import { EmptyState, ErrorState, DetailSkeleton, RunStatusPill } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 import ScenarioRunView from "./ScenarioRunView";
@@ -176,26 +176,7 @@ export default function HistoryDetail() {
 						<span className="text-xs text-muted-foreground font-mono truncate">
 							{selectedRunId}
 						</span>
-						<Badge
-							variant={
-								run.status === "completed"
-									? "default"
-									: run.status === "failed"
-										? "destructive"
-										: "outline"
-							}
-							/* "stopped" is a run status, so it takes the
-							   --status-stopped family the sidebar's RunItem
-							   already uses - not a raw orange that happens to
-							   look the same. */
-							className={`text-xs capitalize shrink-0 ${
-								run.status === "stopped"
-									? "border-status-stopped text-status-stopped-text"
-									: ""
-							}`}
-						>
-							{run.status}
-						</Badge>
+						<RunStatusPill status={run.status} />
 						<Button
 							variant="ghost"
 							size="sm"

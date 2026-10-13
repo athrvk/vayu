@@ -54,6 +54,8 @@ import {
 	environmentIdInput,
 	LOAD_RUN_SCHEMA_GATE_REFUSAL,
 	scenarioDataInput,
+	dataFileNameInput,
+	dataFileHashInput,
 	scenarioRecursiveInput,
 	thresholdsInput,
 	validationScriptAliasInput,
@@ -325,8 +327,10 @@ export const LOAD_TOOLS: McpTool[] = [
 				.array(z.record(z.string(), z.unknown()))
 				.optional()
 				.describe(
-					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
+					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run, with dataFileName / dataFileHash when given), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
 				),
+			dataFileName: dataFileNameInput,
+			dataFileHash: dataFileHashInput,
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name
 			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
@@ -343,6 +347,8 @@ export const LOAD_TOOLS: McpTool[] = [
 						.describe("Collection whose saved requests are the sequence."),
 					recursive: scenarioRecursiveInput,
 					data: scenarioDataInput,
+					dataFileName: dataFileNameInput,
+					dataFileHash: dataFileHashInput,
 				})
 				.optional()
 				.describe(
@@ -473,6 +479,12 @@ export const LOAD_TOOLS: McpTool[] = [
 			// before the run row exists and its refusal names the field, so a
 			// second copy of those rules here could only drift (issue #993).
 			if (Array.isArray(args.data)) payload.data = args.data;
+			// The rows' file by name and hash (issue #2051), as given: the engine
+			// refuses either one without `data`, by name.
+			for (const key of ["dataFileName", "dataFileHash"]) {
+				const v = str(args, key);
+				if (v !== undefined) payload[key] = v;
+			}
 			// Forwarded verbatim - the keys are the engine's own metric names,
 			// and they come back unchanged in `get_run_report`'s
 			// `thresholdValidation`. Zod has already bounded every value.

@@ -29,13 +29,19 @@
 
 import path from "path";
 
-import { DATA_FILE_EXTENSIONS } from "./data-file.js";
+import { DATA_FILE_EXTENSIONS, DATA_FILE_HASH_PATTERN } from "./data-file.js";
 
 export interface DataFileLocation {
 	/** Absolute path on this machine. */
 	path: string;
 	/** The file's own name when it was picked. */
 	fileName: string;
+	/**
+	 * SHA-256 of the file's bytes when the app last read it (issue #2051), so
+	 * an agent can tell whether the file still matches a run's `dataFileHash`.
+	 * Absent for a location remembered before hashes were recorded.
+	 */
+	hash?: string;
 }
 
 /** The entries of a published payload this process is willing to repeat. */
@@ -47,7 +53,13 @@ export function normalizeDataFileLocations(payload: unknown): Map<string, DataFi
 		if (typeof entry?.path !== "string" || typeof entry.fileName !== "string") continue;
 		if (!path.isAbsolute(entry.path)) continue;
 		if (!DATA_FILE_EXTENSIONS.includes(path.extname(entry.path).toLowerCase())) continue;
-		locations.set(collectionId, { path: entry.path, fileName: entry.fileName });
+		// A malformed hash drops the hash, not the location: the path is still
+		// one this process would open.
+		const hash =
+			typeof entry.hash === "string" && DATA_FILE_HASH_PATTERN.test(entry.hash)
+				? { hash: entry.hash }
+				: {};
+		locations.set(collectionId, { path: entry.path, fileName: entry.fileName, ...hash });
 	}
 	return locations;
 }

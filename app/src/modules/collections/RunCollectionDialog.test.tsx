@@ -331,9 +331,27 @@ describe("a data file", () => {
 				{ user: "ada", id: "1" },
 				{ user: "grace", id: "2" },
 			],
+			// Which file drove the run (issue #2051): its name and the SHA-256
+			// of its bytes, never its path.
+			dataFileName: "users.csv",
+			dataFileHash: "2db0eca7622a0202096a0e1ee4af0bf2a4f91d3f6c6a1e593900962549927551",
 		});
 		// Omitted, not computed: the engine owns "absent means one pass per row".
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+	});
+
+	// A POSIX file name may hold a `\`, which the engine refuses in a
+	// `dataFileName` so no path is stored (#2051): the run still starts.
+	// Mutation check: send `dataFile.fileName` unfiltered and this fails.
+	it("leaves out a file name holding a path separator, keeping the hash", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("odd\\name.csv", "user\nada");
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		const scenario = mutate.mock.calls[0][0].scenario;
+		expect(scenario.dataFileName).toBeUndefined();
+		expect(scenario.dataFileHash).toMatch(/^[0-9a-f]{64}$/);
+		expect(scenario.data).toEqual([{ user: "ada" }]);
 	});
 
 	it("keeps an explicit iteration count and says how many rows go unused", async () => {
@@ -506,7 +524,7 @@ describe("running the sequence as a load test", () => {
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
 	});
 
-	it("hands the dashboard the row count, and nothing for a run without a file (#1940)", async () => {
+	it("hands the dashboard the row count and the file's name and hash, and nothing for a run without a file (#1940, #2051)", async () => {
 		const { unmount } = render(
 			<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
 		);
@@ -519,7 +537,11 @@ describe("running the sequence as a load test", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		succeedWith("run_load_8");
 
-		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBe(2);
+		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+			dataRowCount: 2,
+			dataFileName: "users.csv",
+			dataFileHash: "eefb4557a05007a7651f212036cde499da3c25508761ba78de983a521b7446e5",
+		});
 		unmount();
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
@@ -528,6 +550,8 @@ describe("running the sequence as a load test", () => {
 		succeedWith("run_load_9");
 
 		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBeUndefined();
+		expect(useDashboardStore.getState().loadTestConfig?.dataFileName).toBeUndefined();
+		expect(useDashboardStore.getState().loadTestConfig?.dataFileHash).toBeUndefined();
 	});
 
 	it("describes the rows as a load run binds them, not as iterations", async () => {
@@ -798,10 +822,14 @@ describe("pre-filling from the declared data file", () => {
 	});
 
 	it("re-reads the remembered file and sends its rows", async () => {
+		// Stored with no hash, read back with one: the read records the hash,
+		// which replaces the stored location while the read is still in flight
+		// (#2051). The pre-fill must land anyway.
 		remember("/home/u/users.csv", "users.csv");
 		stubReadDataFile(async () => ({
 			bytes: bytesOf("user,id\nada,1\ngrace,2"),
 			fileName: "users.csv",
+			hash: "a".repeat(64),
 		}));
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
@@ -816,6 +844,7 @@ describe("pre-filling from the declared data file", () => {
 			{ user: "ada", id: "1" },
 			{ user: "grace", id: "2" },
 		]);
+		expect(useDataFileStore.getState().locations.col_1?.hash).toBe("a".repeat(64));
 		// A read of what was declared, not a pick: reopening the dialog writes
 		// nothing (issue #2050).
 		expect(updateCollection.mutate).not.toHaveBeenCalled();

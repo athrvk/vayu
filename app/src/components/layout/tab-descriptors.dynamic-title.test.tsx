@@ -40,6 +40,35 @@ const REQUEST_B = {
 
 const REQUESTS: Record<string, typeof REQUEST_A> = { req_a: REQUEST_A, req_b: REQUEST_B };
 
+// Run tabs (#2051): a collection run names its file inside the `scenario`
+// block, a load run at the top level, and an older run has neither.
+const RUNS: Record<string, unknown> = {
+	run_collection: {
+		id: "run_collection",
+		type: "scenario",
+		configSnapshot: { scenario: { collectionId: "col_1", dataFileName: "users.csv" } },
+	},
+	run_collection_old: {
+		id: "run_collection_old",
+		type: "scenario",
+		configSnapshot: { scenario: { collectionId: "col_1" } },
+	},
+	run_load: {
+		id: "run_load",
+		type: "load",
+		configSnapshot: {
+			method: "GET",
+			url: "https://api.test/orders",
+			dataFileName: "users.csv",
+		},
+	},
+	run_load_old: {
+		id: "run_load_old",
+		type: "load",
+		configSnapshot: { method: "GET", url: "https://api.test/orders" },
+	},
+};
+
 // Stable references, not a fresh object literal per call: the real
 // TanStack Query hooks return the same `data` identity across renders while
 // the underlying cache entry is unchanged, which is what lets `resolveString`
@@ -61,8 +90,8 @@ vi.mock("@/queries", () => ({
 	}),
 	runDetailOptions: (id: string | null) => ({
 		queryKey: ["run", id],
-		queryFn: async () => undefined,
-		initialData: undefined,
+		queryFn: async () => (id ? RUNS[id] : undefined),
+		initialData: id ? RUNS[id] : undefined,
 		enabled: false,
 	}),
 	useCollectionsQuery: () => ({ data: NO_COLLECTIONS }),
@@ -111,5 +140,36 @@ describe("a request tab's label with a dynamic variable in its URL", () => {
 		const { first } = labelsOf(["req_a", "req_b"]);
 		expect(first[0]).toMatch(/^\/todos\/\d+$/);
 		expect(first[1]).toMatch(/^\/todos\/\d+$/);
+	});
+});
+
+describe("a run tab's tooltip names the data file", () => {
+	function descriptorOf(entityId: string) {
+		const tabs = [{ id: `t-${entityId}`, type: "run" as const, entityId }];
+		const { result } = renderHook(() => useTabDescriptors(tabs), {
+			wrapper: ({ children }) => (
+				<QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+			),
+		});
+		return result.current[0];
+	}
+
+	it("appends the name to a collection run's title and leaves the label alone", () => {
+		const d = descriptorOf("run_collection");
+		expect(d.title).toBe("Collection run: col_1 · users.csv");
+		expect(d.label).toBe("col_1");
+	});
+
+	it("appends the name to a load run's title and leaves the label alone", () => {
+		const d = descriptorOf("run_load");
+		expect(d.title).toBe("Load test: GET /orders · users.csv");
+		expect(d.label).toBe("/orders");
+	});
+
+	it.each([
+		["collection", "run_collection_old", "Collection run: col_1"],
+		["load", "run_load_old", "Load test: GET /orders"],
+	])("is unchanged for a %s run recorded without a file", (_kind, id, title) => {
+		expect(descriptorOf(id).title).toBe(title);
 	});
 });

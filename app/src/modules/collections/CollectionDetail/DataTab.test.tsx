@@ -136,6 +136,9 @@ describe("declaring a contract", () => {
 		expect(useDataFileStore.getState().locations.col_1).toEqual({
 			path: "/home/u/users.csv",
 			fileName: "users.csv",
+			// SHA-256 of the picked bytes (issue #2051), so MCP can name the
+			// file's content beside its path.
+			hash: "88e94c0d2bbe183d98748a0fb71c5704bcb28e216797d6cd71855ca88378ab1a",
 		});
 	});
 
@@ -241,6 +244,7 @@ describe("removing the file", () => {
 		expect(useDataFileStore.getState().locations.col_1).toEqual({
 			path: "/home/u/plans.csv",
 			fileName: "plans.csv",
+			hash: "b7359bc0b274253135286ab911139026c671d4a11f8df272d20bd5342fa265c0",
 		});
 	});
 

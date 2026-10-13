@@ -89,11 +89,15 @@ function DashboardHeader({
 	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
 	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
-	// The rows are never stored, so this count is the only trace on the
-	// dashboard that a file drove the run (#1940). Nothing for a run without one.
+	// The rows are never stored, so the count (and, since #2051, the file's
+	// name) is the only trace on the dashboard that a file drove the run
+	// (#1940). Nothing for a run without one.
 	const rowCount = configuration?.dataRowCount;
-	if (rowCount != null && rowCount > 0)
-		configParts.push(`${rowCount} ${pluralize(rowCount, "row")}`);
+	if (rowCount != null && rowCount > 0) {
+		const fileName = configuration?.dataFileName;
+		const rows = `${rowCount} ${pluralize(rowCount, "row")}`;
+		configParts.push(fileName ? `${rows} from ${fileName}` : rows);
+	}
 	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
 	const configSummary = configParts.join(" · ");
 

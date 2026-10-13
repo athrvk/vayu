@@ -50,7 +50,12 @@ import {
 	ScenarioStepsTab,
 } from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
-import type { LoadTestDetailProps, MonitorSeriesResponse, TimeSeriesResponse } from "../types";
+import type {
+	LoadTestDetailProps,
+	MonitorSeriesResponse,
+	SeriesFailure,
+	TimeSeriesResponse,
+} from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
@@ -96,18 +101,36 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const {
 		data: timeSeriesData,
 		isLoading: isLoadingSeries,
+		isError: isSeriesError,
+		error: seriesError,
 		isFetchingNextPage,
 		hasNextPage,
 		fetchNextPage,
+		refetch: refetchSeries,
 	} = useRunTimeSeriesQuery(runId ?? null, report.metadata?.status);
 
 	// Auto-page through the full series so breakpoint detection and the charts see
-	// every tick, not just the first page.
+	// every tick, not just the first page. Not while the query is in error: a
+	// failed page leaves `hasNextPage` true and `isFetchingNextPage` back at
+	// false, which is exactly this effect's trigger, so it would re-request the
+	// failing page in a tight loop. The failure's Retry calls `fetchNextPage`
+	// itself, and a success clears the error and resumes the paging.
 	useEffect(() => {
-		if (hasNextPage && !isFetchingNextPage) {
+		if (hasNextPage && !isFetchingNextPage && !isSeriesError) {
 			fetchNextPage();
 		}
-	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+	}, [hasNextPage, isFetchingNextPage, isSeriesError, fetchNextPage]);
+
+	// A partly loaded series resumes at the page that failed; one with nothing
+	// loaded starts over. `refetch` would re-read every loaded page instead.
+	const seriesFailure = useMemo<SeriesFailure | undefined>(() => {
+		if (!isSeriesError) return undefined;
+		const resumable = hasNextPage && !!timeSeriesData?.pages?.length;
+		return {
+			message: seriesError?.message ?? "The engine returned no time-series data.",
+			retry: () => void (resumable ? fetchNextPage() : refetchSeries()),
+		};
+	}, [isSeriesError, seriesError, hasNextPage, timeSeriesData, fetchNextPage, refetchSeries]);
 
 	const timeSeries = useMemo(
 		() => timeSeriesData?.pages?.flatMap((page: TimeSeriesResponse) => page.data) ?? [],
@@ -302,6 +325,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								<span className="text-muted-foreground">Data:</span>
 								<span className="text-foreground font-mono">
 									{config.dataRowCount} {pluralize(config.dataRowCount, "row")}
+									{config.dataFileName ? ` · ${config.dataFileName}` : ""}
 								</span>
 							</div>
 						)}
@@ -429,6 +453,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								derived={derived}
 								anomalies={anomalies}
 								timeSeries={timeSeries}
+								seriesFailure={seriesFailure}
 								monitorSamples={monitorSamples}
 								isLoadingSeries={isLoadingSeries}
 								isFetchingMore={isFetchingNextPage}

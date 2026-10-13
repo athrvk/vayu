@@ -24,7 +24,11 @@
  *        All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
  */
 
-import { DATA_CONTRACT_SENTENCE, presentCollections } from "./collection-shape.js";
+import {
+	DATA_CONTRACT_SENTENCE,
+	presentCollections,
+	withCurrentDataFileHashes,
+} from "./collection-shape.js";
 import {
 	runOutputShape,
 	secretsShape,
@@ -91,7 +95,12 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 			secretsShape(
 				ctx,
 				withholdRowListSecrets
-			)(presentCollections(await ctx.client.listCollections(signal), ctx)),
+			)(
+				await withCurrentDataFileHashes(
+					presentCollections(await ctx.client.listCollections(signal), ctx),
+					ctx
+				)
+			),
 	},
 	{
 		name: "environments",
