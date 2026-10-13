@@ -25,7 +25,7 @@
  * (`InheritedElementsNotice`), the same split the old script panels drew
  * between the editable script and the "runs before your own" chain card.
  *
- * `renderAboveForm` is the host-supplied render extension point (issue #1553):
+ * `renderAboveForm` is the one host-supplied extension point (issue #1553):
  * a plain render function, so this file still depends on nothing but the
  * element itself - the host closes over whatever context it needs (variable
  * resolution, a data contract) and hands back a node, or nothing.

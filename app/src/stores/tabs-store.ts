@@ -775,7 +775,7 @@ export const useTabsStore = create<TabsState>()(
 				// too - unlike the response above, this runs for every `type`: a
 				// collection id keys `collectionTab` the same way a request id keys
 				// `requestTab`/`responseTab`, and `clearEntity` is a harmless no-op
-				// for whichever of the three maps never held the id.
+				// for whichever of the four maps never held the id.
 				const { clearEntity } = useTabSelectionStore.getState();
 				for (const id of ids) clearEntity(id);
 
