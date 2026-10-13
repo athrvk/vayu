@@ -18,7 +18,7 @@ import {
 } from "@/queries";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import { Button, DeleteConfirmDialog } from "@/components/ui";
-import { pluralize } from "@/modules/dashboard/utils/format";
+import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import TrashItem from "./TrashItem";
 import { retentionCopy, retentionDaysFrom } from "../retention";
 import { restoreNotice } from "../restore-notice";
@@ -262,7 +262,10 @@ export default function TrashList() {
 					open={confirmEmptyOpen}
 					onOpenChange={setConfirmEmptyOpen}
 					title="Empty trash?"
-					description={`All ${entries.length} ${pluralize(entries.length, "item")} in the trash are removed permanently. This can't be undone.`}
+					description={`${pickByCount(entries.length, {
+						one: "The one item in the trash is removed permanently.",
+						other: `All ${entries.length} items in the trash are removed permanently.`,
+					})} This can't be undone.`}
 					confirmLabel="Empty trash"
 					onConfirm={() => void handleEmptyTrash()}
 					isDeleting={isEmptying}

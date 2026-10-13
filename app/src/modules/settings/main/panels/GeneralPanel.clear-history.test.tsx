@@ -43,10 +43,11 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 const deleteRun = vi.fn((_id: string) => Promise.resolve());
 const invalidateRuns = vi.fn();
 
-const runs = [
+const twoRuns = [
 	{ id: "r1", status: "completed" },
 	{ id: "r2", status: "failed" },
 ];
+let runs = twoRuns;
 
 vi.mock("@/queries/runs", () => ({
 	useAllRunsQuery: () => ({ data: runs }),
@@ -68,6 +69,7 @@ vi.mock("./CookiesCard", () => ({ CookiesCard: () => null }));
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+	runs = twoRuns;
 	deleteRun.mockClear();
 	invalidateRuns.mockClear();
 	confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -113,6 +115,18 @@ describe("GeneralPanel - clear run history", () => {
 		await waitFor(() =>
 			expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r2"])
 		);
+	});
+
+	it.each([
+		[1, "The one stored run and its metrics are removed permanently. This can't be undone."],
+		[2, "All 2 stored runs and their metrics are removed permanently. This can't be undone."],
+	])("agrees the verb with a count of %i", async (count, sentence) => {
+		runs = twoRuns.slice(0, count);
+		render(<GeneralPanel />);
+
+		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+
+		expect(await screen.findByRole("dialog")).toHaveTextContent(sentence);
 	});
 
 	it("deletes nothing when the dialog is cancelled", async () => {

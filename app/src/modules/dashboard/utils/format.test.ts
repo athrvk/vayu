@@ -11,7 +11,21 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { formatClock, formatDuration } from "./format";
+import { formatClock, formatDuration, pickByCount } from "./format";
+
+describe("pickByCount", () => {
+	const forms = { one: "1 request is", other: "N requests are" };
+
+	it("takes the singular sentence for exactly one", () => {
+		expect(pickByCount(1, forms)).toBe("1 request is");
+	});
+
+	it("takes the plural sentence for zero and for many", () => {
+		expect(pickByCount(0, forms)).toBe("N requests are");
+		expect(pickByCount(2, forms)).toBe("N requests are");
+		expect(pickByCount(120, forms)).toBe("N requests are");
+	});
+});
 
 describe("formatClock", () => {
 	it("pads minutes and seconds to two digits", () => {

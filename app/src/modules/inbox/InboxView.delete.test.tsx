@@ -38,7 +38,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useTabsStore } from "@/stores";
 import type { Inbox, InboxCapture } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
-import { capturesAtRisk } from "./useInboxDeletion";
+import { capturesAtRisk, type InboxDeletion } from "./useInboxDeletion";
+import { DeleteInboxDialog } from "./DeleteInboxDialog";
 
 /**
  * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
@@ -146,7 +147,11 @@ describe("deleting the inbox the tab shows", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 		// The listener is one click to replace; the recorded requests are not,
 		// so the count is what the dialog argues from.
-		expect(await screen.findByText(/2 recorded requests/i)).toBeInTheDocument();
+		expect(
+			await screen.findByText(
+				"Its 2 recorded requests are removed with it. This can't be undone."
+			)
+		).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 
 		fireEvent.click(
@@ -177,7 +182,11 @@ describe("deleting the inbox the tab shows", () => {
 		await screen.findByText("/hook");
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-		expect(await screen.findByText(/1 recorded request /i)).toBeInTheDocument();
+		expect(
+			await screen.findByText(
+				"Its one recorded request is removed with it. This can't be undone."
+			)
+		).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 	});
 
@@ -196,6 +205,32 @@ describe("deleting the inbox the tab shows", () => {
 		// synced (issue #554) - so the surface has to resolve that itself.
 		expect(await screen.findByText("http://127.0.0.1:41235/")).toBeInTheDocument();
 		expect(useTabsStore.getState().openTabs.filter((t) => t.type === "inbox")).toHaveLength(1);
+	});
+});
+
+describe("what the delete confirmation says is lost", () => {
+	// The tab deletes an empty inbox outright, so the zero wording is reachable
+	// only through the dialog itself.
+	function dialogFor(captureCount: number) {
+		const deletion: InboxDeletion = {
+			inbox: inbox(),
+			captureCount,
+			requestDelete: vi.fn(),
+			confirmOpen: true,
+			closeConfirm: vi.fn(),
+			confirmDelete: vi.fn(),
+			isDeleting: false,
+		};
+		render(<DeleteInboxDialog deletion={deletion} />);
+		return screen.getByRole("dialog");
+	}
+
+	it.each([
+		[0, "It has no recorded requests. This can't be undone."],
+		[1, "Its one recorded request is removed with it. This can't be undone."],
+		[2, "Its 2 recorded requests are removed with it. This can't be undone."],
+	])("reads for a count of %i", (count, sentence) => {
+		expect(dialogFor(count)).toHaveTextContent(sentence);
 	});
 });
 

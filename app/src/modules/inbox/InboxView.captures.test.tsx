@@ -280,6 +280,21 @@ describe("what Clear says it removes", () => {
 		expect(dialog).toHaveTextContent("All 2 recorded requests in this inbox are removed.");
 		expect(dialog).not.toHaveTextContent("not shown here");
 	});
+
+	// Zero is not a case: Clear is disabled while the count is 0.
+	it("agrees the verb with a single capture", async () => {
+		listInboxCaptures.mockResolvedValue(page(1, 1, 1));
+		renderTab();
+		await screen.findByText("/hook/1");
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent(
+			"The one recorded request in this inbox is removed. This can't be undone."
+		);
+		expect(dialog).not.toHaveTextContent("are removed");
+	});
 });
 
 describe("reading one capture while others arrive", () => {
