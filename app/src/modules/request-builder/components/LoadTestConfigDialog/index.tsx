@@ -47,8 +47,6 @@ import {
 	Button,
 	Input,
 	Label,
-	Switch,
-	Textarea,
 	ToggleGroup,
 	ToggleGroupItem,
 	Dialog,
@@ -69,12 +67,13 @@ import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
-import { DisclosureCard } from "./DisclosureCard";
+import { RecordingSection } from "./RecordingSection";
+import { BudgetsSection } from "./BudgetsSection";
+import { MonitoringSection } from "./MonitoringSection";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
 import {
-	BUDGET_FIELDS,
 	type BudgetDraft,
 	type CustomBudgetDraft,
 	budgetError,
@@ -82,9 +81,7 @@ import {
 	customBudgetsError,
 	emptyBudgetDraft,
 } from "./budgets";
-import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
 import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
-import { MONITOR_INTERVAL_MS } from "@/constants/monitor";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
 
 interface SavedLoadTestConfig {
@@ -306,7 +303,6 @@ export default function LoadTestConfigDialog({
 		() => saved.customBudgets ?? []
 	);
 	const [failRun, setFailRun] = useState(saved.failRun ?? false);
-	const [budgetsOpen, setBudgetsOpen] = useState(false);
 	/**
 	 * Server monitoring. The cadence and the metric cap are engine settings
 	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
@@ -327,7 +323,6 @@ export default function LoadTestConfigDialog({
 			...saved.monitor,
 		})
 	);
-	const [monitorOpen, setMonitorOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
 	/**
 	 * The data set this run binds (issue #993), and the parse failure that
@@ -341,7 +336,6 @@ export default function LoadTestConfigDialog({
 	 */
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
-	const [recordingOpen, setRecordingOpen] = useState(false);
 	const [scriptsOverride, setScriptsOverride] = useState<
 		"asMarked" | "allInline" | "allDeferred"
 	>(SCRIPTS_DEFAULT);
@@ -998,251 +992,34 @@ export default function LoadTestConfigDialog({
 						disabled={isStarting}
 					/>
 
-					<DisclosureCard
-						open={recordingOpen}
-						onOpenChange={setRecordingOpen}
-						title="Recording & limits"
-					>
-						<div className="space-y-1.5">
-							<Label htmlFor="lt-sample" className="text-xs">
-								Success sample rate
-								<span className="ml-1.5 font-normal text-muted-foreground">
-									keeping {sampleRate}% of successful responses
-								</span>
-							</Label>
-							<input
-								id="lt-sample"
-								type="range"
-								value={sampleRate}
-								onChange={(e) => setSampleRate(Number(e.target.value))}
-								min={limits.SAMPLE_RATE_PCT.MIN}
-								max={limits.SAMPLE_RATE_PCT.MAX}
-								className="w-full accent-primary"
-							/>
-							{/*
-								    The left stop is 1%, not 0%. The value is
-								    converted to the engine's sampling period, and
-								    no period expresses "none" - that is the Save
-								    timing breakdown toggle below, which gates
-								    storage outright. Errors are never sampled
-								    either way; they are always kept.
-								 */}
-							<div className="flex justify-between text-label text-muted-foreground">
-								<span>1% - a trickle</span>
-								<span>100% - everything</span>
-							</div>
-						</div>
+					<RecordingSection
+						mode={mode}
+						limits={limits}
+						sampleRate={sampleRate}
+						onSampleRateChange={setSampleRate}
+						slowThreshold={slowThreshold}
+						onSlowThresholdChange={setSlowThreshold}
+						maxInFlight={maxInFlight}
+						onMaxInFlightChange={setMaxInFlight}
+						saveTimingBreakdown={saveTimingBreakdown}
+						onSaveTimingBreakdownChange={setSaveTimingBreakdown}
+					/>
 
-						<NumberField
-							id="lt-slow"
-							label="Slow request threshold"
-							unit="ms"
-							value={slowThreshold}
-							onChange={num(setSlowThreshold)}
-							min={limits.SLOW_THRESHOLD_MS.MIN}
-							max={limits.SLOW_THRESHOLD_MS.MAX}
-							// Outlier capture has its own budget, so it neither spends
-							// nor is spent by the sample rate above - but it is still
-							// bounded (max_slow_results, 1000), because under
-							// saturation nearly every request crosses the threshold.
-							// 0 disables the capture rather than flagging everything.
-							hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
-						/>
+					<BudgetsSection
+						budgets={budgets}
+						onBudgetsChange={setBudgets}
+						customBudgets={customBudgets}
+						onCustomBudgetsChange={setCustomBudgets}
+						failRun={failRun}
+						onFailRunChange={setFailRun}
+						disabled={isStarting}
+					/>
 
-						{mode === "constant_rps" && (
-							<NumberField
-								id="lt-max-inflight"
-								label="Max in-flight requests"
-								optional
-								value={maxInFlight}
-								onChange={setMaxInFlight}
-								min={limits.MAX_IN_FLIGHT.MIN}
-								max={limits.MAX_IN_FLIGHT.MAX}
-								placeholder="Auto"
-								hint="Hard cap on concurrent in-flight requests. Blank derives it from the target rate. Lowering it drops requests sooner under backpressure; raising it queues instead."
-							/>
-						)}
-
-						<div className="flex items-start justify-between gap-3">
-							<Label htmlFor="lt-timing" className="text-xs font-normal leading-snug">
-								Save timing breakdown
-								<span className="block text-label text-muted-foreground">
-									DNS, TLS, connect and first-byte, per sampled request.
-								</span>
-							</Label>
-							<Switch
-								id="lt-timing"
-								checked={saveTimingBreakdown}
-								onCheckedChange={setSaveTimingBreakdown}
-							/>
-						</div>
-					</DisclosureCard>
-
-					<DisclosureCard
-						open={budgetsOpen}
-						onOpenChange={setBudgetsOpen}
-						title="Pass/fail budgets"
-					>
-						<p className="text-label leading-relaxed text-muted-foreground">
-							The run is judged against whatever you declare here and reports a
-							verdict. Leave a field blank to skip that budget; leave them all blank
-							and the run is measured but not judged, as before.
-						</p>
-						{BUDGET_FIELDS.map((field) => (
-							<NumberField
-								key={field.key}
-								id={field.id}
-								label={field.label}
-								unit={field.unit}
-								optional
-								value={budgets[field.key]}
-								onChange={(raw) =>
-									setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-								}
-								min={field.min}
-								max={field.max}
-								placeholder="No budget"
-								hint={field.hint}
-							/>
-						))}
-
-						{/*
-						 * The custom rows sit below the fixed six and above the
-						 * flag, which is the reading order of the section: the
-						 * six every run can declare, then the ones this plan
-						 * records, then what a miss does.
-						 */}
-						<div className="space-y-1.5">
-							<Label className="text-xs">
-								Custom metric budgets
-								<span className="ml-1 font-normal text-muted-foreground">
-									(optional)
-								</span>
-							</Label>
-							<CustomBudgetHint />
-							<CustomBudgetRows
-								rows={customBudgets}
-								onChange={setCustomBudgets}
-								idPrefix="lt"
-								disabled={isStarting}
-							/>
-						</div>
-
-						<div className="flex items-start justify-between gap-3">
-							<Label
-								htmlFor="lt-fail-run"
-								className="text-xs font-normal leading-snug"
-							>
-								Fail the run when a budget is missed
-								<span className="block text-label text-muted-foreground">
-									Otherwise a missed budget is reported but the run still ends
-									Completed.
-								</span>
-							</Label>
-							<Switch
-								id="lt-fail-run"
-								checked={failRun}
-								onCheckedChange={setFailRun}
-							/>
-						</div>
-					</DisclosureCard>
-
-					<DisclosureCard
-						open={monitorOpen}
-						onOpenChange={setMonitorOpen}
-						title="Server monitoring"
-					>
-						<p className="text-label leading-relaxed text-muted-foreground">
-							Scrape the target&apos;s own metrics during the run and chart them on
-							the same timeline as p99 and throughput - so a climb in latency can be
-							read against the server&apos;s CPU or memory. Leave the URL blank to run
-							without it.
-						</p>
-						<div className="space-y-1.5">
-							<Label htmlFor="lt-monitor-url" className="text-xs">
-								Metrics endpoint
-								<span className="ml-1 font-normal text-muted-foreground">
-									(optional)
-								</span>
-							</Label>
-							<Input
-								id="lt-monitor-url"
-								type="text"
-								value={monitor.url}
-								onChange={(e) =>
-									setMonitor((prev) => ({ ...prev, url: e.target.value }))
-								}
-								placeholder="http://localhost:9100/metrics"
-								className="text-sm"
-							/>
-						</div>
-
-						<NumberField
-							id="lt-monitor-interval"
-							label="Scrape interval"
-							unit="ms"
-							value={monitor.intervalMs}
-							onChange={(raw) =>
-								setMonitor((prev) => ({ ...prev, intervalMs: Number(raw) }))
-							}
-							min={MONITOR_INTERVAL_MS.MIN}
-							max={MONITOR_INTERVAL_MS.MAX}
-							hint="Each scrape is one request to the endpoint, on its own thread - it never delays the run's own metrics."
-						/>
-
-						<div className="space-y-1.5">
-							<Label className="text-xs">Response format</Label>
-							{/*
-								    A segmented control rather than a two-row select:
-								    it is a binary choice, and `ToggleGroup` is the
-								    app's primitive for one (roving focus and the
-								    `data-[state=]` variants come with it).
-								 */}
-							<ToggleGroup
-								size="sm"
-								value={monitor.format}
-								onValueChange={(value) => {
-									// Radix emits "" when the active item is
-									// clicked again; a format is not optional, so
-									// that deselection is ignored rather than
-									// leaving the draft with no format at all.
-									if (value === "prometheus" || value === "json") {
-										setMonitor((prev) => ({ ...prev, format: value }));
-									}
-								}}
-							>
-								<ToggleGroupItem value="prometheus">
-									Prometheus text
-								</ToggleGroupItem>
-								<ToggleGroupItem value="json">Flat JSON</ToggleGroupItem>
-							</ToggleGroup>
-						</div>
-
-						<div className="space-y-1.5">
-							<Label htmlFor="lt-monitor-series" className="text-xs">
-								Metrics to chart
-								<span className="ml-1.5 font-normal text-muted-foreground">
-									one name per line, up to {monitorSettings.maxSeries}
-								</span>
-							</Label>
-							<Textarea
-								id="lt-monitor-series"
-								value={monitor.series}
-								onChange={(e) =>
-									setMonitor((prev) => ({ ...prev, series: e.target.value }))
-								}
-								rows={3}
-								placeholder={
-									"node_cpu_seconds_total\nprocess_resident_memory_bytes"
-								}
-								className="font-mono text-xs"
-							/>
-							<p className="text-label text-muted-foreground">
-								A Prometheus name is matched across its labels and the values
-								summed, so a whole family charts as one line.
-							</p>
-						</div>
-					</DisclosureCard>
+					<MonitoringSection
+						monitor={monitor}
+						onMonitorChange={setMonitor}
+						maxSeries={monitorSettings.maxSeries}
+					/>
 
 					{/* Sits last because it gates Start, so it reads immediately above it. */}
 					{oauth2Config && (
