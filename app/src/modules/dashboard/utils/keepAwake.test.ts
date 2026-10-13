@@ -44,15 +44,28 @@ describe("runLengthSeconds", () => {
 	it("answers null for a value it cannot read rather than a wrong number", () => {
 		expect(runLengthSeconds({ duration: "" })).toBeNull();
 		expect(runLengthSeconds({ duration: "forever" })).toBeNull();
-		// "10m" is not a form the dialog produces, and reading it as 10 *seconds*
-		// would silently stop asking about a ten-minute run.
-		expect(runLengthSeconds({ duration: "10m" })).toBeNull();
+		expect(runLengthSeconds({ duration: "-5s" })).toBeNull();
+	});
+
+	it("reads every unit the engine accepts", () => {
+		// "10m" read as 10 *seconds* would silently stop asking about a
+		// ten-minute run (#1945).
+		expect(runLengthSeconds({ duration: "10m" })).toBe(600);
+		expect(runLengthSeconds({ duration: "1h" })).toBe(3600);
+		expect(runLengthSeconds({ duration: "90000ms" })).toBe(90);
+		expect(runLengthSeconds({ rampUpDuration: "2m" })).toBe(120);
 	});
 });
 
 describe("isLongRun", () => {
 	it("asks about a run at the threshold", () => {
 		expect(isLongRun({ duration: `${LONG_RUN_SECONDS}s` })).toBe(true);
+	});
+
+	it("asks about a run whose duration is in minutes", () => {
+		expect(isLongRun({ duration: "15m" })).toBe(true);
+		expect(isLongRun({ duration: "10m" })).toBe(true);
+		expect(isLongRun({ duration: "9m" })).toBe(false);
 	});
 
 	it("says nothing about a run one second under it", () => {
