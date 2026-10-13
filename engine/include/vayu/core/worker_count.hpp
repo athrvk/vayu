@@ -13,12 +13,25 @@
 
 namespace vayu::core {
 
+/// What a load run uses when the core count cannot be detected.
+inline constexpr unsigned FALLBACK_WORKER_COUNT = 4;
+
+/**
+ * The worker count for a core count the OS reported. `hardware_concurrency()`
+ * returns 0 when it cannot tell, and a count of 0 workers is not a count: the
+ * event loop and `/health` both resolve through here so the fallback is one
+ * number, not two.
+ */
+[[nodiscard]] constexpr unsigned effective_worker_count (unsigned detected) {
+    return detected != 0 ? detected : FALLBACK_WORKER_COUNT;
+}
+
 /**
  * The `workers` setting's effective value: the configured count when it is
- * non-zero, otherwise the detected core count - the same auto-detect rule
- * `execute_load_test` resolves independently for the event loop. `/health`
- * calls this so it reports what a run would actually use rather than the
- * unconditional core count it used to.
+ * non-zero, otherwise the detected core count through
+ * @ref effective_worker_count, so it is never 0 - the same rule the event
+ * loop applies to a run. `/health` calls this so it reports what a run would
+ * actually use rather than the unconditional core count it used to.
  */
 int resolve_worker_count (vayu::db::Database& db);
 

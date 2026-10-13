@@ -13,8 +13,9 @@ namespace vayu::core {
 
 int resolve_worker_count (vayu::db::Database& db) {
     int configured = db.get_config_int ("workers", 0); // 0 = auto-detect
-    return configured != 0 ? configured :
-                             static_cast<int> (std::thread::hardware_concurrency ());
+    return configured != 0 ?
+    configured :
+    static_cast<int> (effective_worker_count (std::thread::hardware_concurrency ()));
 }
 
 } // namespace vayu::core
