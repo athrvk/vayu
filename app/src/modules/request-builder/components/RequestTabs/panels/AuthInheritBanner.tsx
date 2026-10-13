@@ -20,8 +20,9 @@
  */
 
 import { Fragment } from "react";
-import { Folder, Info, Lock } from "lucide-react";
+import { Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Callout } from "@/components/shared/Callout";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
@@ -71,21 +72,10 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 
 	if (!collectionId) {
 		return (
-			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				{/*
-				 * `size-icon` (16px), not `size-icon-sm`: `Callout.tsx` - the one
-				 * notice treatment this shape is a hand-rolled copy of - pairs its
-				 * leading icon with `mt-px` at 16px, which centers on a `text-xs
-				 * leading-relaxed` line (19.5px) to within a rounding pixel. A 12px
-				 * icon at the same `mt-px` sits ~3px above that center - visible as
-				 * the icon floating above the text rather than beside it.
-				 */}
-				<Info className="size-icon shrink-0 mt-px" />
-				<p className="m-0 leading-relaxed">
-					This request isn't in a collection, so there's nothing to inherit from.{" "}
-					<span className="text-foreground">No auth will be sent.</span>
-				</p>
-			</div>
+			<Callout severity="info">
+				This request isn't in a collection, so there's nothing to inherit from.{" "}
+				<span className="font-medium">No auth will be sent.</span>
+			</Callout>
 		);
 	}
 
@@ -95,24 +85,20 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 
 	if (!source) {
 		return (
-			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				{/* `size-icon`, not `size-icon-sm` - see the note on the sibling notice above. */}
-				<Lock className="size-icon shrink-0 mt-px" />
-				<p className="m-0 leading-relaxed">
-					{blockedBy ? (
-						<>
-							<span className="font-mono font-medium">{blockedBy.name}</span> is set
-							to No Auth, so nothing is inherited past it - this request will send{" "}
-							<span className="text-foreground font-medium">no authentication</span>.
-						</>
-					) : (
-						<>
-							No ancestor collection defines auth - this request will send{" "}
-							<span className="text-foreground font-medium">no authentication</span>.
-						</>
-					)}
-				</p>
-			</div>
+			<Callout severity="info">
+				{blockedBy ? (
+					<>
+						<span className="font-mono font-medium">{blockedBy.name}</span> is set to No
+						Auth, so nothing is inherited past it - this request will send{" "}
+						<span className="font-medium">no authentication</span>.
+					</>
+				) : (
+					<>
+						No ancestor collection defines auth - this request will send{" "}
+						<span className="font-medium">no authentication</span>.
+					</>
+				)}
+			</Callout>
 		);
 	}
 

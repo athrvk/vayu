@@ -77,7 +77,7 @@ export function InfoBanner({ children }: { children: React.ReactNode }) {
 			{/*
 			 * `size-icon`, not `size-icon-sm`: matches `Callout.tsx`'s leading-icon
 			 * size, which is what actually centers on a `text-xs leading-relaxed`
-			 * line at `mt-px` - see the note in `AuthInheritBanner.tsx`.
+			 * line at `mt-px`.
 			 */}
 			<Info className="size-icon text-primary shrink-0 mt-px" />
 			<p className="text-xs text-foreground leading-relaxed m-0">{children}</p>
