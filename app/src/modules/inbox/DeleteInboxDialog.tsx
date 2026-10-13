@@ -6,6 +6,7 @@
  */
 
 import { DeleteConfirmDialog } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { InboxDeletion } from "./useInboxDeletion";
 
 /**
@@ -24,9 +25,7 @@ export function DeleteInboxDialog({ deletion }: { deletion: InboxDeletion }) {
 			onOpenChange={deletion.closeConfirm}
 			title={`Delete the inbox on port ${inbox.port}?`}
 			confirmLabel="Delete inbox"
-			description={`Its ${captureCount} recorded ${
-				captureCount === 1 ? "request" : "requests"
-			} are removed with it. This can't be undone.`}
+			description={`Its ${captureCount} recorded ${pluralize(captureCount, "request")} are removed with it. This can't be undone.`}
 			onConfirm={deletion.confirmDelete}
 			isDeleting={deletion.isDeleting}
 		/>
