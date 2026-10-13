@@ -28,12 +28,34 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
-import type { RequestAuth } from "@/types";
+import type { Collection, RequestAuth } from "@/types";
 import AuthPanel from "./AuthPanel";
 
-function renderPanel(auth: RequestAuth) {
+// The banner reads the ancestor chain through this hook; a test sets the chain
+// it wants rather than seeding a query cache.
+let ancestorChain: Collection[] = [];
+vi.mock("@/queries/collections", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries/collections")>()),
+	useCollectionAncestors: () => ancestorChain,
+}));
+
+function collection(name: string, auth: RequestAuth): Collection {
+	return {
+		id: name,
+		name,
+		description: "",
+		order: 0,
+		variables: {},
+		auth,
+		elements: [],
+		createdAt: "2026-01-01T00:00:00Z",
+		updatedAt: "2026-01-01T00:00:00Z",
+	};
+}
+
+function renderPanel(auth: RequestAuth, collectionId: string | null = null) {
 	const updateField = vi.fn();
-	const request = { auth, collectionId: null } as unknown as RequestState;
+	const request = { auth, collectionId } as unknown as RequestState;
 	const ctx = {
 		request,
 		updateField,
@@ -102,6 +124,63 @@ describe("AuthPanel with an editable mode", () => {
 		expect(
 			screen.queryByText(/No authentication will be sent with this request/i)
 		).not.toBeInTheDocument();
+	});
+});
+
+describe("AuthPanel inherit banner notices", () => {
+	/*
+	 * The two "nothing to inherit" notices are the app's Callout, not a private
+	 * copy of its box: a hand-rolled one drifts from the surface and icon the
+	 * rest of the app's notices share (#2072).
+	 */
+	function noticeRoot(text: RegExp): HTMLElement {
+		const root = screen.getByText(text).closest("div.rounded-md.border");
+		if (!root) throw new Error("notice has no bordered root");
+		return root as HTMLElement;
+	}
+
+	function expectCallout(root: HTMLElement) {
+		expect(root.className).toContain("bg-panel");
+		expect(root.className).not.toContain("bg-card");
+		// Callout's leading icon is decorative and fixed per severity.
+		expect(root.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+	}
+
+	it("renders a request outside any collection as a Callout", () => {
+		ancestorChain = [];
+		renderPanel({ mode: "inherit" });
+
+		const text = /isn't in a collection, so there's nothing to inherit from/i;
+		expect(screen.getByText(text)).toBeInTheDocument();
+		expect(screen.getByText(/No auth will be sent/i)).toBeInTheDocument();
+		expectCallout(noticeRoot(text));
+	});
+
+	it("names the collection that blocks inheriting with No Auth", () => {
+		ancestorChain = [collection("Payments", { mode: "noauth" })];
+		renderPanel({ mode: "inherit" }, "Payments");
+
+		const text = /is set to No\s+Auth, so nothing is inherited past it/i;
+		expect(screen.getByText("Payments")).toBeInTheDocument();
+		expect(screen.getByText(text, { exact: false })).toBeInTheDocument();
+		expectCallout(noticeRoot(text));
+	});
+
+	it("says no ancestor defines auth when none does", () => {
+		ancestorChain = [collection("Payments", { mode: "none" })];
+		renderPanel({ mode: "inherit" }, "Payments");
+
+		const text = /No ancestor collection defines auth/i;
+		expect(screen.getByText(text, { exact: false })).toBeInTheDocument();
+		expectCallout(noticeRoot(text));
+	});
+
+	it("keeps the resolution chain, not a Callout, when an ancestor supplies auth", () => {
+		ancestorChain = [collection("Payments", { mode: "bearer", token: "abc" })];
+		renderPanel({ mode: "inherit" }, "Payments");
+
+		expect(screen.getByText("SOURCE")).toBeInTheDocument();
+		expect(screen.queryByText(/nothing is inherited past it/i)).not.toBeInTheDocument();
 	});
 });
 
