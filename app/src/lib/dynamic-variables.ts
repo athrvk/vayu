@@ -586,11 +586,6 @@ export function isDynamicVariableName(name: string): boolean {
 	return name.startsWith("$");
 }
 
-/** True only for a name this table can generate - `$guid` yes, `$guidd` no. */
-export function isKnownDynamicVariable(name: string): boolean {
-	return BY_NAME.has(name);
-}
-
 /**
  * Generate a value for `name` (including the `$`), or `null` when the table
  * does not have it.

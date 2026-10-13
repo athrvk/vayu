@@ -24,7 +24,6 @@ import {
 	operationNames,
 	parseGraphQLBody,
 	serializeGraphQLBody,
-	toGraphQLEnvelope,
 	type GraphQLBodyParts,
 } from "./graphql-body";
 
@@ -158,32 +157,6 @@ describe("operationNames", () => {
 			expect(operationNames(query)).toEqual([]);
 		}
 	);
-});
-
-describe("toGraphQLEnvelope", () => {
-	test("wraps a bare document", () => {
-		expect(JSON.parse(toGraphQLEnvelope("query B { b }"))).toEqual({ query: "query B { b }" });
-	});
-
-	test("leaves an envelope alone", () => {
-		const body = JSON.stringify({ query: "{ me }", operationName: "B" });
-		expect(JSON.parse(toGraphQLEnvelope(body))).toEqual({
-			query: "{ me }",
-			operationName: "B",
-		});
-	});
-
-	// A JSON document that is not an envelope is still a query as far as the
-	// mime type promised - wrapping it is what makes it reach the server.
-	test("wraps JSON that is not an envelope", () => {
-		expect(JSON.parse(toGraphQLEnvelope('{"notQuery": 1}'))).toEqual({
-			query: '{"notQuery": 1}',
-		});
-	});
-
-	test("produces an envelope for an empty body", () => {
-		expect(JSON.parse(toGraphQLEnvelope(""))).toEqual({ query: "" });
-	});
 });
 
 describe("variables that are not strict JSON", () => {

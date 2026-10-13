@@ -1091,6 +1091,12 @@ arrives `undefined` - `notifications.maxVisible` feeds `slice(-maxVisible)` in
 preference means adding a line to that merge; the store's test enumerates them
 rather than trusting the list.
 
+**Closed-list pickers snap on rehydrate.** A stored `autoSave.delayMs`,
+`chartBucketSeconds` or `liveRefreshMs` outside its option list (a retired
+option, a hand-edited payload) is snapped in `onRehydrateStorage` - to the
+nearest option for the delay, to the default for the other two - because
+`migrate` runs only on a version mismatch and would miss a same-version payload.
+
 #### `dashboard-store.ts` - Load Test Metrics & State
 
 Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, default 5m, `null` = full run), backstopped by a `maxRetainedTicks` ceiling (default 50,000). Both are kept in sync by `useLiveWindowSync`, mounted once at the App root (not scoped to Settings, so a run streaming with the panel never opened still uses the engine's values), and drive what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)

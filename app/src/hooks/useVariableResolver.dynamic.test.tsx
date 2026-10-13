@@ -38,7 +38,6 @@ vi.mock("@/stores", () => ({
 }));
 
 import { useVariableResolver } from "./useVariableResolver";
-import { isKnownDynamicVariable } from "@/lib/dynamic-variables";
 
 const v = (value: string) => ({ value, enabled: true });
 
@@ -136,12 +135,10 @@ describe("what the token painting sees", () => {
 	it("keeps a known generator out of the variable map", () => {
 		const { getVariable } = setup();
 		expect(getVariable("$guid")).toBeNull();
-		expect(isKnownDynamicVariable("$guid")).toBe(true);
 	});
 
-	it("leaves an unknown generator unknown to both", () => {
+	it("keeps an unknown generator out of the variable map too", () => {
 		const { getVariable } = setup();
 		expect(getVariable("$randomInteger")).toBeNull();
-		expect(isKnownDynamicVariable("$randomInteger")).toBe(false);
 	});
 });

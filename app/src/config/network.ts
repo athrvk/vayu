@@ -54,12 +54,6 @@ export const RUN_SAMPLES_PAGE_LIMIT = 100;
 export const RUNS_PAGE_LIMIT = 50;
 
 /**
- * Page size the MCP `list_runs` tool requests - a single bounded first page,
- * so an agent gets recent runs without downloading unbounded history.
- */
-export const MCP_RUNS_PAGE_LIMIT = 100;
-
-/**
  * Page size for `GET /inbox/:id/requests`. This is the "what arrived recently"
  * window the surface opens with; the live stream appends past it. Not a mirror
  * of the engine's retention - that is the `inboxMaxCaptures` setting, which

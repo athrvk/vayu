@@ -96,11 +96,6 @@ export function isUneditableAuthMode(mode: AuthMode | string): mode is Uneditabl
 	return UNEDITABLE_AUTH_MODES.includes(mode);
 }
 
-/** Narrowing guard: is this a mode the shared field editor can render? */
-export function isEditableAuthMode(mode: AuthMode | string): mode is EditableAuthMode {
-	return (EDITABLE_AUTH_MODES as readonly string[]).includes(mode);
-}
-
 /** Narrowing guard: is this a mode the collection auth tab offers? */
 export function isCollectionAuthMode(mode: AuthMode | string): mode is CollectionAuthMode {
 	return (COLLECTION_AUTH_MODES as readonly string[]).includes(mode);

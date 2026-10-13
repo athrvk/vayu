@@ -231,7 +231,6 @@ export type UiDensity = (typeof UI_DENSITIES)[number]["value"];
 export const DEFAULT_UI_DENSITY: UiDensity = "default";
 
 const FONT_VALUES = new Set<string>(UI_FONTS.map((f) => f.value));
-const MONO_FONT_VALUES = new Set<string>(MONO_FONTS.map((f) => f.value));
 const RADIUS_VALUES = new Set<string>(UI_RADII.map((r) => r.value));
 const DENSITY_VALUES = new Set<string>(UI_DENSITIES.map((d) => d.value));
 
@@ -253,10 +252,6 @@ export function radiusValue(radius: UiRadius): string {
 
 export function fontStack(font: UiFont): string {
 	return (UI_FONTS.find((f) => f.value === font) ?? UI_FONTS[0]).stack;
-}
-
-export function isMonoFont(value: unknown): value is MonoFont {
-	return typeof value === "string" && MONO_FONT_VALUES.has(value);
 }
 
 export function monoFontStack(font: MonoFont): string {

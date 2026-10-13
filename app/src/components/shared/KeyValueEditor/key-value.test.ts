@@ -54,10 +54,9 @@ describe("blank rows", () => {
 		expect(toKeyValueEntries([blank])).toEqual([]);
 	});
 
-	it("drops the ephemeral id and system flag but keeps the file members", () => {
-		const entries = toKeyValueEntries([{ ...fileRow, key: "avatar", system: true }]);
+	it("drops the ephemeral id but keeps the file members", () => {
+		const entries = toKeyValueEntries([{ ...fileRow, key: "avatar" }]);
 		expect(entries[0]).not.toHaveProperty("id");
-		expect(entries[0]).not.toHaveProperty("system");
 		expect(entries[0]).toMatchObject({ key: "avatar", type: "file", src: "/tmp/a.png" });
 	});
 });

@@ -23,11 +23,6 @@ export function asRecord(v: unknown): JsonRecord | undefined {
 	return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as JsonRecord) : undefined;
 }
 
-/** A node's array form, or `[]` - callers step over a non-array rather than throwing. */
-export function asArray(v: unknown): unknown[] {
-	return Array.isArray(v) ? v : [];
-}
-
 /** A node that is a string, else `undefined`. Never coerces - see `asString` for that. */
 export function asStr(v: unknown): string | undefined {
 	return typeof v === "string" ? v : undefined;

@@ -12,9 +12,15 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	CHART_GRANULARITY_OPTIONS,
+	DEFAULT_CHART_BUCKET_SECONDS,
 	DEFAULT_EDITOR_PREFS,
+	DEFAULT_LIVE_REFRESH_MS,
 	DEFAULT_SLO_THRESHOLD_MS,
+	LIVE_REFRESH_OPTIONS,
 	SLO_THRESHOLD_MAX_MS,
+	isChartBucketSeconds,
+	isLiveRefreshMs,
 } from "@/constants/client-settings";
 import { DEFAULT_NOTIFICATION_PREFS } from "@/constants/toast";
 import { DEFAULT_MONO_FONT } from "@/constants/appearance";
@@ -164,6 +170,40 @@ describe("client-settings rehydration", () => {
 		await useClientSettingsStore.persist.rehydrate();
 
 		expect(useClientSettingsStore.getState().systemNotifications).toBe(true);
+	});
+
+	it("snaps a chart granularity and live refresh outside their option lists to the defaults", async () => {
+		// Neither value is one the pickers offer, so they must not survive the
+		// round trip: the picker would show nothing selected while the stale
+		// figure kept driving the charts.
+		expect(isChartBucketSeconds(7)).toBe(false);
+		expect(isLiveRefreshMs(123)).toBe(false);
+		seed({ version: 1, state: { chartBucketSeconds: 7, liveRefreshMs: 123 } });
+
+		await useClientSettingsStore.persist.rehydrate();
+
+		const s = useClientSettingsStore.getState();
+		expect(s.chartBucketSeconds).toBe(DEFAULT_CHART_BUCKET_SECONDS);
+		expect(s.liveRefreshMs).toBe(DEFAULT_LIVE_REFRESH_MS);
+	});
+
+	it("keeps a chart granularity and live refresh that are in their option lists", async () => {
+		const bucket = CHART_GRANULARITY_OPTIONS.find(
+			(o) => o.value !== DEFAULT_CHART_BUCKET_SECONDS
+		);
+		const refresh = LIVE_REFRESH_OPTIONS.find((o) => o.value !== DEFAULT_LIVE_REFRESH_MS);
+		expect(bucket).toBeDefined();
+		expect(refresh).toBeDefined();
+		seed({
+			version: 1,
+			state: { chartBucketSeconds: bucket?.value, liveRefreshMs: refresh?.value },
+		});
+
+		await useClientSettingsStore.persist.rehydrate();
+
+		const s = useClientSettingsStore.getState();
+		expect(s.chartBucketSeconds).toBe(bucket?.value);
+		expect(s.liveRefreshMs).toBe(refresh?.value);
 	});
 
 	it("completes a nested object stored before a key was added to it", async () => {

@@ -334,14 +334,7 @@ export function substitutePathVariables(
  */
 export function composePathParams(rows: readonly KeyValueEntry[]): KeyValueEntry[] {
 	return pathRowsOf(rows).map((row) => {
-		const {
-			id: _id,
-			system: _system,
-			...entry
-		} = row as KeyValueEntry & {
-			id?: unknown;
-			system?: unknown;
-		};
+		const { id: _id, ...entry } = row as KeyValueEntry & { id?: unknown };
 		return entry;
 	});
 }

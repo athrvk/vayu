@@ -104,7 +104,6 @@ export interface VariableSupport {
  */
 export interface KeyValueItem extends FormFieldEntry {
 	id: string;
-	system?: boolean; // true = row is managed by the system (e.g. X-Request-ID)
 }
 
 /** Props of the shared key/value table (`components/shared/KeyValueEditor`). */

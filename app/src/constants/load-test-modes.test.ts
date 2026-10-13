@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { LOAD_TEST_MODES, loadTestModeLabel, loadTestModeDescription } from "./load-test-modes";
+import { LOAD_TEST_MODES, loadTestModeLabel } from "./load-test-modes";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -50,7 +50,6 @@ describe("load test mode vocabulary", () => {
 		// a mode this build has never heard of should still read as a name.
 		expect(loadTestModeLabel("some_future_mode")).toBe("Some future mode");
 		expect(loadTestModeLabel(undefined)).toBe("");
-		expect(loadTestModeDescription("some_future_mode")).toBe("");
 	});
 
 	it("is the only place the labels are written", () => {

@@ -85,7 +85,7 @@ export const toKeyValueItems = (entries: FormFieldEntry[] | undefined): KeyValue
 
 /**
  * Convert UI KeyValueItem[] back to domain entries.
- * Strips the ephemeral `id` and `system` fields.
+ * Strips the ephemeral `id` field.
  * Blank trailing rows are omitted (see `isBlankRow`).
  *
  * The result is typed as `FormFieldEntry[]` - a superset of `KeyValueEntry`
@@ -93,7 +93,5 @@ export const toKeyValueItems = (entries: FormFieldEntry[] | undefined): KeyValue
  * part on the way to storage while headers and params are unaffected.
  */
 export const toKeyValueEntries = (items: KeyValueItem[]): FormFieldEntry[] => {
-	return items
-		.filter((item) => !isBlankRow(item))
-		.map(({ id: _id, system: _sys, ...entry }) => entry);
+	return items.filter((item) => !isBlankRow(item)).map(({ id: _id, ...entry }) => entry);
 };
