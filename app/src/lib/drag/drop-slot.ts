@@ -11,8 +11,7 @@
  * A "slot" is the gap a dragged item would be inserted into: slot 0 is before
  * the first item, slot `n` after the last. `slotAt` reads one off a pointer
  * coordinate, `landingIndex` turns it into the index the item ends up at once it
- * has left its old place, and `isNoOpSlot` names the two slots that put it back
- * where it was.
+ * has left its old place; a drop is a no-op when that equals where it started.
  *
  * Pure and node-tested, so a surface (a tab strip, a list) shares the maths
  * without sharing a DOM. The collection tree does not use it: its drops resolve
@@ -57,11 +56,4 @@ export function landingIndex(insertBefore: number, fromIndex: number): number {
 	assertIndex("Slot", insertBefore);
 	assertIndex("Source index", fromIndex);
 	return insertBefore > fromIndex ? insertBefore - 1 : insertBefore;
-}
-
-/** True for the two slots - just before and just after the item - that leave it where it is. */
-export function isNoOpSlot(slot: number, fromIndex: number): boolean {
-	assertIndex("Slot", slot);
-	assertIndex("Source index", fromIndex);
-	return slot === fromIndex || slot === fromIndex + 1;
 }

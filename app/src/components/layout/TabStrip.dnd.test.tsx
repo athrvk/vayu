@@ -434,6 +434,52 @@ describe("with an overflowing strip", () => {
 		expect(orderedIds()).toEqual(["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t0"]);
 	});
 
+	it("a drop into the slot across an overflow gap lands at the head of the hidden run and stays on screen", () => {
+		// t7 is active, so the strip renders t0..t3 and t7 with t4..t6 hidden between.
+		stubStripWidth(600);
+		useTabsStore.setState({ activeTabId: "t7" });
+		renderStrip();
+		expect(renderedIds().slice(0, 5)).toEqual(["t0", "t1", "t2", "t3", "t7"]);
+
+		// Past t3's midpoint (350) and short of t7's (450): the slot before t7.
+		press("t2", 250);
+		moveTo("t2", 410);
+		expect(tab("t7").querySelector("[data-drop-indicator]")).toHaveAttribute(
+			"data-drop-indicator",
+			"before"
+		);
+		release("t2", 410);
+
+		expect(orderedIds()).toEqual(["t0", "t1", "t3", "t2", "t4", "t5", "t6", "t7"]);
+		expect(renderedIds()).toEqual(["t0", "t1", "t3", "t2", "t7"]);
+		expect(useTabsStore.getState().activeTabId).toBe("t7");
+	});
+
+	it("a slot that is a real move across the gap draws a line, one that is not draws none", () => {
+		// t3 surfaced beside t0: the strip is [t0, t3] with t1, t2 hidden between.
+		useTabsStore.setState({ activeTabId: "t3" });
+		renderStrip();
+		expect(renderedIds()).toEqual(["t0", "t3"]);
+
+		// t3 dropped on its own left edge leaves the visible order alone but moves
+		// it to the head of the hidden run, so the slot is offered.
+		press("t3", 150);
+		moveTo("t3", 110);
+		expect(tab("t3").querySelector("[data-drop-indicator]")).toHaveAttribute(
+			"data-drop-indicator",
+			"before"
+		);
+		release("t3", 110);
+		expect(orderedIds()).toEqual(["t0", "t3", "t1", "t2", "t4", "t5", "t6", "t7"]);
+
+		// t0 dropped right after itself is no move at all, hidden tabs or not.
+		press("t0", 50);
+		moveTo("t0", 90);
+		expect(indicators()).toHaveLength(0);
+		release("t0", 90);
+		expect(orderedIds()).toEqual(["t0", "t3", "t1", "t2", "t4", "t5", "t6", "t7"]);
+	});
+
 	it("a tab chosen from the overflow menu is draggable at once", async () => {
 		renderStrip();
 		const trigger = screen.getByLabelText(/more tabs/i);

@@ -38,7 +38,7 @@ import {
 	IDLE_GESTURE,
 	type DragGesture,
 } from "@/lib/drag/drag-gesture";
-import { isNoOpSlot, landingIndex, slotAt, type ItemExtent } from "@/lib/drag/drop-slot";
+import { landingIndex, slotAt, type ItemExtent } from "@/lib/drag/drop-slot";
 import { moveTabAndFocus } from "./tab-focus";
 import type { TabStripDnd, TabStripPointerHandlers } from "./TabStripDndContext";
 
@@ -61,42 +61,59 @@ function extentOf(el: HTMLElement): ItemExtent {
 }
 
 /**
- * The slot among the rendered tabs a pointer names, or `null` for none: outside
- * the strip vertically, or the two slots that leave the dragged tab where it is.
- */
-function slotUnderPointer(
-	strip: HTMLElement,
-	point: { x: number; y: number },
-	draggedId: string
-): number | null {
-	const bounds = strip.getBoundingClientRect();
-	if (point.y < bounds.top || point.y > bounds.bottom) return null;
-
-	const tabs = renderedTabs(strip);
-	const from = tabs.findIndex((el) => el.dataset.tabId === draggedId);
-	if (from === -1) return null;
-
-	const slot = slotAt(tabs.map(extentOf), point.x);
-	return isNoOpSlot(slot, from) ? null : slot;
-}
-
-/**
  * The `openTabs` index a visible slot inserts before. The strip renders only the
- * tabs that fit, so the slot indexes `visibleIds`, not the store's list; a slot
- * past the last visible tab lands just after it, ahead of whatever overflowed.
- * `null` when a tab the slot names has since closed.
+ * tabs that fit, and the active tab is surfaced beside them from wherever it sits,
+ * so the visible tabs can have hidden ones between them. A slot other than the
+ * first therefore lands right after the visible tab to its left, never before the
+ * one to its right: a drop beside a run of hidden tabs goes to the head of that
+ * run and the dropped tab stays on screen. The end slot lands after the last
+ * rendered tab. `null` when a tab the slot names has since closed.
  */
 function insertionIndex(slot: number, visibleIds: readonly string[]): number | null {
 	if (visibleIds.length === 0) return null;
 	const { openTabs } = useTabsStore.getState();
 	const indexOf = (id: string) => openTabs.findIndex((t) => t.id === id);
 
-	if (slot < visibleIds.length) {
-		const at = indexOf(visibleIds[slot]);
+	if (slot === 0) {
+		const at = indexOf(visibleIds[0]);
 		return at === -1 ? null : at;
 	}
-	const last = indexOf(visibleIds[visibleIds.length - 1]);
-	return last === -1 ? null : last + 1;
+	const left = indexOf(visibleIds[Math.min(slot, visibleIds.length) - 1]);
+	return left === -1 ? null : left + 1;
+}
+
+/**
+ * Where dropping `draggedId` in visible `slot` moves it in the store's list, or
+ * `null` when either tab has since closed. Compared in store terms because a gap
+ * of hidden tabs makes the visible neighbours of a tab differ from its store ones.
+ */
+function storeMove(
+	slot: number,
+	draggedId: string,
+	visibleIds: readonly string[]
+): { from: number; to: number } | null {
+	const insertBefore = insertionIndex(slot, visibleIds);
+	const from = useTabsStore.getState().openTabs.findIndex((t) => t.id === draggedId);
+	if (insertBefore === null || from === -1) return null;
+	return { from, to: landingIndex(insertBefore, from) };
+}
+
+/**
+ * The slot among the rendered tabs a pointer names, or `null` for none: outside
+ * the strip vertically, or a slot whose drop would leave the dragged tab where it is.
+ */
+function slotUnderPointer(
+	strip: HTMLElement,
+	point: { x: number; y: number },
+	draggedId: string,
+	visibleIds: readonly string[]
+): number | null {
+	const bounds = strip.getBoundingClientRect();
+	if (point.y < bounds.top || point.y > bounds.bottom) return null;
+
+	const slot = slotAt(renderedTabs(strip).map(extentOf), point.x);
+	const move = storeMove(slot, draggedId, visibleIds);
+	return move && move.to !== move.from ? slot : null;
 }
 
 /** The tab and edge the drop line is drawn on: slot `s` is before tab `s`, slot `n` after tab `n - 1`. */
@@ -173,7 +190,8 @@ export function useTabStripDnd({ stripRef, visibleIds, onMoved }: TabStripDndOpt
 			const resolved = slotUnderPointer(
 				stripRef.current,
 				{ x: e.clientX, y: e.clientY },
-				pressed.tabId
+				pressed.tabId,
+				visibleIdsRef.current
 			);
 			if (resolved === slotRef.current) return;
 			slotRef.current = resolved;
@@ -192,13 +210,10 @@ export function useTabStripDnd({ stripRef, visibleIds, onMoved }: TabStripDndOpt
 			endDrag();
 			if (!dropped || target === null) return;
 
-			const insertBefore = insertionIndex(target, visibleIdsRef.current);
-			const fromIndex = useTabsStore
-				.getState()
-				.openTabs.findIndex((t) => t.id === pressed.tabId);
-			if (insertBefore === null || fromIndex === -1) return;
+			const move = storeMove(target, pressed.tabId, visibleIdsRef.current);
+			if (!move) return;
 
-			moveTabAndFocus(pressed.tabId, landingIndex(insertBefore, fromIndex));
+			moveTabAndFocus(pressed.tabId, move.to);
 			onMoved(pressed.tabId);
 		},
 		[endDrag, onMoved]
