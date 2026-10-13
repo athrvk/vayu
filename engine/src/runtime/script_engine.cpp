@@ -6203,8 +6203,7 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     // `pm.request.method = 'post'` means POST. Upper-casing is a normalisation
     // of a value the script clearly meant, not the silent acceptance of a
     // wrong one - an unrecognised verb below still fails loudly.
-    std::transform (method_text.begin (), method_text.end (), method_text.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+    method_text = vayu::utils::ascii_upper (method_text);
     if (auto parsed = parse_method (method_text)) {
         staged.method = *parsed;
     } else {
@@ -7287,8 +7286,7 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
         std::string method_text = js_to_string (ctx, js_method.get ());
         // Same normalisation pm.request's write-back applies: 'post' clearly
         // means POST, while an unrecognised verb below still fails loudly.
-        std::transform (method_text.begin (), method_text.end (), method_text.begin (),
-        [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+        method_text = vayu::utils::ascii_upper (method_text);
         if (auto parsed = parse_method (method_text)) {
             out.method = *parsed;
         } else {

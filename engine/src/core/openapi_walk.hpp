@@ -23,10 +23,9 @@
  */
 
 #include "vayu/core/spec_coverage.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -51,12 +50,6 @@ find_object (const nlohmann::ordered_json& node, const char* key) {
         return nullptr;
     }
     return &(*found);
-}
-
-inline std::string upper (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    return value;
 }
 
 /// Which of the two formats Vayu imports a document claims to be. `None` is
@@ -345,7 +338,7 @@ std::vector<WalkedOperation>& walked) {
             continue;
         }
         DeclaredOperation row;
-        row.method = upper (method);
+        row.method = vayu::utils::ascii_upper (method);
         row.path   = path;
         if (identified) {
             row.operation_id = claim_operation_id (*operation, claimed_ids, notes);

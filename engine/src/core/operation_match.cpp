@@ -8,6 +8,7 @@
 #include "vayu/core/operation_match.hpp"
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <cctype>
 #include <unordered_map>
@@ -145,14 +146,6 @@ std::string normalize_path_shape (std::string_view path) {
     return flattened;
 }
 
-std::string upper (std::string_view text) {
-    std::string out (text);
-    for (char& c : out) {
-        c = static_cast<char> (std::toupper (static_cast<unsigned char> (c)));
-    }
-    return out;
-}
-
 /**
  * Whether a concrete path could be this template with its placeholders filled:
  * the same number of segments, and every non-placeholder segment equal.
@@ -255,7 +248,7 @@ std::string spec_path_shape (std::string_view path) {
 }
 
 std::string operation_shape_key (std::string_view method, std::string_view path_shape) {
-    return upper (method) + " " + std::string (path_shape);
+    return vayu::utils::ascii_upper (method) + " " + std::string (path_shape);
 }
 
 namespace {
@@ -341,9 +334,10 @@ std::vector<bool>& operation_claimed) {
         if (request_claimed[i] || !shape) {
             continue;
         }
-        const std::string method = upper (requests[i].method);
+        const std::string method = vayu::utils::ascii_upper (requests[i].method);
         for (size_t j = 0; j < operations.size (); ++j) {
-            if (operation_claimed[j] || upper (operations[j].method) != method) {
+            if (operation_claimed[j] ||
+            vayu::utils::ascii_upper (operations[j].method) != method) {
                 continue;
             }
             if (!fills_template (*shape, operation_shapes[j])) {

@@ -14,6 +14,7 @@
 #include "vayu/core/spec_coverage.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -29,12 +30,6 @@ namespace limits = vayu::core::constants::spec_document;
 /// `"default"`, the pattern OpenAPI gives the response that catches what the
 /// others do not. Compared rather than parsed, so it is spelled once.
 constexpr const char* DEFAULT_PATTERN = "default";
-
-std::string upper (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    return value;
-}
 
 bool all_digits (const std::string& value) {
     return std::all_of (value.begin (), value.end (),
@@ -59,7 +54,7 @@ bool matches_range (const std::string& pattern, int status) {
     std::isdigit (static_cast<unsigned char> (pattern[0])) == 0) {
         return false;
     }
-    if (upper (pattern.substr (1)) != "XX") {
+    if (vayu::utils::ascii_upper (pattern.substr (1)) != "XX") {
         return false;
     }
     const int hundreds = pattern[0] - '0';
@@ -180,8 +175,9 @@ const std::string& stored) {
             continue;
         }
         DeclaredOperation operation;
-        operation.method = upper (row.value ("method", std::string ()));
-        operation.path   = row.value ("path", std::string ());
+        operation.method =
+        vayu::utils::ascii_upper (row.value ("method", std::string ()));
+        operation.path = row.value ("path", std::string ());
         if (operation.method.empty () || operation.path.empty ()) {
             continue;
         }
@@ -238,8 +234,9 @@ std::optional<size_t> OperationIndex::resolve (const std::string& spec_operation
             }
         }
     }
-    const auto method = upper (stamped.value ("method", std::string ()));
-    const auto path   = stamped.value ("path", std::string ());
+    const auto method =
+    vayu::utils::ascii_upper (stamped.value ("method", std::string ()));
+    const auto path = stamped.value ("path", std::string ());
     if (method.empty () || path.empty ()) {
         return std::nullopt;
     }

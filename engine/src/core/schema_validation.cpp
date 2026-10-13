@@ -20,7 +20,6 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <map>
 #include <unordered_set>
 #include <utility>
@@ -34,12 +33,6 @@ namespace vayu::core {
 namespace {
 
 namespace limits = vayu::core::constants::schema_validation;
-
-std::string upper (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    return value;
-}
 
 std::string trim (const std::string& value) {
     const auto first = value.find_first_not_of (" \t");
@@ -66,7 +59,7 @@ std::string media_type_of (const std::string& content_type) {
 /// `METHOD path`, the second identity key - the spelling `OperationIndex` uses,
 /// because both resolve the same stamped `spec_operation` text.
 std::string method_path_key (const std::string& method, const std::string& path) {
-    return upper (method) + " " + path;
+    return vayu::utils::ascii_upper (method) + " " + path;
 }
 
 /**
@@ -557,8 +550,9 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
         if (!row.is_object ()) {
             continue;
         }
-        const auto method = upper (row.value ("method", std::string ()));
-        const auto path   = row.value ("path", std::string ());
+        const auto method =
+        vayu::utils::ascii_upper (row.value ("method", std::string ()));
+        const auto path = row.value ("path", std::string ());
         if (method.empty () || path.empty ()) {
             continue; // one unusable row must not cost the document its index
         }
