@@ -11,7 +11,9 @@
  * Every line is `Vayu <kind> "<name>" (<id>)` plus, for most kinds, a tail that
  * places the entity (` in <collection path>`) or describes it (` - <detail>`).
  * The name is for a person to recognise; the id is the key every MCP tool
- * takes. The grammar, every kind's example and the fixture the examples are
+ * takes. A kind that belongs to another entity (a variable, a spec operation, a
+ * run sample, an element, a threshold) names that owner in its tail instead.
+ * The grammar, every kind's example and the fixture the examples are
  * formatted from are in `docs/engine/mcp.md` ("Naming what the user means"),
  * which `agent-reference.docs.test.ts` holds to this file.
  *
@@ -31,6 +33,7 @@ import { formatInstant } from "@/lib/time-value";
 import { pathLabel } from "@/lib/path-label";
 import type {
 	Collection,
+	ElementDef,
 	Environment,
 	Inbox,
 	InboxCapture,
@@ -39,7 +42,9 @@ import type {
 	Request,
 	RequestExample,
 	Run,
+	RunSample,
 	RunSummary,
+	SpecOperation,
 	TrashEntry,
 } from "@/types";
 
@@ -55,7 +60,12 @@ export type ReferenceKind =
 	| "capture"
 	| "mock server"
 	| "mock issuer"
-	| "trash entry";
+	| "trash entry"
+	| "variable"
+	| "spec operation"
+	| "run sample"
+	| "element"
+	| "threshold";
 
 /** Where a collection chain ends up in a line: `A / B`, the same as the breadcrumb. */
 const PATH_SEPARATOR = " / ";
@@ -72,8 +82,18 @@ export function quoteName(name: string): string {
 		.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 
+/** `variable "Name"`: the kinds with no id of their own are named by their label alone. */
+function named(kind: string, name: string): string {
+	return `${kind} "${quoteName(name)}"`;
+}
+
+/** `request "Name" (id)`: also how a line's tail names the owner it sits under. */
+function entity(kind: string, name: string, id: string | number): string {
+	return `${named(kind, name)} (${id})`;
+}
+
 function head(kind: ReferenceKind, name: string, id: string | number): string {
-	return `Vayu ${kind} "${quoteName(name)}" (${id})`;
+	return `Vayu ${entity(kind, name, id)}`;
 }
 
 /** ` in A / B`, or nothing at the root and when the chain is not loaded. */
@@ -93,7 +113,7 @@ export function exampleReference(
 	request: Pick<Request, "id" | "name">,
 	collectionPath: readonly string[]
 ): string {
-	const owner = `request "${quoteName(request.name)}" (${request.id})`;
+	const owner = entity("request", request.name, request.id);
 	return `${head("example", example.name, example.id)} of ${owner}${inPath(collectionPath)}`;
 }
 
@@ -202,4 +222,88 @@ export function mockIssuerReference(issuer: Pick<MockIssuer, "issuerId" | "port"
 
 export function trashReference(entry: Pick<TrashEntry, "id" | "kind" | "name">): string {
 	return `${head("trash entry", entry.name, entry.id)} - ${entry.kind}`;
+}
+
+/** Where a variable lives. Each scope carries the id the tools address it by; globals have none. */
+export type VariableScope =
+	| { type: "environment"; environment: Pick<Environment, "id" | "name"> }
+	| { type: "collection"; collection: Pick<Collection, "id" | "name"> }
+	| { type: "globals" };
+
+/**
+ * A variable is addressed by its name within a scope, so the line has no id of
+ * its own. It takes `{ name }` and never a `VariableValue`: the value and the
+ * `secret` flag are not reachable from here.
+ */
+export function variableReference(variable: { name: string }, scope: VariableScope): string {
+	const name = `Vayu ${named("variable", variable.name)}`;
+	switch (scope.type) {
+		case "environment":
+			return `${name} in ${entity("environment", scope.environment.name, scope.environment.id)}`;
+		case "collection":
+			return `${name} in ${entity("collection", scope.collection.name, scope.collection.id)}`;
+		case "globals":
+			return `${name} in globals`;
+	}
+}
+
+/**
+ * `GET /pets/{petId}`: the templated path as the document writes it, the
+ * identity `diff_spec` and `sync_spec` match on. `operationId` follows when the
+ * document declares one.
+ */
+export function specOperationReference(
+	operation: Pick<SpecOperation, "method" | "path" | "operationId">,
+	collection: Pick<Collection, "id" | "name">
+): string {
+	const label = `${operation.method.toUpperCase()} ${pathOnly(operation.path)}`;
+	const operationId = operation.operationId ? ` ("${quoteName(operation.operationId)}")` : "";
+	return `Vayu ${named("spec operation", label)} in ${entity("collection", collection.name, collection.id)}${operationId}`;
+}
+
+/** `Vayu run sample (<resultId>) of run (<run_id>)`: no name, the result row id is the key. */
+export function runSampleReference(
+	sample: Pick<RunSample, "resultId">,
+	run: Pick<Run, "id">
+): string {
+	return `Vayu run sample (${sample.resultId}) of run (${run.id})`;
+}
+
+/** Who an element belongs to: a request or a collection, named so the id can be looked up. */
+export type ElementOwner =
+	| { type: "request"; request: Pick<Request, "id" | "name"> }
+	| { type: "collection"; collection: Pick<Collection, "id" | "name"> };
+
+/**
+ * An element is named by its own name, else by its kind (`script.pre`). Its
+ * `config`, where a script or an assertion's expected value sits, is not
+ * reachable from here.
+ */
+export function elementReference(
+	element: Pick<ElementDef, "id" | "kind" | "name">,
+	owner: ElementOwner
+): string {
+	const title = element.name?.trim() || element.kind;
+	const ownerTail =
+		owner.type === "request"
+			? entity("request", owner.request.name, owner.request.id)
+			: entity("collection", owner.collection.name, owner.collection.id);
+	return `${head("element", title, element.id)} of ${ownerTail}`;
+}
+
+/** What a threshold budget belongs to: the run that was judged, or the request that declares it. */
+export type ThresholdOwner =
+	| { type: "run"; run: Pick<Run, "id"> }
+	| { type: "request"; request: Pick<Request, "id" | "name"> };
+
+/**
+ * `key` is the engine's budget name (`latencyP95Ms`, `custom.<name>.<stat>`).
+ * The budget's limit and the measured value are not reachable from here.
+ */
+export function thresholdReference(threshold: { key: string }, owner: ThresholdOwner): string {
+	const ownerTail =
+		owner.type === "run"
+			? `run (${owner.run.id})`
+			: entity("request", owner.request.name, owner.request.id);
+	return `Vayu ${named("threshold", threshold.key)} of ${ownerTail}`;
 }

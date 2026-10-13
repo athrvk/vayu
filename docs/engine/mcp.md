@@ -901,6 +901,19 @@ An entity the app labels by something other than a name is named by that: an
 inbox, a mock server and a mock issuer by their port (a mock server also by its
 collection), a capture by its method and path.
 
+Five kinds belong to another entity, so the line names that owner. A **variable** is its name in a scope - `in environment "<name>"
+(<id>)`, `in collection "<name>" (<id>)` or `in globals` - and the line never
+says what it holds, nor whether it is secret. A **spec operation** is
+`"<METHOD> <path>"`, the path as the OpenAPI document templates it
+(`/pets/{petId}`), then `in collection "<name>" (<id>)` and, when the document
+declares one, `("<operationId>")`. A **run sample** is `(<resultId>) of run
+(<runId>)`. An **element** is named by its own name, else its kind
+(`script.pre`), then `of request "<name>" (<id>)` or `of collection "<name>"
+(<id>)`. A **threshold** is its budget key (`latencyP95Ms`,
+`custom.<name>.<stat>`), then `of run (<runId>)` or `of request "<name>"
+(<id>)`. Look each up through its owner's id; the next section lists the call
+each feeds.
+
 Most kinds add a tail after the id. ` in <A / B>` places an entity in the
 collection tree, root first, and is left off at the root. ` - <detail>` describes
 what the id alone does not: a run's kind, target, start time and status, a trash
@@ -919,15 +932,20 @@ as `en-US` in UTC; the app prints the user's own locale and zone.
 ```
 Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders
 Vayu example "Created" (exa_2d4f6a81-3c5e-4b79-8a1c-6e8f0a2b4c6d) of request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders
+Vayu element "Sign payload" (el_b4d6f8a0-2c1e-4a73-9b5d-7f9a1c3e5b70) of request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
 Vayu collection "Orders" (col_4a6c8e02-9b1d-4f35-a7c8-1d3e5f708192) in Checkout
 Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
 Vayu environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
+Vayu variable "baseUrl" in environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
+Vayu spec operation "GET /orders/{orderId}" in collection "Orders" (col_4a6c8e02-9b1d-4f35-a7c8-1d3e5f708192) ("getOrder")
 Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
 Vayu run "GET /v1/orders" (run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7) - design run, GET /v1/orders, 10/5/26, 9:30:00 AM, failed
 Vayu run "Checkout" (run_c3e5a7b9-1d2f-4c40-8e6a-0b1c2d3e4f50) - collection run, collection "Checkout", 10/6/26, 7:00:00 AM, completed
 Vayu run comparison base (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) target (run_e8f0a2b4-6c7d-4e91-b3a5-c7d9e1f30415)
 Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
 Vayu run "Create order" (run_e8f0a2b4-6c7d-4e91-b3a5-c7d9e1f30415) - load test, POST /v1/orders, 10/7/26, 8:10:00 AM, stopped
+Vayu run sample (1042) of run (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8)
+Vayu threshold "latencyP95Ms" of run (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8)
 Vayu inbox "port 8099" (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
 Vayu capture "POST /stripe/events" (7) in inbox (inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f)
 Vayu mock server "Orders on port 4010" (mock_1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d)
@@ -949,6 +967,19 @@ Where the user copies each kind from in the app:
   tab's menu.
 - **mock issuer**: the issuer's row menu in the Services drawer.
 - **trash entry**: the copy button on the entry in Trash.
+- **variable**: the copy button on the variable's row in the Variables drawer, for an environment's,
+  a collection's and the globals alike. Feeds `resolve_variables` and `update_environment`,
+  `update_collection` or `update_globals` for its scope.
+- **spec operation**: the copy button on an operation's row in a collection's spec sync (the
+  added, changed and removed lists). Feeds `get_spec`, `diff_spec` and `sync_spec`, which match on
+  its method and path.
+- **run sample**: the copy button in a sample card's header on a load test's Samples tab. Feeds
+  `get_run_samples` and `get_run_report`, which join on its `resultId`.
+- **element**: the copy item in an element's row menu, in a request's or a collection's Elements
+  list. Feeds the `elements` argument of `update_request` and `update_collection`.
+- **threshold**: the copy button on a budget's row in the load test config dialog (a custom budget
+  included), and on its verdict in a load test report. Feeds `start_load_run`'s `thresholds` and
+  `get_run_report`'s verdict.
 
 The command palette's `Copy "<tab>" for agent` copies the line of whichever of those tabs is active.
 
