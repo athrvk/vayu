@@ -1839,7 +1839,15 @@ host passes `referenceOwner`, #2047) and Delete - the two
 Move items carrying "Already first" / "Already last" at the row's ends rather
 than being silently off (#1690). Click on
 the header toggles the card; a newly added or duplicated element opens
-expanded, everything else starts collapsed. Alt+Up/Alt+Down on the header's
+expanded, everything else starts collapsed. Which cards are open is kept per
+request or collection id in `tab-selection-store`, so it survives the builder
+unmounting and a switch between two open tabs: both hosts bind the list's
+optional `openIds` / `onOpenChange` props through `useOpenElementRows`
+(`ElementList/useOpenElementRows.ts`), which subscribes by selector. The list
+calls `onOpenChange(id, true)` for a row it adds or duplicates and
+`onOpenChange(id, false)` for one it removes, so the set never holds an id the
+list no longer has. A host with no id (the stored-run copy, an unsaved
+request) passes neither prop and keeps component-local state. Alt+Up/Alt+Down on the header's
 own two toggle buttons moves the row, mirroring the menu's Move items.
 **Rename's autofocus is timed off `RowActionsMenu`'s `onCloseAutoFocus`**, not
 a guessed delay: selecting Rename only flags the row's own pending-rename ref,

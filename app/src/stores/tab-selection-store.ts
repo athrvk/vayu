@@ -8,7 +8,8 @@
 /**
  * Tab Selection Store
  *
- * Remembers each surface's active sub-tab per entity id, so it survives:
+ * Remembers each surface's active sub-tab, and which element rows are
+ * expanded, per entity id, so they survive:
  * - `Shell.tsx` unmounting the whole surface when its workspace tab is not
  *   the one on screen (one tab's surface is mounted at a time)
  * - Switching between two open request/collection tabs of the same type,
@@ -16,9 +17,10 @@
  *   as `response-store.ts` does for response data
  *
  * In memory only, like `response-store.ts` - a sub-tab pick is not worth
- * persisting to disk. Unlike that store, this one carries no LRU cap: an
- * entry here is one enum value rather than a response body, so even a long
- * session's worth of distinct entities costs nothing worth bounding. Entries
+ * persisting to disk, and neither is which cards are open. Unlike that store,
+ * this one carries no LRU cap: an entry here is one enum value or a handful of
+ * element ids rather than a response body, so even a long session's worth of
+ * distinct entities costs nothing worth bounding. Entries
  * are dropped only when their entity is (`clearEntity`, wired at the same
  * delete seams `response-store` uses).
  */
@@ -31,6 +33,11 @@ interface TabSelectionState {
 	requestTab: Map<string, RequestTab>;
 	responseTab: Map<string, ResponseTab>;
 	collectionTab: Map<string, CollectionTab>;
+	/**
+	 * Expanded `ElementList` rows, by request or collection id. Replaced, never
+	 * mutated in place: a host subscribes to its entity's set by reference.
+	 */
+	openElementRows: Map<string, ReadonlySet<string>>;
 
 	getRequestTab: (id: string) => RequestTab | null;
 	setRequestTab: (id: string, tab: RequestTab) => void;
@@ -38,8 +45,10 @@ interface TabSelectionState {
 	setResponseTab: (id: string, tab: ResponseTab) => void;
 	getCollectionTab: (id: string) => CollectionTab | null;
 	setCollectionTab: (id: string, tab: CollectionTab) => void;
+	getOpenElementRows: (entityId: string) => ReadonlySet<string> | null;
+	setElementRowOpen: (entityId: string, elementId: string, open: boolean) => void;
 
-	/** Drops `id` from all three maps - a deleted request or collection. */
+	/** Drops `id` from all four maps - a deleted request or collection. */
 	clearEntity: (id: string) => void;
 	clearAll: () => void;
 }
@@ -48,6 +57,7 @@ export const useTabSelectionStore = create<TabSelectionState>((set, get) => ({
 	requestTab: new Map(),
 	responseTab: new Map(),
 	collectionTab: new Map(),
+	openElementRows: new Map(),
 
 	getRequestTab: (id) => get().requestTab.get(id) ?? null,
 	setRequestTab: (id, tab) => {
@@ -70,23 +80,49 @@ export const useTabSelectionStore = create<TabSelectionState>((set, get) => ({
 		set({ collectionTab });
 	},
 
+	getOpenElementRows: (entityId) => get().openElementRows.get(entityId) ?? null,
+	setElementRowOpen: (entityId, elementId, open) => {
+		const current = get().openElementRows.get(entityId);
+		if ((current?.has(elementId) ?? false) === open) return;
+		const ids = new Set(current);
+		if (open) ids.add(elementId);
+		else ids.delete(elementId);
+		const openElementRows = new Map(get().openElementRows);
+		openElementRows.set(entityId, ids);
+		set({ openElementRows });
+	},
+
 	clearEntity: (id) => {
-		const { requestTab, responseTab, collectionTab } = get();
-		if (!requestTab.has(id) && !responseTab.has(id) && !collectionTab.has(id)) return;
+		const { requestTab, responseTab, collectionTab, openElementRows } = get();
+		if (
+			!requestTab.has(id) &&
+			!responseTab.has(id) &&
+			!collectionTab.has(id) &&
+			!openElementRows.has(id)
+		)
+			return;
 		const nextRequestTab = new Map(requestTab);
 		nextRequestTab.delete(id);
 		const nextResponseTab = new Map(responseTab);
 		nextResponseTab.delete(id);
 		const nextCollectionTab = new Map(collectionTab);
 		nextCollectionTab.delete(id);
+		const nextOpenElementRows = new Map(openElementRows);
+		nextOpenElementRows.delete(id);
 		set({
 			requestTab: nextRequestTab,
 			responseTab: nextResponseTab,
 			collectionTab: nextCollectionTab,
+			openElementRows: nextOpenElementRows,
 		});
 	},
 
 	clearAll: () => {
-		set({ requestTab: new Map(), responseTab: new Map(), collectionTab: new Map() });
+		set({
+			requestTab: new Map(),
+			responseTab: new Map(),
+			collectionTab: new Map(),
+			openElementRows: new Map(),
+		});
 	},
 }));

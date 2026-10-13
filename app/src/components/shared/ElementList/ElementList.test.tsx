@@ -297,6 +297,115 @@ describe("ElementList - collapse and expand", () => {
 	});
 });
 
+describe("ElementList - controlled disclosure (openIds / onOpenChange)", () => {
+	function renderControlled(
+		elements: ElementDef[],
+		openIds: ReadonlySet<string>,
+		onOpenChange = vi.fn(),
+		onChange = vi.fn()
+	) {
+		render(
+			<ElementList
+				elements={elements}
+				onChange={onChange}
+				kinds={KINDS}
+				openIds={openIds}
+				onOpenChange={onOpenChange}
+			/>
+		);
+		return { onOpenChange, onChange };
+	}
+
+	it("renders a row in openIds expanded with no click, and the others collapsed", () => {
+		renderControlled([extractElement("e1"), extractElement("e2")], new Set(["e1"]));
+
+		const rows = screen.getAllByRole("button", { name: /^(Expand|Collapse) Extract JSON$/ });
+		expect(rows.map((r) => r.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+		expect(screen.getAllByLabelText("JSONPath")).toHaveLength(1);
+	});
+
+	it("reports a header click as onOpenChange(id, false) and leaves the form up until the host answers", () => {
+		const { onOpenChange } = renderControlled([extractElement("e1")], new Set(["e1"]));
+
+		fireEvent.click(
+			within(rowFor("Extract JSON")).getByRole("button", { name: "Collapse Extract JSON" })
+		);
+
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith("e1", false);
+		expect(screen.getByLabelText("JSONPath")).toBeInTheDocument();
+	});
+
+	it("reports expanding a collapsed row as onOpenChange(id, true)", () => {
+		const { onOpenChange } = renderControlled([extractElement("e1")], new Set());
+
+		expandRow("Extract JSON");
+
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith("e1", true);
+		expect(screen.queryByLabelText("JSONPath")).not.toBeInTheDocument();
+	});
+
+	it("reports the title button's click too, not only the chevron's", () => {
+		const { onOpenChange } = renderControlled([extractElement("e1")], new Set());
+
+		fireEvent.click(screen.getByText("Extract JSON"));
+
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith("e1", true);
+	});
+
+	it("opens a row added through the picker by calling onOpenChange(newId, true)", async () => {
+		const { onOpenChange, onChange } = renderControlled([], new Set());
+
+		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+		await screen.findByText("Once Only");
+		fireEvent.click(screen.getByText("Once Only").closest("[cmdk-item]")!);
+
+		const [added] = onChange.mock.calls[0][0] as ElementDef[];
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(added.id, true);
+	});
+
+	it("opens a duplicated row by calling onOpenChange(copyId, true)", async () => {
+		const { onOpenChange, onChange } = renderControlled([extractElement("e1")], new Set());
+
+		await chooseRowAction("Extract JSON", "Duplicate");
+
+		const [, copy] = onChange.mock.calls[0][0] as ElementDef[];
+		expect(copy.id).not.toBe("e1");
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(copy.id, true);
+	});
+
+	it("closes a removed row's entry by calling onOpenChange(id, false)", async () => {
+		const { onOpenChange, onChange } = renderControlled(
+			[extractElement("e1")],
+			new Set(["e1"])
+		);
+
+		await chooseRowAction("Extract JSON", "Delete");
+
+		expect(onChange).toHaveBeenCalledWith([]);
+		expect(onOpenChange).toHaveBeenCalledExactlyOnceWith("e1", false);
+	});
+
+	it("round-trips through a host that keeps the set, surviving the list unmounting", () => {
+		const open = new Set<string>();
+		const host = () => (
+			<ElementList
+				elements={[extractElement("e1")]}
+				onChange={vi.fn()}
+				kinds={KINDS}
+				openIds={new Set(open)}
+				onOpenChange={(id, next) => (next ? open.add(id) : open.delete(id))}
+			/>
+		);
+		const first = render(host());
+		expandRow("Extract JSON");
+		first.unmount();
+
+		render(host());
+
+		expect(screen.getByLabelText("JSONPath")).toBeInTheDocument();
+	});
+});
+
 describe("ElementList - the Add menu", () => {
 	function openMenu() {
 		fireEvent.click(screen.getByRole("button", { name: /add element/i }));

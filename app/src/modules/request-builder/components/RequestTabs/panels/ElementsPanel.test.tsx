@@ -22,7 +22,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { useLayoutStore } from "@/stores";
+import { useLayoutStore, useTabSelectionStore } from "@/stores";
 import type { RequestBuilderContextValue } from "../../../types";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
@@ -144,6 +144,9 @@ beforeEach(() => {
 	// one test's pick does not surface as a duplicate "Recently used" row
 	// in the next.
 	useLayoutStore.setState({ recentElementKinds: [] });
+	// Every case shares request id `req_1`, and which rows are open is kept per
+	// id in this store - one case's expanded row must not open the next one's.
+	useTabSelectionStore.getState().clearAll();
 });
 
 describe("ElementsPanel", () => {
