@@ -146,7 +146,7 @@ export interface DisplayMetrics {
 	send_rate?: number; // Rate at which requests are dispatched to the server
 	throughput?: number; // Rate at which responses are received from the server
 	// Connection metrics
-	backpressure?: number; // Queue depth: requests sent but not yet responded
+	backpressure?: number; // In flight: sent but not yet answered, plus slots a think timer holds
 	current_concurrency?: number; // Number of concurrent HTTP connections
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;

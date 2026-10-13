@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "temp_database.hpp"
+#include "vayu/core/worker_count.hpp"
 #include "vayu/db/database.hpp"
 
 namespace vayu::http::routes {
@@ -49,12 +50,16 @@ class HealthRouteTest : public ::testing::Test {
 // pins the fallback side of `resolve_worker_count`, independently of the
 // configured-value case below, which needs `init ()` to seed the row before
 // it can be overwritten.
-TEST_F (HealthRouteTest, WithNoConfiguredValueHealthReportsTheDetectedCoreCount) {
+TEST_F (HealthRouteTest, WithNoConfiguredValueHealthReportsTheEffectiveCoreCount) {
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
     const auto health = vayu::http::routes::build_health_response (*db);
 
-    EXPECT_EQ (health["workers"].get<unsigned int> (), std::thread::hardware_concurrency ());
+    // Not the raw `hardware_concurrency ()`, which is 0 on a host that cannot
+    // tell, and `/health` must never report 0 workers.
+    EXPECT_EQ (health["workers"].get<unsigned int> (),
+    vayu::core::effective_worker_count (std::thread::hardware_concurrency ()));
+    EXPECT_GT (health["workers"].get<unsigned int> (), 0u);
 }
 
 TEST_F (HealthRouteTest, WithAConfiguredValueHealthReportsIt) {

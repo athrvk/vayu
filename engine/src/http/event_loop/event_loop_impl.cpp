@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/worker_count.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
@@ -38,10 +39,8 @@ EventLoopImpl::EventLoopImpl (EventLoopConfig cfg) : config (std::move (cfg)) {
     // Determine number of workers
     size_t num_workers = config.num_workers;
     if (num_workers == 0) {
-        num_workers = std::thread::hardware_concurrency ();
-        if (num_workers == 0) {
-            num_workers = 4; // Fallback
-        }
+        num_workers =
+        vayu::core::effective_worker_count (std::thread::hardware_concurrency ());
     }
 
     // Create workers, each rate-limited to its share of the aggregate budget.

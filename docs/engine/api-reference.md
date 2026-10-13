@@ -645,7 +645,8 @@ Check engine status and version.
 `workers` is the `workers` setting's effective value: the configured count
 when it is set, otherwise the detected core count - the same value the next
 run's `EventLoop` will use, not the machine's raw core count regardless of
-configuration.
+configuration. It is never `0`: a host whose core count cannot be detected
+reports `4`, the fallback the event loop applies too.
 
 **`recovery` (optional, issue #922)** - present only when this engine startup had
 to recover the database, and **absent** on a clean start rather than `null`:
@@ -7723,7 +7724,7 @@ no frame.
 | `sendRate` | Rate requests are dispatched (open model) |
 | `throughput` | Rate responses are received |
 | `activeConnections` | Current in-flight requests |
-| `backpressure` | Queue depth (`requestsSent − totalRequests`) |
+| `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire |

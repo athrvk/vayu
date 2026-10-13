@@ -21,6 +21,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -1810,4 +1811,67 @@ TEST_F (LoadStrategyTest, AThinkTimerHoldsTheRunBackByItsWait) {
     const auto entry = element_entry (summary, "el_think");
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
     EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
+}
+
+// The live frame's `backpressure` and the stored tick's are one number (#1921):
+// both read `RunContext::in_flight ()`, which counts a slot a `timer.think`
+// wait still holds. Driven through `collect_metrics` with the counters set by
+// hand, so the reservations are the only difference between that definition
+// and `requestsSent - totalRequests`, and the wait outlives the test.
+TEST_F (LoadStrategyTest, ThinkReservationsCountInTheLiveAndStoredBackpressureAlike) {
+    const size_t SENT        = 3;
+    const size_t THINKING    = 2;
+    const int64_t WAIT_MS    = 60000;
+    const std::string run_id = "run-think-backpressure";
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto context =
+    std::make_shared<vayu::core::RunContext> (run_id, nlohmann::json::object ());
+    context->requests_sent = SENT;
+    for (size_t i = 0; i < THINKING; ++i) {
+        context->reserve_think_wait (WAIT_MS);
+    }
+    ASSERT_EQ (context->in_flight (), SENT + THINKING);
+
+    context->start_time_ms = 1;
+    context->is_running    = true;
+    std::thread metrics (
+    [context, &db] () { vayu::core::collect_metrics (context, &db); });
+
+    // The stored tick is gated at 1 Hz; wait for the first one to land.
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (5);
+    while (db.count_metric_ticks (run_id) == 0 && std::chrono::steady_clock::now () < deadline) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (50));
+    }
+    context->is_running = false;
+    metrics.join ();
+
+    const auto stored = db.get_metric_ticks_since (run_id, 0);
+    ASSERT_FALSE (stored.empty ())
+    << "no tick was persisted within the deadline";
+    const auto stored_tick = nlohmann::json::parse (stored.front ().payload);
+    EXPECT_EQ (stored_tick["backpressure"].get<size_t> (), SENT + THINKING);
+
+    // The live frame published at the same tick shares its wall-clock stamp.
+    const auto batch = context->ticks_since (0);
+    ASSERT_FALSE (batch.payloads.empty ());
+    bool matched                         = false;
+    constexpr std::string_view DATA_LINE = "\ndata: ";
+    for (const auto& frame : batch.payloads) {
+        const auto data_at = frame.find (DATA_LINE);
+        ASSERT_NE (data_at, std::string::npos) << frame;
+        const auto live =
+        nlohmann::json::parse (frame.substr (data_at + DATA_LINE.size ()));
+        if (live["timestamp"] != stored_tick["timestamp"]) {
+            continue;
+        }
+        matched = true;
+        EXPECT_EQ (live["backpressure"], stored_tick["backpressure"]) << frame;
+    }
+    EXPECT_TRUE (matched)
+    << "no live frame carried the stored tick's timestamp";
+
+    const auto published = context->latest_live_tick ();
+    ASSERT_HAS_VALUE (published);
+    EXPECT_EQ (published->in_flight, SENT + THINKING);
 }

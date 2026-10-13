@@ -67,6 +67,7 @@ add_executable(vayu_tests
     numeric_flag_test.cpp
     high_resolution_timer_test.cpp
     platform_test.cpp
+    worker_count_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
     tls_verification_test.cpp

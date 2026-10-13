@@ -372,6 +372,10 @@ int run_cli (std::span<char* const> args) {
         print_version ();
         return 0;
     }
+    if (*request == vayu::core::CliRequest::MissingCommand) {
+        print_help ();
+        return 1;
+    }
 
     // Initialize curl (still needed for httplib?)
     // httplib uses its own socket implementation, but vayu::http::global_init
@@ -396,9 +400,6 @@ int run_cli (std::span<char* const> args) {
         }
     } else if (options.command == "backup") {
         result = backup_via_daemon (options.daemon_url);
-    } else if (options.command[0] == '-') {
-        // Already handled flags above
-        result = 0;
     } else {
         std::string msg = "Error: Unknown command '" + options.command + "'";
         std::cerr << msg << "\n";

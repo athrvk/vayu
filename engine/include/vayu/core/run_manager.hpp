@@ -1058,7 +1058,7 @@ struct MetricTickSample {
     size_t current_concurrency = 0;
     double send_rate           = 0.0;
     double throughput          = 0.0;
-    size_t backpressure        = 0;   // Sent but not yet responded
+    size_t backpressure        = 0;   // In flight, think-timer slots included
     double error_rate          = 0.0; // Percent
     size_t dropped_requests    = 0;
     size_t bytes_sent          = 0;

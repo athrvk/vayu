@@ -49,6 +49,11 @@ enum class CliRequest : std::uint8_t {
     /// `--version`. Long form only: `-v` is `--verbose` (issue #1557), the same
     /// flag `vayu-engine` has always read it as.
     Version,
+    /// Every argument was a flag and none named a command (`vayu-cli
+    /// --no-color`): the caller prints the usage and exits 1, the answer to no
+    /// arguments at all. Reported here, not left to the dispatch, which would
+    /// otherwise have to guess that a leading `-` meant "flags already handled".
+    MissingCommand,
 };
 
 namespace detail {
@@ -108,7 +113,8 @@ read_run_command (std::span<char* const> args, size_t& i, CliOptions& options) {
  * @return what to do next, or the line to print on stderr before exiting 1.
  *
  * `args[1]` is the command and is seeded onto @p options by the caller; the
- * loop still visits it, because a command is also how `-h` reaches this.
+ * loop still visits it, because a command is also how `-h` reaches this. A
+ * flag in that position means no command was given (CliRequest::MissingCommand).
  */
 inline std::expected<CliRequest, std::string>
 read_cli_flags (std::span<char* const> args, CliOptions& options) {
@@ -140,6 +146,9 @@ read_cli_flags (std::span<char* const> args, CliOptions& options) {
         if (!outcome) {
             return std::unexpected (outcome.error ());
         }
+    }
+    if (args.size () > 1 && looks_like_a_flag (args[1])) {
+        return CliRequest::MissingCommand;
     }
     return CliRequest::Continue;
 }

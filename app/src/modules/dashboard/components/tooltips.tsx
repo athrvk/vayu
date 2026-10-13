@@ -70,7 +70,7 @@ export const TOOLTIPS = {
 	totalRequests:
 		"Cumulative count of requests dispatched and completed (success + failure). For iterations mode this approaches the configured target; for the others it grows with throughput.",
 	peakConcurrency:
-		"Maximum simultaneously in-flight requests at any point during the run. Backpressure shown beneath is the current queue depth (requests dispatched but not yet sent to curl).",
+		"Maximum simultaneously in-flight requests at any point during the run, counting a slot a think timer is still holding. Backpressure shown beneath is that same in-flight count right now: requests sent but not yet answered, plus any think-timer slots.",
 	p99Latency:
 		"Tail latency - 99 of every 100 requests completed in this time or less. Real user-impact lives at p99, not the mean; mean (sub-text) is misleading on heavy-tailed distributions.",
 	throughputPerVu:

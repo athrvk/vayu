@@ -13,6 +13,9 @@ The `vayu-cli` tool executes HTTP requests and load tests via the Vayu Engine da
 vayu-cli <COMMAND> [OPTIONS]
 ```
 
+The command comes first. With no command at all, or only flags (`vayu-cli
+--no-color`), the usage is printed and the exit code is 1.
+
 ## Commands
 
 ### run

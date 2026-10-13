@@ -413,10 +413,6 @@ std::vector<std::string>& failure_messages) {
         run_totals.failed += totals.failed;
     }
 
-    // Every scripted step drew a blank, so the run validated nothing.
-    if (run_totals.sampled == 0) {
-        return run_totals;
-    }
     return run_totals;
 }
 
@@ -2513,7 +2509,7 @@ int64_t& first_tick_steady_ms) {
     double throughput =
     run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
 
-    // Calculate backpressure (true in-flight: requests sent but not yet responded)
+    // Sent but not yet answered, plus every slot a think timer still holds.
     size_t backpressure = context->in_flight ();
 
     // One locked read shared by the debug line and the persisted
@@ -2666,9 +2662,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         }
         stats["currentRps"] = live_current_rps;
 
-        // Backpressure: sent but not yet responded (mirrors SSE handler).
-        size_t backpressure =
-        requests_sent > current_total ? requests_sent - current_total : 0;
+        // One definition with the persisted tick and peak_in_flight, think-timer
+        // reservations included (#1921), so it can exceed this frame's
+        // `requestsSent - totalRequests`.
+        const size_t backpressure = context->in_flight ();
         stats["backpressure"]     = backpressure;
         stats["runId"]            = context->run_id;
         stats["timestamp"]        = now_wall_ms;
