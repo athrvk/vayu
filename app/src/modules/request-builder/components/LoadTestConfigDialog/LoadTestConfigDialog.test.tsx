@@ -1072,6 +1072,25 @@ describe("pass/fail budgets", () => {
 		expect(p99().value).toBe("");
 		expect(started(second.onStart).thresholds).toBeUndefined();
 	});
+
+	it("hands the saved request to each budget's Copy for agent (#2047)", () => {
+		open({ referenceOwner: { type: "request", request: { id: "req_7", name: "Orders" } } });
+		openBudgets();
+
+		// Mutation check: stop forwarding `referenceOwner` to BudgetsSection and
+		// the fixed fields lose their button.
+		expect(
+			screen.getByRole("button", { name: "Copy p99 latency at most for agent" })
+		).toBeInTheDocument();
+	});
+
+	it("has no Copy for agent without a saved request", () => {
+		open();
+		openBudgets();
+
+		expect(screen.getByLabelText(/p99 latency/i)).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /for agent$/ })).not.toBeInTheDocument();
+	});
 });
 
 /**

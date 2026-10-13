@@ -50,8 +50,12 @@ const sessionStore = { activeEnvironmentId: null, setActiveEnvironmentId: vi.fn(
 vi.mock("@/stores", async () => {
 	const saveStore =
 		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
+	// `VariableRow`'s "Copy for agent" button reads the toast store through `useCopy`.
+	const toastStore =
+		await vi.importActual<typeof import("@/stores/toast-store")>("@/stores/toast-store");
 	return {
 		useSaveStore: saveStore.useSaveStore,
+		useToastStore: toastStore.useToastStore,
 		useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
 	};
 });

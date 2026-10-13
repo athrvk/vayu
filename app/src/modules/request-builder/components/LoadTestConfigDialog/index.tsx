@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
+import type { ThresholdOwner } from "@/lib/agent-reference";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
@@ -87,6 +88,12 @@ export interface LoadTestConfigDialogProps {
 	 * the audit.
 	 */
 	request?: ColumnAuditRequest;
+	/**
+	 * The saved request, for each budget's "Copy for agent". The stored row's id
+	 * and name, not the draft's: an unsaved rename is not a name the agent's
+	 * tools know. Absent for a request with no saved row.
+	 */
+	referenceOwner?: ThresholdOwner;
 }
 
 export default function LoadTestConfigDialog({
@@ -98,6 +105,7 @@ export default function LoadTestConfigDialog({
 	isStreamingRequest,
 	collectionId,
 	request,
+	referenceOwner,
 }: LoadTestConfigDialogProps) {
 	/**
 	 * The ceilings are a user setting (Settings -> Load testing), so every range
@@ -298,6 +306,7 @@ export default function LoadTestConfigDialog({
 						failRun={failRun}
 						onFailRunChange={setFailRun}
 						disabled={isStarting}
+						referenceOwner={referenceOwner}
 					/>
 
 					<MonitoringSection

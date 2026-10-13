@@ -24,6 +24,7 @@ import { collectionNamePath } from "@/modules/collections/tree-utils";
 import {
 	captureReference,
 	collectionReference,
+	elementReference,
 	environmentReference,
 	exampleReference,
 	inboxReference,
@@ -32,7 +33,11 @@ import {
 	requestReference,
 	runComparisonReference,
 	runReference,
+	runSampleReference,
+	specOperationReference,
+	thresholdReference,
 	trashReference,
+	variableReference,
 	type RunReferenceInput,
 } from "./agent-reference";
 import { formatInstant } from "./time-value";
@@ -101,9 +106,24 @@ const FORMATTED = [
 		request,
 		requestPath
 	),
+	elementReference(
+		{ id: "el_b4d6f8a0-2c1e-4a73-9b5d-7f9a1c3e5b70", kind: "script.pre", name: "Sign payload" },
+		{ type: "request", request }
+	),
 	collectionReference(orders, collectionNamePath(orders.parentId ?? "", collections)),
 	collectionReference(checkout, []),
 	environmentReference({ id: "env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9", name: "Staging" }),
+	variableReference(
+		{ name: "baseUrl" },
+		{
+			type: "environment",
+			environment: { id: "env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9", name: "Staging" },
+		}
+	),
+	specOperationReference(
+		{ method: "GET", path: "/orders/{orderId}", operationId: "getOrder" },
+		orders
+	),
 	runReference(createOrderRun),
 	runReference({
 		id: "run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7",
@@ -123,6 +143,8 @@ const FORMATTED = [
 		checkout.name
 	),
 	runComparisonReference(createOrderRun, stoppedRun),
+	runSampleReference({ resultId: 1042 }, createOrderRun),
+	thresholdReference({ key: "latencyP95Ms" }, { type: "run", run: createOrderRun }),
 	inboxReference({ inboxId: "inbox_c0d1e2f3-a4b5-4c6d-8e7f-9a0b1c2d3e4f", port: 8099 }),
 	captureReference({
 		id: 7,

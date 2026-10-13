@@ -33,6 +33,8 @@ import {
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
 import { TimeValue } from "@/components/shared/TimeValue";
+import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
+import { runSampleReference } from "@/lib/agent-reference";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
 
@@ -43,6 +45,8 @@ interface SampleRequestCardProps {
 	onToggle: () => void;
 	/** The captured exchange for this row, once the samples query has it. */
 	captured?: RunSample;
+	/** The run this sample belongs to; "Copy for agent" is absent without it. */
+	runId?: string;
 }
 
 export default function SampleRequestCard({
@@ -51,7 +55,15 @@ export default function SampleRequestCard({
 	isExpanded,
 	onToggle,
 	captured,
+	runId,
 }: SampleRequestCardProps) {
+	// `sample.id` is absent on a report from an engine older than 0.15.0, and
+	// the line is keyed by it.
+	const reference =
+		runId !== undefined && sample.id !== undefined
+			? runSampleReference({ resultId: sample.id }, { id: runId })
+			: null;
+
 	// A stored sample is dating a run, not placing a moment inside one, so this
 	// side wants the day where the dashboard's live row wants milliseconds.
 	// Gating on the phases themselves, not on `sample.trace`. The two used to be
@@ -72,6 +84,14 @@ export default function SampleRequestCard({
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
+			actions={
+				reference !== null && (
+					<CopyForAgentButton
+						reference={reference}
+						label={`Copy sample ${index + 1} for agent`}
+					/>
+				)
+			}
 			// Flat divide-y strip, matching the dashboard's live list
 			// (`RequestResponseView.tsx`) rather than a boxed card per row - no
 			// per-row radius needed, the same "square on purpose" exception a

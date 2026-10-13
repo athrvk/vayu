@@ -21,7 +21,7 @@
  * `useRequestBuilderContext`, which `ScriptElementForm` itself cannot depend on.
  */
 
-import { useElementKindsQuery } from "@/queries";
+import { useElementKindsQuery, useRequestQuery } from "@/queries";
 import { ElementList } from "@/components/shared/ElementList";
 import { ScriptReferencesRow } from "@/components/shared";
 import { useRequestBuilderContext } from "../../../context";
@@ -40,6 +40,9 @@ export default function ElementsPanel() {
 		dataColumns,
 	} = useRequestBuilderContext();
 	const { data: kinds } = useElementKindsQuery();
+	// The saved row, not the builder's draft: an unsaved rename would put a name
+	// in the line that the engine and the agent's tools do not know yet.
+	const { data: savedRequest } = useRequestQuery(request.id ?? null);
 	// `script.setup` / `script.teardown` are collection-only (issue #1499):
 	// the engine refuses them on a request's own `elements`, so a request's
 	// Add menu never offers them - `InheritedElementsNotice` below still shows
@@ -64,6 +67,9 @@ export default function ElementsPanel() {
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
 				kinds={addableKinds}
+				referenceOwner={
+					savedRequest ? { type: "request", request: savedRequest } : undefined
+				}
 				renderAboveForm={(element) => {
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
 						return null;

@@ -264,6 +264,14 @@ Everything else is counted as unchanged, and requests carrying no operation at
 all are counted separately: the contract never described them, so the comparison
 leaves them out and says how many it left out.
 
+Every operation row in the three lists carries a **Copy for agent** button: it
+puts `Vayu spec operation "GET /pets/{petId}" in collection "<name>" (<id>)`,
+followed by `("<operationId>")` when the document declares one, on the
+clipboard, so an agent can be pointed at the operation without retyping it.
+`diff_spec` and `sync_spec` match on that method and path. The line names the
+collection being synced and the templated path as the document writes it, and
+carries nothing the draft or the field diff holds - no URL, header or body.
+
 ### The fourth kind: a change no request row can carry
 
 The three buckets describe operations, and plenty of contract changes are not

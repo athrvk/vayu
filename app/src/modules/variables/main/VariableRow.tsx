@@ -19,10 +19,11 @@
  */
 
 import { memo } from "react";
-import { KeyRound, Trash2 } from "lucide-react";
+import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import {
 	Button,
 	Checkbox,
+	IconSwap,
 	Input,
 	Select,
 	SelectContent,
@@ -33,6 +34,8 @@ import {
 	TooltipIconButton,
 } from "@/components/ui";
 import { TimeMarker } from "@/components/shared/TimeValue";
+import { useCopy } from "@/hooks/useCopy";
+import { variableReference, type VariableScope } from "@/lib/agent-reference";
 import { cn } from "@/lib/utils";
 import { parseTimeValue } from "@/lib/time-value";
 import type { VariableType } from "@/lib/variable-cast";
@@ -55,6 +58,12 @@ interface VariableRowProps {
 	onCommitNow: () => void;
 	onRemove: (id: string) => void;
 	onBlur: () => void;
+	/**
+	 * The scope this table edits, for the "Copy for agent" line; null while the
+	 * environment or collection it names is not loaded. Memoised by the parent
+	 * so it never defeats `memo`.
+	 */
+	scope: VariableScope | null;
 }
 
 function VariableRow({
@@ -64,7 +73,9 @@ function VariableRow({
 	onCommitNow,
 	onRemove,
 	onBlur,
+	scope,
 }: VariableRowProps) {
+	const { copy, copied } = useCopy({ feedback: "icon" });
 	/*
 	 * A row is a secret field once it is persisted: an unsaved blank row masks
 	 * nothing, because there is no stored secret to protect and typing into a
@@ -77,6 +88,12 @@ function VariableRow({
 	 * tooltip a screen share or a screenshot can catch.
 	 */
 	const showsTime = !variable.secret && parseTimeValue(variable.value) !== null;
+	/*
+	 * A secret row names nothing for an agent to look up, and an unsaved or
+	 * unnamed row names nothing at all. The line is built from `{ name }` alone,
+	 * never the row, so the value cannot ride along.
+	 */
+	const referenceScope = !variable.secret && !variable.isNew && variable.key ? scope : null;
 
 	return (
 		/*
@@ -246,17 +263,44 @@ function VariableRow({
 				)}
 			</td>
 			<td className="py-1">
-				{!variable.isNew && (
-					<Button
-						variant="rowActionDestructive"
-						size="icon"
-						onClick={() => onRemove(variable.id)}
-						aria-label="Delete variable"
-						className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-					>
-						<Trash2 className="size-icon" />
-					</Button>
-				)}
+				<div className="flex items-center justify-end gap-1">
+					{referenceScope && (
+						<Button
+							variant="rowAction"
+							size="icon"
+							onClick={() =>
+								void copy(
+									variableReference({ name: variable.key }, referenceScope),
+									"Reference"
+								)
+							}
+							aria-label={`Copy ${variable.key} for agent`}
+							title="Copy for agent"
+							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						>
+							<IconSwap
+								state={copied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon" />,
+									copied: (
+										<Check className="size-icon text-status-success-text" />
+									),
+								}}
+							/>
+						</Button>
+					)}
+					{!variable.isNew && (
+						<Button
+							variant="rowActionDestructive"
+							size="icon"
+							onClick={() => onRemove(variable.id)}
+							aria-label="Delete variable"
+							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						>
+							<Trash2 className="size-icon" />
+						</Button>
+					)}
+				</div>
 			</td>
 		</tr>
 	);

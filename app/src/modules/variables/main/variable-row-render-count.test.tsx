@@ -86,6 +86,9 @@ const variablesStoreState = { selectedCategory: null, setSelectedCategory: vi.fn
 vi.mock("@/stores", () => ({
 	useSaveStore: (selector: (state: typeof saveStoreState) => unknown) => selector(saveStoreState),
 	useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
+	// `VariableRow`'s "Copy for agent" button reads the toast store through `useCopy`.
+	useToastStore: (selector: (state: { showToast: () => void }) => unknown) =>
+		selector({ showToast: () => {} }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({

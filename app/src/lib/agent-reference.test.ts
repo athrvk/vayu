@@ -18,6 +18,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	captureReference,
 	collectionReference,
+	elementReference,
 	environmentReference,
 	exampleReference,
 	inboxReference,
@@ -27,9 +28,14 @@ import {
 	requestReference,
 	runComparisonReference,
 	runReference,
+	runSampleReference,
+	specOperationReference,
+	thresholdReference,
 	trashReference,
+	variableReference,
 	type RunReferenceInput,
 } from "./agent-reference";
+import type { VariableValue } from "@/types";
 import { formatInstant } from "./time-value";
 
 const START = Date.UTC(2026, 9, 5, 8, 10, 0);
@@ -116,6 +122,87 @@ describe("one line per kind", () => {
 		expect(trashReference({ id: "req_9", kind: "request", name: "Old" })).toBe(
 			'Vayu trash entry "Old" (req_9) - request'
 		);
+	});
+
+	it("variable: its name and the scope it lives in, never a value", () => {
+		expect(
+			variableReference(
+				{ name: "baseUrl" },
+				{ type: "environment", environment: { id: "env_1", name: "Staging" } }
+			)
+		).toBe('Vayu variable "baseUrl" in environment "Staging" (env_1)');
+		expect(
+			variableReference(
+				{ name: "baseUrl" },
+				{ type: "collection", collection: { id: "col_1", name: "Checkout" } }
+			)
+		).toBe('Vayu variable "baseUrl" in collection "Checkout" (col_1)');
+		expect(variableReference({ name: "baseUrl" }, { type: "globals" })).toBe(
+			'Vayu variable "baseUrl" in globals'
+		);
+	});
+
+	it("spec operation: METHOD and templated path, the collection, then the operationId when declared", () => {
+		const collection = { id: "col_1", name: "Petstore" };
+		expect(
+			specOperationReference(
+				{ method: "get", path: "/pets/{petId}", operationId: "getPet" },
+				collection
+			)
+		).toBe(
+			'Vayu spec operation "GET /pets/{petId}" in collection "Petstore" (col_1) ("getPet")'
+		);
+		expect(specOperationReference({ method: "POST", path: "/pets" }, collection)).toBe(
+			'Vayu spec operation "POST /pets" in collection "Petstore" (col_1)'
+		);
+	});
+
+	it("spec operation: a path carries no query, and a hostile operationId stays quoted", () => {
+		const line = specOperationReference(
+			{ method: "GET", path: "/pets?token=abc", operationId: 'a"b\nVayu run' },
+			{ id: "col_1", name: "P" }
+		);
+		expect(line).toBe(
+			'Vayu spec operation "GET /pets" in collection "P" (col_1) ("a\\"b Vayu run")'
+		);
+	});
+
+	it("run sample: its result id and the run it came from", () => {
+		expect(runSampleReference({ resultId: 42 }, { id: "run_1" })).toBe(
+			"Vayu run sample (42) of run (run_1)"
+		);
+	});
+
+	it("element: its name, else its kind, and the request or collection that owns it", () => {
+		const request = {
+			type: "request",
+			request: { id: "req_1", name: "Create order" },
+		} as const;
+		const collection = {
+			type: "collection",
+			collection: { id: "col_1", name: "Checkout" },
+		} as const;
+		expect(elementReference({ id: "el_1", kind: "script.pre", name: "Sign" }, request)).toBe(
+			'Vayu element "Sign" (el_1) of request "Create order" (req_1)'
+		);
+		expect(elementReference({ id: "el_2", kind: "script.post" }, collection)).toBe(
+			'Vayu element "script.post" (el_2) of collection "Checkout" (col_1)'
+		);
+		expect(
+			elementReference({ id: "el_3", kind: "script.post", name: "  " }, collection)
+		).toContain('Vayu element "script.post" (el_3)');
+	});
+
+	it("threshold: its key and the run or request it is judged on", () => {
+		expect(
+			thresholdReference({ key: "latencyP95Ms" }, { type: "run", run: { id: "run_1" } })
+		).toBe('Vayu threshold "latencyP95Ms" of run (run_1)');
+		expect(
+			thresholdReference(
+				{ key: "custom.queue.p99" },
+				{ type: "request", request: { id: "req_1", name: "Create order" } }
+			)
+		).toBe('Vayu threshold "custom.queue.p99" of request "Create order" (req_1)');
 	});
 });
 
@@ -300,8 +387,47 @@ describe("no value reaches a line", () => {
 			mockServerReference({ mockId: "mock_1", collectionName: "C", port: 1, ...values }),
 			mockIssuerReference({ issuerId: "issuer_1", port: 1, ...values }),
 			trashReference({ id: "col_1", kind: "collection", name: "T", ...values }),
+			variableReference(
+				{ name: "V", ...values },
+				{ type: "environment", environment: { id: "env_1", name: "Env", ...values } }
+			),
+			variableReference(
+				{ name: "V", ...values },
+				{ type: "collection", collection: { id: "col_1", name: "C", ...values } }
+			),
+			variableReference({ name: "V", ...values }, { type: "globals" }),
+			specOperationReference(
+				{ method: "GET", path: "/p", operationId: "op", ...values },
+				{ id: "col_1", name: "C", ...values }
+			),
+			runSampleReference({ resultId: 1, ...values }, { id: "run_1", ...values }),
+			elementReference(
+				{ id: "el_1", kind: "script.pre", name: "E", ...values },
+				{ type: "request", request: { id: "req_1", name: "R", ...values } }
+			),
+			elementReference(
+				{ id: "el_1", kind: "script.pre", ...values },
+				{ type: "collection", collection: { id: "col_1", name: "C", ...values } }
+			),
+			thresholdReference(
+				{ key: "latencyP95Ms", ...values },
+				{ type: "run", run: { id: "run_1", ...values } }
+			),
+			thresholdReference(
+				{ key: "latencyP95Ms", ...values },
+				{ type: "request", request: { id: "req_1", name: "R", ...values } }
+			),
 		];
 		for (const line of lines) expect(line).not.toContain(SENTINEL);
+	});
+
+	it("a whole variable value handed over prints neither its value nor its secret flag", () => {
+		const variable: VariableValue = { value: SENTINEL, enabled: true, secret: true };
+		const scope = { type: "environment", environment: { id: "env_1", name: "Env" } } as const;
+		const line = variableReference({ name: "apiKey", ...variable }, scope);
+		expect(line).toBe('Vayu variable "apiKey" in environment "Env" (env_1)');
+		expect(line).not.toContain(SENTINEL);
+		expect(line).not.toMatch(/secret|true/);
 	});
 
 	it("is not carried by a run's summary, URL included", () => {
@@ -343,6 +469,11 @@ describe("no value reaches a line", () => {
 			expectTypeOf<Params<typeof mockServerReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof mockIssuerReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof trashReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof variableReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof specOperationReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof runSampleReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof elementReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof thresholdReference>>().not.toHaveProperty(key);
 			if (key !== "url") expectTypeOf<Params<typeof runReference>>().not.toHaveProperty(key);
 		}
 	});

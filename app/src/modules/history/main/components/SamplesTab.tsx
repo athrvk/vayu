@@ -81,6 +81,7 @@ export default function SamplesTab({ report }: TabProps) {
 							key={idx}
 							sample={sample}
 							index={idx}
+							runId={report.metadata?.runId}
 							isExpanded={expandedIndex === idx}
 							onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}
 							captured={

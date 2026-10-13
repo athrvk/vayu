@@ -76,6 +76,9 @@ vi.mock("@/stores", () => ({
 	// object back instead of the one function it asked for.
 	useSaveStore: (selector: (state: typeof saveStoreState) => unknown) => selector(saveStoreState),
 	useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
+	// `VariableRow`'s "Copy for agent" button reads the toast store through `useCopy`.
+	useToastStore: (selector: (state: { showToast: () => void }) => unknown) =>
+		selector({ showToast: () => {} }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({

@@ -67,6 +67,9 @@ export * from "./StoredExchangeWarning";
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
 
+// The icon "Copy for agent" button for rows with no menu (#2047)
+export * from "./CopyForAgentButton";
+
 // HTTP method display (single source of truth)
 export * from "./MethodBadge";
 
