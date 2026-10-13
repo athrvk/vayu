@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import type { ReactNode } from "react";
 import { Input, Label } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,7 @@ export function NumberField({
 	placeholder,
 	hint,
 	optional,
+	action,
 }: {
 	id: string;
 	label: string;
@@ -43,6 +45,8 @@ export function NumberField({
 	placeholder?: string;
 	hint?: string;
 	optional?: boolean;
+	/** A control beside the input, such as a row-level copy button. */
+	action?: ReactNode;
 }) {
 	const hintId = hint ? `${id}-hint` : undefined;
 	return (
@@ -53,27 +57,30 @@ export function NumberField({
 					<span className="ml-1 font-normal text-muted-foreground">(optional)</span>
 				)}
 			</Label>
-			<div className="relative">
-				<Input
-					id={id}
-					type="number"
-					inputMode="numeric"
-					value={value}
-					onChange={(e) => onChange(e.target.value)}
-					min={min}
-					max={max}
-					placeholder={placeholder}
-					aria-describedby={hintId}
-					className={cn("text-sm", unit && "pr-14")}
-				/>
-				{unit && (
-					<span
-						className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-label text-muted-foreground"
-						aria-hidden="true"
-					>
-						{unit}
-					</span>
-				)}
+			<div className="flex items-center gap-2">
+				<div className="relative min-w-0 flex-1">
+					<Input
+						id={id}
+						type="number"
+						inputMode="numeric"
+						value={value}
+						onChange={(e) => onChange(e.target.value)}
+						min={min}
+						max={max}
+						placeholder={placeholder}
+						aria-describedby={hintId}
+						className={cn("text-sm", unit && "pr-14")}
+					/>
+					{unit && (
+						<span
+							className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-label text-muted-foreground"
+							aria-hidden="true"
+						>
+							{unit}
+						</span>
+					)}
+				</div>
+				{action}
 			</div>
 			{hint && (
 				<p id={hintId} className="text-label leading-relaxed text-muted-foreground">

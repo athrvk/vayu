@@ -7,7 +7,8 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Label, Switch } from "@/components/ui";
-import { NumberField } from "@/components/shared";
+import { CopyForAgentButton, NumberField } from "@/components/shared";
+import { thresholdReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { DisclosureCard } from "./DisclosureCard";
 import { BUDGET_FIELDS, type BudgetDraft, type CustomBudgetDraft } from "./budgets";
 import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
@@ -21,6 +22,8 @@ interface BudgetsSectionProps {
 	onFailRunChange: (value: boolean) => void;
 	/** Locks the custom rows while the run is starting. */
 	disabled: boolean;
+	/** The saved request the budgets belong to; "Copy for agent" is absent without it. */
+	referenceOwner?: ThresholdOwner;
 }
 
 /** The run's pass/fail limits: the fixed fields, the custom rows, and what a miss does. */
@@ -32,6 +35,7 @@ export function BudgetsSection({
 	failRun,
 	onFailRunChange,
 	disabled,
+	referenceOwner,
 }: BudgetsSectionProps) {
 	const [open, setOpen] = useState(false);
 
@@ -55,6 +59,14 @@ export function BudgetsSection({
 					max={field.max}
 					placeholder="No budget"
 					hint={field.hint}
+					action={
+						referenceOwner && (
+							<CopyForAgentButton
+								reference={thresholdReference({ key: field.key }, referenceOwner)}
+								label={`Copy ${field.label} for agent`}
+							/>
+						)
+					}
 				/>
 			))}
 
@@ -74,6 +86,7 @@ export function BudgetsSection({
 					onChange={onCustomBudgetsChange}
 					idPrefix="lt"
 					disabled={disabled}
+					referenceOwner={referenceOwner}
 				/>
 			</div>
 

@@ -57,6 +57,7 @@ import type {
 import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
+import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import { composePathParams } from "./utils/path-variables";
 import { bodyModeHeaders, toFlatHeaders } from "./utils/key-value";
@@ -329,6 +330,17 @@ export default function RequestBuilder() {
 					}
 				: undefined,
 		[pendingLoadTestRequest]
+	);
+
+	// The saved row names the request in a budget's "Copy for agent" (#2047).
+	const savedRequestId = fetchedRequest?.id;
+	const savedRequestName = fetchedRequest?.name;
+	const thresholdOwner = useMemo<ThresholdOwner | undefined>(
+		() =>
+			savedRequestId !== undefined && savedRequestName !== undefined
+				? { type: "request", request: { id: savedRequestId, name: savedRequestName } }
+				: undefined,
+		[savedRequestId, savedRequestName]
 	);
 
 	// Convert fetched request to RequestState format
@@ -1047,6 +1059,7 @@ export default function RequestBuilder() {
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}
 					request={pendingLoadTestAuditRequest}
+					referenceOwner={thresholdOwner}
 				/>
 			)}
 		</>

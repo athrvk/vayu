@@ -52,7 +52,8 @@ import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
 import { Button, Checkbox, DeleteConfirmDialog, ICON_MOTION } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, CopyForAgentButton } from "@/components/shared";
+import { specOperationReference } from "@/lib/agent-reference";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { useDiffSpecMutation, useSpecMetaReader, useSyncSpecMutation } from "@/queries/specs";
@@ -66,7 +67,13 @@ import {
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { RefReport } from "@/services/importers/ref-bundler";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, SpecDiffChanged, SpecDiffResponse, SpecField } from "@/types";
+import type {
+	Collection,
+	SpecDiffChanged,
+	SpecDiffResponse,
+	SpecField,
+	SpecOperation,
+} from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -270,6 +277,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				{state.phase === "diff" && (
 					<>
 						<DiffReport
+							collection={collection}
 							diff={state.diff}
 							unresolvedRefs={state.unresolvedRefs}
 							refReport={state.refReport}
@@ -361,12 +369,18 @@ interface SelectionProps {
 }
 
 function DiffReport({
+	collection,
 	diff,
 	unresolvedRefs,
 	refReport,
 	selection,
 	onChange,
-}: { diff: SpecDiffResponse; unresolvedRefs: number; refReport: RefReport } & SelectionProps) {
+}: {
+	collection: Collection;
+	diff: SpecDiffResponse;
+	unresolvedRefs: number;
+	refReport: RefReport;
+} & SelectionProps) {
 	const toggleAdded = (key: string, on: boolean) => {
 		const added = new Set(selection.added);
 		if (on) added.add(key);
@@ -444,6 +458,8 @@ function DiffReport({
 							title={entry.draft.name}
 							detail={operationKey(entry.operation)}
 							note={entry.folder ? `into ${entry.folder}` : undefined}
+							operation={entry.operation}
+							collection={collection}
 						/>
 					))}
 				</Group>
@@ -462,6 +478,8 @@ function DiffReport({
 							title={entry.name}
 							detail={operationKey(entry.operation)}
 							note="delete"
+							operation={entry.operation}
+							collection={collection}
 						/>
 					))}
 				</Group>
@@ -476,6 +494,7 @@ function DiffReport({
 						<ChangedRow
 							key={changed.requestId}
 							changed={changed}
+							collection={collection}
 							fields={selection.changed.get(changed.requestId)}
 							onChange={(fields) => setChanged(changed.requestId, fields)}
 						/>
@@ -492,12 +511,34 @@ function DiffReport({
 	);
 }
 
+/**
+ * "Copy for agent" on an operation row (#2047). Beside the row's `<label>`, not
+ * inside it, so a copy never reads as a tick. The collection is the one being
+ * synced, the one `diff_spec` and `sync_spec` take.
+ */
+function OperationCopyButton({
+	operation,
+	collection,
+}: {
+	operation: SpecOperation;
+	collection: Collection;
+}) {
+	return (
+		<CopyForAgentButton
+			reference={specOperationReference(operation, collection)}
+			label={`Copy ${operationKey(operation)} for agent`}
+		/>
+	);
+}
+
 function ChangedRow({
 	changed,
+	collection,
 	fields,
 	onChange,
 }: {
 	changed: SpecDiffChanged;
+	collection: Collection;
 	/** The ticked fields, or `undefined` when this request is not being applied. */
 	fields: ReadonlySet<SpecField> | undefined;
 	onChange: (fields: ReadonlySet<SpecField> | null) => void;
@@ -513,33 +554,36 @@ function ChangedRow({
 
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2 space-y-1">
-			<label className="flex items-center gap-2">
-				<Checkbox
-					checked={applying}
-					onChange={(e) =>
-						onChange(
-							e.target.checked
-								? new Set(
-										changed.fields
-											.filter((field) => !field.userTouched)
-											.map((field) => field.field)
-									)
-								: null
-						)
-					}
-					aria-label={`Apply changes to ${changed.name}`}
-					// `size-target` (issue #1679), not `size-icon`: same reason as
-					// the field-level checkbox below - a bare checkbox is its own
-					// hit target. `items-center`, not `items-baseline`, above: a
-					// checkbox this size floats above a single-line label at its
-					// text baseline rather than sitting level with it.
-					className="size-target"
-				/>
-				<span className="text-xs font-medium">{changed.name}</span>
-				<span className="text-label font-mono text-muted-foreground break-all">
-					{operationKey(changed.operation)}
-				</span>
-			</label>
+			<div className="flex items-center gap-2">
+				<label className="flex min-w-0 flex-1 items-center gap-2">
+					<Checkbox
+						checked={applying}
+						onChange={(e) =>
+							onChange(
+								e.target.checked
+									? new Set(
+											changed.fields
+												.filter((field) => !field.userTouched)
+												.map((field) => field.field)
+										)
+									: null
+							)
+						}
+						aria-label={`Apply changes to ${changed.name}`}
+						// `size-target` (issue #1679), not `size-icon`: same reason as
+						// the field-level checkbox below - a bare checkbox is its own
+						// hit target. `items-center`, not `items-baseline`, above: a
+						// checkbox this size floats above a single-line label at its
+						// text baseline rather than sitting level with it.
+						className="size-target"
+					/>
+					<span className="text-xs font-medium">{changed.name}</span>
+					<span className="text-label font-mono text-muted-foreground break-all">
+						{operationKey(changed.operation)}
+					</span>
+				</label>
+				<OperationCopyButton operation={changed.operation} collection={collection} />
+			</div>
 
 			{changed.renamed && (
 				<p className="text-label text-muted-foreground">
@@ -616,16 +660,20 @@ function CheckRow({
 	title,
 	detail,
 	note,
+	operation,
+	collection,
 }: {
 	checked: boolean;
 	onChange: (on: boolean) => void;
 	title: string;
 	detail: string;
 	note?: string;
+	operation: SpecOperation;
+	collection: Collection;
 }) {
 	return (
-		<li className="rounded-md border border-rule surface-sunken p-2">
-			<label className="flex items-baseline gap-2">
+		<li className="flex items-center gap-2 rounded-md border border-rule surface-sunken p-2">
+			<label className="flex min-w-0 flex-1 items-baseline gap-2">
 				<Checkbox
 					checked={checked}
 					onChange={(e) => onChange(e.target.checked)}
@@ -641,6 +689,7 @@ function CheckRow({
 				</span>
 				{note && <span className="text-label text-muted-foreground">{note}</span>}
 			</label>
+			<OperationCopyButton operation={operation} collection={collection} />
 		</li>
 	);
 }

@@ -22,6 +22,7 @@
  */
 
 import { Plus, X } from "lucide-react";
+import { CopyForAgentButton } from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -31,10 +32,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
+import { thresholdReference, type ThresholdOwner } from "@/lib/agent-reference";
 import {
 	CUSTOM_BUDGET_STATS,
 	type CustomBudgetDraft,
 	type CustomBudgetStat,
+	customBudgetKey,
 	emptyCustomBudgetRow,
 } from "./budgets";
 
@@ -48,9 +51,20 @@ export interface CustomBudgetRowsProps {
 	 */
 	idPrefix: string;
 	disabled?: boolean;
+	/**
+	 * The saved request these budgets belong to; each named row's "Copy for
+	 * agent" is absent without it, as in the collection runner, which has none.
+	 */
+	referenceOwner?: ThresholdOwner;
 }
 
-export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomBudgetRowsProps) {
+export function CustomBudgetRows({
+	rows,
+	onChange,
+	idPrefix,
+	disabled,
+	referenceOwner,
+}: CustomBudgetRowsProps) {
 	const update = (id: string, patch: Partial<CustomBudgetDraft>) =>
 		onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
 
@@ -71,6 +85,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 					<span className="min-w-0 flex-1">Metric name</span>
 					<span className="w-24">Stat</span>
 					<span className="w-24">At most</span>
+					{referenceOwner && <span className="w-control-sm shrink-0" />}
 					{/* The remove button's column, so the captions line up with the fields. */}
 					<span className="w-9" />
 				</div>
@@ -122,6 +137,9 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 						className="w-24 shrink-0 text-sm"
 						disabled={disabled}
 					/>
+					{referenceOwner && (
+						<CustomBudgetCopyButton row={row} index={index} owner={referenceOwner} />
+					)}
 					<Button
 						type="button"
 						variant="ghost"
@@ -147,6 +165,30 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 				Add custom metric budget
 			</Button>
 		</div>
+	);
+}
+
+/**
+ * A row names a budget once it has a metric name; before that the slot stays
+ * empty at the button's width so the columns do not shift as the name is typed.
+ */
+function CustomBudgetCopyButton({
+	row,
+	index,
+	owner,
+}: {
+	row: CustomBudgetDraft;
+	index: number;
+	owner: ThresholdOwner;
+}) {
+	const name = row.name.trim();
+	if (name === "") return <span className="size-control-sm shrink-0" aria-hidden="true" />;
+
+	return (
+		<CopyForAgentButton
+			reference={thresholdReference({ key: customBudgetKey(name, row.stat) }, owner)}
+			label={`Copy custom budget ${index + 1} for agent`}
+		/>
 	);
 }
 

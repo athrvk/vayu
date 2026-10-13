@@ -25,8 +25,10 @@
  */
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { thresholdReference } from "@/lib/agent-reference";
 import { cn } from "@/lib/utils";
 import type { RunReport } from "@/types/domain";
+import { CopyForAgentButton } from "./CopyForAgentButton";
 
 /**
  * How each budget reads on screen. Keyed by the engine's metric name, which
@@ -50,10 +52,12 @@ function formatValue(value: number): string {
 
 export interface ThresholdVerdictProps {
 	verdict: RunReport["thresholdValidation"];
+	/** The run that was judged; each check's "Copy for agent" is absent without it. */
+	runId?: string;
 	className?: string;
 }
 
-export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) {
+export function ThresholdVerdict({ verdict, runId, className }: ThresholdVerdictProps) {
 	if (!verdict || verdict.checks.length === 0) return null;
 
 	const failed = verdict.failed > 0;
@@ -123,21 +127,32 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 										{unit})
 									</span>
 								</span>
-								<span
-									className={cn(
-										"font-mono font-medium",
-										check.passed
-											? "text-status-success-text"
-											: "text-destructive-text"
-									)}
-								>
-									{evaluated ? (
-										<>
-											{formatValue(check.actual ?? 0)}
-											{unit}
-										</>
-									) : (
-										"no samples"
+								<span className="flex items-center gap-1.5">
+									<span
+										className={cn(
+											"font-mono font-medium",
+											check.passed
+												? "text-status-success-text"
+												: "text-destructive-text"
+										)}
+									>
+										{evaluated ? (
+											<>
+												{formatValue(check.actual ?? 0)}
+												{unit}
+											</>
+										) : (
+											"no samples"
+										)}
+									</span>
+									{runId !== undefined && (
+										<CopyForAgentButton
+											reference={thresholdReference(
+												{ key: check.metric },
+												{ type: "run", run: { id: runId } }
+											)}
+											label={`Copy ${meta?.label ?? check.metric} budget for agent`}
+										/>
 									)}
 								</span>
 							</li>

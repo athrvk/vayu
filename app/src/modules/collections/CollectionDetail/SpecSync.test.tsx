@@ -36,9 +36,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { useToastStore } from "@/stores";
 import type {
 	Collection,
+	SpecDiffAdded,
 	SpecDiffChanged,
+	SpecDiffRemoved,
 	SpecDiffResponse,
 	SpecDocumentMeta,
 	SpecDraftRequest,
@@ -673,5 +676,120 @@ describe("SpecSync", () => {
 		// Still the diff, still ticked: nothing was written, so there is nothing
 		// to re-check before trying again.
 		expect(screen.getByRole("button", { name: /apply selected/i })).toBeTruthy();
+	});
+});
+
+describe("Copy for agent on an operation row (#2047)", () => {
+	const SENTINEL = "s3cr3t-sentinel";
+	const writeText = vi.fn();
+
+	const GET_PET: SpecOperation = { operationId: "getPet", method: "get", path: "/pets/{petId}" };
+	const DELETE_PET: SpecOperation = { method: "DELETE", path: "/pets/{petId}" };
+
+	const added: SpecDiffAdded = {
+		operation: GET_PET,
+		folder: "pets",
+		draft: draft({ name: "Get a pet", url: `{{baseUrl}}/pets/{{petId}}?token=${SENTINEL}` }),
+		safe: true,
+	};
+	const removed: SpecDiffRemoved = {
+		requestId: "req_9",
+		name: "Delete a pet",
+		operation: DELETE_PET,
+		safe: false,
+	};
+
+	beforeEach(() => {
+		writeText.mockReset().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		useToastStore.setState({ toasts: [] });
+		diffSpec.mockResolvedValue(
+			diffResponse({
+				added: [added],
+				removed: [removed],
+				changed: [
+					changed({
+						fields: [
+							{
+								field: "url",
+								current: `{{baseUrl}}/pets?token=${SENTINEL}`,
+								next: "{{baseUrl}}/pets",
+								userTouched: false,
+							},
+						],
+					}),
+				],
+			})
+		);
+	});
+
+	const copyButton = (operation: string) =>
+		screen.getByRole("button", { name: `Copy ${operation} for agent` });
+
+	/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+	const liveGlyph = (button: HTMLElement) =>
+		button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+
+	async function renderDiff() {
+		renderSync();
+		check();
+		await screen.findByText(/the document has changed/i);
+	}
+
+	it.each([
+		[
+			"a new operation",
+			"GET /pets/{petId}",
+			'Vayu spec operation "GET /pets/{petId}" in collection "Pets API" (col_1) ("getPet")',
+		],
+		[
+			"a removed one",
+			"DELETE /pets/{petId}",
+			'Vayu spec operation "DELETE /pets/{petId}" in collection "Pets API" (col_1)',
+		],
+		[
+			"a changed one",
+			"GET /pets",
+			'Vayu spec operation "GET /pets" in collection "Pets API" (col_1) ("listPets")',
+		],
+	])("copies the formatter's line for %s", async (_row, operation, line) => {
+		await renderDiff();
+
+		fireEvent.click(copyButton(operation));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith(line);
+	});
+
+	it("swaps the glyph to a check and raises no toast", async () => {
+		await renderDiff();
+		const button = copyButton("GET /pets/{petId}");
+		expect(liveGlyph(button)).toContain("lucide-copy");
+
+		fireEvent.click(button);
+
+		await waitFor(() => expect(liveGlyph(button)).toContain("lucide-check"));
+		expect(useToastStore.getState().toasts).toEqual([]);
+	});
+
+	it("keeps everything the draft and the field diff carry off the clipboard", async () => {
+		await renderDiff();
+
+		fireEvent.click(copyButton("GET /pets/{petId}"));
+		fireEvent.click(copyButton("GET /pets"));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+		for (const [line] of writeText.mock.calls) expect(line).not.toContain(SENTINEL);
+	});
+
+	it("does not tick the row it sits beside", async () => {
+		await renderDiff();
+		const box = screen.getByRole("checkbox", { name: "Get a pet (GET /pets/{petId})" });
+		const before = (box as HTMLInputElement).checked;
+
+		fireEvent.click(copyButton("GET /pets/{petId}"));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect((box as HTMLInputElement).checked).toBe(before);
 	});
 });
