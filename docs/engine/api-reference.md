@@ -7723,7 +7723,7 @@ no frame.
 | `sendRate` | Rate requests are dispatched (open model) |
 | `throughput` | Rate responses are received |
 | `activeConnections` | Current in-flight requests |
-| `backpressure` | Queue depth (`requestsSent − totalRequests`) |
+| `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
