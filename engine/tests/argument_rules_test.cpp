@@ -213,6 +213,32 @@ TEST (ArgumentRulesTest, TheCommandItselfIsLeftToTheDispatch) {
     EXPECT_EQ (*request, core::CliRequest::Continue);
 }
 
+TEST (ArgumentRulesTest, FlagsWithNoCommandAreRefusedLikeNoArgumentsAtAll) {
+    // `vayu-cli --no-color` used to exit 0 and print nothing, so a script that
+    // lost its subcommand looked like a success (#1921).
+    const auto read = [] (std::initializer_list<std::string_view> line) {
+        core::CliOptions options;
+        const ArgumentVector args (line);
+        return core::read_cli_flags (args.span (), options);
+    };
+
+    for (const auto& request :
+    { read ({ "--no-color" }), read ({ "--daemon", "http://127.0.0.1:9999" }),
+    read ({ "--verbose", "2" }), read ({ "--verbose", "run", "req.json" }) }) {
+        ASSERT_HAS_VALUE (request) << request.error ();
+        EXPECT_EQ (*request, core::CliRequest::MissingCommand);
+    }
+}
+
+TEST (ArgumentRulesTest, ACommandBeforeItsFlagsIsNotMissing) {
+    core::CliOptions options;
+    const ArgumentVector args ({ "run", "req.json", "--no-color" });
+    const auto request = core::read_cli_flags (args.span (), options);
+
+    ASSERT_HAS_VALUE (request) << request.error ();
+    EXPECT_EQ (*request, core::CliRequest::Continue);
+}
+
 // ---------------------------------------------------------------------------
 // What the rules must not have broken
 // ---------------------------------------------------------------------------
