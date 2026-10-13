@@ -17,7 +17,7 @@
  * only way to not pay for a subsystem is to not be in it.
  *
  * The MCP stack is the case that made this a test (#1145): the barrel pulled
- * the MCP SDK, zod and a 7,300-line tool registry with 67 schemas built at
+ * the MCP SDK, zod and a large tool registry whose schemas are built at
  * module scope, ~250-300ms of serial evaluation ahead of the window, on every
  * launch - including launches with MCP switched off, because `main.ts` reached
  * through that barrel for the very preference that decides whether to start it.
