@@ -899,7 +899,7 @@ json with_postman_source (json mapped, const json* auth) {
 std::string to_method (const json* declared, bool* unsupported = nullptr) {
     static constexpr std::array<const char*, 7> METHODS = { "GET", "POST",
         "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
-    const std::string upper                             = walk::upper (
+    const std::string upper = vayu::utils::ascii_upper (
     declared == nullptr || declared->is_null () ? std::string ("GET") : as_string (declared));
     const bool matched = std::any_of (METHODS.begin (), METHODS.end (),
     [&upper] (const char* method) { return upper == method; });

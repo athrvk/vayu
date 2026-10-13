@@ -81,6 +81,24 @@ TEST (AsciiLower, LeavesAByteAbove127ExactlyAsItWas) {
     EXPECT_EQ (ascii_lower (high), high);
 }
 
+TEST (AsciiUpper, RaisesTheTwentySixLettersAndLeavesEverythingElse) {
+    EXPECT_EQ (ascii_upper ("post"), "POST");
+    EXPECT_EQ (ascii_upper ("Post"), "POST");
+    EXPECT_EQ (ascii_upper ("POST"), "POST");
+    EXPECT_EQ (ascii_upper (""), "");
+
+    // 'a' - 1 is '`' and 'z' + 1 is '{', which an off-by-one range test would
+    // raise.
+    EXPECT_EQ (ascii_upper ("`{@[ 0189_-."), "`{@[ 0189_-.");
+
+    // A byte above 127 is not a letter on either signing of `char`.
+    EXPECT_EQ (ascii_upper ("caf\xC3\xA9-header"), "CAF\xC3\xA9-HEADER");
+    static_assert (ascii_upper ('a') == 'A');
+    static_assert (ascii_upper ('z') == 'Z');
+    static_assert (ascii_upper ('`') == '`');
+    static_assert (ascii_upper ('{') == '{');
+}
+
 TEST (AsciiLower, TheCharacterFoldIsAConstantExpression) {
     // The comparator in `types.hpp` calls it per character per lookup, so it
     // has to be the cheap spelling as well as the correct one.
@@ -140,13 +158,14 @@ TEST (CaseInsensitiveLess, TheOrderingAndTheEqualityAgree) {
     EXPECT_EQ (headers.at ("content-type"), "text/plain");
 }
 
-/// The one name the conversions replaced. `towlower` is deliberately not here:
-/// nothing in the engine has ever named it, and a guard is worth having for
-/// the spelling that actually accumulated.
-constexpr std::string_view kFoldCall = "tolower";
+/// The names the conversions replaced. `towlower` and `towupper` are
+/// deliberately not here: nothing in the engine has ever named them, and a
+/// guard is worth having for the spellings that actually accumulated.
+constexpr std::array<std::string_view, 2> kFoldCalls = { "tolower", "toupper" };
 
 /**
- * @brief Whether @p code names `tolower` at all, called or not.
+ * @brief Whether @p code names @p name (`tolower`, `toupper`) at all, called
+ * or not.
  *
  * `tests::names_call` is the wrong matcher here and the reason is the whole
  * point of the issue: the two sites that were actually undefined spelled it
@@ -159,7 +178,7 @@ constexpr std::string_view kFoldCall = "tolower";
  * it `tolower_count` and any longer name containing this one would be
  * reported, which would make the rule unstatable. Nothing narrower is needed -
  * `std::` and `::` sit to the left of the name and do not interfere, and
- * `towlower` does not contain it.
+ * `towlower` and `towupper` do not contain them.
  */
 bool names_fold (const std::string& code, std::string_view name) {
     const auto is_identifier_char = [] (char c) {
@@ -191,7 +210,8 @@ struct ExemptSite {
 };
 
 /// Empty, and that is the claim: the fold is written as a range test on the
-/// character, so even the primitive itself does not call `std::tolower`. A
+/// character, so even the primitive itself calls neither `std::tolower` nor
+/// `std::toupper`. A
 /// site that genuinely cannot route through `utils/ascii_case.hpp` belongs
 /// here with its reason beside it, not silenced at the line.
 constexpr std::array<ExemptSite, 0> kExempt = {};
@@ -227,13 +247,15 @@ TEST (AsciiFold, TheEngineSourcesDoNotHandRollIt) {
             ++scanned_files;
             scanned_bytes += code.size ();
 
-            if (is_exempt (relative, kFoldCall) || !names_fold (code, kFoldCall)) {
-                continue;
+            for (const auto call : kFoldCalls) {
+                if (is_exempt (relative, call) || !names_fold (code, call)) {
+                    continue;
+                }
+                std::string offender = relative;
+                offender += " calls ";
+                offender += call;
+                offenders.push_back (std::move (offender));
             }
-            std::string offender = relative;
-            offender += " calls ";
-            offender += kFoldCall;
-            offenders.push_back (std::move (offender));
         }
     }
 
@@ -251,8 +273,10 @@ TEST (AsciiFold, TheEngineSourcesDoNotHandRollIt) {
     EXPECT_TRUE (offenders.empty ())
     << "a hand-rolled fold does not receive the primitive's fixes, and reads "
        "the process's C locale for any byte above 127. Use "
-       "vayu/utils/ascii_case.hpp - ascii_lower for a character or a string, "
-       "ascii_lower_equal to compare without building one - or add the site "
+       "vayu/utils/ascii_case.hpp - ascii_lower or ascii_upper for a character "
+       "or a "
+       "string, ascii_lower_equal to compare without building one - or add the "
+       "site "
        "to kExempt with its reason. Offenders:\n  "
     << joined;
 }
@@ -264,26 +288,34 @@ TEST (AsciiFold, TheEngineSourcesDoNotHandRollIt) {
  * brought every copy back.
  */
 TEST (AsciiFold, TheGuardSeesTheNameCalledOrPassed) {
-    EXPECT_TRUE (names_fold ("c = std::tolower (c);", kFoldCall));
+    EXPECT_TRUE (names_fold ("c = std::tolower (c);", "tolower"));
 
     // The spelling `tests::names_call` misses, and the one that was undefined:
     // the function passed rather than called, so no `(` follows the name.
-    EXPECT_TRUE (names_fold ("std::transform (b, e, b, ::tolower);", kFoldCall));
-    EXPECT_FALSE (tests::names_call ("std::transform (b, e, b, ::tolower);", kFoldCall));
+    EXPECT_TRUE (names_fold ("std::transform (b, e, b, ::tolower);", "tolower"));
+    EXPECT_FALSE (tests::names_call ("std::transform (b, e, b, ::tolower);", "tolower"));
 
-    EXPECT_FALSE (names_fold ("x = ascii_lower (c);", kFoldCall));
-    EXPECT_FALSE (names_fold ("y = std::towlower (c);", kFoldCall));
-    EXPECT_FALSE (names_fold ("int tolower_count = 0;", kFoldCall));
-    EXPECT_FALSE (names_fold ("auto x = my_tolower (c);", kFoldCall));
+    EXPECT_FALSE (names_fold ("x = ascii_lower (c);", "tolower"));
+    EXPECT_FALSE (names_fold ("y = std::towlower (c);", "tolower"));
+    EXPECT_FALSE (names_fold ("int tolower_count = 0;", "tolower"));
+    EXPECT_FALSE (names_fold ("auto x = my_tolower (c);", "tolower"));
+
+    // The same matcher serves the other half of the pair.
+    EXPECT_TRUE (names_fold ("c = std::toupper (c);", "toupper"));
+    EXPECT_TRUE (names_fold ("std::transform (b, e, b, ::toupper);", "toupper"));
+    EXPECT_FALSE (names_fold ("x = ascii_upper (c);", "toupper"));
+    EXPECT_FALSE (names_fold ("y = std::towupper (c);", "toupper"));
+    EXPECT_FALSE (names_fold ("auto x = my_toupper (c);", "toupper"));
+    EXPECT_FALSE (names_fold ("c = std::toupper (c);", "tolower"));
 
     // The prose in `ascii_case.hpp` names the call it replaced, so the guard
     // has to read code and not comments or it could never be quieted.
     EXPECT_FALSE (
     names_fold (tests::strip_comments (
                 "// the sites that spelled std::tolower (c) themselves\n"),
-    kFoldCall));
+    "tolower"));
     EXPECT_TRUE (names_fold (
-    tests::strip_comments ("/* see above */ std::tolower (c);\n"), kFoldCall));
+    tests::strip_comments ("/* see above */ std::tolower (c);\n"), "tolower"));
 }
 
 } // namespace

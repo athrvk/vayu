@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <initializer_list>
@@ -202,8 +201,7 @@ std::string lorem_sentence () {
     // Never empty: the count is at least one, so the capitalisation below reads
     // a character that is there.
     std::string sentence = join_words (LOREM_WORDS, random_int (4, 9));
-    sentence.at (0) =
-    static_cast<char> (std::toupper (static_cast<unsigned char> (sentence.at (0))));
+    sentence.at (0)      = vayu::utils::ascii_upper (sentence.at (0));
     return sentence + ".";
 }
 
@@ -1283,10 +1281,7 @@ DynamicResolution dynamic,
 nlohmann::json& payload) {
     if (auto method = payload.find ("method");
     method != payload.end () && method->is_string ()) {
-        std::string verb = method->get<std::string> ();
-        std::transform (verb.begin (), verb.end (), verb.begin (),
-        [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-        *method = verb;
+        *method = vayu::utils::ascii_upper (method->get<std::string> ());
     }
 
     if (auto url = payload.find ("url"); url != payload.end () && url->is_string ()) {

@@ -21,10 +21,9 @@
 #include "vayu/core/spec_diff.hpp"
 
 #include "vayu/core/operation_match.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -51,13 +50,6 @@ struct FieldValue {
     std::string compare;
     std::string display;
 };
-
-std::string upper (std::string_view text) {
-    std::string out (text);
-    std::transform (out.begin (), out.end (), out.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    return out;
-}
 
 /**
  * `value.replace(/\s+/g, " ").trim()`, cut to `DISPLAY_MAX`.
@@ -219,7 +211,8 @@ std::string path_key (const DeclaredOperation& operation) {
  */
 bool same_operation (const DeclaredOperation& a, const DeclaredOperation& b) {
     return a.operation_id == b.operation_id &&
-    upper (a.method) == upper (b.method) && a.path == b.path;
+    vayu::utils::ascii_upper (a.method) == vayu::utils::ascii_upper (b.method) &&
+    a.path == b.path;
 }
 
 /**

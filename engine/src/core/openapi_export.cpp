@@ -87,13 +87,6 @@ constexpr std::array<std::string_view, 2> NON_PARAMETER_HEADERS = {
     "authorization", "content-type"
 };
 
-std::string upper (std::string_view text) {
-    std::string out (text);
-    std::transform (out.begin (), out.end (), out.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    return out;
-}
-
 std::string_view trim (std::string_view text) {
     const auto is_space = [] (char c) {
         return std::isspace (static_cast<unsigned char> (c)) != 0;
@@ -716,7 +709,7 @@ struct Dialect {
 };
 
 std::string method_path_key (std::string_view method, std::string_view path) {
-    return upper (method) + " " + std::string (path);
+    return vayu::utils::ascii_upper (method) + " " + std::string (path);
 }
 
 /**
@@ -1979,7 +1972,8 @@ Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
 Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool standalone) {
     const ApiKeyNames claimed = apikey_names_of (entry.auth);
     ext::UrlOmitted in_url;
-    Json out{ { "name", entry.name }, { "method", upper (entry.method) },
+    Json out{ { "name", entry.name },
+        { "method", vayu::utils::ascii_upper (entry.method) },
         { "url", ext::redact_url_credentials (entry.url, claimed.params, in_url) },
         { "order", entry.order } };
     if (standalone && !entry.description.empty ()) {
@@ -2523,8 +2517,8 @@ const BoundWrite& write) {
         imported_name = string_member (operation, "operationId");
         if (imported_name.empty () && !operation.contains ("operationId") &&
         entry.spec_operation) {
-            imported_name =
-            upper (entry.spec_operation->method) + " " + entry.spec_operation->path;
+            imported_name = vayu::utils::ascii_upper (entry.spec_operation->method) +
+            " " + entry.spec_operation->path;
         }
     }
     if (!entry.name.empty () && entry.name != imported_name) {

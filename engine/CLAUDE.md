@@ -90,14 +90,16 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   Guard: `tests/character_cast_test.cpp`.
 - **A case-insensitive comparison folds through one primitive** (#1060).
   **`vayu::utils::ascii_lower`** (`utils/ascii_case.hpp`) folds a character or a
-  whole string; **`ascii_lower_equal`** compares without building a lowered
+  whole string, and **`ascii_upper`** raises one the same way (#2090);
+  **`ascii_lower_equal`** compares without building a lowered
   copy (`vayu::CaseInsensitiveLess` folds through it in one pass). ASCII is in
   the name because it is the contract: every caller folds a header name, a
   scheme, a MIME type, a hostname or a log-level word, all ASCII by their own
-  specifications, and `std::tolower` on a byte above 127 is undefined where
-  `char` is signed and locale-dependent otherwise. Nothing here calls
-  `std::tolower`. Guard: `tests/ascii_case_test.cpp`, whose matcher catches the
-  function *passed* (`std::transform (b, e, b, ::tolower)`) as well as called.
+  specifications, and `std::tolower` or `std::toupper` on a byte above 127 is
+  undefined where `char` is signed and locale-dependent otherwise. Nothing here
+  calls either. Guard: `tests/ascii_case_test.cpp`, whose matcher catches the
+  function *passed* (`std::transform (b, e, b, ::tolower)`) as well as called, for
+  both `tolower` and `toupper`.
 - **A class with a destructor states all five** (#945,
   `cppcoreguidelines-special-member-functions`). Every RAII holder (the `Impl`
   behind a pImpl, `Database`, the in-process mock servers in `tests/`, and every
