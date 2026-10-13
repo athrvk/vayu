@@ -17,8 +17,8 @@
  * whole process shares, filled on the call. The caller then reads it - through
  * `std::put_time`, or by constructing a `std::string` from it - and anything
  * that calls the same function in between has already overwritten it. The
- * engine is threaded end to end (event loop workers, the thread pool, the
- * metrics collector, every HTTP handler), so "in between" is an ordinary
+ * engine is threaded end to end (event loop workers, the metrics collector,
+ * every HTTP handler), so "in between" is an ordinary
  * interleaving rather than a rare one, and a lock of our own does not help: the
  * storage is shared with libcurl, QuickJS and the C runtime, none of which
  * takes it.

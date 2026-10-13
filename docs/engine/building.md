@@ -981,11 +981,11 @@ What the measurement settled, and what it means for the floor:
 | `std::move_only_function` | yes | **no** | yes |
 
 The engine uses the first three. It does **not** use `std::move_only_function`,
-however much `thread_pool.hpp`'s `std::function` queue would like to - libc++
-has not shipped it, so on macOS it does not exist. Ubuntu pins no compiler: its
-default GCC covers everything the engine adopted, and `g++-14` adds only
-features that are not on the list (`std::print`, `std::ranges::to`, deducing
-`this`). Re-run the probe before reaching for anything not in the table.
+however much a task queue would like to - libc++ has not shipped it, so on
+macOS it does not exist. Ubuntu pins no compiler: its default GCC covers
+everything the engine adopted, and `g++-14` adds only features that are not on
+the list (`std::print`, `std::ranges::to`, deducing `this`). Re-run the probe
+before reaching for anything not in the table.
 
 `scripts/cxx-feature-probe/` asks them. It is a standalone CMake project - one
 tiny translation unit per feature, compiled *and linked* at a standard the

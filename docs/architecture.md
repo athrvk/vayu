@@ -29,7 +29,7 @@ Vayu uses a **Sidecar Architecture** that decouples the user interface from the 
 │  │  └───────────────────┘  │      │             │               │  │
 │  │           │             │      │             ▼               │  │
 │  │           │             │      │  ┌───────────────────────┐  │
-│  │           ▼             │      │  │    Thread Pool        │  │
+│  │           ▼             │      │  │    Worker Threads     │  │
 │  │  ┌───────────────────┐  │      │  │  ┌─────┐ ┌─────┐     │  │
 │  │  │   Sidecar Manager │  │      │  │  │ W1  │ │ W2  │ ... │  │
 │  │  │   (spawn/kill)    │  │      │  │  └──┬──┘ └──┬──┘     │  │

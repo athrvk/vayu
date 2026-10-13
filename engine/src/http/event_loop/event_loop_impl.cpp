@@ -131,18 +131,6 @@ RequestHandle EventLoopImpl::submit_async (const Request& request) {
     return handle;
 }
 
-bool EventLoopImpl::cancel (size_t request_id) {
-    // SPSC Queue does not support random access/removal.
-    // To support cancellation, we would need a separate mechanism (e.g.
-    // cancellation tokens or a cancelled-ID list). For now, we disable
-    // pending-queue cancellation to prioritize throughput. Active transfers
-    // could still be cancelled if we tracked them, but the original
-    // implementation only checked the pending queue anyway.
-
-    (void)request_id; // Unused
-    return false;
-}
-
 BatchResult EventLoopImpl::execute_batch (const std::vector<Request>& requests) {
     BatchResult result;
 

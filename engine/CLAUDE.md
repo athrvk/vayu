@@ -6,7 +6,7 @@ The load-testing and request-execution engine. AGPL-3.0. See the repo root
 ```
 engine/
 ├── src/core/      # load_strategy, metrics_collector, run_manager, import, openapi
-├── src/http/      # HTTP server, SSE, routes, thread_pool, rate_limiter, transport
+├── src/http/      # HTTP server, SSE, routes, rate_limiter, transport
 ├── src/db/        # SQLite persistence
 ├── src/runtime/   # QuickJS scripting engine
 ├── src/platform/  # per-OS code (timer resolution, process, paths)
@@ -28,9 +28,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   translation unit per feature and the `C++ feature probe` workflow runs it on
   all three platforms plus `g++-14`; it gates nothing (`docs/engine/building.md`).
   The one measurement that shapes the code: libc++ has no
-  `std::move_only_function`, so `thread_pool.hpp`'s queue stays `std::function`
-  and every queued task stays copyable. Run the probe before reaching for a
-  C++23 library feature the engine does not already use.
+  `std::move_only_function`, so a queued task stays a copyable `std::function`.
+  Run the probe before reaching for a C++23 library feature the engine does not
+  already use.
 - **An error-or-nothing API is `RouteResult`** (`std::expected<void, RouteError>`),
   never an `std::optional` whose empty state means success. `route_error` builds
   the refusal; `as_response` converts one to the pair a testable core answers.

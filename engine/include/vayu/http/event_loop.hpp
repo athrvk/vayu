@@ -198,14 +198,6 @@ class EventLoop {
     [[nodiscard]] RequestHandle submit_async (const Request& request);
 
     /**
-     * @brief Cancel a pending request
-     *
-     * @param request_id The ID returned from submit()
-     * @return true if the request was cancelled, false if already completed
-     */
-    bool cancel (size_t request_id);
-
-    /**
      * @brief Execute a batch of requests and wait for all to complete
      *
      * This is the simplest way to run multiple requests concurrently.
@@ -238,10 +230,5 @@ class EventLoop {
     private:
     std::unique_ptr<detail::EventLoopImpl> impl_;
 };
-
-// vayu::http::ThreadPool lives in "vayu/http/thread_pool.hpp" - it used to be
-// declared here as well, a second class of the same name in the same namespace
-// whose only definition was thread_pool.cpp's. That is an ODR violation that
-// linked purely because both had a single unique_ptr member; do not re-add it.
 
 } // namespace vayu::http
