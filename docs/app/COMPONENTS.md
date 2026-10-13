@@ -384,7 +384,8 @@ What a drag surface shares without sharing a DOM. The collection tree and the ta
 The one place the app words an entity for an agent (#2046): `Vayu <kind> "<name>" (<id>)` plus a tail, one
 exported formatter per kind (`requestReference`, `exampleReference`, `collectionReference`,
 `environmentReference`, `runReference`, `runComparisonReference`, `inboxReference`, `captureReference`,
-`mockServerReference`, `mockIssuerReference`, `trashReference`). **A reference carries no value:** each
+`mockServerReference`, `mockIssuerReference`, `trashReference`, `variableReference`, `specOperationReference`,
+`runSampleReference`, `elementReference`, `thresholdReference`). **A reference carries no value:** each
 formatter takes a `Pick<>` of exactly the fields it prints, so a URL, header, body, variable, token or
 secret is not reachable from inside it, and a run's URL is cut to its path with `lib/path-label.ts`
 (`pathLabel`, shared with the tab titles) plus a cut at any `?` or `#`. The module is pure - no React, store
@@ -398,9 +399,15 @@ The surfaces that put a line on the clipboard are the "Copy for agent" row actio
 environment, history, inbox, mock-issuer and mock-server rows, the tab menu and the palette's
 `copy-for-agent` command, each through `useCopy()` with the name "Reference" (toast "Reference copied"). A collection's line takes the chain *above* it and a request's the chain of its own
 collection, so neither names a folder twice. The same line is on the surfaces that have no row menu:
-a trash entry, an example row and a capture's detail header carry an icon button (`useCopy({ feedback:
-"icon" })` with `IconSwap`, so the glyph swaps to a check and no toast follows), and the inbox and
-mock-server tab headers a text "Copy for agent" button (toast "Reference copied").
+a trash entry, an example row, a capture's detail header, a variable row and a run sample's header carry an
+icon button (`useCopy({ feedback: "icon" })` with `IconSwap`, so the glyph swaps to a check and no toast
+follows), and the inbox and mock-server tab headers a text "Copy for agent" button (toast "Reference copied").
+A pipeline element row (`ElementList`) has a "Copy for agent" item in its `⋯` menu, after Duplicate, built from
+the element's id, kind and name alone; the host names the owner through `referenceOwner` (the request builder's
+Elements tab for a saved request, the collection's Elements tab for the collection) and the item is absent without
+one. A variable row takes its scope from `VariableTableEditor`'s `config` and is absent for a secret row, an
+unsaved row and a scope that is not loaded; the line is built from the name alone, so the value never reaches it.
+A run sample's button is absent without the run id (`report.metadata.runId`) or the sample's result row id.
 
 ## Collections (`modules/collections/`)
 
@@ -650,7 +657,7 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead) and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail |
-| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response |
+| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts. A failed time-series fetch (`LoadTestDetail`'s `seriesFailure`) draws the shared `ErrorState` with Try again instead of the "insufficient data" sentence, or, when some pages loaded, a warning `Callout` naming how many points did, whose retry resumes at the failed page (issue #1944). A failed server-vitals fetch (`monitorFailure`) is a warning `Callout` with Try again drawn above the section whatever the time series holds, and holds the auto-paging back while the query is in error (issue #2062) |
@@ -671,7 +678,7 @@ A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is 
 
 **A save merges the user's edited rows onto the freshest map rather than replacing it with the editor's own copy** (#1439), through the same `lib/variable-merge.ts` primitive the context bar's `useVariableCommit` uses - see [state-management.md](state-management.md#a-variable-map-write-merges-onto-the-freshest-map-never-onto-its-own-copy). An MCP agent's `update_environment` landing on a key the table has not touched survives the next save regardless of how stale the table's own copy of that key is; a key both the user and an agent touched shows a `Callout` naming it, with a "Take theirs" action, rather than resolving silently either way.
 
-**`main/VariableRow.tsx` is `memo`-wrapped, keyed by `variable.id`, for the same reason `KeyValueRow` is** (issue #1716). The table used to render every row inline in a `.map`, with no row component of its own, so `updateVariable` rebuilding the whole `variables` array on every keystroke re-rendered every row's `Input`, `Select` and `SecretInput` regardless of which row was typed in. `updateVariable`, `removeVariable` and the `commitNow` wrapper around the ref-held `performSave` are all in `VariableTableEditor.tsx` now id-based and ref-backed (`variablesRef`), so their identities survive a keystroke; `handleBlur` reads `hasPendingChangesRef` for the same reason, since a dependency on the `hasPendingChanges` *state* would change its identity on every dirty/clean flip and defeat every row's memo on that flip alone. Only the row whose own `variable` object actually changed re-renders - `main/variable-row-render-count.test.tsx` pins it.
+**`main/VariableRow.tsx` is `memo`-wrapped, keyed by `variable.id`, for the same reason `KeyValueRow` is** (issue #1716). The table used to render every row inline in a `.map`, with no row component of its own, so `updateVariable` rebuilding the whole `variables` array on every keystroke re-rendered every row's `Input`, `Select` and `SecretInput` regardless of which row was typed in. `updateVariable`, `removeVariable` and the `commitNow` wrapper around the ref-held `performSave` are all in `VariableTableEditor.tsx` now id-based and ref-backed (`variablesRef`), so their identities survive a keystroke; `handleBlur` reads `hasPendingChangesRef` for the same reason, since a dependency on the `hasPendingChanges` *state* would change its identity on every dirty/clean flip and defeat every row's memo on that flip alone. Only the row whose own `variable` object actually changed re-renders - `main/variable-row-render-count.test.tsx` pins it. The row's "Copy for agent" button (`variableReference`, #2047) reads its scope from a `scope` prop that `VariableTableEditor` memoises on the owner's id and name, so it is one reference across a keystroke and does not defeat `memo`.
 
 ## Settings (`modules/settings/`)
 
@@ -1809,7 +1816,8 @@ while collapsed (`summarize-element.ts` - `in [200, 201]`, `wait 500 ms`,
 `$.token → token (env)`; a kind this module has no template for falls back to
 the kind's own description, and one that is genuinely unconfigured to its
 first two properties as `key: value`), an enable switch, and a `⋯` menu
-(`RowActionsMenu`) for Rename, Move up/down, Duplicate and Delete - the two
+(`RowActionsMenu`) for Rename, Move up/down, Duplicate, Copy for agent (when the
+host passes `referenceOwner`, #2047) and Delete - the two
 Move items carrying "Already first" / "Already last" at the row's ends rather
 than being silently off (#1690). Click on
 the header toggles the card; a newly added or duplicated element opens

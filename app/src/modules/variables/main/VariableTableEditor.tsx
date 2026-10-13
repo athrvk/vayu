@@ -74,6 +74,7 @@ import {
 	type VariableChanges,
 	type VariableConflict,
 } from "@/lib/variable-merge";
+import type { VariableScope } from "@/lib/agent-reference";
 import VariableRow from "./VariableRow";
 
 export interface VariableRowData {
@@ -335,6 +336,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			: type === "environment"
 				? `Environment: ${environment?.name}`
 				: `Collection: ${collection?.name}`;
+
+	// What "Copy for agent" on a row names. Built from the owner's id and name
+	// as primitives so the object keeps its identity across a keystroke and
+	// every memoised row is handed the same reference.
+	const ownerId = type === "environment" ? environment?.id : collection?.id;
+	const ownerName = type === "environment" ? environment?.name : collection?.name;
+	const referenceScope = useMemo<VariableScope | null>(() => {
+		if (type === "globals") return { type };
+		if (ownerId === undefined || ownerName === undefined) return null;
+		const owner = { id: ownerId, name: ownerName };
+		return type === "environment" ? { type, environment: owner } : { type, collection: owner };
+	}, [type, ownerId, ownerName]);
 
 	// Get data based on type (memoized so the fallback empty object is stable
 	// across renders and doesn't re-fire the init effect at L390)
@@ -852,7 +865,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							 * the only unlabelled column in a table of labelled ones.
 							 */}
 							<th className="pb-2 w-14 px-2">Secret</th>
-							<th className="pb-2 w-10"></th>
+							<th className="pb-2 w-18"></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -874,6 +887,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								onCommitNow={commitNow}
 								onRemove={removeVariable}
 								onBlur={handleBlur}
+								scope={referenceScope}
 							/>
 						))}
 					</tbody>

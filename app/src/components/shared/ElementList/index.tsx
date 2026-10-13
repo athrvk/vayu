@@ -12,7 +12,7 @@
  * assertions, timers, controllers and scripts - each a collapsible card: an
  * icon, the element's name or its kind's label, a one-line summary of
  * its config while collapsed, an enable switch, and a `⋯` menu for rename,
- * move, duplicate and delete. The body, shown expanded, is the kind's form:
+ * move, duplicate, copy for agent (when the host names an owner) and delete. The body, shown expanded, is the kind's form:
  * generated from its JSON Schema (`GenericElementForm`) unless a bespoke
  * override (`elementForms.ts`) replaces it. The Add control is a searchable
  * picker over the catalogue, grouped by category (`element-categories.ts`),
@@ -32,7 +32,16 @@
  */
 
 import { useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronRight, CopyPlus, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+	ArrowDown,
+	ArrowUp,
+	ChevronRight,
+	Copy,
+	CopyPlus,
+	Pencil,
+	Plus,
+	Trash2,
+} from "lucide-react";
 import {
 	Button,
 	Collapsible,
@@ -55,7 +64,9 @@ import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shar
 import { generateId } from "@/lib/id";
 import { isBlankScriptElement, missingRequiredKeys } from "@/lib/elements";
 import { cn } from "@/lib/utils";
+import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
+import { elementReference, type ElementOwner } from "@/lib/agent-reference";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
@@ -90,6 +101,12 @@ export interface ElementListProps {
 	 * editor. Return `null`/`undefined` for an element with nothing to add.
 	 */
 	renderAboveForm?: (element: ElementDef) => ReactNode;
+	/**
+	 * Who these elements belong to, so a row can offer "Copy for agent". The
+	 * list holds no request or collection of its own; a host that has no saved
+	 * owner to name leaves this out and the item is absent.
+	 */
+	referenceOwner?: ElementOwner;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -179,6 +196,7 @@ function ElementRow({
 	onMove,
 	onDuplicate,
 	renderAboveForm,
+	referenceOwner,
 }: {
 	element: ElementDef;
 	kinds: ElementKindSchema[];
@@ -191,6 +209,7 @@ function ElementRow({
 	onMove: (direction: -1 | 1) => void;
 	onDuplicate: () => void;
 	renderAboveForm?: (element: ElementDef) => ReactNode;
+	referenceOwner?: ElementOwner;
 }) {
 	const schema = kinds.find((k) => k.kind === element.kind);
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
@@ -247,6 +266,9 @@ function ElementRow({
 		onCancel: () => setRenaming(false),
 	});
 
+	const { copy } = useCopy();
+	const reference = referenceOwner ? elementReference(element, referenceOwner) : null;
+
 	const handleDelete = () => {
 		if (isElementBlank(element)) onRemove();
 		else setConfirmingDelete(true);
@@ -272,6 +294,16 @@ function ElementRow({
 			disabledReason: "Already last",
 		},
 		{ label: "Duplicate", icon: CopyPlus, onSelect: onDuplicate },
+		...(reference === null
+			? []
+			: [
+					{
+						label: "Copy for agent",
+						icon: Copy,
+						hint: reference,
+						onSelect: () => void copy(reference, "Reference"),
+					},
+				]),
 		{
 			label: "Delete",
 			icon: Trash2,
@@ -464,7 +496,13 @@ function ElementRow({
 	);
 }
 
-export function ElementList({ elements, onChange, kinds, renderAboveForm }: ElementListProps) {
+export function ElementList({
+	elements,
+	onChange,
+	kinds,
+	renderAboveForm,
+	referenceOwner,
+}: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const recentKindIds = useLayoutStore((s) => s.recentElementKinds);
@@ -559,6 +597,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 						onMove={(direction) => moveAt(index, direction)}
 						onDuplicate={() => duplicateAt(index)}
 						renderAboveForm={renderAboveForm}
+						referenceOwner={referenceOwner}
 					/>
 				))
 			)}

@@ -1071,6 +1071,8 @@ the two lists never appear together.
 | `"collection"`| Came from any collection layer |
 | `"environment"`| Came from the active environment |
 
+The variables table's "Copy for agent" line (`variableReference`) names the scope the resolver would pick for editing that definition - the environment, collection or globals the row is stored in, the one a commit targets by `sourceId` - not the resolved value, which is never in the line.
+
 `VariableOrigin.scope` is wider - a `VariableOriginScope` (`VariableScope |
 "row"`) - because the origins list can also carry a bound row. It has no row in
 this table: nobody wrote a row's cell and nothing can edit it, so it is never a

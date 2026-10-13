@@ -56,9 +56,13 @@ const KINDS: ElementKindSchema[] = [
 	kindSchema("script.setup", "Setup Script", "script", /* collectionOnly */ true),
 ];
 
+/** What `useRequestQuery` answers: the saved row, undefined while it loads or for an unsaved request. */
+const savedRequest: { value: { id: string; name: string } | undefined } = { value: undefined };
+
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useElementKindsQuery: () => ({ data: KINDS }),
+	useRequestQuery: () => ({ data: savedRequest.value }),
 	// ScriptElementForm's snippets list reads this; not what this file guards.
 	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
 }));
@@ -134,6 +138,7 @@ function setContext(overrides: Partial<RequestBuilderContextValue> = {}) {
 
 beforeEach(() => {
 	updateField.mockClear();
+	savedRequest.value = undefined;
 	setContext();
 	// `ElementList`'s Add-element picker reads/writes this directly - reset so
 	// one test's pick does not surface as a duplicate "Recently used" row
@@ -300,5 +305,48 @@ describe("ElementsPanel", () => {
 
 			expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
 		});
+	});
+});
+
+describe("ElementsPanel - Copy for agent", () => {
+	const writeText = vi.fn();
+
+	beforeEach(() => {
+		writeText.mockReset().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		setContext({
+			request: { id: "req_1", collectionId: null, elements: [extractElement("e1")] } as never,
+		});
+	});
+
+	async function openMenu() {
+		const trigger = within(rowFor("Extract JSON")).getByRole("button", {
+			name: "More actions for Extract JSON",
+		});
+		fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+		fireEvent.click(trigger, { detail: 1 });
+		return screen.findByRole("menu");
+	}
+
+	it("names the saved request, not the builder's draft", async () => {
+		savedRequest.value = { id: "req_1", name: "List pets" };
+		render(<ElementsPanel />);
+
+		await openMenu();
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Copy for agent/ }));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith(
+			'Vayu element "extract.json" (e1) of request "List pets" (req_1)'
+		);
+	});
+
+	it("is absent while there is no saved request to name", async () => {
+		render(<ElementsPanel />);
+
+		const menu = await openMenu();
+
+		expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+		expect(within(menu).queryByRole("menuitem", { name: /Copy for agent/ })).toBeNull();
 	});
 });

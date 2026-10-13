@@ -26,6 +26,8 @@
  * iterations and lives once in `runs.config_snapshot`.
  */
 
+import { Check, Copy } from "lucide-react";
+import { Button, IconSwap } from "@/components/ui";
 import {
 	UnifiedResponseViewer,
 	SampledExchange,
@@ -33,6 +35,8 @@ import {
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
 import { TimeValue } from "@/components/shared/TimeValue";
+import { useCopy } from "@/hooks/useCopy";
+import { runSampleReference } from "@/lib/agent-reference";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
 
@@ -43,6 +47,8 @@ interface SampleRequestCardProps {
 	onToggle: () => void;
 	/** The captured exchange for this row, once the samples query has it. */
 	captured?: RunSample;
+	/** The run this sample belongs to; "Copy for agent" is absent without it. */
+	runId?: string;
 }
 
 export default function SampleRequestCard({
@@ -51,7 +57,16 @@ export default function SampleRequestCard({
 	isExpanded,
 	onToggle,
 	captured,
+	runId,
 }: SampleRequestCardProps) {
+	const { copy, copied } = useCopy({ feedback: "icon" });
+	// `sample.id` is absent on a report from an engine older than 0.15.0, and
+	// the line is keyed by it.
+	const reference =
+		runId !== undefined && sample.id !== undefined
+			? runSampleReference({ resultId: sample.id }, { id: runId })
+			: null;
+
 	// A stored sample is dating a run, not placing a moment inside one, so this
 	// side wants the day where the dashboard's live row wants milliseconds.
 	// Gating on the phases themselves, not on `sample.trace`. The two used to be
@@ -72,6 +87,25 @@ export default function SampleRequestCard({
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
+			actions={
+				reference !== null && (
+					<Button
+						variant="rowAction"
+						size="icon"
+						onClick={() => void copy(reference, "Reference")}
+						aria-label={`Copy sample ${index + 1} for agent`}
+						title="Copy for agent"
+					>
+						<IconSwap
+							state={copied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" />,
+								copied: <Check className="size-icon-sm text-status-success-text" />,
+							}}
+						/>
+					</Button>
+				)
+			}
 			// Flat divide-y strip, matching the dashboard's live list
 			// (`RequestResponseView.tsx`) rather than a boxed card per row - no
 			// per-row radius needed, the same "square on purpose" exception a

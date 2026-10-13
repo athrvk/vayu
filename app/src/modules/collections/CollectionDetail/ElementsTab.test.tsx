@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render as renderBare, screen, fireEvent, within } from "@testing-library/react";
+import { render as renderBare, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
@@ -497,5 +497,25 @@ describe("ElementsTab - the variable writer (issue #1651)", () => {
 		renderTab(makeCollection([]));
 
 		expect(useVariableWriterMock).toHaveBeenCalledWith({ collectionId: "c1" });
+	});
+});
+
+describe("ElementsTab - Copy for agent", () => {
+	it("names the collection the elements belong to", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		renderTab(makeCollection([extractElement("e1")]));
+
+		const trigger = within(rowFor("Extract JSON")).getByRole("button", {
+			name: "More actions for Extract JSON",
+		});
+		fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+		fireEvent.click(trigger, { detail: 1 });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Copy for agent/ }));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith(
+			'Vayu element "extract.json" (e1) of collection "Acme API" (c1)'
+		);
 	});
 });

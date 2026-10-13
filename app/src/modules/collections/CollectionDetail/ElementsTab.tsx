@@ -159,6 +159,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 					elements={elements}
 					onChange={setElements}
 					kinds={kindsList}
+					referenceOwner={{ type: "collection", collection }}
 					renderAboveForm={(element) => {
 						if (element.kind !== "script.pre" && element.kind !== "script.post")
 							return null;

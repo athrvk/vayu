@@ -45,6 +45,7 @@ function renderRow(overrides: Partial<VariableRowData>) {
 					onCommitNow={() => {}}
 					onRemove={() => {}}
 					onBlur={() => {}}
+					scope={null}
 				/>
 			</tbody>
 		</table>
