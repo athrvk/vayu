@@ -19,9 +19,23 @@
 // throughout the app. `Braces` is the variables mark (see `Dock.tsx`).
 import { Folder, Zap, Braces, Clock, Settings, Inbox, Radio } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
-import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
+import {
+	requestDetailOptions,
+	runDetailOptions,
+	useCollectionsQuery,
+	useInboxesQuery,
+	useMockServersQuery,
+} from "@/queries";
 import { collectionNamePath } from "@/modules/collections/tree-utils";
 import { pathLabel } from "@/lib/path-label";
+import {
+	collectionReference,
+	inboxReference,
+	mockServerReference,
+	requestReference,
+} from "@/lib/agent-reference";
+import { loadedRunReference } from "@/lib/run-reference-input";
+import { shownService } from "@/lib/shown-service";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
@@ -84,6 +98,14 @@ export interface TabDescriptor {
 	 * question only the right-clicked one asks.
 	 */
 	path?: string;
+	/**
+	 * The entity's reference line (`lib/agent-reference.ts`), what the tab
+	 * menu's and the palette's "Copy for agent" copy (#2047). Present on a tab
+	 * that names an entity once that entity has loaded; absent on the welcome,
+	 * settings, variables and dashboard tabs, which name none. Built here for
+	 * the reason `path` is.
+	 */
+	agentReference?: string;
 }
 
 /**
@@ -168,6 +190,14 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 		queries: tabs.map((t) => runDetailOptions(t.type === "run" ? t.entityId : null)),
 	});
 	const { data: collections = [] } = useCollectionsQuery();
+	// Gated on an open tab of the kind: every surface that mounts this hook
+	// would otherwise keep a service poll alive for the app's whole life.
+	const { data: inboxes = [] } = useInboxesQuery({
+		enabled: tabs.some((t) => t.type === "inbox"),
+	});
+	const { data: mocks = [] } = useMockServersQuery({
+		enabled: tabs.some((t) => t.type === "mock-server"),
+	});
 	const { resolveString } = useVariableResolver();
 	/*
 	 * The row the open builder is bound to (issue #1074). One resolver serves the
@@ -199,6 +229,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 		const withDataFile = (title: string) =>
 			dataFile ? `${title} · ${dataFile.fileName}` : title;
 		const icon = iconForTab(tab, run?.type, Boolean(collectionId));
+		const runLine = run ? loadedRunReference(run, collections) : undefined;
 
 		switch (tab.type) {
 			case "welcome":
@@ -207,15 +238,43 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				return { label: "Settings", title: "Settings", icon };
 			case "variables":
 				return { label: "Variables", title: "Variables", icon };
-			case "inbox":
-				return { label: "Inbox", title: "Webhook inbox", icon };
-			case "mock-server":
-				return { label: "Mock server", title: "Mock server", icon };
+			case "inbox": {
+				// A tab with no address shows the lowest-port inbox, and so names it.
+				const inbox = shownService(inboxes, (i) => i.inboxId === tab.entityId);
+				return {
+					label: "Inbox",
+					title: "Webhook inbox",
+					icon,
+					agentReference: inbox ? inboxReference(inbox) : undefined,
+				};
+			}
+			case "mock-server": {
+				const mock = shownService(mocks, (m) => m.mockId === tab.entityId);
+				return {
+					label: "Mock server",
+					title: "Mock server",
+					icon,
+					agentReference: mock ? mockServerReference(mock) : undefined,
+				};
+			}
 			case "dashboard":
 				return { label: "Load test", title: "Load test", icon };
 			case "collection": {
-				const name = collections.find((c) => c.id === tab.entityId)?.name ?? "Collection";
-				return { label: name, title: name, icon };
+				const collection = collections.find((c) => c.id === tab.entityId);
+				const name = collection?.name ?? "Collection";
+				return {
+					label: name,
+					title: name,
+					icon,
+					agentReference: collection
+						? collectionReference(
+								collection,
+								collection.parentId
+									? collectionNamePath(collection.parentId, collections)
+									: []
+							)
+						: undefined,
+				};
 			}
 			case "request": {
 				if (!request) return { label: "Request", title: "Request" };
@@ -228,6 +287,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					? resolveString(request.url, row)
 					: stableTitleUrl(request.id ?? tab.entityId ?? "", request.url, resolveString);
 				const name = requestTabTitle(request.name, resolvedUrl);
+				const chain = collectionNamePath(request.collectionId, collections);
 				return {
 					label: name,
 					title: `${request.method} ${name}`,
@@ -236,9 +296,10 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					// path labels are not confined to run tabs.
 					isPath: name.startsWith("/"),
 					fromUrl: !hasOwnName(request.name),
-					path: [...collectionNamePath(request.collectionId, collections), name].join(
-						" / "
-					),
+					path: [...chain, name].join(" / "),
+					// The request's own name, never `name` above: an unnamed
+					// request's title is its resolved URL, which can hold a secret.
+					agentReference: requestReference(request, chain),
 				};
 			}
 			case "run": {
@@ -255,6 +316,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 						title: withDataFile(`Collection run: ${name}`),
 						icon,
 						isPath: false,
+						agentReference: runLine,
 					};
 				}
 				// A design run or load test: the snapshot's method and path, the
@@ -275,11 +337,12 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 						icon,
 						isPath: Boolean(path),
 						fromUrl: Boolean(path),
+						agentReference: runLine,
 					};
 				}
 				// Still loading, or a run with no snapshot to name it by.
 				const fallback = run ? kind : "Run";
-				return { label: fallback, title: fallback, icon };
+				return { label: fallback, title: fallback, icon, agentReference: runLine };
 			}
 		}
 	});

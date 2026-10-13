@@ -126,6 +126,20 @@ describe("run", () => {
 		);
 	});
 
+	it("a URL with a literal percent still yields a line", () => {
+		const run = loadRun({
+			summary: { requestName: "Sale", method: "GET", url: "https://api.test/sale/50%" },
+		});
+		expect(runReference(run)).toContain(" - load test, GET /sale/50%, ");
+	});
+
+	it("a path that decodes to a line break stays on one line", () => {
+		const run = loadRun({
+			summary: { requestName: "Sale", method: "GET", url: "https://api.test/a%0Ab" },
+		});
+		expect(runReference(run)).not.toMatch(/[\r\n]/);
+	});
+
 	it("names the kinds apart", () => {
 		expect(runReference(loadRun({ type: "design" }))).toContain(" - design run, ");
 		expect(runReference(loadRun({ type: "load" }))).toContain(" - load test, ");

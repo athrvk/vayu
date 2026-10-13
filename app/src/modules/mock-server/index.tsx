@@ -40,6 +40,8 @@ import {
 import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
+import { mockServerReference } from "@/lib/agent-reference";
+import { shownService } from "@/lib/shown-service";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -58,7 +60,7 @@ export default function MockServerView() {
 	const show = (mockId: string) => openTab({ type: "mock-server", entityId: mockId });
 
 	const ordered = [...mocks].sort((a, b) => a.port - b.port);
-	const mock = mocks.find((m) => m.mockId === addressedMockId) ?? ordered[0] ?? null;
+	const mock = shownService(mocks, (m) => m.mockId === addressedMockId);
 
 	const routesQuery = useMockServerRoutesQuery(mock?.mockId ?? null);
 	const routes = routesQuery.data ?? [];
@@ -103,6 +105,15 @@ export default function MockServerView() {
 						onClick={() => void copy(mock.url, "Mock server URL")}
 					>
 						<Copy className="size-icon-sm" aria-hidden="true" />
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-control-sm gap-1.5 px-2 text-xs"
+						onClick={() => void copy(mockServerReference(mock), "Reference")}
+					>
+						<Copy className="size-icon-sm" aria-hidden="true" />
+						Copy for agent
 					</Button>
 					<Badge variant="outline">{mock.collectionName}</Badge>
 					<Button

@@ -33,12 +33,19 @@ import { TIMING } from "@/config/timing";
 import type { StartMockServerRequest } from "@/types";
 import { queryKeys } from "./keys";
 
-/** Every mock this engine is running. A stopped one is gone, not listed. */
-export function useMockServersQuery() {
+/**
+ * Every mock this engine is running. A stopped one is gone, not listed.
+ *
+ * `enabled` is for the tab descriptors, which need the list only while a
+ * mock-server tab is open; see `useInboxesQuery` for why a reader that may not
+ * need the answer must not keep a poll alive.
+ */
+export function useMockServersQuery(options: { enabled?: boolean } = {}) {
 	return useQuery({
 		queryKey: queryKeys.mockServer.list(),
 		queryFn: () => apiService.listMockServers(),
 		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
+		enabled: options.enabled ?? true,
 	});
 }
 

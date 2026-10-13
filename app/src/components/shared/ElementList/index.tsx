@@ -32,7 +32,7 @@
  */
 
 import { useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, CopyPlus, Pencil, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
 	Collapsible,
@@ -271,7 +271,7 @@ function ElementRow({
 			disabled: isLast,
 			disabledReason: "Already last",
 		},
-		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
+		{ label: "Duplicate", icon: CopyPlus, onSelect: onDuplicate },
 		{
 			label: "Delete",
 			icon: Trash2,

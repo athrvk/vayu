@@ -72,6 +72,7 @@ import { useInboxNotifyStore, useLayoutStore, useTabsStore, useToastStore } from
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
+import { inboxReference, mockIssuerReference, mockServerReference } from "@/lib/agent-reference";
 import type { Inbox, MockIssuer, MockIssuerFailureMode, MockServer } from "@/types";
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
@@ -241,6 +242,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const stopInbox = useStopInboxMutation();
+	const inboxLine = inboxReference(inbox);
 	// No capture list on this surface, so the record's own count is all it knows.
 	const deletion = useInboxDeletion(inbox);
 	const notifies = useInboxNotifyStore((s) => s.enabled[inbox.inboxId] === true);
@@ -269,6 +271,12 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 						hint: inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`,
 						icon: Copy,
 						onSelect: () => void copy(inbox.url, "Inbox URL"),
+					},
+					{
+						label: "Copy for agent",
+						hint: inboxLine,
+						icon: Copy,
+						onSelect: () => void copy(inboxLine, "Reference"),
 					},
 					// Absent rather than disabled on a stopped inbox: there is nothing
 					// to stop, and the engine keeps the record rather than the listener.
@@ -366,6 +374,7 @@ function IssuerRow({
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const stopIssuer = useStopMockIssuerMutation();
+	const issuerLine = mockIssuerReference(issuer);
 	const updateIssuer = useUpdateMockIssuerMutation();
 
 	const update = (patch: { failureMode?: MockIssuerFailureMode; slowMs?: number }) => {
@@ -409,6 +418,12 @@ function IssuerRow({
 				}
 				actionsLabel={`More actions for issuer on port ${issuer.port}`}
 				actions={[
+					{
+						label: "Copy for agent",
+						hint: issuerLine,
+						icon: Copy,
+						onSelect: () => void copy(issuerLine, "Reference"),
+					},
 					{
 						// Destructive, unlike an inbox's Stop: stopping an issuer drops
 						// it from the engine's list rather than leaving a stopped record
@@ -605,6 +620,7 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const stopMock = useStopMockServerMutation();
+	const mockLine = mockServerReference(mock);
 
 	return (
 		<ServiceRow
@@ -622,6 +638,12 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 					hint: mock.url,
 					icon: Copy,
 					onSelect: () => void copy(mock.url, "Mock server URL"),
+				},
+				{
+					label: "Copy for agent",
+					hint: mockLine,
+					icon: Copy,
+					onSelect: () => void copy(mockLine, "Reference"),
 				},
 				{
 					// Terminal like an issuer's, for the same reason: the record goes

@@ -19,13 +19,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, CopyPlus, Trash2 } from "lucide-react";
 import { RowContextMenu } from "./RowContextMenu";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import type { RowAction } from "./row-actions";
 
 const actions: RowAction[] = [
-	{ label: "Duplicate", icon: Copy, onSelect: () => {} },
+	{ label: "Duplicate", icon: CopyPlus, onSelect: () => {} },
 	{ label: "Delete", icon: Trash2, onSelect: () => {}, destructive: true },
 ];
 

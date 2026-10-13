@@ -77,5 +77,16 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 					},
 				]
 			: []),
+		// Every tab that names an entity, once that entity has loaded (#2047).
+		...(descriptor.agentReference
+			? [
+					{
+						label: "Copy for agent",
+						icon: Copy,
+						hint: descriptor.agentReference,
+						onSelect: () => void copy(descriptor.agentReference ?? "", "Reference"),
+					},
+				]
+			: []),
 	];
 }

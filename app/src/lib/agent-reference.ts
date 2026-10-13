@@ -127,7 +127,9 @@ const RUN_KIND_WORDS = {
  * ride into a reference on that account.
  */
 function pathOnly(url: string): string {
-	return pathLabel(url).replace(/[?#].*$/s, "");
+	return pathLabel(url)
+		.replace(/[?#].*$/s, "")
+		.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 
 /** `GET /orders`, or `""` for a run whose summary names neither. */

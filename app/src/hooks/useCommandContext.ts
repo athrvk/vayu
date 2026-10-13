@@ -33,6 +33,7 @@ export function useCommandContext(surfaces?: CommandSurfaces): CommandContext {
 	const activeTab = openTabs.find((tab) => tab.id === activeTabId) ?? null;
 	const descriptors = useTabDescriptors(activeTab ? [activeTab] : []);
 	const activeTabLabel = descriptors[0]?.label ?? null;
+	const activeTabReference = descriptors[0]?.agentReference ?? null;
 
 	const activeCollection =
 		activeTab?.type === "collection" && activeTab.entityId
@@ -40,7 +41,7 @@ export function useCommandContext(surfaces?: CommandSurfaces): CommandContext {
 			: null;
 
 	return useMemo(
-		() => ({ activeTab, activeTabLabel, activeCollection, surfaces }),
-		[activeTab, activeTabLabel, activeCollection, surfaces]
+		() => ({ activeTab, activeTabLabel, activeTabReference, activeCollection, surfaces }),
+		[activeTab, activeTabLabel, activeTabReference, activeCollection, surfaces]
 	);
 }

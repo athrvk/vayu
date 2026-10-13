@@ -48,6 +48,8 @@ vi.mock("@/queries", () => ({
 		enabled: false,
 	}),
 	useCollectionsQuery: () => ({ data: state.collections }),
+	useInboxesQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/hooks/useVariableResolver", () => ({

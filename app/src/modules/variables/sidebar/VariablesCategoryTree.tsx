@@ -63,10 +63,12 @@ import {
 	type RowAction,
 } from "@/components/shared";
 import type { Environment } from "@/types";
-import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy } from "lucide-react";
+import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy, CopyPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
+import { useCopy } from "@/hooks/useCopy";
+import { environmentReference } from "@/lib/agent-reference";
 import {
 	Badge,
 	Button,
@@ -163,6 +165,7 @@ export default function VariablesCategoryTree() {
 	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
 	const failSave = useSaveStore((s) => s.failSave);
 	const showToast = useToastStore((s) => s.showToast);
+	const { copy } = useCopy();
 
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
@@ -534,6 +537,7 @@ export default function VariablesCategoryTree() {
 										const isRenaming = renamingEnvId === environment.id;
 										// One list, three ways in: the ⋯ button, the tree's Shift+F10 /
 										// Menu / Shift+Enter keys, and right-click (#1360).
+										const reference = environmentReference(environment);
 										const rowActions: RowAction[] = [
 											{
 												label: "Rename",
@@ -542,9 +546,15 @@ export default function VariablesCategoryTree() {
 											},
 											{
 												label: "Duplicate",
-												icon: Copy,
+												icon: CopyPlus,
 												onSelect: () =>
 													void duplicateEnvironment(environment),
+											},
+											{
+												label: "Copy for agent",
+												icon: Copy,
+												hint: reference,
+												onSelect: () => void copy(reference, "Reference"),
 											},
 											{
 												label: "Delete",

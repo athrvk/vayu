@@ -61,6 +61,8 @@ import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
+import { inboxReference } from "@/lib/agent-reference";
+import { shownService } from "@/lib/shown-service";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -226,8 +228,7 @@ export default function InboxView() {
 	// address it no longer has falls back to the first one it does. An effect
 	// writing that fallback back into the tab would say the same thing one
 	// render later, and be wrong for that render.
-	const inbox: Inbox | null =
-		inboxes.find((i) => i.inboxId === addressedInboxId) ?? ordered[0] ?? null;
+	const inbox: Inbox | null = shownService(inboxes, (i) => i.inboxId === addressedInboxId);
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
 	// `captures` defaults to `[]`, so an in-flight fetch is indistinguishable
@@ -334,6 +335,15 @@ export default function InboxView() {
 					onClick={() => void copy(inbox.url, "Inbox URL")}
 				>
 					<Copy className="size-icon-sm" aria-hidden="true" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-control-sm gap-1.5 px-2 text-xs"
+					onClick={() => void copy(inboxReference(inbox), "Reference")}
+				>
+					<Copy className="size-icon-sm" aria-hidden="true" />
+					Copy for agent
 				</Button>
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}

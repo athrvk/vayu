@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, Trash2, Edit2, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
+import { Plus, Trash2, Edit2, Copy, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
 import {
 	useTabsStore,
 	useSaveStore,
@@ -27,7 +27,9 @@ import {
 	useStopMockServerMutation,
 } from "@/queries";
 import { restoreNotice } from "@/modules/trash";
-import { collectDescendantEntityIds } from "./tree-utils";
+import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
+import { useCopy } from "@/hooks/useCopy";
+import { collectionReference } from "@/lib/agent-reference";
 import type { CollectionTreeCrudSlice } from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
@@ -127,6 +129,7 @@ export function useTreeCrud({
 	const stopMockServerMutation = useStopMockServerMutation();
 	const { data: mockServers = [] } = useMockServersQuery();
 	const showToast = useToastStore((s) => s.showToast);
+	const { copy } = useCopy();
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
@@ -690,6 +693,22 @@ export function useTreeCrud({
 	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
 	const dismissExportDialog = useCallback(() => setExportTarget(null), []);
 
+	const getCopyForAgentAction = useCallback(
+		(collection: Collection): RowAction => {
+			const reference = collectionReference(
+				collection,
+				collection.parentId ? collectionNamePath(collection.parentId, collections) : []
+			);
+			return {
+				label: "Copy for agent",
+				icon: Copy,
+				hint: reference,
+				onSelect: () => void copy(reference, "Reference"),
+			};
+		},
+		[collections, copy]
+	);
+
 	/**
 	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
 	 * state live, and rendered by the shared RowActionsMenu - the same component
@@ -744,6 +763,7 @@ export function useTreeCrud({
 				icon: FileOutput,
 				onSelect: () => setExportTarget({ collection, format: "postman" }),
 			},
+			getCopyForAgentAction(collection),
 			{
 				label: "Delete",
 				icon: Trash2,
@@ -756,7 +776,13 @@ export function useTreeCrud({
 		// expanded set. The suppression that used to sit here hid two callbacks
 		// captured from whichever render last rebuilt this - benign only by
 		// accident, and this is the seam the drag-and-drop work extends.
-		[expandCollection, handleCreateRequest, handleRenameCollection, handleCollectionDeleteClick]
+		[
+			expandCollection,
+			getCopyForAgentAction,
+			handleCreateRequest,
+			handleRenameCollection,
+			handleCollectionDeleteClick,
+		]
 	);
 
 	const isCreatingCollection = createCollectionMutation.isPending;

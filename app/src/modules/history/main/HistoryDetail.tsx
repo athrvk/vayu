@@ -26,9 +26,11 @@
  * status - the things the pane below does not repeat.
  */
 
-import { History } from "lucide-react";
-import { useRunQuery, useRunReportQuery, isRunNotFound } from "@/queries";
+import { Copy, History } from "lucide-react";
+import { useCollectionsQuery, useRunQuery, useRunReportQuery, isRunNotFound } from "@/queries";
 import { isRunInProgress } from "@/lib/run-status";
+import { loadedRunReference } from "@/lib/run-reference-input";
+import { useCopy } from "@/hooks/useCopy";
 import { useTabsStore } from "@/stores";
 import { Button } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton, RunStatusPill } from "@/components/shared";
@@ -41,6 +43,8 @@ export default function HistoryDetail() {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const closeTab = useTabsStore((s) => s.closeTab);
+	const { data: collections = [] } = useCollectionsQuery();
+	const { copy } = useCopy();
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -173,6 +177,17 @@ export default function HistoryDetail() {
 							{selectedRunId}
 						</span>
 						<RunStatusPill status={run.status} />
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-control-sm shrink-0 gap-1.5 px-2 text-xs"
+							onClick={() =>
+								void copy(loadedRunReference(run, collections), "Reference")
+							}
+						>
+							<Copy className="size-icon-sm" aria-hidden="true" />
+							Copy for agent
+						</Button>
 					</div>
 				</div>
 			</div>
