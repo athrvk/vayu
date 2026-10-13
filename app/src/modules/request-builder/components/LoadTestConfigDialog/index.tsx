@@ -53,7 +53,7 @@ import {
 	DialogCancelButton,
 	DisabledHint,
 } from "@/components/ui";
-import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import { Callout, NumberField } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
@@ -62,6 +62,7 @@ import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
 import { useSavedLoadTestConfig } from "./useSavedLoadTestConfig";
+import { buildNotices } from "./notices";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
@@ -307,128 +308,31 @@ export default function LoadTestConfigDialog({
 		// prints the reason; this is what stops the Start button.
 		dataFileError;
 
-	const notices = useMemo(() => {
-		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
-
-		if (rampDurationError) {
-			list.push({
-				key: "ramp",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Ramp is longer than the run">
-						{rampDurationError}
-					</Callout>
-				),
-			});
-		}
-
-		if (budgetsError) {
-			list.push({
-				key: "budgets",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="A budget is out of range">
-						{budgetsError}
-					</Callout>
-				),
-			});
-		}
-
-		if (monitoringError) {
-			list.push({
-				key: "monitor",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Server monitoring is incomplete">
-						{monitoringError}
-					</Callout>
-				),
-			});
-		}
-
-		if (capacityRangeError) {
-			list.push({
-				key: "capacity-range",
-				severity: "blocking",
-				node: (
-					<Callout
-						severity="blocking"
-						title="Start concurrency is at or above the maximum"
-					>
-						{capacityRangeError}
-					</Callout>
-				),
-			});
-		}
-
-		if (startFloorError) {
-			list.push({
-				key: "start-floor",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Start is below one connection">
-						{startFloorError}
-					</Callout>
-				),
-			});
-		}
-
-		if (startConcurrencyError) {
-			list.push({
-				key: "start-concurrency",
-				severity: "blocking",
-				node: (
-					<Callout severity="blocking" title="Ramp would run downwards">
-						{startConcurrencyError}
-					</Callout>
-				),
-			});
-		}
-
-		// Unconditional before issue #1594: the load path ran no element at all,
-		// so a pre-request script never reached the wire regardless of what the
-		// run asked for. Now `elements.scripts: "allInline"` makes it run per
-		// submission, so the warning is only true at the other two settings.
-		if (hasPreRequestScript && scriptsOverride !== "allInline") {
-			list.push({
-				key: "pre-script",
-				severity: "warning",
-				node: (
-					<Callout severity="warning" title="Pre-request script won't run">
-						Running JS per request would cap throughput, so the load engine skips it
-						unless Scripts below is set to All inline. Your post-request script still
-						runs once afterwards, against sampled responses.
-					</Callout>
-				),
-			});
-		}
-
-		if (defaultHeaderDifference) {
-			list.push({
-				key: "default-headers",
-				severity: "info",
-				node: (
-					<Callout severity="info" title="This load run's default headers differ">
-						{defaultHeaderDifference}
-					</Callout>
-				),
-			});
-		}
-
-		return list.sort(
-			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
-		);
-	}, [
-		rampDurationError,
-		startFloorError,
-		startConcurrencyError,
-		capacityRangeError,
-		budgetsError,
-		monitoringError,
-		hasPreRequestScript,
-		scriptsOverride,
-		defaultHeaderDifference,
-	]);
+	const notices = useMemo(
+		() =>
+			buildNotices({
+				rampDurationError,
+				startFloorError,
+				startConcurrencyError,
+				capacityRangeError,
+				budgetsError,
+				monitoringError,
+				hasPreRequestScript,
+				scriptsOverride,
+				defaultHeaderDifference,
+			}),
+		[
+			rampDurationError,
+			startFloorError,
+			startConcurrencyError,
+			capacityRangeError,
+			budgetsError,
+			monitoringError,
+			hasPreRequestScript,
+			scriptsOverride,
+			defaultHeaderDifference,
+		]
+	);
 
 	const handleStart = () => {
 		if (blockingError) return;
