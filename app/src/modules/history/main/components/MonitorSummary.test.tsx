@@ -55,6 +55,17 @@ function renderTab(monitor?: RunReport["monitor"]) {
 	);
 }
 
+/**
+ * Callout has no `data-slot`, so a Callout is told apart by what only it
+ * renders: the `border-warning/40` box and a hidden icon. The hand-rolled
+ * notices it replaced (#1945) drew `bg-status-warning/10` and no icon.
+ */
+function warningCalloutAround(text: RegExp): HTMLElement {
+	const callout = screen.getByText(text).closest<HTMLElement>("[class*='border-warning/40']");
+	if (!callout) throw new Error(`no warning Callout around ${String(text)}`);
+	return callout;
+}
+
 describe("the Server Vitals summary on a stored run", () => {
 	it("prints each series' min, avg and max when the run recorded them", () => {
 		renderTab({
@@ -99,6 +110,8 @@ describe("the Server Vitals summary on a stored run", () => {
 
 		expect(screen.getByText(/2 of 10 scrapes failed/i)).toBeTruthy();
 		expect(screen.getByText("cpu_percent")).toBeTruthy();
+		const callout = warningCalloutAround(/2 of 10 scrapes failed/i);
+		expect(callout.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 
 	it("names the case where scrapes succeeded but carried none of the metrics", () => {
@@ -108,6 +121,9 @@ describe("the Server Vitals summary on a stored run", () => {
 		renderTab({ samples: 30, failures: 0, series: {} });
 
 		expect(screen.getByText(/none carried the metrics this run asked for/i)).toBeTruthy();
+		const callout = warningCalloutAround(/none carried the metrics this run asked for/i);
+		expect(callout).toHaveTextContent("Scrapes carried no metrics");
+		expect(callout.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 		expect(screen.queryByText(/every scrape failed/i)).toBeNull();
 	});
 

@@ -92,18 +92,18 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 			)}
 
 			{monitor.samples > 0 && series.length === 0 && (
-				<p className="p-3 text-sm bg-status-warning/10 border border-status-warning/20 text-warning-text">
+				<Callout severity="warning" title="Scrapes carried no metrics">
 					{monitor.samples} scrape{monitor.samples === 1 ? "" : "s"} succeeded, but none
 					carried the metrics this run asked for - check the metric names against the
 					endpoint&apos;s output.
-				</p>
+				</Callout>
 			)}
 
 			{monitor.samples > 0 && monitor.failures > 0 && (
-				<p className="text-sm text-warning-text">
+				<Callout severity="warning">
 					{monitor.failures} of {attempts} scrapes failed - the gaps in the chart are
 					those.
-				</p>
+				</Callout>
 			)}
 
 			{series.length > 0 && (
