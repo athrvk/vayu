@@ -12,6 +12,16 @@
 const pluralRules = new Intl.PluralRules("en-US");
 
 /**
+ * Pick the whole sentence for `count`, by the same `Intl.PluralRules` category
+ * as `pluralize`. For a sentence whose verb (or more) agrees with the count,
+ * where swapping the noun alone leaves "1 request are removed"; each form is
+ * written out so it can be read, and grepped, as a sentence.
+ */
+export function pickByCount(count: number, forms: { one: string; other: string }): string {
+	return forms[pluralRules.select(count) === "one" ? "one" : "other"];
+}
+
+/**
  * Pick the singular or plural form of a noun for `count`, via
  * `Intl.PluralRules` rather than a hand-rolled "s" suffix or "(s)" - see
  * docs/ux-writing.md's numbers-and-units rule.

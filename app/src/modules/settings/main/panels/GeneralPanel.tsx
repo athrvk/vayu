@@ -16,7 +16,7 @@
 
 import { useState, useEffect } from "react";
 import { FolderOpen, Save, Database, RotateCcw, Loader2 } from "lucide-react";
-import { pluralize } from "@/modules/dashboard/utils/format";
+import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import {
 	Card,
 	CardContent,
@@ -357,7 +357,10 @@ export default function GeneralPanel() {
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
 				confirmLabel="Clear history"
-				description={`All ${runs.length} stored ${pluralize(runs.length, "run")} and their metrics are removed permanently. This can't be undone.`}
+				description={`${pickByCount(runs.length, {
+					one: "The one stored run and its metrics are removed permanently.",
+					other: `All ${runs.length} stored runs and their metrics are removed permanently.`,
+				})} This can't be undone.`}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>

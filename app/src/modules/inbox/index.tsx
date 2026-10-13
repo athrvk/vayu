@@ -63,7 +63,7 @@ import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { inboxReference } from "@/lib/agent-reference";
 import { shownService } from "@/lib/shown-service";
-import { pluralize } from "@/modules/dashboard/utils/format";
+import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 import { CaptureDetail } from "./CaptureDetail";
@@ -155,10 +155,15 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
  * inbox of 120 understates the loss by exactly the part the user cannot see.
  */
 function clearDescription(total: number, listed: number): string {
-	const requests = `${total} recorded ${pluralize(total, "request")}`;
-	return listed < total
-		? `All ${requests}, including the ones not shown here, are removed. This can't be undone.`
-		: `All ${requests} in this inbox are removed. This can't be undone.`;
+	// Zero is unreachable: Clear is disabled while there is nothing to clear.
+	const consequence =
+		listed < total
+			? `All ${total} recorded requests, including the ones not shown here, are removed.`
+			: pickByCount(total, {
+					one: "The one recorded request in this inbox is removed.",
+					other: `All ${total} recorded requests in this inbox are removed.`,
+				});
+	return `${consequence} This can't be undone.`;
 }
 
 /**

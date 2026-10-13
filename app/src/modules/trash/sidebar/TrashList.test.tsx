@@ -410,6 +410,21 @@ describe("empty trash", () => {
 		expect(purge).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		[1, "The one item in the trash is removed permanently. This can't be undone."],
+		[2, "All 2 items in the trash are removed permanently. This can't be undone."],
+	])("agrees the verb with a count of %i", async (count, sentence) => {
+		state.items = [
+			collectionEntry(),
+			collectionEntry({ id: "c2", name: "Auth", kind: "request" }),
+		].slice(0, count);
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Empty trash" }));
+
+		expect(await screen.findByRole("dialog")).toHaveTextContent(sentence);
+	});
+
 	it("purges every row once confirmed", async () => {
 		state.items = [
 			collectionEntry(),
