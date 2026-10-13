@@ -64,12 +64,32 @@ export interface SavedLoadTestConfig {
 	monitor: MonitorDraft;
 }
 
+/** The fields that describe the load itself, edited together by `ProfileFields`. */
+export type LoadTestProfile = Pick<
+	SavedLoadTestConfig,
+	| "mode"
+	| "duration"
+	| "rps"
+	| "concurrency"
+	| "iterations"
+	| "rampDuration"
+	| "startConcurrency"
+	| "stepDuration"
+	| "sloMs"
+	| "streamDuration"
+	| "streamMaxEvents"
+>;
+
 /**
  * The memo as the dialog's fields start out: every range-bound number clamped
  * into the current limits, every absent field defaulted. `maxInFlight` is a
  * string because its field is optional and blank means "derive it".
  */
-export type RestoredLoadTestConfig = Omit<SavedLoadTestConfig, "maxInFlight"> & {
+export type RestoredLoadTestConfig = Omit<
+	SavedLoadTestConfig,
+	keyof LoadTestProfile | "maxInFlight"
+> & {
+	profile: LoadTestProfile;
 	maxInFlight: string;
 };
 
@@ -114,7 +134,7 @@ function restoreConfig(
 	const restore = (value: number | undefined, fallback: number, key: keyof LoadTestLimits) =>
 		clampToRange(value ?? fallback, limits[key]);
 
-	return {
+	const profile: LoadTestProfile = {
 		mode: saved.mode ?? LOAD_TEST_DEFAULTS.MODE,
 		duration: restore(saved.duration, LOAD_TEST_DEFAULTS.DURATION_S, "DURATION_S"),
 		rps: restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS"),
@@ -145,6 +165,15 @@ function restoreConfig(
 			LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS,
 			"STREAM_MAX_EVENTS"
 		),
+		// Capacity Discovery searches for the edge of this budget. Seeded from the
+		// same `sloThresholdMs` setting the p99 budget is - the search and the
+		// chart annotation are two readings of one number, and giving the mode its
+		// own default would be a third notion of "too slow".
+		sloMs: restore(saved.sloMs, seeds.sloThresholdMs, "SLO_MS"),
+	};
+
+	return {
+		profile,
 		maxInFlight: saved.maxInFlight != null ? String(saved.maxInFlight) : "",
 		// Clamped like the rest, and load-bearing for a second reason: a config
 		// saved when the slider's floor was 0 restores that 0, because
@@ -156,11 +185,6 @@ function restoreConfig(
 		),
 		slowThreshold: saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS,
 		saveTimingBreakdown: saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN,
-		// Capacity Discovery searches for the edge of this budget. Seeded from the
-		// same `sloThresholdMs` setting the p99 budget is - the search and the
-		// chart annotation are two readings of one number, and giving the mode its
-		// own default would be a third notion of "too slow".
-		sloMs: restore(saved.sloMs, seeds.sloThresholdMs, "SLO_MS"),
 		// Budgets and monitor are merged onto an empty draft rather than swapped
 		// wholesale: a block saved by an older build predates whatever field this
 		// build added since, and `budgetError` / `monitorError` read every

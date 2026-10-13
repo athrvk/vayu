@@ -53,7 +53,7 @@ import {
 	DialogCancelButton,
 	DisabledHint,
 } from "@/components/ui";
-import { Callout, NumberField } from "@/components/shared";
+import { Callout } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
@@ -61,11 +61,13 @@ import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
-import { useSavedLoadTestConfig } from "./useSavedLoadTestConfig";
+import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTestConfig";
 import { buildNotices } from "./notices";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
+import { ProfileFields } from "./ProfileFields";
+import { usesDuration } from "./profile";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import { describeDefaultHeaderDifference } from "./default-headers";
@@ -157,21 +159,13 @@ export default function LoadTestConfigDialog({
 		monitorIntervalMs: monitorSettings.defaultIntervalMs,
 	});
 
-	const [mode, setMode] = useState(initial.mode);
-	const [duration, setDuration] = useState(initial.duration);
-	const [rps, setRps] = useState(initial.rps);
-	const [concurrency, setConcurrency] = useState(initial.concurrency);
-	const [iterations, setIterations] = useState(initial.iterations);
-	const [rampDuration, setRampDuration] = useState(initial.rampDuration);
-	const [startConcurrency, setStartConcurrency] = useState(initial.startConcurrency);
-	const [stepDuration, setStepDuration] = useState(initial.stepDuration);
-	const [streamDuration, setStreamDuration] = useState(initial.streamDuration);
-	const [streamMaxEvents, setStreamMaxEvents] = useState(initial.streamMaxEvents);
+	const [profile, setProfile] = useState(initial.profile);
+	const updateProfile = (patch: Partial<LoadTestProfile>) =>
+		setProfile((prev) => ({ ...prev, ...patch }));
 	const [maxInFlight, setMaxInFlight] = useState(initial.maxInFlight);
 	const [sampleRate, setSampleRate] = useState(initial.sampleRate);
 	const [slowThreshold, setSlowThreshold] = useState(initial.slowThreshold);
 	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(initial.saveTimingBreakdown);
-	const [sloMs, setSloMs] = useState(initial.sloMs);
 	const [budgets, setBudgets] = useState(initial.budgets);
 	const [customBudgets, setCustomBudgets] = useState(initial.customBudgets);
 	const [failRun, setFailRun] = useState(initial.failRun);
@@ -193,16 +187,19 @@ export default function LoadTestConfigDialog({
 		"asMarked" | "allInline" | "allDeferred"
 	>(SCRIPTS_DEFAULT);
 
-	/**
-	 * Duration is meaningless in `iterations`: the engine stops on
-	 * `requests_sent < iterations` and its branch in `load_strategy.cpp` never
-	 * reads duration - `docs/engine/api-reference.md` documents the field as
-	 * "constant_rps / constant_concurrency / ramp_up". The old dialog showed it
-	 * anyway, second on screen, and persisted whatever you typed. It already
-	 * half-knew: the OAuth guard is handed `null` in this mode precisely because
-	 * a duration-based warning would be nonsense.
-	 */
-	const usesDuration = mode !== "iterations";
+	const {
+		mode,
+		duration,
+		rps,
+		concurrency,
+		iterations,
+		rampDuration,
+		startConcurrency,
+		stepDuration,
+		sloMs,
+		streamDuration,
+		streamMaxEvents,
+	} = profile;
 
 	/*
 	 * The chosen file against the contract in scope for this request's
@@ -385,7 +382,7 @@ export default function LoadTestConfigDialog({
 
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
 		// discards makes the stored run config claim something untrue about it.
-		if (usesDuration) config.duration_seconds = duration;
+		if (usesDuration(mode)) config.duration_seconds = duration;
 
 		// The parsed rows themselves - the same array the preview showed, never
 		// a re-parse (issue #993). Absent when no file was picked, which is what
@@ -439,8 +436,6 @@ export default function LoadTestConfigDialog({
 		onStart(config);
 	};
 
-	const num = (set: (n: number) => void) => (raw: string) => set(Number(raw));
-
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
 			<DialogContent className="max-w-xl">
@@ -482,177 +477,22 @@ export default function LoadTestConfigDialog({
 
 					<div className="space-y-1.5">
 						<Label className="text-xs">Load profile</Label>
-						<ProfilePicker value={mode} onChange={setMode} disabled={isStarting} />
+						<ProfilePicker
+							value={mode}
+							onChange={(next) => updateProfile({ mode: next })}
+							disabled={isStarting}
+						/>
 					</div>
 
-					{/* Only the fields this profile actually uses. */}
-					<div className="grid grid-cols-2 gap-3">
-						{mode === "constant_rps" && (
-							<NumberField
-								id="lt-rps"
-								label="Target rate"
-								unit="req/s"
-								value={rps}
-								onChange={num(setRps)}
-								min={limits.RPS.MIN}
-								max={limits.RPS.MAX}
-							/>
-						)}
-
-						{mode !== "constant_rps" && (
-							<NumberField
-								id="lt-concurrency"
-								label={
-									mode === "ramp_up"
-										? "Target connections"
-										: mode === "capacity"
-											? "Stop climbing at"
-											: "Connections"
-								}
-								value={concurrency}
-								onChange={num(setConcurrency)}
-								min={limits.CONCURRENCY.MIN}
-								max={limits.CONCURRENCY.MAX}
-								hint={
-									mode === "capacity"
-										? "The ceiling the search will not climb past. Reaching it ends the run."
-										: undefined
-								}
-							/>
-						)}
-
-						{mode === "iterations" && (
-							<NumberField
-								id="lt-iterations"
-								label="Requests"
-								value={iterations}
-								onChange={num(setIterations)}
-								min={limits.ITERATIONS.MIN}
-								max={limits.ITERATIONS.MAX}
-							/>
-						)}
-
-						{usesDuration && (
-							<NumberField
-								id="lt-duration"
-								label={
-									mode === "ramp_up"
-										? "Total duration"
-										: mode === "capacity"
-											? "Give up after"
-											: "Duration"
-								}
-								unit="s"
-								value={duration}
-								onChange={num(setDuration)}
-								min={limits.DURATION_S.MIN}
-								max={limits.DURATION_S.MAX}
-							/>
-						)}
-
-						{mode === "capacity" && (
-							<NumberField
-								id="lt-slo"
-								label="Latency budget"
-								unit="ms"
-								value={sloMs}
-								onChange={num(setSloMs)}
-								min={limits.SLO_MS.MIN}
-								max={limits.SLO_MS.MAX}
-								hint="The p99 the search looks for the edge of. Prefilled from your SLO setting."
-							/>
-						)}
-
-						{mode === "capacity" && (
-							<NumberField
-								id="lt-step-duration"
-								label="Hold each level for"
-								unit="s"
-								value={stepDuration}
-								onChange={num(setStepDuration)}
-								min={limits.STEP_DURATION_S.MIN}
-								max={limits.STEP_DURATION_S.MAX}
-								hint="Longer steps measure each level more steadily; shorter ones search faster."
-							/>
-						)}
-
-						{(mode === "ramp_up" || mode === "capacity") && (
-							<NumberField
-								id="lt-start-concurrency"
-								label="Start from"
-								value={startConcurrency}
-								onChange={num(setStartConcurrency)}
-								min={limits.START_CONCURRENCY.MIN}
-								max={limits.START_CONCURRENCY.MAX}
-								hint={
-									mode === "capacity"
-										? "The first level the search measures. It steps up from here while latency holds."
-										: "Connections at the start of the ramp. The engine climbs from here to the target."
-								}
-							/>
-						)}
-
-						{mode === "ramp_up" && (
-							<NumberField
-								id="lt-ramp"
-								label="Ramp duration"
-								unit="s"
-								value={rampDuration}
-								onChange={num(setRampDuration)}
-								min={limits.RAMP_DURATION_S.MIN}
-								max={limits.RAMP_DURATION_S.MAX}
-							/>
-						)}
-
-						{/*
-						 * The stream caps sit with the other run parameters, not
-						 * under Advanced: for a streaming request they are what
-						 * decides when each transfer ends, which is the same kind
-						 * of decision Duration makes for the run. Reaching either
-						 * is a *completed* stream, so the hints say so - a user
-						 * who read them as timeouts would read the run's 0% error
-						 * rate as luck.
-						 */}
-						{isStreamingRequest && (
-							<>
-								<NumberField
-									id="lt-stream-duration"
-									label="Stop each stream after"
-									unit="s"
-									value={streamDuration}
-									onChange={num(setStreamDuration)}
-									min={limits.STREAM_DURATION_S.MIN}
-									max={limits.STREAM_DURATION_S.MAX}
-									hint="A stream that reaches this counts as completed, not as a timeout."
-								/>
-								<NumberField
-									id="lt-stream-events"
-									label="Or after this many events"
-									value={streamMaxEvents}
-									onChange={num(setStreamMaxEvents)}
-									min={limits.STREAM_MAX_EVENTS.MIN}
-									max={limits.STREAM_MAX_EVENTS.MAX}
-									hint="Whichever comes first ends the stream. Under load a stream is always bounded."
-								/>
-							</>
-						)}
-					</div>
+					<ProfileFields
+						profile={profile}
+						onChange={updateProfile}
+						limits={limits}
+						isStreamingRequest={isStreamingRequest}
+					/>
 
 					<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
-						{summarise(
-							{
-								mode,
-								duration,
-								rps,
-								concurrency,
-								iterations,
-								rampDuration,
-								startConcurrency,
-								stepDuration,
-								sloMs,
-							},
-							blockingError !== null
-						)}
+						{summarise(profile, blockingError !== null)}
 					</p>
 
 					{/*
@@ -781,7 +621,7 @@ export default function LoadTestConfigDialog({
 					{oauth2Config && (
 						<OAuth2LoadTestGuard
 							config={oauth2Config}
-							durationSeconds={usesDuration ? duration : null}
+							durationSeconds={usesDuration(mode) ? duration : null}
 							onGateChange={setOauthGated}
 						/>
 					)}

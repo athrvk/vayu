@@ -31,7 +31,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("useSavedLoadTestConfig", () => {
 	it("starts from the defaults and the settings seeds when nothing is stored", () => {
 		const { initial } = restore();
-		expect(initial.duration).toBe(LOAD_TEST_DEFAULTS.DURATION_S);
+		expect(initial.profile.duration).toBe(LOAD_TEST_DEFAULTS.DURATION_S);
 		expect(initial.maxInFlight).toBe("");
 		expect(initial.budgets.latencyP99Ms).toBe("345");
 		expect(initial.monitor.intervalMs).toBe(2000);
@@ -39,7 +39,7 @@ describe("useSavedLoadTestConfig", () => {
 
 	it("falls back to the defaults when the stored memo is not JSON", () => {
 		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, "{not json");
-		expect(restore().initial.rps).toBe(LOAD_TEST_DEFAULTS.RPS);
+		expect(restore().initial.profile.rps).toBe(LOAD_TEST_DEFAULTS.RPS);
 	});
 
 	it("clamps a stored number that a lowered ceiling no longer allows", () => {
@@ -47,7 +47,7 @@ describe("useSavedLoadTestConfig", () => {
 			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
 			JSON.stringify({ concurrency: limits.CONCURRENCY.MAX + 1 })
 		);
-		expect(restore().initial.concurrency).toBe(limits.CONCURRENCY.MAX);
+		expect(restore().initial.profile.concurrency).toBe(limits.CONCURRENCY.MAX);
 	});
 
 	it("keeps a stored blank p99 budget blank instead of re-seeding it", () => {
@@ -59,10 +59,11 @@ describe("useSavedLoadTestConfig", () => {
 	});
 
 	it("round-trips a saved memo", () => {
-		const first = restore();
-		first.save({ ...first.initial, rps: 77, maxInFlight: 5 } satisfies SavedLoadTestConfig);
+		const { initial: first, save } = restore();
+		const { profile, ...rest } = first;
+		save({ ...profile, ...rest, rps: 77, maxInFlight: 5 } satisfies SavedLoadTestConfig);
 		const { initial } = restore();
-		expect(initial.rps).toBe(77);
+		expect(initial.profile.rps).toBe(77);
 		expect(initial.maxInFlight).toBe("5");
 	});
 
@@ -71,6 +72,7 @@ describe("useSavedLoadTestConfig", () => {
 			throw new Error("quota");
 		});
 		const { initial, save } = restore();
-		expect(() => save({ ...initial, maxInFlight: null })).not.toThrow();
+		const { profile, ...rest } = initial;
+		expect(() => save({ ...profile, ...rest, maxInFlight: null })).not.toThrow();
 	});
 });
