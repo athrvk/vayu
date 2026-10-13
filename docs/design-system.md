@@ -1471,7 +1471,7 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 
 | Name | Duration | Curve | Tailwind class | Use |
 |------|----------|-------|----------------|-----|
-| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Loading spinners |
+| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Unused by the app; spinners are `Loader2` with Tailwind's `animate-spin` |
 | `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
 | `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
 | `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
@@ -1481,9 +1481,11 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 | interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 | press feedback | 0.1s | ease-out | *(baseline, `[data-slot="button"]`)* | `scale: 0.98` on `:active` |
 
-**Spinner pattern:**
+**Spinner pattern:** the lucide `Loader2` glyph, never a bordered `div` turned into a ring
+(`loading-idioms.test.ts` bans `border-t-transparent` outside `components/ui`). See
+[Loading](#loading).
 ```tsx
-<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" />
+<Loader2 className="size-icon-sm animate-spin" />
 ```
 
 **Live dot pattern:**
@@ -2954,9 +2956,11 @@ nothing saying which one a new screen should reach for.
   `DetailSkeleton` - the shape of the content that is about to appear, so
   the layout does not jump when it arrives.
 - **An in-place action on an existing control is an inline spinner.**
-  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
-  a per-row purge. The control that was clicked is what shows it is working;
-  nothing else on the pane should move.
+  `Loader2` (`size-icon` or `size-icon-sm`, `animate-spin`) inside the button or
+  row that triggered it - Send, Stop, Save, a per-row purge. The spinner is
+  always that glyph: a bordered `div` with a transparent top edge is a further
+  idiom, and `loading-idioms.test.ts` fails on it. The control that was clicked
+  is what shows it is working; nothing else on the pane should move.
 - **A multi-step job is a progress view.** `ImportProgressView` and its kin -
   several named steps with their own state, not a single spinner standing in
   for all of them.
@@ -2976,7 +2980,7 @@ content stays exactly where it is, the pane takes `aria-busy` and drops to
 what says the new data landed. No spinner, no bar, no reflow - anything that
 *reflows* is the thing this replaces. `ResponseViewer` (`modules/request-
 builder/`) is the pattern's call site; the loading branch there keeps the
-centred spinner for the case where there is genuinely nothing to hold on to.
+centred `Loader2` for the case where there is genuinely nothing to hold on to.
 
 **One exception to "nothing moves": `SendingWave`.** A dim that never moves at
 all reads as inert rather than as a request in flight - easy to mistake for a
@@ -3335,7 +3339,7 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
   {/* Primary action */}
   <button className="h-[34px] px-4 rounded-md bg-primary text-white text-[13px] font-semibold ...">
     {isExecuting
-      ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" /> Sending</>
+      ? <><Loader2 className="size-icon-sm animate-spin" /> Sending</>
       : <>▶ Send</>
     }
   </button>

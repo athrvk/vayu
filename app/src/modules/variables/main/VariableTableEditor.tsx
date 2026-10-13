@@ -62,7 +62,7 @@ import {
 	TooltipIconButton,
 	environmentDeleteDescription,
 } from "@/components/ui";
-import { Callout, ErrorState } from "@/components/shared";
+import { Callout, DetailSkeleton, ErrorState } from "@/components/shared";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
@@ -235,7 +235,6 @@ const EDITOR_CONFIGS = {
 		infoTextColor: "text-scope-global",
 		infoBorder: "border-scope-global/20",
 		checkboxColor: "checked:bg-scope-global checked:border-scope-global",
-		loadingColor: "border-scope-global",
 	},
 	environment: {
 		icon: Cloud as LucideIcon,
@@ -248,7 +247,6 @@ const EDITOR_CONFIGS = {
 		infoTextColor: "text-scope-environment",
 		infoBorder: "border-scope-environment/20",
 		checkboxColor: "checked:bg-scope-environment checked:border-scope-environment",
-		loadingColor: "border-scope-environment",
 	},
 	collection: {
 		icon: Folder as LucideIcon,
@@ -261,7 +259,6 @@ const EDITOR_CONFIGS = {
 		infoTextColor: "text-scope-collection",
 		infoBorder: "border-scope-collection/20",
 		checkboxColor: "checked:bg-scope-collection checked:border-scope-collection",
-		loadingColor: "border-scope-collection",
 	},
 } as const;
 
@@ -727,16 +724,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				);
 
 	if (isDataLoading) {
-		return (
-			<div className="flex items-center justify-center h-full">
-				<div
-					className={cn(
-						"animate-spin w-6 h-6 border-2 border-t-transparent rounded-full",
-						editorConfig.loadingColor
-					)}
-				/>
-			</div>
-		);
+		return <DetailSkeleton label="Loading variables" />;
 	}
 
 	if (dataError) {
