@@ -41,6 +41,12 @@ interface HistoricalChartsSectionProps {
 	failure?: SeriesFailure;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples?: MonitorSample[];
+	/**
+	 * The server-vitals fetch failed. Drawn above the section whatever the time
+	 * series holds, because the vitals chart it explains is itself absent and the
+	 * time-series branches below would otherwise swallow it.
+	 */
+	monitorFailure?: SeriesFailure;
 	isLoading?: boolean;
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
@@ -53,6 +59,30 @@ interface HistoricalChartsSectionProps {
 const SYNC_KEY = CHART_SYNC.history;
 
 export default function HistoricalChartsSection({
+	monitorFailure,
+	...seriesProps
+}: HistoricalChartsSectionProps) {
+	return (
+		<>
+			{monitorFailure && (
+				<Callout
+					severity="warning"
+					title="Couldn't load the server vitals"
+					action={
+						<Button variant="outline" size="sm" onClick={monitorFailure.retry}>
+							Try again
+						</Button>
+					}
+				>
+					{monitorFailure.message}
+				</Callout>
+			)}
+			<SeriesCharts {...seriesProps} />
+		</>
+	);
+}
+
+function SeriesCharts({
 	data,
 	failure,
 	monitorSamples = [],
@@ -62,7 +92,7 @@ export default function HistoricalChartsSection({
 	breakpoint,
 	anomalies,
 	sleeps,
-}: HistoricalChartsSectionProps) {
+}: Omit<HistoricalChartsSectionProps, "monitorFailure">) {
 	if (isLoading && data.length === 0) {
 		return (
 			<Card>

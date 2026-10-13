@@ -40,9 +40,9 @@ export interface TabProps {
 }
 
 /**
- * A failed time-series fetch, with the action that retries it. `retry` is the
- * owner's choice of what to re-run (the first page, or the page that failed), so
- * the charts section only offers it.
+ * A failed paged fetch (the time series, or the server-vitals series), with the
+ * action that retries it. `retry` is the owner's choice of what to re-run (the
+ * first page, or the page that failed), so the charts section only offers it.
  */
 export interface SeriesFailure {
 	message: string;
@@ -60,6 +60,8 @@ export interface PerformanceTabProps extends TabProps {
 	seriesFailure?: SeriesFailure;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples: MonitorSample[];
+	/** Set when fetching the server-vitals series failed; absent while it is healthy. */
+	monitorFailure?: SeriesFailure;
 	isLoadingSeries?: boolean;
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
