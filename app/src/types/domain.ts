@@ -1083,6 +1083,8 @@ export interface VariableInfo extends ResolvedVariable {
  */
 export interface RunConfigSnapshot {
 	url?: string;
+	/** The request's name as the client sent it at run start - see {@link RunSummary.requestName}. */
+	requestName?: string;
 	method?: string;
 	mode?: string;
 	duration?: string;
