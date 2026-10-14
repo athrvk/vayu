@@ -257,6 +257,10 @@ extern JSClassID response_chain_class_id;
 // "got number" rather than showing them a coerced "[object Object]".
 const char* js_type_name (JSContext* ctx, JSValueConst value);
 
+// `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
+void setup_pm_execution (JSContext* ctx, JSValue pm);
+void setup_pm_metrics (JSContext* ctx, JSValue pm);
+
 } // namespace vayu::runtime::pm_detail
 
 #endif // VAYU_HAS_QUICKJS
