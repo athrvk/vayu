@@ -464,6 +464,15 @@ at runtime:
   import graph
 - **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
   schemas, loaded by the first request (see `docs/engine/mcp.md`)
+- **koffi** (MIT): a prebuilt FFI binding, used for the one call Electron has
+  no API for, `RegisterApplicationRestart`, which asks Windows to reopen Vayu
+  after a restart (`electron/restart-registration.ts`, issue #2098). Only a
+  packaged Windows build ever imports it - `main.ts` reaches it through a
+  dynamic `import("koffi")` after the engine is up, so it is not on the startup
+  graph and the other platforms never load it. Its native code ships as an
+  optional per-platform package (`@koromix/koffi-<platform>`), so no install
+  script is needed; electron-builder unpacks the `.node` file from the asar on
+  its own. A failed import costs the restart and nothing else
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
 package listed there ships a copy the app never opens: before the test that
