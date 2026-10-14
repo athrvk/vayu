@@ -472,8 +472,9 @@ at runtime:
   packaged Windows build ever imports it - `main.ts` reaches it through a
   dynamic `import("koffi")` after the engine is up, so it is not on the startup
   graph and the other platforms never load it. Its native code ships as an
-  optional per-platform package (`@koromix/koffi-<platform>`), so no install
-  script is needed; electron-builder unpacks the `.node` file from the asar on
+  optional per-platform package (`@koromix/koffi-<platform>`), so its install
+  script (a build-from-source fallback) is denied in `pnpm-workspace.yaml`
+  `allowBuilds`; electron-builder unpacks the `.node` file from the asar on
   its own. A failed import costs the restart and nothing else
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
