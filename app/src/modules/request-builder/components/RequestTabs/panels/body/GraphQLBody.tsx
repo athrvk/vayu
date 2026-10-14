@@ -822,12 +822,15 @@ export function GraphQLBody({
 						 * opens the list. It follows the picker's own rule (a choice that
 						 * is real) and needs the name the envelope will send.
 						 */}
-						{names.length > 1 && parts.operationName && operationReference && (
-							<CopyForAgentButton
-								reference={operationReference(parts.operationName)}
-								label="Copy operation for agent"
-							/>
-						)}
+						{names.length > 1 &&
+							parts.operationName &&
+							names.includes(parts.operationName) &&
+							operationReference && (
+								<CopyForAgentButton
+									reference={operationReference(parts.operationName)}
+									label="Copy operation for agent"
+								/>
+							)}
 					</div>
 				</PaneHeader>
 				{/*

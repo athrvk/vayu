@@ -118,6 +118,11 @@ describe("the SDL printer", () => {
 		expect(printed.unknownTypes).toEqual([]);
 	});
 
+	test("an empty type list prints the whole schema, as an omitted one does", async () => {
+		const introspection = introspectionFromSchema(buildSchema(FIXTURE_SDL));
+		expect(await printSdl(introspection, [])).toEqual(await printSdl(introspection));
+	});
+
 	test("prints only the named types, in the order given", async () => {
 		const printed = await printSdl(introspectionFromSchema(buildSchema(FIXTURE_SDL)), [
 			"Query",

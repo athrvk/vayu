@@ -219,7 +219,7 @@ export async function printSdl(
 		printType,
 	} = await import("graphql");
 	const schema = buildClientSchema(introspection as IntrospectionQuery);
-	if (only === undefined) {
+	if (only === undefined || only.length === 0) {
 		const types = Object.values(schema.getTypeMap())
 			.filter((type) => !isIntrospectionType(type) && !isSpecifiedScalarType(type))
 			.map((type) => type.name);

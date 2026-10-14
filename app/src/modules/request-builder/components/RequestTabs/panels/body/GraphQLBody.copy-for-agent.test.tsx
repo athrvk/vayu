@@ -135,6 +135,12 @@ describe("Copy operation for agent", () => {
 		expect(copyButton()).toBeNull();
 	});
 
+	it("is absent when the envelope names an operation the document does not define", () => {
+		renderBody(body("Gone"));
+		expect(screen.getByLabelText("Operation")).toBeTruthy();
+		expect(copyButton()).toBeNull();
+	});
+
 	it("is absent with the picker when the document defines one operation", () => {
 		renderBody(
 			JSON.stringify({
