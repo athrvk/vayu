@@ -275,6 +275,30 @@ std::string& missing_column);
 std::string
 missing_column_message (JSContext* ctx, const std::string& what, const std::string& column);
 
+// `pm.sendRequest` (pm_send_request.cpp).
+JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+
+// `pm.request.url`: the URL a string or a Url object carries, nullopt for
+// anything else.
+std::optional<std::string>
+script_url_text (JSContext* ctx, JSValueConst value, std::string* out_error = nullptr);
+
+// Header objects, shared by `pm.request`, `pm.response` and `pm.sendRequest`.
+void define_header_entry (JSContext* ctx,
+JSValue headers,
+const std::string& name,
+const std::string& value);
+void install_header_methods (JSContext* ctx, JSValue headers, bool mutators);
+std::optional<std::string> read_header_object (JSContext* ctx,
+JSValueConst js_headers,
+const char* label,
+bool suggest_delete,
+Headers& out);
+
+// `pm.response`: the reason phrase `reason()` answers, and json()/text().
+std::string response_reason_phrase (const Response& response);
+void install_response_body_readers (JSContext* ctx, JSValue response, const std::string& body);
+
 } // namespace vayu::runtime::pm_detail
 
 #endif // VAYU_HAS_QUICKJS
