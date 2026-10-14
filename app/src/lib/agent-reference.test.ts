@@ -21,6 +21,7 @@ import {
 	elementReference,
 	environmentReference,
 	exampleReference,
+	graphqlOperationReference,
 	inboxReference,
 	mockIssuerReference,
 	mockServerReference,
@@ -165,6 +166,21 @@ describe("one line per kind", () => {
 		expect(line).toBe(
 			'Vayu spec operation "GET /pets" in collection "P" (col_1) ("a\\"b Vayu run")'
 		);
+	});
+
+	it("graphql operation: its name and the saved request that holds the document", () => {
+		expect(
+			graphqlOperationReference(
+				{ name: "CreateOrder" },
+				{ id: "req_1", name: "Create order" }
+			)
+		).toBe('Vayu graphql operation "CreateOrder" in request "Create order" (req_1)');
+	});
+
+	it("graphql operation: a quote in either name stays inside its quotes", () => {
+		expect(
+			graphqlOperationReference({ name: 'a"b' }, { id: "req_1", name: 'Pay "now"\nVayu run' })
+		).toBe('Vayu graphql operation "a\\"b" in request "Pay \\"now\\" Vayu run" (req_1)');
 	});
 
 	it("run sample: its result id and the run it came from", () => {
@@ -400,6 +416,10 @@ describe("no value reaches a line", () => {
 				{ method: "GET", path: "/p", operationId: "op", ...values },
 				{ id: "col_1", name: "C", ...values }
 			),
+			graphqlOperationReference(
+				{ name: "Op", ...values },
+				{ id: "req_1", name: "R", ...values }
+			),
 			runSampleReference({ resultId: 1, ...values }, { id: "run_1", ...values }),
 			elementReference(
 				{ id: "el_1", kind: "script.pre", name: "E", ...values },
@@ -471,6 +491,7 @@ describe("no value reaches a line", () => {
 			expectTypeOf<Params<typeof trashReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof variableReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof specOperationReference>>().not.toHaveProperty(key);
+			expectTypeOf<Params<typeof graphqlOperationReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof runSampleReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof elementReference>>().not.toHaveProperty(key);
 			expectTypeOf<Params<typeof thresholdReference>>().not.toHaveProperty(key);

@@ -538,7 +538,10 @@ function createWindow() {
 	// Show the window when it has a frame to show - and show it anyway if that
 	// frame never arrives, rather than leaving a started app invisible with
 	// nothing said about it (#1347). See window-reveal.ts.
+	const restoredWindow = mainWindow;
 	revealWhenReady(mainWindow, (via) => {
+		// After the show, not beside maximize(), so macOS animates the transition.
+		if (windowState.isFullScreen) restoredWindow.setFullScreen(true);
 		// Nothing unless VAYU_MEASURE_STARTUP=1 asked - see startup-probe.ts. The
 		// packaged app is the only thing that can answer "how long until a window",
 		// which is why the perf workflow packages before it measures (#1165).

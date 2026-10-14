@@ -464,6 +464,8 @@ at runtime:
   import graph
 - **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
   schemas, loaded by the first request (see `docs/engine/mcp.md`)
+- **graphql**: `get_graphql_schema`'s introspection query and SDL printer,
+  loaded by the first call of that tool; the renderer bundles its own copy
 - **koffi** (MIT): a prebuilt FFI binding, used for the one call Electron has
   no API for, `RegisterApplicationRestart`, which asks Windows to reopen Vayu
   after a restart (`electron/restart-registration.ts`, issue #2098). Only a

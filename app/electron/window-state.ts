@@ -7,7 +7,7 @@
 
 /**
  * Window State Manager
- * Persists and restores window size, position, and maximized state
+ * Persists and restores window size, position, and maximized / full-screen state
  */
 
 import { createJsonStore } from "./json-store.js";
@@ -20,6 +20,7 @@ interface WindowState {
 	width: number;
 	height: number;
 	isMaximized: boolean;
+	isFullScreen: boolean;
 }
 
 interface WindowStateOptions {
@@ -58,12 +59,13 @@ function sanitizeWindowState(saved: unknown, defaults: WindowState): WindowState
 		return { ...defaults };
 	}
 
-	const { x, y, width, height, isMaximized } = saved as Record<string, unknown>;
+	const { x, y, width, height, isMaximized, isFullScreen } = saved as Record<string, unknown>;
 
 	const state: WindowState = {
 		width: isFiniteNumber(width) && width > 0 ? width : defaults.width,
 		height: isFiniteNumber(height) && height > 0 ? height : defaults.height,
 		isMaximized: typeof isMaximized === "boolean" ? isMaximized : defaults.isMaximized,
+		isFullScreen: typeof isFullScreen === "boolean" ? isFullScreen : defaults.isFullScreen,
 	};
 
 	if (isFiniteNumber(x) && isFiniteNumber(y)) {
@@ -79,6 +81,7 @@ export function loadWindowState(options: WindowStateOptions): WindowState {
 		width: options.defaultWidth,
 		height: options.defaultHeight,
 		isMaximized: false,
+		isFullScreen: false,
 	};
 
 	const savedState = store.get("windowState");
@@ -107,39 +110,41 @@ export function loadWindowState(options: WindowStateOptions): WindowState {
 }
 
 function saveWindowState(window: BrowserWindow): void {
+	const isFullScreen = window.isFullScreen();
 	const isMaximized = window.isMaximized();
 	const bounds = window.getBounds();
 
-	let state: WindowState;
-
-	if (isMaximized) {
-		// When maximized, preserve the previous non-maximized bounds. They come off
-		// disk, so they get the same scrubbing a load does - otherwise a maximize
-		// re-persists whatever garbage was already in the file.
-		const existingState = sanitizeWindowState(store.get("windowState"), {
-			width: bounds.width,
-			height: bounds.height,
-			isMaximized: true,
-		});
-		state = {
-			isMaximized: true,
-			x: existingState.x,
-			y: existingState.y,
-			width: existingState.width,
-			height: existingState.height,
-		};
-	} else {
-		// Save current bounds when not maximized
-		state = {
+	if (!isFullScreen && !isMaximized) {
+		store.set("windowState", {
 			isMaximized: false,
+			isFullScreen: false,
 			x: bounds.x,
 			y: bounds.y,
 			width: bounds.width,
 			height: bounds.height,
-		};
+		});
+		return;
 	}
 
-	store.set("windowState", state);
+	// A maximized or full-screen window reports the display's bounds, which would
+	// restore as a window the size of the screen with nothing to un-maximize back
+	// to. Keep the previous normal bounds instead. They come off disk, so they get
+	// the same scrubbing a load does - otherwise this re-persists whatever garbage
+	// was already in the file.
+	const existingState = sanitizeWindowState(store.get("windowState"), {
+		width: bounds.width,
+		height: bounds.height,
+		isMaximized,
+		isFullScreen,
+	});
+	store.set("windowState", {
+		isMaximized,
+		isFullScreen,
+		x: existingState.x,
+		y: existingState.y,
+		width: existingState.width,
+		height: existingState.height,
+	});
 }
 
 export function trackWindowState(window: BrowserWindow): void {

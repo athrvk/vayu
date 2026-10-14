@@ -27,6 +27,7 @@ import {
 	elementReference,
 	environmentReference,
 	exampleReference,
+	graphqlOperationReference,
 	inboxReference,
 	mockIssuerReference,
 	mockServerReference,
@@ -124,6 +125,7 @@ const FORMATTED = [
 		{ method: "GET", path: "/orders/{orderId}", operationId: "getOrder" },
 		orders
 	),
+	graphqlOperationReference({ name: "CreateOrder" }, request),
 	runReference(createOrderRun),
 	runReference({
 		id: "run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7",

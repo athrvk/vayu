@@ -80,6 +80,9 @@ import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { containsVariableToken } from "@/constants/variables";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
+import { graphqlOperationReference } from "@/lib/agent-reference";
+import { useRequestQuery } from "@/queries";
+import type { GraphQLBodyProps } from "./body/GraphQLBody";
 import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { switchGraphQLMethod } from "./body/graphql-method";
@@ -94,7 +97,26 @@ import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
  * work, none of which a REST request ever touches. It renders only for
  * `bodyMode === "graphql"`, so it loads then (#1146).
  */
-const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
+const LazyGraphQLBody = lazy(() => import("./body/GraphQLBody"));
+
+/**
+ * The GraphQL pane with its agent reference formatter. The line names the SAVED
+ * request, not the builder's draft, for the reason `ExamplesPanel` does: an
+ * unsaved rename is a name the engine and the agent's tools do not know yet. A
+ * wrapper rather than a hook in `BodyPanel`, so only the GraphQL mode needs the
+ * query cache.
+ */
+function GraphQLBody(props: GraphQLBodyProps) {
+	const { data: savedRequest } = useRequestQuery(props.requestId);
+	const operationReference = useMemo(
+		() =>
+			savedRequest
+				? (name: string) => graphqlOperationReference({ name }, savedRequest)
+				: undefined,
+		[savedRequest]
+	);
+	return <LazyGraphQLBody {...props} operationReference={operationReference} />;
+}
 
 /**
  * The floor the editor never shrinks past, as a class rather than a number.

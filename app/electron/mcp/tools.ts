@@ -37,6 +37,7 @@ import {
 	writesDisabled,
 } from "./tools/kit.js";
 import { READ_TOOLS } from "./tools/reads.tools.js";
+import { GRAPHQL_SCHEMA_TOOLS } from "./tools/graphql-schema.tools.js";
 import { RUN_REQUEST_TOOLS } from "./tools/run-request.tools.js";
 import { ENGINE_CONFIG_TOOLS } from "./tools/engine-config.tools.js";
 import { COLLECTION_TOOLS } from "./tools/collections.tools.js";
@@ -94,6 +95,7 @@ export {
 export { projectOAuth2Token, projectOAuth2Status } from "./tools/oauth2.js";
 export { DEFAULT_INBOX_CAPTURE_LIMIT, MAX_INBOX_CAPTURE_LIMIT } from "./tools/webhook-inbox.js";
 export { MAX_EXAMPLES_BODY_BYTES } from "./tools/examples.js";
+export { MAX_INTROSPECTION_BYTES, MAX_SCHEMA_SDL_BYTES } from "./tools/graphql-schema.js";
 export { MAX_SPEC_DIFF_ENTRIES } from "./tools/spec-bindings.js";
 
 /**
@@ -122,6 +124,7 @@ export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult
 
 export const TOOLS: McpTool[] = [
 	...READ_TOOLS,
+	...GRAPHQL_SCHEMA_TOOLS,
 	...RUN_REQUEST_TOOLS,
 	...ENGINE_CONFIG_TOOLS,
 	...COLLECTION_TOOLS,
