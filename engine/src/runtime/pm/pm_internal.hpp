@@ -257,6 +257,11 @@ extern JSClassID response_chain_class_id;
 // "got number" rather than showing them a coerced "[object Object]".
 const char* js_type_name (JSContext* ctx, JSValueConst value);
 
+// The state behind a `pm.request.url` Url object, or nullptr for anything
+// else - a class test, so the jar can tell a Url from a forged look-alike.
+struct RequestUrlState;
+RequestUrlState* request_url_state (JSValueConst value);
+
 // `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
 void setup_pm_execution (JSContext* ctx, JSValue pm);
 void setup_pm_metrics (JSContext* ctx, JSValue pm);
@@ -277,6 +282,11 @@ missing_column_message (JSContext* ctx, const std::string& what, const std::stri
 
 // `pm.sendRequest` (pm_send_request.cpp).
 JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+
+// `pm.cookies` and `pm.response.cookies` (pm_cookies.cpp). The second is the
+// getter `setup_pm_response` installs.
+void setup_pm_cookies (JSContext* ctx, JSValue pm);
+JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
 // `pm.request.url`: the URL a string or a Url object carries, nullopt for
 // anything else.
