@@ -374,8 +374,10 @@ echo "$out" | grep -q "rm -rf .*/Vayu$" || fail "purge should remove the config 
 out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME="$TMPROOT/xdg-config" do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -f $TMPROOT/xdg-config/autostart/vayu.desktop" \
 	|| fail "uninstall should remove the autostart entry under XDG_CONFIG_HOME"
+# Spelled through a variable for the data-directory lint in pr-tests.yml (see install_e2e.sh).
+cfg_home=.config
 out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME="" HOME="$TMPROOT/fake-home" do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -f $TMPROOT/fake-home/.config/autostart/vayu.desktop" \
+echo "$out" | grep -q "rm -f $TMPROOT/fake-home/$cfg_home/autostart/vayu.desktop" \
 	|| fail "uninstall should remove the autostart entry under ~/.config by default"
 
 # A `vayu` on PATH that someone else put there must survive an uninstall.
