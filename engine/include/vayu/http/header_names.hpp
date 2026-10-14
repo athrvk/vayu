@@ -72,7 +72,7 @@
  *   just defined can collide with one composition already resolved. It has no
  *   `400` to return, so it refuses the send the way the pre-send gate does -
  *   see `resolve_residual_tokens`.
- * - **A script's own `pm.sendRequest`** (`runtime/script_engine.cpp`, issue
+ * - **A script's own `pm.sendRequest`** (`runtime/pm/pm_send_request.cpp`, issue
  *   #1067) refuses in the same words with the call named in front of them,
  *   because that send is the script's rather than the request's - see
  *   `resolve_send_request_headers`. It throws where the others refuse, since a

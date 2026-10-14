@@ -7,8 +7,9 @@ description: >-
 
 Vayu exposes a **Postman-compatible** `pm` scripting API for pre-request and test
 scripts. Scripts run in the engine's QuickJS runtime
-(`engine/src/runtime/script_engine.cpp`); the global `pm` object is bound there. The
-intent is that the most common Postman scripts paste in and run unchanged.
+(`engine/src/runtime/script_engine.cpp`); the global `pm` object is bound there, and most
+of its surfaces live under `engine/src/runtime/pm/`, one file per family. The intent is
+that the most common Postman scripts paste in and run unchanged.
 
 > "Postman" is a trademark of Postman, Inc. Vayu is not affiliated with or endorsed by
 > Postman. Vayu re-implements a compatible API surface (method names and behaviour);
@@ -893,8 +894,8 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 
 A **pre-request** script can change the outgoing request. `pm.request`'s `url` /
 `method` / `headers` / `body` are copied out of the C++ `Request` into a plain JS object
-(`script_engine.cpp`, `setup_pm_request`), and after the script returns that object is read
-back and applied to the same `Request` before `client.send()`
+(`pm/pm_request_url.cpp`, `setup_pm_request`), and after the script returns that object is
+read back and applied to the same `Request` before `client.send()`
 (`apply_pm_request_writeback`). In a **test** script it stays a read-only record: the
 request has already gone out, so nothing is written back and a mutation there is discarded.
 
@@ -1217,7 +1218,7 @@ reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" 
 
 | Concern                         | Location                                                                                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pm` runtime (QuickJS bindings) | `engine/src/runtime/script_engine.cpp`                                                                                                                  |
+| `pm` runtime (QuickJS bindings) | `engine/src/runtime/script_engine.cpp` (the engine and the `pm` composer), `engine/src/runtime/pm/` (the surfaces)                                      |
 | Completion metadata endpoint    | `engine/src/http/routes/scripting.cpp`                                                                                                                  |
 | Type declaration generator      | `engine/src/http/routes/script_types.cpp`                                                                                                               |
 | Generated declarations (pinned) | `engine/tests/fixtures/script-typedefs.d.ts`                                                                                                            |

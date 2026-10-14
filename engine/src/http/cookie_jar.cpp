@@ -33,7 +33,7 @@ constexpr size_t NETSCAPE_FIELDS            = 7;
 
 /// A case-insensitive compare for hostnames, which are ASCII and
 /// case-insensitive (RFC 6265 §5.1.2 lowercases before comparing). Cookie
-/// *names* are not - see find_cookie in script_engine.cpp.
+/// *names* are not - see find_cookie in runtime/pm/pm_cookies.cpp.
 bool hosts_equal (std::string_view a, std::string_view b) {
     return vayu::utils::ascii_lower_equal (a, b);
 }
