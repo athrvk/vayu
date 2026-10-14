@@ -70,11 +70,12 @@ async function importWindowState() {
 	return import("./window-state");
 }
 
-/** Just enough BrowserWindow for the save path: bounds, maximized, listeners. */
-function fakeWindow(options: { bounds: Rectangle; isMaximized?: boolean }) {
+/** Just enough BrowserWindow for the save path: bounds, maximized, full screen, listeners. */
+function fakeWindow(options: { bounds: Rectangle; isMaximized?: boolean; isFullScreen?: boolean }) {
 	const handlers = new Map<string, () => void>();
 	const window = {
 		isMaximized: () => options.isMaximized ?? false,
+		isFullScreen: () => options.isFullScreen ?? false,
 		getBounds: () => options.bounds,
 		on: (event: string, handler: () => void) => {
 			handlers.set(event, handler);
@@ -109,6 +110,7 @@ describe("a corrupt window-state.json", () => {
 			width: 1400,
 			height: 900,
 			isMaximized: false,
+			isFullScreen: false,
 		});
 	});
 
@@ -121,7 +123,14 @@ describe("a corrupt window-state.json", () => {
 		emit("close");
 
 		expect(JSON.parse(storeFile())).toEqual({
-			windowState: { x: 10, y: 20, width: 800, height: 600, isMaximized: false },
+			windowState: {
+				x: 10,
+				y: 20,
+				width: 800,
+				height: 600,
+				isMaximized: false,
+				isFullScreen: false,
+			},
 		});
 	});
 });
@@ -156,6 +165,7 @@ describe("malformed but syntactically valid state", () => {
 			width: 1400,
 			height: 1000,
 			isMaximized: false,
+			isFullScreen: false,
 		});
 	});
 
@@ -187,6 +197,16 @@ describe("malformed but syntactically valid state", () => {
 		expect(loadWindowState(DEFAULTS).isMaximized).toBe(false);
 	});
 
+	it("coerces a non-boolean isFullScreen to false", async () => {
+		seedStore(
+			JSON.stringify({ windowState: { width: 800, height: 600, isFullScreen: "yes" } })
+		);
+
+		const { loadWindowState } = await importWindowState();
+
+		expect(loadWindowState(DEFAULTS).isFullScreen).toBe(false);
+	});
+
 	it.each([
 		["a string", '{"windowState": "abc"}'],
 		["an array", '{"windowState": [1, 2, 3]}'],
@@ -200,6 +220,7 @@ describe("malformed but syntactically valid state", () => {
 			width: 1400,
 			height: 900,
 			isMaximized: false,
+			isFullScreen: false,
 		});
 	});
 
@@ -215,8 +236,59 @@ describe("malformed but syntactically valid state", () => {
 		emit("close");
 
 		expect(JSON.parse(storeFile())).toEqual({
-			windowState: { x: 10, y: 20, width: 1920, height: 1080, isMaximized: true },
+			windowState: {
+				x: 10,
+				y: 20,
+				width: 1920,
+				height: 1080,
+				isMaximized: true,
+				isFullScreen: false,
+			},
 		});
+	});
+});
+
+describe("full screen", () => {
+	it("keeps the previous normal bounds and records the flag when saved full screen", async () => {
+		seedStore(JSON.stringify({ windowState: { x: 10, y: 20, width: 800, height: 600 } }));
+
+		const { trackWindowState } = await importWindowState();
+		const { window, emit } = fakeWindow({
+			bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+			isFullScreen: true,
+		});
+		trackWindowState(window);
+		emit("close");
+
+		expect(JSON.parse(storeFile())).toEqual({
+			windowState: {
+				x: 10,
+				y: 20,
+				width: 800,
+				height: 600,
+				isMaximized: false,
+				isFullScreen: true,
+			},
+		});
+	});
+
+	it("clears the flag when a window leaves full screen", async () => {
+		seedStore(JSON.stringify({ windowState: { width: 800, height: 600, isFullScreen: true } }));
+
+		const { trackWindowState } = await importWindowState();
+		const { window, emit } = fakeWindow({ bounds: { x: 5, y: 6, width: 900, height: 700 } });
+		trackWindowState(window);
+		emit("close");
+
+		expect(JSON.parse(storeFile()).windowState.isFullScreen).toBe(false);
+	});
+
+	it("loads a saved full-screen state", async () => {
+		seedStore(JSON.stringify({ windowState: { width: 800, height: 600, isFullScreen: true } }));
+
+		const { loadWindowState } = await importWindowState();
+
+		expect(loadWindowState(DEFAULTS).isFullScreen).toBe(true);
 	});
 });
 
@@ -239,6 +311,7 @@ describe("valid state", () => {
 			width: 1024,
 			height: 768,
 			isMaximized: false,
+			isFullScreen: false,
 		});
 	});
 

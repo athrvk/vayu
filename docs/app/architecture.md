@@ -77,7 +77,11 @@ The main process is responsible for:
 - **Window Management**: Creates and manages the Electron `BrowserWindow`. Its
   `webPreferences` hold the renderer's security posture - no Node integration,
   context isolation on, and Chromium's spellchecker off, so no field in the
-  request builder draws underlines and no dictionary is fetched over the network
+  request builder draws underlines and no dictionary is fetched over the network.
+  Bounds, maximised and full-screen state are remembered across launches in
+  `window-state.json` under the user-data directory (`window-state.ts`, issue
+  #2100); a maximised or full-screen window keeps its previous normal bounds, and
+  full screen is re-entered after the window is shown
 - **Engine Lifecycle**: Starts and stops the C++ engine via `EngineSidecar`
 - **App Lifecycle**: Handles app ready, window close, and quit events. A close or quit that would stop a running inbox, mock server or mock issuer is intercepted first and names what it stops, so a window-scoped service is never taken silently (`service-stop-guard.ts`, issue #1363)
 - **Context Menu**: Composes the right-click menu from Chromium's `context-menu` params and the target the renderer announces (`context-menu.ts`, issue #1359)
