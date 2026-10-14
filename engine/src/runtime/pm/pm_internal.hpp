@@ -254,11 +254,11 @@ extern JSClassID request_body_class_id;
 extern JSClassID expect_class_id;
 extern JSClassID response_chain_class_id;
 
-// The definitions `ScriptEngine::Impl` registers those ids with, for the
-// classes that live outside `script_engine.cpp`. Each stays in the unit that
-// defines its finalizer and exotic hooks.
+// The definitions `ScriptEngine::Impl` registers those ids with. Each stays in
+// the unit that defines its finalizer and exotic hooks.
 extern JSClassDef request_url_class;
 extern JSClassDef request_body_class;
+extern JSClassDef expect_class;
 extern JSClassDef response_chain_class;
 
 // Name a rejected value the way the script author wrote it, so the error says
@@ -287,6 +287,12 @@ using DeepEqualPath = std::vector<std::pair<void*, void*>>;
 enum class ZeroRule { SameValueZero, Signed };
 
 int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros);
+
+// `pm.test`, `pm.expect` and `pm.expect.fail` (pm_expect.cpp), which
+// `setup_pm_object` installs.
+JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
 // `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
 void setup_pm_execution (JSContext* ctx, JSValue pm);
