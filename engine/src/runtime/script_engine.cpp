@@ -11,6 +11,10 @@
  *
  * This file interfaces with QuickJS C library and uses different coding conventions.
  *
+ * The `pm` object's surfaces live in `pm/`, one file per family, sharing
+ * `pm/pm_internal.hpp`; what stays here is the console, base64 and
+ * `pm.crypto`, the `pm` composer and the engine itself (issue #2092).
+ *
  * Nothing here is linted: `engine/src/runtime/.clang-tidy` turns every check off
  * for this directory, with the reason. There used to be a file-wide
  * NOLINTBEGIN/NOLINTEND pair saying the same thing a second way (#885) - two
@@ -52,226 +56,14 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
 
-#ifdef VAYU_HAS_QUICKJS
-// Disable warnings for QuickJS C header in C++ code
-#if defined(__clang__) || defined(__GNUC__)
-#pragma GCC diagnostic push
-#if defined(__clang__)
-// Must come first: the names below are not all known to every Clang
-// (-Wcast-function-type-mismatch is 19+), and an unrecognised one is itself a
-// warning - which VAYU_WERROR turns into a build failure, so the suppression
-// block would break the build it exists to keep quiet.
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wc99-extensions"
-#pragma GCC diagnostic ignored "-Wcast-function-type-mismatch"
-#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-#endif
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-extern "C" {
-#include "quickjs.h"
-}
-#if defined(__clang__) || defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-#endif
+#include "pm/pm_internal.hpp"
 
 namespace vayu::runtime {
 
 #ifdef VAYU_HAS_QUICKJS
 
-// Per-runtime deadline state for the interrupt handler. One instance is owned by
-// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
-// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
-// used by one thread at a time, so no synchronization is needed here.
-//
-// Declared up here rather than beside the interrupt handler below because
-// `pm.sendRequest` reads the same deadline to bound a blocking call: QuickJS
-// only calls the interrupt handler *between bytecode operations*, so a C
-// function that blocks never yields to it and the deadline has to be consulted
-// by hand. One struct, so the budget the handler enforces and the budget the
-// clamp reads cannot drift.
-struct RuntimeState {
-    bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
-    std::chrono::steady_clock::time_point deadline{};
-    /// Set by the interrupt handler when it stops a call, cleared before each
-    /// execution and before each call an assertion makes into the script. The
-    /// handler is the only thing that knows *why* a call ended, and an
-    /// assertion that calls back into the script cannot tell the engine's abort
-    /// from a value the script threw: both arrive as a pending exception at the
-    /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
-    bool interrupted = false;
-};
-
-// ============================================================================
-// QuickJS Helper Functions
-// ============================================================================
-
+namespace pm_detail {
 namespace {
-// Context data stored in JS runtime
-struct ContextData {
-    std::vector<TestResult> tests;
-    std::vector<ConsoleEntry> console_output;
-    const Request* request                              = nullptr;
-    const Response* response                            = nullptr;
-    Environment* environment                            = nullptr;
-    Environment* globals                                = nullptr;
-    Environment* collectionVariables                    = nullptr;
-    const std::vector<Environment>* collectionAncestors = nullptr;
-    std::optional<std::string> request_id;
-    std::optional<std::string> request_name;
-    std::optional<ScriptEvent> event;
-    std::optional<size_t> iteration;
-    /// The virtual user `pm.info.vu` reads, 1-based - see `ScriptContext::vu`.
-    std::optional<size_t> vu;
-    std::optional<size_t> iteration_count;
-    /// `pm.info.run` - see `ScriptContext::run_summary`, which owns the
-    /// rationale.
-    std::optional<RunSummaryInfo> run_summary;
-    /// The row `pm.iterationData` reads, or null - see
-    /// `ScriptContext::iteration_data`, which owns the rationale.
-    const nlohmann::json* iteration_data = nullptr;
-    /// The stream's stored `events` trace node `pm.response.events` reads, or
-    /// null - see `ScriptContext::response_events`, which owns the rationale.
-    const nlohmann::json* response_events = nullptr;
-    bool has_error                        = false;
-    std::string error_message;
-
-    /**
-     * Whether `pm.sendRequest` may send - see
-     * `ScriptConfig::allow_send_request` for why the default is deny.
-     */
-    bool allow_send_request = false;
-
-    /**
-     * How many requests this execution has already issued. Per-execution
-     * state, not per-context: contexts are pooled and reused, so a counter
-     * living on the context would let the first script spend the second
-     * script's budget.
-     */
-    int send_request_count = 0;
-
-    /// What `pm.cookies` reads and `pm.sendRequest` sends through - see
-    /// `ScriptContext::cookie_jar`, which owns the rationale.
-    vayu::http::CookieJar* cookie_jar = nullptr;
-    std::string cookie_scope{ vayu::http::NO_ENVIRONMENT_SCOPE };
-
-    /// Where `pm.cookies.jar()` stages its writes - see
-    /// `ScriptContext::cookie_writes`. Drained by `pm.sendRequest`, which
-    /// hands them to the auxiliary transfer.
-    std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
-
-    /// A read-only per-VU cookie view for an inline load-run script - see
-    /// `ScriptContext::cookie_read_lines`, which owns the rationale.
-    const std::vector<std::string>* cookie_read_lines = nullptr;
-
-    /// What a flat `pm.cookies` read throws with neither a jar nor a
-    /// per-VU view - see `ScriptContext::cookie_read_refusal`.
-    const char* cookie_read_refusal = nullptr;
-
-    /// How `pm.sendRequest` reaches the network - see
-    /// `ScriptContext::transport`, which owns the rationale.
-    vayu::http::TransportPolicy transport;
-
-    /// What the engine adds to a `pm.sendRequest` - see
-    /// `ScriptContext::default_headers`, which owns the rationale.
-    vayu::http::DefaultHeaderPolicy default_headers;
-
-    /// How much of a `pm.sendRequest` response body is read before the
-    /// transfer is refused - see `ScriptContext::max_response_bytes`, which
-    /// owns the rationale and the per-path choice.
-    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
-
-    /// Whether `pm.execution` may record an intent at all - see
-    /// `ScriptContext::in_scenario`.
-    bool in_scenario = false;
-
-    /// `pm.metrics`'s write destination, or null to refuse it - see
-    /// `ScriptContext::record_metric`.
-    std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
-
-    /// What `pm.execution` recorded, copied onto the `ScriptResult` at the end
-    /// of the execution. Per-execution like the rest of this struct, so a
-    /// pooled context cannot carry one script's jump into the next.
-    ScriptControl control;
-};
-
-// Get context data from JS context
-ContextData* get_context_data (JSContext* ctx) {
-    return static_cast<ContextData*> (JS_GetContextOpaque (ctx));
-}
-
-// Milliseconds left of this execution's wall-clock budget, or nullopt when the
-// engine was configured without one (timeout_ms == 0). May be negative: the
-// caller decides whether an already-blown budget is an error or a clamp.
-std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
-    auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
-    if (!state || !state->enabled) {
-        return std::nullopt;
-    }
-    return std::chrono::duration_cast<std::chrono::milliseconds> (
-    state->deadline - std::chrono::steady_clock::now ())
-    .count ();
-}
-
-// Clears the handler's record before a call an assertion is about to make into
-// the script, so that `script_deadline_expired` afterwards answers about *that
-// call* rather than about the execution so far. The distinction is not
-// theoretical: `pm.test` consumes an abort natively and lets the script run on,
-// and QuickJS gives it a fresh 10,000-operation budget before the next poll -
-// so a flag left standing would read the ordinary throw in the next test as an
-// abort too, failing an assertion that holds.
-void arm_script_deadline_watch (JSContext* ctx) {
-    if (auto* state =
-        static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)))) {
-        state->interrupted = false;
-    }
-}
-
-// Whether the wall-clock deadline stopped the call just made. Asked by the
-// assertions that call back into the script: the interrupt stops the call by
-// raising an exception into it, which at the call site is indistinguishable
-// from one the script threw, so reading a pending exception as "the function
-// threw" reports a pass about a function that never returned. The handler's own
-// flag is the only honest answer - comparing the clock here would also call a
-// script's ordinary throw a timeout when it happened to land past the deadline.
-bool script_deadline_expired (JSContext* ctx) {
-    auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
-    return state != nullptr && state->enabled && state->interrupted;
-}
-
-// Frees a borrowed JSValue on every exit. QuickJS ships no such helper, and the
-// surfaces that read a handful of properties and refuse on most of them - the
-// pm.request write-back, pm.sendRequest's options object, the Url query
-// writers - each have several early returns to leak from.
-class ScopedValue {
-    public:
-    ScopedValue (JSContext* ctx, JSValue value) : ctx_ (ctx), value_ (value) {
-    }
-    ~ScopedValue () {
-        JS_FreeValue (ctx_, value_);
-    }
-    ScopedValue (const ScopedValue&)            = delete;
-    ScopedValue& operator= (const ScopedValue&) = delete;
-    [[nodiscard]] JSValue get () const {
-        return value_;
-    }
-
-    private:
-    JSContext* ctx_;
-    JSValue value_;
-};
-
-// Convert JS string to C++ string
-std::string js_to_string (JSContext* ctx, JSValue val) {
-    const char* str = JS_ToCString (ctx, val);
-    if (!str)
-        return "";
-    std::string result (str);
-    JS_FreeCString (ctx, str);
-    return result;
-}
 
 // ============================================================================
 // Variable Type Casting
@@ -460,11 +252,6 @@ struct RequestUrlState {
     bool dirty = false;
 };
 
-// Defined with the header accessors below, and needed here: naming a rejected
-// value the way the script author wrote it is the same courtesy on a URL
-// member as on a header.
-const char* js_type_name (JSContext* ctx, JSValueConst value);
-
 /**
  * @brief Bring the URL up to date with whatever the script did to its members,
  *        and answer the whole URL (issue #1040).
@@ -552,7 +339,11 @@ request_url_current_text (JSContext* ctx, JSValueConst url, RequestUrlState& sta
     return state.text;
 }
 
+} // namespace
+
 JSClassID request_url_class_id = 0;
+
+namespace {
 
 void request_url_finalizer (JSRuntime* rt, JSValue val) {
     (void)rt;
@@ -589,7 +380,11 @@ struct RequestBodyState {
     std::string text;
 };
 
+} // namespace
+
 JSClassID request_body_class_id = 0;
+
+namespace {
 
 void request_body_finalizer (JSRuntime* rt, JSValue val) {
     (void)rt;
@@ -749,7 +544,11 @@ int report_unknown_chain_member (JSContext* ctx, JSValueConst obj, JSAtom prop, 
     return -1;
 }
 
+} // namespace
+
 JSClassID expect_class_id = 0;
+
+namespace {
 
 void expect_finalizer (JSRuntime* rt, JSValue val) {
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (val, expect_class_id));
@@ -3641,6 +3440,8 @@ JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int arg
 // pm.response.to chain objects
 // ============================================================================
 
+} // namespace
+
 // Every link in the chain carries this class. Its exotic hook turns an
 // unrecognised member into a throw: `pm.response.to.be.ok` is an expression
 // statement, so a member that does not exist evaluates to undefined and
@@ -3648,6 +3449,8 @@ JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int arg
 // than a missing matcher that fails loudly. Own properties are resolved before
 // the hook runs, so it only ever sees names nothing implements.
 JSClassID response_chain_class_id = 0;
+
+namespace {
 
 int response_chain_unknown_member (JSContext* ctx,
 JSPropertyDescriptor* desc,
@@ -3762,6 +3565,8 @@ JSValue create_response_to_object (JSContext* ctx) {
 // Header accessors (pm.request.headers / pm.response.headers)
 // ============================================================================
 
+} // namespace
+
 // Name a rejected value the way the script author wrote it, so the error says
 // "got number" rather than showing them a coerced "[object Object]". Shared by
 // the header methods below and by the pm.request write-back further down.
@@ -3784,6 +3589,8 @@ const char* js_type_name (JSContext* ctx, JSValueConst value) {
         return "object";
     return "value";
 }
+
+namespace {
 
 // The methods live on the very object that holds the header entries, because
 // `apply_pm_request_writeback` reads *that* object - so a header added by
@@ -8819,6 +8626,10 @@ std::mutex& class_id_registration_mutex () {
 }
 
 } // anonymous namespace
+} // namespace pm_detail
+
+// `ScriptEngine::Impl` below reads the shared state and every installer.
+using namespace pm_detail;
 
 // ============================================================================
 // ScriptEngine Implementation

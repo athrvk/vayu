@@ -664,15 +664,27 @@ endif()
 
 # Add QuickJS if available
 if(QUICKJS_FOUND)
-    target_sources(vayu_core PRIVATE
+    # The pm/ files are the `pm` object's surfaces, split out of
+    # script_engine.cpp (issue #2092); they share pm/pm_internal.hpp.
+    set(VAYU_QUICKJS_SOURCES
         src/runtime/script_engine.cpp
+        src/runtime/pm/pm_cookies.cpp
+        src/runtime/pm/pm_execution_metrics.cpp
+        src/runtime/pm/pm_expect.cpp
+        src/runtime/pm/pm_request_url.cpp
+        src/runtime/pm/pm_response.cpp
+        src/runtime/pm/pm_scopes.cpp
+        src/runtime/pm/pm_send_request.cpp
     )
+    target_sources(vayu_core PRIVATE ${VAYU_QUICKJS_SOURCES})
     target_link_libraries(vayu_core PUBLIC quickjs)
     target_compile_definitions(vayu_core PUBLIC VAYU_HAS_QUICKJS)
-    
-    # Disable C99 extension warnings for script_engine.cpp (QuickJS macros use compound literals)
+
+    # Disable C99 extension warnings for the QuickJS glue (QuickJS macros use
+    # compound literals). One list for both, so a file added to the glue cannot
+    # miss the flag.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(src/runtime/script_engine.cpp PROPERTIES
+        set_source_files_properties(${VAYU_QUICKJS_SOURCES} PROPERTIES
             COMPILE_FLAGS "-Wno-c99-extensions"
         )
     endif()
