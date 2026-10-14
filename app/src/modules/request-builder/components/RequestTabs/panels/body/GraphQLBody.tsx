@@ -60,6 +60,7 @@ import {
 	type DocumentInsertion,
 } from "@/lib/graphql/insert-skeleton";
 import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
+import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
 import { sendsGraphQLInTheUrl } from "./graphql-method";
@@ -118,6 +119,14 @@ export interface GraphQLBodyProps {
 	 * (issue #1228).
 	 */
 	method: HttpMethod;
+	/**
+	 * The agent reference line for an operation of this request
+	 * (`graphqlOperationReference`), or undefined while the request is unsaved or
+	 * its saved row has not loaded: the line names the request by its id, and a
+	 * request with none has nothing for an agent's tools to look up. A prop, not a
+	 * query in here, so this lazy body stays free of the data layer.
+	 */
+	operationReference?: (operationName: string) => string;
 }
 
 /**
@@ -353,6 +362,7 @@ export function GraphQLBody({
 	variablesDraft,
 	onVariablesDraftChange,
 	method,
+	operationReference,
 }: GraphQLBodyProps) {
 	// One subscription, not three: the entry object is the store's own reference,
 	// so it is a stable snapshot, and status/schema/error/freshness cannot be
@@ -807,6 +817,20 @@ export function GraphQLBody({
 								</SelectContent>
 							</Select>
 						)}
+						{/*
+						 * Beside the picker, not inside it: a button in a Select trigger
+						 * opens the list. It follows the picker's own rule (a choice that
+						 * is real) and needs the name the envelope will send.
+						 */}
+						{names.length > 1 &&
+							parts.operationName &&
+							names.includes(parts.operationName) &&
+							operationReference && (
+								<CopyForAgentButton
+									reference={operationReference(parts.operationName)}
+									label="Copy operation for agent"
+								/>
+							)}
 					</div>
 				</PaneHeader>
 				{/*

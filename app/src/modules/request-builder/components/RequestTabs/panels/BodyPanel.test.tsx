@@ -28,7 +28,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { RequestBuilderContext } from "../../../context";
@@ -47,7 +48,19 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 		<div data-testid="code-editor" data-language={language} />
 	),
 }));
-vi.mock("./body/GraphQLBody", () => ({ default: () => <div data-testid="graphql-body" /> }));
+/** The props the GraphQL pane was last rendered with. */
+let graphqlProps: { operationReference?: (name: string) => string } = {};
+vi.mock("./body/GraphQLBody", () => ({
+	default: (props: typeof graphqlProps) => {
+		graphqlProps = props;
+		return <div data-testid="graphql-body" />;
+	},
+}));
+
+const getRequest = vi.fn();
+vi.mock("@/services/api", () => ({
+	apiService: { getRequest: (id: string) => getRequest(id) },
+}));
 
 const { default: BodyPanel } = await import("./BodyPanel");
 
@@ -75,17 +88,26 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 	} as unknown as RequestBuilderContextValue;
 
 	return render(
-		// A `{{variable}}` cell hovers to a tooltip, and Radix needs the provider
-		// the app mounts at its root.
-		<TooltipProvider>
-			<RequestBuilderContext.Provider value={value}>
-				<BodyPanel />
-			</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		// The GraphQL mode reads the saved request, so it needs the query cache.
+		<QueryClientProvider
+			client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
+		>
+			{/* A `{{variable}}` cell hovers to a tooltip, and Radix needs the provider
+			    the app mounts at its root. */}
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={value}>
+					<BodyPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		</QueryClientProvider>
 	);
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+	vi.clearAllMocks();
+	graphqlProps = {};
+	getRequest.mockResolvedValue({ id: "req_1", name: "Create order", collectionId: "col_1" });
+});
 
 describe("the content type a mode implies", () => {
 	it("is on screen without opening the dropdown", () => {
@@ -259,6 +281,26 @@ describe("the editor fills the pane", () => {
 		const box = (await screen.findByTestId("graphql-body")).closest("div.flex-1")!;
 		expect(box.className).toContain("min-h-40");
 		expect(box.getAttribute("style")).toBeNull();
+	});
+});
+
+describe("the GraphQL pane's agent reference", () => {
+	it("names the SAVED request, so an unsaved rename never reaches the line", async () => {
+		renderPanel({ bodyMode: "graphql", id: "req_1", name: "Draft rename" });
+		await screen.findByTestId("graphql-body");
+
+		await waitFor(() => expect(graphqlProps.operationReference).toBeDefined());
+		expect(graphqlProps.operationReference?.("CreateOrder")).toBe(
+			'Vayu graphql operation "CreateOrder" in request "Create order" (req_1)'
+		);
+	});
+
+	it("offers no formatter for a request that is not saved", async () => {
+		renderPanel({ bodyMode: "graphql", id: undefined });
+		await screen.findByTestId("graphql-body");
+
+		expect(getRequest).not.toHaveBeenCalled();
+		expect(graphqlProps.operationReference).toBeUndefined();
 	});
 });
 

@@ -51,6 +51,10 @@ Introspection happens on the body tab's own lifecycle and when you press
 header you typed by hand is not part of the schema's identity, so after editing
 an `Authorization` row directly, press Refresh.
 
+A coding agent connected over the [MCP server](../engine/mcp.md) reads the same
+schema with `get_graphql_schema`: the request composed the same way and
+introspected with the same auth, so it sees the types the editor sees.
+
 ## The schema explorer
 
 Press **Browse schema**, the panel icon at the left of the Query pane's header,
@@ -168,6 +172,13 @@ named one, and a server given no `operationName` for such a document answers
 with an error rather than a guess - so the picker appears exactly when the
 choice becomes real. Whatever else the envelope carries (`extensions`, an
 `operationName` an importer preserved) rides along through every edit.
+
+Beside the picker, a saved request has a **Copy operation for agent** button. It
+copies one line naming the chosen operation and the request that holds it
+(`Vayu graphql operation "CreateOrder" in request "Create order" (req_...)`), so
+a coding agent can read the request's schema through `get_graphql_schema` and
+send that `operationName`. The line carries the operation's name only, never the
+query text, the variables or a header.
 
 ## The context bar
 

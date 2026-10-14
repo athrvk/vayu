@@ -209,6 +209,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
+| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
@@ -901,12 +902,15 @@ An entity the app labels by something other than a name is named by that: an
 inbox, a mock server and a mock issuer by their port (a mock server also by its
 collection), a capture by its method and path.
 
-Five kinds belong to another entity, so the line names that owner. A **variable** is its name in a scope - `in environment "<name>"
+Six kinds belong to another entity, so the line names that owner. A **variable** is its name in a scope - `in environment "<name>"
 (<id>)`, `in collection "<name>" (<id>)` or `in globals` - and the line never
 says what it holds, nor whether it is secret. A **spec operation** is
 `"<METHOD> <path>"`, the path as the OpenAPI document templates it
 (`/pets/{petId}`), then `in collection "<name>" (<id>)` and, when the document
-declares one, `("<operationId>")`. A **run sample** is `(<resultId>) of run
+declares one, `("<operationId>")`. A **graphql operation** is its name in the
+document, then `in request "<name>" (<id>)`: the request's body holds the
+document, and the line never carries the query text, the variables or a header.
+A **run sample** is `(<resultId>) of run
 (<runId>)`. An **element** is named by its own name, else its kind
 (`script.pre`), then `of request "<name>" (<id>)` or `of collection "<name>"
 (<id>)`. A **threshold** is its budget key (`latencyP95Ms`,
@@ -938,6 +942,7 @@ Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
 Vayu environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
 Vayu variable "baseUrl" in environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
 Vayu spec operation "GET /orders/{orderId}" in collection "Orders" (col_4a6c8e02-9b1d-4f35-a7c8-1d3e5f708192) ("getOrder")
+Vayu graphql operation "CreateOrder" in request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
 Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
 Vayu run "GET /v1/orders" (run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7) - design run, GET /v1/orders, 10/5/26, 9:30:00 AM, failed
 Vayu run "Checkout" (run_c3e5a7b9-1d2f-4c40-8e6a-0b1c2d3e4f50) - collection run, collection "Checkout", 10/6/26, 7:00:00 AM, completed
@@ -973,6 +978,10 @@ Where the user copies each kind from in the app:
 - **spec operation**: the copy button on an operation's row in a collection's spec sync (the
   added, changed and removed lists). Feeds `get_spec`, `diff_spec` and `sync_spec`, which match on
   its method and path.
+- **graphql operation**: the copy button beside the operation picker in the Query pane of a saved
+  GraphQL request (the picker shows once the document defines more than one operation and one is
+  chosen). Feeds `get_graphql_schema`'s `requestId` and the envelope's `operationName` in
+  `run_request` and `update_request`.
 - **run sample**: the copy button in a sample card's header on a load test's Samples tab. Feeds
   `get_run_samples` and `get_run_report`, which join on its `resultId`.
 - **element**: the copy item in an element's row menu, in a request's or a collection's Elements
@@ -1002,7 +1011,9 @@ and that path can hold a secret variable's value.
 
 The server instructions carry the grammar and both rules in every session, without
 tool names (the instructions never name a tool; each tool's description is its one
-contract).
+contract). They also say that a GraphQL request's schema can be read through Vayu,
+introspected with the request's own auth and answered as SDL, before a query is
+written.
 
 ### Request composition
 
@@ -1142,6 +1153,16 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [file part](api-reference.md#file-references-binary-bodies-and-file-parts) has no spelling in a
   `key=value` string, and a stored one is left alone unless `body` replaces the
   whole body.
+
+  **GraphQL schema.** Before writing a `graphql` body, an agent reads the
+  endpoint's schema with `get_graphql_schema`: given a saved request's
+  `requestId` it composes that request exactly as a send would (the same
+  `POST /compose`, so the same variables and the same auth, `inherit` walked),
+  or given a `url` it composes that endpoint inline. It then sends the standard
+  introspection query as a transient `POST /execute`, so no run row is filed,
+  and answers the schema as SDL. The schema is the request's own, the one the
+  app's editor introspects, rather than a copy the agent was handed. It is
+  fetched live on every call.
 - **File bodies** - `create_request` and `update_request` store a `binary`
   body, one file sent as the whole body: `file: {src, contentType?, fileName?}`
   in place of `body` (a lone `file` implies `bodyType: "binary"`). Every file
@@ -1896,7 +1917,7 @@ cannot read a missing value as an empty one.
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
 | A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
 | The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `list_request_examples` |
-| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks) |
+| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks), `get_graphql_schema`'s `endpoint` (the composed URL; the SDL is never withheld) |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
@@ -2072,13 +2093,14 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 76 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 77 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
 evaluated before `app.whenReady` and cost every launch ~250-300 ms ahead of the
 window, MCP switched off or not (#1145). A disabled launch now evaluates none of
-it; opening the Settings tool list is what pays for the registry.
+it; opening the Settings tool list is what pays for the registry. `graphql` is
+not part of that load: `get_graphql_schema` imports it on its first call.
 
 The IPC surface:
 
