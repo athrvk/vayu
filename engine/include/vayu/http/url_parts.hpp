@@ -21,8 +21,9 @@
  * `cookie_jar.cpp` reads a host, a path and a scheme through libcurl's `CURLU`
  * for its own scoping, and stops there. `pm.request.url` (issue #991) needs the
  * whole shape - scheme, host segments, port, decoded path segments, the query
- * in wire order, the fragment - so it lives here rather than inside
- * `script_engine.cpp`, where nothing could unit-test it without a JS context.
+ * in wire order, the fragment - so it lives here rather than beside the
+ * bindings in `runtime/pm/pm_request_url.cpp`, where nothing could unit-test
+ * it without a JS context.
  *
  * **libcurl owns the parsing.** Splitting a URL by hand is the class of thing
  * that is right for the URLs you thought of and wrong for the rest (IPv6

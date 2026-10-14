@@ -257,16 +257,13 @@ extern JSClassID response_chain_class_id;
 // The definitions `ScriptEngine::Impl` registers those ids with, for the
 // classes that live outside `script_engine.cpp`. Each stays in the unit that
 // defines its finalizer and exotic hooks.
+extern JSClassDef request_url_class;
+extern JSClassDef request_body_class;
 extern JSClassDef response_chain_class;
 
 // Name a rejected value the way the script author wrote it, so the error says
 // "got number" rather than showing them a coerced "[object Object]".
 const char* js_type_name (JSContext* ctx, JSValueConst value);
-
-// The state behind a `pm.request.url` Url object, or nullptr for anything
-// else - a class test, so the jar can tell a Url from a forged look-alike.
-struct RequestUrlState;
-RequestUrlState* request_url_state (JSValueConst value);
 
 // The `pm.expect` primitives `pm.response.to` shares, defined beside the
 // rest of `pm.expect`: the AssertionError throw, a value as a failure message
@@ -317,10 +314,25 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
 void setup_pm_cookies (JSContext* ctx, JSValue pm);
 JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
+// `pm.request` and `pm.info` (pm_request_url.cpp), and the write-back that
+// applies a pre-request script's `pm.request` to the request about to be sent.
+void setup_pm_request (JSContext* ctx, JSValue pm);
+void setup_pm_info (JSContext* ctx, JSValue pm);
+std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& request);
+
+// The state behind a `pm.request.url` Url object, or nullptr for anything
+// else - a class test, so the jar can tell a Url from a forged look-alike.
+struct RequestUrlState;
+RequestUrlState* request_url_state (JSValueConst value);
+
 // `pm.request.url`: the URL a string or a Url object carries, nullopt for
 // anything else.
 std::optional<std::string>
 script_url_text (JSContext* ctx, JSValueConst value, std::string* out_error = nullptr);
+
+// The text `pm.expect` reads a string-like target as: a string, or the Url or
+// RequestBody object that replaced one on `pm.request`; nullopt otherwise.
+std::optional<std::string> expect_string_like (JSContext* ctx, JSValueConst value);
 
 // Header objects, shared by `pm.request`, `pm.response` and `pm.sendRequest`.
 void define_header_entry (JSContext* ctx,
