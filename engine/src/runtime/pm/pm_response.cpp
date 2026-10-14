@@ -1128,7 +1128,7 @@ JSValue js_request_headers_remove (JSContext* ctx, JSValueConst this_val, int ar
 // already is there, documented in both script docs.
 void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
     // The reads are eight of one shape, so they are a table and a loop - the
-    // idiom `build_query_object` uses for the same job. The three mutators are
+    // idiom `build_query_object` (pm_request_url.cpp) uses for the same job. The three mutators are
     // not: two of them share one implementation through a magic number, and
     // spelling that in the table would cost more than it saves.
     struct HeaderRead {
