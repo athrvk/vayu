@@ -12,7 +12,8 @@
  * places the entity (` in <collection path>`) or describes it (` - <detail>`).
  * The name is for a person to recognise; the id is the key every MCP tool
  * takes. A kind that belongs to another entity (a variable, a spec operation, a
- * run sample, an element, a threshold) names that owner in its tail instead.
+ * graphql operation, a run sample, an element, a threshold) names that owner in
+ * its tail instead.
  * The grammar, every kind's example and the fixture the examples are
  * formatted from are in `docs/engine/mcp.md` ("Naming what the user means"),
  * which `agent-reference.docs.test.ts` holds to this file.
@@ -63,6 +64,7 @@ export type ReferenceKind =
 	| "trash entry"
 	| "variable"
 	| "spec operation"
+	| "graphql operation"
 	| "run sample"
 	| "element"
 	| "threshold";
@@ -259,6 +261,18 @@ export function specOperationReference(
 	const label = `${operation.method.toUpperCase()} ${pathOnly(operation.path)}`;
 	const operationId = operation.operationId ? ` ("${quoteName(operation.operationId)}")` : "";
 	return `Vayu ${named("spec operation", label)} in ${entity("collection", collection.name, collection.id)}${operationId}`;
+}
+
+/**
+ * An operation is addressed by its name within the request's document, so the
+ * line has no id of its own. It takes `{ name }`: the query text, the variables
+ * and the headers are not reachable from here.
+ */
+export function graphqlOperationReference(
+	operation: { name: string },
+	request: Pick<Request, "id" | "name">
+): string {
+	return `Vayu ${named("graphql operation", operation.name)} in ${entity("request", request.name, request.id)}`;
 }
 
 /** `Vayu run sample (<resultId>) of run (<run_id>)`: no name, the result row id is the key. */

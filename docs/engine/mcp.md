@@ -902,12 +902,15 @@ An entity the app labels by something other than a name is named by that: an
 inbox, a mock server and a mock issuer by their port (a mock server also by its
 collection), a capture by its method and path.
 
-Five kinds belong to another entity, so the line names that owner. A **variable** is its name in a scope - `in environment "<name>"
+Six kinds belong to another entity, so the line names that owner. A **variable** is its name in a scope - `in environment "<name>"
 (<id>)`, `in collection "<name>" (<id>)` or `in globals` - and the line never
 says what it holds, nor whether it is secret. A **spec operation** is
 `"<METHOD> <path>"`, the path as the OpenAPI document templates it
 (`/pets/{petId}`), then `in collection "<name>" (<id>)` and, when the document
-declares one, `("<operationId>")`. A **run sample** is `(<resultId>) of run
+declares one, `("<operationId>")`. A **graphql operation** is its name in the
+document, then `in request "<name>" (<id>)`: the request's body holds the
+document, and the line never carries the query text, the variables or a header.
+A **run sample** is `(<resultId>) of run
 (<runId>)`. An **element** is named by its own name, else its kind
 (`script.pre`), then `of request "<name>" (<id>)` or `of collection "<name>"
 (<id>)`. A **threshold** is its budget key (`latencyP95Ms`,
@@ -939,6 +942,7 @@ Vayu collection "Checkout" (col_8e2d4b17-1c3a-4f60-a9d2-5b6c7d8e9f01)
 Vayu environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
 Vayu variable "baseUrl" in environment "Staging" (env_7c9e1b34-5d6f-4a80-b2c3-e4f5a6b7c8d9)
 Vayu spec operation "GET /orders/{orderId}" in collection "Orders" (col_4a6c8e02-9b1d-4f35-a7c8-1d3e5f708192) ("getOrder")
+Vayu graphql operation "CreateOrder" in request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f)
 Vayu run "Create order" (run_5a7c9e21-4d3b-4a8f-b1c2-d3e4f5a6b7c8) - load test, POST /v1/orders, 10/5/26, 8:10:00 AM, completed
 Vayu run "GET /v1/orders" (run_9d1f3b57-2e4c-4b68-a0d1-f2a3b4c5d6e7) - design run, GET /v1/orders, 10/5/26, 9:30:00 AM, failed
 Vayu run "Checkout" (run_c3e5a7b9-1d2f-4c40-8e6a-0b1c2d3e4f50) - collection run, collection "Checkout", 10/6/26, 7:00:00 AM, completed
@@ -974,6 +978,10 @@ Where the user copies each kind from in the app:
 - **spec operation**: the copy button on an operation's row in a collection's spec sync (the
   added, changed and removed lists). Feeds `get_spec`, `diff_spec` and `sync_spec`, which match on
   its method and path.
+- **graphql operation**: the copy button beside the operation picker in the Query pane of a saved
+  GraphQL request (the picker shows once the document defines more than one operation and one is
+  chosen). Feeds `get_graphql_schema`'s `requestId` and the envelope's `operationName` in
+  `run_request` and `update_request`.
 - **run sample**: the copy button in a sample card's header on a load test's Samples tab. Feeds
   `get_run_samples` and `get_run_report`, which join on its `resultId`.
 - **element**: the copy item in an element's row menu, in a request's or a collection's Elements

@@ -173,6 +173,13 @@ with an error rather than a guess - so the picker appears exactly when the
 choice becomes real. Whatever else the envelope carries (`extensions`, an
 `operationName` an importer preserved) rides along through every edit.
 
+Beside the picker, a saved request has a **Copy operation for agent** button. It
+copies one line naming the chosen operation and the request that holds it
+(`Vayu graphql operation "CreateOrder" in request "Create order" (req_...)`), so
+a coding agent can read the request's schema through `get_graphql_schema` and
+send that `operationName`. The line carries the operation's name only, never the
+query text, the variables or a header.
+
 ## The context bar
 
 The bar's **GraphQL** section carries the glanceable half: whether a schema is
