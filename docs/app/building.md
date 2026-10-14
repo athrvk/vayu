@@ -464,6 +464,8 @@ at runtime:
   import graph
 - **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
   schemas, loaded by the first request (see `docs/engine/mcp.md`)
+- **graphql**: `get_graphql_schema`'s introspection query and SDL printer,
+  loaded by the first call of that tool; the renderer bundles its own copy
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
 package listed there ships a copy the app never opens: before the test that

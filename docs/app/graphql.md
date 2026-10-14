@@ -51,6 +51,10 @@ Introspection happens on the body tab's own lifecycle and when you press
 header you typed by hand is not part of the schema's identity, so after editing
 an `Authorization` row directly, press Refresh.
 
+A coding agent connected over the [MCP server](../engine/mcp.md) reads the same
+schema with `get_graphql_schema`: the request composed the same way and
+introspected with the same auth, so it sees the types the editor sees.
+
 ## The schema explorer
 
 Press **Browse schema**, the panel icon at the left of the Query pane's header,

@@ -102,7 +102,9 @@ const INSTRUCTIONS_TAIL =
 	"suggest_load_profile) provide ready-made starting points. Before writing a " +
 	"preRequestScript or postRequestScript, read vayu://scripting/completions - it is " +
 	"the engine's own list of every pm.* name the script sandbox provides, including " +
-	"synchronous pm.crypto hashing and btoa/atob for signing a request.";
+	"synchronous pm.crypto hashing and btoa/atob for signing a request. A GraphQL " +
+	"request's schema can be read through Vayu, introspected with the request's own " +
+	"auth and answered as SDL, before a query is written.";
 
 /**
  * The reveal setting, stated the same way and for the same reason as the write

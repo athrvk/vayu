@@ -86,6 +86,9 @@ export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\`
 /** What `run_collection_smoke` says about the `url` every row echoes. */
 export const WITHHELD_SMOKE_ROW_URL_SENTENCE = `Every row's \`url\` - the composed one, or for a request that could not be composed the stored one - has the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
 
+/** What `get_graphql_schema` says about the `endpoint` it echoes. */
+export const WITHHELD_GRAPHQL_ENDPOINT_SENTENCE = `\`endpoint\` is the composed URL with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}; the schema itself is never withheld.`;
+
 /** What `get_cookies` says about cookie values. */
 export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
 
