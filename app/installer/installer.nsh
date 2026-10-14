@@ -21,6 +21,12 @@
 
 !define APP_DATA_DIR "Vayu"
 
+; The name Electron gives the Start at login registry value: the app's
+; AppUserModelID (APP_USER_MODEL_ID in app/electron/constants.ts, guarded by
+; installer-nsh-paths.test.ts). The login item is written by the app, not by this
+; installer, so removing the app has to remove it here (#2098).
+!define LOGIN_ITEM_VALUE "io.github.athrvk.vayu"
+
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
@@ -127,6 +133,19 @@
 ; ============================================================================
 !macro customUnInstall
   !insertmacro useUserShellContext
+
+  ; Start at login lives in the user's registry, outside every directory this
+  ; uninstaller removes, so a removed app would otherwise leave a Run entry
+  ; pointing at a file that is gone - Windows keeps listing it under Startup
+  ; apps. Removed whatever the user answers about their data below: it is a
+  ; setting of the installed app, not data. Not on an update, which runs this
+  ; same uninstaller over the old version (--updated) and must keep the user's
+  ; choice. HKCU, with StartupApproved beside it where Task Manager records the
+  ; enabled/disabled toggle.
+  ${ifNot} ${isUpdated}
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${LOGIN_ITEM_VALUE}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "${LOGIN_ITEM_VALUE}"
+  ${endIf}
 
   ; A silent uninstall (an updater's reinstall, winget, a scripted removal) has
   ; nobody to answer a Yes/No MessageBox, and NSIS does not suppress a raw

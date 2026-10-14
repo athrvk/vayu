@@ -65,7 +65,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     anyway.
 
     Pin a version with `VAYU_VERSION=0.2.1` in front of the command, or
-    uninstall by re-running it with `-- --uninstall`.
+    uninstall by re-running it with `-- --uninstall`, which also removes the Start
+    at login entry if you turned it on.
 
 === "Windows"
 

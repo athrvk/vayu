@@ -1071,6 +1071,8 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 them - a preference that only lands on the next reload reads as a broken
 setting.
 
+**Start at login is not a field here** (issue #2098). The login item lives in the OS - the user can remove it from Task Manager, System Settings or a desktop's startup list without Vayu knowing - so `StartAtLoginCard` reads it through `electronAPI.getLoginItem()` on mount and after each `setLoginItem()`, and nothing joins `SETTINGS_STORAGE_KEYS`. `resetAll` is the one place the store touches it: it calls `setLoginItem(false)` before it clears the keys and reloads, so a reset to defaults does not leave Vayu starting at login.
+
 `keepAwakeDuringRuns` is the user's standing answer to whether a run may ask the
 OS to stay awake (issue #1357). It is **read when a run starts** rather than
 watched, by `LoadTestService` and `ScenarioRunService`, so the answer that

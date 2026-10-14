@@ -2,6 +2,10 @@ allowBuilds:
     electron: true
     electron-winstaller: true
     esbuild: true
+    # koffi's install script is only the build-from-source fallback; the prebuilt
+    # @koromix/koffi-<platform> package supplies the binary. Denied on purpose,
+    # so pnpm 11 does not fail the install on an unreviewed build (ERR_PNPM_IGNORED_BUILDS).
+    koffi: false
 onlyBuiltDependencies:
     - electron
     - electron-winstaller

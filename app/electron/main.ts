@@ -24,6 +24,7 @@ import {
 	session,
 	shell,
 } from "electron";
+import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
@@ -41,6 +42,8 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
+import { createLoginItem, registerLoginItemIpc } from "./login-item.js";
+import { registerForRestart, wasRestartedAfterReboot } from "./restart-registration.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
@@ -1270,6 +1273,23 @@ function setupIpcHandlers() {
 		};
 	});
 
+	// Start at login (#2098). The OS owns the answer, so this holds no state: each
+	// call reads or writes it. `APPIMAGE` is the file the user launched; Linux's
+	// `process.execPath` inside one is a path in a mount that is gone by the next
+	// login.
+	registerLoginItemIpc(
+		ipcMain,
+		createLoginItem({
+			platform: process.platform,
+			isPackaged: app.isPackaged,
+			binaryPath: process.env.APPIMAGE ?? process.execPath,
+			configHome: process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+			get: () => app.getLoginItemSettings(),
+			set: (settings) => app.setLoginItemSettings(settings),
+			log: (msg, fields) => appLogger().info("main", msg, fields),
+		})
+	);
+
 	// Accent color scheme - maps OS accent to the nearest Vayu scheme
 	ipcMain.handle("accent:get", () => {
 		const accentHex = systemPreferences.getAccentColor?.() ?? null;
@@ -1694,6 +1714,23 @@ app.whenReady().then(async () => {
 	// swallows its own failures, and starting it here means even one that escaped
 	// that guard would cost the user nothing but MCP.
 	await startMcp();
+
+	// Last of all, and not awaited: it asks Windows to reopen the app after a
+	// restart, which the window and the engine do not depend on and which must
+	// not be able to hold up or fail anything before them. It never rejects, so
+	// a missing binding costs the feature and nothing else. `koffi` is reached
+	// only through this dynamic import, and only on Windows (#2098).
+	if (wasRestartedAfterReboot(process.argv)) {
+		appLogger().info("main", "Relaunched by Windows after a restart", {
+			restartedAfterReboot: true,
+		});
+	}
+	void registerForRestart({
+		platform: process.platform,
+		isPackaged: app.isPackaged,
+		load: () => import("koffi"),
+		log: (msg, fields) => appLogger().warn("main", msg, fields),
+	});
 });
 
 app.on("window-all-closed", () => {

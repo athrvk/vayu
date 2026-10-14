@@ -44,6 +44,8 @@ vi.mock("./CookiesCard", () => ({ CookiesCard: () => null }));
 
 const getAppPaths = vi.fn();
 const openLogsFolder = vi.fn();
+// The Start at login card on the same panel reads this on mount.
+const getLoginItem = vi.fn();
 
 beforeEach(() => {
 	getAppPaths.mockReset().mockResolvedValue({
@@ -53,7 +55,17 @@ beforeEach(() => {
 		logsPath: "/data/logs",
 	});
 	openLogsFolder.mockReset().mockResolvedValue("");
-	(window as unknown as { electronAPI: unknown }).electronAPI = { getAppPaths, openLogsFolder };
+	getLoginItem.mockReset().mockResolvedValue({
+		supported: false,
+		reason: "Start at login is available in the installed app.",
+		openAtLogin: false,
+		needsApproval: false,
+	});
+	(window as unknown as { electronAPI: unknown }).electronAPI = {
+		getAppPaths,
+		openLogsFolder,
+		getLoginItem,
+	};
 });
 
 afterEach(() => {

@@ -87,6 +87,13 @@ export const APP_SETTINGS = [
 		keywords: ["save delay", "unsaved"],
 	},
 	{
+		anchor: "start-at-login",
+		panel: "general",
+		label: "Start at login",
+		searchText: "Whether Vayu opens by itself when you sign in to your computer.",
+		keywords: ["startup", "autostart", "login item", "boot"],
+	},
+	{
 		anchor: "data-management",
 		panel: "general",
 		label: "Data management",

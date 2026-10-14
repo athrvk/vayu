@@ -24,6 +24,7 @@ import {
 	type OpenIntent,
 } from "./open-intent";
 import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon";
+import { RESTARTED_AFTER_REBOOT_ARG } from "./restart-registration";
 
 describe("isImportableFile", () => {
 	it("takes the extensions the import pipeline reads", () => {
@@ -132,6 +133,10 @@ describe("parseOpenIntents", () => {
 
 	it("finds nothing on an ordinary launch", () => {
 		expect(parseOpenIntents(["vayu", "--enable-logging", "."])).toEqual([]);
+	});
+
+	it("reads nothing into the argument Windows relaunches the app with after a restart", () => {
+		expect(parseOpenIntents(["vayu", RESTARTED_AFTER_REBOOT_ARG])).toEqual([]);
 	});
 });
 

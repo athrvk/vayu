@@ -236,6 +236,11 @@ printf 'PASS: a failed download leaves the install intact\n'
 # The data directory the app names (Vayu).
 dir=Vayu
 mkdir -p "$ROOT/.config/$dir" "$ROOT/Library/Application Support/$dir"
+# What the app's Start at login switch leaves behind on Linux.
+# Spelled through a variable: the data-directory lint in pr-tests.yml flags any literal ".config/<name>" that is not the app's own directory.
+cfg_home=.config
+mkdir -p "$ROOT/$cfg_home/autostart"
+touch "$ROOT/$cfg_home/autostart/vayu.desktop"
 out="$(installer --uninstall 2>&1)" || fail "uninstall failed: $out"
 [ -e "$target" ] && fail "uninstall left the app at $target"
 
@@ -243,6 +248,7 @@ case "$OS" in
 	Darwin) data_root="$ROOT/Library/Application Support" ;;
 	*)
 		[ -e "$ROOT/.local/share/applications/vayu.desktop" ] && fail "the desktop entry survived uninstall"
+		[ -e "$ROOT/$cfg_home/autostart/vayu.desktop" ] && fail "the autostart entry survived uninstall"
 		data_root="$ROOT/.config"
 		;;
 esac

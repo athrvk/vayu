@@ -8,7 +8,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
@@ -239,5 +239,67 @@ describe("client-settings rehydration", () => {
 				[key]: Object.keys(expected[key]).sort(),
 			});
 		}
+	});
+});
+
+/**
+ * "Reset to defaults" and the login item (#2098).
+ *
+ * The item lives in the OS, so clearing `SETTINGS_STORAGE_KEYS` alone would
+ * leave Vayu starting at login after a reset that promised defaults. The
+ * request has to go out before the reload tears the renderer down.
+ */
+describe("client-settings resetAll", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+		localStorage.clear();
+	});
+
+	function stubReloadAndBridge(setLoginItem: (on: boolean) => Promise<unknown>) {
+		const order: string[] = [];
+		const reload = vi.fn(() => order.push("reload"));
+		vi.stubGlobal("location", { reload });
+		(window as unknown as { electronAPI: unknown }).electronAPI = {
+			setLoginItem: vi.fn((on: boolean) => {
+				order.push(
+					`setLoginItem(${on}) while storage ${
+						localStorage.getItem(STORAGE_KEYS.CLIENT_SETTINGS) === null
+							? "empty"
+							: "intact"
+					}`
+				);
+				return setLoginItem(on);
+			}),
+		};
+		return { order, reload };
+	}
+
+	it("turns the login item off before it clears storage and reloads", () => {
+		localStorage.setItem(STORAGE_KEYS.CLIENT_SETTINGS, "{}");
+		const { order } = stubReloadAndBridge(() => Promise.resolve());
+
+		useClientSettingsStore.getState().resetAll();
+
+		expect(order).toEqual(["setLoginItem(false) while storage intact", "reload"]);
+		expect(localStorage.getItem(STORAGE_KEYS.CLIENT_SETTINGS)).toBeNull();
+	});
+
+	it("still resets and reloads when the item cannot be turned off", async () => {
+		const { reload } = stubReloadAndBridge(() => Promise.reject(new Error("refused")));
+
+		useClientSettingsStore.getState().resetAll();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledOnce();
+	});
+
+	it("resets and reloads with no bridge at all", () => {
+		const reload = vi.fn();
+		vi.stubGlobal("location", { reload });
+
+		useClientSettingsStore.getState().resetAll();
+
+		expect(reload).toHaveBeenCalledOnce();
 	});
 });
