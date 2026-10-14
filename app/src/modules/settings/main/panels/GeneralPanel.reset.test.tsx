@@ -118,6 +118,7 @@ describe("Reset app settings copy", () => {
 		"dashboard",
 		"notifications",
 		"auto-save",
+		"start at login",
 		"load-test limits",
 	];
 

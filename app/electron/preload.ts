@@ -94,6 +94,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("theme:changed", handler);
 	},
 
+	// Start at login (#2098). The OS holds the answer; main/login-item.ts reads and
+	// writes it, so nothing here is cached.
+	getLoginItem: (): Promise<{
+		supported: boolean;
+		reason: string | null;
+		openAtLogin: boolean;
+		needsApproval: boolean;
+	}> => ipcRenderer.invoke("loginItem:get"),
+	setLoginItem: (
+		on: boolean
+	): Promise<{
+		supported: boolean;
+		reason: string | null;
+		openAtLogin: boolean;
+		needsApproval: boolean;
+	}> => ipcRenderer.invoke("loginItem:set", on),
+
 	// Accent color scheme (Windows and macOS only)
 	getAccentScheme: (): Promise<{ accentScheme: string | null }> =>
 		ipcRenderer.invoke("accent:get"),

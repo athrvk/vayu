@@ -24,6 +24,16 @@ interface ThemeInfo {
 	themeSource: ThemeSource;
 }
 
+/** Mirrors `LoginItemState` in `electron/login-item.ts`. */
+export interface LoginItemInfo {
+	supported: boolean;
+	/** Why it is unsupported, as a sentence. `null` when supported. */
+	reason: string | null;
+	openAtLogin: boolean;
+	/** macOS holds the item until the user approves it in System Settings. */
+	needsApproval: boolean;
+}
+
 interface AccentSchemeInfo {
 	accentScheme: ColorScheme | null;
 }
@@ -211,6 +221,15 @@ interface ElectronAPI {
 	getTheme: () => Promise<ThemeInfo>;
 	setTheme: (source: ThemeSource) => Promise<ThemeInfo>;
 	onThemeChanged: (callback: (theme: ThemeInfo) => void) => () => void;
+
+	/**
+	 * Start at login (issue #2098). The OS holds the answer - the user can remove
+	 * the item outside the app - so it is read here on demand and never mirrored
+	 * into a store. `setLoginItem` rejects a non-boolean and resolves with what the
+	 * OS now says, which for macOS can still be off with `needsApproval` set.
+	 */
+	getLoginItem: () => Promise<LoginItemInfo>;
+	setLoginItem: (on: boolean) => Promise<LoginItemInfo>;
 
 	// Accent color scheme (Windows and macOS only). Returns null on platforms that
 	// don't support system accent colors (Linux) or if no accent color is available.

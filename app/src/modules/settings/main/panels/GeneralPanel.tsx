@@ -9,7 +9,7 @@
  * GeneralPanel
  *
  * System-level app settings: the installed version and a manual update check,
- * auto-save behavior, data management (clear stored run history), on-disk
+ * auto-save behavior, start at login, data management (clear stored run history), on-disk
  * storage locations, and a reset-to-defaults for every renderer preference. Client-side; the data actions talk to the engine's run
  * store via the existing API.
  */
@@ -39,6 +39,7 @@ import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { UpdatesCard } from "./UpdatesCard";
+import { StartAtLoginCard } from "./StartAtLoginCard";
 import { CookiesCard } from "./CookiesCard";
 import { WorkspaceBackupCard } from "./WorkspaceBackupCard";
 import { useSettingsStore } from "@/modules/settings/settings-store";
@@ -186,6 +187,10 @@ export default function GeneralPanel() {
 				</CardContent>
 			</Card>
 
+			{/* The OS-held login item (#2098): a preference, but the OS owns the
+			    answer, which is why it is not one of the stored settings above. */}
+			<StartAtLoginCard />
+
 			{/* Data management */}
 			<Card data-setting-anchor={DATA_MANAGEMENT.anchor}>
 				<CardHeader className="pb-3">
@@ -322,8 +327,8 @@ export default function GeneralPanel() {
 					</div>
 					<CardDescription>
 						Restore every app preference to its default: appearance, editor, dashboard,
-						notifications, auto-save, and the load-test limits. Collections, requests,
-						and run history are not affected.
+						notifications, auto-save, start at login, and the load-test limits.
+						Collections, requests, and run history are not affected.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -346,7 +351,7 @@ export default function GeneralPanel() {
 				open={confirmReset}
 				onOpenChange={setConfirmReset}
 				title="Reset app settings?"
-				description="Every app preference goes back to its default - appearance, editor, dashboard, notifications, auto-save and the load-test limits - and the app reloads. Collections, requests and run history are not affected."
+				description="Every app preference goes back to its default - appearance, editor, dashboard, notifications, auto-save, start at login and the load-test limits - and the app reloads. Collections, requests and run history are not affected."
 				onConfirm={resetSettings}
 				confirmLabel="Reset"
 				confirmVariant="default"

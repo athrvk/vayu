@@ -23,7 +23,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { USER_DATA_DIR_NAME } from "./constants.js";
+import { APP_USER_MODEL_ID, USER_DATA_DIR_NAME } from "./constants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = readFileSync(join(here, "..", "installer", "installer.nsh"), "utf8");
@@ -172,5 +172,49 @@ describe("an updated launch leaves the running app to electron-builder", () => {
 		).toBeGreaterThan(-1);
 		expect(guard?.index ?? Infinity, "the guard runs after it").toBeLessThan(at);
 		expect(skipTarget, "the guard's target is above it").toBeGreaterThan(at);
+	});
+});
+
+/**
+ * Start at login (issue #2098) registers a value under HKCU's `Run` key, named
+ * by the app's AppUserModelID. The uninstaller removes it, along with the
+ * `StartupApproved` record Task Manager keeps beside it - but never on an update,
+ * which runs the same uninstaller over the old version and must not turn the
+ * user's setting off.
+ *
+ * Mutation check: drop either `DeleteRegValue`, or the `isUpdated` guard, and the
+ * matching case reds.
+ */
+describe("the uninstaller removes the Start at login entry", () => {
+	const [, body] = macros().find(([name]) => name === "customUnInstall") ?? ["", ""];
+	const RUN = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	// The NSIS define reference, spelled out: not a template placeholder.
+	const VALUE_REF = ["$", "{LOGIN_ITEM_VALUE}"].join("");
+	const APPROVED = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+
+	it("names the value the app registers", () => {
+		const define = /^!define LOGIN_ITEM_VALUE "([^"]*)"$/m.exec(script);
+		expect(define, "installer.nsh no longer defines LOGIN_ITEM_VALUE").not.toBeNull();
+		expect(define?.[1]).toBe(APP_USER_MODEL_ID);
+	});
+
+	it.each([
+		["the Run value", RUN],
+		["the StartupApproved value", APPROVED],
+	])("deletes %s from HKCU", (_what, key) => {
+		expect(body).toContain(`DeleteRegValue HKCU "${key}" "${VALUE_REF}"`);
+	});
+
+	it("does so before the keep-data question, so both answers remove it", () => {
+		const deleteAt = body.indexOf("DeleteRegValue");
+		expect(deleteAt).toBeGreaterThan(-1);
+		expect(deleteAt).toBeLessThan(body.indexOf("IfSilent"));
+	});
+
+	it("skips an updated launch", () => {
+		const guard = /\$\{ifNot\} \$\{isUpdated\}([\s\S]*?)\$\{endIf\}/i.exec(body);
+		expect(guard, "customUnInstall has no ${ifNot} ${isUpdated} block").not.toBeNull();
+		expect(guard?.[1]).toContain("DeleteRegValue");
+		expect(guard?.[1].match(/DeleteRegValue/g)).toHaveLength(2);
 	});
 });

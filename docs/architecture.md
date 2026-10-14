@@ -344,7 +344,10 @@ one app instance may drive it:
 
 - **One instance.** The app takes `app.requestSingleInstanceLock()` before it
   starts anything. A second launch focuses the running window and exits - it
-  never gets its own engine, and never attaches to the first instance's.
+  never gets its own engine, and never attaches to the first instance's. A
+  launch from the OS's login item (Settings > General > Start at login) is an
+  ordinary launch: it takes this lock like any other, so a Vayu already running
+  at sign-in is focused, not duplicated.
 - **Spawned or adopted, the running instance owns the engine.** Normally the app
   spawns it. If an engine is already answering on the port at startup - an
   orphan left by a crashed session, or in development one started by hand - the

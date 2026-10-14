@@ -1160,18 +1160,22 @@ uninstall_macos() {
 }
 
 uninstall_linux() {
-	local config cache
+	local config cache autostart
 	# The app names its data directory itself (USER_DATA_DIR_NAME in
 	# app/electron/constants.ts). The cache is still Electron's own, named
 	# after the package.
 	config="${XDG_CONFIG_HOME:-$HOME/.config}/Vayu"
 	cache="${XDG_CACHE_HOME:-$HOME/.cache}/vayu-client"
+	# The Start at login entry the app writes itself (app/electron/login-item.ts).
+	# Left behind it would try to launch a deleted AppImage at every login.
+	autostart="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/vayu.desktop"
 
 	log 'Removing Vayu...'
 	printf '  %s\n' "$LINUX_APP_DIR"
 	run rm -rf "$LINUX_APP_DIR"
 	run rm -f "$LINUX_DESKTOP_FILE"
 	run rm -f "$LINUX_ICON_FILE"
+	run rm -f "$autostart"
 	# Only if it points at an install this script made - someone may well have
 	# their own `vayu` on PATH, and deleting that would be a surprise. Matched on
 	# the layout rather than on $LINUX_APP_BIN as computed right now, because

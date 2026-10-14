@@ -24,6 +24,7 @@ import {
 	session,
 	shell,
 } from "electron";
+import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
@@ -41,6 +42,7 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
+import { createLoginItem, registerLoginItemIpc } from "./login-item.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
@@ -1266,6 +1268,23 @@ function setupIpcHandlers() {
 			themeSource: nativeTheme.themeSource,
 		};
 	});
+
+	// Start at login (#2098). The OS owns the answer, so this holds no state: each
+	// call reads or writes it. `APPIMAGE` is the file the user launched; Linux's
+	// `process.execPath` inside one is a path in a mount that is gone by the next
+	// login.
+	registerLoginItemIpc(
+		ipcMain,
+		createLoginItem({
+			platform: process.platform,
+			isPackaged: app.isPackaged,
+			binaryPath: process.env.APPIMAGE ?? process.execPath,
+			configHome: process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+			get: () => app.getLoginItemSettings(),
+			set: (settings) => app.setLoginItemSettings(settings),
+			log: (msg, fields) => appLogger().info("main", msg, fields),
+		})
+	);
 
 	// Accent color scheme - maps OS accent to the nearest Vayu scheme
 	ipcMain.handle("accent:get", () => {

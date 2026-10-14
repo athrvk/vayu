@@ -368,6 +368,16 @@ if echo "$out" | grep -q '^\[dry-run\] sudo'; then fail "Linux uninstall must no
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -rf .*/Vayu$" || fail "purge should remove the config dir"
 
+# The Start at login entry is the app's own file, so a plain uninstall removes it
+# too: left behind it launches a deleted AppImage at every login. It follows
+# XDG_CONFIG_HOME, and falls back to ~/.config.
+out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME="$TMPROOT/xdg-config" do_uninstall 2>&1)"
+echo "$out" | grep -q "rm -f $TMPROOT/xdg-config/autostart/vayu.desktop" \
+	|| fail "uninstall should remove the autostart entry under XDG_CONFIG_HOME"
+out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME= HOME="$TMPROOT/fake-home" do_uninstall 2>&1)"
+echo "$out" | grep -q "rm -f $TMPROOT/fake-home/.config/autostart/vayu.desktop" \
+	|| fail "uninstall should remove the autostart entry under ~/.config by default"
+
 # A `vayu` on PATH that someone else put there must survive an uninstall.
 mkdir -p "$TMPROOT/bin"
 LINUX_BIN_LINK="$TMPROOT/bin/vayu"

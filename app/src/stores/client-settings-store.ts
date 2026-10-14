@@ -242,6 +242,11 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				})),
 
 			resetAll: () => {
+				// The login item lives in the OS, not in a stored key, so clearing
+				// storage alone would leave Vayu starting at login after a "reset".
+				// Fire-and-forget: a rejection must not stop the reset it is part of,
+				// and the reload below does not wait on it.
+				void window.electronAPI?.setLoginItem(false).catch(() => {});
 				for (const key of SETTINGS_STORAGE_KEYS) localStorage.removeItem(key);
 				// Reload so the pre-paint script and every store re-seed from defaults.
 				window.location.reload();
