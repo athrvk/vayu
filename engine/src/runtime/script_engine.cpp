@@ -326,19 +326,19 @@ const std::string& encoding) {
         return array;
     }
 
-    std::string out;
-    if (encoding == "hex") {
-        out = vayu::utils::hex_encode (raw);
-    } else if (encoding == "base64") {
-        out = vayu::utils::base64_encode (raw);
-    } else if (encoding == "base64url") {
-        out = vayu::utils::base64url_encode (raw);
-    } else {
+    if (encoding != "hex" && encoding != "base64" && encoding != "base64url") {
         return JS_ThrowTypeError (ctx,
         "unknown digest encoding '%s' - expected 'hex', 'base64', "
         "'base64url' or 'bytes'",
         encoding.c_str ());
     }
+
+    // Initialised, not assigned in branches: GCC 13 at -O3 reads the move-assign
+    // into a default-constructed SSO string as an out-of-bounds copy
+    // (-Warray-bounds, an error under VAYU_WERROR).
+    const std::string out = encoding == "hex" ? vayu::utils::hex_encode (raw) :
+    encoding == "base64" ? vayu::utils::base64_encode (raw) :
+                           vayu::utils::base64url_encode (raw);
 
     return JS_NewStringLen (ctx, out.data (), out.size ());
 }
