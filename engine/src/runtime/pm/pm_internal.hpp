@@ -261,6 +261,20 @@ const char* js_type_name (JSContext* ctx, JSValueConst value);
 void setup_pm_execution (JSContext* ctx, JSValue pm);
 void setup_pm_metrics (JSContext* ctx, JSValue pm);
 
+// The variable scopes, `pm.variables` and `pm.iterationData` (pm_scopes.cpp).
+void setup_pm_variable_scopes (JSContext* ctx, JSValue pm);
+void setup_pm_variables (JSContext* ctx, JSValue pm);
+void setup_pm_iteration_data (JSContext* ctx, JSValue pm);
+
+// `{{...}}` resolution against everything a script can see, and the refusal
+// for a data column the bound row does not carry; `pm.variables.replaceIn` and
+// `pm.sendRequest` both go through these so they cannot answer differently.
+std::optional<std::string> resolve_script_template (JSContext* ctx,
+const std::string& input,
+std::string& missing_column);
+std::string
+missing_column_message (JSContext* ctx, const std::string& what, const std::string& column);
+
 } // namespace vayu::runtime::pm_detail
 
 #endif // VAYU_HAS_QUICKJS
