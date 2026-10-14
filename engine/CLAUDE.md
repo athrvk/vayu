@@ -8,7 +8,7 @@ engine/
 ├── src/core/      # load_strategy, metrics_collector, run_manager, import, openapi
 ├── src/http/      # HTTP server, SSE, routes, rate_limiter, transport
 ├── src/db/        # SQLite persistence
-├── src/runtime/   # QuickJS scripting engine
+├── src/runtime/   # QuickJS scripting engine; pm/ holds the pm.* surfaces, one file per family
 ├── src/platform/  # per-OS code (timer resolution, process, paths)
 ├── src/utils/     # shared primitives (encoding, ascii_case, parse, reentrant)
 ├── include/vayu/  # Public headers
@@ -298,8 +298,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 - **clang-format 19 exactly** (`.clang-format` at repo root; the pin exists
   because 18 formats a measured share of the sources differently). A
   patch-level difference inside 19 can still matter (one 19.1.x pair disagrees
-  about three continuation lines in `script_engine.cpp`), so after `clang-format
-  -i` read `git diff` for reindentation you did not intend and put it back: the
+  about three continuation lines in the QuickJS glue under `src/runtime/`), so
+  after `clang-format -i` read `git diff` for reindentation you did not intend
+  and put it back: the
   tree as committed is what CI's binary accepts. `Engine formatting` in
   `pr-tests.yml` runs `--dry-run -Werror` over the whole of
   `engine/{src,include,tests}` (#886) and `scripts/pre-commit` runs the same
