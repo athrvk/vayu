@@ -10,7 +10,8 @@
 		"dist-electron/**/*",
 		"package.json",
 		"!**/*.map",
-		"!**/*.d.{ts,mts,cts}"
+		"!**/*.d.{ts,mts,cts}",
+		"!**/node_modules/@koromix/koffi-{darwin,linux}-*{,/**/*}"
 	],
 	"publish": [
 		{

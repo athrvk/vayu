@@ -475,7 +475,12 @@ at runtime:
   optional per-platform package (`@koromix/koffi-<platform>`), so its install
   script (a build-from-source fallback) is denied in `pnpm-workspace.yaml`
   `allowBuilds`; electron-builder unpacks the `.node` file from the asar on
-  its own. A failed import costs the restart and nothing else
+  its own. A failed import costs the restart and nothing else. The macOS and
+  Linux native packages are left out of every build by one `files` pattern in
+  `electron-builder.json`: the macOS universal merge refuses a `.node` that is
+  identical in its x64 and arm64 halves, which an arm64-only binary always is.
+  The pattern is top-level because a platform-level `files` replaces the
+  top-level list rather than adding to it
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
 package listed there ships a copy the app never opens: before the test that
