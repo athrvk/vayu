@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "vayu/runtime/script_engine.hpp"
@@ -253,6 +254,11 @@ extern JSClassID request_body_class_id;
 extern JSClassID expect_class_id;
 extern JSClassID response_chain_class_id;
 
+// The definitions `ScriptEngine::Impl` registers those ids with, for the
+// classes that live outside `script_engine.cpp`. Each stays in the unit that
+// defines its finalizer and exotic hooks.
+extern JSClassDef response_chain_class;
+
 // Name a rejected value the way the script author wrote it, so the error says
 // "got number" rather than showing them a coerced "[object Object]".
 const char* js_type_name (JSContext* ctx, JSValueConst value);
@@ -261,6 +267,29 @@ const char* js_type_name (JSContext* ctx, JSValueConst value);
 // else - a class test, so the jar can tell a Url from a forged look-alike.
 struct RequestUrlState;
 RequestUrlState* request_url_state (JSValueConst value);
+
+// The `pm.expect` primitives `pm.response.to` shares, defined beside the
+// rest of `pm.expect`: the AssertionError throw, a value as a failure message
+// quotes it, the unknown-member hook body both chains share, own enumerable
+// keys, and deep equality.
+JSValue throw_assertion_failure (JSContext* ctx, const std::string& message);
+std::string js_describe (JSContext* ctx, JSValueConst val);
+int report_unknown_chain_member (JSContext* ctx, JSValueConst obj, JSAtom prop, const char* path);
+bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::string>& out);
+
+// One level of the comparison path: the two objects being compared. Compared
+// by identity, which is what a cycle is.
+using DeepEqualPath = std::vector<std::pair<void*, void*>>;
+
+// Whether a deep comparison separates `+0` from `-0`, which is the one rule the
+// two libraries Vayu answers for do not share: chai's `.eql` runs on deep-eql,
+// whose number rule is `x === y && (x !== 0 || 1/x === 1/y)`, while the response
+// assertions match chai-postman, which runs on lodash `_.isEqual` and compares
+// the two as equal. Stated by the caller rather than picked once for both, so
+// neither contract has to be the one that is quietly wrong.
+enum class ZeroRule { SameValueZero, Signed };
+
+int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros);
 
 // `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
 void setup_pm_execution (JSContext* ctx, JSValue pm);
@@ -305,7 +334,9 @@ const char* label,
 bool suggest_delete,
 Headers& out);
 
-// `pm.response`: the reason phrase `reason()` answers, and json()/text().
+// `pm.response` (pm_response.cpp): its installer, the reason phrase
+// `reason()` answers, and json()/text().
+void setup_pm_response (JSContext* ctx, JSValue pm);
 std::string response_reason_phrase (const Response& response);
 void install_response_body_readers (JSContext* ctx, JSValue response, const std::string& body);
 
