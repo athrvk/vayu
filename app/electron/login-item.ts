@@ -19,7 +19,9 @@
  * written by hand, and read back the same way. An entry whose `Exec` names a
  * different binary than the one running (the AppImage was moved, or this is a
  * second copy) reads as off: the entry exists but would not launch this app, and
- * turning the switch on rewrites it to point here.
+ * turning the switch on rewrites it to point here. So does an entry a desktop
+ * environment has disabled in place (`Hidden=true`, or
+ * `X-GNOME-Autostart-enabled=false`): it keeps its `Exec` and no longer starts.
  *
  * Only a packaged build registers anything. A dev run's `process.execPath` is
  * Electron's own binary, and a login item pointing at it would launch a bare
@@ -85,10 +87,39 @@ function unsupported(reason: string): LoginItemState {
 /**
  * The `Exec` value for a binary, quoted per the Desktop Entry spec: the spec
  * word-splits an unquoted value, so a path with a space would launch its first
- * word. Inside quotes `"`, `` ` ``, `$` and `\` take a backslash.
+ * word. Inside quotes `"`, `` ` ``, `$` and `\` take a backslash, and a `%` is
+ * written `%%` because a bare one opens a field code.
  */
 function quotedExec(binaryPath: string): string {
-	return `"${binaryPath.replace(/["`$\\]/g, "\\$&")}"`;
+	const escaped = binaryPath.replace(/["`$\\]/g, "\\$&").replace(/%/g, "%%");
+	return `"${escaped}"`;
+}
+
+/**
+ * The `Key=Value` pairs of the `[Desktop Entry]` group; other groups (an
+ * `[Desktop Action ...]` with an `Exec` of its own) are ignored. Lines are
+ * trimmed so the CRLF endings or trailing blanks a rewriting tool leaves do not
+ * change what a value reads as.
+ */
+function desktopEntryFields(text: string): Map<string, string> {
+	const fields = new Map<string, string>();
+	let inDesktopEntry = false;
+	for (const rawLine of text.split("\n")) {
+		const line = rawLine.trim();
+		if (line.startsWith("[")) {
+			inDesktopEntry = line === "[Desktop Entry]";
+			continue;
+		}
+		const separator = line.indexOf("=");
+		if (!inDesktopEntry || line.startsWith("#") || separator < 0) continue;
+		const key = line.slice(0, separator).trimEnd();
+		if (!fields.has(key)) fields.set(key, line.slice(separator + 1).trimStart());
+	}
+	return fields;
+}
+
+function fieldEquals(fields: Map<string, string>, key: string, expected: string): boolean {
+	return fields.get(key)?.toLowerCase() === expected;
 }
 
 function autostartEntry(binaryPath: string): string {
@@ -123,9 +154,17 @@ export function createLoginItem(deps: LoginItemDeps): LoginItem {
 
 	function readLinux(): LoginItemState {
 		const entry = readAutostartEntry();
-		const execLine = `Exec=${quotedExec(deps.binaryPath)}`;
-		const names = entry?.split("\n").some((line) => line === execLine) ?? false;
-		return { supported: true, reason: null, openAtLogin: names, needsApproval: false };
+		const fields = desktopEntryFields(entry ?? "");
+		const launchesUs = fields.get("Exec") === quotedExec(deps.binaryPath);
+		const enabled =
+			!fieldEquals(fields, "Hidden", "true") &&
+			!fieldEquals(fields, "X-GNOME-Autostart-enabled", "false");
+		return {
+			supported: true,
+			reason: null,
+			openAtLogin: launchesUs && enabled,
+			needsApproval: false,
+		};
 	}
 
 	function readNative(): LoginItemState {

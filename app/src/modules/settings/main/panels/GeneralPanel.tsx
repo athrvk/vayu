@@ -9,8 +9,9 @@
  * GeneralPanel
  *
  * System-level app settings: the installed version and a manual update check,
- * auto-save behavior, start at login, data management (clear stored run history), on-disk
- * storage locations, and a reset-to-defaults for every renderer preference. Client-side; the data actions talk to the engine's run
+ * auto-save behavior, start at login, data management (clear stored run
+ * history), on-disk storage locations, and a reset-to-defaults for every
+ * renderer preference. Client-side; the data actions talk to the engine's run
  * store via the existing API.
  */
 

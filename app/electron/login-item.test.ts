@@ -194,6 +194,65 @@ describe("linux", () => {
 		expect(readFileSync(autostartFile(), "utf8")).not.toContain("/old/place");
 	});
 
+	describe("an entry the desktop environment rewrote", () => {
+		const exec = `Exec="${BINARY}"`;
+		function seed(content: string) {
+			mkdirSync(join(configHome, "autostart"), { recursive: true });
+			writeFileSync(autostartFile(), content);
+		}
+
+		it.each([
+			["X-GNOME-Autostart-enabled=false", "X-GNOME-Autostart-enabled=false"],
+			["a differently cased false", "X-GNOME-Autostart-enabled=False"],
+			["Hidden=true", "Hidden=true"],
+			["a differently cased true", "Hidden=TRUE"],
+		])("reads as off with %s although its Exec still names us", (_name, line) => {
+			seed(`[Desktop Entry]\nType=Application\nName=Vayu\n${exec}\n${line}\n`);
+
+			expect(build().loginItem.read().openAtLogin).toBe(false);
+		});
+
+		it.each(["Hidden=false", "X-GNOME-Autostart-enabled=true"])(
+			"still reads as on with %s",
+			(line) => {
+				seed(`[Desktop Entry]\nType=Application\n${exec}\n${line}\n`);
+
+				expect(build().loginItem.read().openAtLogin).toBe(true);
+			}
+		);
+
+		it("reads a CRLF file with trailing blanks and a matching Exec as on", () => {
+			seed(`[Desktop Entry]\r\nType=Application\r\n${exec}  \r\nHidden=false\r\n`);
+
+			expect(build().loginItem.read().openAtLogin).toBe(true);
+		});
+
+		it("ignores a disabling key or an Exec in another group", () => {
+			seed(
+				`[Desktop Entry]\n${exec}\n\n[Desktop Action later]\nExec="/elsewhere"\nHidden=true\n`
+			);
+			expect(build().loginItem.read().openAtLogin).toBe(true);
+
+			seed(`[Desktop Action first]\n${exec}\n`);
+			expect(build().loginItem.read().openAtLogin).toBe(false);
+		});
+
+		it("is switched back on by writing it again", () => {
+			seed(`[Desktop Entry]\n${exec}\nHidden=true\n`);
+			const { loginItem } = build();
+
+			expect(loginItem.write(true).openAtLogin).toBe(true);
+		});
+	});
+
+	it("writes a % as %% so it is not read as a field code, and reads that back as on", () => {
+		const { loginItem } = build({ binaryPath: "/opt/100%/Vayu.AppImage" });
+
+		expect(loginItem.write(true).openAtLogin).toBe(true);
+
+		expect(readFileSync(autostartFile(), "utf8")).toContain('Exec="/opt/100%%/Vayu.AppImage"');
+	});
+
 	it("does not take a binary whose path merely starts like ours", () => {
 		const { loginItem } = build({ binaryPath: "/opt/Vayu/Vayu.AppImage" });
 		mkdirSync(join(configHome, "autostart"), { recursive: true });
