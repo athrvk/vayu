@@ -7154,7 +7154,7 @@ knob.
       "unresolvedTokens": 0,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
-        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0 }
+        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0, "deferred": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
       "executed": 474, "errors": 30, "httpErrors": 30, "noResponse": 0,
@@ -7186,11 +7186,14 @@ this run - and is **absent** for a step whose script ran inline instead
 (its outcome is in `elements`), asserted nothing, or drew no sample - "no
 assertions" and "no failures" are different answers.
 
-`elements` (issue #1495) is the step's per-element pass/fail/skip tally,
-`{ id, kind, passed, failed, skipped }` one entry per compiled element that
-ran at least once this run - **absent** for a step with no elements or none
-that ever ran, the same convention `tests` follows. `skipped` folds in both a
-disabled element and a `script.*` element left deferred to the replay above.
+`elements` (issue #1495) is the step's per-element tally,
+`{ id, kind, passed, failed, skipped, deferred }` one entry per compiled
+element that ran at least once this run - **absent** for a step with no
+elements or none that ever ran, the same convention `tests` follows.
+`deferred` (issue #2144) counts a `script.post` element left to the replay
+above: it does run, later, and its assertions are the step's `tests`.
+`skipped` counts what never runs - a disabled element, and an un-inlined
+`script.pre`, which has no replay to go to.
 
 **`transactions`** (issue #1515), a sibling of `steps` rather than a member of
 it - a `control.transaction` spans a folder, not one step:
@@ -7261,8 +7264,9 @@ pre-request script reports `preRequestScript: "skipped"` on its
 `scenario.steps` entry, and the run's `warnings` array carries one line
 naming how many steps did. The single-target shape reports the same fact
 differently (see `requestElements` above): an un-inlined `script.pre`
-element's own entry in `summary["elements"]` carries the `"skipped"`
-outcome instead of a separate warning line.
+element's own entry in `summary["elements"]` counts every submission under
+`skipped` (never `deferred`, which is only for a `script.post` the replay
+runs) instead of a separate warning line.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
@@ -8565,20 +8569,33 @@ named it.
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
   },
   "elements": [
-    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0 },
-    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0 }
+    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0, "deferred": 0 },
+    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_3", "kind": "script.post", "passed": 0, "failed": 0, "skipped": 0, "deferred": 10 }
   ],
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
-outcomes - `extract.*` / `assert.*` / `timer.*`, tallied across every submission as
-`{id, kind, passed, failed, skipped}`. Absent, not `[]`, for a run that declared no
+outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
+submission as `{id, kind, passed, failed, skipped, deferred}`. `deferred` (issue #2144)
+counts the submissions an un-inlined `script.post` was left to the completion replay on:
+its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
+script that never ran. `skipped` is what never runs: a disabled element, or an un-inlined
+`script.pre`. Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
 [Scenario load runs](#scenario-load-runs)), and the two never coexist on one report.
+
+**`testValidation`** counts in two units: `samplesTested` is a number of *responses*
+(each sampled response the post-run replay evaluated the plan's `script.post` against),
+while `testsPassed` and `testsFailed` are numbers of *assertions* (`pm.test` calls) across
+those responses, so `testsPassed + testsFailed` is not `samplesTested` once a script holds
+more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
+`samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
+(`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/

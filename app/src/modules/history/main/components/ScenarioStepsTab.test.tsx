@@ -267,6 +267,39 @@ describe("the per-step element tallies", () => {
 		expect(within(rows[1]).queryByText(/skipped/)).toBeNull();
 	});
 
+	it("says a deferred post-request script was replayed, not that it passed nothing", () => {
+		// The same row the single-request Elements card draws: both read the
+		// shared `ElementTally`, so the field cannot be wired into one only.
+		render(
+			<ScenarioStepsTab
+				steps={[
+					{
+						...STEPS[0],
+						elements: [
+							{
+								id: "el_3",
+								kind: "script.post",
+								passed: 0,
+								failed: 0,
+								skipped: 0,
+								deferred: 40,
+							},
+						],
+					},
+				]}
+				virtualUsers={8}
+			/>
+		);
+		const rows = screen.getAllByRole("row").slice(1);
+		expect(
+			within(rows[1]).getByText(
+				"40 requests deferred to a post-run replay of sampled responses - results in Test Validation"
+			)
+		).toBeTruthy();
+		expect(within(rows[1]).queryByText(/passed/)).toBeNull();
+		expect(within(rows[1]).queryByText(/skipped/)).toBeNull();
+	});
+
 	it("renders no element rows for a step with none", () => {
 		// Mutation check: reverting to `STEPS` (no `elements` field on either
 		// step) must drop back to exactly one row per step.

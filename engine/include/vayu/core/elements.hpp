@@ -651,8 +651,48 @@ struct ElementOutcome {
     std::string status; ///< "ok" | "failed" | "missing" | "skipped" | "error"
     std::optional<std::string> message;
     std::optional<int64_t> waited_ms;
+    /// A `"skipped"` whose element runs later, elsewhere (a load run's
+    /// post-run replay), not never (#2144) - copied from `ElementSkip`. Not
+    /// serialised by `to_json`; a load run's tallies are its only reader.
+    bool deferred = false;
 
     [[nodiscard]] nlohmann::json to_json () const;
+};
+
+/**
+ * Why `ElementPipeline::run`'s `skip_reason` hook keeps an otherwise-runnable
+ * element from running: reported as a `"skipped"` outcome carrying
+ * @c message. @c deferred says the element still runs, later and elsewhere,
+ * so a load run tallies it apart from a skip that means "never" (#2144).
+ */
+struct ElementSkip {
+    std::string message;
+    bool deferred = false;
+};
+
+/**
+ * One element's outcomes summed across a load run: the counters
+ * `StepElementTallies` (per plan step) and `RequestElementTallies` (a
+ * single-request run) both keep per element, so the two report shapes
+ * classify an outcome by one rule. Lock-free, because `record` runs on
+ * event-loop workers inside the completion drain.
+ */
+struct ElementOutcomeCounts {
+    std::atomic<size_t> passed{ 0 };
+    std::atomic<size_t> failed{ 0 };
+    std::atomic<size_t> skipped{ 0 };
+    std::atomic<size_t> deferred{ 0 };
+
+    /// `"ok"` is passed; `"failed"` and `"error"` are failed; a deferral is
+    /// deferred; every other skip (`"skipped"`, `"missing"`) is skipped.
+    void record (const ElementOutcome& outcome);
+
+    /// Appends `{id, kind, passed, failed, skipped, deferred}` to @p rows,
+    /// or nothing when no outcome was recorded: an element that never ran
+    /// is omitted from the report, not a row of zeros.
+    void append_report_row (nlohmann::json& rows,
+    const std::string& id,
+    const std::string& kind) const;
 };
 
 /**
@@ -814,10 +854,10 @@ class ElementPipeline {
     /**
      * @param skip_reason Consulted for an otherwise-runnable (enabled,
      *        phase-matching) element, before `apply` - `nullopt` from it means
-     *        run as usual, a string means report `"skipped"` with that message
-     *        instead of calling `apply` at all. Null (the default, both callers
-     *        before #1495) runs every enabled element unconditionally, exactly
-     *        as before this parameter existed.
+     *        run as usual, an `ElementSkip` means report `"skipped"` with its
+     *        message (and its `deferred`) instead of calling `apply` at all.
+     *        Null (the default, every caller outside a load run) runs every
+     *        enabled element unconditionally.
      *
      *        This is a load run's one hook for "declarative kinds always run
      *        here; a `script.*` kind runs here only when it opted in" (#1495):
@@ -829,7 +869,7 @@ class ElementPipeline {
     ElementContext& ctx,
     const std::vector<CompiledElement>& elements,
     std::vector<ElementOutcome>& sink,
-    const std::function<std::optional<std::string> (const CompiledElement&)>& skip_reason = nullptr);
+    const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_reason = nullptr);
 };
 
 } // namespace vayu::core

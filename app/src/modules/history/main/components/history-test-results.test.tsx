@@ -118,9 +118,15 @@ describe("History Overview - a load run's test outcomes", () => {
 		);
 
 		expect(screen.getByText("Test Validation")).toBeInTheDocument();
-		expect(screen.getByText("Samples tested")).toBeInTheDocument();
+		expect(screen.getByText("Responses tested")).toBeInTheDocument();
 		expect(screen.getByText("100")).toBeInTheDocument();
 		expect(screen.getByText("13")).toBeInTheDocument();
+		// The denominator is the report's own `summary.totalRequests` (issue #2144).
+		expect(
+			screen.getByText(`Tested 100 of ${(60_000).toLocaleString()} requests.`, {
+				exact: false,
+			})
+		).toBeInTheDocument();
 	});
 
 	it("names the failing assertions from the run's stored failure row", () => {

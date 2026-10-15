@@ -1803,9 +1803,9 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreElementsHeaderEditReachesTheWire) {
 
 // The same element left unmarked runs nowhere: `script.pre` has no deferred
 // replay to fall back to (only `script.post` does), so an un-inlined one is
-// skipped and its edit never reaches the wire. This is the contrast that
-// makes the `allInline` case below an assertion about the override rather
-// than about scripts running at all.
+// skipped - not deferred (#2144) - and its edit never reaches the wire. This
+// is the contrast that makes the `allInline` case below an assertion about
+// the override rather than about scripts running at all.
 TEST_F (LoadStrategyTest, AnUnmarkedScriptPreElementIsSkippedRatherThanRun) {
     vayu::tests::EchoServer echo;
     vayu::db::Database db (TEST_DB_PATH);
@@ -1818,7 +1818,27 @@ TEST_F (LoadStrategyTest, AnUnmarkedScriptPreElementIsSkippedRatherThanRun) {
     EXPECT_FALSE (echo.has_header ("X-Signed")) << summary.dump ();
     const auto entry = element_entry (summary, "el_pre");
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
-    EXPECT_EQ (entry["skipped"], 2u);
+    EXPECT_EQ (entry["skipped"], 2u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
+}
+
+// A disabled element is the other skip that is not a deferral (#2144). A
+// `script.post` is the kind chosen because its enabled, un-inlined twin below
+// is the one that tallies `deferred`: the pipeline must answer "disabled"
+// before it ever asks the load path's deferral hook.
+TEST_F (LoadStrategyTest, ADisabledScriptPostElementTalliesSkippedNotDeferred) {
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-disabled-post",
+    request_elements_payload (mock_server->fast_url (), 3, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_post" },
+    { "kind", "script.post" }, { "enabled", false },
+    { "config", { { "script", "pm.test('runs', function () {});" } } } } })));
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 3u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
 }
 
 // `elements.scripts: "allInline"` (issue #1495's run-level override, read by
@@ -1841,8 +1861,9 @@ TEST_F (LoadStrategyTest, TheAllInlineScriptsOverrideForcesAnUnmarkedScriptPreIn
 }
 
 // An unmarked `script.post` is left to the run's completion replay, exactly
-// where a `tests` string used to go: skipped on every submission, and counted
-// once per sampled response by `validate_scripts` under `summary["tests"]`.
+// where a `tests` string used to go: deferred on every submission (#2144),
+// and counted once per sampled response by `validate_scripts` under
+// `summary["tests"]`.
 TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay) {
     vayu::db::Database db (TEST_DB_PATH);
 
@@ -1860,8 +1881,9 @@ TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay
 
     const auto entry = element_entry (summary, "el_post");
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
-    EXPECT_EQ (entry["skipped"], 3u)
-    << "the pipeline hook must leave it to the replay";
+    EXPECT_EQ (entry["deferred"], 3u)
+    << "the pipeline hook must leave it to the replay: " << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
     EXPECT_EQ (entry["passed"], 0u);
 }
 
@@ -1888,6 +1910,7 @@ TEST_F (LoadStrategyTest, AnInlineScriptPostElementRunsPerSubmissionAndIsNotRepl
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
     EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
     EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
     EXPECT_FALSE (summary.contains ("tests"))
     << "an inline script.post must not be replayed deferred as well: "
     << summary.dump ();

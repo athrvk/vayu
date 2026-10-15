@@ -58,6 +58,62 @@ describe("RequestElementsSummary", () => {
 		expect(screen.queryByText(/skipped/)).toBeNull();
 	});
 
+	describe("a deferred post-request script (issue #2144)", () => {
+		const deferredScript = (overrides: Partial<RunScenarioStepElementTally> = {}) =>
+			tally({ kind: "script.post", passed: 0, skipped: 0, deferred: 235_690, ...overrides });
+
+		it("says it was replayed and where the results are, not '0 passed'", () => {
+			render(<RequestElementsSummary elements={[deferredScript()]} />);
+
+			expect(
+				screen.getByText(
+					"235,690 requests deferred to a post-run replay of sampled responses - results in Test Validation"
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/passed/)).toBeNull();
+			expect(screen.queryByText(/skipped/)).toBeNull();
+		});
+
+		it("uses the singular for one response", () => {
+			render(<RequestElementsSummary elements={[deferredScript({ deferred: 1 })]} />);
+			expect(
+				screen.getByText(
+					"1 request deferred to a post-run replay of sampled responses - results in Test Validation"
+				)
+			).toBeTruthy();
+		});
+
+		it("still states the other tallies when the row is mixed", () => {
+			render(
+				<RequestElementsSummary
+					elements={[deferredScript({ deferred: 5, passed: 3, failed: 1, skipped: 2 })]}
+				/>
+			);
+			expect(screen.getByText(/5 requests deferred to a post-run replay/)).toBeTruthy();
+			expect(screen.getByText("3 passed")).toBeTruthy();
+			expect(screen.getByText("1 failed")).toBeTruthy();
+			expect(screen.getByText("2 skipped")).toBeTruthy();
+		});
+
+		it("keeps a skipped-only row, such as an un-inlined script.pre, as skipped", () => {
+			render(
+				<RequestElementsSummary
+					elements={[tally({ kind: "script.pre", passed: 0, skipped: 9, deferred: 0 })]}
+				/>
+			);
+			expect(screen.getByText("9 skipped")).toBeTruthy();
+			expect(screen.getByText("0 passed")).toBeTruthy();
+			expect(screen.queryByText(/replayed/)).toBeNull();
+		});
+
+		it("renders a report stored before the field as it always did", () => {
+			render(<RequestElementsSummary elements={[tally({ passed: 0, skipped: 7 })]} />);
+			expect(screen.getByText("0 passed")).toBeTruthy();
+			expect(screen.getByText("7 skipped")).toBeTruthy();
+			expect(screen.queryByText(/replayed/)).toBeNull();
+		});
+	});
+
 	it("renders one row per element", () => {
 		render(
 			<RequestElementsSummary

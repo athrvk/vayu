@@ -115,6 +115,11 @@ describe("RequestResponseView retention", () => {
 		expect(screen.queryByText(/Bounded retention/)).not.toBeInTheDocument();
 	});
 
+	it("says how many of the run's requests the validation covered (issue #2144)", () => {
+		renderReport();
+		expect(screen.getByText(/Tested 1,000 of 3,000,000 requests/)).toBeInTheDocument();
+	});
+
 	// The badge counts what is on screen. `results` is capped at 100 by the
 	// report route regardless of retention, so "captured" overstated it even
 	// before the stores were bounded.
