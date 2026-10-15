@@ -27,8 +27,8 @@
  *
  * **The agent-connect row is this screen's alone** (#2122). MCP is a feature
  * the user has to know to look for, and a fresh install is the one moment the
- * app has their attention; once a workspace has content the Launcher's own
- * Settings and Documentation links are enough. It opens Settings on the
+ * app has their attention; once a workspace has content the Launcher keeps
+ * only the shared footer link. It opens Settings on the
  * "AI agents (MCP)" section rather than explaining anything here.
  */
 
