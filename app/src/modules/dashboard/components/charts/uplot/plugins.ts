@@ -196,6 +196,14 @@ export function tooltipPlugin(opts: {
 	format?: Record<number, ValueFormatter>;
 	skip?: Set<number>;
 	xLabel?: (x: number) => string;
+	/** Unit line under the time header, for a chart whose values are not self-evident. */
+	caption?: string;
+	/**
+	 * Per-series values to print instead of `u.data`, keyed like `format`. A getter,
+	 * because the plugin outlives the data it reads (`setData` does not rebuild it).
+	 * A series listed here is a per-band amount, so a zero is not a row.
+	 */
+	tipValues?: () => Record<number, (number | null)[]>;
 }): uPlot.Plugin {
 	let tip: HTMLDivElement | null = null;
 	const fmt = opts.format ?? {};
@@ -238,18 +246,33 @@ export function tooltipPlugin(opts: {
 				header.style.cssText = "opacity:.7;margin-bottom:2px";
 				header.textContent = xLabel(xVal as number);
 				const rows: HTMLElement[] = [header];
+				if (opts.caption) {
+					const caption = document.createElement("div");
+					caption.style.cssText = "opacity:.7;margin-bottom:2px";
+					caption.textContent = opts.caption;
+					rows.push(caption);
+				}
+				const headRows = rows.length;
+				const tipValues = opts.tipValues?.() ?? {};
+				// An interval that saw no responses keeps its first band's row, so the
+				// readout says "0" rather than showing a header over nothing.
+				let firstZeroRow: HTMLElement | null = null;
 				for (let s = 1; s < u.series.length; s++) {
 					if (skip.has(s)) continue;
 					const series = u.series[s];
 					if (series.show === false) continue;
-					const raw = u.data[s][idx];
+					const own = tipValues[s];
+					const raw = own ? own[idx] : u.data[s][idx];
 					const formatted = (fmt[s] ?? ((v) => (v == null ? "-" : String(v))))(
 						raw as number | null
 					);
 					const stroke =
 						typeof series.stroke === "function" ? series.stroke(u, s) : series.stroke;
-					rows.push(tooltipRow(String(series.label ?? ""), formatted, String(stroke)));
+					const row = tooltipRow(String(series.label ?? ""), formatted, String(stroke));
+					if (own && raw === 0) firstZeroRow ??= row;
+					else rows.push(row);
 				}
+				if (rows.length === headRows && firstZeroRow) rows.push(firstZeroRow);
 				// Built from text, never markup: series labels include script-defined
 				// custom-metric names, which an imported collection can fill with HTML.
 				tip.replaceChildren(...rows);

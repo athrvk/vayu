@@ -73,4 +73,81 @@ describe("tooltipPlugin", () => {
 		expect(tip.textContent).toContain("rps");
 		expect(tip.textContent).toContain("5");
 	});
+
+	describe("tipValues", () => {
+		/** Three stacked series plotting 9, 9, 9 (running totals) over one x. */
+		function hoverStack(opts: Parameters<typeof tooltipPlugin>[0]): HTMLElement {
+			const over = document.createElement("div");
+			const u = {
+				over,
+				cursor: { idx: 0, left: 10, top: 10 },
+				data: [[1], [9], [9], [9]],
+				series: [
+					{},
+					{ label: "2xx", stroke: "a" },
+					{ label: "3xx", stroke: "b" },
+					{ label: "err", stroke: "c" },
+				],
+			} as unknown as uPlot;
+			const plugin = tooltipPlugin(opts);
+			(plugin.hooks.init as (u: uPlot) => void)(u);
+			(plugin.hooks.setCursor as (u: uPlot) => void)(u);
+			return over.querySelector(".vayu-chart-tooltip") as HTMLElement;
+		}
+		const rowsOf = (tip: HTMLElement) =>
+			Array.from(tip.children)
+				.slice(1)
+				.map((r) => r.textContent);
+
+		it("prints the series' own values, not the plotted ones, and drops zero rows", () => {
+			const tip = hoverStack({ theme: THEME, tipValues: () => ({ 1: [9], 2: [0], 3: [0] }) });
+			expect(rowsOf(tip)).toEqual(["2xx9"]);
+		});
+
+		it("keeps a non-zero own value in every row that has one", () => {
+			const tip = hoverStack({ theme: THEME, tipValues: () => ({ 1: [6], 2: [3], 3: [0] }) });
+			expect(rowsOf(tip)).toEqual(["2xx6", "3xx3"]);
+		});
+
+		it("keeps the first row of an interval where every own value is zero", () => {
+			const tip = hoverStack({ theme: THEME, tipValues: () => ({ 1: [0], 2: [0], 3: [0] }) });
+			expect(rowsOf(tip)).toEqual(["2xx0"]);
+		});
+
+		it("leaves a series without tipValues on the plotted value, zero or not", () => {
+			// 3xx has no entry, so its plotted 9 prints even beside zeroed neighbours.
+			const tip = hoverStack({ theme: THEME, tipValues: () => ({ 1: [0], 3: [0] }) });
+			expect(rowsOf(tip)).toEqual(["3xx9"]);
+		});
+
+		it("prints every series' plotted value when no tipValues is given", () => {
+			expect(rowsOf(hoverStack({ theme: THEME }))).toEqual(["2xx9", "3xx9", "err9"]);
+		});
+
+		it("reads tipValues at hover time, so a later setData is seen without a rebuild", () => {
+			let current: Record<number, (number | null)[]> = { 1: [1] };
+			const over = document.createElement("div");
+			const u = {
+				over,
+				cursor: { idx: 0, left: 10, top: 10 },
+				data: [[1], [9]],
+				series: [{}, { label: "2xx", stroke: "a" }],
+			} as unknown as uPlot;
+			const plugin = tooltipPlugin({ theme: THEME, tipValues: () => current });
+			(plugin.hooks.init as (u: uPlot) => void)(u);
+			const hover = plugin.hooks.setCursor as (u: uPlot) => void;
+			hover(u);
+			const tip = over.querySelector(".vayu-chart-tooltip") as HTMLElement;
+			expect(rowsOf(tip)).toEqual(["2xx1"]);
+			current = { 1: [4] };
+			hover(u);
+			expect(rowsOf(tip)).toEqual(["2xx4"]);
+		});
+
+		it("adds the caption as a second line under the time header", () => {
+			const tip = hoverStack({ theme: THEME, caption: "responses / 0.5 s" });
+			expect(tip.children[0].textContent).toBe("1.0s");
+			expect(tip.children[1].textContent).toBe("responses / 0.5 s");
+		});
+	});
 });
