@@ -115,6 +115,8 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						"Did performance regress between these two Vayu runs? Focus on latency percentiles, " +
 							"throughput, and error rate; quantify each change and give a clear verdict. " +
+							"Read `comparability` first: each entry is a way the runs were not the same " +
+							"experiment, and a verdict has to say how it limits the comparison. " +
 							`${RUN_ERROR_DEFINITION_SENTENCE}\n\n` +
 							`Comparison (${baseRunId} -> ${targetRunId}):\n${JSON.stringify(comparison, null, 2)}`
 					),

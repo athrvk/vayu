@@ -1592,12 +1592,15 @@ export interface RunScenarioSummary {
  * `GET /runs/:id`.
  *
  * `startConcurrency` / `rampUpDuration` / `followRedirects` / `maxRedirects`
- * are declared but **not rendered anywhere yet** - this type mirrors the wire,
- * so a field the engine sends is declared whether or not a screen reads it,
- * and a reader can trust that what is missing here is missing from the payload
- * too. If you are looking for
- * somewhere to surface them, the history sidebar row and the load test report
- * both already show `httpVersion` and would be the consistent home.
+ * are declared but **not read from a row's summary** - this type mirrors the
+ * wire, so a field the engine sends is declared whether or not a screen reads
+ * it, and a reader can trust that what is missing here is missing from the
+ * payload too. The two ramp knobs are read from the *report's*
+ * `metadata.configuration` instead, by the baseline comparison's
+ * `comparability` list (issue #2162); the redirect settings are shown nowhere.
+ * If you are looking for somewhere to surface them on a row, the history
+ * sidebar row and the load test report both already show `httpVersion` and
+ * would be the consistent home.
  */
 export interface RunSummary {
 	url?: string;
@@ -1616,9 +1619,9 @@ export interface RunSummary {
 	mode?: string;
 	duration?: string;
 	concurrency?: number;
-	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	/** Ramp-up runs only (issue #1935); sent by the engine, not read from a row - see the note above. */
 	startConcurrency?: number;
-	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	/** Ramp-up runs only (issue #1935); sent by the engine, not read from a row - see the note above. */
 	rampUpDuration?: string;
 	comment?: string;
 	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
@@ -1630,9 +1633,9 @@ export interface RunSummary {
 	/**
 	 * Whether this run negotiated a compressed response (issue #1488) - see
 	 * {@link RunConfigSnapshot.defaultHeaders}. Omitted, not `false`, for a
-	 * run recorded before this field existed; the baseline comparison is the
-	 * one reader that treats an absent value as `false`, matching what such a
-	 * run actually sent.
+	 * run recorded before this field existed; the baseline comparison (its
+	 * `compression` entry in `comparability`) is the one reader that treats an
+	 * absent value as `false`, matching what such a run actually sent.
 	 */
 	acceptEncoding?: boolean;
 	/**

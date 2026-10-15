@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import BaselineComparison from "./BaselineComparison";
 import { withQueryClient } from "@/test/query-wrapper";
@@ -43,17 +43,22 @@ function report(over: {
 	avgRps: number;
 	errorRate: number;
 	acceptEncoding?: boolean;
+	status?: string;
+	testDuration?: number;
+	configuration?: Record<string, unknown>;
 }): RunReport {
+	const configuration = {
+		...over.configuration,
+		...(over.acceptEncoding === undefined ? {} : { acceptEncoding: over.acceptEncoding }),
+	};
 	return {
 		metadata: {
 			runId: "r",
 			runType: "load",
-			status: "completed",
+			status: over.status ?? "completed",
 			startTime: 0,
 			endTime: 1000,
-			...(over.acceptEncoding === undefined
-				? {}
-				: { configuration: { acceptEncoding: over.acceptEncoding } }),
+			...(Object.keys(configuration).length === 0 ? {} : { configuration }),
 		},
 		summary: {
 			totalRequests: 1000,
@@ -62,6 +67,7 @@ function report(over: {
 			errorRate: over.errorRate,
 			totalDurationSeconds: 10,
 			avgRps: over.avgRps,
+			...(over.testDuration === undefined ? {} : { testDuration: over.testDuration }),
 		},
 		latency: { min: 1, max: 90, avg: 10, p50: 8, p90: 20, p95: 30, p99: over.p99 },
 		statusCodes: { "200": 1000 },
@@ -241,7 +247,8 @@ describe("BaselineComparison", () => {
 	/*
 	 * Issue #1488: a baseline pinned under a different compression-negotiation
 	 * setting than the run it is compared against means the byte and latency
-	 * deltas above are not a clean comparison, so the strip says so.
+	 * deltas above are not a clean comparison, so the strip says so - as one
+	 * entry of the comparability list (#2162).
 	 */
 	it("warns when the baseline and the open run negotiated compression differently", async () => {
 		mocked.getRun.mockResolvedValue(run());
@@ -261,28 +268,92 @@ describe("BaselineComparison", () => {
 		);
 
 		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
-		expect(screen.getByText(/Compression negotiation differs/)).toBeInTheDocument();
+		expect(screen.getByText(/Compression negotiation differs/)).toHaveTextContent(
+			"not negotiated vs negotiated."
+		);
 	});
 
-	it("says nothing when both runs negotiated compression the same way", async () => {
+	/*
+	 * Issue #2162: the pair the strip was silent about - a short, stopped,
+	 * 50-user run against a pinned 20 s, 10-user baseline. Every row names both
+	 * values, so the reader sees what differs and not just that something does.
+	 */
+	it("lists what differs between the runs, with the baseline's value then this run's", async () => {
 		mocked.getRun.mockResolvedValue(run());
 		mocked.listRuns.mockResolvedValue(
 			baselinePage([run({ id: "run_baseline", baseline: true })])
 		);
 		mocked.getRunReport.mockResolvedValue(
-			report({ p99: 50, avgRps: 100, errorRate: 1, acceptEncoding: true })
+			report({
+				p99: 50,
+				avgRps: 100,
+				errorRate: 1,
+				testDuration: 20,
+				configuration: { mode: "constant_concurrency", concurrency: 10 },
+			})
 		);
 
 		render(
 			withQueryClient(
 				<BaselineComparison
-					report={report({ p99: 50, avgRps: 100, errorRate: 1, acceptEncoding: true })}
+					report={report({
+						p99: 90,
+						avgRps: 40,
+						errorRate: 1,
+						status: "stopped",
+						testDuration: 3,
+						configuration: { mode: "ramp_up", concurrency: 50 },
+					})}
 					runId="run_target"
 				/>
 			)
 		);
 
 		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
-		expect(screen.queryByText(/Compression negotiation differs/)).not.toBeInTheDocument();
+		const list = screen.getByRole("list", { name: "Comparability warnings" });
+		const rows = within(list)
+			.getAllByRole("listitem")
+			.map((row) => row.textContent);
+		expect(rows).toEqual([
+			"Test mode differs. constant_concurrency vs ramp_up.",
+			"Virtual users differ. 10 vs 50.",
+			"Run durations differ by more than 2x. 20 s vs 3 s, stopped.",
+			"Run status differs. Completed vs Stopped.",
+		]);
+		// The warning tone is the one the compression line always had, and it is
+		// the text colour token: the bare fill is not a foreground.
+		for (const row of within(list).getAllByRole("listitem")) {
+			expect(row.className).toContain("text-status-warning-text");
+		}
+	});
+
+	it("says nothing when the two runs are like for like", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		const same = {
+			testDuration: 20,
+			acceptEncoding: true,
+			configuration: { mode: "constant_concurrency", concurrency: 10 },
+		};
+		mocked.getRunReport.mockResolvedValue(
+			report({ p99: 50, avgRps: 100, errorRate: 1, ...same })
+		);
+
+		render(
+			withQueryClient(
+				<BaselineComparison
+					report={report({ p99: 60, avgRps: 90, errorRate: 1, ...same })}
+					runId="run_target"
+				/>
+			)
+		);
+
+		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
+		expect(
+			screen.queryByRole("list", { name: "Comparability warnings" })
+		).not.toBeInTheDocument();
+		expect(screen.queryByText(/differs/)).not.toBeInTheDocument();
 	});
 });
