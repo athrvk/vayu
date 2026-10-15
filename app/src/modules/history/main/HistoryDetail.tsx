@@ -34,6 +34,7 @@ import { useCopy } from "@/hooks/useCopy";
 import { useTabsStore } from "@/stores";
 import { Button } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton, RunStatusPill } from "@/components/shared";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 import ScenarioRunView from "./ScenarioRunView";
@@ -167,11 +168,7 @@ export default function HistoryDetail() {
 				<div className="flex items-center gap-3">
 					<div className="flex-1 min-w-0 flex items-center gap-2">
 						<h1 className="text-sm font-semibold text-foreground shrink-0">
-							{isDesignRun
-								? "Design run"
-								: isScenarioRun
-									? "Collection run"
-									: "Load test"}
+							{RUN_TYPE_NAME[run.type]}
 						</h1>
 						<span className="text-xs text-muted-foreground font-mono truncate">
 							{selectedRunId}

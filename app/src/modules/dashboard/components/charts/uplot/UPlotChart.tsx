@@ -59,6 +59,12 @@ export interface UPlotSeriesSpec {
 	format?: ValueFormatter;
 	/** Omit from the hover tooltip (e.g. a band's lower edge). */
 	hideInTooltip?: boolean;
+	/**
+	 * What the tooltip prints for this series, one entry per x, when the plotted
+	 * value is not the quantity (a stacked band plots a running total). A zero
+	 * entry drops the row from the tooltip.
+	 */
+	tipValues?: (number | null)[];
 }
 
 export interface UPlotChartProps {
@@ -102,6 +108,8 @@ export interface UPlotChartProps {
 	 * can cross-highlight with the time charts (the scatter passes this).
 	 */
 	focusTimes?: number[];
+	/** Unit line under the tooltip's time header. */
+	tooltipCaption?: string;
 	/** Pulsing dot on the last point of the first primary-axis series. */
 	isLive?: boolean;
 }
@@ -136,6 +144,7 @@ export function UPlotChart({
 	xValueSync = true,
 	focusTimes,
 	isLive = false,
+	tooltipCaption,
 }: UPlotChartProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const plotRef = useRef<uPlot | null>(null);
@@ -147,6 +156,16 @@ export function UPlotChart({
 	const originRef = useRef<symbol>(Symbol("uplot-chart"));
 	const suppressPublishRef = useRef(false);
 	const focusTimesRef = useRef<number[] | undefined>(focusTimes);
+	// Read at hover time: the plot is not rebuilt when data streams in.
+	const tipValuesRef = useRef<Record<number, (number | null)[]>>({});
+
+	useEffect(() => {
+		const byPosition: Record<number, (number | null)[]> = {};
+		series.forEach((s, i) => {
+			if (s.tipValues) byPosition[i + 1] = s.tipValues;
+		});
+		tipValuesRef.current = byPosition;
+	}, [series]);
 
 	useEffect(() => {
 		markersRef.current = markers;
@@ -178,8 +197,8 @@ export function UPlotChart({
 						`${s.label}:${s.role}:${s.kind ?? "line"}:${s.scale ?? "y"}:${s.bandTo ?? ""}`
 				)
 				.join("|") +
-			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}`,
-		[series, themeKey, height, syncKey, isLive, xTime, xValueSync]
+			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}`,
+		[series, themeKey, height, syncKey, isLive, xTime, xValueSync, tooltipCaption]
 	);
 
 	useEffect(() => {
@@ -308,6 +327,8 @@ export function UPlotChart({
 						format: perSeriesFormat,
 						skip,
 						xLabel: xTooltipFormat ?? (xTime ? defaultTimeTooltip : xFormat),
+						caption: tooltipCaption,
+						tipValues: () => tipValuesRef.current,
 					}),
 				],
 			};
@@ -391,10 +412,10 @@ export function UPlotChart({
 			plotRef.current = null;
 		};
 		// `shapeSig` is the serialized form of everything this effect reads -
-		// series identity, theme, height, sync key, live/x-axis flags - so the
-		// omitted deps are all inside it. Listing `series` or `data` instead
-		// would tear the plot down and rebuild it on every data tick, which the
-		// `setData` effect below exists to avoid.
+		// series identity, theme, height, sync key, live/x-axis flags, tooltip
+		// caption - so the omitted deps are all inside it. Listing `series` or
+		// `data` instead would tear the plot down and rebuild it on every data
+		// tick, which the `setData` effect below exists to avoid.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shapeSig]);
 

@@ -50,6 +50,15 @@ describe("RecentRuns", () => {
 		expect(screen.getByText("GET")).toBeInTheDocument();
 	});
 
+	it.each([
+		["design", "Send"],
+		["scenario", "Collection run"],
+		["load", "Load test"],
+	] as const)("names a %s run's kind %s", (type, name) => {
+		render(<RecentRuns runs={[run({ type })]} />);
+		expect(screen.getByText(name)).toBeInTheDocument();
+	});
+
 	it("tells two runs apart", () => {
 		// The whole point: before this, both rows rendered identically.
 		render(

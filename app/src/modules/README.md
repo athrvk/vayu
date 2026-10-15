@@ -21,7 +21,7 @@ Some modules have components displayed in both the sidebar and main content area
 #### `history/`
 
 - **Location:** Both sidebar and main
-- **Sidebar:** `sidebar/HistoryList.tsx` - List of test runs
+- **Sidebar:** `sidebar/HistoryList.tsx` - List of runs
 - **Main:** `main/HistoryDetail.tsx`, `main/LoadTestDetail.tsx`, `main/DesignRunView.tsx` - Run detail views
 - **A design run opens as an editable copy, not a viewer.** `DesignRunView`
   renders the request builder itself, seeded from the stored run by

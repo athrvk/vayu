@@ -26,6 +26,17 @@ export const RUN_KIND_LABEL: Record<Run["type"], string> = {
 	scenario: "collection",
 };
 
+/**
+ * The title-case name a run type goes by wherever it heads a surface (a header,
+ * a filter option, a tab title). `design` is the wire value for a single send
+ * and stays so; the user never sees that word.
+ */
+export const RUN_TYPE_NAME: Record<Run["type"], string> = {
+	design: "Send",
+	scenario: "Collection run",
+	load: "Load test",
+};
+
 export interface TabProps {
 	report: RunReport;
 	runId?: string;

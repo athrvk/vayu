@@ -8,15 +8,19 @@
 /**
  * Status-class composition over time, as stacked areas, on the shared uPlot
  * primitive. Stacking is done by feeding cumulative sums and filling each class'
- * band between consecutive cumulative series (bottom 2xx fills to zero).
+ * band between consecutive cumulative series (bottom 2xx fills to zero). The
+ * tooltip prints each class' own count (`tipValues`), not the stack height.
  */
 
 import { useMemo } from "react";
 import type uPlot from "uplot";
 import type { LoadTestMetrics } from "@/types";
-import { buildStatusOverTime } from "../../../utils/metricsTransforms";
+import { buildStatusOverTime, stackStatusPoints } from "../../../utils/metricsTransforms";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
 import { fmtCount } from "./formatters";
+
+/** The bucket `buildStatusOverTime` counts into; `TOOLTIPS.statusCodesOverTime` says the same. */
+const STATUS_TOOLTIP_UNIT = "responses / 0.5 s";
 
 export function StatusCodesOverTimeChart({
 	history,
@@ -29,21 +33,25 @@ export function StatusCodesOverTimeChart({
 	syncKey?: string;
 	height?: number;
 }) {
-	const data = useMemo<uPlot.AlignedData>(() => {
-		const d = buildStatusOverTime(history);
-		const times = d.map((p) => p.time);
+	const { data, own } = useMemo(() => {
+		const stack = stackStatusPoints(buildStatusOverTime(history));
 		// Cumulative stack, bottom → top: 2xx, +3xx, +4xx, +5xx, +err.
-		const s0 = d.map((p) => p.c2xx);
-		const s1 = d.map((p) => p.c2xx + p.c3xx);
-		const s2 = d.map((p) => p.c2xx + p.c3xx + p.c4xx);
-		const s3 = d.map((p) => p.c2xx + p.c3xx + p.c4xx + p.c5xx);
-		const s4 = d.map((p) => p.c2xx + p.c3xx + p.c4xx + p.c5xx + p.cErr);
-		return [times, s0, s1, s2, s3, s4];
+		return {
+			data: [stack.times, ...stack.stacked] as uPlot.AlignedData,
+			own: stack.own,
+		};
 	}, [history]);
 
 	// Each class = the band between its cumulative line and the one below it.
 	const series: UPlotSeriesSpec[] = [
-		{ label: "2xx", role: "status-success", kind: "area", width: 0.75, format: fmtCount },
+		{
+			label: "2xx",
+			role: "status-success",
+			kind: "area",
+			width: 0.75,
+			format: fmtCount,
+			tipValues: own[0],
+		},
 		/*
 		 * The five series resolve through `constants/http-status.ts` now, so a
 		 * colour means the same class here as on a response badge or a history
@@ -63,6 +71,7 @@ export function StatusCodesOverTimeChart({
 			bandTo: 1,
 			bandRole: "status-redirect",
 			format: fmtCount,
+			tipValues: own[1],
 		},
 		{
 			label: "4xx",
@@ -71,6 +80,7 @@ export function StatusCodesOverTimeChart({
 			bandTo: 2,
 			bandRole: "status-client-error",
 			format: fmtCount,
+			tipValues: own[2],
 		},
 		{
 			label: "5xx",
@@ -79,6 +89,7 @@ export function StatusCodesOverTimeChart({
 			bandTo: 3,
 			bandRole: "status-server-error",
 			format: fmtCount,
+			tipValues: own[3],
 		},
 		{
 			label: "err",
@@ -87,6 +98,7 @@ export function StatusCodesOverTimeChart({
 			bandTo: 4,
 			bandRole: "status-no-response",
 			format: fmtCount,
+			tipValues: own[4],
 		},
 	];
 
@@ -99,6 +111,7 @@ export function StatusCodesOverTimeChart({
 			height={height}
 			yFormat={(v) => `${Math.round(v)}`}
 			isLive={!isCompleted}
+			tooltipCaption={STATUS_TOOLTIP_UNIT}
 			syncKey={syncKey}
 		/>
 	);

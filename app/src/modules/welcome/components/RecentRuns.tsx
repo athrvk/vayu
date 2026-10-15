@@ -31,6 +31,7 @@ import { MethodBadge, RUN_STATUS, TruncatedText } from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { Run } from "@/types";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 
 const RECENT_RUN_LIMIT = 5;
 
@@ -86,7 +87,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
 								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro font-mono font-semibold uppercase">
-									{run.type === "load" ? "Load" : "Design"}
+									{RUN_TYPE_NAME[run.type]}
 								</span>
 								{method && <MethodBadge method={method} size="sm" />}
 								{url ? (
