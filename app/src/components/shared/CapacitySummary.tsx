@@ -23,6 +23,7 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { formatRps } from "./run-outcome";
 import type { RunReport } from "@/types/domain";
 
 /**
@@ -65,10 +66,6 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 /** Trailing zeros are noise on a latency the search measured to the ms. */
 function formatMs(value: number): string {
 	return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function formatRps(value: number): string {
-	return Math.round(value).toLocaleString("en-US");
 }
 
 export interface CapacitySummaryProps {

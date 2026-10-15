@@ -12,7 +12,7 @@ describe("resultSubtitle", () => {
 	it.each([
 		[{ rps: 485.2, p95Ms: 42, errorRate: 0 }, "485 req/s · p95 42 ms · 0.0% errors"],
 		[{ rps: 12400, p95Ms: 1500, errorRate: 15.14 }, "12,400 req/s · p95 1.50 s · 15.1% errors"],
-		[{ rps: 4.25 }, "4.3 req/s"],
+		[{ rps: 4.25 }, "4 req/s"],
 		[{ p95Ms: 42, errorRate: 2 }, "p95 42 ms · 2.0% errors"],
 		[{ errorRate: 0.01 }, "<0.1% errors"],
 		[{ verdict: "passed" as const }, null],

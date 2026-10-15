@@ -8068,6 +8068,11 @@ which is not the same claim as passing. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all. A collection run's row never carries one.
 
+`verdict` is the verdict as stored, even for a `stopped` run, whose partial
+data the app shows as "Not judged" rather than passed or failed. `errorRate` is
+computed over the stored status-code distribution, so it can differ slightly
+from the report's `summary.errorRate`.
+
 **Response (envelope):**
 ```json
 {

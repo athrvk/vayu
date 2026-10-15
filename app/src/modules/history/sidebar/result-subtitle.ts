@@ -6,13 +6,8 @@
  */
 
 import { formatResponseTime } from "@/components/shared";
-import { formatErrorRate } from "@/components/shared/run-outcome";
+import { formatErrorRate, formatRps } from "@/components/shared/run-outcome";
 import type { LoadResultSummary } from "@/types";
-
-/** Whole requests per second once there are many, one decimal while a fraction still matters. */
-function formatRps(rps: number): string {
-	return rps >= 100 ? Math.round(rps).toLocaleString() : rps.toFixed(1);
-}
 
 /**
  * The line a finished load run's history row prints under its identity:

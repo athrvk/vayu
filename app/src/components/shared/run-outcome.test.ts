@@ -18,6 +18,7 @@ import { describe, it, expect } from "vitest";
 import type { Run, RunReport } from "@/types";
 import {
 	formatErrorRate,
+	formatRps,
 	judgeRun,
 	reportOutcome,
 	rowOutcome,
@@ -204,6 +205,16 @@ describe("formatErrorRate", () => {
 		[100, "100.0%"],
 	])("%s is %s", (percent, text) => {
 		expect(formatErrorRate(percent)).toBe(text);
+	});
+});
+
+describe("formatRps", () => {
+	it.each([
+		[485.2, "485"],
+		[12400, "12,400"],
+		[4.5, "5"],
+	])("%s reads %s", (rps, text) => {
+		expect(formatRps(rps)).toBe(text);
 	});
 });
 

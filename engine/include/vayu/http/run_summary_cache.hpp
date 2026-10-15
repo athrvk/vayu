@@ -48,8 +48,11 @@ namespace vayu::http {
  * `run_manager.cpp`'s finish and failure paths and from `scenario_runner.cpp`)
  * each store it *before* the terminal status, so a row read with a terminal
  * status already holds its final summary - or none, when that write failed or
- * the run never got far enough to make one. A Pending or Running row's summary
- * is not final, so `outcome_for` must only be asked about a terminal run.
+ * the run never got far enough to make one. The exception is a stop that finds
+ * no registered worker: it writes Stopped with an empty summary and the worker
+ * stores its own afterwards. A Pending or Running row's summary is not final,
+ * and neither is an empty one, so `outcome_for` must only be asked about a
+ * terminal run that holds a summary.
  *
  * **Threading: one mutex per table, held only around that table** - the same
  * discipline `CookieJar` runs on, and deliberately *not* the database mutex,

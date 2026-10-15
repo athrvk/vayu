@@ -1440,6 +1440,29 @@ TEST_F (RunsRouteTest, LoadRowGetsNoResultSummaryUntilItsStatusIsTerminal) {
     EXPECT_EQ (summaries_.outcome_build_count (), 1u);
 }
 
+// A stop that finds no registered worker writes Stopped with no summary, and
+// the worker stores its own afterwards. The poll between the two must neither
+// build nor cache an empty outcome, or the real one would never show. Dropping
+// the non-empty gate fails the first poll's build count and the last poll's key.
+TEST_F (RunsRouteTest, StoppedLoadRowWithoutSummaryIsNotCachedBeforeTheWorkerWritesOne) {
+    seed ({ .id = "run_early_stop", .status = vayu::RunStatus::Stopped });
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_FALSE (row_of (first, "run_early_stop").contains ("resultSummary"));
+    EXPECT_EQ (summaries_.outcome_build_count (), 0u);
+
+    db_->update_run_summary ("run_early_stop", judged_summary (true));
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (second_status, 200);
+    const auto finished = row_of (second, "run_early_stop");
+    ASSERT_TRUE (finished.contains ("resultSummary"));
+    EXPECT_EQ (finished["resultSummary"]["verdict"], "passed");
+    EXPECT_EQ (summaries_.outcome_build_count (), 1u);
+}
+
 // A terminal load run's summary is final, so the poll parses it once - and
 // only a load row's: a design or scenario row never asks for an outcome.
 TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {

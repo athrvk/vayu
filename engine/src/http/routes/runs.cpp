@@ -756,10 +756,15 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
 }
 
 // Whether a row of this run may carry a `resultSummary` built from its stored
-// summary: a load run at a terminal status. A Pending or Running row's summary
-// is not final yet (see RunSummaryCache), so it is neither read nor cached.
+// summary: a load run at a terminal status with a summary stored. A Pending or
+// Running row's summary is not final yet (see RunSummaryCache), so it is neither
+// read nor cached. Terminal status does not guarantee the summary exists: the
+// inactive branch of POST /runs/:id/stop writes Stopped with none before the
+// worker registers, and the worker writes its summary afterwards. An empty
+// summary is therefore not final either, and caching its empty outcome would
+// hide the real one for good.
 bool carries_load_result_summary (const vayu::db::Run& run) {
-    if (run.type != vayu::RunType::Load) {
+    if (run.type != vayu::RunType::Load || run.summary.empty ()) {
         return false;
     }
     switch (run.status) {
