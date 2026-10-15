@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { concurrencyUnit } from "@/constants/load-test-modes";
 import { TOOLTIPS } from "../tooltips";
 import type { Breakpoint } from "../../utils/computeBreakpoint";
 import { HeroCardShell } from "./HeroCardShell";
@@ -48,9 +49,9 @@ export function SaturationCard({
 			{breakpoint.crossed && (
 				<p className="text-label text-muted-foreground font-mono mt-0.5">
 					p99 crossed{" "}
-					<span className="text-foreground font-semibold">{breakpoint.p99Ms}</span>ms at
-					conc{" "}
-					<span className="text-foreground font-semibold">{breakpoint.concurrency}</span>
+					<span className="text-foreground font-semibold">{breakpoint.p99Ms}</span>ms at{" "}
+					<span className="text-foreground font-semibold">{breakpoint.concurrency}</span>{" "}
+					{concurrencyUnit(breakpoint.concurrency ?? 0)}
 				</p>
 			)}
 		</HeroCardShell>

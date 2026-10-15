@@ -11,11 +11,11 @@
  * the first three switch per mode. This table is the authority for which cards
  * a mode shows - add a mode here, beside the branch that renders it:
  *
- *   constant_rps         Duration · Total requests · Peak concurrency · p99
- *   constant_concurrency Duration · Total requests · Throughput / VU   · p99
+ *   constant_rps         Duration · Total requests · Peak in-flight requests · p99
+ *   constant_concurrency Duration · Total requests · Throughput per virtual user · p99
  *   iterations           Elapsed  · Remaining (ETA) · Mean iter time   · p99
- *   ramp_up              Peak concurrency · Breakpoint · p99 at peak · Total requests
- *   capacity             Peak concurrency · Breakpoint · p99 at peak · Total requests
+ *   ramp_up              Peak virtual users · Breakpoint · p99 at peak · Total requests
+ *   capacity             Peak virtual users · Breakpoint · p99 at peak · Total requests
  *
  * ramp_up and capacity are the exception: their 4th stat is Total requests, not p99, so
  * that branch renders all four cards itself. Shared cards (Duration / Total /
@@ -25,6 +25,7 @@
  */
 
 import { cn } from "@/lib/utils";
+import { CONCURRENCY_UNIT, isClosedLoopMode } from "@/constants/load-test-modes";
 import { formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
@@ -140,11 +141,16 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Peak concurrency - max in-flight with backpressure sub. */
+/**
+ * Peak concurrency - max in-flight with backpressure sub. Virtual users in a
+ * closed-loop mode, requests in flight under Constant RPS: the same measurement,
+ * named for what the mode lets it count.
+ */
 function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
+	const closedLoop = isClosedLoopMode(d.mode);
 	return (
 		<StatCard
-			label="Peak concurrency"
+			label={closedLoop ? `Peak ${CONCURRENCY_UNIT}` : "Peak in-flight requests"}
 			value={formatNumber(d.peakConcurrency)}
 			sub={
 				<>
@@ -152,7 +158,7 @@ function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 					<span className="text-muted-foreground">{formatNumber(d.backpressure)}</span>
 				</>
 			}
-			infoTip={TOOLTIPS.peakConcurrency}
+			infoTip={closedLoop ? TOOLTIPS.peakVirtualUsers : TOOLTIPS.peakInFlight}
 		/>
 	);
 }

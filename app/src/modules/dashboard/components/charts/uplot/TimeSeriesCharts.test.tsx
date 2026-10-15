@@ -23,14 +23,28 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import type { RampOverlay } from "../../../utils/metricsTransforms";
-import { RequestRateChart } from "./TimeSeriesCharts";
+import { CONCURRENCY_LABEL, IN_FLIGHT_LABEL } from "@/constants/load-test-modes";
+import { RequestRateChart, ConnectionsChart } from "./TimeSeriesCharts";
+import { ResponseTimeVsConcurrencyChart } from "./ScatterAndDistribution";
 
-const mockState = vi.hoisted(() => ({ constructions: 0 }));
+const mockState = vi.hoisted(() => ({
+	constructions: 0,
+	series: [] as { label: string }[],
+	markers: [] as { label: string }[],
+}));
 
 // Hoisted above these imports by vitest, so `RequestRateChart` above resolves
 // against this mock, not the real `UPlotChart`.
 vi.mock("./UPlotChart", () => ({
-	UPlotChart: () => {
+	UPlotChart: ({
+		series,
+		markers,
+	}: {
+		series: { label: string }[];
+		markers?: { label: string }[];
+	}) => {
+		mockState.series = series;
+		mockState.markers = markers ?? [];
 		// A mount-only effect counts constructions, not renders: React keeps the
 		// same instance (and skips this effect) across a re-render that reuses
 		// the element's key, and creates a new one when the key changes.
@@ -101,5 +115,39 @@ describe("RequestRateChart - ramp overlay chart identity (#1717)", () => {
 
 		rerender(<RequestRateChart history={historyOf(4)} rampOverlay={null} />);
 		expect(mockState.constructions).toBe(1);
+	});
+});
+
+describe("ConnectionsChart - what the series is called", () => {
+	function seriesLabel(mode: string | undefined): string {
+		render(<ConnectionsChart mode={mode} history={historyOf(4)} />);
+		return mockState.series[0].label;
+	}
+
+	it.each(["ramp_up", "capacity", "constant_concurrency", "iterations"])(
+		"counts virtual users in the closed-loop %s mode",
+		(mode) => {
+			expect(seriesLabel(mode)).toBe(CONCURRENCY_LABEL);
+		}
+	);
+
+	it("counts requests in flight under Constant RPS, which holds no users", () => {
+		expect(seriesLabel("constant_rps")).toBe(IN_FLIGHT_LABEL);
+	});
+
+	it("reads a run of unknown mode as open-loop, as the dashboard's default branch does", () => {
+		expect(seriesLabel(undefined)).toBe(IN_FLIGHT_LABEL);
+	});
+});
+
+describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
+	it("names the breakpoint in virtual users", () => {
+		render(
+			<ResponseTimeVsConcurrencyChart
+				history={historyOf(4)}
+				breakpoint={{ crossed: true, concurrency: 45, timeSeconds: 2, p99Ms: 227 }}
+			/>
+		);
+		expect(mockState.markers.map((m) => m.label)).toContain("~45 virtual users");
 	});
 });

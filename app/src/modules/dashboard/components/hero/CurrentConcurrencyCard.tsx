@@ -26,7 +26,7 @@ export function CurrentConcurrencyCard({
 	rampDeviationPct?: number;
 }) {
 	return (
-		<HeroCardShell label="Current concurrency" tip={TOOLTIPS.currentConcurrency}>
+		<HeroCardShell label="Active virtual users" tip={TOOLTIPS.currentConcurrency}>
 			<HeroValue value={currentConcurrency} unit="active" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				targeting{" "}

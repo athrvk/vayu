@@ -20,6 +20,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
+import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL } from "@/constants/load-test-modes";
 
 vi.mock("@/modules/dashboard/components/charts/uplot", () => {
 	const stub = (name: string) => () => <div data-testid={name} />;
@@ -135,5 +136,22 @@ describe("HistoricalChartsSection, fetch failure", () => {
 
 		expect(screen.queryByText("Charts are incomplete")).toBeNull();
 		expect(screen.getByTestId("rate-chart")).toBeTruthy();
+	});
+});
+
+describe("HistoricalChartsSection, concurrency card title", () => {
+	it.each(["ramp_up", "capacity", "constant_concurrency", "iterations"])(
+		"counts virtual users for a closed-loop %s run",
+		(mode) => {
+			render(<HistoricalChartsSection data={ticks(10)} mode={mode} />);
+			expect(screen.getByText(`Active ${CONCURRENCY_UNIT}`)).toBeTruthy();
+			expect(screen.queryByText(IN_FLIGHT_LABEL)).toBeNull();
+		}
+	);
+
+	it("counts requests in flight for a Constant RPS run, which holds no users", () => {
+		render(<HistoricalChartsSection data={ticks(10)} mode="constant_rps" />);
+		expect(screen.getByText(IN_FLIGHT_LABEL)).toBeTruthy();
+		expect(screen.queryByText(`Active ${CONCURRENCY_UNIT}`)).toBeNull();
 	});
 });

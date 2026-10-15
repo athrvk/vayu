@@ -104,7 +104,37 @@ export const CONCURRENCY_LABEL = "Virtual users";
  * the noun without a count reads `CONCURRENCY_UNIT` / `CONCURRENCY_LABEL`.
  */
 export function formatConcurrency(concurrency: number): string {
-	return `${concurrency} ${pluralize(concurrency, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT)}`;
+	return `${concurrency} ${concurrencyUnit(concurrency)}`;
+}
+
+/** The unit agreeing with a count, for a surface that styles the number apart from the noun. */
+export function concurrencyUnit(concurrency: number): string {
+	return pluralize(concurrency, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT);
+}
+
+/** What a Constant RPS run measures where a closed-loop run counts virtual users. */
+export const IN_FLIGHT_LABEL = "In-flight requests";
+
+const CLOSED_LOOP_MODES: ReadonlySet<string> = new Set([
+	"constant_concurrency",
+	"iterations",
+	"ramp_up",
+	"capacity",
+]);
+
+/**
+ * Whether a run holds a number of virtual users, each waiting on its own reply.
+ * Constant RPS is the open-loop mode: requests leave on a clock whatever the
+ * server does, so its concurrency series counts requests in flight, not users.
+ * An unrecognised mode reads as open-loop, as the dashboard's default branch does.
+ */
+export function isClosedLoopMode(mode: string | undefined | null): boolean {
+	return mode != null && CLOSED_LOOP_MODES.has(mode);
+}
+
+/** The words for the series the engine reports as `current_concurrency` under `mode`. */
+export function concurrencyMeasureLabel(mode: string | undefined | null): string {
+	return isClosedLoopMode(mode) ? CONCURRENCY_LABEL : IN_FLIGHT_LABEL;
 }
 
 /**

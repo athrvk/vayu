@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
+import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { isRateLimitedRun, hasPercentileSignal } from "@/modules/dashboard/utils/metricsTransforms";
 import {
 	LatencyPercentilesChart,
@@ -77,6 +78,7 @@ export default function PerformanceTab({
 					isLoading={isLoadingSeries}
 					isFetchingMore={isFetchingMore}
 					progress={progress}
+					mode={derived.mode}
 					breakpoint={derived.breakpoint}
 					anomalies={anomalies}
 					sleeps={hostSleeps}
@@ -91,7 +93,7 @@ export default function PerformanceTab({
 				(isRampUp ? (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
-							<CardTitle>Response time vs concurrency</CardTitle>
+							<CardTitle>Response time vs {CONCURRENCY_UNIT}</CardTitle>
 						</CardHeader>
 						<CardContent>
 							<ResponseTimeVsConcurrencyChart

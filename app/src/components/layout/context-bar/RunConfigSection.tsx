@@ -27,7 +27,11 @@
  */
 
 import { useRunQuery } from "@/queries";
-import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
+import {
+	CONCURRENCY_LABEL,
+	loadTestModeLabel,
+	formatConcurrency,
+} from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { scenarioFromSnapshot } from "./run-scenario";
@@ -124,8 +128,8 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 	}
 	if (config?.concurrency != null && config.concurrency > 0) {
 		rows.push(
-			<Row key="concurrency" label="Concurrency">
-				{formatConcurrency(config.concurrency)}
+			<Row key="concurrency" label={CONCURRENCY_LABEL}>
+				{config.concurrency}
 			</Row>
 		);
 	}

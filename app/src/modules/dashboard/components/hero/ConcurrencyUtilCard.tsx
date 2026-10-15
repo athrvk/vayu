@@ -30,8 +30,8 @@ function utilFillColor(util: number | undefined): string {
 }
 
 /**
- * constant_concurrency hero card #2 - how many of the configured N concurrent
- * users were actually in-flight on average. Below 100% means idle VUs.
+ * constant_concurrency hero card #2 - how many of the configured N virtual
+ * users were actually in-flight on average. Below 100% means idle virtual users.
  */
 export function ConcurrencyUtilCard({
 	currentConcurrency,
@@ -48,7 +48,7 @@ export function ConcurrencyUtilCard({
 	const fillColor = utilFillColor(util);
 
 	return (
-		<HeroCardShell label="Concurrency utilisation" tip={TOOLTIPS.concurrencyUtil}>
+		<HeroCardShell label="Virtual user utilisation" tip={TOOLTIPS.concurrencyUtil}>
 			<HeroValue
 				value={currentConcurrency}
 				color={textColor}
