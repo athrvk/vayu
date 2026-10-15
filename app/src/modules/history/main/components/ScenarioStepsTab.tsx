@@ -15,9 +15,11 @@
  * no `results[]` to fall back to, which is why a design-mode collection run
  * renders `ScenarioRunView` and this one renders here.
  *
- * `executed` per step is the number worth reading first: an errored step ends
- * its iteration, so a sequence whose counts fall away after step 3 is telling
- * you step 3 failed, and the `errors` column says how often.
+ * `executed` per step is the number worth reading first: a step that got no
+ * response ends its iteration, so a sequence whose counts fall away after step 3
+ * is telling you step 3 got nothing back. `errors` is wider than that - it also
+ * counts 4xx/5xx responses, which do not end the iteration - so its tooltip
+ * splits the two.
  *
  * The Tests column is the deferred per-step validation (issue #450): each
  * step's own post-request script replayed after the run against that step's
@@ -28,7 +30,7 @@
 
 import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
-import { Badge } from "@/components/ui";
+import { Badge, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { ElementTally, TruncatedText } from "@/components/shared";
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -49,6 +51,26 @@ export interface ScenarioStepsTabProps {
  */
 function latency(ms: number) {
 	return ms < 10 ? `${ms.toFixed(2)}ms` : `${formatNumber(Math.round(ms))}ms`;
+}
+
+/**
+ * The Errors tally, with its split on hover. `httpErrors` and `noResponse` are
+ * absent from a report stored before the engine reported them, and a tally with
+ * no split is shown as the bare count rather than as a split of zeros.
+ */
+function ErrorsCell({ step }: { step: RunScenarioStepStat }) {
+	const count = <span>{formatNumber(step.errors)}</span>;
+	const { httpErrors, noResponse } = step;
+	if (step.errors === 0 || httpErrors === undefined || noResponse === undefined) return count;
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{count}</TooltipTrigger>
+			<TooltipContent>
+				{formatNumber(httpErrors)} {pluralize(httpErrors, "HTTP error")},{" "}
+				{formatNumber(noResponse)} no response
+			</TooltipContent>
+		</Tooltip>
+	);
 }
 
 export default function ScenarioStepsTab({
@@ -169,7 +191,7 @@ export default function ScenarioStepsTab({
 												: "px-3 py-2 text-right font-mono text-muted-foreground"
 										}
 									>
-										{formatNumber(step.errors)}
+										<ErrorsCell step={step} />
 									</td>
 									<td className="px-3 py-2 text-right font-mono">
 										{step.tests ? (
