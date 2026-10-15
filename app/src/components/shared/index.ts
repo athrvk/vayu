@@ -31,6 +31,9 @@ export * from "./callout-severity";
 // the request builder's per-field merge (#1436, #1437)
 export * from "./ExternalChangeCallout";
 
+// "12 requests cancelled by Stop" - outside every error and request count
+export * from "./CancelledRequestsNote";
+
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 
@@ -50,6 +53,7 @@ export * from "./SampledSchemaValidation";
 export * from "./ScriptLifecycleSummary";
 
 // A single-request run's own step-level element outcomes (issue #1641)
+export * from "./ElementTally";
 export * from "./RequestElementsSummary";
 
 // "982 of 1,000 assertions passed" - a load run's test outcome, live and stored

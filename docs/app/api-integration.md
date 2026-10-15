@@ -1462,6 +1462,13 @@ The renderer treats a non-zero count as "this list is a
 dashboard's Sampled Requests, the history Samples tab and the Test Validation
 card, and the sample-count badges say **shown** rather than *captured*, since
 `results` is capped at 100 by the report route irrespective of retention.
+The Test Validation card also states the arithmetic from `summary.totalRequests`
+("Tested N of M requests"), worded so it holds for requests that never got a
+response as well as for displaced ones; `samplesTested` counts responses and
+`testsPassed` / `testsFailed` count assertions, and the card's labels say so
+(issue #2144). A report's `elements[]` row may carry `deferred` (absent from older
+reports): a post-request script left to the post-run replay, rendered as "replayed
+on N sampled responses" rather than "0 passed".
 
 An **absent** `sampling` is a run whose stored summary predates the counts, not
 a run that dropped nothing, so the note stays out rather than asserting a

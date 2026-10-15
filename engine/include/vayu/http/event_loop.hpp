@@ -161,7 +161,7 @@ class EventLoop {
      *        in-flight ones are awaited. If false, both are cancelled: the
      *        queued backlog is discarded without being sent, and every
      *        in-flight transfer is removed from curl and completed with an
-     *        `ErrorCode::InternalError` "Request cancelled" result, so a stop
+     *        `ErrorCode::Cancelled` "Request cancelled" result, so a stop
      *        cannot be held hostage by an upstream that never answers.
      * @param drain_timeout Upper bound on the wait when `wait_for_pending` is
      *        true; whatever is still in flight when it expires is cancelled the

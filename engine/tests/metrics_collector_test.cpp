@@ -787,6 +787,42 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsCountsErrorsFromTheCallersSnapshot)
     EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 25.0);
 }
 
+// #2136: a Stop-cancelled request is counted on its own and moves nothing
+// else - so 10 cancelled beside 70,000 answered reads as 0% errors, every
+// answered request is still a success, and the average divides by the
+// requests that recorded a latency.
+TEST_F (MetricsCollectorTest, CancelledRequestsStayOutOfEveryOtherCount) {
+    for (int i = 0; i < 70000; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    for (int i = 0; i < 10; ++i) {
+        collector->record_cancelled ();
+    }
+
+    EXPECT_EQ (collector->cancelled (), 10u);
+    EXPECT_EQ (collector->total_requests (), 70000u);
+    EXPECT_EQ (collector->total_errors (), 0u);
+    EXPECT_EQ (collector->success_count (), 70000u);
+    EXPECT_DOUBLE_EQ (collector->average_latency (), 10.0);
+    EXPECT_EQ (collector->status_code_distribution ().count (0), 0u);
+    EXPECT_TRUE (collector->errors ().empty ());
+    EXPECT_EQ (collector->errors_dropped (), 0u);
+
+    auto stats = collector->get_current_stats (0, 1.0, 70010);
+    EXPECT_EQ (stats["cancelled"].get<size_t> (), 10u);
+    EXPECT_EQ (stats["totalRequests"].get<size_t> (), 70000u);
+    EXPECT_EQ (stats["totalSuccess"].get<size_t> (), 70000u);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 0u);
+    EXPECT_EQ (stats["noResponse"].get<size_t> (), 0u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 0.0);
+}
+
+TEST_F (MetricsCollectorTest, LiveStatsCarryAZeroCancelledCount) {
+    auto stats = collector->get_current_stats (0, 1.0, 0);
+    ASSERT_TRUE (stats.contains ("cancelled"));
+    EXPECT_EQ (stats["cancelled"].get<size_t> (), 0u);
+}
+
 // ============================================================================
 // count_status_failures - the one definition of a load-test error (#2124)
 // ============================================================================

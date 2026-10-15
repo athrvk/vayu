@@ -115,6 +115,18 @@ describe("compare_runs", () => {
 		expect(text).toContain("run_main -> run_target");
 	});
 
+	test("tells the model to read comparability before judging, and embeds the list", async () => {
+		const text = textOf(
+			await prompt("compare_runs").build(
+				{ baseRunId: "run_main", targetRunId: "run_target" },
+				ctxWith(fakeClient())
+			)
+		);
+
+		expect(text).toContain("Read `comparability` first");
+		expect(text).toContain('"comparability": []');
+	});
+
 	test("a target with no pinned baseline fails with the fix named", async () => {
 		const client = fakeClient({ listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }) });
 

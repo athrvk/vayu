@@ -6238,7 +6238,8 @@ rule the flat numeric fields follow.
 `maxErrorRatePct` is measured against every response outside 2xx/3xx **plus** the
 transport failures that never got one - the
 [one error definition](#what-counts-as-an-error), the same figure
-`summary.errorRate` reports and the live tick streams.
+`summary.errorRate` reports and the live tick streams. A request a Stop
+cancelled is in neither its numerator nor its denominator.
 
 `maxAssertionFailureRatePct` (issue #1497) is measured against this run's
 combined assertion tally: every `assert.*` element outcome and every
@@ -7153,7 +7154,7 @@ knob.
       "unresolvedTokens": 0,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
-        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0 }
+        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0, "deferred": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
       "executed": 474, "errors": 30, "httpErrors": 30, "noResponse": 0,
@@ -7185,11 +7186,14 @@ this run - and is **absent** for a step whose script ran inline instead
 (its outcome is in `elements`), asserted nothing, or drew no sample - "no
 assertions" and "no failures" are different answers.
 
-`elements` (issue #1495) is the step's per-element pass/fail/skip tally,
-`{ id, kind, passed, failed, skipped }` one entry per compiled element that
-ran at least once this run - **absent** for a step with no elements or none
-that ever ran, the same convention `tests` follows. `skipped` folds in both a
-disabled element and a `script.*` element left deferred to the replay above.
+`elements` (issue #1495) is the step's per-element tally,
+`{ id, kind, passed, failed, skipped, deferred }` one entry per compiled
+element that ran at least once this run - **absent** for a step with no
+elements or none that ever ran, the same convention `tests` follows.
+`deferred` (issue #2144) counts a `script.post` element left to the replay
+above: it does run, later, and its assertions are the step's `tests`.
+`skipped` counts what never runs - a disabled element, and an un-inlined
+`script.pre`, which has no replay to go to.
 
 **`transactions`** (issue #1515), a sibling of `steps` rather than a member of
 it - a `control.transaction` spans a folder, not one step:
@@ -7260,8 +7264,9 @@ pre-request script reports `preRequestScript: "skipped"` on its
 `scenario.steps` entry, and the run's `warnings` array carries one line
 naming how many steps did. The single-target shape reports the same fact
 differently (see `requestElements` above): an un-inlined `script.pre`
-element's own entry in `summary["elements"]` carries the `"skipped"`
-outcome instead of a separate warning line.
+element's own entry in `summary["elements"]` counts every submission under
+`skipped` (never `deferred`, which is only for a `script.post` the replay
+runs) instead of a separate warning line.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
@@ -7524,8 +7529,27 @@ response came back, with an error status) and **No response**:
 | Stop response (`POST /runs/:runId/stop`) | `summary.httpErrors` | `summary.noResponse` |
 | Report (`GET /runs/:runId/report`) | `summary.httpErrorRequests` | `summary.noResponseRequests` |
 
-A request `POST /runs/:runId/stop` cancels before it is answered is recorded
-under code `0` too, so it counts as No response (issue #2136 separates it).
+A request `POST /runs/:runId/stop` cancels before it is answered is **not an
+error** (issue #2136). It got no outcome from the target, so it is counted on
+its own, as **cancelled**, and is in no other count: not the total, not the
+status-code distribution, not either half above, not the error rate. A healthy
+target stopped mid-run therefore reads `errorRate` 0 however many requests
+were in flight. The surfaces that carry it:
+
+| Surface | Cancelled |
+|---------|-----------|
+| Live tick (`GET /runs/:runId/live`) | `cancelled` |
+| Stored tick (`GET /runs/:runId/metrics`) | `cancelled` |
+| Stop response (`POST /runs/:runId/stop`) | `summary.cancelled` |
+| Report (`GET /runs/:runId/report`) | `summary.cancelledRequests` |
+
+So `totalRequests` is the requests that got an outcome,
+`successfulRequests + failedRequests`, and every request the run sent is in
+exactly one of `totalRequests` and the cancelled count. Only a Stop's
+cancellation is exempt. When a run reaches its natural end, a request still in
+flight after its own timeout plus a 2s grace is cancelled too, and that one
+never answered: it stays an error, under status code `0`, and its stored error
+record carries `error_type` `cancelled` (`errors.types` in the report).
 
 ### GET /runs/:runId/metrics
 
@@ -7553,6 +7577,7 @@ capacity-breakpoint / saturation stats from stored data.
       "requests_failed": 5,
       "http_errors": 5,
       "no_response": 0,
+      "cancelled": 0,
       "current_rps": 150.5,
       "current_concurrency": 100,
       "send_rate": 150.0,
@@ -7575,7 +7600,9 @@ capacity-breakpoint / saturation stats from stored data.
 `requests_failed` is the producer's own error count, written into the tick at
 write time, by the [one error definition](#what-counts-as-an-error) and from
 the same status-code snapshot as that tick's `status_codes`; `http_errors` and
-`no_response` split it. It is not derived at read time from `error_rate` and
+`no_response` split it. `cancelled` is the requests a Stop cancelled so far,
+outside all three (issue #2136); a tick stored before that issue has no
+`cancelled` key. It is not derived at read time from `error_rate` and
 `requests_completed` any more - that derivation depended on the order the EAV
 rows came back in, and reported 0 failed requests for every bucket of every run.
 A tick an engine older than issue #2124 stored has no `http_errors` /
@@ -7655,7 +7682,7 @@ event: metrics
 id: 0
 data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "totalRequests":1500,"totalSuccess":1495,"totalErrors":5,"errorRate":0.33,
-       "httpErrors":5,"noResponse":0,
+       "httpErrors":5,"noResponse":0,"cancelled":0,
        "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
@@ -7776,12 +7803,13 @@ no frame.
 |-------|---------|
 | `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts; `totalErrors` by the [one error definition](#what-counts-as-an-error) |
 | `httpErrors` / `noResponse` | `totalErrors` split: an error status came back, or no response did |
+| `cancelled` | Requests a Stop cancelled before they answered; in none of the counts above ([issue #2136](#what-counts-as-an-error)) |
 | `errorRate` | `totalErrors` as a percentage of the status-code distribution's total |
 | `currentRps` | Instantaneous RPS (delta over the tick window) |
 | `sendRate` | Rate requests are dispatched (open model) |
 | `throughput` | Rate responses are received |
 | `activeConnections` | Current in-flight requests |
-| `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests` |
+| `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
@@ -7824,8 +7852,9 @@ editing it there are the same action.
 
 The final `metrics` event is emitted only once the run's worker has actually
 settled. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
-requests are cancelled and recorded, so the last live numbers agree with the
-stored report rather than freezing at the moment of the stop request.
+requests are cancelled and counted as `cancelled`, so the last live numbers
+agree with the stored report rather than freezing at the moment of the stop
+request.
 
 **Application-level reconnect**: clients that close the EventSource themselves
 (e.g. after observing `readyState === CLOSED`) should NOT open a new connection
@@ -8221,16 +8250,18 @@ worker to settle, and answers with a summary of what the run actually did.
 
 **Stop discards, it does not drain.** The queued backlog is thrown away rather
 than sent, and transfers already in flight are cancelled (removed from curl and
-completed as an `INTERNAL_ERROR` "Request cancelled"), so the target stops
-receiving traffic immediately and the stop's latency does not belong to the
-upstream. A cancelled request was submitted, so it is counted: it lands in the
-run's errors as No response (see [What counts as an error](#what-counts-as-an-error)),
-which is what keeps `requests_sent` and the recorded total equal.
+completed as a `CANCELLED` "Request cancelled"), so the target stops receiving
+traffic immediately and the stop's latency does not belong to the upstream. A
+cancelled request was submitted, so it is counted, but **not as an error**
+(issue #2136): it is `summary.cancelled`, outside `totalRequests`, `errors` and
+`errorRate` (see [What counts as an error](#what-counts-as-an-error)). Every
+request the run sent is in exactly one of `totalRequests` and `cancelled`.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
 up to its own `timeout` plus a 2s grace; anything still outstanding then is
-cancelled the same way. Without that bound an upstream that never answers would
-hold the run in `running` indefinitely.
+cancelled the same way - and, because nobody asked for that one to stop, it is
+an error with no response, not a cancellation. Without that bound an upstream
+that never answers would hold the run in `running` indefinitely.
 
 **Response** (active run):
 ```json
@@ -8242,6 +8273,7 @@ hold the run in `running` indefinitely.
     "errors": 5,
     "httpErrors": 3,
     "noResponse": 2,
+    "cancelled": 12,
     "errorRate": 0.33,
     "avgLatencyMs": 38.9
   }
@@ -8250,8 +8282,8 @@ hold the run in `running` indefinitely.
 
 `errors` and `errorRate` are the [one error definition](#what-counts-as-an-error),
 the same figures the live tick and the report show; `httpErrors` and
-`noResponse` split `errors`, and the requests this stop cancelled are among
-`noResponse`.
+`noResponse` split `errors`. `cancelled` is the requests this stop cancelled,
+counted in none of them.
 
 `avgLatencyMs` is the same average the final report and the live ticks show:
 the latency sum over the requests that contributed to it (successes). It is not
@@ -8442,6 +8474,7 @@ named it.
     "failedRequests": 30,
     "httpErrorRequests": 30,
     "noResponseRequests": 0,
+    "cancelledRequests": 0,
     "errorRate": 0.5,
     "totalDurationSeconds": 60.0,
     "avgRps": 100.0,
@@ -8536,20 +8569,33 @@ named it.
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
   },
   "elements": [
-    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0 },
-    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0 }
+    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0, "deferred": 0 },
+    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_3", "kind": "script.post", "passed": 0, "failed": 0, "skipped": 0, "deferred": 10 }
   ],
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
-outcomes - `extract.*` / `assert.*` / `timer.*`, tallied across every submission as
-`{id, kind, passed, failed, skipped}`. Absent, not `[]`, for a run that declared no
+outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
+submission as `{id, kind, passed, failed, skipped, deferred}`. `deferred` (issue #2144)
+counts the submissions an un-inlined `script.post` was left to the completion replay on:
+its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
+script that never ran. `skipped` is what never runs: a disabled element, or an un-inlined
+`script.pre`. Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
 [Scenario load runs](#scenario-load-runs)), and the two never coexist on one report.
+
+**`testValidation`** counts in two units: `samplesTested` is a number of *responses*
+(each sampled response the post-run replay evaluated the plan's `script.post` against),
+while `testsPassed` and `testsFailed` are numbers of *assertions* (`pm.test` calls) across
+those responses, so `testsPassed + testsFailed` is not `samplesTested` once a script holds
+more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
+`samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
+(`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/
@@ -8711,6 +8757,15 @@ per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percenti
 [one error definition](#what-counts-as-an-error), recounted from the run's
 status-code distribution; `summary.httpErrorRequests` and
 `summary.noResponseRequests` split `failedRequests` and always sum to it.
+`summary.totalRequests` is `successfulRequests + failedRequests`, the requests
+that got an outcome, and `errorRate` is `failedRequests` over it.
+
+`summary.cancelledRequests` is the requests a `POST /runs/:runId/stop`
+cancelled before they answered (issue #2136): sent, never an outcome, and so
+in none of the figures above - a healthy target stopped mid-run reports
+`errorRate` 0 beside them. Always present: `0` for a run nothing cancelled,
+and for a run whose stored summary predates the count, because only the
+stored summary records it (the status-code distribution never held them).
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked
 for HTTP/2 and negotiated something older - see

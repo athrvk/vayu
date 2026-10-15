@@ -188,7 +188,7 @@ struct EngineDefaults {
 };
 
 /**
- * Per-element pass/fail/skip tallies for a single-request run's own
+ * Per-element pass/fail/skip/defer tallies for a single-request run's own
  * `requestElements` (issue #1594) - the load-path sibling of
  * `StepElementTallies` (`scenario_load.hpp`), but keyed by element id alone:
  * this run shape has one virtual step (its one request, repeated), not a
@@ -207,26 +207,18 @@ class RequestElementTallies {
     }
 
     /// A no-op for an element id this run's `step_elements` does not have.
-    void record (const std::string& element_id, const std::string& status) {
-        auto it = counts_.find (element_id);
+    /// Classified by `ElementOutcomeCounts::record`, the rule
+    /// `StepElementTallies` shares.
+    void record (const vayu::core::ElementOutcome& outcome) {
+        auto it = counts_.find (outcome.id);
         if (it == counts_.end ()) {
             return;
         }
-        // "ok" is a pass; "error" folds into "failed"; every other status
-        // ("missing", "skipped") folds into "skipped" - the report answers
-        // "did this run's requests see this element pass", not which of two
-        // failure shapes it was, matching `StepElementTallies`'s own rule.
-        if (status == "ok") {
-            it->second.passed.fetch_add (1, std::memory_order_relaxed);
-        } else if (status == "failed" || status == "error") {
-            it->second.failed.fetch_add (1, std::memory_order_relaxed);
-        } else {
-            it->second.skipped.fetch_add (1, std::memory_order_relaxed);
-        }
+        it->second.record (outcome);
     }
 
     /// This run's `elements` array for the report, in `step_elements`
-    /// order, or an empty one for an element that never ran - the same
+    /// order, omitting an element that never ran - the same
     /// "absent when nothing happened" convention `StepElementTallies::build`
     /// follows.
     [[nodiscard]] nlohmann::json build (
@@ -237,14 +229,7 @@ class RequestElementTallies {
             if (it == counts_.end ()) {
                 continue;
             }
-            const size_t passed = it->second.passed.load (std::memory_order_relaxed);
-            const size_t failed = it->second.failed.load (std::memory_order_relaxed);
-            const size_t skipped = it->second.skipped.load (std::memory_order_relaxed);
-            if (passed == 0 && failed == 0 && skipped == 0) {
-                continue;
-            }
-            out.push_back ({ { "id", element.id }, { "kind", element.kind },
-            { "passed", passed }, { "failed", failed }, { "skipped", skipped } });
+            it->second.append_report_row (out, element.id, element.kind);
         }
         return out;
     }
@@ -275,12 +260,7 @@ class RequestElementTallies {
     }
 
     private:
-    struct Counts {
-        std::atomic<size_t> passed{ 0 };
-        std::atomic<size_t> failed{ 0 };
-        std::atomic<size_t> skipped{ 0 };
-    };
-    std::unordered_map<std::string, Counts> counts_;
+    std::unordered_map<std::string, vayu::core::ElementOutcomeCounts> counts_;
 };
 
 // `optin.performance.Padding` is right that size-ordering these fields would
@@ -581,18 +561,30 @@ struct RunContext {
      * comparison, so #1512's extensibility contract (rule 1) holds outside
      * `core/elements`. Shared by the scenario load producer's pipeline hooks
      * and, since issue #1594, a single-request run's own.
+     *
+     * Only a `step.after` script is *deferred* (#2144): the post-run replay
+     * runs the post-request script (`find_step_post_script`,
+     * `compile_step_elements`) and nothing else, so an un-inlined
+     * `step.before` script is a plain skip - it never runs at all.
      */
-    [[nodiscard]] static std::optional<std::string> load_pipeline_skip_reason (
-    const vayu::core::CompiledElement& element,
+    [[nodiscard]] static std::optional<vayu::core::ElementSkip>
+    load_pipeline_skip_reason (const vayu::core::CompiledElement& element,
     ScriptsOverrideMode scripts_mode) {
         const auto* kind = vayu::core::Registry::instance ().find (element.kind);
         if (kind == nullptr || kind->hot_path != vayu::core::HotPathClass::Script) {
             return std::nullopt; // declarative - always runs here
         }
-        if (!script_element_runs_inline (element.config, scripts_mode)) {
-            return "deferred to the run's post-run replay";
+        if (script_element_runs_inline (element.config, scripts_mode)) {
+            return std::nullopt;
         }
-        return std::nullopt;
+        if (element.element && element.element->phase () == vayu::core::Phase::StepAfter) {
+            return vayu::core::ElementSkip{
+                "deferred to the run's post-run replay", true
+            };
+        }
+        return vayu::core::ElementSkip{
+            "not marked inline; a load run has no pre-request replay", false
+        };
     }
 
     // Latency (ms) past which a completion is captured as an outlier, resolved
@@ -988,16 +980,18 @@ struct RunContext {
     [[nodiscard]] size_t total_requests () const {
         return metrics_collector ? metrics_collector->total_requests () : 0;
     }
-    // True in-flight requests: submitted but not yet completed (success or
-    // error). This is the correct quantity for the maxInFlight cap and ramp
-    // backpressure, unlike EventLoop::pending_count() which only measures the
+    // True in-flight requests: submitted but not yet settled (success, error,
+    // or cancelled by a Stop - which total_requests() leaves out, #2136). This
+    // is the correct quantity for the maxInFlight cap and ramp backpressure,
+    // unlike EventLoop::pending_count() which only measures the
     // submission-queue depth that workers drain to ~0. The subtraction is
     // guarded against size_t underflow because requests_sent (written by the
-    // strategy thread) and total_requests (written by worker callbacks) are
-    // read with relaxed ordering and may momentarily disagree.
+    // strategy thread) and the completion counters (written by worker
+    // callbacks) are read with relaxed ordering and may momentarily disagree.
     [[nodiscard]] size_t in_flight () const {
         size_t sent = requests_sent.load ();
-        size_t done = total_requests ();
+        size_t done = total_requests () +
+        (metrics_collector ? metrics_collector->cancelled () : 0);
         size_t base = sent > done ? sent - done : 0;
         // A run with no `timer.think` element (the overwhelming common case)
         // never reserves one, so this is one relaxed load and nothing else -
@@ -1060,6 +1054,7 @@ struct MetricTickSample {
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
     size_t http_errors         = 0; // Of the errors, those that got a response
     size_t no_response         = 0; // Of the errors, those that got none
+    size_t cancelled           = 0; // By a Stop; in none of the above (#2136)
     double current_rps         = 0.0;
     size_t current_concurrency = 0;
     double send_rate           = 0.0;
@@ -1224,6 +1219,7 @@ struct SamplingRetention {
  */
 struct RunSummaryInputs {
     size_t total_requests    = 0;
+    size_t cancelled         = 0; // By a Stop; not in total_requests (#2136)
     double rps               = 0.0;
     double send_rate         = 0.0;
     double throughput        = 0.0;

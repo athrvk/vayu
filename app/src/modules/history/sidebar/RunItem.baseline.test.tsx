@@ -39,6 +39,8 @@ function loadRun(overrides: Partial<Run> = {}): Run {
 
 const noop = () => {};
 
+const BASELINE_CHIP = "Baseline - kept past retention";
+
 describe("RunItem baseline pin", () => {
 	it("pins an unpinned run", () => {
 		const onToggleBaseline = vi.fn();
@@ -68,7 +70,7 @@ describe("RunItem baseline pin", () => {
 			/>
 		);
 
-		const action = screen.getByRole("button", { name: "Unpin baseline" });
+		const action = screen.getByRole("button", { name: "Unpin baseline - kept past retention" });
 		expect(action).toHaveAttribute("aria-pressed", "true");
 		fireEvent.click(action);
 		expect(onToggleBaseline).toHaveBeenCalledWith("run_1", false, expect.anything());
@@ -84,7 +86,7 @@ describe("RunItem baseline pin", () => {
 				isDeleting={false}
 			/>
 		);
-		expect(screen.getByText("Baseline")).toBeInTheDocument();
+		expect(screen.getByText(BASELINE_CHIP)).toBeInTheDocument();
 		unmount();
 
 		render(
@@ -96,7 +98,62 @@ describe("RunItem baseline pin", () => {
 				isDeleting={false}
 			/>
 		);
-		expect(screen.queryByText("Baseline")).not.toBeInTheDocument();
+		expect(screen.queryByText(BASELINE_CHIP)).not.toBeInTheDocument();
+	});
+
+	/*
+	 * A load run's pin is two promises, and the second (kept past retention) was
+	 * only ever in a tooltip (#2163): the chip and the action's accessible name
+	 * both have to say it, and an unpinned run claims neither.
+	 */
+	it("states both meanings in the pinned chip and the pin action's name", () => {
+		render(
+			<RunItem
+				run={loadRun({ baseline: true })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				onToggleBaseline={vi.fn()}
+				isDeleting={false}
+			/>
+		);
+		expect(screen.getByText(BASELINE_CHIP)).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: new RegExp(BASELINE_CHIP, "i") })
+		).toBeInTheDocument();
+	});
+
+	it("keeps the full chip text in a title and lets the chip give way when narrow", () => {
+		render(
+			<RunItem
+				run={loadRun({ baseline: true })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				onToggleBaseline={vi.fn()}
+				isDeleting={false}
+			/>
+		);
+		const chip = screen.getByText(BASELINE_CHIP).closest("[data-slot='badge']");
+		expect(chip).toHaveAttribute("title", BASELINE_CHIP);
+		expect(chip!.className).toContain("min-w-0");
+		expect(chip!.className).not.toContain("shrink-0");
+		expect(screen.getByText(BASELINE_CHIP).className).toContain("truncate");
+	});
+
+	it("says neither meaning on an unpinned run's chip or action", () => {
+		render(
+			<RunItem
+				run={loadRun()}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				onToggleBaseline={vi.fn()}
+				isDeleting={false}
+			/>
+		);
+		expect(screen.queryByText(/kept past retention/i)).not.toBeInTheDocument();
+		const action = screen.getByRole("button", { name: "Pin as baseline" });
+		expect(action.getAttribute("aria-label")).not.toMatch(/retention/i);
+		// The unpinned tooltip is where the second meaning is promised up front.
+		expect(action).toHaveAttribute("title", expect.stringMatching(/baseline.*past retention/));
 	});
 
 	/*
@@ -117,7 +174,7 @@ describe("RunItem baseline pin", () => {
 			/>
 		);
 
-		const chip = screen.getByText("Baseline").closest("[data-slot='badge']");
+		const chip = screen.getByText(BASELINE_CHIP).closest("[data-slot='badge']");
 		expect(chip).not.toBeNull();
 		expect(chip!.className).toContain("bg-primary/15");
 		expect(chip!.className).not.toMatch(/hover:bg-/);
@@ -157,7 +214,7 @@ describe("RunItem baseline pin", () => {
 				/>
 			);
 			expect(screen.getByText("Pinned")).toBeInTheDocument();
-			expect(screen.queryByText("Baseline")).not.toBeInTheDocument();
+			expect(screen.queryByText(BASELINE_CHIP)).not.toBeInTheDocument();
 			expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
 		}
 	);

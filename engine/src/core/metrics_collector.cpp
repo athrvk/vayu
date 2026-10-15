@@ -1212,6 +1212,7 @@ const Percentiles* window_percentiles) const {
     stats["totalErrors"]       = failures.failed;
     stats["httpErrors"]        = failures.http_errors ();
     stats["noResponse"]        = failures.no_response;
+    stats["cancelled"]         = cancelled ();
     stats["totalSuccess"]      = success;
     stats["errorRate"]         = failures.error_rate ();
     stats["avgLatencyMs"]      = avg_lat;

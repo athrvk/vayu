@@ -38,6 +38,7 @@ import {
 	ThresholdVerdict,
 	TestValidationSummary,
 	Callout,
+	CancelledRequestsNote,
 } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
@@ -124,6 +125,9 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 					)}
 				</CardContent>
 			</Card>
+
+			{/* Outside every count above and below; a stopped run can have this and no errors. */}
+			<CancelledRequestsNote count={report.summary.cancelledRequests} />
 
 			{/* Error Details */}
 			{report.errors && report.errors.total > 0 && (
@@ -249,6 +253,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			<TestValidationSummary
 				testValidation={report.testValidation}
 				sampling={report.sampling}
+				totalRequests={report.summary.totalRequests}
 			/>
 
 			{/* Sampled Request/Response Results */}

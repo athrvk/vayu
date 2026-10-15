@@ -40,7 +40,7 @@ vi.mock("@/services", () => ({
 
 const crumb = () => screen.getByRole("navigation", { name: "Run location" });
 
-function seed(mode: "running" | "completed" | "failed") {
+function seed(mode: "running" | "completed" | "failed" | "stopped") {
 	useDashboardStore.setState({ currentRunId: "run_1", mode, isStreaming: mode === "running" });
 }
 
@@ -60,6 +60,41 @@ describe("the dashboard's crumb line", () => {
 		seed("failed");
 		render(<LoadTestDashboard />);
 		expect(crumb().textContent).toBe("HistoryLoad test report");
+	});
+
+	it("lays a stopped run out as the finished report once its report is here (#2136)", () => {
+		seed("stopped");
+		useDashboardStore.setState({
+			finalReport: {
+				metadata: { runId: "run_1", status: "stopped", startTime: 0, endTime: 1 },
+				summary: {
+					totalRequests: 1,
+					successfulRequests: 1,
+					failedRequests: 0,
+					errorRate: 0,
+				},
+				latency: {
+					p50: 1,
+					p75: 1,
+					p90: 1,
+					p95: 1,
+					p99: 1,
+					p999: 1,
+					avg: 1,
+					min: 1,
+					max: 1,
+				},
+			} as never,
+		});
+		render(<LoadTestDashboard />);
+		expect(crumb().textContent).toBe("HistoryLoad test report");
+	});
+
+	it("keeps the live layout for a stopped run until its report arrives (#2136)", () => {
+		seed("stopped");
+		useDashboardStore.setState({ finalReport: null });
+		render(<LoadTestDashboard />);
+		expect(crumb().textContent).toBe("HistoryLive load test");
 	});
 
 	it("reveals the history drawer from the first segment", () => {

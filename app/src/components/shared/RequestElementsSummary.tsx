@@ -19,7 +19,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { formatNumber } from "@/lib/format-number";
+import { ElementTally } from "./ElementTally";
 import type { RunReport } from "@/types/domain";
 
 export interface RequestElementsSummaryProps {
@@ -38,21 +38,8 @@ export function RequestElementsSummary({ elements, className }: RequestElementsS
 			<CardContent>
 				<ul className="space-y-1.5">
 					{elements.map((element) => (
-						<li key={element.id} className="flex items-center gap-2 text-sm">
-							<span className="text-muted-foreground font-mono">{element.kind}</span>
-							<span className="font-mono text-status-success-text">
-								{formatNumber(element.passed)} passed
-							</span>
-							{element.failed > 0 && (
-								<span className="font-mono text-status-error-text">
-									{formatNumber(element.failed)} failed
-								</span>
-							)}
-							{element.skipped > 0 && (
-								<span className="font-mono text-muted-foreground">
-									{formatNumber(element.skipped)} skipped
-								</span>
-							)}
+						<li key={element.id}>
+							<ElementTally element={element} className="text-sm" />
 						</li>
 					))}
 				</ul>

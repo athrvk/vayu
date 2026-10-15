@@ -579,11 +579,98 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     EXPECT_EQ (payload["status_codes"]["404"].get<size_t> (), 1u);
 }
 
+// #2136: the persisted tick carries the Stop-cancelled count beside the error
+// split, which does not include it.
+TEST_F (LoadStrategyTest, MetricTickPayloadCarriesTheCancelledCount) {
+    vayu::core::MetricTickSample sample;
+    sample.cancelled = 4;
+    auto payload     = vayu::core::build_metric_tick_payload (sample);
+    ASSERT_TRUE (payload.contains ("cancelled"));
+    EXPECT_EQ (payload["cancelled"].get<size_t> (), 4u);
+}
+
+namespace {
+/** The Error the event loop completes a cancelled transfer with. */
+vayu::Result<vayu::Response> cancellation_result () {
+    return vayu::Result<vayu::Response> (
+    vayu::Error{ vayu::ErrorCode::Cancelled, "Request cancelled" });
+}
+} // namespace
+
+// #2136: a transfer a user Stop cancelled is not an error. It is counted on
+// its own, outside total_requests and the status distribution - and it still
+// releases its in-flight slot, or the closed-loop controller would see a
+// phantom request for every one the Stop cancelled.
+TEST_F (LoadStrategyTest, StopCancelledResultIsCountedApartFromErrors) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-stop-cancelled", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    context->should_stop = true;
+    vayu::core::handle_result (context, db, cancellation_result ());
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.cancelled (), 1u);
+    EXPECT_EQ (mc.total_errors (), 0u);
+    EXPECT_EQ (context->total_requests (), 0u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_TRUE (mc.status_code_distribution ().empty ())
+    << "a cancelled request has no status, not status 0";
+    EXPECT_TRUE (mc.errors ().empty ());
+
+    const auto stats = mc.get_current_stats (0, 1.0, 1);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 0u);
+    EXPECT_EQ (stats["cancelled"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 0.0);
+}
+
+// The same result at a run's natural end is the drain deadline cancelling a
+// request that never answered, and stays an error under its own type.
+TEST_F (LoadStrategyTest, DrainDeadlineCancellationIsStillAnError) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-drain-cancelled", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (context, db, cancellation_result ());
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.cancelled (), 0u);
+    EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_EQ (context->total_requests (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    const auto dist = mc.status_code_distribution ();
+    ASSERT_EQ (dist.count (0), 1u);
+    EXPECT_EQ (dist.at (0), 1u);
+    ASSERT_EQ (mc.errors ().size (), 1u);
+    EXPECT_NE (mc.errors ().front ().trace_data.find ("\"cancelled\""), std::string::npos);
+}
+
+// A Stop does not turn every failure into a cancellation: only the event
+// loop's own cancellation is one.
+TEST_F (LoadStrategyTest, OtherErrorsDuringAStopStayErrors) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-stop-other-error", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    context->should_stop = true;
+    vayu::core::handle_result (context, db,
+    vayu::Result<vayu::Response> (
+    vayu::Error{ vayu::ErrorCode::InternalError, "Failed to create curl handle" }));
+
+    EXPECT_EQ (context->metrics_collector->cancelled (), 0u);
+    EXPECT_EQ (context->metrics_collector->total_errors (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+}
+
 // A transport-level Error result (curl-handle creation failure, or the
-// stop(false) cancellation drain) is a real completion. Dropping it would
-// leave requests_sent counted with no matching completion, so in_flight()
-// would stay permanently inflated and the closed-loop controller would keep
-// shrinking effective concurrency for the rest of the run.
+// natural-end drain cancelling what outlived its deadline) is a real
+// completion. Dropping it would leave requests_sent counted with no matching
+// completion, so in_flight() would stay permanently inflated and the
+// closed-loop controller would keep shrinking effective concurrency for the
+// rest of the run.
 TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "test-transport-error", nlohmann::json{ { "mode", "constant_rps" } });
@@ -1716,9 +1803,9 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreElementsHeaderEditReachesTheWire) {
 
 // The same element left unmarked runs nowhere: `script.pre` has no deferred
 // replay to fall back to (only `script.post` does), so an un-inlined one is
-// skipped and its edit never reaches the wire. This is the contrast that
-// makes the `allInline` case below an assertion about the override rather
-// than about scripts running at all.
+// skipped - not deferred (#2144) - and its edit never reaches the wire. This
+// is the contrast that makes the `allInline` case below an assertion about
+// the override rather than about scripts running at all.
 TEST_F (LoadStrategyTest, AnUnmarkedScriptPreElementIsSkippedRatherThanRun) {
     vayu::tests::EchoServer echo;
     vayu::db::Database db (TEST_DB_PATH);
@@ -1731,7 +1818,27 @@ TEST_F (LoadStrategyTest, AnUnmarkedScriptPreElementIsSkippedRatherThanRun) {
     EXPECT_FALSE (echo.has_header ("X-Signed")) << summary.dump ();
     const auto entry = element_entry (summary, "el_pre");
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
-    EXPECT_EQ (entry["skipped"], 2u);
+    EXPECT_EQ (entry["skipped"], 2u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
+}
+
+// A disabled element is the other skip that is not a deferral (#2144). A
+// `script.post` is the kind chosen because its enabled, un-inlined twin below
+// is the one that tallies `deferred`: the pipeline must answer "disabled"
+// before it ever asks the load path's deferral hook.
+TEST_F (LoadStrategyTest, ADisabledScriptPostElementTalliesSkippedNotDeferred) {
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-disabled-post",
+    request_elements_payload (mock_server->fast_url (), 3, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_post" },
+    { "kind", "script.post" }, { "enabled", false },
+    { "config", { { "script", "pm.test('runs', function () {});" } } } } })));
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 3u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
 }
 
 // `elements.scripts: "allInline"` (issue #1495's run-level override, read by
@@ -1754,8 +1861,9 @@ TEST_F (LoadStrategyTest, TheAllInlineScriptsOverrideForcesAnUnmarkedScriptPreIn
 }
 
 // An unmarked `script.post` is left to the run's completion replay, exactly
-// where a `tests` string used to go: skipped on every submission, and counted
-// once per sampled response by `validate_scripts` under `summary["tests"]`.
+// where a `tests` string used to go: deferred on every submission (#2144),
+// and counted once per sampled response by `validate_scripts` under
+// `summary["tests"]`.
 TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay) {
     vayu::db::Database db (TEST_DB_PATH);
 
@@ -1773,8 +1881,9 @@ TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay
 
     const auto entry = element_entry (summary, "el_post");
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
-    EXPECT_EQ (entry["skipped"], 3u)
-    << "the pipeline hook must leave it to the replay";
+    EXPECT_EQ (entry["deferred"], 3u)
+    << "the pipeline hook must leave it to the replay: " << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
     EXPECT_EQ (entry["passed"], 0u);
 }
 
@@ -1801,6 +1910,7 @@ TEST_F (LoadStrategyTest, AnInlineScriptPostElementRunsPerSubmissionAndIsNotRepl
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
     EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
     EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
+    EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
     EXPECT_FALSE (summary.contains ("tests"))
     << "an inline script.post must not be replayed deferred as well: "
     << summary.dump ();

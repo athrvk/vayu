@@ -6794,6 +6794,45 @@ describe("dispatchTool", () => {
 	});
 
 	/*
+	 * Issue #2162: the stopped short run against the long one reads as a
+	 * regression in every delta, so the tool returns the reasons it is not one
+	 * and its description tells the agent to read them first.
+	 */
+	test("compare_runs returns comparability and tells the agent to read it first", async () => {
+		const reports: Record<string, unknown> = {
+			run_a: {
+				metadata: { status: "completed", configuration: { concurrency: 10 } },
+				summary: { avgRps: 100, testDuration: 20 },
+			},
+			run_b: {
+				metadata: { status: "stopped", configuration: { concurrency: 50 } },
+				summary: { avgRps: 40, testDuration: 3 },
+			},
+		};
+		const client = fakeClient({
+			getRunReport: vi.fn().mockImplementation((id: string) => Promise.resolve(reports[id])),
+		});
+
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).toMatchObject({
+			comparability: [
+				{ code: "concurrency", base: "10", target: "50" },
+				{ code: "duration", base: "20 s", target: "3 s, stopped" },
+				{ code: "status", base: "Completed", target: "Stopped" },
+			],
+		});
+		expect(TOOLS.find((t) => t.name === "compare_runs")?.description).toMatch(
+			/Read comparability before the deltas/
+		);
+	});
+
+	/*
 	 * Omitting the base is the "did my change regress?" shape: the agent knows
 	 * the run it just started and not which older run is the reference. It
 	 * resolves through the same endpoint the history view's strip uses, so the

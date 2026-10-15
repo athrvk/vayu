@@ -1592,12 +1592,15 @@ export interface RunScenarioSummary {
  * `GET /runs/:id`.
  *
  * `startConcurrency` / `rampUpDuration` / `followRedirects` / `maxRedirects`
- * are declared but **not rendered anywhere yet** - this type mirrors the wire,
- * so a field the engine sends is declared whether or not a screen reads it,
- * and a reader can trust that what is missing here is missing from the payload
- * too. If you are looking for
- * somewhere to surface them, the history sidebar row and the load test report
- * both already show `httpVersion` and would be the consistent home.
+ * are declared but **not read from a row's summary** - this type mirrors the
+ * wire, so a field the engine sends is declared whether or not a screen reads
+ * it, and a reader can trust that what is missing here is missing from the
+ * payload too. The two ramp knobs are read from the *report's*
+ * `metadata.configuration` instead, by the baseline comparison's
+ * `comparability` list (issue #2162); the redirect settings are shown nowhere.
+ * If you are looking for somewhere to surface them on a row, the history
+ * sidebar row and the load test report both already show `httpVersion` and
+ * would be the consistent home.
  */
 export interface RunSummary {
 	url?: string;
@@ -1616,9 +1619,9 @@ export interface RunSummary {
 	mode?: string;
 	duration?: string;
 	concurrency?: number;
-	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	/** Ramp-up runs only (issue #1935); sent by the engine, not read from a row - see the note above. */
 	startConcurrency?: number;
-	/** Ramp-up runs only (issue #1935); sent by the engine, not yet rendered - see the note above. */
+	/** Ramp-up runs only (issue #1935); sent by the engine, not read from a row - see the note above. */
 	rampUpDuration?: string;
 	comment?: string;
 	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
@@ -1630,9 +1633,9 @@ export interface RunSummary {
 	/**
 	 * Whether this run negotiated a compressed response (issue #1488) - see
 	 * {@link RunConfigSnapshot.defaultHeaders}. Omitted, not `false`, for a
-	 * run recorded before this field existed; the baseline comparison is the
-	 * one reader that treats an absent value as `false`, matching what such a
-	 * run actually sent.
+	 * run recorded before this field existed; the baseline comparison (its
+	 * `compression` entry in `comparability`) is the one reader that treats an
+	 * absent value as `false`, matching what such a run actually sent.
 	 */
 	acceptEncoding?: boolean;
 	/**
@@ -2196,12 +2199,20 @@ export interface LoadTestMetrics {
 }
 
 /**
- * One element's pass/fail/skip tally within a load run's step, from
+ * One element's pass/fail/skip/defer tally within a load run's step, from
  * `scenario.steps[i].elements` (`StepElementTallies::build`,
  * `engine/src/core/scenario_load.cpp`) - the load-path sibling of the
  * sequential run's per-execution {@link ElementOutcome}. Aggregated across
  * every virtual user and iteration rather than one outcome per execution,
  * which is why the shape is a set of counts instead of a single `outcome`.
+ *
+ * `deferred` counts a post-request script (`script.post`) that the load path
+ * left to the post-run replay against the sampled responses (issue #2144), so
+ * its verdicts are in {@link RunReport.testValidation}, not in `passed` or
+ * `failed`. It is **not** a kind of `skipped`: a script that did not run at
+ * all (an un-inlined `script.pre`, a disabled element) stays `skipped`.
+ * Absent from a report stored before #2144, which tallied the replayed script
+ * as `skipped`; those rows keep their stored numbers.
  */
 export interface RunScenarioStepElementTally {
 	id: string;
@@ -2209,6 +2220,7 @@ export interface RunScenarioStepElementTally {
 	passed: number;
 	failed: number;
 	skipped: number;
+	deferred?: number;
 }
 
 /**
@@ -2414,6 +2426,13 @@ export interface RunReport {
 		httpErrorRequests?: number;
 		/** The part of `failedRequests` that got none (status code 0). Absent from an engine older than #2124. */
 		noResponseRequests?: number;
+		/**
+		 * Requests a user's Stop cancelled before they were answered (issue #2136).
+		 * Not an error and in no other count: outside `totalRequests`, the
+		 * status-code distribution and `errorRate`. Absent from an engine older
+		 * than #2136; absent means none.
+		 */
+		cancelledRequests?: number;
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;
@@ -2684,7 +2703,7 @@ export interface RunReport {
 	 * {@link RunReport.scenario} instead - the two never coexist) and for a
 	 * single-request run that declared no `requestElements`, or one whose
 	 * elements never ran. Reuses {@link RunScenarioStepElementTally}: both
-	 * come off the same `{id, kind, passed, failed, skipped}` tally shape.
+	 * come off the same `{id, kind, passed, failed, skipped, deferred}` tally shape.
 	 */
 	elements?: RunScenarioStepElementTally[];
 	/**

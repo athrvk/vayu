@@ -8,6 +8,8 @@
 /**
  * A load run's aggregate test-validation outcome - how many sampled responses
  * were asserted against, and how many of those assertions passed (issue #726).
+ * Two units share the card and the labels name them: responses tested is a
+ * count of responses, passed and failed are counts of assertions (issue #2144).
  *
  * The engine writes `testValidation` (`run_manager.cpp` -> `runs.cpp`) into
  * every load-run report whose plan carried a post-request script, and stores
@@ -27,6 +29,7 @@
 
 import { XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import type { RunReport } from "@/types/domain";
@@ -43,7 +46,28 @@ export interface TestValidationSummaryProps {
 	 */
 	failures?: string[];
 	failuresTotal?: number;
+	/**
+	 * The run's total request count, `summary.totalRequests`. With it the card
+	 * says how many of the run's requests were tested; without it the card says
+	 * nothing about the denominator rather than guess one (never "of 0").
+	 */
+	totalRequests?: number;
 	className?: string;
+}
+
+/**
+ * The tested-of-total line. `samplesTested` counts responses, `totalRequests`
+ * counts requests, and the gap is not only the retention limit's doing: a
+ * request that errored before a response arrived has nothing to test. The
+ * sentence says the rest "had no response or were not kept" so it holds for
+ * either cause; the uniformity of what was kept is `SampleRetentionNote`'s to
+ * state, because only it knows whether the byte budget was spent.
+ */
+function testedLine(samplesTested: number, totalRequests: number): string {
+	if (samplesTested >= totalRequests) {
+		return `Tested all ${formatNumber(totalRequests)} requests.`;
+	}
+	return `Tested ${formatNumber(samplesTested)} of ${formatNumber(totalRequests)} requests. The rest had no response or were not kept.`;
 }
 
 export function TestValidationSummary({
@@ -51,6 +75,7 @@ export function TestValidationSummary({
 	sampling,
 	failures,
 	failuresTotal,
+	totalRequests,
 	className,
 }: TestValidationSummaryProps) {
 	const hasFailures = failures !== undefined && failures.length > 0;
@@ -70,28 +95,37 @@ export function TestValidationSummary({
 					<>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
-								<p className="text-sm text-muted-foreground">Samples tested</p>
-								<p className="font-bold">{testValidation.samplesTested}</p>
+								<p className="text-sm text-muted-foreground">Responses tested</p>
+								<p className="font-bold">
+									{formatNumber(testValidation.samplesTested)}
+								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Passed</p>
+								<p className="text-sm text-muted-foreground">Assertions passed</p>
 								<p className="font-bold text-status-success-text">
-									{testValidation.testsPassed}
+									{formatNumber(testValidation.testsPassed)}
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Failed</p>
+								<p className="text-sm text-muted-foreground">Assertions failed</p>
 								<p className="font-bold text-destructive-text">
-									{testValidation.testsFailed}
+									{formatNumber(testValidation.testsFailed)}
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Success rate</p>
+								<p className="text-sm text-muted-foreground">
+									Assertion success rate
+								</p>
 								<p className="font-bold">
 									{testValidation.successRate.toFixed(1)}%
 								</p>
 							</div>
 						</div>
+						{totalRequests !== undefined && totalRequests > 0 && (
+							<p className="mt-3 text-xs text-muted-foreground tabular-nums">
+								{testedLine(testValidation.samplesTested, totalRequests)}
+							</p>
+						)}
 						<SampleRetentionNote
 							sampling={sampling}
 							shown={testValidation.samplesTested}
@@ -112,7 +146,7 @@ export function TestValidationSummary({
 						<p className="text-xs font-medium text-muted-foreground">
 							Failed tests
 							{failuresTotal !== undefined && (
-								<span className="ml-1">({failuresTotal})</span>
+								<span className="ml-1">({formatNumber(failuresTotal)})</span>
 							)}
 						</p>
 						<div className="space-y-1.5">
@@ -136,7 +170,8 @@ export function TestValidationSummary({
 						 */}
 						{failuresTotal !== undefined && failuresTotal > failures.length && (
 							<p className="mt-2 text-xs text-muted-foreground tabular-nums">
-								Showing {failures.length} of {failuresTotal}.
+								Showing {formatNumber(failures.length)} of{" "}
+								{formatNumber(failuresTotal)}.
 							</p>
 						)}
 					</div>

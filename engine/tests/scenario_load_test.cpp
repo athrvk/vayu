@@ -29,6 +29,7 @@
 
 #include <httplib.h>
 
+#include "mock_server.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -572,6 +573,67 @@ TEST_F (ScenarioLoadTest, AnErroredStepEndsItsIterationWithoutStrandingTheVirtua
     EXPECT_EQ (state->iterations_abandoned.load (), 3u);
     EXPECT_EQ (state->iterations_completed.load (), 0u);
     EXPECT_EQ (state->steps_errored.load (), 3u);
+}
+
+// #2136: a step a user Stop cancelled neither ran nor failed. It is counted as
+// cancelled and moves no step tally - no step error, no abandoned iteration,
+// no coverage send - while its virtual user is still released.
+TEST_F (ScenarioLoadTest, AStepTheStopCancelledMovesNoStepTally) {
+    vayu::tests::SlowMockServer upstream;
+    auto execution = plan_over ({ upstream.hang_url () });
+    execution.plan.steps[0].request.timeout_ms = 120000;
+    execution.plan.steps[0].spec_operation =
+    R"({"operationId":"hang","method":"GET","path":"/hang"})";
+    vayu::core::DeclaredOperation hang;
+    hang.operation_id                  = "hang";
+    hang.method                        = "GET";
+    hang.path                          = "/hang";
+    hang.responses                     = { "200" };
+    execution.spec.spec_id             = "spec_1";
+    execution.spec.declared_operations = { hang };
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1000 },
+        { "concurrency", 2 } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-stop", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    // Stops once both virtual users have a transfer in flight, the way the
+    // stop route does: flag, wake, then the run lets go of the loop.
+    std::thread stopper ([&context] () {
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (5);
+        while (context->event_loop->active_count () < 2 &&
+        std::chrono::steady_clock::now () < deadline) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+        context->should_stop = true;
+        context->notify_refill ();
+    });
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto state = vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+    stopper.join ();
+    context->event_loop->stop (false);
+
+    ASSERT_GT (context->requests_sent.load (), 0u)
+    << "nothing was sent; nothing is proven";
+    EXPECT_EQ (context->metrics_collector->cancelled (), context->requests_sent.load ());
+    EXPECT_EQ (context->metrics_collector->total_errors (), 0u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_EQ (state->steps_errored.load (), 0u);
+    EXPECT_EQ (state->steps.errors (0), 0u);
+    EXPECT_EQ (state->steps_executed.load (), 0u);
+    EXPECT_EQ (state->iterations_abandoned.load (), 0u);
+
+    const auto coverage = vayu::core::build_scenario_load_coverage (*state);
+    ASSERT_FALSE (coverage.empty ()) << "a bound run must report coverage";
+    ASSERT_EQ (coverage["operations"].size (), 1u);
+    EXPECT_EQ (coverage["operations"][0]["sent"], 0)
+    << "a cancelled send was counted against its operation";
 }
 
 // A step that answered 500 is an error in its own row of the breakdown, but a
@@ -1544,8 +1606,53 @@ TEST_F (ScenarioLoadTest, PerStepElementTalliesAreAttachedToTheBreakdown) {
     EXPECT_EQ (elements[0]["passed"], 2);
     EXPECT_EQ (elements[0]["failed"], 0);
     EXPECT_EQ (elements[0]["skipped"], 0);
+    EXPECT_EQ (elements[0]["deferred"], 0);
     EXPECT_FALSE (summary["steps"][1].contains ("elements"))
     << "a step with no elements at all must carry no such key";
+}
+
+// A deferral is its own count (#2144): an un-inlined `script.post` is left to
+// the post-run replay, so it runs - later - and must not read as a script
+// that was never run. The two skips that are not deferrals stay `skipped`:
+// an un-inlined `script.pre` has no replay to go to, and a disabled element
+// is never offered to the deferral hook at all.
+TEST_F (ScenarioLoadTest, AnUninlinedScriptPostTalliesDeferredNotSkipped) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo") });
+    auto disabled  = vayu::tests::script_element_json (
+    "el_disabled", "script.post", "pm.test('never', function () {});");
+    disabled["enabled"]              = false;
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements ({
+    vayu::tests::script_element_json ("el_post",
+    "script.post", "pm.test('status', function () { pm.expect(pm.response.code).to.equal(200); });"),
+    vayu::tests::script_element_json ("el_pre", "script.pre", "pm.variables.set('a', '1');"),
+    disabled,
+    });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary["steps"][0].contains ("elements")) << summary.dump ();
+    const auto& elements = summary["steps"][0]["elements"];
+    ASSERT_EQ (elements.size (), 3u) << summary.dump ();
+    const auto row = [&elements] (const std::string& id) {
+        for (const auto& entry : elements) {
+            if (entry["id"] == id) {
+                return entry;
+            }
+        }
+        return json ();
+    };
+
+    EXPECT_EQ (row ("el_post")["deferred"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_post")["skipped"], 0) << summary.dump ();
+    EXPECT_EQ (row ("el_pre")["skipped"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_pre")["deferred"], 0) << summary.dump ();
+    EXPECT_EQ (row ("el_disabled")["skipped"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_disabled")["deferred"], 0) << summary.dump ();
 }
 
 // ============================================================================

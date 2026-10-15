@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { formatClock, formatDuration, pickByCount } from "./format";
+import { formatClock, formatDuration, formatErrorPercent, pickByCount } from "./format";
 
 describe("pickByCount", () => {
 	const forms = { one: "1 request is", other: "N requests are" };
@@ -52,5 +52,20 @@ describe("formatDuration", () => {
 	it("stays the prose form, distinct from the clock", () => {
 		expect(formatDuration(65_000)).toBe("1m 5s");
 		expect(formatClock(65_000)).not.toBe(formatDuration(65_000));
+	});
+});
+
+describe("formatErrorPercent", () => {
+	it("prints zero and rates that survive the rounding as plain digits", () => {
+		expect(formatErrorPercent(0)).toBe("0.0");
+		expect(formatErrorPercent(15)).toBe("15.0");
+		expect(formatErrorPercent(100)).toBe("100.0");
+		expect(formatErrorPercent(0.014, 2)).toBe("0.01");
+		expect(formatErrorPercent(17, 2)).toBe("17.00");
+	});
+
+	it("never prints a nonzero rate as zero: it reads below the last place", () => {
+		expect(formatErrorPercent(0.04)).toBe("<0.1");
+		expect(formatErrorPercent(0.001, 2)).toBe("<0.01");
 	});
 });

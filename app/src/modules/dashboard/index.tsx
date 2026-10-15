@@ -229,9 +229,13 @@ export default function LoadTestDashboard() {
 		[currentRunId, setStopping, stopRun, showToast]
 	);
 
-	// A failed run is a finished one: it lays out as the report, only the header's
-	// pill says how it ended (#1932).
-	const isReport = mode === "completed" || mode === "failed";
+	// A failed or stopped run is a finished one: it lays out as the report, only
+	// the header's pill says how it ended (#1932, #2136). A stopped run's store
+	// mode flips on the Stop click, before its report is fetched, and never
+	// becomes `completed`; it takes the report layout once the report is here, so
+	// the live view does not blank into placeholders in between.
+	const isReport =
+		mode === "completed" || mode === "failed" || (mode === "stopped" && !!finalReport);
 
 	// What `completed` leaves unsaid: whether the run held its budgets (#2130).
 	// Only a settled report has a verdict; a live run's, or a report still being

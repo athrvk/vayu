@@ -298,24 +298,15 @@ StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
     }
 }
 
-void StepElementTallies::record (size_t step,
-const std::string& element_id,
-const std::string& status) {
+void StepElementTallies::record (size_t step, const ElementOutcome& outcome) {
     if (step >= index_of_id_by_step_.size ()) {
         return;
     }
-    const auto found = index_of_id_by_step_[step].find (element_id);
+    const auto found = index_of_id_by_step_[step].find (outcome.id);
     if (found == index_of_id_by_step_[step].end ()) {
         return;
     }
-    Counts& counts = counts_by_step_[step][found->second];
-    if (status == "ok") {
-        counts.passed.fetch_add (1, std::memory_order_relaxed);
-    } else if (status == "failed" || status == "error") {
-        counts.failed.fetch_add (1, std::memory_order_relaxed);
-    } else { // "skipped" | "missing"
-        counts.skipped.fetch_add (1, std::memory_order_relaxed);
-    }
+    counts_by_step_[step][found->second].record (outcome);
 }
 
 nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step) const {
@@ -327,14 +318,7 @@ nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step)
     const auto& counts   = counts_by_step_[step];
     const size_t count   = std::min (elements.size (), counts.size ());
     for (size_t i = 0; i < count; ++i) {
-        const size_t passed = counts[i].passed.load (std::memory_order_relaxed);
-        const size_t failed = counts[i].failed.load (std::memory_order_relaxed);
-        const size_t skipped = counts[i].skipped.load (std::memory_order_relaxed);
-        if (passed + failed + skipped == 0) {
-            continue; // never ran under this run - omitted, not a row of zeros
-        }
-        array.push_back ({ { "id", elements[i].id }, { "kind", elements[i].kind },
-        { "passed", passed }, { "failed", failed }, { "skipped", skipped } });
+        counts[i].append_report_row (array, elements[i].id, elements[i].kind);
     }
     return array;
 }
@@ -574,7 +558,7 @@ const nlohmann::json* data_row) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
-        state.element_tallies.record (step_index, outcome.id, outcome.status);
+        state.element_tallies.record (step_index, outcome);
     }
     // A controller kind's skip (issue #1515) - the load path's own
     // `pm.execution.skipRequest()`.
@@ -694,7 +678,7 @@ const nlohmann::json* data_row) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
-        state.element_tallies.record (step_index, outcome.id, outcome.status);
+        state.element_tallies.record (step_index, outcome);
     }
     // A `control.transaction` closing occurrence (issue #1515) - see
     // `scenario_runner.cpp`'s identical fold for why `waited_ms` alone
@@ -872,15 +856,8 @@ class ScenarioLoadDriver {
         vu, step_index, iteration, vu_index, row, data_row, pipeline_before_ms, sent_request,
         next_target_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
-                // No `Response` object exists at all - nothing for `step.after`
-                // to run against, exactly as before #1495. Coverage still
-                // counts it: a transport error is a request this operation
-                // was sent and did not answer, reported as status 0 rather
-                // than a status the server never sent (issue #629).
-                state->coverage.record (step_index, 0);
-                finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
-                handle_result (context, db, result,
-                ResultAnnotations{ row, step_index, iteration, vu_index });
+                finish_without_response (context, db, state, plan, vu, step_index,
+                result, ResultAnnotations{ row, step_index, iteration, vu_index });
                 return;
             }
 
@@ -1057,7 +1034,7 @@ class ScenarioLoadDriver {
         int64_t total_wait_ms = 0;
         for (const auto& outcome : outcomes) {
             total_wait_ms += outcome.waited_ms.value_or (0);
-            state.element_tallies.record (step_index, outcome.id, outcome.status);
+            state.element_tallies.record (step_index, outcome);
         }
         if (total_wait_ms > 0) {
             vu.ready_at_ms = std::max (vu.ready_at_ms, steady_now_ms () + total_wait_ms);
@@ -1140,11 +1117,42 @@ class ScenarioLoadDriver {
     }
 
     /**
+     * A completion that carried no `Response` at all - nothing for
+     * `step.after` to run against, exactly as before #1495.
+     *
+     * A step a user Stop cancelled (#2136) only releases its VU: it neither
+     * ran nor failed, so it is no step error, no coverage send and no
+     * abandoned iteration, and the run is ending, so the VU's position is
+     * never read again. Any other is the step's failure, and coverage still
+     * counts it: a request this operation was sent and did not answer,
+     * reported as status 0 rather than a status the server never sent (issue
+     * #629). Either way the VU is released before `handle_result`, for
+     * `finish_step`'s reason.
+     */
+    static void finish_without_response (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    const std::shared_ptr<ScenarioLoadState>& state,
+    const ScenarioPlan& plan,
+    VirtualUser* vu,
+    size_t step_index,
+    const vayu::Result<vayu::Response>& result,
+    const ResultAnnotations& annotations) {
+        if (is_stop_cancellation (*context, result.error ())) {
+            vu->busy.store (false, std::memory_order_release);
+        } else {
+            state->coverage.record (step_index, 0);
+            finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
+        }
+        handle_result (context, db, result, annotations);
+    }
+
+    /**
      * One step's outcome applied to the run's tallies and the VU's state
-     * machine, and the only writer of `busy`'s `true -> false` edge. Shared by
-     * the completion callback and the data-binding failure, so a step that
-     * never reached the wire retires its VU exactly as a completed one does - a
-     * VU left busy permanently shrinks effective concurrency.
+     * machine, and - beside a Stop's cancellation in
+     * `finish_without_response` - the only writer of `busy`'s `true -> false`
+     * edge. Shared by the completion callback and the data-binding failure, so
+     * a step that never reached the wire retires its VU exactly as a completed
+     * one does - a VU left busy permanently shrinks effective concurrency.
      *
      * @p errored means the step got no response (a transport error, or a step
      * never sent), and it ends the iteration as abandoned. A response with an

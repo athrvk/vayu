@@ -53,6 +53,15 @@ consumes it.
   card recounts them from the status map: `ErrorRateCard` only buckets that
   map for its bar, and `MetricsView` feeds it the report's distribution once
   there is one and the latest tick's before that.
+- **A request a Stop cancelled is not an error (#2136).** The engine counts it
+  apart (`summary.cancelledRequests`) and leaves it out of `totalRequests`, the
+  status-code distribution and every error figure, so the Error rate card and
+  its bar never include it. The two report views draw it as one muted line,
+  `CancelledRequestsNote` ("N requests cancelled by Stop"), beside the error
+  card rather than inside it, since a stopped run with no errors still has it.
+  The card's colour follows its digits (`formatErrorPercent`): a rate above zero
+  is never printed as `0.0` in red. A `stopped` run lays out as the final report
+  like `completed` and `failed` do.
 - **A chart card's render gate asks a predicate, not a series.**
   `utils/metricsTransforms.ts` owns both halves: the transform a chart plots,
   and the `spansMultipleBuckets` / `hasPercentileSignal` predicates a card reads

@@ -104,6 +104,44 @@ describe("ErrorRateCard", () => {
 		expect(widths[OK]).toBe(0);
 	});
 
+	it("never prints 0.0 in red: a rate under 0.1% takes a second decimal", () => {
+		renderCard({
+			totalRequests: 70_000,
+			failedRequests: 10,
+			httpErrors: 10,
+			noResponse: 0,
+			statusCodes: { "200": 69_990, "500": 10 },
+		});
+
+		expect(screen.queryByText("0.0")).toBeNull();
+		const value = screen.getByText("0.01");
+		expect(value.getAttribute("style")).toContain("destructive-text");
+	});
+
+	it("reads <0.01 in red for a rate that rounds to nothing at two decimals", () => {
+		renderCard({
+			totalRequests: 1_000_000,
+			failedRequests: 1,
+			httpErrors: 1,
+			noResponse: 0,
+			statusCodes: { "200": 999_999, "500": 1 },
+		});
+
+		expect(screen.getByText("<0.01").getAttribute("style")).toContain("destructive-text");
+	});
+
+	it("draws a zero rate in success, so colour and digits agree at both ends", () => {
+		renderCard({
+			totalRequests: 70_000,
+			failedRequests: 0,
+			httpErrors: 0,
+			noResponse: 0,
+			statusCodes: { "200": 70_000 },
+		});
+
+		expect(screen.getByText("0.0").getAttribute("style")).toContain("success-text");
+	});
+
 	it("keeps an empty bar and a zero rate before the first response", () => {
 		const { widths } = renderCard({
 			totalRequests: 0,

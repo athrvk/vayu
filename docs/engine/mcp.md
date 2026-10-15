@@ -220,7 +220,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
-| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes |
@@ -496,6 +496,22 @@ Notes:
   `lower-is-better`, `higher-is-better` or `neutral` (total requests, which
   moves with how long a run was told to run) - so a reader can tell a
   regression from an improvement without knowing each metric's sense.
+  The result also carries **`comparability`** (#2162), which an agent reads
+  *before* the deltas: a list of `{ code, message, base, target }`, empty for
+  a like-for-like pair, one entry per way the runs were not the same
+  experiment. `base` and `target` are the two values already formatted
+  (`"20 s"` against `"3 s, stopped"`). The codes, always in this order:
+  `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
+  ramp time too), `target_rps`, `duration` (the runs' measured
+  `summary.testDuration`, in seconds, more than 2x apart), `status` (any two differing run
+  statuses, such as `Stopped` against `Completed`), `http_version` (`auto`
+  is unknown and never differs), `data_file` (by content hash; none against
+  one counts), `request` (method or URL, the URL without userinfo, query or
+  fragment because the comparison is not masked the way `get_run_report` is)
+  and `compression` (the same fact as `compressionNegotiationDiffers`, which
+  stays). A field a report does not carry is unknown, not a difference. The
+  history view's vs-baseline strip renders the same list from the same
+  computation (`src/lib/run-compare.ts`), so the two cannot disagree.
 - **Run housekeeping** (issue #755) is the History surface an agent could
   otherwise only page through: `list_runs` takes the engine's own filters
   (`type`, `status`, `requestId`, `collectionId`, `q` over the stored config,
@@ -1714,7 +1730,7 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
 | `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
-| `compare_runs`         | `baseRunId?, targetRunId` | The computed delta + "did this regress?". An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
+| `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
 | `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
 
@@ -1726,7 +1742,10 @@ the `vayu://run/{runId}/report` resource. An agent reading `errorRate` is told
 what counts: a status outside 2xx/3xx or no response, a 3xx being a success, with
 the `httpErrors` / `noResponse` split beside the count. The fields themselves are
 the engine's, passed through unchanged (see [What counts as an
-error](api-reference.md#what-counts-as-an-error)).
+error](api-reference.md#what-counts-as-an-error)), including the separate
+`cancelled` / `cancelledRequests` count of requests a Stop cancelled, which is
+no error (issue #2136); the sentence says so in a clause of its own and names
+`cancelledRequests` as where it is reported.
 
 ## Safety model
 
@@ -2078,7 +2097,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
-| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
+| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |

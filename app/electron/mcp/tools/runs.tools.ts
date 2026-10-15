@@ -192,7 +192,7 @@ export const RUN_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. compressionNegotiationDiffers true means the two runs did not negotiate a compressed response the same way, so the byte and latency deltas are not a clean comparison - check the runs' config before reading a regression into them. " +
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. Read comparability before the deltas: each entry (code, message, base, target) is a way the two runs were not the same experiment - mode, virtual users, target rate, duration (more than 2x apart), status (a stopped run against a completed one), HTTP version, data file, request, or compression negotiation. An empty list means like for like. When it is not empty, say so before calling anything a regression: a short stopped run always looks slower and lower-throughput than a long one. compressionNegotiationDiffers is the compression entry on its own. " +
 			RUN_ERROR_DEFINITION_SENTENCE,
 		annotations: {
 			title: "Compare runs",

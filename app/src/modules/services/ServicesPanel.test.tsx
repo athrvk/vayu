@@ -22,13 +22,14 @@
  * only the HTTP call is faked.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { Inbox, MockIssuer } from "@/types";
 import ServicesPanel from "./ServicesPanel";
+import { stubNumberLocale } from "@/test/number-locale";
 
 const listInboxes = vi.fn();
 const listMockIssuers = vi.fn();
@@ -639,6 +640,13 @@ describe("an issuer row", () => {
 });
 
 describe("starting an issuer", () => {
+	// The range messages group their bounds in the host's locale.
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	const openDialog = async () => {
 		renderPanel();
 		fireEvent.click((await screen.findAllByRole("button", { name: "New issuer" }))[0]);

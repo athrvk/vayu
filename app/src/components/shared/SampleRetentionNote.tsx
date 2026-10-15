@@ -26,6 +26,7 @@
  * which one happened (issue #1192).
  */
 
+import { formatNumber } from "@/lib/format-number";
 import { Callout } from "./Callout";
 import type { RunReport } from "@/types/domain";
 
@@ -75,11 +76,11 @@ export function SampleRetentionNote({
 
 	return (
 		<Callout severity="info" title="Bounded retention" className={className}>
-			{displaced.toLocaleString()} further {noun} were displaced by this run&apos;s retention
+			{formatNumber(displaced)} further {noun} were displaced by this run&apos;s retention
 			limit.{" "}
 			{budgetSpent
-				? `Its response-sample budget was spent, so the ${shown.toLocaleString()} tested are drawn from the part of the run whose bodies fit, not uniformly from the whole of it.`
-				: `The ${shown.toLocaleString()} ${verb} are drawn uniformly from the whole run, not from its opening.`}
+				? `Its response-sample budget was spent, so the ${formatNumber(shown)} tested are drawn from the part of the run whose bodies fit, not uniformly from the whole of it.`
+				: `The ${formatNumber(shown)} ${verb} are drawn uniformly from the whole run, not from its opening.`}
 		</Callout>
 	);
 }

@@ -59,7 +59,7 @@ export default function CollectionTree() {
 	// TanStack Query hooks
 	// isError as well as isLoading. The query is destructured with `= []`, so a
 	// failed fetch is indistinguishable from an empty workspace unless it is
-	// asked about - and the empty state's "Add a collection" would invite a
+	// asked about - and the empty state's "New collection" would invite a
 	// duplicate of collections that already exist.
 	const {
 		data: collections = [],
@@ -376,15 +376,16 @@ export default function CollectionTree() {
 						<EmptyState
 							icon={Folder}
 							title="No collections yet"
-							description="Collections group related requests - make one to get started."
+							description="Group related requests and share variables across them."
 							action={
-								<Button
-									variant="link"
-									onClick={panel.openNewCollectionForm}
-									className="text-primary"
-								>
-									Add a collection
-								</Button>
+								<div className="flex gap-2">
+									<Button size="sm" onClick={panel.openNewCollectionForm}>
+										New collection
+									</Button>
+									<Button variant="outline" size="sm" onClick={openImport}>
+										Import
+									</Button>
+								</div>
 							}
 						/>
 					)}

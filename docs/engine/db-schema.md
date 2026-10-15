@@ -1161,7 +1161,7 @@ default, so `sync_schema()` can
 
 ```json
 {
-  "total_requests": 100, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
+  "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
   "test_duration": 2.0, "setup_overhead": 0.25,
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
@@ -1201,6 +1201,11 @@ completed - which keeps the report's `timingBreakdown.phases` absent rather than
 zeroed rows; a zeroed TLS row would claim the handshake was free, which is a different statement
 from "this run did not measure it". A zero *inside* a present section is meaningful and kept: a
 run over reused connections genuinely has a TLS p50 of 0.
+
+`cancelled` counts the requests a user stop cancelled before they answered (issue #2136). They
+are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
+else here can recover it. Always written, `0` included; a summary stored before the issue has no
+key and the report reads it as `0`.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`
@@ -1433,7 +1438,7 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
 {
   "timestamp": 1730000001000, "elapsed_seconds": 1.0,
   "requests_completed": 120, "requests_failed": 2,
-  "http_errors": 0, "no_response": 2,
+  "http_errors": 0, "no_response": 2, "cancelled": 0,
   "current_rps": 118.4, "current_concurrency": 10, "send_rate": 120.0,
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
   "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
@@ -1445,7 +1450,8 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
 `requests_failed`, `http_errors` and `no_response` count errors by the one definition
 ([What counts as an error](api-reference.md#what-counts-as-an-error)); the breakdown pair is
 absent from a tick an engine older than issue #2124 stored, whose `requests_failed` counted
-no-response failures only.
+no-response failures only. `cancelled` is the requests a user stop has cancelled so far, which
+none of the three counts (issue #2136); absent from a tick stored before that issue.
 
 Two consequences of the row being the tick:
 
