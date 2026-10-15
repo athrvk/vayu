@@ -292,7 +292,14 @@ it, so what the user would otherwise have to finish by hand is kept:
 - One toast says what arrived: `Imported "Pet Store" - 60 requests, 4 folders`,
   or `Imported 3 files` for a batch, with `; N things to finish` appended when
   a report has action-tier lines or file references to relink. When there is a
-  report, the toast's one action opens the collection on its Info tab.
+  report, the toast's one action opens the collection on its Info tab, even
+  when the user is already inside it on another sub-tab.
+- The Info tab of each new root carries an **Import notes** callout
+  (`CollectionDetail/ImportNotesCallout.tsx`): the same notice lines and
+  file-reference list the preview drew, under the file's name. It stays, past
+  the toast and the session's other tabs, until its dismiss button is pressed;
+  that drops the report for every root the file created. It is in memory only,
+  so a restart clears it.
 
 A failed apply is unchanged: the dialog stays open with a per-row outcome and
 none of the above happens, since part of the batch may not have landed.
