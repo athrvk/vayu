@@ -1136,7 +1136,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 ```typescript
 {
   currentRunId: string | null
-  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped". The dashboard lays out all three of completed/failed/stopped as the final report (#2136)
+  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped". The dashboard lays out all three of completed/failed/stopped as the final report, a stopped run once `finalReport` is set (#2136)
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
   historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)

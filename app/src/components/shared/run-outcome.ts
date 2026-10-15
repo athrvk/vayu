@@ -33,7 +33,7 @@
  */
 
 import type { Run, RunReport } from "@/types";
-import { pluralize } from "@/modules/dashboard/utils/format";
+import { formatErrorPercent, pluralize } from "@/modules/dashboard/utils/format";
 import { budgetName } from "./threshold-metrics";
 
 export type RunOutcome = "passed" | "failed" | "not-judged";
@@ -75,8 +75,7 @@ export function formatRps(value: number): string {
 
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
 export function formatErrorRate(percent: number): string {
-	if (percent > 0 && percent < 0.05) return "<0.1%";
-	return `${percent.toFixed(1)}%`;
+	return `${formatErrorPercent(percent)}%`;
 }
 
 type Budgets =

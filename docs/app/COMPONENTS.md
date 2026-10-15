@@ -503,7 +503,7 @@ Info's blank-name rule survives the buttons' removal by being spoken instead: `r
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported. A run that finishes any way at all lays out as the final report: `completed`, `failed` and `stopped` alike (issues #1932, #2136), so a user-stopped run gets the report breadcrumb, the report's numbers and the "Not judged - Stopped before it finished" verdict rather than staying in the live layout.
+Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported. A run that finishes any way at all lays out as the final report: `completed`, `failed` and `stopped` alike (issues #1932, #2136; a stopped run once its report has arrived, since the Stop click flips the mode before the report is fetched), so a user-stopped run gets the report breadcrumb, the report's numbers and the "Not judged - Stopped before it finished" verdict rather than staying in the live layout.
 
 The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
 
