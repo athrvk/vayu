@@ -45,7 +45,10 @@ interface EmptyStateBaseProps {
 	 * sentence.
 	 */
 	title: string;
-	/** A Button, usually `variant="link"`. Both variants. */
+	/**
+	 * A Button, usually `variant="link"`. A create path plus Import may be two
+	 * Buttons in a `flex gap-2` wrapper. Both variants.
+	 */
 	action?: ReactNode;
 	className?: string;
 }

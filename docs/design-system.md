@@ -2876,7 +2876,9 @@ to the *same* handler that header button uses - never a second, parallel
 create path, which is what would drift. Where the surface genuinely has no
 create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
-user caused it undoes that ("Clear the filters", "Clear the filter"). A pane
+user caused it undoes that ("Clear the filters", "Clear the filter"). The
+collections sidebar offers its create path plus Import as a two-`Button`
+`flex gap-2` wrapper ("New collection", "Import") rather than a lone link. A pane
 that is a selection prompt ("No run selected"), a not-found, a loading step
 or a wait on someone else's traffic gets none: there is nothing to offer.
 The `inline` variant takes an action for this reason - the drawer's group

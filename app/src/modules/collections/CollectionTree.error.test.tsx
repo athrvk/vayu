@@ -14,7 +14,7 @@
  * `useCollectionsQuery` is destructured as `{ data: collections = [] }`, and
  * nothing sets `throwOnError`, so a query that settles as an error never
  * reaches the ErrorBoundary - it just resolves to `[]`. The tree then rendered
- * "No collections yet" with an "Add a collection" button, which is
+ * "No collections yet" with a "New collection" button, which is
  * worse than merely wrong: it invites a user whose collections exist but could
  * not be loaded to create a duplicate.
  *
@@ -23,9 +23,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { useImportModalStore } from "@/stores";
 import CollectionTree from "./CollectionTree";
 
 const refetch = vi.fn();
@@ -67,6 +68,7 @@ function renderTree() {
 }
 
 beforeEach(() => {
+	useImportModalStore.setState({ isOpen: false, pendingPath: null });
 	refetch.mockReset();
 	queryState.collections = {
 		data: [],
@@ -131,5 +133,38 @@ describe("CollectionTree when the collections query fails", () => {
 		renderTree();
 		expect(screen.getByText("No collections yet")).toBeInTheDocument();
 		expect(screen.queryByText(/couldn't load/i)).not.toBeInTheDocument();
+	});
+});
+
+describe("CollectionTree empty workspace", () => {
+	it("offers New collection and Import beside each other", () => {
+		renderTree();
+
+		// Exact names: the toolbar's icon buttons are "Add collection" and
+		// "Import collection", so these are the empty state's own.
+		expect(screen.getByRole("button", { name: "New collection" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Import" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Import collection" })).toBeInTheDocument();
+	});
+
+	it("opens the import dialog from Import", () => {
+		renderTree();
+		expect(useImportModalStore.getState().isOpen).toBe(false);
+
+		fireEvent.click(screen.getByRole("button", { name: "Import" }));
+
+		expect(useImportModalStore.getState().isOpen).toBe(true);
+	});
+
+	it("opens the new-collection form from New collection, not the import dialog", () => {
+		renderTree();
+		expect(screen.queryByPlaceholderText("Collection name")).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "New collection" }));
+
+		expect(screen.getByPlaceholderText("Collection name")).toBeInTheDocument();
+		expect(useImportModalStore.getState().isOpen).toBe(false);
+		// The form replaces the empty state rather than stacking on it.
+		expect(screen.queryByText("No collections yet")).not.toBeInTheDocument();
 	});
 });
