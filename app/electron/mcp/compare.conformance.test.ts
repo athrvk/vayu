@@ -146,6 +146,111 @@ const CASES: { name: string; base: Record<string, unknown>; target: Record<strin
 		base: { metadata: { configuration: { mode: "constant_rps" } } },
 		target: { metadata: { configuration: { acceptEncoding: true } } },
 	},
+	{
+		// The pair #2162 was filed for: a short, stopped, 50-user run against a
+		// pinned 20 s, 10-user one.
+		name: "a stopped 50-user run against a completed 10-user baseline (mode, users, duration, status)",
+		base: {
+			metadata: {
+				status: "completed",
+				configuration: { mode: "constant_concurrency", concurrency: 10 },
+			},
+			summary: { testDuration: 20.004, avgRps: 100 },
+		},
+		target: {
+			metadata: {
+				status: "stopped",
+				configuration: { mode: "ramp_up", concurrency: 50, startConcurrency: 5 },
+			},
+			summary: { testDuration: 3.04, avgRps: 40 },
+		},
+	},
+	{
+		name: "every comparability rule at once, so the order is pinned",
+		base: {
+			metadata: {
+				status: "completed",
+				requestMethod: "GET",
+				requestUrl: "https://api.test/a",
+				configuration: {
+					mode: "constant_rps",
+					concurrency: 10,
+					targetRps: 100,
+					httpVersion: "http1.1",
+					dataFileHash: "aaaaaaaa11112222",
+					acceptEncoding: false,
+				},
+			},
+			summary: { testDuration: 20 },
+		},
+		target: {
+			metadata: {
+				status: "failed",
+				requestMethod: "POST",
+				requestUrl: "https://api.test/b",
+				configuration: {
+					mode: "ramp_up",
+					concurrency: 50,
+					startConcurrency: 2,
+					rampUpDuration: "10s",
+					targetRps: 400,
+					httpVersion: "http2",
+					dataFileName: "users.csv",
+					dataFileHash: "bbbbbbbb33334444",
+					acceptEncoding: true,
+				},
+			},
+			summary: { testDuration: 3 },
+		},
+	},
+	{
+		name: "durations just above 2x",
+		base: { summary: { testDuration: 10 } },
+		target: { summary: { testDuration: 20.1 } },
+	},
+	{
+		name: "durations at exactly 2x",
+		base: { summary: { testDuration: 10 } },
+		target: { summary: { testDuration: 20 } },
+	},
+	{
+		name: "a zero duration against a real one",
+		base: { summary: { testDuration: 0 } },
+		target: { summary: { testDuration: 20 } },
+	},
+	{
+		name: "a field on one side only, which is unknown and not a difference",
+		base: {},
+		target: {
+			metadata: {
+				requestMethod: "GET",
+				configuration: { mode: "iterations", concurrency: 5, httpVersion: "http2" },
+			},
+			summary: { testDuration: 5 },
+		},
+	},
+	{
+		name: "auto against a pinned HTTP version, and a data file against none",
+		base: { metadata: { configuration: { httpVersion: "auto" } } },
+		target: {
+			metadata: { configuration: { httpVersion: "http2", dataFileHash: "bbbbbbbb33334444" } },
+		},
+	},
+	{
+		name: "a request url carrying a credential in its query and userinfo",
+		base: { metadata: { requestUrl: "https://u:pw@api.test/a?token=s3cret" } },
+		target: { metadata: { requestUrl: "https://api.test/b#frag" } },
+	},
+	{
+		name: "reports with a null metadata and a malformed one",
+		base: { metadata: null, summary: { testDuration: 10 } },
+		target: { metadata: { configuration: 3 }, summary: { testDuration: 10 } },
+	},
+	{
+		name: "no metadata on either side",
+		base: { summary: { avgRps: 1 } },
+		target: { summary: { avgRps: 1 } },
+	},
 ];
 
 describe("run comparison mirror", () => {
@@ -208,6 +313,70 @@ describe("run comparison mirror", () => {
 			expect(compare("a", "b", preIssue, negotiated).compressionNegotiationDiffers).toBe(
 				true
 			);
+		}
+	});
+
+	/*
+	 * Same reasoning as above: two implementations that both returned `[]` for
+	 * every pair would agree forever. The pair #2162 was filed for is pinned as
+	 * values, on both sides, in the order the strip renders them.
+	 */
+	test("comparability names what differs, with both values, in a fixed order", () => {
+		const { base, target } = CASES.find((c) => c.name.startsWith("a stopped 50-user"))!;
+		const expected = [
+			{
+				code: "mode",
+				message: "Test mode differs.",
+				base: "constant_concurrency",
+				target: "ramp_up",
+			},
+			{
+				code: "concurrency",
+				message: "Virtual users differ.",
+				base: "10",
+				target: "5 to 50",
+			},
+			{
+				code: "duration",
+				message: "Run durations differ by more than 2x.",
+				base: "20 s",
+				target: "3 s, stopped",
+			},
+			{
+				code: "status",
+				message: "Run status differs.",
+				base: "Completed",
+				target: "Stopped",
+			},
+		];
+
+		expect(mainCompare("a", "b", base, target).comparability).toEqual(expected);
+		expect(rendererCompare("a", "b", base, target).comparability).toEqual(expected);
+	});
+
+	test("comparability is empty for a like-for-like pair and for reports with no metadata", () => {
+		const same = {
+			metadata: { status: "completed", configuration: { mode: "once", concurrency: 1 } },
+			summary: { testDuration: 10 },
+		};
+
+		for (const compare of [mainCompare, rendererCompare]) {
+			expect(compare("a", "b", same, same).comparability).toEqual([]);
+			expect(compare("a", "b", {}, {}).comparability).toEqual([]);
+			expect(compare("a", "b", { metadata: null }, { metadata: "x" }).comparability).toEqual(
+				[]
+			);
+		}
+	});
+
+	test("the duration threshold is strict: exactly 2x passes, just above warns", () => {
+		const at = (seconds: number) => ({ summary: { testDuration: seconds } });
+
+		for (const compare of [mainCompare, rendererCompare]) {
+			expect(compare("a", "b", at(10), at(20)).comparability).toEqual([]);
+			expect(compare("a", "b", at(10), at(20.1)).comparability.map((w) => w.code)).toEqual([
+				"duration",
+			]);
 		}
 	});
 

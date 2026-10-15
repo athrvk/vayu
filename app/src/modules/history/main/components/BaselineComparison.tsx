@@ -16,6 +16,10 @@
  * run *is* the baseline, or the baseline's report has not loaded. A strip that
  * rendered zeros would be a claim ("nothing changed") the app cannot support.
  *
+ * Under the deltas, one warning row per `comparability` entry: the two runs
+ * must be the same experiment (same mode, virtual users, duration, ...) for a
+ * delta to mean "regressed", and a short stopped run never is (#2162).
+ *
  * Colour comes from `MetricDelta.direction`, never from the sign of the number:
  * latency falling is an improvement and throughput falling is not, and the one
  * place that distinction lives is `lib/run-compare.ts`, which the MCP
@@ -205,14 +209,20 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					<DeltaCell key={metric.metric} metric={metric} />
 				))}
 			</div>
-			{comparison.compressionNegotiationDiffers && (
-				<div className="flex items-center gap-2 mt-2 text-xs text-status-warning-text">
-					<AlertTriangle className="size-icon-sm shrink-0" />
-					<span>
-						Compression negotiation differs between these runs; byte and latency figures
-						are not directly comparable.
-					</span>
-				</div>
+			{comparison.comparability.length > 0 && (
+				<ul className="mt-2 flex flex-col gap-1" aria-label="Comparability warnings">
+					{comparison.comparability.map((warning) => (
+						<li
+							key={warning.code}
+							className="flex items-start gap-2 text-xs text-status-warning-text"
+						>
+							<AlertTriangle className="mt-0.5 size-icon-sm shrink-0" />
+							<span>
+								{warning.message} {warning.base} vs {warning.target}.
+							</span>
+						</li>
+					))}
+				</ul>
 			)}
 		</div>
 	);
