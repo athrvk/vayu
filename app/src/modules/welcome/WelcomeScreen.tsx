@@ -21,6 +21,7 @@ import { useTabsStore, useImportModalStore, useLayoutStore } from "@/stores";
 import { useCollectionsQuery, useRunsQuery, flattenRunPages } from "@/queries";
 import { ErrorState } from "@/components/shared";
 import { useNewRequest } from "@/hooks/useNewRequest";
+import { revealSettingsCategory } from "@/lib/commands/reveal-settings";
 import { CollectionPicker } from "./components/CollectionPicker";
 import { DEMO_REQUEST_PRESET } from "./demo-request";
 import { FirstRunWelcome } from "./FirstRunWelcome";
@@ -97,6 +98,7 @@ export default function WelcomeScreen() {
 							onImport={openImport}
 							onNewRequest={() => newRequest()}
 							onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
+							onConnectAgent={() => revealSettingsCategory("mcp")}
 						/>
 					)
 				) : (

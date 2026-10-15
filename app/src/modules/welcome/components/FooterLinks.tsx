@@ -45,6 +45,13 @@ export function FooterLinks() {
 			>
 				Documentation
 			</button>
+			<button
+				type="button"
+				className={linkClass}
+				onClick={() => window.electronAPI?.openAppLink("mcp")}
+			>
+				Connect an agent (MCP)
+			</button>
 		</div>
 	);
 }

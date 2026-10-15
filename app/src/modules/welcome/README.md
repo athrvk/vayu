@@ -13,9 +13,17 @@ screen's job is to **start something new**.
 
 Two consequences worth keeping in mind before adding anything here:
 
-- **No marketing content.** A "Key Features" grid and two hardcoded performance
-  numbers were removed because they pitch software the user has already
-  installed, and the static numbers read as if they were telemetry.
+- **No marketing content, but the first-run state may say what Vayu is.** A
+  "Key Features" grid and two hardcoded performance numbers were removed
+  because they pitch software the user has already installed, and the static
+  numbers read as if they were telemetry. Allowed: one plain sentence on
+  `FirstRunWelcome` naming what the product does (the native engine, load
+  testing, the MCP server for coding agents, that data stays on the machine),
+  and actions that open a feature the user would not find by looking, such as
+  "Connect your coding agent" (#2122). Not allowed: figures of any kind, a
+  features grid, or a pitch or action row on the Launcher, whose reader already
+  installed the app and has a workspace (the footer's doc links are shared by
+  both states). Wording follows `docs/ux-writing.md`.
 - **No duplicates.** Anything already visible in the Collections sidebar or the
   History drawer does not belong here - a "Recent Collections" list was removed
   for repeating the sidebar rendered beside it.
@@ -24,7 +32,7 @@ Two consequences worth keeping in mind before adding anything here:
 
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, state selection
 - `FirstRunWelcome.tsx` - fresh workspace; import leads, and this is the only
-  state that carries branding
+  state that carries branding or the agent-connect row
 - `Launcher.tsx` - populated workspace; actions, recent runs, counts
 - `components/ActionTile.tsx`, `components/DemoApiTile.tsx`,
   `components/RecentRuns.tsx`, `components/FooterLinks.tsx`
@@ -40,9 +48,13 @@ Two consequences worth keeping in mind before adding anything here:
   otherwise read the event as that data; the screen also wraps `onNewRequest`
   for the same reason.
 - `RecentRuns` copies before sorting - the array is the TanStack Query cache.
-- Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel. The
-  renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would
-  spawn an unmanaged Electron window.
+- Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel
+  (the keys live in `electron/app-links.ts`). The renderer cannot open
+  arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged
+  Electron window.
+- "Connect your coding agent" opens Settings on the MCP section through
+  `revealSettingsCategory` (`lib/commands/reveal-settings.ts`), the same call
+  the command palette's settings commands make.
 - **The column is the state's own, not the container's** (`welcome-column.ts`,
   #1691). The screen used to fill the tab, so at 1440px the tiles and the recent
   runs hugged the left edge with the right two-thirds empty. `WelcomeScreen`'s
