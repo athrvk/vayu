@@ -304,6 +304,7 @@ export const REPO = "athrvk/vayu";
 export const SITE_URL = "https://athrvk.github.io/vayu/";
 export const DOCS_URL = SITE_URL;
 export const SCRIPTING_DOCS_URL = `${SITE_URL}engine/scripting/`;
+export const MCP_DOCS_URL = `${SITE_URL}engine/mcp/`;
 export const ISSUES_URL = `https://github.com/${REPO}/issues`;
 
 // Auto-updater

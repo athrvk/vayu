@@ -304,7 +304,7 @@ interface ElectronAPI {
 	onNavigateHistory: (callback: (direction: "back" | "forward") => void) => () => void;
 
 	// Open one of the app's own doc links in the system browser
-	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;
+	openAppLink: (key: "docs" | "scripting" | "mcp" | "issues") => Promise<void>;
 
 	// OAuth 2.0 interactive flow
 	openExternalUrl: (url: string) => Promise<void>;
