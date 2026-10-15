@@ -872,15 +872,8 @@ class ScenarioLoadDriver {
         vu, step_index, iteration, vu_index, row, data_row, pipeline_before_ms, sent_request,
         next_target_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
-                // No `Response` object exists at all - nothing for `step.after`
-                // to run against, exactly as before #1495. Coverage still
-                // counts it: a transport error is a request this operation
-                // was sent and did not answer, reported as status 0 rather
-                // than a status the server never sent (issue #629).
-                state->coverage.record (step_index, 0);
-                finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
-                handle_result (context, db, result,
-                ResultAnnotations{ row, step_index, iteration, vu_index });
+                finish_without_response (context, db, state, plan, vu, step_index,
+                result, ResultAnnotations{ row, step_index, iteration, vu_index });
                 return;
             }
 
@@ -1140,11 +1133,42 @@ class ScenarioLoadDriver {
     }
 
     /**
+     * A completion that carried no `Response` at all - nothing for
+     * `step.after` to run against, exactly as before #1495.
+     *
+     * A step a user Stop cancelled (#2136) only releases its VU: it neither
+     * ran nor failed, so it is no step error, no coverage send and no
+     * abandoned iteration, and the run is ending, so the VU's position is
+     * never read again. Any other is the step's failure, and coverage still
+     * counts it: a request this operation was sent and did not answer,
+     * reported as status 0 rather than a status the server never sent (issue
+     * #629). Either way the VU is released before `handle_result`, for
+     * `finish_step`'s reason.
+     */
+    static void finish_without_response (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    const std::shared_ptr<ScenarioLoadState>& state,
+    const ScenarioPlan& plan,
+    VirtualUser* vu,
+    size_t step_index,
+    const vayu::Result<vayu::Response>& result,
+    const ResultAnnotations& annotations) {
+        if (is_stop_cancellation (*context, result.error ())) {
+            vu->busy.store (false, std::memory_order_release);
+        } else {
+            state->coverage.record (step_index, 0);
+            finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
+        }
+        handle_result (context, db, result, annotations);
+    }
+
+    /**
      * One step's outcome applied to the run's tallies and the VU's state
-     * machine, and the only writer of `busy`'s `true -> false` edge. Shared by
-     * the completion callback and the data-binding failure, so a step that
-     * never reached the wire retires its VU exactly as a completed one does - a
-     * VU left busy permanently shrinks effective concurrency.
+     * machine, and - beside a Stop's cancellation in
+     * `finish_without_response` - the only writer of `busy`'s `true -> false`
+     * edge. Shared by the completion callback and the data-binding failure, so
+     * a step that never reached the wire retires its VU exactly as a completed
+     * one does - a VU left busy permanently shrinks effective concurrency.
      *
      * @p errored means the step got no response (a transport error, or a step
      * never sent), and it ends the iteration as abandoned. A response with an

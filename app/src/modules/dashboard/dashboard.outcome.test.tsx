@@ -84,7 +84,7 @@ const MISSED: RunReport["thresholdValidation"] = {
 };
 
 function seed(
-	mode: "running" | "completed" | "failed",
+	mode: "running" | "completed" | "failed" | "stopped",
 	finalReport: RunReport | null,
 	isStreaming = false
 ) {
@@ -112,6 +112,28 @@ describe("the dashboard's verdict banner", () => {
 		expect(screen.getByText("Not judged")).toBeInTheDocument();
 		expect(screen.getByText(/No budgets set. 0.0% errors/)).toBeInTheDocument();
 		expect(screen.queryByText("Passed")).toBeNull();
+		expect(screen.getByTestId("header").dataset.outcome).toBe("not-judged");
+	});
+
+	it("says Not judged, stopped before it finished, for a run the user stopped (#2136)", () => {
+		seed(
+			"stopped",
+			report({
+				metadata: {
+					runId: "run_1",
+					runType: "load",
+					status: "stopped",
+					startTime: 0,
+					endTime: 1,
+				},
+				thresholdValidation: MISSED,
+			})
+		);
+		render(<LoadTestDashboard />);
+
+		expect(screen.getByText("Not judged")).toBeInTheDocument();
+		expect(screen.getByText(/Stopped before it finished/)).toBeInTheDocument();
+		expect(screen.queryByText("Failed")).toBeNull();
 		expect(screen.getByTestId("header").dataset.outcome).toBe("not-judged");
 	});
 

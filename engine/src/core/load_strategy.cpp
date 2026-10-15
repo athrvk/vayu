@@ -49,6 +49,9 @@ const char* error_type_name (vayu::ErrorCode code) {
     case vayu::ErrorCode::DataBindingFailed: return "data_binding_failed";
     case vayu::ErrorCode::ProxyError: return "proxy_error";
     case vayu::ErrorCode::InternalError: return "internal_error";
+    // Only a natural-end drain cancellation reaches a stored trace; a Stop's
+    // is never recorded as an error (`is_stop_cancellation`).
+    case vayu::ErrorCode::Cancelled: return "cancelled";
     default: return "unknown";
     }
 }
@@ -202,25 +205,42 @@ const ResultAnnotations& annotations) {
     }
 }
 
+namespace {
+/** A transfer that ended in an Error rather than a Response, as a failure. */
+void record_error_result (const std::shared_ptr<RunContext>& context,
+const vayu::Error& error,
+const ResultAnnotations& annotations) {
+    nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
+        { "error_type", error_type_name (error.code) }, { "message", error.message },
+        { "request_number", context->total_requests () } };
+    annotate (error_json, annotations);
+    context->metrics_collector->record_error (
+    error.code, error.message, error_json.dump ());
+}
+} // namespace
+
+bool is_stop_cancellation (const RunContext& context, const vayu::Error& error) {
+    return error.code == vayu::ErrorCode::Cancelled && context.should_stop.load ();
+}
+
 void handle_result (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& /* db - unused, kept for API compat */,
 const vayu::Result<vayu::Response>& result,
 const ResultAnnotations& annotations) {
-    // A transfer usually completes as a Response carrying error_code, but two
-    // paths still produce a real Error: curl-handle creation failure, and the
-    // stop(false) cancellation drain. Both raise ErrorCode::InternalError, so
-    // the type is read off the code rather than assumed to be cancellation.
-    // Dropping either would leave requests_sent counted with no completion,
-    // permanently inflating in_flight() and shrinking effective concurrency
-    // for the rest of the run.
+    // A transfer usually completes as a Response carrying error_code, but a
+    // few paths still produce a real Error: curl-handle creation failure, a
+    // data-binding failure, and the event loop's cancellation. Dropping any of
+    // them would leave requests_sent counted with no completion, permanently
+    // inflating in_flight() and shrinking effective concurrency for the rest
+    // of the run - which is why a Stop's cancellation is still recorded, just
+    // not as an error.
     if (result.is_error ()) {
         const auto& error = result.error ();
-        nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
-            { "error_type", error_type_name (error.code) }, { "message", error.message },
-            { "request_number", context->total_requests () } };
-        annotate (error_json, annotations);
-        context->metrics_collector->record_error (
-        error.code, error.message, error_json.dump ());
+        if (is_stop_cancellation (*context, error)) {
+            context->metrics_collector->record_cancelled ();
+        } else {
+            record_error_result (context, error, annotations);
+        }
 
         if (context->closed_loop.load (std::memory_order_relaxed)) {
             context->notify_refill ();

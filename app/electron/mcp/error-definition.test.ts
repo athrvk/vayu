@@ -38,6 +38,11 @@ describe("the error definition sentence", () => {
 		expect(RUN_ERROR_DEFINITION_SENTENCE).toContain("3xx redirect is a success");
 	});
 
+	test("says a request a Stop cancelled is not an error and names where it is counted", () => {
+		expect(RUN_ERROR_DEFINITION_SENTENCE).toContain("cancelled by a user Stop is not an error");
+		expect(RUN_ERROR_DEFINITION_SENTENCE).toContain("`cancelledRequests`");
+	});
+
 	test("names the split on every surface the engine records it", () => {
 		for (const key of [
 			"httpErrors",

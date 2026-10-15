@@ -26,6 +26,7 @@ const vayu::core::RunContext& context) {
         summary.errors      = failures.failed;
         summary.no_response = failures.no_response;
         summary.error_rate  = failures.error_rate ();
+        summary.cancelled   = context.metrics_collector->cancelled ();
     }
     summary.total_requests = context.total_requests ();
     summary.avg_latency_ms = context.average_latency_ms ();
@@ -199,8 +200,8 @@ const RunSummary& summary) {
     response["runId"]   = run_id;
     response["summary"] = { { "totalRequests", summary.total_requests },
         { "errors", summary.errors }, { "httpErrors", summary.errors - summary.no_response },
-        { "noResponse", summary.no_response }, { "errorRate", summary.error_rate },
-        { "avgLatencyMs", summary.avg_latency_ms } };
+        { "noResponse", summary.no_response }, { "cancelled", summary.cancelled },
+        { "errorRate", summary.error_rate }, { "avgLatencyMs", summary.avg_latency_ms } };
     return response;
 }
 

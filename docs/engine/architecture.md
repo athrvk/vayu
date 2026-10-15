@@ -343,8 +343,9 @@ Manages the lifecycle of load test runs:
 - **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
   backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
   reaches the end of its duration waits for genuine in-flight requests, but no longer than
-  `timeout` + 2s. Cancelled requests are recorded as errors, so a run's submitted and recorded
-  counts still agree.
+  `timeout` + 2s. A request the drain deadline cancels is recorded as an error; one a user stop
+  cancels is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
+  its error count, so `requests_sent` is always the total plus the cancelled count.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
   final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
   removing rows (see the API reference), and it sets `RunContext::settled`, which
@@ -1035,7 +1036,7 @@ deadline; only the flag's spelling is shared, through `read_stream_flag`.
 
 `constant_concurrency`, `ramp_up`, `iterations` and `capacity` share a `maintain_concurrency`
 loop driven by a pure `compute_refill_deficit` primitive: each tick, refill exactly
-`target − in_flight` new requests (where `in_flight = requests_sent − completed`). On stop the
+`target − in_flight` new requests (where `in_flight = requests_sent − (completed + cancelled)`). On stop the
 controller is notified for prompt cancellation rather than waiting for in-flight requests to drain.
 Between ticks the loop blocks on `refill_cv` with a 50ms safety-net timeout, woken early by a
 completion (`notify_refill`) - the actual wait, not a poll, so a run with headroom to fill sends

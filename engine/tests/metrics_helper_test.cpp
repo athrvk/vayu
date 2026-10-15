@@ -74,6 +74,26 @@ TEST_F (MetricsHelperTest, StopSummaryCountsHttpErrorsLikeTheReport) {
     EXPECT_EQ (response["summary"]["noResponse"], 5);
 }
 
+// #2136: what a Stop cancelled is reported as `cancelled`, never as an error
+// or a request without a response, and does not move the error rate.
+TEST_F (MetricsHelperTest, StopSummaryReportsCancelledApartFromErrors) {
+    for (int i = 0; i < 7; ++i) {
+        test_context->metrics_collector->record_cancelled ();
+    }
+    auto summary = MetricsHelper::calculate_summary (*test_context);
+
+    EXPECT_EQ (summary.cancelled, 7u);
+    EXPECT_EQ (summary.total_requests, 100u);
+    EXPECT_EQ (summary.errors, 5u);
+    EXPECT_EQ (summary.no_response, 5u);
+    EXPECT_DOUBLE_EQ (summary.error_rate, 5.0);
+
+    auto response = MetricsHelper::create_stop_response ("run", summary);
+    EXPECT_EQ (response["summary"]["cancelled"], 7);
+    EXPECT_EQ (response["summary"]["noResponse"], 5);
+    EXPECT_EQ (response["summary"]["errors"], 5);
+}
+
 // The disagreement above, asserted directly against the source the report and
 // the per-tick rows read.
 TEST_F (MetricsHelperTest, StopSummaryAvgLatencyMatchesTheCollector) {
@@ -115,6 +135,7 @@ TEST_F (MetricsHelperTest, CreatesStopResponseCorrectly) {
     EXPECT_EQ (response["summary"]["errors"], 5);
     EXPECT_EQ (response["summary"]["httpErrors"], 3);
     EXPECT_EQ (response["summary"]["noResponse"], 2);
+    EXPECT_EQ (response["summary"]["cancelled"], 0);
     EXPECT_DOUBLE_EQ (response["summary"]["avgLatencyMs"], 150.0);
     EXPECT_DOUBLE_EQ (response["summary"]["errorRate"], 5.0);
 }

@@ -307,6 +307,11 @@ struct ReportExtras {
     // whether the protocol the report is labelled with is the one the numbers
     // were measured over (issue #215).
     double http_version_downgraded = 0.0;
+    // Requests a user Stop cancelled (#2136): sent, never answered, and in
+    // neither `totalRequests` nor any error count. Only the stored summary
+    // knows it - the status distribution never held them - so a run stored
+    // before the key existed reads 0.
+    size_t cancelled_requests = 0;
     // Per-phase latency distributions, verbatim from the summary and already in
     // the report's shape. Empty for a run that recorded none - the toggle off,
     // nothing successful completed, or an engine older than the phase bank -
@@ -462,6 +467,7 @@ void apply_summary_totals (const nlohmann::json& summary,
 vayu::DetailedReport& report,
 ReportExtras& extras) {
     read_number (summary, "total_requests", report.total_requests);
+    read_number (summary, "cancelled", extras.cancelled_requests);
     read_number (summary, "send_rate", report.send_rate);
     read_number (summary, "throughput", report.throughput);
     read_number (summary, "test_duration", report.total_duration_s);
@@ -1408,7 +1414,9 @@ double target_rps) {
         { "successfulRequests", report.successful_requests },
         { "failedRequests", report.failed_requests },
         { "httpErrorRequests", failures.http_errors () },
-        { "noResponseRequests", failures.no_response }, { "errorRate", report.error_rate },
+        { "noResponseRequests", failures.no_response },
+        { "cancelledRequests", extras.cancelled_requests },
+        { "errorRate", report.error_rate },
         { "totalDurationSeconds", report.total_duration_s },
         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
         { "sendRate", report.send_rate }, { "throughput", report.throughput },
@@ -1824,7 +1832,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
             vayu::utils::log_info ("run", "Run stopped",
             { { "runId", run_id }, { "totalRequests", summary.total_requests },
-            { "errors", summary.errors } });
+            { "errors", summary.errors }, { "cancelled", summary.cancelled } });
             auto response =
             vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
 

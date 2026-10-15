@@ -1547,6 +1547,7 @@ const SampledValidationTotals& schema_totals,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     RunSummaryInputs inputs;
     inputs.total_requests   = totals.completed;
+    inputs.cancelled        = context->metrics_collector->cancelled ();
     inputs.rps              = totals.actual_rps;
     inputs.send_rate        = totals.total_duration_s > 0 ?
            static_cast<double> (context->requests_sent.load ()) / totals.total_duration_s :
@@ -2204,6 +2205,7 @@ RunManager& manager) {
             RunSummaryInputs inputs;
             auto& mc                       = *context->metrics_collector;
             inputs.total_requests          = mc.total_requests ();
+            inputs.cancelled               = mc.cancelled ();
             const double elapsed_s         = context->start_time_ms > 0 ?
                     static_cast<double> (steady_now_ms () - context->start_steady_ms) / 1000.0 :
                     0.0;
@@ -2278,6 +2280,7 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["requests_failed"]     = sample.requests_failed;
     payload["http_errors"]         = sample.http_errors;
     payload["no_response"]         = sample.no_response;
+    payload["cancelled"]           = sample.cancelled;
     payload["current_rps"]         = sample.current_rps;
     payload["current_concurrency"] = sample.current_concurrency;
     payload["send_rate"]           = sample.send_rate;
@@ -2305,6 +2308,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
 
     nlohmann::json summary;
     summary["total_requests"]   = inputs.total_requests;
+    summary["cancelled"]        = inputs.cancelled;
     summary["rps"]              = inputs.rps;
     summary["send_rate"]        = inputs.send_rate;
     summary["throughput"]       = inputs.throughput;
@@ -2560,6 +2564,7 @@ int64_t& first_tick_steady_ms) {
         sample.requests_failed     = failures.failed;
         sample.http_errors         = failures.http_errors ();
         sample.no_response         = failures.no_response;
+        sample.cancelled           = mc.cancelled ();
         sample.current_rps         = current_rps;
         sample.current_concurrency = active_now;
         sample.send_rate           = send_rate;
@@ -2668,7 +2673,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         stats["currentRps"] = live_current_rps;
 
         // One definition with the persisted tick and peak_in_flight, think-timer
-        // reservations included (#1921), so it can exceed this frame's
+        // reservations included (#1921) and Stop-cancelled requests excluded
+        // (#2136), so it can differ from this frame's
         // `requestsSent - totalRequests`.
         const size_t backpressure = context->in_flight ();
         stats["backpressure"]     = backpressure;

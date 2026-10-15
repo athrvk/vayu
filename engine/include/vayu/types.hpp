@@ -512,7 +512,13 @@ enum class ErrorCode : std::uint8_t {
     /// `InternalError`: that number is an engine memory guard rather than a
     /// bound a client asked for, and it is what every stored load trace already
     /// carries.
-    ResponseTooLarge
+    ResponseTooLarge,
+    /// The engine cancelled the transfer before it answered: a load run's
+    /// event loop stopping (`EventLoop::stop`). Whether that is an error
+    /// depends on why it stopped, which only the run knows - a user Stop is
+    /// not one, a natural-end drain deadline is (issue #2136,
+    /// `is_stop_cancellation`). Appended for the same reason `ProxyError` was.
+    Cancelled
 };
 
 /**
@@ -534,6 +540,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::DataBindingFailed: return "DATA_BINDING_FAILED";
     case ErrorCode::ProxyError: return "PROXY_ERROR";
     case ErrorCode::ResponseTooLarge: return "RESPONSE_TOO_LARGE";
+    case ErrorCode::Cancelled: return "CANCELLED";
     }
     return "UNKNOWN";
 }
@@ -563,8 +570,8 @@ inline const char* to_string (ErrorCode code) {
  * threshold verdict, `pm.info.run.errorRate` - derives it here, from the
  * distribution, so none of them can count a different thing.
  *
- * A request a Stop cancels is recorded under code 0 too, so it lands in
- * `no_response` (#2136).
+ * A request a user Stop cancels is not in the distribution at all, so it is in
+ * none of these counts: the collector keeps it apart as `cancelled` (#2136).
  */
 struct StatusFailures {
     size_t total       = 0; ///< Every request the distribution holds.
@@ -850,7 +857,9 @@ struct RunSummary {
     size_t total_requests = 0;
     size_t errors      = 0; ///< By `count_status_failures`, like `error_rate`.
     size_t no_response = 0; ///< Of `errors`, those that got no response.
-    double error_rate  = 0.0;
+    /// Cancelled by the Stop, outside `total_requests` and `errors` (#2136).
+    size_t cancelled      = 0;
+    double error_rate     = 0.0;
     double avg_latency_ms = 0.0;
 };
 
