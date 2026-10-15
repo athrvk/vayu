@@ -36,10 +36,12 @@ describe("EmptyState", () => {
 		expect(screen.queryByRole("img")).toBeNull();
 	});
 
-	it("drops the icon and description in the inline variant", () => {
-		// The inline variant sits inside a small panel, so it is one muted line
-		// - passing icon or description must not smuggle them in.
+	it("renders the inline variant as the title alone", () => {
+		// The inline variant sits inside a small panel, so it is one muted line.
+		// The compiler refuses icon and description (next test); this is the
+		// runtime half, for a caller that gets past it.
 		const { container } = render(
+			// @ts-expect-error inline takes neither icon nor description
 			<EmptyState
 				variant="inline"
 				icon={Inbox}
@@ -50,6 +52,21 @@ describe("EmptyState", () => {
 		expect(screen.getByText("No cookies in response")).toBeInTheDocument();
 		expect(container.querySelector("svg")).toBeNull();
 		expect(screen.queryByText("should not render")).toBeNull();
+	});
+
+	it("refuses icon, iconClassName and description on an inline state at compile time", () => {
+		// #2129: the inline variant used to discard these silently. Each line
+		// carries one directive, so loosening any one prop in the type leaves
+		// an unused `@ts-expect-error`, which `pnpm type-check` reports.
+		const elements = [
+			// @ts-expect-error inline has no icon
+			<EmptyState variant="inline" title="t" icon={Inbox} />,
+			// @ts-expect-error inline has no iconClassName
+			<EmptyState variant="inline" title="t" iconClassName="animate-spin" />,
+			// @ts-expect-error inline has no description
+			<EmptyState variant="inline" title="t" description="d" />,
+		];
+		expect(elements).toHaveLength(3);
 	});
 
 	it("keeps the action in the inline variant, under the line", () => {

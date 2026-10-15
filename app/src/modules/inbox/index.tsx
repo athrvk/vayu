@@ -515,8 +515,7 @@ export default function InboxView() {
 						) : captures.length === 0 ? (
 							<EmptyState
 								variant="inline"
-								title="No captures yet."
-								description="Point a webhook at the URL above."
+								title="No captures yet. Point a webhook at the URL above."
 							/>
 						) : (
 							<>

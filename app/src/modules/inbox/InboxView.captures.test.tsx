@@ -380,7 +380,9 @@ describe("the first fetch of the capture list", () => {
 		const list = (await screen.findByRole("status", { name: "Loading" })).closest("aside");
 		expect(list).not.toBeNull();
 		const aside = within(list as HTMLElement);
-		expect(aside.queryByText("No captures yet.")).not.toBeInTheDocument();
+		expect(
+			aside.queryByText("No captures yet. Point a webhook at the URL above.")
+		).not.toBeInTheDocument();
 		// A count of 0 is as false as the sentence: the total is not known yet.
 		expect(aside.getByText("-")).toBeInTheDocument();
 		expect(aside.queryByText("0")).not.toBeInTheDocument();
@@ -407,7 +409,9 @@ describe("the first fetch of the capture list", () => {
 			resolveFirstPage(page(0, 0, 0));
 		});
 
-		expect(await screen.findByText("No captures yet.")).toBeInTheDocument();
+		expect(
+			await screen.findByText("No captures yet. Point a webhook at the URL above.")
+		).toBeInTheDocument();
 		expect(screen.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
 	});
 
