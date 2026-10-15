@@ -94,7 +94,7 @@ electron/
 
 ## Troubleshooting
 
-**Engine not connecting:** Ensure engine is running on port 9876
+**Engine not connecting:** Hover the engine status in the Dock for the address and the reason. The app uses port 9876, or a fallback in 9880-9889 when another program holds it
 
 **SSE not working:** Only works during active load tests
 

@@ -59,7 +59,20 @@ export const USER_DATA_DIR_NAME = APP_NAME;
 
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
+/** The engine's default port: the first candidate, and the one tools outside the app assume. */
 export const ENGINE_PORT = 9876;
+/**
+ * Every port the sidecar may run the engine on, tried in order, so another
+ * program holding 9876 does not leave the app without an engine (#2118).
+ *
+ * A fixed list rather than an OS-assigned port because the renderer's CSP is a
+ * build-time `<meta>` (`renderer-csp.ts`) and can only name ports known at
+ * build time. The fallbacks skip `MCP_PORT` (9877) and its neighbours.
+ */
+export const ENGINE_PORT_CANDIDATES: readonly number[] = [
+	ENGINE_PORT,
+	...Array.from({ length: 10 }, (_, index) => 9880 + index),
+];
 /** Lock file written by the engine inside its data dir. */
 export const ENGINE_LOCK_FILE = "vayu.lock";
 /**

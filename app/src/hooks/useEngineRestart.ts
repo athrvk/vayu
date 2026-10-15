@@ -35,6 +35,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 	const clearRestartRequired = useEngineStore((s) => s.clearRestartRequired);
 	const openEngineStartWindow = useEngineStore((s) => s.openEngineStartWindow);
 	const closeEngineStartWindow = useEngineStore((s) => s.closeEngineStartWindow);
+	const setEngineStartFailure = useEngineStore((s) => s.setEngineStartFailure);
 	const showToast = useToastStore((s) => s.showToast);
 
 	const restart = useCallback(async () => {
@@ -69,6 +70,9 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		// path. Drop it rather than let it speak for the engine replacing it.
 		await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
 		openEngineStartWindow(Date.now());
+		// The failure being retried would keep the poll reading the coming
+		// silence as unreachable; the main process re-reports it if it holds.
+		setEngineStartFailure(null);
 		try {
 			const result = await window.electronAPI.restartEngine();
 			if (!result.success) {
@@ -112,6 +116,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		clearRestartRequired,
 		openEngineStartWindow,
 		closeEngineStartWindow,
+		setEngineStartFailure,
 		showToast,
 	]);
 

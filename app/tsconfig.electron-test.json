@@ -39,7 +39,11 @@
 			"@shared/*": ["../shared/*"]
 		}
 	},
-	"include": ["electron/**/*.test.ts"],
+	/*
+	 * `src/types/electron.d.ts` augments `Window` with the preload bridge, which
+	 * `src/config/network.ts` reads and `engine-origin.test.ts` reaches.
+	 */
+	"include": ["electron/**/*.test.ts", "src/types/electron.d.ts"],
 	/* Undo the inherited exclusion - these files are the whole point here. */
 	"exclude": []
 }

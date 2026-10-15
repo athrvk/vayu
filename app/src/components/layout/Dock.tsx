@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
@@ -19,7 +19,14 @@ import {
 	type EngineStatus as EngineConnectionStatus,
 	type SaveStatus,
 } from "@/stores";
-import { ICON_MOTION, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipValue,
+} from "@/components/ui";
+import { ENGINE_BASE_URL } from "@/config/network";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { ResponsePositionButton } from "./ResponsePositionButton";
@@ -38,6 +45,27 @@ const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
 };
 
 /**
+ * What the connection light's tooltip says, or null when it has nothing to say.
+ *
+ * Connected, it names the engine's address: the engine may be on a fallback
+ * port (#2118), and `vayu-cli --daemon` or `VAYU_ENGINE_URL` have to be given
+ * that address. Unreachable, it is the reason: the main process's own sentence
+ * when it has one (it is written for the user), else what the transport said.
+ * Starting is quiet.
+ */
+function engineStatusDetail(
+	status: EngineConnectionStatus,
+	startFailure: string | null,
+	engineError: string | null
+): ReactNode {
+	if (status === "connected") {
+		return <TooltipValue hint="Engine address">{ENGINE_BASE_URL}</TooltipValue>;
+	}
+	if (status !== "unreachable") return null;
+	return startFailure ?? engineError;
+}
+
+/**
  * The connection light - and, when it is out, why.
  *
  * `engineError` is written on every failed health poll (`queries/health.ts`)
@@ -49,18 +77,25 @@ const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
  * became a toast rather than a line here.
  *
  * The trigger is focusable, so the reason is reachable by keyboard and not only
- * by hover, and the icon exists to say there is something to hover at all.
+ * by hover, and the icon exists to say there is something to hover at all. A
+ * connected engine's address rides the same trigger without the icon: it is
+ * reference, not a problem to go and read.
  *
- * Only `unreachable` gets that affordance. The window paints while the engine is
+ * Only `unreachable` gets the reason. The window paints while the engine is
  * still starting (#1144), so the first seconds of every launch are spent not
  * connected - and rendering a red flag and a transport error there described a
  * failure that had not happened (#1164). "Starting…" is a state of its own,
  * quiet by design, and the store turns it into `unreachable` on its own budget
  * so an engine that never comes up still ends up saying why.
+ *
+ * A start failure the main process reports (every engine port held, #2118)
+ * also offers Retry, because the sentence tells the user to press it and the
+ * Dock is where they are reading it.
  */
 function EngineStatus() {
 	const engineStatus = useEngineStore((s) => s.engineStatus);
 	const engineError = useEngineStore((s) => s.engineError);
+	const engineStartFailure = useEngineStore((s) => s.engineStartFailure);
 
 	/*
 	 * `status-success-text`: not the general `success-text`, and not the bare
@@ -92,15 +127,16 @@ function EngineStatus() {
 		</>
 	);
 
-	if (engineStatus !== "unreachable" || !engineError) {
+	const detail = engineStatusDetail(engineStatus, engineStartFailure, engineError);
+	if (!detail) {
 		return <span className={className}>{label}</span>;
 	}
 
-	return (
+	const status = (
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
-					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the engine error text
+					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the engine address and error text
 					tabIndex={0}
 					className={cn(
 						className,
@@ -108,7 +144,9 @@ function EngineStatus() {
 					)}
 				>
 					{label}
-					<Info className="size-icon-sm" aria-hidden="true" />
+					{engineStatus === "unreachable" && (
+						<Info className="size-icon-sm" aria-hidden="true" />
+					)}
 				</span>
 			</TooltipTrigger>
 			{/* Wraps rather than truncates: an engine message names a port, a path
@@ -118,9 +156,58 @@ function EngineStatus() {
 			    `max-w-64` rode `--spacing`, narrowing the column at the Default
 			    density. */}
 			<TooltipContent side="top">
-				<p className="max-w-3xs whitespace-normal break-words">{engineError}</p>
+				<p className="max-w-3xs whitespace-normal break-words">{detail}</p>
 			</TooltipContent>
 		</Tooltip>
+	);
+
+	if (!engineStartFailure) return status;
+
+	return (
+		<>
+			{status}
+			<EngineRestartButton idleLabel="Retry" busyLabel="Retrying…" />
+		</>
+	);
+}
+
+/**
+ * The engine restart as a warning-toned button, shared by Retry after a start
+ * failure and by the pending-setting restart so the two cannot drift.
+ *
+ * Spreads the rest onto the `<button>` because `PendingRestartButton` wraps it
+ * in a `TooltipTrigger asChild`, which hands it a ref and event handlers.
+ */
+function EngineRestartButton({
+	idleLabel,
+	busyLabel,
+	className,
+	...props
+}: {
+	idleLabel: string;
+	busyLabel: string;
+} & Omit<ComponentProps<"button">, "children" | "onClick" | "disabled">) {
+	const { restart, isRestarting } = useEngineRestart();
+
+	return (
+		<button
+			{...props}
+			onClick={() => void restart()}
+			disabled={isRestarting}
+			className={cn(
+				"group flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				className
+			)}
+		>
+			<RefreshCw
+				className={cn("size-icon-sm", isRestarting && "animate-spin")}
+				// Not while it is already spinning: the one-shot turn would
+				// fight the `animate-spin` loop that says work is happening.
+				data-icon-motion={isRestarting ? undefined : ICON_MOTION.spinOnce}
+				aria-hidden="true"
+			/>
+			{isRestarting ? busyLabel : idleLabel}
+		</button>
 	);
 }
 
@@ -445,8 +532,6 @@ function SaveStatusLine() {
 }
 
 function PendingRestartButton() {
-	const { restart, isRestarting } = useEngineRestart();
-
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -462,20 +547,11 @@ function PendingRestartButton() {
 				 * a setting, not the state of a run, a connection or a service, and
 				 * amber in that family means "4xx client error".
 				 */}
-				<button
-					onClick={() => void restart()}
-					disabled={isRestarting}
-					className="enter-fade group flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-				>
-					<RefreshCw
-						className={cn("size-icon-sm", isRestarting && "animate-spin")}
-						// Not while it is already spinning: the one-shot turn would
-						// fight the `animate-spin` loop that says work is happening.
-						data-icon-motion={isRestarting ? undefined : ICON_MOTION.spinOnce}
-						aria-hidden="true"
-					/>
-					{isRestarting ? "Restarting…" : "Restart pending"}
-				</button>
+				<EngineRestartButton
+					idleLabel="Restart pending"
+					busyLabel="Restarting…"
+					className="enter-fade"
+				/>
 			</TooltipTrigger>
 			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
 			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}

@@ -29,7 +29,7 @@
  * only the source knows is a limitation nobody knows.
  */
 
-import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
+import { engineOrigin } from "./engine-endpoint.js";
 import { appLogger } from "./app-log.js";
 import { engineFetch } from "./engine-fetch.js";
 
@@ -111,21 +111,19 @@ export interface ProxyResolutionSystem {
 	log: (message: string) => void;
 }
 
-const engineBase = () => `http://${ENGINE_HOST}:${ENGINE_PORT}`;
-
 export const defaultProxyResolutionSystem: ProxyResolutionSystem = {
 	// Filled in by `installProxyResolution`, which is the only place a real
 	// Electron session exists. Resolving nothing is the correct answer for a
 	// process with no session: it leaves the setting alone.
 	resolveProxy: async () => "DIRECT",
 	readSetting: async (key) => {
-		const response = await engineFetch(`${engineBase()}/config`);
+		const response = await engineFetch(`${engineOrigin()}/config`);
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 		const config = (await response.json()) as { entries?: { key?: string; value?: string }[] };
 		return config?.entries?.find((entry) => entry.key === key)?.value ?? "";
 	},
 	writeSetting: async (key, value) => {
-		const response = await engineFetch(`${engineBase()}/config`, {
+		const response = await engineFetch(`${engineOrigin()}/config`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ entries: { [key]: value } }),

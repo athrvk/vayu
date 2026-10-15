@@ -11,7 +11,8 @@ Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
 [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk),
-and proxies the engine's REST API on `:9876`. The **C++ engine is not modified** -
+and proxies the engine's REST API on `:9876` (or the fallback port the app chose
+when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
 Once Vayu is running, any agent opts in with one command; if Vayu is down, the
@@ -1906,7 +1907,7 @@ configurable in **Settings → MCP** and persisted.
   `POST`-only, 4 MB body cap.
 
 **Why no auth token on the endpoint:** any local process could already reach the
-engine's REST API on `:9876`; the MCP endpoint proxies the same capability behind
+engine's REST API on `:9876` (or its fallback); the MCP endpoint proxies the same capability behind
 _more_ guards and adds DNS-rebinding protection. It grants no capability a local
 process did not already have.
 
@@ -2219,7 +2220,7 @@ from environment variables:
 
 | Variable                        | Default                 | Meaning                                |
 | ------------------------------- | ----------------------- | -------------------------------------- |
-| `VAYU_ENGINE_URL`               | `http://127.0.0.1:9876` | Engine base URL.                       |
+| `VAYU_ENGINE_URL`               | `http://127.0.0.1:9876` | Engine base URL. Set it to the address the Dock shows when the app fell back to another port (#2118); the Electron-hosted server follows the app's port by itself. |
 | `VAYU_VERSION`                  | `0.0.0`                 | Version reported to clients.           |
 | `VAYU_MCP_ALLOWLIST`            | (empty)                 | Comma-separated hostnames.             |
 | `VAYU_MCP_ALLOW_ALL`            | `false`                 | `true` bypasses the allowlist.         |

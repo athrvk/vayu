@@ -1853,7 +1853,7 @@ not rule names - two of these lines silence two rules at once.
   buttons, on a landmark because the rail is `role="toolbar"`-free.
 - `components/layout/Dock.tsx` (3) - `jsx-a11y/no-noninteractive-tabindex`
   three times: the Radix `TooltipTrigger` wires focus and blur to the tooltip
-  holding the engine error text, the same shape again on the save-error
+  holding the engine's address or error text, the same shape again on the save-error
   tooltip, and again on the version string's worker-count tooltip (issue
   #1508) - each the only keyboard path to its text.
 - `components/layout/PanelResizeHandle.tsx` (1) -

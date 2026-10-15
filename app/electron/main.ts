@@ -27,7 +27,13 @@ import {
 import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
+import {
+	EngineSidecar,
+	EngineNotReadyError,
+	EnginePortInUseError,
+	defaultSidecarSystem,
+} from "./sidecar.js";
+import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { hashDataFile, hashDataFileReply, readDataFile } from "./data-file.js";
 import { AppFocusStore } from "./app-focus.js";
@@ -132,8 +138,7 @@ import {
 	TITLEBAR_FG_DARK,
 	WINDOW_BG_LIGHT,
 	WINDOW_BG_DARK,
-	ENGINE_HOST,
-	ENGINE_PORT,
+	ENGINE_PORT_CANDIDATES,
 	MCP_HOST,
 	MCP_PORT,
 	MCP_ENDPOINT_URL,
@@ -191,6 +196,13 @@ let engineSidecar: EngineSidecar | null = null;
  * promise cannot surface as an unhandled rejection.
  */
 let engineStartup: Promise<void> | null = null;
+/**
+ * Why the engine is down when a start failed in a way that leaves the window up
+ * for the user to fix: today only `EnginePortInUseError`. Read by the
+ * renderer's disconnected state over `engine:startFailure`; null once a start
+ * or restart succeeds.
+ */
+let engineStartFailure: string | null = null;
 // The MCP port, bound while the server is enabled. See mcp/listener.ts.
 let mcpListener: McpListener | null = null;
 // The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
@@ -515,6 +527,9 @@ function createWindow() {
 			nodeIntegration: false,
 			contextIsolation: true,
 			preload: path.join(__dirname, "preload.js"),
+			// The engine's port, read once by the preload (#2118). Fixed before
+			// the first window exists; see `enginePortFixed`.
+			additionalArguments: [`--vayu-engine-port=${enginePort()}`],
 			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
 			// header values, {{tokens}} and JSON keys all draw squiggles - and on
 			// Windows and Linux the checker fetches Hunspell dictionaries from a
@@ -874,9 +889,19 @@ function createMenu() {
 	Menu.setApplicationMenu(menu);
 }
 
+/** The sidecar's port choice, made known to every reader of `engineOrigin()`. */
+function publishEnginePort(port: number): void {
+	fixEnginePort(port);
+	appLogger().info("main", "Engine endpoint for this session", { url: engineOrigin() });
+}
+
 async function startEngine() {
 	try {
-		engineSidecar = new EngineSidecar();
+		engineSidecar = new EngineSidecar(
+			ENGINE_PORT_CANDIDATES,
+			defaultSidecarSystem,
+			publishEnginePort
+		);
 		await engineSidecar.start();
 		appLogger().info("main", "Engine started successfully", { url: engineSidecar.getApiUrl() });
 		// Read once per launch: the file floor governs every record buffered
@@ -891,6 +916,19 @@ async function startEngine() {
 		if (error instanceof EngineNotReadyError) {
 			appLogger().warn("main", `${error.message}; leaving it to the renderer's health poll.`);
 			appLogger().applyFloor("debug");
+			return;
+		}
+
+		// Another program holds every port the engine may use. That is the
+		// user's to fix, not a reason to leave: the window stays on the
+		// disconnected state with this sentence, and Retry (`engine:restart`)
+		// tries again.
+		if (error instanceof EnginePortInUseError) {
+			appLogger().warn("main", "No engine port is free; waiting for the user to retry", {
+				error: error.message,
+			});
+			appLogger().applyFloor("debug");
+			engineStartFailure = error.message;
 			return;
 		}
 
@@ -989,7 +1027,7 @@ async function startMcp() {
 			loadHandler: async () => {
 				const { VayuMcpService } = await loadMcp();
 				const service = new VayuMcpService({
-					engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
+					engineBaseUrl: engineOrigin(),
 					host: MCP_HOST,
 					port: MCP_PORT,
 					version: app.getVersion(),
@@ -1068,6 +1106,9 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		return { success: false, error: "Engine sidecar not initialized" };
 	}
 
+	// Cleared up front: the renderer reads it to decide an engine is not
+	// coming, and a retry in flight is exactly when that is no longer known.
+	engineStartFailure = null;
 	try {
 		await engineSidecar.restart();
 		appLogger().info("main", "Engine restarted successfully");
@@ -1078,6 +1119,7 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		// written for the user and attaches the attempt that failed as `cause`,
 		// which the string form drops. The renderer still gets the sentence.
 		appLogger().error("main", "Failed to restart engine", { error: String(error) });
+		engineStartFailure = error instanceof EnginePortInUseError ? error.message : null;
 		return { success: false, error: errorMessage };
 	}
 }
@@ -1168,6 +1210,10 @@ function setupIpcHandlers() {
 	ipcMain.handle("engine:restart", async () => {
 		return await restartEngine();
 	});
+
+	// Why a launch left the window up without an engine, for the disconnected
+	// state to show; null when there is nothing to say.
+	ipcMain.handle("engine:startFailure", () => engineStartFailure);
 
 	// MCP server status - used by Settings to show the connect URL and state.
 	ipcMain.handle("mcp:status", () => {
@@ -1652,6 +1698,12 @@ app.whenReady().then(async () => {
 	// corrupt one left the app with a headless engine and no window. MCP is an
 	// optional convenience with no UI depending on it, so it still starts after
 	// everything the user can see is up and wired.
+	//
+	// The one wait first: the window's renderer is told the engine's port as it
+	// is created (`additionalArguments`), so the sidecar's choice has to exist.
+	// Probing is milliseconds and does not wait for the engine to be ready; a
+	// start that fails before choosing settles `engineStartup` instead.
+	await Promise.race([enginePortFixed(), engineStartup]);
 	createWindow();
 
 	// Before the engine wait, like the window: a macOS Dock click during a slow

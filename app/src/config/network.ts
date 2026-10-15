@@ -8,13 +8,33 @@
 /**
  * UI-to-Engine Network Configuration
  *
- * The engine sidecar listens on a fixed local port (see engine docs and
- * app/electron/constants.ts - the electron main process duplicates the port
- * because it cannot import renderer modules).
+ * The engine sidecar listens on 9876 unless another program holds it, in which
+ * case the main process picks a fallback and tells the renderer once, as
+ * `electronAPI.enginePort` (#2118; the candidate list is
+ * app/electron/constants.ts, which the main process owns because it cannot
+ * import renderer modules). The preload sets that value before any renderer
+ * script runs, so resolving it at module load is complete.
  */
 
+/** The engine's default port, and the answer wherever there is no preload. */
+export const DEFAULT_ENGINE_PORT = 9876;
+
+/**
+ * The port the preload reports, or the default when there is no preload (a
+ * browser tab, the test suite) or it reports something that is not a port.
+ */
+export function resolveEnginePort(api: { enginePort?: number | null } | undefined): number {
+	const port = api?.enginePort;
+	if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) {
+		return DEFAULT_ENGINE_PORT;
+	}
+	return port;
+}
+
 export const ENGINE_HOST = "127.0.0.1";
-export const ENGINE_PORT = 9876;
+export const ENGINE_PORT = resolveEnginePort(
+	typeof window === "undefined" ? undefined : window.electronAPI
+);
 export const ENGINE_BASE_URL = `http://${ENGINE_HOST}:${ENGINE_PORT}`;
 
 /** Default timeout for UI-to-engine requests (local operations). */

@@ -104,6 +104,9 @@ See [Engine Architecture](engine/architecture.md) for detailed information.
 ## Communication Protocol
 
 The Manager communicates with the Engine via a localhost HTTP API on port 9876.
+If another program already holds that port, the Manager runs the engine on a
+fallback port instead and tells the renderer which (see
+[Ownership model](#ownership-model)); the Dock's engine status shows the address.
 
 ### Request/Response Flow
 
@@ -339,8 +342,9 @@ The Engine runs as a separate process managed by the Electron main process:
 
 ### Ownership model
 
-The engine binds one fixed port (9876) and owns one SQLite database, so exactly
-one app instance may drive it:
+The engine binds one port and owns one SQLite database, so exactly one app
+instance may drive it. The port is 9876 unless another program holds it, in
+which case the app picks a fallback (below).
 
 - **One instance.** The app takes `app.requestSingleInstanceLock()` before it
   starts anything. A second launch focuses the running window and exits - it
@@ -351,9 +355,9 @@ one app instance may drive it:
   a restart (`--restarted-after-reboot`, registered by `restart-registration.ts`):
   an ordinary launch that takes the lock, with nothing special-cased.
 - **Spawned or adopted, the running instance owns the engine.** Normally the app
-  spawns it. If an engine is already answering on the port at startup - an
-  orphan left by a crashed session, or in development one started by hand - the
-  app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
+  spawns it. If an engine is already answering on one of its ports at startup -
+  an orphan left by a crashed session, or in development one started by hand -
+  the app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
   data directory), reported as running, restarted for real when Settings asks,
   and shut down on quit like any engine the app spawned itself. Adoption checks
   the running engine's `/health.version` against this app's own first (issue
@@ -361,8 +365,22 @@ one app instance may drive it:
   its own build instead - see `docs/lock-file-handling.md`. A lock PID that is
   a live Vayu engine but never answers `/health` is waited for on the same
   budget a spawned engine gets, adopted if it answers, and otherwise stopped by
-  PID and replaced (issue #1905); "port in use by another application" is left
-  for a port the lock does not explain.
+  PID and replaced (issue #1905); a port the lock does not explain is held by
+  another program, and the app moves on to its next port (next bullet).
+- **Another program on 9876 moves the engine, it does not stop the app** (issue
+  #2118). The sidecar walks an ordered list: 9876, then 9880-9889 (a fixed list
+  rather than an OS-assigned port, because the renderer's CSP names its
+  `connect-src` origins at build time, and clear of the MCP port 9877). A port
+  answering `/health` goes through the adopt-or-replace flow above, a free one is
+  taken, a held one is skipped. The first start fixes the choice for the life of
+  the app: the main process passes it to the renderer once, as
+  `electronAPI.enginePort`, and the renderer's `ENGINE_BASE_URL`, the `Origin`
+  bridge and the MCP server's engine URL all follow it. The Dock's engine status
+  shows the address while connected. With every port held the app stays up on
+  the disconnected state, the Dock says to free 9876 and offers Retry (the
+  renderer was told one port, so Retry looks at 9876 alone), and nothing quits. Tools outside the app assume 9876: `vayu-cli --daemon`
+  and the stdio MCP launcher's `VAYU_ENGINE_URL` need the address the Dock shows
+  when the app fell back.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a
   wait for the process to go, then a name-verified kill by PID if it outstays
   the grace period. The name check is what keeps a recycled PID from being
@@ -412,12 +430,15 @@ one app instance may drive it:
   an answer nobody is there to give (issue #1363). The flush-failure dialog above
   is no exception: a signal quit that cannot save its edits would stall on it
   until `install.sh` killed the app and orphaned the engine (issue #1908).
-- **A taken port is a loud failure, not a silent one.** The engine binds 9876
-  before it serves, so anything already holding the port makes it print
-  `Could not bind 127.0.0.1:9876 - ...` to stderr and exit **1** rather than
-  report itself listening. It never falls back to another port: the app and CLI
-  both address the engine at a fixed one, so an engine on a different port would
-  be a quieter failure than no engine at all.
+- **A taken port is a loud failure, not a silent one.** The engine binds its
+  port (`--port`, default 9876) before it serves, so anything already holding
+  it makes it print `Could not bind 127.0.0.1:<port> - ...` to stderr and exit
+  **1** rather than report itself listening. The engine never falls back to
+  another port by itself, because a process that silently moves is a quieter
+  failure than none. The *app* is what chooses a different port, before it
+  spawns the engine, and then tells every consumer (issue #2118, above); it
+  checks the port is free first, so the engine's exit 1 is the race where
+  something takes the port in between.
 - **A database written by a newer engine refuses to open, the same way.**
   `Database::migrate_before_sync` reads `PRAGMA user_version` before touching
   anything else and, on a version newer than this build's `SCHEMA_VERSION`,
@@ -584,7 +605,8 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   are sent, checked after variables resolve, and every transfer handle is
   restricted to those two protocols for redirects too
   ([URL schemes](engine/api-reference.md#url-schemes)).
-- **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
+- **Local-Only Communication**: Control API only binds to `127.0.0.1` (port 9876
+  by default; the app may choose a fallback, see [Ownership model](#ownership-model))
 - **The engine serves no browser**: it sends no CORS header, and before any
   route runs it refuses a `Host` that is not `127.0.0.1:<port>`,
   `localhost:<port>` or `[::1]:<port>` (DNS rebinding) and any request carrying
@@ -598,9 +620,11 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **The shell carries the renderer past that gate**: the renderer is a browser
   context too. The Electron shell (`app/electron/engine-origin.ts`), on the
   main window's session, strips the renderer's `Origin` and `Referer` from
-  requests to exactly `http://127.0.0.1:9876/*` and supplies the CORS response
-  headers the renderer needs, so the renderer reaches the engine like any
-  local tool. That URL filter is the whole boundary, which is why nothing but
+  requests to the engine's own address, `http://127.0.0.1:<port>/*` for the one
+  port the app chose (the filter registers every candidate port, since it is
+  fixed at startup, but only the chosen one is bridged), and supplies the CORS
+  response headers the renderer needs, so the renderer reaches the engine like
+  any local tool. That URL filter is the whole boundary, which is why nothing but
   the app's own document may load in that session.
 - **HTML Preview runs nothing and fetches nothing**: the response pane renders
   the server's markup in an iframe with `sandbox=""` (no `allow-scripts`, no
