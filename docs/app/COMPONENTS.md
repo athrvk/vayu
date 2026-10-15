@@ -2045,7 +2045,7 @@ seeding lost its reason to exist. **A fresh entity's Elements tab shows a
 sentence plus quick-add chips instead of a bare `emptyLabel` string**
 (issue #1608): `ElementList` itself computes them from whichever kinds it
 finds in the `kinds` prop it was already handed - Extract from JSON, Assert
-status code and Pre-request script always, Setup script only when the
+status code, Pre-request script and Post-request script always (#2129), Setup script only when the
 collection tab's own `kinds` (which, unlike the request tab's, includes the
 `collectionOnly` kinds) offers `script.setup`. A click adds that kind,
 expanded, the same as the picker.

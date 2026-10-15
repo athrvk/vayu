@@ -55,8 +55,7 @@ describe("EmptyState", () => {
 	});
 
 	it("refuses icon, iconClassName and description on an inline state at compile time", () => {
-		// #2129: the inline variant used to discard these silently. Each line
-		// carries one directive, so loosening any one prop in the type leaves
+		// #2129: each line carries one directive, so loosening any one prop in the type leaves
 		// an unused `@ts-expect-error`, which `pnpm type-check` reports.
 		const elements = [
 			// @ts-expect-error inline has no icon
