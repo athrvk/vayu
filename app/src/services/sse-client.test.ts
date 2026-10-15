@@ -37,6 +37,26 @@ describe("mapSseMetrics", () => {
 		expect(m.status_codes).toBeUndefined();
 	});
 
+	it("maps the error count and its HTTP errors / No response split (issue #2124)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			totalRequests: 100,
+			totalErrors: 17,
+			httpErrors: 15,
+			noResponse: 2,
+		});
+		expect(m.requests_failed).toBe(17);
+		expect(m.http_errors).toBe(15);
+		expect(m.no_response).toBe(2);
+	});
+
+	it("defaults the error split to 0 when the frame carries none", () => {
+		const m = mapSseMetrics({ timestamp: 1, totalRequests: 0 });
+		expect(m.requests_failed).toBe(0);
+		expect(m.http_errors).toBe(0);
+		expect(m.no_response).toBe(0);
+	});
+
 	it("renames customMetrics into custom_metrics (issue #1500)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,
@@ -285,6 +305,31 @@ function attach(client: SSEClient, runId: string, h: ReturnType<typeof handlers>
 		h.onSuperseded
 	);
 }
+
+describe("SSEClient - the placeholder before the first tick", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("reports zero errors, with the split, when the run ends before any tick", () => {
+		const client = new SSEClient();
+		const h = handlers();
+
+		attach(client, "run_1", h);
+		MockEventSource.instances[0]?.complete("completed");
+
+		expect(h.onMessage).toHaveBeenCalledTimes(1);
+		expect(h.onMessage.mock.calls[0][0]).toMatchObject({
+			requests_failed: 0,
+			http_errors: 0,
+			no_response: 0,
+		});
+	});
+});
 
 describe("SSEClient - the hand-off when a run is displaced", () => {
 	beforeEach(() => {

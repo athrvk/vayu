@@ -20,6 +20,7 @@ import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import { pluralize } from "../utils/format";
+import { errorBreakdown } from "../utils/errorBreakdown";
 import {
 	CompactHeadersViewer,
 	CapturedResponseNotice,
@@ -75,6 +76,11 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 
 	const statusCodes = report.statusCodes || {};
 	const hasStatusCodes = Object.keys(statusCodes).length > 0;
+	const errors = errorBreakdown(
+		report.summary.failedRequests,
+		report.summary.httpErrorRequests,
+		report.summary.noResponseRequests
+	);
 
 	return (
 		<div className="p-5 space-y-4">
@@ -132,6 +138,14 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 								<span className="font-semibold text-destructive-text">
 									{report.errors.total}
 								</span>
+							</div>
+							<div className="flex justify-between text-sm">
+								<span className="text-muted-foreground">HTTP errors:</span>
+								<span className="font-medium">{errors.httpErrors}</span>
+							</div>
+							<div className="flex justify-between text-sm">
+								<span className="text-muted-foreground">No response:</span>
+								<span className="font-medium">{errors.noResponse}</span>
 							</div>
 							{Object.entries(report.errors.types || {}).map(([type, count]) => (
 								<div key={type} className="flex justify-between text-sm">

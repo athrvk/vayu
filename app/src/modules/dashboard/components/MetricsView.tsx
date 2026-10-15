@@ -42,6 +42,7 @@ import {
 	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
 import { createAnomalyDetector } from "../utils/detectAnomalies";
+import { errorBreakdown } from "../utils/errorBreakdown";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -162,6 +163,12 @@ function MetricsView({
 			metrics.throughput ??
 			metrics.current_rps;
 		const droppedRequests = metrics.dropped_requests ?? 0;
+		const failedRequests = metrics.requests_failed ?? 0;
+		const { httpErrors, noResponse } = errorBreakdown(
+			failedRequests,
+			metrics.http_errors,
+			metrics.no_response
+		);
 
 		return {
 			mode: loadMode,
@@ -173,8 +180,12 @@ function MetricsView({
 			currentRps: metrics.current_rps ?? 0,
 			avgQueueWaitMs: metrics.avg_queue_wait_ms ?? 0,
 			totalRequests: metrics.requests_completed,
-			failedRequests: metrics.requests_failed ?? 0,
-			statusCodes: finalReport?.statusCodes ?? {},
+			failedRequests,
+			httpErrors,
+			noResponse,
+			// The report's distribution wins once there is one; the live tick's
+			// map is what fills the bar during the run (issue #2124).
+			statusCodes: finalReport?.statusCodes ?? metrics.status_codes ?? {},
 			requestsExpected: metrics.requests_expected ?? 0,
 			requestsSent: metrics.requests_sent ?? 0,
 			peakConcurrency,

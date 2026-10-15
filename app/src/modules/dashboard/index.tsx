@@ -245,6 +245,8 @@ export default function LoadTestDashboard() {
 			return {
 				requests_completed: finalReport.summary.totalRequests,
 				requests_failed: finalReport.summary.failedRequests,
+				http_errors: finalReport.summary.httpErrorRequests,
+				no_response: finalReport.summary.noResponseRequests,
 				current_rps: finalReport.summary.avgRps,
 				latency_p50_ms: finalReport.latency.p50,
 				latency_p95_ms: finalReport.latency.p95,

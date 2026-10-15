@@ -30,6 +30,8 @@ export function HeroRow({ d }: { d: DashboardDerived }) {
 			<ErrorRateCard
 				totalRequests={d.totalRequests}
 				failedRequests={d.failedRequests}
+				httpErrors={d.httpErrors}
+				noResponse={d.noResponse}
 				statusCodes={d.statusCodes}
 			/>
 		</div>

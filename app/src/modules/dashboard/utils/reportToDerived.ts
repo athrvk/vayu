@@ -8,6 +8,7 @@
 import type { RunReport } from "@/types";
 import type { DashboardDerived } from "../types";
 import { resolveMode } from "../hooks/useMode";
+import { errorBreakdown } from "./errorBreakdown";
 import { isRateLimitedRun } from "./metricsTransforms";
 
 /** Parse a duration string like "10s" to seconds; undefined/empty → undefined. */
@@ -44,6 +45,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		avgQueueWaitMs: s.avgQueueWaitMs ?? 0,
 		totalRequests: s.totalRequests,
 		failedRequests: s.failedRequests,
+		...errorBreakdown(s.failedRequests, s.httpErrorRequests, s.noResponseRequests),
 		statusCodes: report.statusCodes ?? {},
 		requestsExpected: s.totalRequests,
 		requestsSent: s.totalRequests,
