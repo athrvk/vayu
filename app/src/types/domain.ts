@@ -2229,10 +2229,25 @@ export interface RunScenarioStepStat {
 	/** Step executions across every virtual user and iteration. */
 	executed: number;
 	/**
-	 * Of those, the ones that errored. An errored step ends its iteration, so a
-	 * non-zero count here is also why the steps after it ran fewer times.
+	 * Of those, the ones that were errors under the run's one definition (issue
+	 * #2124): a response outside 2xx/3xx, or no response at all. The sum of
+	 * {@link httpErrors} and {@link noResponse}. Only a no-response step ends its
+	 * iteration, so a non-zero count here does not by itself explain the steps
+	 * after it running fewer times.
 	 */
 	errors: number;
+	/**
+	 * Of {@link errors}, the responses that arrived with a 4xx or 5xx. The
+	 * iteration carries on to the next step. Absent from a report stored before
+	 * the engine split the tally (issue #2134).
+	 */
+	httpErrors?: number;
+	/**
+	 * Of {@link errors}, the executions that got no response (a transport error,
+	 * or a step never sent). These are the ones that end the iteration. Absent
+	 * from a report stored before the engine split the tally (issue #2134).
+	 */
+	noResponse?: number;
 	latency: {
 		min: number;
 		p50: number;
@@ -2796,8 +2811,10 @@ export interface RunReport {
 		/** Step executions the run performed, whether or not their rows survived. */
 		stepsExecuted: number;
 		passed: number;
+		/** On a load run: step executions that answered 4xx/5xx (the steps' `httpErrors`). */
 		failed: number;
 		skipped: number;
+		/** On a load run: step executions that got no response (the steps' `noResponse`). */
 		errored: number;
 		/** Step rows the run kept - the length `results[]` should have. */
 		stepsStored: number;
@@ -2813,7 +2830,8 @@ export interface RunReport {
 		 */
 		virtualUsers?: number;
 		/**
-		 * Iterations an errored step ended before the plan's last step. Counted
+		 * Iterations a step with no response ended before the plan's last step
+		 * (an HTTP error status does not end one). Counted
 		 * apart from `iterationsCompleted` because it is what explains a
 		 * breakdown that thins towards the end of the sequence.
 		 */

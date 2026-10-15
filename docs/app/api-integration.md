@@ -826,9 +826,16 @@ history row reads it because a run whose work is a sequence has no `url` or
 
 A scenario load run's **report** carries the per-step breakdown the design-mode
 runner has no need for: `scenario.steps[]`
-(`{index, name, requestId, method, executed, errors, latency:{min,p50,p95,p99,max}}`)
+(`{index, name, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`)
 plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
 rows, so that array is the only per-step record such a run keeps.
+
+A step's `errors` is the run's one error definition (a response outside 2xx/3xx,
+or no response) and equals `httpErrors + noResponse`. Only a `noResponse`
+execution ends its iteration; an HTTP error status does not. `httpErrors` and
+`noResponse` are optional in the renderer's type because a report stored before
+the engine split the tally lacks them; the Steps table shows the split in the
+Errors cell's tooltip when both are present and the bare count otherwise.
 
 A step also carries `tests` (`{sampled, passed, failed}`) when its own
 post-request script was replayed against that step's sampled responses - the

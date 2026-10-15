@@ -95,6 +95,14 @@ class ScenarioMockServer {
             });
         }
 
+        // A response that arrived and is still an error (#2134): unlike the
+        // refused port the transport-error tests use, it has a status.
+        svr.Get ("/fail500", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/fail500");
+            res.status = 500;
+            res.set_content (R"({"error":"boom"})", "application/json");
+        });
+
         // The body a bind produced, read off the wire rather than off the plan:
         // a body that binds cleanly and is then re-encoded downstream is still
         // a corrupt request (issue #593).
@@ -628,6 +636,78 @@ TEST_F (ScenarioLoadTest, AStepTheStopCancelledMovesNoStepTally) {
     << "a cancelled send was counted against its operation";
 }
 
+// A step that answered 500 is an error in its own row of the breakdown, but a
+// response arrived, so the iteration goes on to the next step (#2134). The
+// summary counts it as `failed`, never `errored`, which stays the
+// iteration-abort count. Mutation checks: drop the `record_failed_status`
+// call in the completion callback and the error counts read 0; make an HTTP
+// error status set `errored` there and `/s2` is never reached.
+TEST_F (ScenarioLoadTest, AStepAnsweringAnHttpErrorCountsAsAnErrorWithoutEndingItsIteration) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/fail500"), server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (server.hits_for ("/fail500").size (), 3u);
+    EXPECT_EQ (server.hits_for ("/s2").size (), 3u)
+    << "an HTTP error response ended the iteration as if nothing had answered";
+
+    EXPECT_EQ (state->steps.completed (1), 3u);
+    EXPECT_EQ (state->steps.errors (1), 3u)
+    << "a step that answered 500 on every send reported no errors";
+    EXPECT_EQ (state->steps.http_errors (1), 3u);
+    EXPECT_EQ (state->steps.no_response (1), 0u);
+    EXPECT_EQ (state->steps.errors (0), 0u);
+    EXPECT_EQ (state->steps.errors (2), 0u);
+    EXPECT_EQ (state->steps_errored.load (), 0u);
+    EXPECT_EQ (state->iterations_abandoned.load (), 0u);
+    EXPECT_EQ (state->iterations_completed.load (), 3u);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps_executed"], 9);
+    EXPECT_EQ (summary["errored"], 0);
+    EXPECT_EQ (summary["iterations_abandoned"], 0);
+    EXPECT_EQ (summary["failed"], 3);
+    EXPECT_EQ (summary["passed"], 6) << "a 500 was counted as a passed step";
+    const auto& failing = summary["steps"][1];
+    EXPECT_EQ (failing["errors"], 3);
+    EXPECT_EQ (failing["httpErrors"], 3);
+    EXPECT_EQ (failing["noResponse"], 0);
+}
+
+// The other half of the error definition: a step nothing answered is a
+// `noResponse` error, and that one does end its iteration.
+TEST_F (ScenarioLoadTest, AStepWithNoResponseCountsAsNoResponseAndEndsItsIteration) {
+    ScenarioMockServer server;
+    const auto execution = plan_over (
+    { server.url ("/s0"), "http://127.0.0.1:1/unreachable", server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s2").size (), 0u);
+    EXPECT_EQ (state->steps.errors (1), 2u);
+    EXPECT_EQ (state->steps.no_response (1), 2u);
+    EXPECT_EQ (state->steps.http_errors (1), 0u);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps_executed"], 4);
+    EXPECT_EQ (summary["errored"], 2);
+    EXPECT_EQ (summary["iterations_abandoned"], 2);
+    EXPECT_EQ (summary["failed"], 0);
+    EXPECT_EQ (summary["passed"], 2);
+    const auto& unanswered = summary["steps"][1];
+    EXPECT_EQ (unanswered["errors"], 2);
+    EXPECT_EQ (unanswered["noResponse"], 2);
+    EXPECT_EQ (unanswered["httpErrors"], 0);
+}
+
 // ============================================================================
 // Per-step metrics
 // ============================================================================
@@ -752,6 +832,8 @@ TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenario
     EXPECT_EQ (summary["iterations_completed"], 2);
     EXPECT_EQ (summary["steps_executed"], 4);
     EXPECT_EQ (summary["errored"], 0);
+    EXPECT_EQ (summary["passed"], 4);
+    EXPECT_EQ (summary["failed"], 0);
     // This mode's own.
     EXPECT_EQ (summary["virtual_users"], 1);
 
@@ -762,6 +844,9 @@ TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenario
     EXPECT_EQ (summary["steps"][0]["requestId"], "req_0");
     EXPECT_EQ (summary["steps"][0]["method"], "GET");
     EXPECT_EQ (summary["steps"][0]["executed"], 2);
+    EXPECT_EQ (summary["steps"][0]["errors"], 0);
+    EXPECT_EQ (summary["steps"][0]["httpErrors"], 0);
+    EXPECT_EQ (summary["steps"][0]["noResponse"], 0);
     EXPECT_EQ (summary["steps"][1]["name"], "step1");
     EXPECT_TRUE (summary["steps"][0]["latency"].contains ("p99"));
 }

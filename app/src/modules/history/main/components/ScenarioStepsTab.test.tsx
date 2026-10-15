@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import ScenarioStepsTab from "./ScenarioStepsTab";
 import type { RunScenarioStepStat } from "@/types";
 
@@ -67,9 +68,9 @@ describe("the step table", () => {
 	});
 
 	it("says how far short of the first step a later one ran", () => {
-		// An errored step ends its iteration, so the steps after it run fewer
-		// times. Saying so is what stops the reader concluding the run simply
-		// lost requests.
+		// A step that got no response ends its iteration, so the steps after it
+		// run fewer times. Saying so is what stops the reader concluding the run
+		// simply lost requests.
 		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
 		expect(within(rowFor("List orders")).getByText(/\(6 short\)/)).toBeTruthy();
 		expect(within(rowFor("Log in")).queryByText(/short/)).toBeNull();
@@ -107,6 +108,65 @@ describe("the step table", () => {
 		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
 		const table = screen.getByRole("table");
 		expect(table.parentElement?.className).toContain("overflow-x-auto");
+	});
+});
+
+/**
+ * The Errors column counts HTTP error responses as well as requests that got no
+ * response (issue #2134); only the second ends an iteration, so the tooltip
+ * keeps the two apart.
+ */
+describe("the Errors column", () => {
+	const errorsCell = (name: string) => within(rowFor(name)).getByText("6").closest("td")!;
+
+	it("shows the red count and splits it into HTTP errors and no response on hover", async () => {
+		const split: RunScenarioStepStat[] = [
+			STEPS[0],
+			{ ...STEPS[1], errors: 6, httpErrors: 4, noResponse: 2 },
+		];
+		render(<ScenarioStepsTab steps={split} virtualUsers={8} />);
+
+		const cell = errorsCell("List orders");
+		expect(cell.className).toContain("text-status-error-text");
+		fireEvent.pointerMove(within(cell).getByText("6"), { pointerType: "mouse" });
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(
+			"4 HTTP errors, 2 no response"
+		);
+	});
+
+	it("uses the singular for a lone HTTP error", async () => {
+		const one: RunScenarioStepStat[] = [
+			{ ...STEPS[1], errors: 6, httpErrors: 1, noResponse: 5 },
+		];
+		render(<ScenarioStepsTab steps={one} virtualUsers={8} />);
+
+		fireEvent.pointerMove(within(errorsCell("List orders")).getByText("6"), {
+			pointerType: "mouse",
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("1 HTTP error, 5 no response");
+	});
+
+	it("shows the bare count, with no split, for a report stored before the split", () => {
+		// `STEPS[1]` carries `errors: 6` and neither `httpErrors` nor `noResponse`,
+		// the shape an older stored report has.
+		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
+
+		const cell = errorsCell("List orders");
+		expect(cell.className).toContain("text-status-error-text");
+		fireEvent.pointerMove(within(cell).getByText("6"), { pointerType: "mouse" });
+		expect(screen.queryByRole("tooltip")).toBeNull();
+	});
+
+	it("leaves a step with no errors muted and without a tooltip", () => {
+		const clean: RunScenarioStepStat[] = [{ ...STEPS[0], httpErrors: 0, noResponse: 0 }];
+		render(<ScenarioStepsTab steps={clean} virtualUsers={8} />);
+
+		const cell = within(rowFor("Log in")).getByText("0").closest("td")!;
+		expect(cell.className).toContain("text-muted-foreground");
+		fireEvent.pointerMove(within(cell).getByText("0"), { pointerType: "mouse" });
+		expect(screen.queryByRole("tooltip")).toBeNull();
 	});
 });
 

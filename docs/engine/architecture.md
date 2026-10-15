@@ -1104,9 +1104,12 @@ row exists - and the executor is the only thing that differs.
   multi-step sequence is an arrival-rate executor, a named non-goal. `maxInFlight`
   is *moot*: in-flight is bounded by the VU count by construction, so setting it
   logs a warning and does nothing.
-- **An errored step ends its iteration**, and the VU starts the next one. A VU
-  stranded on a failing step would permanently shrink effective concurrency for
-  the rest of the run.
+- **A step that got no response ends its iteration**, and the VU starts the
+  next one. A VU stranded on a failing step would permanently shrink effective
+  concurrency for the rest of the run. A step that answered with an HTTP error
+  status is counted in that step's `errors` (as `httpErrors`, #2134) and the
+  iteration carries on: a response arrived, so the next step has something to
+  follow.
 - **Per-step latency histograms**, one per plan step, allocated once from the
   plan's step count - which is what `maxScenarioSteps` bounds. They reach the
   report as `summary.scenario.steps`; a scenario load run stores no per-step
