@@ -21,7 +21,7 @@
  * sides and pins the budget it spends against the main process's own.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getHealth = vi.fn();
 vi.mock("@/services/api", () => ({ apiService: { getHealth: () => getHealth() } }));
@@ -68,6 +68,7 @@ beforeEach(() => {
 	useEngineStore.setState({
 		engineStatus: "starting",
 		engineError: null,
+		engineStartFailure: null,
 		recovery: null,
 		workers: null,
 		engineStartWindow: null,
@@ -512,5 +513,87 @@ describe("useHealthQuery - a restart is a cold start", () => {
 
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
 		expect(useEngineStore.getState().engineError).toContain("socket hang up");
+	});
+});
+
+/**
+ * Every engine port held (#2118): the main process knows the engine is not
+ * coming, so the poll must not spend the startup budget pretending otherwise.
+ * It asks on a failed poll, and what it hears decides the status and puts the
+ * main process's sentence where the Dock reads it.
+ */
+describe("useHealthQuery - a start failure the main process reports", () => {
+	const SENTENCE =
+		"Another program is using port 9876 and the fallback ports. Quit it and press Retry.";
+	const getEngineStartFailure = vi.fn();
+
+	beforeEach(() => {
+		getEngineStartFailure.mockReset();
+		(window as unknown as { electronAPI?: unknown }).electronAPI = { getEngineStartFailure };
+		getHealth.mockImplementation(() => Promise.reject(new Error("connect ECONNREFUSED")));
+		// A launch inside its startup budget, which is where this matters.
+		useEngineStore.setState({ engineStartWindow: Date.now() });
+	});
+
+	afterEach(() => {
+		delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+	});
+
+	it("is unreachable at once, inside the startup budget, carrying the sentence", async () => {
+		getEngineStartFailure.mockResolvedValue(SENTENCE);
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+		expect(useEngineStore.getState().engineStartFailure).toBe(SENTENCE);
+	});
+
+	it("stays unreachable on the polls after the first, not back to Starting…", async () => {
+		getEngineStartFailure.mockResolvedValue(SENTENCE);
+		const { result } = renderHook(() => useHealthQuery(), { wrapper });
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+
+		getHealth.mockImplementation(() => Promise.reject(new Error("a later refusal")));
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		await waitFor(() => expect(useEngineStore.getState().engineError).toBe("a later refusal"));
+		expect(useEngineStore.getState().engineStatus).toBe("unreachable");
+	});
+
+	it("leaves an ordinary launch in Starting…, with nothing to report", async () => {
+		getEngineStartFailure.mockResolvedValue(null);
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(getEngineStartFailure).toHaveBeenCalled());
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
+	it("does not ask outside Electron, where there is no main process", async () => {
+		delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
+	it("is not a reason to fail the poll when the main process cannot be asked", async () => {
+		getEngineStartFailure.mockRejectedValue(new Error("ipc closed"));
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(getEngineStartFailure).toHaveBeenCalled());
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
+	it("is dropped when an engine answers", async () => {
+		useEngineStore.setState({ engineStatus: "unreachable", engineStartFailure: SENTENCE });
+		getHealth.mockReset();
+		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
 	});
 });

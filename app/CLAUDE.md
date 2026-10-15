@@ -67,7 +67,12 @@ everything.
   (`src/config/network.ts`). The engine refuses any request that carries an
   `Origin`, and the renderer's get through only because
   `electron/engine-origin.ts` strips it for exactly that URL; the same engine
-  spelled `localhost:9876` is outside the filter and is refused. That module is
+  spelled `localhost:<port>` is outside the filter and is refused. The port is
+  not a constant: the sidecar takes 9876 or the first free fallback in
+  `ENGINE_PORT_CANDIDATES` (#2118), the main process hands the choice to the
+  window as `electronAPI.enginePort`, and `network.ts` resolves it once at
+  module load (9876 where there is no preload). The main process reads it only
+  through `electron/engine-endpoint.ts`, never a literal. That module is
   also the one place a `webRequest` listener may be registered, because Electron
   keeps one per event per session (`engine-origin.test.ts`).
 - State: Zustand for UI state, TanStack Query for server state.
@@ -268,10 +273,13 @@ write the pair `bg-card surface-card` (see `docs/design-system.md`).
 
 A sweep or a probe runs the renderer under vite and drives it with
 playwright-core, no Electron: `pnpm exec vite --port <N> --strictPort`, the
-engine on a port of its own, and `ENGINE_PORT` in `src/config/network.ts`
-patched in a worktree only (it is a compile-time constant). Chromium is
-pre-installed at `/opt/pw-browsers/chromium` and needs `--no-sandbox`.
-`window.electronAPI` is absent there, so every preload-only path (file parts,
+engine on a port of its own, and `DEFAULT_ENGINE_PORT` in
+`src/config/network.ts` patched in a worktree only (it is what the renderer
+uses when no preload reports a port). Do not hand the page a stub
+`window.electronAPI` carrying just `enginePort`: `errors/error-logger.ts` and
+`TitleBar.tsx` read the object's presence as the whole bridge and would call
+methods it lacks. Chromium is pre-installed at `/opt/pw-browsers/chromium` and
+needs `--no-sandbox`. `window.electronAPI` is absent there, so every preload-only path (file parts,
 the quit flush, system notifications, the OS proxy) is off and its fallback is
 what you measure. Every root poll is a TanStack `refetchInterval` with the
 background default, so a hidden window measures the paused case; an idle

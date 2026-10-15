@@ -540,14 +540,17 @@ Bundled by Vite, so `devDependencies`:
 
 ### Port Already in Use
 
-**Error**: `Port 9876 is already in use`
+**Symptom**: another program holds port 9876.
 
-**Solution**: 
+**Solution**: the app runs the engine on the first free port of 9880-9889
+instead; the Dock's "Engine connected" tooltip shows the address it chose. When
+every one of those is held, the Dock reads "Another program is using port 9876
+and the fallback ports. Quit it and press Retry." Free a port and press Retry.
+A `vayu-engine` run by hand does not fall back: it prints
+`Could not bind 127.0.0.1:<port> - ...` and exits 1.
 ```bash
-# Kill process on port 9876
-pnpm kill-ports
-# Or manually:
-# macOS/Linux: lsof -ti:9876 | xargs kill
+# Find the holder
+# macOS/Linux: lsof -ti:9876
 # Windows: netstat -ano | findstr :9876
 ```
 

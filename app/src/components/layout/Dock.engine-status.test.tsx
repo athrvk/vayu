@@ -29,12 +29,19 @@
  * `unreachable` is the one that owes an explanation.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { Dock } from "./Dock";
 import { useEngineStore } from "@/stores";
+
+// The engine on a fallback port (#2118): the address the tooltip must read from
+// the one config, not spell out itself.
+vi.mock("@/config/network", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/config/network")>()),
+	ENGINE_BASE_URL: "http://127.0.0.1:9880",
+}));
 
 // The Dock prints the app version, which Vite `define`s at build time; vitest
 // does not, so without this the component throws before it renders anything.
@@ -60,7 +67,15 @@ const renderDock = () => {
 
 beforeEach(() => {
 	cleanup();
-	useEngineStore.setState({ engineStatus: "unreachable", engineError: null });
+	useEngineStore.setState({
+		engineStatus: "unreachable",
+		engineError: null,
+		engineStartFailure: null,
+	});
+});
+
+afterEach(() => {
+	delete (window as unknown as { electronAPI?: unknown }).electronAPI;
 });
 
 describe("the engine status indicator", () => {
@@ -89,13 +104,22 @@ describe("the engine status indicator", () => {
 		await waitFor(() => expect(screen.getAllByText(reason).length).toBeGreaterThan(0));
 	});
 
-	it("keeps the connected state a plain label", () => {
-		// A stale error must not follow the engine back up: `health.ts` clears it
-		// on success, and the indicator only offers the tooltip while down.
+	it("names the engine's address on the connected light, without the error icon", async () => {
+		// #2118: on a fallback port the address is the one thing the CLI and the
+		// stdio MCP launcher cannot guess. It rides the same focusable trigger as
+		// the error text, but a healthy engine has no problem to hover for, so the
+		// Info icon stays off.
 		useEngineStore.setState({ engineStatus: "connected", engineError: null });
 		renderDock();
 		expect(screen.getByText("Engine connected")).toBeTruthy();
-		expect(screen.getByText("Engine connected").closest("[tabindex='0']")).toBeNull();
+		expect(document.querySelector("[tabindex='0'] .lucide-info")).toBeNull();
+
+		const trigger = screen.getByText("Engine connected").closest("[tabindex='0']");
+		expect(trigger).toBeTruthy();
+		fireEvent.focus(trigger!);
+		await waitFor(() =>
+			expect(screen.getAllByText("http://127.0.0.1:9880").length).toBeGreaterThan(0)
+		);
 	});
 
 	it("paints the connection light from the --status-* family", () => {
@@ -137,5 +161,55 @@ describe("the engine status indicator", () => {
 		expect(screen.getByText("Starting…").closest("[tabindex='0']")).toBeNull();
 		expect(document.querySelector("[tabindex='0'] .lucide-info")).toBeNull();
 		expect(screen.queryByText("fetch failed: ECONNREFUSED 127.0.0.1:9876")).toBeNull();
+	});
+});
+
+/*
+ * #2118. The main process knows when every engine port is held; the health poll
+ * copies that into the store, and the Dock is where the user reads it and acts.
+ */
+describe("a start failure the main process reported", () => {
+	const SENTENCE =
+		"Another program is using port 9876 and the fallback ports. Quit it and press Retry.";
+
+	function stubRestart() {
+		const restartEngine = vi.fn().mockResolvedValue({ success: true });
+		(window as unknown as { electronAPI?: unknown }).electronAPI = { restartEngine };
+		return restartEngine;
+	}
+
+	it("is the reason on the tooltip, ahead of the transport's", async () => {
+		useEngineStore.setState({
+			engineStatus: "unreachable",
+			engineError: "connect ECONNREFUSED 127.0.0.1:9876",
+			engineStartFailure: SENTENCE,
+		});
+		renderDock();
+
+		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
+		fireEvent.focus(trigger!);
+		await waitFor(() => expect(screen.getAllByText(SENTENCE).length).toBeGreaterThan(0));
+		expect(screen.queryByText("connect ECONNREFUSED 127.0.0.1:9876")).toBeNull();
+	});
+
+	it("offers Retry, which restarts the engine", async () => {
+		const restartEngine = stubRestart();
+		useEngineStore.setState({ engineStatus: "unreachable", engineStartFailure: SENTENCE });
+		renderDock();
+
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		// The failure being retried no longer speaks for the engine coming up.
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
+	it("is the only thing that offers Retry: a plain transport error does not", () => {
+		useEngineStore.setState({
+			engineStatus: "unreachable",
+			engineError: "connect ECONNREFUSED 127.0.0.1:9876",
+			engineStartFailure: null,
+		});
+		renderDock();
+		expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
 	});
 });

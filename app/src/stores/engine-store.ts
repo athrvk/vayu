@@ -48,6 +48,18 @@ interface EngineState {
 	engineError: string | null;
 
 	/**
+	 * Why the main process has no engine to start, when that is something the
+	 * user can fix - another program holding every port the engine may use
+	 * (#2118). `null` otherwise.
+	 *
+	 * Apart from `engineError` because it is not the transport's report but the
+	 * main process's own, it does not wait out the startup budget (the engine is
+	 * known not to be coming), and its presence is what makes the Dock offer
+	 * Retry. Written by the health poll, cleared by the poll an engine answers.
+	 */
+	engineStartFailure: string | null;
+
+	/**
 	 * What the engine's startup did about a database it could not open (issue
 	 * #922), as reported by `GET /health`.
 	 *
@@ -104,6 +116,7 @@ interface EngineState {
 	// Connection actions
 	setEngineStatus: (status: EngineStatus) => void;
 	setEngineError: (error: string | null) => void;
+	setEngineStartFailure: (failure: string | null) => void;
 	setEngineRecovery: (recovery: EngineRecovery | null) => void;
 	setWorkers: (workers: number | null) => void;
 	openEngineStartWindow: (openedAt: number) => void;
@@ -119,6 +132,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	// renders on first paint, before any poll has been answered or refused.
 	engineStatus: "starting",
 	engineError: null,
+	engineStartFailure: null,
 	recovery: null,
 	workers: null,
 	// Closed until the health poll mounts and opens it. Nothing can have polled
@@ -130,6 +144,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	// Connection actions
 	setEngineStatus: (status) => set({ engineStatus: status }),
 	setEngineError: (error) => set({ engineError: error }),
+	setEngineStartFailure: (failure) => set({ engineStartFailure: failure }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 	setWorkers: (workers) => set({ workers }),
 	openEngineStartWindow: (openedAt) => set({ engineStartWindow: openedAt }),

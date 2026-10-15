@@ -185,6 +185,22 @@ describe("startup ordering", () => {
 	});
 
 	/*
+	 * #2118. The renderer reads the start failure to decide an engine is not
+	 * coming; a retry in flight must not keep reporting the one it replaces.
+	 * Mutation check: drop the clear and the slice below has no assignment
+	 * before the restart.
+	 */
+	it("forgets the start failure before a restart tries again", () => {
+		const start = main.indexOf("async function restartEngine()");
+		const clearAt = main.indexOf("engineStartFailure = null;", start);
+		const restartAt = main.indexOf("await engineSidecar.restart();", start);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(clearAt).toBeGreaterThan(start);
+		expect(clearAt).toBeLessThan(restartAt);
+	});
+
+	/*
 	 * #2118. The renderer is told the engine's port once, on its command line,
 	 * so the sidecar's choice must exist before the window does. Mutation check:
 	 * drop the `enginePortFixed()` wait and the window is built with the default

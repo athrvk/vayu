@@ -1106,10 +1106,12 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		return { success: false, error: "Engine sidecar not initialized" };
 	}
 
+	// Cleared up front: the renderer reads it to decide an engine is not
+	// coming, and a retry in flight is exactly when that is no longer known.
+	engineStartFailure = null;
 	try {
 		await engineSidecar.restart();
 		appLogger().info("main", "Engine restarted successfully");
-		engineStartFailure = null;
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);

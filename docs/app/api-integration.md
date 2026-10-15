@@ -13,7 +13,12 @@ The app communicates with the engine through:
 - **HTTP REST API**: For CRUD operations and request execution
 - **Server-Sent Events (SSE)**: For real-time load test metrics
 
-All communication happens on `localhost:9876` (configurable).
+All communication happens on `127.0.0.1:9876`, or on a fallback port (9880-9889)
+when another program holds 9876 (issue #2118). The main process chooses the port
+before the window exists and the preload exposes it as `electronAPI.enginePort`;
+`config/network.ts` reads it once into `ENGINE_BASE_URL`, and everything the
+renderer sends goes through that. With no preload (a browser tab, the test
+suite) it is 9876.
 
 ## API Client Architecture
 
@@ -50,7 +55,7 @@ Low-level fetch wrapper with error handling and timeout management.
 
 ### Features
 
-- **Base URL Configuration**: `http://127.0.0.1:9876` (from `config/api-endpoints.ts`)
+- **Base URL Configuration**: `ENGINE_BASE_URL` (`config/network.ts`), re-exported as `API_ENDPOINTS.BASE_URL` by `config/api-endpoints.ts`. `http://127.0.0.1:9876` unless the app fell back to another port
 - **Request Timeout**: 30 seconds default
 - **Error Transformation**: Converts HTTP errors to `ApiError` with user-friendly messages
 - **Query Parameters**: Automatic URL encoding
@@ -1048,7 +1053,7 @@ Centralized endpoint configuration:
 
 ```typescript
 export const API_ENDPOINTS = {
-  BASE_URL: "http://127.0.0.1:9876",
+  BASE_URL: ENGINE_BASE_URL, // http://127.0.0.1:<port>, from config/network.ts
   
   // Health & Config
   HEALTH: "/health",
@@ -1792,9 +1797,13 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 ### Engine Not Responding
 
-1. Check if engine is running: `curl http://127.0.0.1:9876/health`
-2. Check engine logs in Electron console
-3. Verify port 9876 is not blocked
+1. Check the Dock: hovering "Engine connected" shows the address the app is
+   using, and the disconnected state says why. "Another program is using port
+   9876 and the fallback ports" means every candidate is held; quit the program
+   and press Retry.
+2. Check if engine is running: `curl <address from the Dock>/health` (9876
+   unless the app fell back)
+3. Check engine logs in Electron console
 
 ### SSE Not Connecting
 
@@ -1810,7 +1819,7 @@ renderer gets through only because the Electron shell's bridge
 to exactly `ENGINE_BASE_URL` and adds the CORS response headers. A CORS error
 or a `403` naming browser origins therefore means:
 - The request did not go through `ENGINE_BASE_URL` (`src/config/network.ts`) -
-  the same engine spelled `localhost:9876` is outside the bridge's filter
+  the same engine spelled `localhost:<port>` is outside the bridge's filter
 - The page is not running in the app's own window session (plain Chromium,
   or a window the bridge was never installed on); see "Driving the renderer
   without Electron" in `app/CLAUDE.md` for the bridge a test browser needs

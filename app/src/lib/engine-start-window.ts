@@ -59,3 +59,18 @@ export function engineStarting(): boolean {
 		"starting"
 	);
 }
+
+/**
+ * Why the main process left the app without an engine, when that is a reason
+ * the user can act on (#2118) - today, another program holding every port the
+ * engine may use. `null` when there is none, outside Electron, and when the
+ * main process cannot be asked: the poll that asks is already reporting a
+ * failure, and a failure to describe it must not add a second one.
+ */
+export async function readEngineStartFailure(): Promise<string | null> {
+	try {
+		return (await window.electronAPI?.getEngineStartFailure()) ?? null;
+	} catch {
+		return null;
+	}
+}

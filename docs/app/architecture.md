@@ -5,7 +5,7 @@ description: >-
 
 # Vayu App Architecture
 
-The Vayu Manager is an Electron-based desktop application built with React and TypeScript. It provides a user interface for designing API requests, executing them, and running load tests. The app communicates with the Vayu Engine (a C++ daemon) via HTTP on `localhost:9876`.
+The Vayu Manager is an Electron-based desktop application built with React and TypeScript. It provides a user interface for designing API requests, executing them, and running load tests. The app communicates with the Vayu Engine (a C++ daemon) via HTTP on `127.0.0.1:9876` (a fallback port when another program holds it).
 
 ## High-Level Architecture
 
@@ -111,7 +111,7 @@ The `EngineSidecar` class manages the C++ engine process:
   instead, which the launch path treats as "not yet" rather than as fatal
 - **Build guidance**: A missing binary names `python build.py -e` and
   `docs/building.md` - the single build entry point, not per-platform scripts
-- **Port Management**: Checks if port 9876 is available or if engine is already running (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced)
+- **Port Management**: Walks `ENGINE_PORT_CANDIDATES` (9876, then 9880-9889). A candidate answering `/health` goes through adopt-or-replace, a free one is taken, a held one is skipped (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced). The first start fixes the choice for the app's lifetime (`electron/engine-endpoint.ts`), and the window is created after it, with the port on its command line. With every candidate held it raises `EnginePortInUseError`: the app stays up on the disconnected state with the reason, and Retry runs `engine:restart` again (issue #2118)
 - **Ownership**: Tracks whether the engine was *spawned* or *adopted* (already
   running at startup). An adopted engine is owned just as fully - `isRunning()`
   reports it, `restart()` really replaces it, and quit shuts it down by PID.
@@ -348,8 +348,8 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **No Node Integration**: Renderer runs in isolated context
 - **Preload Script**: Minimal IPC bridge through `contextBridge.exposeInMainWorld()`
 - **Window Navigation**: The main window refuses any navigation that is not the app's own document and denies `window.open` (`electron/window-navigation.ts`). The preload re-runs on whatever the window navigates to, so this is what keeps `window.electronAPI` off a third-party origin. The app's own document is the entry `file:` URL in production and the dev server's origin in development, where a Vite full reload is a real navigation. Outbound links go to the user's browser through the scheme-validated `openExternalUrl` IPC instead. The built document carries a Content-Security-Policy `<meta>` (see [Security](../architecture.md#security)).
-- **Engine Origin Bridge**: The engine emits no CORS header and refuses any request carrying an `Origin`, so `electron/engine-origin.ts` is the renderer's CORS. Installed on the default session before the main window is created, it removes `Origin` and `Referer` from requests matching `http://127.0.0.1:9876/*` and adds `Access-Control-Allow-Origin: *` to the responses, plus the method and headers a preflight asked for. The filter is the whole boundary: a renderer call to the engine under any other spelling (`localhost:9876`, `[::1]:9876`) keeps its `Origin` and is refused, so every call is built from `ENGINE_BASE_URL`. The development renderer (the Vite origin) depends on it; the packaged `file:` renderer is exempt from CORS in Electron 44 and is covered for the day it is not. Electron keeps one listener per `webRequest` event per session, so another concern joins this module instead of registering its own, and `engine-origin.test.ts` fails on a registration anywhere else
-- **Local Communication**: Engine runs on localhost only (127.0.0.1:9876)
+- **Engine Origin Bridge**: The engine emits no CORS header and refuses any request carrying an `Origin`, so `electron/engine-origin.ts` is the renderer's CORS. Installed on the default session before the main window is created, it removes `Origin` and `Referer` from requests to `http://127.0.0.1:<port>/*` for the port the engine took (the filter names every candidate port because Chromium registers it once; only the chosen one is bridged) and adds `Access-Control-Allow-Origin: *` to the responses, plus the method and headers a preflight asked for. The filter is the whole boundary: a renderer call to the engine under any other spelling (`localhost:<port>`, `[::1]:<port>`) keeps its `Origin` and is refused, so every call is built from `ENGINE_BASE_URL`. The development renderer (the Vite origin) depends on it; the packaged `file:` renderer is exempt from CORS in Electron 44 and is covered for the day it is not. Electron keeps one listener per `webRequest` event per session, so another concern joins this module instead of registering its own, and `engine-origin.test.ts` fails on a registration anywhere else
+- **Local Communication**: Engine runs on localhost only (127.0.0.1, port 9876 or the fallback the app chose)
 
 ## Performance Optimizations
 

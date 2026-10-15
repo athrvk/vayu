@@ -18,7 +18,11 @@ import { useEngineStore, useSaveStore } from "@/stores";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { useEffect, useRef } from "react";
 import { TIMING } from "@/config/timing";
-import { engineStarting, engineStatusAfterFailedPoll } from "@/lib/engine-start-window";
+import {
+	engineStarting,
+	engineStatusAfterFailedPoll,
+	readEngineStartFailure,
+} from "@/lib/engine-start-window";
 
 /**
  * How hard to poll `/health`, given how the last poll went.
@@ -37,6 +41,23 @@ export function healthPollIntervalMs(
 	return starting
 		? TIMING.HEALTH_STARTUP_POLL_INTERVAL_MS
 		: TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS;
+}
+
+/**
+ * Ask the main process why there is no engine, and let the answer overrule the
+ * startup grace: a start it has already given up on is not worth 45 seconds of
+ * "Starting…".
+ *
+ * Skipped once a poll has answered, because the engine that did is the
+ * authority and this read may have been in flight when it came up.
+ */
+function adoptEngineStartFailure(): void {
+	void readEngineStartFailure().then((failure) => {
+		const store = useEngineStore.getState();
+		if (store.engineStatus === "connected") return;
+		store.setEngineStartFailure(failure);
+		if (failure !== null) store.setEngineStatus("unreachable");
+	});
 }
 
 /**
@@ -107,6 +128,7 @@ export function useHealthQuery() {
 			closeEngineStartWindow();
 			setEngineStatus("connected");
 			setEngineError(null);
+			useEngineStore.getState().setEngineStartFailure(null);
 			// Absent means a clean start, so it clears rather than being left
 			// alone - the engine that answered this poll is the authority on
 			// what its own startup did, including a different engine answering
@@ -138,6 +160,7 @@ export function useHealthQuery() {
 			}
 		} else if (query.isError) {
 			sawDisconnect.current = true;
+			adoptEngineStartFailure();
 			// Read before the status is written: the notification below is about
 			// the transition, and only the previous value says whether this poll
 			// is one.
@@ -148,10 +171,13 @@ export function useHealthQuery() {
 			// opened. So the window is consulted when a poll settles, and the poll
 			// after it is what re-reads a window that closed meanwhile; a failing
 			// poll is already on the fast cadence.
-			const status = engineStatusAfterFailedPoll(
-				useEngineStore.getState().engineStartWindow,
-				Date.now()
-			);
+			const { engineStartWindow, engineStartFailure } = useEngineStore.getState();
+			// A known start failure stays unreachable between polls; the grace
+			// window would flip it back to starting until the next read lands.
+			const status =
+				engineStartFailure === null
+					? engineStatusAfterFailedPoll(engineStartWindow, Date.now())
+					: "unreachable";
 			setEngineStatus(status);
 			// A launch still inside the grace window has nothing to report yet, and
 			// the poll that ends the window carries the reason with it.
