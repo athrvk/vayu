@@ -29,6 +29,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { TOOLS, dispatchTool, isListed, withheldWriteRefusal, type ToolContext } from "./tools.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
+import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
 
@@ -179,6 +180,7 @@ export function createMcpServer(
 			title: VAYU_TITLE,
 			description: VAYU_DESCRIPTION,
 			websiteUrl: VAYU_WEBSITE,
+			icons: SERVER_ICONS,
 		},
 		// No `capabilities` here: declaring `tools` up front makes the SDK install
 		// its `tools/call` handler at construction, before the capture below can

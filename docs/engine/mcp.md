@@ -2151,6 +2151,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
+| `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |

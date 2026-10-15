@@ -1248,10 +1248,18 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		expect(c.getProtocolEra()).toBe("modern");
 		const identity = c.getServerVersion();
 		expect(identity?.name).toBe("vayu");
+		expect(identity?.icons?.[0]?.src).toMatch(/^data:image\/png;base64,/);
 		const res = (await c.callTool({ name: "get_engine_health", arguments: {} })) as {
 			content: Array<{ text: string }>;
 		};
 		expect(res.content[0].text).toContain("9.9.9");
+	});
+
+	it("names the server's icon to a 2025-era client too", async () => {
+		const port = await host();
+		const c = await connectTo(port, { modern: false });
+		expect(c.getProtocolEra()).toBe("legacy");
+		expect(c.getServerVersion()?.icons?.[0]?.mimeType).toBe("image/png");
 	});
 
 	/*
