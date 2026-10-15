@@ -266,6 +266,15 @@ class MockEventSource {
 	complete(status: string): void {
 		this.listeners.get("complete")?.({ data: JSON.stringify({ status }) } as MessageEvent);
 	}
+	/** The frame the engine's 60 s timeout sends: ended, with no word on how. */
+	completeWithoutStatus(): void {
+		this.listeners.get("complete")?.({ data: JSON.stringify({ runId: "r1" }) } as MessageEvent);
+	}
+	/** The browser giving up on the connection: an `error` in the CLOSED state. */
+	drop(): void {
+		this.readyState = MockEventSource.CLOSED;
+		this.listeners.get("error")?.({} as MessageEvent);
+	}
 }
 
 /** The four lifecycle handlers, named so a case can assert on one of them. */
@@ -358,7 +367,7 @@ describe("SSEClient - the hand-off when a run is displaced", () => {
 
 		attach(client, "run_1", first);
 		MockEventSource.instances[0]?.complete("completed");
-		expect(first.onClose).toHaveBeenCalledWith("completed");
+		expect(first.onClose).toHaveBeenCalledWith("completed", { frame: true });
 
 		attach(client, "run_2", handlers());
 		expect(first.onSuperseded).not.toHaveBeenCalled();
@@ -368,5 +377,58 @@ describe("SSEClient - the hand-off when a run is displaced", () => {
 		const client = new SSEClient();
 		client.connect("run_1", vi.fn(), vi.fn(), vi.fn());
 		expect(() => client.connect("run_2", vi.fn(), vi.fn(), vi.fn())).not.toThrow();
+	});
+});
+
+describe("SSEClient - what the close handler is told (#2140)", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	/*
+	 * Mutation check: collapse the three endings into `onClose(null)` and the
+	 * bare-frame and dropped-connection cases below can no longer be told apart,
+	 * so the first of them reddens.
+	 */
+	it("reports a status frame as a frame, with its status", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.complete("failed");
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith("failed", { frame: true });
+	});
+
+	it("reports a frame with no status as a frame, with a null status", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.completeWithoutStatus();
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith(null, { frame: true });
+	});
+
+	it("reports a closed connection as no frame", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.drop();
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith(null, { frame: false });
+	});
+
+	it("says nothing for an error the browser is still retrying", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.listeners.get("error")?.({} as MessageEvent);
+
+		expect(h.onClose).not.toHaveBeenCalled();
 	});
 });

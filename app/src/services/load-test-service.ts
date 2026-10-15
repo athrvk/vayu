@@ -13,7 +13,7 @@
  * where any component can read them.
  */
 
-import { sseClient, type SSETerminalStatus } from "./sse-client";
+import { sseClient, type SSECloseInfo, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -71,6 +71,15 @@ const STREAM_DROPPED_MESSAGE =
 const STREAM_SUPERSEDED_MESSAGE =
 	"A collection run took over the live stream, and this load test is still running.";
 
+/**
+ * How a bare `complete` frame is waited out (#2140): the engine closed the
+ * stream without a status, which only its 60 s timeout does, while the stored
+ * row still says running. The row settles a moment later, so read it again
+ * rather than report a stream error for a run that is about to be over.
+ */
+const SETTLE_POLL_INTERVAL_MS = 500;
+const SETTLE_POLL_MAX_MS = 30_000;
+
 class LoadTestService {
 	private activeRunId: string | null = null;
 	private isConnected: boolean = false;
@@ -102,6 +111,15 @@ class LoadTestService {
 	 * it was painted, which is the whole of what this remembers.
 	 */
 	private progressFailedRunId: string | null = null;
+	/**
+	 * Which wait for a settling report is current (#2140). Bumped by everything
+	 * that makes a pending wait stale; a wait holds the value it started under
+	 * and does nothing once it differs. `activeRunId` cannot say this, because
+	 * Reconnect puts the same id back while the old wait is still sleeping.
+	 */
+	private settleGeneration = 0;
+	/** Ends the current wait's sleep early; null when none is sleeping. */
+	private wakeSettleSleep: (() => void) | null = null;
 
 	/**
 	 * Start monitoring a load test run
@@ -128,6 +146,9 @@ class LoadTestService {
 			wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "Load test run streaming");
 		}
 
+		// A wait for an earlier close's report is stale from here, including one
+		// for this same run: that is what Reconnect is.
+		this.cancelSettleWait();
 		this.activeRunId = runId;
 		this.isConnected = true;
 
@@ -205,6 +226,7 @@ class LoadTestService {
 	 */
 	private releaseRun(runId: string): void {
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		this.cancelSettleWait();
 		if (this.progressFailedRunId !== runId) {
 			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
 		}
@@ -362,6 +384,7 @@ class LoadTestService {
 		// Lowered so the callout's Reconnect, `startMonitoring` with this same
 		// run, is not turned away as a run already being watched (#1925).
 		this.isConnected = false;
+		this.cancelSettleWait();
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		this.failProgress(this.activeRunId);
 		// The stream dropped, not the load test - it keeps executing on the
@@ -378,11 +401,17 @@ class LoadTestService {
 
 	/**
 	 * The stream ended. `status` is what the engine's completion frame said, or
-	 * null for a stream that ended without one - a dropped connection, or an
-	 * older engine (issue #1415).
+	 * null for a stream that ended without one (issue #1415); `info.frame` says
+	 * whether a frame arrived at all (#2140). A bare frame is the engine ending
+	 * the stream, so a report still running is waited out; a dropped connection
+	 * is not, because the run may genuinely still be going.
 	 */
-	private async handleClose(status: SSETerminalStatus = null): Promise<void> {
+	private async handleClose(
+		status: SSETerminalStatus = null,
+		info: SSECloseInfo = { frame: false }
+	): Promise<void> {
 		const runId = this.activeRunId;
+		const generation = this.settleGeneration;
 		this.flushPending();
 		this.isConnected = false;
 		// Before the awaited report fetch below: the machine must not stay pinned
@@ -410,10 +439,15 @@ class LoadTestService {
 		const report = await this.fetchStoredReport(runId);
 		// The frame is the engine's word that the run ended. Without one the
 		// stored row decides, and a run it still calls live lost only its stream.
-		if (status === null && isRunInProgress(report?.metadata?.status)) {
-			this.loseStream(runId);
-		} else {
+		if (status !== null || !isRunInProgress(report?.metadata?.status)) {
 			this.finishRun(runId, status, report);
+		} else {
+			const settled = info.frame ? await this.waitForSettledReport(runId, generation) : null;
+			// Stopped, or the run is being watched again: whoever did that owns
+			// `activeRunId` now, and nothing below may speak for this wait.
+			if (generation !== this.settleGeneration) return;
+			if (settled) this.finishRun(runId, null, settled);
+			else this.loseStream(runId);
 		}
 		// Only if it is still this run's. A run started while the fetch was in
 		// flight has already put its own id here, and forgetting it would leave
@@ -423,6 +457,46 @@ class LoadTestService {
 		if (this.activeRunId === runId) {
 			this.activeRunId = null;
 		}
+	}
+
+	/**
+	 * Read `runId`'s stored report until it stops saying the run is live, for at
+	 * most `SETTLE_POLL_MAX_MS`. Null when the bound passes or the wait is
+	 * cancelled - the caller tells those apart by `generation`.
+	 */
+	private async waitForSettledReport(
+		runId: string,
+		generation: number
+	): Promise<RunReport | null> {
+		const deadline = Date.now() + SETTLE_POLL_MAX_MS;
+		while (Date.now() < deadline) {
+			await this.sleepForSettleWait(SETTLE_POLL_INTERVAL_MS);
+			if (generation !== this.settleGeneration) return null;
+			const report = await this.fetchStoredReport(runId);
+			if (generation !== this.settleGeneration) return null;
+			// A report that could not be read says nothing either way: keep asking.
+			if (report && !isRunInProgress(report.metadata?.status)) return report;
+		}
+		return null;
+	}
+
+	/** Resolves after `ms`, or as soon as {@link cancelSettleWait} runs. */
+	private sleepForSettleWait(ms: number): Promise<void> {
+		return new Promise((resolve) => {
+			const wake = () => {
+				clearTimeout(timer);
+				this.wakeSettleSleep = null;
+				resolve();
+			};
+			const timer = setTimeout(wake, ms);
+			this.wakeSettleSleep = wake;
+		});
+	}
+
+	/** Make any pending wait stale and end its sleep now, so nothing is left armed. */
+	private cancelSettleWait(): void {
+		this.settleGeneration += 1;
+		this.wakeSettleSleep?.();
 	}
 
 	/**
