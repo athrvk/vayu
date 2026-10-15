@@ -38,28 +38,44 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-interface EmptyStateProps {
+interface EmptyStateBaseProps {
 	/**
-	 * Sentence case, no trailing period - it is a heading, not a sentence.
-	 * "No run selected", not "No Run Selected." Ignored by `inline`, which
-	 * renders it as its single line.
+	 * Sentence case. A `pane` title is a heading, so no trailing period ("No
+	 * run selected"); an `inline` title is the whole message and may be a
+	 * sentence.
 	 */
 	title: string;
-	/** What to do about it. One sentence, with a period. `pane` only. */
+	/** A Button, usually `variant="link"`. Both variants. */
+	action?: ReactNode;
+	className?: string;
+}
+
+interface PaneEmptyStateProps extends EmptyStateBaseProps {
+	variant?: "pane";
+	/** What to do about it. One sentence, with a period. */
 	description?: string;
-	/** `pane` only. Decorative, so it is hidden from assistive tech. */
+	/** Decorative, so it is hidden from assistive tech. */
 	icon?: LucideIcon;
 	/**
 	 * Extra classes on the icon itself - `animate-spin` for a loading state
 	 * that reuses this pane rather than a bespoke spinner, e.g. a stored
-	 * run's report still in flight. `pane` only.
+	 * run's report still in flight.
 	 */
 	iconClassName?: string;
-	/** A Button, usually `variant="link"`. Both variants. */
-	action?: ReactNode;
-	variant?: "pane" | "inline";
-	className?: string;
 }
+
+/**
+ * The inline line is the title and nothing else, so the props it would drop
+ * are refused by the compiler rather than discarded at runtime (#2129).
+ */
+interface InlineEmptyStateProps extends EmptyStateBaseProps {
+	variant: "inline";
+	description?: never;
+	icon?: never;
+	iconClassName?: never;
+}
+
+type EmptyStateProps = PaneEmptyStateProps | InlineEmptyStateProps;
 
 export function EmptyState({
 	title,
