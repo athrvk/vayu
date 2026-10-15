@@ -40,15 +40,16 @@ vi.mock("@/queries", () => ({
 
 const TAB = { id: "t1", type: "collection", entityId: "col_1" } as const;
 
-const run = (id: string, extra: Partial<Run> = {}): Run => ({
-	id,
-	type: "scenario",
-	status: "completed",
-	startTime: Date.now(),
-	endTime: Date.now(),
-	summary: { scenario: { collectionId: "col_1", stepCount: 3, iterations: 1 } },
-	...extra,
-});
+const run = (id: string, extra: Partial<Run> = {}): Run =>
+	({
+		id,
+		type: "scenario",
+		status: "completed",
+		startTime: Date.now(),
+		endTime: Date.now(),
+		summary: { scenario: { collectionId: "col_1", stepCount: 3, iterations: 1 } },
+		...extra,
+	}) as Run;
 
 const envelope = (runs: Run[]): RunListResponse => ({
 	data: runs,

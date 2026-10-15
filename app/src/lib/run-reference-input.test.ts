@@ -40,7 +40,7 @@ function loadedRun(overrides: Partial<Run> = {}): Run {
 			auth: { mode: "bearer", bearer: { token: SENTINEL } },
 		},
 		...overrides,
-	};
+	} as Run;
 }
 
 describe("runReferenceInput", () => {

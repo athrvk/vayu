@@ -21,7 +21,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
+import {
+	EmptyState,
+	Callout,
+	RunOutcomeBanner,
+	TabBreadcrumb,
+	reportOutcome,
+} from "@/components/shared";
 import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
@@ -227,6 +233,14 @@ export default function LoadTestDashboard() {
 	// pill says how it ended (#1932).
 	const isReport = mode === "completed" || mode === "failed";
 
+	// What `completed` leaves unsaid: whether the run held its budgets (#2130).
+	// Only a settled report has a verdict; a live run's, or a report still being
+	// fetched, answers null and draws nothing.
+	const judgement = useMemo(
+		() => (isReport ? reportOutcome(finalReport) : null),
+		[isReport, finalReport]
+	);
+
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
 		return historicalMetrics.length > 0
@@ -382,6 +396,7 @@ export default function LoadTestDashboard() {
 				requestUrl={displayRequestUrl}
 				requestMethod={displayRequestMethod}
 				elapsedDuration={elapsedDuration}
+				outcome={judgement?.outcome}
 				configuration={displayConfiguration}
 			/>
 
@@ -445,6 +460,12 @@ export default function LoadTestDashboard() {
 							the run finished.
 						</Callout>
 					)}
+				</div>
+			)}
+
+			{judgement && (
+				<div className="enter-fade px-5 pt-3 shrink-0">
+					<RunOutcomeBanner judgement={judgement} />
 				</div>
 			)}
 

@@ -31,12 +31,17 @@ vi.mock("@/stores", () => ({
 	useDashboardStore: (select: (s: unknown) => unknown) => select({ sourceRequestId: null }),
 }));
 
-function mount(mode: DashboardMode, isStreaming = false) {
+function mount(
+	mode: DashboardMode,
+	isStreaming = false,
+	outcome?: DashboardHeaderProps["outcome"]
+) {
 	const props: DashboardHeaderProps = {
 		mode,
 		isStreaming,
 		isStopping: false,
 		onStop: async () => {},
+		outcome,
 	};
 	return render(<DashboardHeader {...props} />);
 }
@@ -83,5 +88,49 @@ describe("DashboardHeader status pill", () => {
 
 		mount("running", false);
 		expect(pill()).toBeNull();
+	});
+
+	describe("a completed run's verdict (#2130)", () => {
+		/** The pill's glyph with its colour classes stripped, so only the shape is compared. */
+		function glyphShape(outcome?: DashboardHeaderProps["outcome"]): string {
+			const { unmount } = mount("completed", false, outcome);
+			const markup = pill()!
+				.querySelector("svg")!
+				.outerHTML.replace(/class="[^"]*"/g, "");
+			unmount();
+			return markup;
+		}
+
+		it("keeps the success tick for a run that passed", () => {
+			expect(glyphShape("passed")).toBe(glyphShape());
+		});
+
+		it.each([
+			["failed", "text-status-error-text", "bg-status-error/15"],
+			["not-judged", "text-muted-foreground", "bg-muted"],
+		] as const)(
+			"draws %s without the success tick or the success family",
+			(outcome, text, tint) => {
+				const success = glyphShape("passed");
+				mount("completed", false, outcome);
+
+				const el = screen.getByText("Completed").closest("[data-status]")!;
+				expect(el.className).toContain(text);
+				expect(el.className).toContain(tint);
+				expect(el.className).not.toContain("success");
+				expect(glyphShape(outcome)).not.toBe(success);
+			}
+		);
+
+		it("gives a failed verdict and an unjudged one different shapes", () => {
+			expect(glyphShape("failed")).not.toBe(glyphShape("not-judged"));
+		});
+
+		it("leaves every other mode as it was, whatever verdict it is handed", () => {
+			mount("failed", false, "not-judged");
+
+			const el = screen.getByText("Failed").closest("[data-status]")!;
+			expect(el.className).toContain("text-status-error-text");
+		});
 	});
 });

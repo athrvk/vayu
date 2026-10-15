@@ -222,7 +222,7 @@ The collection and run sections gate on `tab.entityId` as well as the type: a ta
 
 **There is still deliberately no "last result" section**, and `recent-sends` is not one. Status, duration and age of the *last* send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary, which is why the specced one was built and removed in #344. What the pane structurally cannot show is *more than one send*, and that is the whole content of `recent-sends`: if it ever narrows to the latest run it is the removed section again. Its id is new rather than reused, so the `last-result` guard in `registry.test.tsx` keeps guarding.
 
-That section is affordable because the paginated `GET /runs` now carries each design run's outcome on its row (`resultSummary`: `statusCode` + `latencyMs`), added for it in #380. Before that, N rows meant N `GET /runs/:id/report` calls, and that path loads and JSON-parses every result's `trace_data`. Load and collection runs carry no `resultSummary` - their results are unbounded - and the engine's query cannot read them even if asked.
+That section is affordable because the paginated `GET /runs` now carries each design run's outcome on its row (`resultSummary`: `statusCode` + `latencyMs`), added for it in #380. Before that, N rows meant N `GET /runs/:id/report` calls, and that path loads and JSON-parses every result's `trace_data`. Collection runs carry no `resultSummary`, and a load run's (`{rps, p95Ms, errorRate, verdict}`, #2130) comes from its stored summary rather than its results - those are unbounded, and the engine's design-result query cannot read them even if asked.
 
 **Freshness is wiring, not polling.** `runs.recentDesign(requestId)` is its own key family (like `runs.lastDesign`, and for the same `InfiniteData` shape-clash reason), so nothing under `runs.lists()` refreshes it: the builder's send path, the run view's replay, the MCP `run` event and the delete/clear-history paths each invalidate it explicitly. A new invalidation point for runs needs to touch it too, or the section silently shows the sends from before.
 
@@ -559,7 +559,7 @@ after the frame left the run's retained ring.
 
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
-**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`; search, type, status, origin and pinned are asked of the engine so they reach runs older than the loaded pages, and only the MCP-client narrowing and the sort are client-side) and `RunItem.tsx` (one run row - status glyph, method badge, request name or URL, load-test chips; the start time, the status word and the run's comment are the row's time card, on its stretched activator). Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360 - plus **Copy for agent** (`runReference`, #2047), which has no hover-revealed button to mirror and is the menu's own.
+**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`; search, type, status, origin and pinned are asked of the engine so they reach runs older than the loaded pages, and only the MCP-client narrowing and the sort are client-side) and `RunItem.tsx` (one run row - status glyph, method badge, request name or URL, load-test chips; the start time and the status word are the row's time card, on its stretched activator). A **finished load run's** row also says how it went (#2130): its glyph is refined by the verdict (`rowOutcome`, from `resultSummary.verdict` and `.errorRate` alone - the tick only for a run that passed, a ringed exclamation for failed, a ringed question mark for not judged), a result line under the identity ("485 req/s · p95 42 ms · 0.0% errors", each figure left out when the run did not record it) and the verdict in the activator's accessible name. The run's **comment** is a visible line of its own (two lines at most) for every run type, not a row of the time card: it is what tells two runs of one URL apart, and a hover is the wrong place for that. Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360 - plus **Copy for agent** (`runReference`, #2047), which has no hover-revealed button to mirror and is the menu's own.
 
 **Who started a run** (#1817) is two marks on the row and one Select in the filter row. The engine records `origin: {kind: "app"|"mcp"|"other", client}` on every run (the renderer stamps `app` in `apiService`'s four run-starting calls, the MCP server stamps `mcp` with the client's handshake name). A run whose `requestId` is null and that is not a collection run (`type: "scenario"`, or a scenario load run, which carries `summary.scenario`) shows **Unsaved**: it came from a tab that was never saved, or from an agent that sent the request inline, so there is no request to open it from. A collection run never links a request, so it is exempt. An agent's run (`origin.kind === "mcp"`) shows a neutral chip with the client's product name from `mcpClientDisplayName` (`lib/mcp-client-names.ts`), the raw identifier when the table does not know it, and "MCP client" when the agent sent none; the app's and `other` runs show nothing, and the chip is in the activator's accessible name. Both marks are their own `shrink-0` elements beside the identity span, which stays the only thing that gives way. Every spelling in the table is one a client was seen to send, read from the client's source or from the community registry of `initialize` requests (apify/mcp-client-capabilities, snapshot 2026-10-06), and none is captured from a client talking to Vayu (the file's header says which row rests on what; #1819 stays open for the captures and for whether each client echoes `Mcp-Session-Id`). A wrong row costs a raw label rather than a wrong name. The third **Select** (All origins / App / Agents) sends the kind as `GET /runs?origin=` and re-applies it in `filterRuns`; once the loaded runs name more than one agent, each client is an entry under Agents too, narrowing client-side. "Clear the filters" resets the origin with the rest, and an origin that empties the list counts as a narrowing filter for the empty-state copy.
 
@@ -1448,6 +1448,47 @@ last-run row take the label and `-text` token alone. All read `RUN_STATUS` in
 once per status. The header's `mode` includes `failed` (#1932), set when the
 engine reports the run failed, so a failed run no longer reads as Completed.
 
+**`completed` is not a verdict** (#2130). A run that missed a budget, or whose
+responses mostly errored, still ends `completed`, and the tick said it went well.
+Both components take an optional `outcome` (`passed` | `failed` | `not-judged`,
+from `run-outcome.ts`) that refines **only a `completed` run** through
+`runStatusDisplay`: `failed` is a ringed exclamation in the error family,
+`not-judged` a ringed question mark in the neutral family, each a different shape
+from the tick and from `Failed`'s cross; `passed` keeps the tick. The word stays
+"Completed" - the verdict is the banner's. The dashboard header takes the
+outcome *string* as a prop, not the judgement object: it is memo'd on `Object.is`
+and a fresh `{outcome, reason}` per render would defeat it (#1714).
+
+## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
+
+The line a finished load run opens on: **Passed**, **Failed** or **Not judged**,
+then why ("2 of 4 budgets missed: p95, throughput", "All 3 budgets met, but
+15.1% errors", "No budgets set. 0.0% errors"). It is a `Callout` - `blocking` for
+failed, `info` with the success tick for passed, plain neutral `info` for not
+judged - and the live dashboard (between the notice slot and the tab bar) and
+`LoadTestDetail` (below the request bar) draw the same component.
+
+The verdict is `run-outcome.ts`, once, and the header glyph and the history row
+read it too, so the three cannot disagree. `judgeRun` takes the status, the
+report's `thresholdValidation` (which names the missed budgets) *or* a list
+row's `verdict` (which does not), and the error rate:
+
+- **failed** - the run's status is `failed`, or a declared budget was missed. A
+  budget the run could not measure (`evaluated: false`) is counted by the engine
+  as failed, so it lands here and is named like any other.
+- **passed** - every budget met **and** no request errored.
+- **not-judged** - no budgets were set, or the budgets were met but requests
+  errored (a latency ceiling can be met by a run of instant 500s), or the run
+  was stopped. Never green: absence of a failure is not a pass.
+- **`null`** - still pending or running, or no report: the banner renders
+  nothing, because "Not judged" over a report that has not arrived is a claim
+  about a run nobody has looked at.
+
+`errorRate` is a percent (0-100) by the one error definition in
+`docs/ux-writing.md`. The budgets' short names (`p95`, `throughput`) live in
+`threshold-metrics.ts` beside the long labels `ThresholdVerdict` draws, so the
+two cannot drift; a metric with no entry keeps its raw key.
+
 ## Stop Run Button (`components/shared/StopRunButton.tsx`)
 
 "Stop the run that is happening right now", in the one treatment, for the
@@ -2325,7 +2366,7 @@ surface can hand it whatever it holds. A string that cannot hold an element
 from `lib/time-value.ts` with the same style names; `formatDayHeading` writes
 the history sidebar's day headings. `TimeTooltip` is the card on a trigger the
 surface draws itself: the history row hangs it off its stretched activator,
-with the status and the run's comment as `extraRows`. API data in a table is
+with the status as an `extraRow`. API data in a table is
 decided by `parseTimeValue` alone, never `new Date()`: `HeadersViewer` wraps
 each time run of a header value (`proseTimeRuns`, the Raw tab's own reading)
 in a `TimeValue` and leaves the rest of the text as received, and an editable

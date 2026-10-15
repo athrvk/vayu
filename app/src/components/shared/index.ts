@@ -77,6 +77,10 @@ export * from "./MethodBadge";
 export * from "./RunStatusPill";
 export * from "./run-status";
 
+// Passed, failed or not judged - the verdict `completed` does not give (#2130)
+export * from "./run-outcome";
+export * from "./RunOutcomeBanner";
+
 // "Reachable on <bind>" - wherever a non-loopback local service is named
 export * from "./NonLoopbackBadge";
 

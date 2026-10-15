@@ -5,8 +5,18 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Circle, CircleCheck, CircleSlash, CircleX, Loader2, type LucideIcon } from "lucide-react";
+import {
+	Circle,
+	CircleAlert,
+	CircleCheck,
+	CircleQuestionMark,
+	CircleSlash,
+	CircleX,
+	Loader2,
+	type LucideIcon,
+} from "lucide-react";
 import type { Run } from "@/types";
+import type { RunOutcome } from "./run-outcome";
 
 /**
  * How a run's status is drawn, once: the history row's glyph and the dashboard
@@ -64,3 +74,38 @@ export const RUN_STATUS: Record<Run["status"], RunStatusDisplay> = {
 		tint: "bg-muted border-border",
 	},
 };
+
+/**
+ * A `completed` run is not necessarily a good one (#2130), so once a run has a
+ * verdict the success tick is only for a run that earned it. A failed verdict
+ * is a ringed exclamation in the error family, an unjudged one a ringed question
+ * mark in the neutral family: neither is the `failed` status's cross, because the
+ * run did finish, and neither shares a shape with the tick.
+ */
+const COMPLETED_OUTCOME: Record<Exclude<RunOutcome, "passed">, RunStatusDisplay> = {
+	failed: {
+		label: RUN_STATUS.completed.label,
+		icon: CircleAlert,
+		text: "text-status-error-text",
+		tint: "bg-status-error/15 border-status-error/25",
+	},
+	"not-judged": {
+		label: RUN_STATUS.completed.label,
+		icon: CircleQuestionMark,
+		text: "text-muted-foreground",
+		tint: "bg-muted border-border",
+	},
+};
+
+/**
+ * How a run is drawn: its status, refined by its verdict when it has one. Only
+ * a `completed` run is refined - every other status already says more than a
+ * verdict could (`failed` is a failure, `stopped` was never judged, a live run
+ * has no verdict yet), and `passed` keeps the tick.
+ */
+export function runStatusDisplay(status: Run["status"], outcome?: RunOutcome): RunStatusDisplay {
+	if (status === "completed" && outcome && outcome !== "passed") {
+		return COMPLETED_OUTCOME[outcome];
+	}
+	return RUN_STATUS[status];
+}

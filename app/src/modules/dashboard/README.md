@@ -7,7 +7,10 @@ This module displays real-time load test metrics and results.
 ## Structure
 
 - `index.tsx` - Main LoadTestDashboard component (entry point)
-- `components/` - Sub-components (DashboardHeader, MetricsView, etc.)
+- `components/` - Sub-components (DashboardHeader, MetricsView, etc.). The header takes the
+  finished run's verdict (`outcome`, from `components/shared/run-outcome.ts`) as a string so a
+  `completed` pill does not wear the success tick for a run that missed a budget; it is a string
+  because the header is memo'd on `Object.is`. The same verdict is the banner above the tabs.
 - `hooks/` - Dashboard-scoped hooks (`useMode`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions

@@ -33,7 +33,13 @@ import {
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
-import { MethodBadge, TabBreadcrumb, TruncatedText } from "@/components/shared";
+import {
+	MethodBadge,
+	RunOutcomeBanner,
+	TabBreadcrumb,
+	TruncatedText,
+	reportOutcome,
+} from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
@@ -206,6 +212,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// answer to 401s that appear partway through an otherwise healthy run.
 	const authNote = useMemo(() => authRefreshNote(report.auth), [report.auth]);
 
+	// Whether the run held its budgets (#2130) - null for a report that does not
+	// say how the run ended, which draws nothing.
+	const judgement = useMemo(() => reportOutcome(report), [report]);
+
 	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
 	const crumbs = useMemo(
 		() => [
@@ -271,6 +281,8 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						</>
 					)}
 				</div>
+
+				<RunOutcomeBanner judgement={judgement} className="mb-3" />
 
 				{/* Load test config used for this run. Gated on protocolLabel too, not
 				    just mode/comment - POST /runs accepts an iterations-only body with

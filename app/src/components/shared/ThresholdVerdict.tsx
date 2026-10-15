@@ -29,21 +29,7 @@ import { thresholdReference } from "@/lib/agent-reference";
 import { cn } from "@/lib/utils";
 import type { RunReport } from "@/types/domain";
 import { CopyForAgentButton } from "./CopyForAgentButton";
-
-/**
- * How each budget reads on screen. Keyed by the engine's metric name, which
- * travels verbatim from `POST /runs` through the stored summary to the report -
- * a metric this build has no row for still renders, under its raw key, rather
- * than vanishing from a verdict whose counts include it.
- */
-const METRIC_LABELS: Record<string, { label: string; unit: string; floor?: boolean }> = {
-	latencyP50Ms: { label: "p50 latency", unit: "ms" },
-	latencyP95Ms: { label: "p95 latency", unit: "ms" },
-	latencyP99Ms: { label: "p99 latency", unit: "ms" },
-	maxErrorRatePct: { label: "Error rate", unit: "%" },
-	minThroughputRps: { label: "Throughput", unit: "req/s", floor: true },
-	maxAssertionFailureRatePct: { label: "Assertion failure rate", unit: "%" },
-};
+import { THRESHOLD_METRICS } from "./threshold-metrics";
 
 /** Trailing zeros are noise on a budget the user typed as a whole number. */
 function formatValue(value: number): string {
@@ -104,7 +90,7 @@ export function ThresholdVerdict({ verdict, runId, className }: ThresholdVerdict
 				</p>
 				<ul className="space-y-1.5">
 					{verdict.checks.map((check) => {
-						const meta = METRIC_LABELS[check.metric];
+						const meta = THRESHOLD_METRICS[check.metric];
 						const unit = meta?.unit ?? "";
 						// The comparator has to follow the metric: a throughput
 						// floor passes *above* its limit, and printing it with a

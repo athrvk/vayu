@@ -841,7 +841,10 @@ length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single
 exchange. `GET /runs/:id` attaches the whole `result` instead, trace and bodies
 included, which is why the list carries the two numbers rather than that - and
 why the context bar's Recent sends section is one list call and no report fetch.
-Load and collection runs carry no `resultSummary`: their results are unbounded.
+A collection run's row carries no `resultSummary`. A load run's results are
+unbounded and are never read for one; once the run is terminal its row carries
+`{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
+[GET /runs](../engine/api-reference.md#get-runs)).
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept

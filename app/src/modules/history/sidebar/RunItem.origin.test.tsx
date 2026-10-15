@@ -34,7 +34,7 @@ function row(overrides: Partial<Run> = {}): Run {
 		environmentId: null,
 		summary: { url: "https://api.example.test/checkout", method: "POST" },
 		...overrides,
-	};
+	} as Run;
 }
 
 const noop = () => {};

@@ -16,7 +16,7 @@ import type { Run } from "@/types";
 import { filterRuns, mcpClientNames, useHistoryStore } from "./history-store";
 
 function run(id: string, over: Partial<Run> = {}): Run {
-	return { id, type: "design", status: "completed", startTime: 1, endTime: 2, ...over };
+	return { id, type: "design", status: "completed", startTime: 1, endTime: 2, ...over } as Run;
 }
 
 const app = run("app", { origin: { kind: "app", client: null } });

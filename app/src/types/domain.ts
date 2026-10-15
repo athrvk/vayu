@@ -1673,16 +1673,9 @@ export interface RunOrigin {
 	client?: string | null;
 }
 
-export interface Run {
+/** What every run shares; {@link Run} adds the `type` and the `resultSummary` that goes with it. */
+interface RunFields {
 	id: string;
-	/**
-	 * `scenario` is a collection run - one row per step. Its tab is
-	 * `ScenarioRunView` (the step list), not the load-test report: a scenario
-	 * run's `results[]` are step executions, so the load report's percentiles
-	 * would describe a sequence as if it were one request repeated. The sidebar
-	 * row is still the non-load shape, which `RunItem.run-types.test.tsx` pins.
-	 */
-	type: "load" | "design" | "scenario";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
@@ -1697,12 +1690,6 @@ export interface Run {
 	environmentId?: string | null;
 	/** The exchange, present only for a design run once it has completed or failed. */
 	result?: RunResult;
-	/**
-	 * What a **design run's** list row says about its exchange - see
-	 * {@link RunResultSummary}. Never present on a load or collection run's row,
-	 * and never on `GET /runs/:id`, which attaches the whole {@link result}.
-	 */
-	resultSummary?: RunResultSummary;
 	/**
 	 * Whether this run is pinned - kept past the engine's retention and
 	 * findable through `GET /runs?baseline=true`. Toggled through
@@ -1724,6 +1711,24 @@ export interface Run {
 }
 
 /**
+ * A run as the engine lists it. `type` decides what `resultSummary` holds, so
+ * narrow on it before reading the summary: a design row's is its one exchange
+ * ({@link RunResultSummary}), a terminal load row's is the run's headline
+ * numbers ({@link LoadResultSummary}), and a collection run's row has none.
+ * `GET /runs/:id` carries neither: it attaches a design run's whole `result`, and
+ * the report serves a load run's numbers.
+ */
+export type Run =
+	| (RunFields & { type: "load"; resultSummary?: LoadResultSummary })
+	| (RunFields & { type: "design"; resultSummary?: RunResultSummary })
+	// A collection run - one row per step. Its tab is `ScenarioRunView` (the step
+	// list), not the load-test report: a scenario run's `results[]` are step
+	// executions, so the load report's percentiles would describe a sequence as if
+	// it were one request repeated. The sidebar row is still the non-load shape,
+	// which `RunItem.run-types.test.tsx` pins.
+	| (RunFields & { type: "scenario"; resultSummary?: undefined });
+
+/**
  * The outcome of a design run's single exchange, carried by its **list row**
  * from the paginated `GET /runs` (`get_runs_response`,
  * `engine/src/http/routes/runs.cpp`).
@@ -1738,6 +1743,25 @@ export interface Run {
 export interface RunResultSummary {
 	statusCode: number;
 	latencyMs: number;
+}
+
+/**
+ * A **terminal load run's** list row, read engine-side from the run's stored
+ * summary (#2130) so History can show how a run went without a report fetch per
+ * row. Every key is absent when the run did not record it, never zeroed; a row
+ * still pending or running has no `resultSummary` at all.
+ *
+ * `verdict` is present only when the run declared budgets. Its absence means no
+ * budget judged the run, which is a different claim from `"passed"`.
+ */
+export interface LoadResultSummary {
+	/** Achieved requests per second. */
+	rps?: number;
+	/** 95th-percentile latency, in milliseconds. */
+	p95Ms?: number;
+	/** Percent, 0-100, by the one error definition (`docs/ux-writing.md`). */
+	errorRate?: number;
+	verdict?: "passed" | "failed";
 }
 
 /** The `{data, pagination}` envelope the paginated `GET /runs` returns. */

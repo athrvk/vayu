@@ -1561,9 +1561,11 @@ struct Run {
     // disagree - never set anywhere else. Narrow and separate from `summary`
     // (issue #1527) so the paginated list route can read it straight off the
     // row already fetched for every page, with no cache and no per-row JSON
-    // parse: `RunSummaryCache` keys on the immutable `config_snapshot` and
-    // must never learn a completion-time fact, or a row cached while the run
-    // was still running would show no warnings forever.
+    // parse: `RunSummaryCache`'s compact-summary table keys on the immutable
+    // `config_snapshot` and must never learn a completion-time fact, or a row
+    // cached while the run was still running would show no warnings forever.
+    // (Its load-outcome table does read `summary`, and only once the status
+    // is terminal, for the same reason.)
     bool has_warnings = false; // INTEGER NOT NULL DEFAULT 0
     // Who started the run, as the starting client asserted it (#1817):
     // `"app"`, `"mcp"` or `"other"`, validated by `read_run_origin` before the
