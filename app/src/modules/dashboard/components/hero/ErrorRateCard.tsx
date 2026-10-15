@@ -8,6 +8,7 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
+import { formatErrorPercent } from "../../utils/format";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";
@@ -66,10 +67,13 @@ export function ErrorRateCard({
 	statusCodes: Record<string, number>;
 }) {
 	const errorRate = totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0;
+	// A rate under 0.1% takes a second decimal so it does not print as 0.0, and
+	// the colour follows the printed digits: red means errors happened, and the
+	// number beside it must say so (a request cancelled by Stop is in neither).
+	const digits = formatErrorPercent(errorRate, errorRate > 0 && errorRate < 0.1 ? 2 : 1);
 	// -text variants: this is the card's large number. The STATUS entries above
 	// keep the fill tokens - those paint legend swatches, not text.
-	const valueColor =
-		errorRate === 0 ? "hsl(var(--success-text))" : "hsl(var(--destructive-text))";
+	const valueColor = errorRate > 0 ? "hsl(var(--destructive-text))" : "hsl(var(--success-text))";
 
 	// Bucket status codes by class
 	const buckets = useMemo(() => {
@@ -90,7 +94,7 @@ export function ErrorRateCard({
 					className="text-hero font-bold leading-none font-mono tabular-nums transition-colors duration-150"
 					style={{ color: valueColor }}
 				>
-					{errorRate.toFixed(1)}
+					{digits}
 				</span>
 				<span className="text-xs text-muted-foreground">%</span>
 				<span className="ml-auto text-label font-mono text-muted-foreground">

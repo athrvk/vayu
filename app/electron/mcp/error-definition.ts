@@ -18,4 +18,6 @@ export const RUN_ERROR_DEFINITION_SENTENCE =
 	"(a timeout, a refused connection, a DNS or TLS failure); a 3xx redirect is a success. Every error " +
 	"count and error rate in a run's numbers uses that one definition, and each count splits into " +
 	"HTTP errors and No response: `httpErrors` / `noResponse` on a live tick, `http_errors` / " +
-	"`no_response` on a stored tick, `httpErrorRequests` / `noResponseRequests` in a report's `summary`.";
+	"`no_response` on a stored tick, `httpErrorRequests` / `noResponseRequests` in a report's `summary`. " +
+	"A request cancelled by a user Stop is not an error: it is in no error count or rate, nor in the " +
+	"totals, and is reported apart as `cancelledRequests` in the report's `summary`.";

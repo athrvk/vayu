@@ -2399,6 +2399,13 @@ export interface RunReport {
 		httpErrorRequests?: number;
 		/** The part of `failedRequests` that got none (status code 0). Absent from an engine older than #2124. */
 		noResponseRequests?: number;
+		/**
+		 * Requests a user's Stop cancelled before they were answered (issue #2136).
+		 * Not an error and in no other count: outside `totalRequests`, the
+		 * status-code distribution and `errorRate`. Absent from an engine older
+		 * than #2136; absent means none.
+		 */
+		cancelledRequests?: number;
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;

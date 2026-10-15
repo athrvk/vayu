@@ -88,3 +88,15 @@ export function formatClock(ms: number): string {
 	const seconds = totalSeconds % 60;
 	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
+
+/**
+ * An error rate in percent as digits, never `0.0` for a rate above zero: a rate
+ * that rounds to nothing at `digits` reads `<0.1` (or `<0.01`), so the number and
+ * the colour it is drawn in cannot disagree about whether errors happened. Zero
+ * stays `0.0`, the one value that is neutral.
+ */
+export function formatErrorPercent(percent: number, digits = 1): string {
+	const fixed = percent.toFixed(digits);
+	if (percent <= 0 || Number(fixed) > 0) return fixed;
+	return `<${(10 ** -digits).toFixed(digits)}`;
+}

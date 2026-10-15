@@ -31,6 +31,9 @@ export * from "./callout-severity";
 // the request builder's per-field merge (#1436, #1437)
 export * from "./ExternalChangeCallout";
 
+// "12 requests cancelled by Stop" - outside every error and request count
+export * from "./CancelledRequestsNote";
+
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 

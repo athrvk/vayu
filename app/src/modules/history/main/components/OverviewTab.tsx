@@ -26,7 +26,9 @@ import {
 	TestValidationSummary,
 	ThresholdVerdict,
 	TransactionsSummary,
+	CancelledRequestsNote,
 } from "@/components/shared";
+import { formatErrorPercent } from "@/modules/dashboard/utils/format";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
@@ -204,6 +206,9 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 				</Card>
 			)}
 
+			{/* Outside every count above and below; a stopped run can have this and no errors. */}
+			<CancelledRequestsNote count={report.summary.cancelledRequests} />
+
 			{/* Errors */}
 			{report.errors && report.errors.total > 0 && (
 				<Card className="enter-fade border-destructive/30">
@@ -220,7 +225,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 							</span>
 							<span className="text-lg font-bold text-destructive-text">
 								{formatNumber(report.errors.total)} (
-								{report.summary.errorRate.toFixed(2)}%)
+								{formatErrorPercent(report.summary.errorRate, 2)}%)
 							</span>
 						</div>
 

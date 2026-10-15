@@ -1728,7 +1728,8 @@ the `httpErrors` / `noResponse` split beside the count. The fields themselves ar
 the engine's, passed through unchanged (see [What counts as an
 error](api-reference.md#what-counts-as-an-error)), including the separate
 `cancelled` / `cancelledRequests` count of requests a Stop cancelled, which is
-no error (issue #2136).
+no error (issue #2136); the sentence says so in a clause of its own and names
+`cancelledRequests` as where it is reported.
 
 ## Safety model
 
