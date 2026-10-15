@@ -19,14 +19,17 @@ import { useCopy } from "@/hooks/useCopy";
 import type { TimeRow } from "@/lib/time-value";
 import {
 	MethodBadge,
+	OUTCOME_TITLE,
 	RowContextMenu,
 	RunStatusGlyph,
 	RUN_STATUS,
+	rowOutcome,
 	type RowAction,
 } from "@/components/shared";
 import { TimeTooltip } from "@/components/shared/TimeValue";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
+import { resultSubtitle } from "./result-subtitle";
 import {
 	Activity,
 	Clock,
@@ -219,11 +222,8 @@ export default function RunItem({
 	// The status word and the start time - said once, in the row's time card
 	// (#1786), rather than on every row (the day-group header above the row
 	// already says which day; a relative "8h ago" repeated down the whole list
-	// said nothing a hover can't say instead). The comment joins it there too:
-	// it's occasional, not the row's identity, so it earns a hover rather than
-	// a permanent line.
+	// said nothing a hover can't say instead).
 	const cardRows: TimeRow[] = [{ label: "Status", value: RUN_STATUS[run.status].label }];
-	if (run.summary?.comment) cardRows.push({ label: "Comment", value: run.summary.comment });
 	// Which file drove the run (#2051): a name, never a path.
 	const dataFile = dataFileFromSummary(run.summary);
 	if (dataFile) cardRows.push({ label: "Data file", value: dataFile.fileName });
@@ -252,6 +252,19 @@ export default function RunItem({
 	// it is one hover away, on the same text, the way a truncated url or
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
+
+	// What a finished load run did (#2130): the verdict `completed` leaves out,
+	// drawn as the glyph's shape and said in words in the activator's name, and
+	// the headline numbers as a line. A row with no `resultSummary` has neither.
+	const judgement = rowOutcome(run);
+	const verdictName = judgement
+		? `, verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
+		: "";
+	const resultLine =
+		run.type === "load" && run.resultSummary ? resultSubtitle(run.resultSummary) : null;
+	// Why the run was run: the one line a user writes about it. A permanent line,
+	// not a hover row - it is what tells two runs of one url apart.
+	const comment = run.summary?.comment;
 
 	const hasMeta =
 		(scenario &&
@@ -287,8 +300,12 @@ export default function RunItem({
 				<div className="flex h-5 min-w-0 items-center gap-2">
 					{/* Glyph only, no word: a per-row status word costs two lines of
 					    dead space, and the time card and the activator's accessible
-					    name state it. The glyph and its colours are `RUN_STATUS`'s. */}
-					<RunStatusGlyph status={run.status} className="size-3 shrink-0" />
+					    name state it. The glyph and its colours are `runStatusDisplay`'s. */}
+					<RunStatusGlyph
+						status={run.status}
+						outcome={judgement?.outcome}
+						className="size-3 shrink-0"
+					/>
 					{method ? (
 						<MethodBadge
 							method={method}
@@ -438,6 +455,12 @@ export default function RunItem({
 					</div>
 				</div>
 
+				{resultLine && (
+					<div className="pl-[1.625rem] text-micro tabular-nums text-muted-foreground">
+						{resultLine}
+					</div>
+				)}
+
 				{/* Meta line(s) - unchanged content, one line tighter than before.
 				    A collection run's step/iteration/sub-folder facts, or a load
 				    run's duration/concurrency/type/protocol; never both, since
@@ -493,6 +516,12 @@ export default function RunItem({
 					</div>
 				)}
 
+				{comment && (
+					<div className="line-clamp-2 pl-[1.625rem] text-micro text-muted-foreground">
+						{comment}
+					</div>
+				)}
+
 				{/*
 				 * The row used to be a <div onClick>: clickable by mouse, but not
 				 * focusable, not in the tab order and not operable by Enter or Space.
@@ -517,7 +546,7 @@ export default function RunItem({
 						// Named by what it is. A collection run announced as a "request run"
 						// with no url after it was a row a screen-reader user could not tell
 						// apart from any other row in the list.
-						aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
+						aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${verdictName}${
 							identitySuffix ? `, ${identitySuffix}` : ""
 						}${mcpClientLabel ? `, started by ${mcpClientLabel}` : ""}`}
 						className="absolute inset-0 z-0 cursor-pointer"
