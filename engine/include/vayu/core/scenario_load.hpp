@@ -301,7 +301,14 @@ class StepHistograms {
 
     /// A completed step: its latency, and whether it counted as an error.
     void record (size_t step, double latency_ms);
+    /// A step that got no response: the transfer raised an error (booked
+    /// under status 0, as the run's own distribution does), or the step was
+    /// never sent. Counts as executed, so it is not paired with `record`.
     void record_error (size_t step);
+    /// A response whose status is outside 2xx/3xx (#2134). Paired with
+    /// `record`, which already counted the step as executed; touches only the
+    /// error tally, because the response still arrived and its latency is real.
+    void record_failed_status (size_t step);
     /// One submission of this step whose bound request still carried a
     /// `{{token}}` composition never resolved (issue #1503) - counted, not
     /// refused, because a literal `{{` can be deliberate in a body.
@@ -311,7 +318,11 @@ class StepHistograms {
         return histograms_.size ();
     }
     [[nodiscard]] size_t completed (size_t step) const;
+    /// `http_errors + no_response`: the one error definition
+    /// (`vayu::count_status_failures`) applied to this step.
     [[nodiscard]] size_t errors (size_t step) const;
+    [[nodiscard]] size_t http_errors (size_t step) const;
+    [[nodiscard]] size_t no_response (size_t step) const;
     [[nodiscard]] size_t unresolved_tokens (size_t step) const;
     [[nodiscard]] MetricsCollector::Percentiles percentiles (size_t step) const;
 
@@ -321,7 +332,8 @@ class StepHistograms {
     /// failed" - a p99 over a step that only two VUs ever reached is a number
     /// the reader has to be able to discount.
     std::vector<std::atomic<size_t>> completed_;
-    std::vector<std::atomic<size_t>> errors_;
+    std::vector<std::atomic<size_t>> http_errors_;
+    std::vector<std::atomic<size_t>> no_response_;
     std::vector<std::atomic<size_t>> unresolved_tokens_;
 };
 

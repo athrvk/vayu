@@ -7133,8 +7133,11 @@ knob.
   Every retained result carries **`dataRowIndex`** on its `trace`, which is how
   a failure is attributed to a row when no per-step `results` rows exist. Absent
   for a run sent without `data`.
-- **An errored step ends its iteration** and its virtual user starts the next
-  one. It is never stranded.
+- **A step that got no response ends its iteration** (a transport error, or a
+  step never sent) and its virtual user starts the next one. It is never
+  stranded. A step that answered with an HTTP error status (4xx/5xx) counts in
+  its `errors` but does **not** end the iteration: a response arrived, and the
+  next step runs.
 - **No per-step `results` rows are stored** - one row per step per iteration per
   virtual user is what a load run exists not to keep. The report's
   `scenario.steps` breakdown is the per-step record instead:
@@ -7142,16 +7145,19 @@ knob.
 ```json
 "scenario": {
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
-  "stepsExecuted": 1422, "errored": 6, "skipped": 12, "virtualUsers": 50,
+  "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
+  "skipped": 12, "virtualUsers": 50,
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
-      "executed": 480, "errors": 0, "unresolvedTokens": 0,
+      "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
+      "unresolvedTokens": 0,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
         { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
-      "executed": 474, "errors": 0, "unresolvedTokens": 0,
+      "executed": 474, "errors": 30, "httpErrors": 30, "noResponse": 0,
+      "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
@@ -7161,6 +7167,18 @@ knob.
 
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
+
+A step's `errors` follows the run's one error definition (issue #2124): a
+status outside 2xx/3xx, or no response at all. It is the sum of two disjoint
+counts. **`httpErrors`** is the responses that arrived with a 4xx or 5xx;
+the step's latency includes them, and the iteration carries on to the next
+step. **`noResponse`** is the executions that got nothing back (a transport
+error, booked under status 0 like the run's own distribution, or a
+data-binding failure that sent nothing); only these end the iteration. At the
+top of the section, `errored` is the iteration-abort count (the sum of every
+step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
+`passed` is `stepsExecuted` less both. Failed assertions and script tests are
+not folded in; they are reported in `elements` and `tests`.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead

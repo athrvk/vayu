@@ -129,7 +129,8 @@ std::optional<std::string> validate_scenario_load_config (const nlohmann::json& 
 
 StepHistograms::StepHistograms (size_t step_count)
 : histograms_ (step_count, nullptr), completed_ (step_count),
-  errors_ (step_count), unresolved_tokens_ (step_count) {
+  http_errors_ (step_count), no_response_ (step_count),
+  unresolved_tokens_ (step_count) {
     for (size_t i = 0; i < step_count; ++i) {
         // Same range and precision as the run's aggregate histogram, so a step's
         // p99 and the whole run's are comparable rather than two resolutions.
@@ -145,7 +146,8 @@ StepHistograms::StepHistograms (size_t step_count)
             "Failed to initialize per-step HdrHistogram for step " + std::to_string (i));
         }
         completed_[i].store (0, std::memory_order_relaxed);
-        errors_[i].store (0, std::memory_order_relaxed);
+        http_errors_[i].store (0, std::memory_order_relaxed);
+        no_response_[i].store (0, std::memory_order_relaxed);
         unresolved_tokens_[i].store (0, std::memory_order_relaxed);
     }
 }
@@ -175,7 +177,14 @@ void StepHistograms::record_error (size_t step) {
         return;
     }
     completed_[step].fetch_add (1, std::memory_order_relaxed);
-    errors_[step].fetch_add (1, std::memory_order_relaxed);
+    no_response_[step].fetch_add (1, std::memory_order_relaxed);
+}
+
+void StepHistograms::record_failed_status (size_t step) {
+    if (step >= http_errors_.size ()) {
+        return;
+    }
+    http_errors_[step].fetch_add (1, std::memory_order_relaxed);
 }
 
 void StepHistograms::record_unresolved_token (size_t step) {
@@ -196,7 +205,19 @@ size_t StepHistograms::unresolved_tokens (size_t step) const {
 }
 
 size_t StepHistograms::errors (size_t step) const {
-    return step < errors_.size () ? errors_[step].load (std::memory_order_relaxed) : 0;
+    return http_errors (step) + no_response (step);
+}
+
+size_t StepHistograms::http_errors (size_t step) const {
+    return step < http_errors_.size () ?
+    http_errors_[step].load (std::memory_order_relaxed) :
+    0;
+}
+
+size_t StepHistograms::no_response (size_t step) const {
+    return step < no_response_.size () ?
+    no_response_[step].load (std::memory_order_relaxed) :
+    0;
 }
 
 MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
@@ -359,6 +380,8 @@ ScriptsOverrideMode scripts_mode) {
               { "name", plan.steps[i].name }, { "requestId", plan.steps[i].request_id },
               { "method", vayu::to_string (plan.steps[i].request.method) },
               { "executed", steps.completed (i) }, { "errors", steps.errors (i) },
+              { "httpErrors", steps.http_errors (i) },
+              { "noResponse", steps.no_response (i) },
               // Requests this step sent with a `{{token}}` composition never
               // resolved (issue #1503) - counted, not refused, so a literal
               // brace a caller meant to send still goes out.
@@ -389,12 +412,19 @@ const ScenarioPlan& plan) {
     const size_t executed = state.steps_executed.load (std::memory_order_relaxed);
     const size_t errored = state.steps_errored.load (std::memory_order_relaxed);
     const size_t skipped = state.steps_skipped.load (std::memory_order_relaxed);
+    // An HTTP error response is never `errored` (that is the iteration-abort
+    // count), so the two sets are disjoint and both come off `passed`.
+    size_t failed = 0;
+    for (size_t i = 0; i < state.steps.step_count (); ++i) {
+        failed += state.steps.http_errors (i);
+    }
+    const size_t not_passed = errored + failed;
     nlohmann::json summary = { // The keys `apply_run_summary` already reads for a
         // scenario run, so one report shape covers both executors.
         { "iterations", state.iterations_started },
         { "iterations_completed", completed }, { "steps_executed", executed },
-        { "passed", executed > errored ? executed - errored : 0 },
-        { "failed", size_t{ 0 } }, { "skipped", skipped }, { "errored", errored },
+        { "passed", executed > not_passed ? executed - not_passed : 0 },
+        { "failed", failed }, { "skipped", skipped }, { "errored", errored },
         // This mode's own.
         { "virtual_users", state.virtual_users },
         { "iterations_abandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
@@ -863,11 +893,8 @@ class ScenarioLoadDriver {
 
             const bool errored = response.has_error ();
             if (!errored) {
-                const double latency_ms = context->include_script_time ?
-                response.timing.total_ms +
-                static_cast<double> (pipeline_before_ms + pipeline_after_ms) :
-                response.timing.total_ms;
-                state->steps.record (step_index, latency_ms);
+                record_answered_step (*context, *state, step_index, response,
+                pipeline_before_ms + pipeline_after_ms);
             }
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
@@ -1076,6 +1103,26 @@ class ScenarioLoadDriver {
     }
 
     /**
+     * A step that got a response: its latency, and an HTTP error status in its
+     * error tally (#2134). The status never makes the step `errored`, which is
+     * the iteration-abort edge: a 4xx/5xx is a response the next step can
+     * still follow (a 404 lookup, a 409 retry).
+     */
+    static void record_answered_step (const RunContext& context,
+    ScenarioLoadState& state,
+    size_t step_index,
+    const vayu::Response& response,
+    int64_t pipeline_ms) {
+        const double latency_ms = context.include_script_time ?
+        response.timing.total_ms + static_cast<double> (pipeline_ms) :
+        response.timing.total_ms;
+        state.steps.record (step_index, latency_ms);
+        if (!vayu::is_success_status (response.status_code)) {
+            state.steps.record_failed_status (step_index);
+        }
+    }
+
+    /**
      * The session @ref finish_step leaves the VU with after a step: none after
      * an error, the step's own capture after an ordinary send, and - for a
      * step with `disableCookies` (issue #1765), whose transfer tracked
@@ -1098,6 +1145,11 @@ class ScenarioLoadDriver {
      * the completion callback and the data-binding failure, so a step that
      * never reached the wire retires its VU exactly as a completed one does - a
      * VU left busy permanently shrinks effective concurrency.
+     *
+     * @p errored means the step got no response (a transport error, or a step
+     * never sent), and it ends the iteration as abandoned. A response with an
+     * HTTP error status is not `errored`: the completion counts it with
+     * `record_failed_status` and the iteration carries on.
      *
      * @p next_cookies is null for an outcome that carries none - an error, or a
      * step that was never sent. @p next_target_from_before is
