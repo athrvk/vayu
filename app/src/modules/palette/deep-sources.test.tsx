@@ -194,7 +194,7 @@ function runRow(overrides: Partial<Run> = {}): Run {
 		endTime: 1_700_000_001_000,
 		summary: { url: "https://api.example/checkout", method: "POST" },
 		...overrides,
-	};
+	} as Run;
 }
 
 function runPage(data: Run[], total = data.length): RunListResponse {

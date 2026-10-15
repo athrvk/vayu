@@ -47,14 +47,15 @@ vi.mock("@/queries", async () => {
 
 const TAB = { id: "t1", type: "run", entityId: "run_1" } as const;
 
-const makeRun = (extra: Partial<Run> = {}): Run => ({
-	id: "run_1",
-	type: "load",
-	status: "completed",
-	startTime: 0,
-	endTime: 0,
-	...extra,
-});
+const makeRun = (extra: Partial<Run> = {}): Run =>
+	({
+		id: "run_1",
+		type: "load",
+		status: "completed",
+		startTime: 0,
+		endTime: 0,
+		...extra,
+	}) as Run;
 
 const environment = (id: string, name: string): Environment =>
 	({ id, name, variables: {} }) as unknown as Environment;

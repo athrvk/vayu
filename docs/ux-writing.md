@@ -110,6 +110,18 @@ scattered strings land the same way.
   `Running / Stopped / Completed / Failed` for a load test run. The present
   participle plus ellipsis means "in progress" and nothing else uses that
   form.
+- **A finished load run has two vocabularies, and they are not synonyms.**
+  The *status* says how the run ended (`Completed`, `Stopped`, `Failed`); the
+  *verdict* says whether it held up: `Passed` (every budget met and no request
+  errored), `Failed` (the run failed, or a budget was missed) or `Not judged`
+  (no budgets were set, the budgets were met but requests errored, or the run was
+  stopped). `Completed` never implies a pass. Never "Success" or "Succeeded" for
+  a verdict, and never "Not judged" over a report that has not loaded - say
+  nothing instead. The reason follows the title after a dash and names budgets by
+  their short names ("2 of 4 budgets missed: p95, throughput"), counts errors by
+  the one definition ("15.1% errors", never "failed responses"), and has no
+  trailing full stop. `app/src/components/shared/run-outcome.ts` holds the
+  strings.
 
 - **A time is never written by hand.** Copy that says when something
   happened puts a `TimeValue` in the sentence ("Deleted 2 hours ago",

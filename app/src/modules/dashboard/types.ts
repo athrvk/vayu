@@ -11,6 +11,7 @@
  * Centralized type definitions for the load test dashboard
  */
 
+import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
@@ -34,6 +35,13 @@ export interface DashboardHeaderProps {
 	requestUrl?: string;
 	requestMethod?: string;
 	elapsedDuration?: number;
+	/**
+	 * The finished run's verdict (`run-outcome.ts`), so a `completed` pill does not
+	 * wear the success tick for a run that missed a budget or was never judged.
+	 * The string, not the judgement: the header is memo'd on `Object.is`, and a
+	 * fresh `{outcome, reason}` per render would defeat it (#1714).
+	 */
+	outcome?: RunOutcome;
 	configuration?: {
 		mode?: string;
 		duration?: number | string | undefined;

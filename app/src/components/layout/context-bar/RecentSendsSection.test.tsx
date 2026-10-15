@@ -41,15 +41,16 @@ vi.mock("@/queries", () => ({
 
 const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
 
-const run = (id: string, extra: Partial<Run> = {}): Run => ({
-	id,
-	type: "design",
-	status: "completed",
-	startTime: Date.now(),
-	endTime: Date.now(),
-	requestId: "req_1",
-	...extra,
-});
+const run = (id: string, extra: Partial<Run> = {}): Run =>
+	({
+		id,
+		type: "design",
+		status: "completed",
+		startTime: Date.now(),
+		endTime: Date.now(),
+		requestId: "req_1",
+		...extra,
+	}) as Run;
 
 const envelope = (runs: Run[]): RunListResponse => ({
 	data: runs,

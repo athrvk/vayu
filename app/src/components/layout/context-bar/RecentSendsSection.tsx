@@ -72,7 +72,9 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 	return (
 		<ul className="space-y-0.5 m-0 p-0 list-none">
 			{runs.map((run) => {
-				const outcome = run.resultSummary;
+				// The query asks for design runs only; the check narrows the row's
+				// summary to the one-exchange shape rather than trusting that.
+				const outcome = run.type === "design" ? run.resultSummary : undefined;
 				return (
 					<li key={run.id}>
 						<Button

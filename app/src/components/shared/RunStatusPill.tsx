@@ -8,10 +8,16 @@
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Run } from "@/types";
-import { RUN_STATUS } from "./run-status";
+import type { RunOutcome } from "./run-outcome";
+import { runStatusDisplay } from "./run-status";
 
 interface RunStatusProps {
 	status: Run["status"];
+	/**
+	 * The run's verdict, when it has one (see `run-outcome.ts`). Only changes how
+	 * a `completed` run is drawn: a tick would call an unjudged or failed run good.
+	 */
+	outcome?: RunOutcome;
 	className?: string;
 }
 
@@ -19,8 +25,8 @@ interface RunStatusProps {
  * The status glyph on its own, for a row too dense for a word. Decorative:
  * whatever hosts it states the status in words (the row's accessible name).
  */
-export function RunStatusGlyph({ status, className }: RunStatusProps) {
-	const { icon: Icon, text, spin } = RUN_STATUS[status];
+export function RunStatusGlyph({ status, outcome, className }: RunStatusProps) {
+	const { icon: Icon, text, spin } = runStatusDisplay(status, outcome);
 	return <Icon className={cn(text, spin && "animate-spin", className)} aria-hidden="true" />;
 }
 
@@ -28,8 +34,8 @@ export function RunStatusGlyph({ status, className }: RunStatusProps) {
  * A run's status as a word and a glyph, tinted by the status family. `chip`
  * because the pill paints its own background (see `badge-variants.ts`).
  */
-export function RunStatusPill({ status, className }: RunStatusProps) {
-	const { label, text, tint } = RUN_STATUS[status];
+export function RunStatusPill({ status, outcome, className }: RunStatusProps) {
+	const { label, text, tint } = runStatusDisplay(status, outcome);
 	return (
 		<Badge
 			variant="chip"
@@ -41,7 +47,7 @@ export function RunStatusPill({ status, className }: RunStatusProps) {
 				className
 			)}
 		>
-			<RunStatusGlyph status={status} className="size-3 shrink-0" />
+			<RunStatusGlyph status={status} outcome={outcome} className="size-3 shrink-0" />
 			{label}
 		</Badge>
 	);

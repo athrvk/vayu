@@ -46,6 +46,7 @@ function DashboardHeader({
 	requestUrl,
 	requestMethod,
 	elapsedDuration = 0,
+	outcome,
 	configuration,
 }: DashboardHeaderProps) {
 	const openTabs = useTabsStore((s) => s.openTabs);
@@ -107,7 +108,7 @@ function DashboardHeader({
 			)}
 
 			{/* Status pill */}
-			{status && <RunStatusPill status={status} />}
+			{status && <RunStatusPill status={status} outcome={outcome} />}
 
 			{/* Method badge */}
 			{requestMethod && <MethodBadge method={requestMethod} size="md" />}
@@ -138,8 +139,10 @@ function headerPropsEqual(prev: DashboardHeaderProps, next: DashboardHeaderProps
 	const { elapsedDuration: prevElapsed = 0, ...prevRest } = prev;
 	const { elapsedDuration: nextElapsed = 0, ...nextRest } = next;
 	if (Math.floor(prevElapsed / 1000) !== Math.floor(nextElapsed / 1000)) return false;
-	return (Object.keys(prevRest) as (keyof typeof prevRest)[]).every((key) =>
-		Object.is(prevRest[key], nextRest[key])
+	// Both key sets: a prop absent on one side is a change, not a match.
+	const keys = new Set([...Object.keys(prevRest), ...Object.keys(nextRest)]);
+	return [...keys].every((key) =>
+		Object.is(prevRest[key as keyof typeof prevRest], nextRest[key as keyof typeof nextRest])
 	);
 }
 

@@ -58,7 +58,7 @@ function run(overrides: Partial<Run>): Run {
 			variables: { apiKey: SENTINEL },
 		},
 		...overrides,
-	};
+	} as Run;
 }
 
 const writeText = vi.fn();

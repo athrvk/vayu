@@ -1448,6 +1448,47 @@ last-run row take the label and `-text` token alone. All read `RUN_STATUS` in
 once per status. The header's `mode` includes `failed` (#1932), set when the
 engine reports the run failed, so a failed run no longer reads as Completed.
 
+**`completed` is not a verdict** (#2130). A run that missed a budget, or whose
+responses mostly errored, still ends `completed`, and the tick said it went well.
+Both components take an optional `outcome` (`passed` | `failed` | `not-judged`,
+from `run-outcome.ts`) that refines **only a `completed` run** through
+`runStatusDisplay`: `failed` is a ringed exclamation in the error family,
+`not-judged` a ringed question mark in the neutral family, each a different shape
+from the tick and from `Failed`'s cross; `passed` keeps the tick. The word stays
+"Completed" - the verdict is the banner's. The dashboard header takes the
+outcome *string* as a prop, not the judgement object: it is memo'd on `Object.is`
+and a fresh `{outcome, reason}` per render would defeat it (#1714).
+
+## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
+
+The line a finished load run opens on: **Passed**, **Failed** or **Not judged**,
+then why ("2 of 4 budgets missed: p95, throughput", "All 3 budgets met, but
+15.1% errors", "No budgets set. 0.0% errors"). It is a `Callout` - `blocking` for
+failed, `info` with the success tick for passed, plain neutral `info` for not
+judged - and the live dashboard (between the notice slot and the tab bar) and
+`LoadTestDetail` (below the request bar) draw the same component.
+
+The verdict is `run-outcome.ts`, once, and the header glyph and the history row
+read it too, so the three cannot disagree. `judgeRun` takes the status, the
+report's `thresholdValidation` (which names the missed budgets) *or* a list
+row's `verdict` (which does not), and the error rate:
+
+- **failed** - the run's status is `failed`, or a declared budget was missed. A
+  budget the run could not measure (`evaluated: false`) is counted by the engine
+  as failed, so it lands here and is named like any other.
+- **passed** - every budget met **and** no request errored.
+- **not-judged** - no budgets were set, or the budgets were met but requests
+  errored (a latency ceiling can be met by a run of instant 500s), or the run
+  was stopped. Never green: absence of a failure is not a pass.
+- **`null`** - still pending or running, or no report: the banner renders
+  nothing, because "Not judged" over a report that has not arrived is a claim
+  about a run nobody has looked at.
+
+`errorRate` is a percent (0-100) by the one error definition in
+`docs/ux-writing.md`. The budgets' short names (`p95`, `throughput`) live in
+`threshold-metrics.ts` beside the long labels `ThresholdVerdict` draws, so the
+two cannot drift; a metric with no entry keeps its raw key.
+
 ## Stop Run Button (`components/shared/StopRunButton.tsx`)
 
 "Stop the run that is happening right now", in the one treatment, for the

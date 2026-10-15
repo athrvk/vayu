@@ -3054,6 +3054,14 @@ hardest to judge. The rule is redundancy: **shape or a word carries the state,
 and the colour agrees with it.** The pill carries the word and the
 glyph; the history row carries the shape.
 
+**A verdict refines `Completed`** (#2130): `RunStatusPill` and `RunStatusGlyph`
+take an optional `outcome` (`run-outcome.ts`) and a `completed` run whose
+verdict is `failed` or `not-judged` swaps the tick for `CircleAlert` (error
+family) or `CircleQuestionMark` (neutral, `text-muted-foreground`). The tick is
+only for a run that passed; the word stays "Completed". The verdict itself is
+drawn by `RunOutcomeBanner`, a `Callout` whose "Not judged" case is the plain
+`info` treatment, never the success tick.
+
 **Run status map (`RUN_STATUS`, `components/shared/run-status.ts`):** one entry
 per status - label, one lucide glyph, the family's `-text` token (the bare token
 is a fill and fails AA as a small foreground - see "The bare token is the fill")
@@ -3924,7 +3932,8 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/shared/run-status.ts` | `RUN_STATUS`: the one status-to-label/glyph/token map behind the dashboard pill and the history row |
-| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both read from `RUN_STATUS` |
+| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both read from `RUN_STATUS` (refined by a verdict through `runStatusDisplay`) |
+| `app/src/components/shared/RunOutcomeBanner.tsx` | The Passed / Failed / Not judged line a finished load run opens on, over `run-outcome.ts`'s verdict |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |

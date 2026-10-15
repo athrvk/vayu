@@ -75,4 +75,13 @@ describe("DashboardHeader render count", () => {
 		h.rerender({ mode: "completed", isStreaming: false });
 		expect(h.count()).toBe(before + 1);
 	});
+
+	it("re-renders when the verdict arrives, and not for the same verdict again", () => {
+		const h = mount();
+		const before = h.count();
+		h.rerender({ outcome: "failed" });
+		expect(h.count()).toBe(before + 1);
+		h.rerender({ outcome: "failed" });
+		expect(h.count()).toBe(before + 1);
+	});
 });
