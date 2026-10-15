@@ -503,8 +503,8 @@ Notes:
   (`"20 s"` against `"3 s, stopped"`). The codes, always in this order:
   `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
   ramp time too), `target_rps`, `duration` (the runs' measured
-  `summary.testDuration`, in seconds, more than 2x apart), `status` (a
-  `Stopped` or `Failed` run against a `Completed` one), `http_version` (`auto`
+  `summary.testDuration`, in seconds, more than 2x apart), `status` (any two differing run
+  statuses, such as `Stopped` against `Completed`), `http_version` (`auto`
   is unknown and never differs), `data_file` (by content hash; none against
   one counts), `request` (method or URL, the URL without userinfo, query or
   fragment because the comparison is not masked the way `get_run_report` is)

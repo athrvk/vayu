@@ -198,7 +198,7 @@ describe("comparability", () => {
 			name: "request, by url, which never carries a query, fragment or userinfo",
 			base: report(
 				{},
-				{ requestMethod: "GET", requestUrl: "https://u:pw@api.test/a?token=s3cret" }
+				{ requestMethod: "GET", requestUrl: "https://u:p@ss@api.test/a?token=s3cret" }
 			),
 			target: report({}, { requestMethod: "GET", requestUrl: "https://api.test/b#frag" }),
 			expected: {

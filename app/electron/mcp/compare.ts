@@ -281,7 +281,7 @@ const requestMethod = (report: Report): string | null => str(report, "metadata",
 function requestUrl(report: Report): string | null {
 	const url = str(report, "metadata", "requestUrl");
 	if (url === null) return null;
-	return url.replace(/[?#].*$/s, "").replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
+	return url.replace(/[?#].*$/s, "").replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
 }
 
 function requestLabel(report: Report): string {
