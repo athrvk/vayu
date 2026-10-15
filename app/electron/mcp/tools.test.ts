@@ -11833,8 +11833,7 @@ describe("secret withholding", () => {
 	};
 
 	const planLoadRun = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) => {
-		const elicit = vi.fn().mockRejectedValue(new Error("client does not support elicitation"));
-		const ctx = { ...ctxWith(client, { ...ALLOW_API, ...safety }), elicit };
+		const ctx = ctxWith(client, { ...ALLOW_API, ...safety });
 		return dispatchTool("start_load_run", { requestId: "req_1", duration: "10s" }, ctx);
 	};
 

@@ -62,7 +62,11 @@ export class McpHttpServer {
 	constructor(opts: McpHttpServerOptions) {
 		this.opts = opts;
 		this.handler = createMcpHandler(({ era, requestInfo }) => this.build(era, requestInfo), {
-			onerror: (err) => opts.log?.warn("mcp", "MCP request rejected", { error: err.message }),
+			// Nearly every report is a client's mistake (a wrong Accept or media
+			// type, an unknown method), answered on the wire already. Vayu's own
+			// fault is logged at `error` where it happens (`build`).
+			onerror: (err) =>
+				opts.log?.debug("mcp", "MCP request rejected", { error: err.message }),
 		});
 		this.serveMcp = toNodeHandler({
 			fetch: (request, options) => this.serve(request, options),

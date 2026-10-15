@@ -121,9 +121,11 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 
 - **Loopback only.** The server binds to `127.0.0.1`; it is not reachable off the
   machine.
-- **DNS-rebinding protection.** `Host` headers are validated (SDK
-  `enableDnsRebindingProtection` + `allowedHosts`), so a malicious web page
-  cannot drive the endpoint through a forged `Host`.
+- **DNS-rebinding protection.** The `Host` header must name a loopback host,
+  and an `Origin` header, when a browser sends one, a loopback origin (the SDK's
+  `localhostHostValidation` / `localhostOriginValidation`, checked in front of
+  the MCP handler), so a malicious web page cannot drive the endpoint through a
+  forged `Host` or post to it from another site.
 - **Target allowlist (empty by default).** The traffic-sending tools
   (`run_request`, `run_collection_smoke`, `run_collection`, `start_load_run`)
   refuse any host that is not explicitly allowlisted. The check runs against the
@@ -134,11 +136,13 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   concurrency, or duration exceed configured ceilings. Together with the
   allowlist, these are the real limits on what load an agent can generate.
 - **Confirmation gate (anti-accident, not anti-adversary).** `start_load_run`
-  returns a preview and starts nothing unless called again with
-  `confirmed: true`. This prevents a load run from starting on a stray tool call,
-  but it is agent-side: the same model can send the second call. It is not a
-  substitute for the caps/allowlist, which are the enforcement. (A future,
-  stronger version would route confirmation to the human via MCP elicitation.)
+  and the destructive deletes start or remove nothing on a first call. Where the
+  client and transport let Vayu ask (a 2026-07-28 client, or stdio), the
+  question goes to the person through MCP elicitation; otherwise the call
+  returns a preview and proceeds only when called again with `confirmed: true`,
+  which is agent-side: the same model can send the second call. Neither is a
+  substitute for the caps/allowlist, which are the enforcement. Which clients
+  are asked: `docs/engine/mcp.md`, "What is live on each transport".
 - **Data writes off by default.** The data-mutating tools (`create_request`,
   `update_environment`, `update_engine_config`) are refused unless the user
   enables write access in Settings. Traffic-sending tools (`run_request`,

@@ -187,8 +187,15 @@ export function createMcpServer(
 		// see it. Registration declares what is registered.
 		{ instructions: instructionsFor(baseCtx.config) }
 	);
-	// Before the first `registerTool`, which otherwise defaults it to true.
-	mcp.server.registerCapabilities({ tools: { listChanged: opts.toolListChanges ?? false } });
+	// Before the first registration, which otherwise defaults each to true. The
+	// resource and prompt lists change under no client: the prompts are fixed,
+	// and the one list that moves (runs, under the run-report template) is moved
+	// by the app as much as by an agent, which this process does not see.
+	mcp.server.registerCapabilities({
+		tools: { listChanged: opts.toolListChanges ?? false },
+		resources: { listChanged: false },
+		prompts: { listChanged: false },
+	});
 
 	const sdkCallTool = captureCallToolHandler(mcp);
 
@@ -252,10 +259,24 @@ function callContext(
 	return {
 		...base,
 		clientName: () => clientName,
-		...(capabilities?.elicitation
+		...(canAskForm(capabilities)
 			? { userInput: { responses: sdkCtx.mcpReq.inputResponses } }
 			: {}),
 	};
+}
+
+/**
+ * Whether a client with @p capabilities can answer a form question - the kind
+ * `confirmDestructive` puts. The SDK's own rule, which it applies by refusing
+ * the call (`-32021`) rather than falling back: a mode named outright must
+ * include `form`, and a bare `elicitation: {}` is the pre-mode form-only
+ * declaration. The client package exports this as `getSupportedElicitationModes`;
+ * the server package does not.
+ */
+function canAskForm(capabilities: ClientCapabilities | undefined): boolean {
+	const elicitation = capabilities?.elicitation;
+	if (!elicitation) return false;
+	return elicitation.form !== undefined || elicitation.url === undefined;
 }
 
 /** The two envelope members `callContext` reads, as the 2026-07-28 revision defines them. */

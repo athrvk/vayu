@@ -114,7 +114,11 @@ The handler checks no headers of its own, so `http.ts` checks them in front of
 it: the Host must be a loopback name (`127.0.0.1`, `localhost` or `[::1]`), and
 an `Origin`, when a browser sends one, must be a loopback origin too; anything
 else is `403`. That is the DNS-rebinding protection, and it also turns away a
-page on another site that posts to the port. A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
+page on another site that posts to the port. The handler itself answers `415`
+to a `POST` whose `Content-Type` is not `application/json`, and a 2025-era
+request `406` when its `Accept` does not take both `application/json` and
+`text/event-stream`, as the transport specification requires; an SDK client
+always sends both. A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
 error), and one over the 4 MB cap `413` with `-32600` - past the cap the rest of
 the upload is drained and discarded rather than the socket being closed under it,
 since resetting the connection mid-upload loses the very response the status code

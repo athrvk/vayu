@@ -675,7 +675,7 @@ function hangingEngineCall() {
  * Cancellation has to reach the engine. Every resource / prompt definition
  * accepts an `AbortSignal` and forwards it to `EngineClient`, but for a while
  * only a unit test ever passed one: the SDK hands each callback a
- * `RequestHandlerExtra` whose `signal` fires on `notifications/cancelled`, and
+ * handler context whose `ctx.mcpReq.signal` fires on `notifications/cancelled`, and
  * `server.ts` dropped it. A cancelled read left the engine request running
  * detached until the client's own 35s timeout.
  */
@@ -1015,10 +1015,8 @@ describe("Streamable HTTP host", () => {
 
 	it("rejects a forged Host header (DNS-rebinding protection)", async () => {
 		await start();
-		// Rejection may surface as a non-200 status or a dropped connection
-		// (status 0); either way it must not succeed.
 		const res = await request({ host: "evil.example.com", body: initBody });
-		expect(res.status).not.toBe(200);
+		expect(res.status).toBe(403);
 	});
 });
 
@@ -1285,6 +1283,24 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		expect(res.content[0].text).not.toMatch(/AWAITING CONFIRMATION/);
 	});
 
+	/*
+	 * Declaring only URL-mode elicitation is declaring no form questions: asking
+	 * one would be refused as a protocol error, so the client gets the flag.
+	 */
+	it("falls back to the confirmed flag for a client that only takes URL questions", async () => {
+		const startRun = vi.fn();
+		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
+		const c = new Client(
+			{ name: "url-only", version: "1.0.0" },
+			{ versionNegotiation: { mode: "auto" }, capabilities: { elicitation: { url: {} } } }
+		);
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		clients.push(c);
+		const res = (await c.callTool(loadCall)) as { content: Array<{ text: string }> };
+		expect(startRun).not.toHaveBeenCalled();
+		expect(res.content[0].text).toMatch(/AWAITING CONFIRMATION/);
+	});
+
 	it("starts nothing when the person declines over HTTP", async () => {
 		const startRun = vi.fn();
 		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
@@ -1345,6 +1361,11 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		const legacy = await connectTo(port, { modern: false });
 		expect(modern.getServerCapabilities()?.tools?.listChanged).toBe(true);
 		expect(legacy.getServerCapabilities()?.tools?.listChanged).toBe(false);
+		// Nothing announces a resource or prompt list change, to anyone.
+		for (const c of [modern, legacy]) {
+			expect(c.getServerCapabilities()?.resources?.listChanged).toBe(false);
+			expect(c.getServerCapabilities()?.prompts?.listChanged).toBe(false);
+		}
 	});
 
 	it("tells a listening client when a Settings change alters tools/list", async () => {
