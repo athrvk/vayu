@@ -190,14 +190,16 @@ export default function HistoryDetail() {
 			</div>
 			{/* Detail Content */}
 			<div className="flex-1 min-h-0 overflow-hidden">
+				{/* Keyed on the run: these views hold per-run local state (active
+				    tab, filters, dialogs) that must not carry over to the next run. */}
 				{isDesignRun ? (
-					<DesignRunView run={run} />
+					<DesignRunView key={selectedRunId} run={run} />
 				) : isScenarioRun ? (
-					<ScenarioRunView run={run} />
+					<ScenarioRunView key={selectedRunId} run={run} />
 				) : isLoadRunInProgress ? (
 					<LoadRunInProgress runId={selectedRunId} />
 				) : (
-					<LoadTestDetail report={report!} runId={selectedRunId} />
+					<LoadTestDetail key={selectedRunId} report={report!} runId={selectedRunId} />
 				)}
 			</div>
 		</div>

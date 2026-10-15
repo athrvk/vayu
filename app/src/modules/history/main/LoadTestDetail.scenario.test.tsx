@@ -51,11 +51,14 @@ vi.mock("@/queries/runs", () => ({
 
 function renderReport(ui: ReactElement) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	return render(
+	const wrap = (children: ReactElement) => (
 		<QueryClientProvider client={qc}>
-			<TooltipProvider>{ui}</TooltipProvider>
+			<TooltipProvider>{children}</TooltipProvider>
 		</QueryClientProvider>
 	);
+	const view = render(wrap(ui));
+	// Same client and providers, so the pane is updated rather than remounted.
+	return { ...view, rerenderReport: (next: ReactElement) => view.rerender(wrap(next)) };
 }
 
 const STEPS: RunScenarioStepStat[] = [
@@ -139,6 +142,33 @@ describe("a scenario load run", () => {
 		// than to the sampled-requests list beside it.
 		expect(screen.getByText("Log in")).toBeTruthy();
 		expect(screen.getByText("List orders")).toBeTruthy();
+	});
+});
+
+describe("a pane whose report changes under it", () => {
+	/*
+	 * Steps is selected, then the same pane is handed a report with no sequence.
+	 * With the selection kept as is, no panel matches it and the pane is blank.
+	 *
+	 * Mutation check: pass `activeTab` to `<Tabs value>` instead of the derived
+	 * `tab` and this reddens.
+	 */
+	it("falls back to Overview when the selected Steps tab goes away", () => {
+		const { rerenderReport } = renderReport(
+			<LoadTestDetail report={report(SCENARIO)} runId="run_1" />
+		);
+		fireEvent.mouseDown(screen.getByRole("tab", { name: /steps/i }));
+		expect(screen.getByRole("tab", { name: /steps/i }).getAttribute("aria-selected")).toBe(
+			"true"
+		);
+
+		rerenderReport(<LoadTestDetail report={report()} runId="run_2" />);
+
+		expect(screen.queryByRole("tab", { name: /steps/i })).toBeNull();
+		expect(screen.getByRole("tab", { name: /overview/i }).getAttribute("aria-selected")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("tabpanel").getAttribute("id")).toContain("overview");
 	});
 });
 
