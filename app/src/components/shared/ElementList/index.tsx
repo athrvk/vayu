@@ -78,6 +78,13 @@ import { summarizeElement } from "./summarize-element";
 const RECENTLY_USED_HEADING = "Recently used";
 
 /**
+ * What an element is, for a reader who came looking for "Pre-request Script"
+ * and "Tests" (#2129): the tab is named Elements and both live inside it.
+ */
+const EMPTY_STATE_GLOSS =
+	"Elements run around a send: pre- and post-request scripts, assertions, and values to extract.";
+
+/**
  * The empty state's quick-add chips (issue #1608), in the order they render.
  * `script.setup` is `collectionOnly` (#1499), so it only ever appears among
  * `kinds` - and therefore only ever renders as a chip - on the collection
@@ -87,6 +94,7 @@ const QUICK_ADD_LABELS: Readonly<Record<string, string>> = {
 	"extract.json": "Extract from JSON",
 	"assert.status": "Assert status code",
 	"script.pre": "Pre-request script",
+	"script.post": "Post-request script",
 	"script.setup": "Setup script",
 };
 const QUICK_ADD_KINDS = Object.keys(QUICK_ADD_LABELS);
@@ -595,7 +603,7 @@ export function ElementList({
 			{elements.length === 0 ? (
 				<div className="enter-fade space-y-2 rounded-md border border-dashed border-rule p-3 text-center">
 					<p className="text-sm text-muted-foreground">
-						No elements yet. Add one from the menu below, or start with:
+						{EMPTY_STATE_GLOSS} Add one from the menu below, or start with:
 					</p>
 					<div className="flex flex-wrap justify-center gap-2">
 						{quickAddCandidates(kinds).map((kind) => (
