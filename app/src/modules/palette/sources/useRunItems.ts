@@ -37,7 +37,7 @@ import { Clock, FolderTree, Search, Zap } from "lucide-react";
 import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
-import { RUN_KIND_LABEL } from "@/modules/history/types";
+import { RUN_KIND_LABEL, RUN_TYPE_NAME } from "@/modules/history/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatInstant } from "@/lib/time-value";
 import type { Collection, Run } from "@/types";
@@ -63,7 +63,7 @@ function runTitle(run: Run, collectionsById: Map<string, Collection>): string {
 		const name = scenario.collectionId
 			? (collectionsById.get(scenario.collectionId)?.name ?? scenario.collectionId)
 			: undefined;
-		return name ?? "Collection run";
+		return name ?? RUN_TYPE_NAME.scenario;
 	}
 	const url = run.summary?.url;
 	return url ?? RUN_KIND_LABEL[run.type];
