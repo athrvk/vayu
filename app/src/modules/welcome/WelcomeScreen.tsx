@@ -95,7 +95,7 @@ export default function WelcomeScreen() {
 					) : (
 						<FirstRunWelcome
 							onImport={openImport}
-							onNewRequest={newRequest}
+							onNewRequest={() => newRequest()}
 							onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
 						/>
 					)
@@ -104,7 +104,7 @@ export default function WelcomeScreen() {
 						runs={runs}
 						collectionCount={collections.length}
 						onImport={openImport}
-						onNewRequest={newRequest}
+						onNewRequest={() => newRequest()}
 						onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
 						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => revealDrawerView("history")}

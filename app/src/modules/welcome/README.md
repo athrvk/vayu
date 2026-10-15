@@ -35,6 +35,10 @@ Two consequences worth keeping in mind before adding anything here:
 
 - Both queries return `[]` while loading, so the container holds on `isLoading`.
   Without that the first-run screen flashes at every returning user.
+- `ActionTile` calls its `onClick` with no arguments, never the click event. A
+  handler whose first parameter is optional data (`newRequest(preset?)`) would
+  otherwise read the event as that data; the screen also wraps `onNewRequest`
+  for the same reason.
 - `RecentRuns` copies before sorting - the array is the TanStack Query cache.
 - Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel. The
   renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would

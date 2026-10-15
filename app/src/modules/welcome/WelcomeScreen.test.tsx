@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
 import { useTabsStore, useSessionStore, useLayoutStore } from "@/stores";
 import { DEMO_REQUEST_PRESET } from "./demo-request";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import type { Run } from "@/types";
 
 const mocks = vi.hoisted(() => ({
@@ -198,6 +199,24 @@ describe("WelcomeScreen", () => {
 	});
 
 	describe("new request targeting", () => {
+		/*
+		 * The tile's click must reach `newRequest` with no preset: handed the click
+		 * event, the old spread put its circular React internals into the payload and
+		 * the encode threw, so the create never left the renderer. Asserted on the
+		 * exact payload and on the encode, since a mocked mutation never encodes.
+		 */
+		function expectBlankPayload(collectionId: string) {
+			expect(mocks.createRequest).toHaveBeenCalledTimes(1);
+			const payload = mocks.createRequest.mock.calls[0][0];
+			expect(payload).toEqual({
+				collectionId,
+				name: DEFAULT_REQUEST_NAME,
+				method: "GET",
+				url: "",
+			});
+			expect(() => JSON.stringify(payload)).not.toThrow();
+		}
+
 		const two = [
 			{ id: "c1", name: "First" },
 			{ id: "c2", name: "Second" },
@@ -208,11 +227,8 @@ describe("WelcomeScreen", () => {
 			useSessionStore.setState({ lastCollectionId: "c2" });
 			renderScreen();
 			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
-			await waitFor(() =>
-				expect(mocks.createRequest).toHaveBeenCalledWith(
-					expect.objectContaining({ collectionId: "c2" })
-				)
-			);
+			await waitFor(() => expect(mocks.createRequest).toHaveBeenCalled());
+			expectBlankPayload("c2");
 			expect(screen.queryByText(/Add request to/i)).not.toBeInTheDocument();
 		});
 
@@ -220,11 +236,8 @@ describe("WelcomeScreen", () => {
 			mocks.collections = { data: [{ id: "solo", name: "Solo" }], isLoading: false };
 			renderScreen();
 			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
-			await waitFor(() =>
-				expect(mocks.createRequest).toHaveBeenCalledWith(
-					expect.objectContaining({ collectionId: "solo" })
-				)
-			);
+			await waitFor(() => expect(mocks.createRequest).toHaveBeenCalled());
+			expectBlankPayload("solo");
 		});
 
 		it("asks when there are several collections and no memory", async () => {
@@ -236,11 +249,8 @@ describe("WelcomeScreen", () => {
 			expect(mocks.createRequest).not.toHaveBeenCalled();
 			// Picking a collection creates the request there
 			fireEvent.click(screen.getByRole("button", { name: /Second/i }));
-			await waitFor(() =>
-				expect(mocks.createRequest).toHaveBeenCalledWith(
-					expect.objectContaining({ collectionId: "c2" })
-				)
-			);
+			await waitFor(() => expect(mocks.createRequest).toHaveBeenCalled());
+			expectBlankPayload("c2");
 		});
 
 		it("creates a collection first on a bare workspace", async () => {
@@ -248,9 +258,8 @@ describe("WelcomeScreen", () => {
 			renderScreen();
 			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
 			await waitFor(() => expect(mocks.createCollection).toHaveBeenCalled());
-			expect(mocks.createRequest).toHaveBeenCalledWith(
-				expect.objectContaining({ collectionId: "new-col" })
-			);
+			await waitFor(() => expect(mocks.createRequest).toHaveBeenCalled());
+			expectBlankPayload("new-col");
 		});
 	});
 

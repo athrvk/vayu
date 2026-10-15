@@ -29,9 +29,22 @@ import { useSessionStore, useTabsStore, useToastStore } from "@/stores";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
+import { EngineUnreachableError } from "@/services/http-client";
 import type { Collection, CreateRequestRequest } from "@/types";
 
-const CREATE_FAILED = "Couldn't create the request. Check that Vayu's engine is running.";
+const CREATE_FAILED = "Couldn't create the request";
+
+/**
+ * The engine copy is for an engine that did not answer. Any other failure - a
+ * 4xx on the payload, a bug in the caller - is not fixed by checking the engine,
+ * so it says what actually went wrong.
+ */
+function createFailedMessage(error: unknown): string {
+	if (error instanceof EngineUnreachableError) {
+		return `${CREATE_FAILED}. Check that Vayu's engine is running.`;
+	}
+	return error instanceof Error ? `${CREATE_FAILED} - ${error.message}` : CREATE_FAILED;
+}
 
 /**
  * A request to create with fields already filled in, rather than the blank
@@ -43,6 +56,45 @@ const CREATE_FAILED = "Couldn't create the request. Check that Vayu's engine is 
 export type RequestPreset = Omit<CreateRequestRequest, "id" | "collectionId" | "name"> & {
 	name?: string;
 };
+
+type PresetFieldKey = Exclude<keyof RequestPreset, "name" | "method" | "url">;
+
+/**
+ * The preset fields forwarded to the create, besides name, method and url. A
+ * whitelist rather than a spread: `newRequest` is handed to `onClick` handlers,
+ * and a spread forwards whatever object arrives (a React `SyntheticEvent` is
+ * circular and fails the JSON encode). The `satisfies` makes a field added to
+ * `CreateRequestRequest` a compile error here instead of a silent drop.
+ */
+const PRESET_FIELDS = {
+	description: true,
+	params: true,
+	headers: true,
+	body: true,
+	bodyType: true,
+	auth: true,
+	elements: true,
+	followRedirects: true,
+	maxRedirects: true,
+	httpVersion: true,
+	verifySSL: true,
+	stream: true,
+	disableCookies: true,
+	disabledSystemHeaders: true,
+	disableUrlEncoding: true,
+	postmanProtocolBehavior: true,
+	specOperation: true,
+	methodSource: true,
+	order: true,
+} satisfies Record<PresetFieldKey, true>;
+
+function forwardedPresetFields(preset: RequestPreset | null): Partial<RequestPreset> {
+	if (!preset) return {};
+	const keys = Object.keys(PRESET_FIELDS) as PresetFieldKey[];
+	return Object.fromEntries(
+		keys.filter((key) => preset[key] !== undefined).map((key) => [key, preset[key]])
+	);
+}
 
 /** Everything `CollectionPicker` needs, so a caller spreads it and nothing else. */
 export interface NewRequestPickerProps {
@@ -94,7 +146,7 @@ export function useNewRequest(): UseNewRequestReturn {
 			const preset = presetRef.current;
 			try {
 				const newRequest = await createRequestMutation.mutateAsync({
-					...preset,
+					...forwardedPresetFields(preset),
 					collectionId,
 					name: preset?.name ?? DEFAULT_REQUEST_NAME,
 					method: preset?.method ?? "GET",
@@ -104,7 +156,7 @@ export function useNewRequest(): UseNewRequestReturn {
 			} catch (error) {
 				// Without this the click looks dead - the old code only logged.
 				console.error("Failed to create new request:", error);
-				showToast(CREATE_FAILED, "error");
+				showToast(createFailedMessage(error), "error");
 			}
 		},
 		[createRequestMutation, openTab, showToast]
@@ -135,7 +187,7 @@ export function useNewRequest(): UseNewRequestReturn {
 					await createRequestIn(newCollection.id);
 				} catch (error) {
 					console.error("Failed to create collection:", error);
-					showToast(CREATE_FAILED, "error");
+					showToast(createFailedMessage(error), "error");
 				}
 			})();
 		},
