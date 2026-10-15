@@ -90,14 +90,10 @@ export const CONCURRENCY_LABEL = "Virtual users";
 /**
  * A run's concurrency, in words: "1 virtual user", "64 virtual users".
  *
- * The UI once called this number five things - "Connections", "Concurrency",
- * "VUs", "workers" and "concurrent users" - and two screens described one run
- * differently. "Virtual users" is the owner's pick (#2128); `workers` in
- * particular is wrong, not merely inconsistent, because the engine owns that
- * name for its libcurl event-loop thread count. The API and MCP field names
- * (`concurrency`, `startConcurrency`, `maxConcurrency`) keep their spelling;
- * only copy a person reads changes. The open-loop in-flight measurement keeps
- * "In-flight requests" and does not use this helper.
+ * Never "workers": the engine owns that name for its libcurl event-loop thread
+ * count (#2128). The API and MCP field names (`concurrency`, `startConcurrency`,
+ * `maxConcurrency`) keep their spelling. The open-loop in-flight measurement
+ * keeps "In-flight requests" and does not use this helper.
  *
  * Callers pass the number and render the result; nobody appends the unit
  * themselves, which is what lets every surface stay in step. Prose that wants
