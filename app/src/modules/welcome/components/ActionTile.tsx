@@ -22,11 +22,16 @@ interface ActionTileProps {
 	onClick: () => void;
 }
 
+/*
+ * `onClick` is wrapped so the handler is called with no arguments: a bare
+ * `onClick={onClick}` hands it the click event, and a handler whose first
+ * parameter is optional data (`newRequest(preset?)`) would read the event as that.
+ */
 export function ActionTile({ icon: Icon, label, description, onClick }: ActionTileProps) {
 	return (
 		<button
 			type="button"
-			onClick={onClick}
+			onClick={() => onClick()}
 			className="group flex flex-col items-start gap-2 rounded-md border border-border bg-card p-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<Icon className="size-icon text-muted-foreground transition-colors group-hover:text-primary" />

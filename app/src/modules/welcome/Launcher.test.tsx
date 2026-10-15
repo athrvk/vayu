@@ -21,8 +21,8 @@
  * queries land, which is the one thing a skeleton exists to prevent.
  */
 
-import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { Launcher } from "./Launcher";
 import { FirstRunWelcome } from "./FirstRunWelcome";
 import { LauncherSkeleton } from "./LauncherSkeleton";
@@ -93,5 +93,27 @@ describe("the welcome screen's column", () => {
 
 		expect(launcherClass).toContain("enter-fade");
 		expect(firstRunClass).toContain("enter-fade");
+	});
+});
+
+describe("the Launcher's New request tile", () => {
+	it("calls onNewRequest with no arguments, not the click event", () => {
+		const onNewRequest = vi.fn();
+		render(
+			<Launcher
+				runs={[]}
+				collectionCount={1}
+				onImport={noop}
+				onNewRequest={onNewRequest}
+				onOpenDemo={noop}
+				onSearch={noop}
+				onHistory={noop}
+				onVariables={noop}
+				onServices={noop}
+			/>
+		);
+		fireEvent.click(screen.getByRole("button", { name: /New request/i }));
+		expect(onNewRequest).toHaveBeenCalledTimes(1);
+		expect(onNewRequest.mock.calls[0]).toHaveLength(0);
 	});
 });
