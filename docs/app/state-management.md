@@ -1766,8 +1766,8 @@ engine's `scenario_plan_test.cpp` (issue #431).
   `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
   `POST /import/apply` in one transaction. Resolves with
-  `{ idMap, rootIds, environmentIds }`: the engine's temp-id map, plus each root
-  collection's and each environment's temp id mapped to its real id, which is
+  `{ idMap, rootIds }`: the engine's temp-id map, plus each root
+  collection's temp id mapped to its real id, which is
   what lets the caller expand and open what it created
 
 **Reordering (`useReorderMutation`)** is the one mutation that writes its caches

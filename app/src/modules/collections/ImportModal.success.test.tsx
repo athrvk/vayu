@@ -35,7 +35,7 @@ vi.mock("@/queries/import", () => ({
 			result.collections.forEach((c: { name: string }, i: number) => {
 				rootIds[`c${i + 1}`] = `col_${c.name}`;
 			});
-			return { idMap: { ...rootIds }, rootIds, environmentIds: {} };
+			return { idMap: { ...rootIds }, rootIds };
 		}),
 		isPending: false,
 	}),

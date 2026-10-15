@@ -281,9 +281,8 @@ The dialog closes on a full success and `announceImport` takes over (issue
 ledger is the one place the loss report is drawn from, and the dialog discards
 it, so what the user would otherwise have to finish by hand is kept:
 
-- `useImportMutation` resolves with `{ idMap, rootIds, environmentIds }`: each
-  root collection's and environment's temp id mapped to the real id the engine
-  minted. That is what the steps below address.
+- `useImportMutation` resolves with `{ idMap, rootIds }`: each root
+  collection's temp id mapped to the real id the engine minted. That is what the steps below address.
 - One `ImportReport` per applied file (the notice lines, the file-reference
   needs, the counts) goes into `import-report-store`, keyed by each root
   collection's real id. A file with nothing to report stores nothing.

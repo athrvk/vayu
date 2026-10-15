@@ -247,7 +247,6 @@ describe("useImportMutation", () => {
 		});
 
 		expect(applied.rootIds).toEqual({ c1: "col_1", c2: "col_2" });
-		expect(applied.environmentIds).toEqual({ e1: "env_1" });
 		expect(applied.idMap).toEqual({ c1: "col_1", c2: "col_2", e1: "env_1" });
 	});
 
