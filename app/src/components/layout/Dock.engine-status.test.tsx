@@ -170,7 +170,7 @@ describe("the engine status indicator", () => {
  */
 describe("a start failure the main process reported", () => {
 	const SENTENCE =
-		"Another program is using port 9876 and the fallback ports. Quit it and press Retry.";
+		"Another program is using port 9876, and the fallback ports are held too. Free port 9876 and press Retry.";
 
 	function stubRestart() {
 		const restartEngine = vi.fn().mockResolvedValue({ success: true });

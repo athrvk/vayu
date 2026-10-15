@@ -83,7 +83,7 @@ describe("useEngineRestart", () => {
 		// sentence, and the failure it replaces stops speaking for the engine
 		// while the restart runs (the next poll re-reads whether it still holds).
 		const sentence =
-			"Another program is using port 9876 and the fallback ports. Quit it and press Retry.";
+			"Another program is using port 9876, and the fallback ports are held too. Free port 9876 and press Retry.";
 		stubElectron({ success: false, error: sentence });
 		useEngineStore.setState({ engineStartFailure: sentence });
 		const { result } = renderHook(() => useEngineRestart(), { wrapper });

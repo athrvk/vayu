@@ -377,8 +377,8 @@ which case the app picks a fallback (below).
   `electronAPI.enginePort`, and the renderer's `ENGINE_BASE_URL`, the `Origin`
   bridge and the MCP server's engine URL all follow it. The Dock's engine status
   shows the address while connected. With every port held the app stays up on
-  the disconnected state, the Dock says which programs to quit and offers Retry,
-  and nothing quits. Tools outside the app assume 9876: `vayu-cli --daemon`
+  the disconnected state, the Dock says to free 9876 and offers Retry (the
+  renderer was told one port, so Retry looks at 9876 alone), and nothing quits. Tools outside the app assume 9876: `vayu-cli --daemon`
   and the stdio MCP launcher's `VAYU_ENGINE_URL` need the address the Dock shows
   when the app fell back.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a

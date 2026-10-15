@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
@@ -166,26 +166,47 @@ function EngineStatus() {
 	return (
 		<>
 			{status}
-			<EngineRetryButton />
+			<EngineRestartButton idleLabel="Retry" busyLabel="Retrying…" />
 		</>
 	);
 }
 
-/** Retry after a start failure the user can fix: the same restart Settings offers. */
-function EngineRetryButton() {
+/**
+ * The engine restart as a warning-toned button, shared by Retry after a start
+ * failure and by the pending-setting restart so the two cannot drift.
+ *
+ * Spreads the rest onto the `<button>` because `PendingRestartButton` wraps it
+ * in a `TooltipTrigger asChild`, which hands it a ref and event handlers.
+ */
+function EngineRestartButton({
+	idleLabel,
+	busyLabel,
+	className,
+	...props
+}: {
+	idleLabel: string;
+	busyLabel: string;
+} & Omit<ComponentProps<"button">, "children" | "onClick" | "disabled">) {
 	const { restart, isRestarting } = useEngineRestart();
 
 	return (
 		<button
+			{...props}
 			onClick={() => void restart()}
 			disabled={isRestarting}
-			className="flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+			className={cn(
+				"group flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				className
+			)}
 		>
 			<RefreshCw
 				className={cn("size-icon-sm", isRestarting && "animate-spin")}
+				// Not while it is already spinning: the one-shot turn would
+				// fight the `animate-spin` loop that says work is happening.
+				data-icon-motion={isRestarting ? undefined : ICON_MOTION.spinOnce}
 				aria-hidden="true"
 			/>
-			{isRestarting ? "Retrying…" : "Retry"}
+			{isRestarting ? busyLabel : idleLabel}
 		</button>
 	);
 }
@@ -511,8 +532,6 @@ function SaveStatusLine() {
 }
 
 function PendingRestartButton() {
-	const { restart, isRestarting } = useEngineRestart();
-
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -528,20 +547,11 @@ function PendingRestartButton() {
 				 * a setting, not the state of a run, a connection or a service, and
 				 * amber in that family means "4xx client error".
 				 */}
-				<button
-					onClick={() => void restart()}
-					disabled={isRestarting}
-					className="enter-fade group flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-				>
-					<RefreshCw
-						className={cn("size-icon-sm", isRestarting && "animate-spin")}
-						// Not while it is already spinning: the one-shot turn would
-						// fight the `animate-spin` loop that says work is happening.
-						data-icon-motion={isRestarting ? undefined : ICON_MOTION.spinOnce}
-						aria-hidden="true"
-					/>
-					{isRestarting ? "Restarting…" : "Restart pending"}
-				</button>
+				<EngineRestartButton
+					idleLabel="Restart pending"
+					busyLabel="Restarting…"
+					className="enter-fade"
+				/>
 			</TooltipTrigger>
 			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
 			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}

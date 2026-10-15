@@ -49,12 +49,17 @@ export function healthPollIntervalMs(
  * "Starting…".
  *
  * Skipped once a poll has answered, because the engine that did is the
- * authority and this read may have been in flight when it came up.
+ * authority and this read may have been in flight when it came up. Skipped too
+ * when a restart opened a new start window meanwhile (`useEngineRestart`): the
+ * reply then describes the start Retry just cleared, and writing it back would
+ * put the old sentence, and the unreachable status, over the retry in flight.
  */
 function adoptEngineStartFailure(): void {
+	const startedIn = useEngineStore.getState().engineStartWindow;
 	void readEngineStartFailure().then((failure) => {
 		const store = useEngineStore.getState();
 		if (store.engineStatus === "connected") return;
+		if (store.engineStartWindow !== startedIn) return;
 		store.setEngineStartFailure(failure);
 		if (failure !== null) store.setEngineStatus("unreachable");
 	});

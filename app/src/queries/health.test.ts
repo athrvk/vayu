@@ -524,7 +524,7 @@ describe("useHealthQuery - a restart is a cold start", () => {
  */
 describe("useHealthQuery - a start failure the main process reports", () => {
 	const SENTENCE =
-		"Another program is using port 9876 and the fallback ports. Quit it and press Retry.";
+		"Another program is using port 9876, and the fallback ports are held too. Free port 9876 and press Retry.";
 	const getEngineStartFailure = vi.fn();
 
 	beforeEach(() => {
@@ -585,6 +585,29 @@ describe("useHealthQuery - a start failure the main process reports", () => {
 		await waitFor(() => expect(getEngineStartFailure).toHaveBeenCalled());
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
 		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
+	it("drops a reply that lands after Retry cleared the failure it describes", async () => {
+		let reply: (failure: string | null) => void = () => {};
+		getEngineStartFailure.mockReturnValue(
+			new Promise<string | null>((resolve) => {
+				reply = resolve;
+			})
+		);
+		renderHook(() => useHealthQuery(), { wrapper });
+		await waitFor(() => expect(getEngineStartFailure).toHaveBeenCalled());
+
+		// What `useEngineRestart` does on Retry: a new start window, failure cleared.
+		act(() => {
+			useEngineStore.getState().openEngineStartWindow(Date.now() + 1000);
+			useEngineStore.getState().setEngineStartFailure(null);
+		});
+		await act(async () => {
+			reply(SENTENCE);
+		});
+
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+		expect(useEngineStore.getState().engineStatus).toBe("starting");
 	});
 
 	it("is dropped when an engine answers", async () => {

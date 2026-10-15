@@ -369,12 +369,20 @@ export class EngineNotReadyError extends Error {
  * Raised when every candidate port is held by something that is not a Vayu
  * engine (#2118). Like `EngineNotReadyError` it leaves the app up: the user can
  * free the port and press Retry, so the message is the sentence they read.
+ *
+ * Several `ports` means a first start found every candidate held. The renderer
+ * is told one port once, so the start narrows to the first (`claimPort`) and
+ * Retry looks at that one alone: the sentence names it as the one to free and
+ * mentions the fallbacks only as context.
  */
 export class EnginePortInUseError extends Error {
 	constructor(ports: readonly number[]) {
-		const held =
-			ports.length > 1 ? `port ${ports[0]} and the fallback ports` : `port ${ports[0]}`;
-		super(`Another program is using ${held}. Quit it and press Retry.`);
+		const [first] = ports;
+		super(
+			ports.length > 1
+				? `Another program is using port ${first}, and the fallback ports are held too. Free port ${first} and press Retry.`
+				: `Another program is using port ${first}. Quit it and press Retry.`
+		);
 		this.name = "EnginePortInUseError";
 	}
 }

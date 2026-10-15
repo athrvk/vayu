@@ -517,7 +517,7 @@ describe("EngineSidecar - choosing a port", () => {
 
 		expect(failure).toBeInstanceOf(EnginePortInUseError);
 		expect((failure as Error).message).toBe(
-			`Another program is using port ${TEST_PORT} and the fallback ports. Quit it and press Retry.`
+			`Another program is using port ${TEST_PORT}, and the fallback ports are held too. Free port ${TEST_PORT} and press Retry.`
 		);
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 		expect(onPortFixed.mock.calls).toEqual([[TEST_PORT]]);

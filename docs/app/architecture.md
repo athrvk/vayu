@@ -326,7 +326,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 
 The preload script (`electron/preload.ts`) exposes a minimal, context-isolated API bridge via `window.electronAPI`:
 
-- **Engine Management**: `restartEngine()` for engine lifecycle control. Engine liveness is *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`), so there is one answer rather than two
+- **Engine Management**: `restartEngine()` for engine lifecycle control; `enginePort`, the port the sidecar settled on (9876 or a fallback), a constant read from the renderer's command line that `config/network.ts` resolves once into `ENGINE_BASE_URL` (issue #2118); `getEngineStartFailure()` over `engine:startFailure`, the main process's own sentence when a start failed in a way the user can fix (every engine port held), or `null`, which the health poll reads on a failed poll. Engine liveness is *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`), so there is one answer rather than two
 - **Theme Management**: `getTheme()`, `setTheme()`, `onThemeChanged()` for OS theme synchronization
 - **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
 - **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, plus `restartToInstallUpdate()`, `openReleasePage()`; the four `update:*` invoke channels (restartToInstall, openReleasePage, check, quitForUpdate) are registered in `setupIpcHandlers` ahead of the engine wait and forward into the lazily loaded updater

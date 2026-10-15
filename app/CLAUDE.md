@@ -279,12 +279,12 @@ uses when no preload reports a port). Do not hand the page a stub
 `window.electronAPI` carrying just `enginePort`: `errors/error-logger.ts` and
 `TitleBar.tsx` read the object's presence as the whole bridge and would call
 methods it lacks. Chromium is pre-installed at `/opt/pw-browsers/chromium` and
-needs `--no-sandbox`. `window.electronAPI` is absent there, so every preload-only path (file parts,
-the quit flush, system notifications, the OS proxy) is off and its fallback is
-what you measure. Every root poll is a TanStack `refetchInterval` with the
-background default, so a hidden window measures the paused case; an idle
-figure needs the window visible and untouched, and the health log's 30 s
-cadence is the proxy that proves it was.
+needs `--no-sandbox`. `window.electronAPI` is absent there, so every
+preload-only path (file parts, the quit flush, system notifications, the OS
+proxy) is off and its fallback is what you measure. Every root poll is a
+TanStack `refetchInterval` with the background default, so a hidden window
+measures the paused case; an idle figure needs the window visible and
+untouched, and the health log's 30 s cadence is the proxy that proves it was.
 
 **Plain Chromium needs the shell's bridge, or the engine refuses it.** It
 sends `Origin: http://localhost:<port>` on every engine call and has no

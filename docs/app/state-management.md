@@ -540,6 +540,7 @@ Merged store managing engine connection status and restart-required notification
 {
   engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
+  engineStartFailure: string | null  // The main process's sentence when no engine can start (every port held), or null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
   workers: number | null  // The `workers` setting's effective value, or null before the first poll
   engineStartWindow: number | null  // When the engine now coming up began, or null
@@ -553,6 +554,7 @@ Merged store managing engine connection status and restart-required notification
 const {
   engineStatus, setEngineStatus,
   engineError, setEngineError,
+  engineStartFailure, setEngineStartFailure,
   recovery, setEngineRecovery,
   workers, setWorkers,
   engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
@@ -564,6 +566,16 @@ const {
 written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
+
+`engineStartFailure` is the main process's own account of why no engine is
+coming, when the user can fix it: another program holding every port the engine
+may use (issue #2118). `useHealthQuery` asks for it (`getEngineStartFailure`) on
+a failed poll and writes it here; the poll an engine answers clears it, and so
+does `useEngineRestart` when Retry is pressed. A reply that lands after a
+restart opened its start window is dropped, because it describes the start
+Retry just cleared. While it is set the status is `unreachable` whatever the
+startup grace says, and the Dock shows it in place of `engineError` and offers
+Retry.
 
 `workers` is the `workers` field from the same poll (issue #1508) - the
 `workers` setting's effective value, not the machine's raw core count - read by

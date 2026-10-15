@@ -1716,6 +1716,12 @@ this hook remains the only thing that classifies; a restart the main process
 reports as failed closes the window again, and the next failed poll goes back
 to owing the user its reason.
 
+A start failure the main process reports overrules that grace. When every
+engine port is held, `useHealthQuery` reads `getEngineStartFailure()` on a failed
+poll, and a sentence there makes the status `unreachable` at once and keeps it
+there between polls, instead of "Starting…" for 45s over an engine nobody is
+starting (issue #2118). The poll an engine answers clears it.
+
 That 45s is the same budget the main process spends on a cold
 engine before it gives up and logs `EngineNotReadyError`
 (`ENGINE_HEALTH_POLL_BUDGET_MS` in `electron/constants.ts`) - it is the same
@@ -1799,8 +1805,8 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 1. Check the Dock: hovering "Engine connected" shows the address the app is
    using, and the disconnected state says why. "Another program is using port
-   9876 and the fallback ports" means every candidate is held; quit the program
-   and press Retry.
+   9876, and the fallback ports are held too" means every candidate is held;
+   free 9876 (Retry looks there alone) and press Retry.
 2. Check if engine is running: `curl <address from the Dock>/health` (9876
    unless the app fell back)
 3. Check engine logs in Electron console
