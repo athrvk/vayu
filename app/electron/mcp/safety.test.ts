@@ -263,6 +263,10 @@ describe("checkLoadCaps", () => {
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/startConcurrency 5000 exceeds the MCP cap of 200/);
 	});
+	test("names the unit the concurrency cap counts", () => {
+		const res = checkLoadCaps({ mode: "constant_concurrency", concurrency: 5000 }, config);
+		expect(res.error).toMatch(/exceeds the MCP cap of 200 virtual users\./);
+	});
 	test("accepts a startConcurrency at the cap", () => {
 		expect(
 			checkLoadCaps({ mode: "ramp_up", concurrency: 200, startConcurrency: 200 }, config).ok

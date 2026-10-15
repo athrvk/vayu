@@ -21,6 +21,7 @@
  */
 
 import type { LoadTestMode } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface LoadTestModeInfo {
 	value: LoadTestMode;
@@ -38,8 +39,8 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 	},
 	{
 		value: "constant_concurrency",
-		label: "Constant Concurrency",
-		description: "Keep a fixed number of connections busy.",
+		label: "Constant Virtual Users",
+		description: "Keep a fixed number of virtual users busy.",
 	},
 	{
 		value: "iterations",
@@ -49,7 +50,7 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 	{
 		value: "ramp_up",
 		label: "Ramp-Up",
-		description: "Climb to the target concurrency over a ramp.",
+		description: "Climb to the target number of virtual users over a ramp.",
 	},
 	{
 		value: "capacity",
@@ -77,30 +78,34 @@ export function loadTestModeLabel(mode: string | undefined | null): string {
 	return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** The unit for exactly one, for callers that format the count themselves. */
+export const CONCURRENCY_UNIT_SINGULAR = "virtual user";
+
+/** The unit `formatConcurrency` speaks, plural. Exported for the guards that pin it. */
+export const CONCURRENCY_UNIT = `${CONCURRENCY_UNIT_SINGULAR}s`;
+
+/** The field label for the same quantity: "Virtual users". */
+export const CONCURRENCY_LABEL = "Virtual users";
+
 /**
- * A run's concurrency, in words.
+ * A run's concurrency, in words: "1 virtual user", "64 virtual users".
  *
- * The same drift as the mode labels above, in the same shape: the history
- * sidebar row rendered `summary.concurrency` as "256 workers" while the
- * dashboard header rendered the identical field as "64 VUs", so one run was
- * described two ways depending on which screen you were on.
- *
- * "Workers" was the wrong half of that disagreement rather than merely the
- * inconsistent one - the engine already owns the name for its libcurl
- * event-loop thread count (`workers`, a Settings key), an unrelated number
- * that was 8 while the sidebar was saying 256. A user comparing two runs in
- * History to see which `workers` value each used read a number wearing that
- * name and got concurrency.
+ * The UI once called this number five things - "Connections", "Concurrency",
+ * "VUs", "workers" and "concurrent users" - and two screens described one run
+ * differently. "Virtual users" is the owner's pick (#2128); `workers` in
+ * particular is wrong, not merely inconsistent, because the engine owns that
+ * name for its libcurl event-loop thread count. The API and MCP field names
+ * (`concurrency`, `startConcurrency`, `maxConcurrency`) keep their spelling;
+ * only copy a person reads changes. The open-loop in-flight measurement keeps
+ * "In-flight requests" and does not use this helper.
  *
  * Callers pass the number and render the result; nobody appends the unit
- * themselves, which is what lets the two surfaces stay in step.
+ * themselves, which is what lets every surface stay in step. Prose that wants
+ * the noun without a count reads `CONCURRENCY_UNIT` / `CONCURRENCY_LABEL`.
  */
 export function formatConcurrency(concurrency: number): string {
-	return `${concurrency} ${CONCURRENCY_UNIT}`;
+	return `${concurrency} ${pluralize(concurrency, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT)}`;
 }
-
-/** The unit `formatConcurrency` speaks. Exported for the guards that pin it. */
-export const CONCURRENCY_UNIT = "VUs";
 
 /**
  * @deprecated Prefer `loadTestModeLabel` above.

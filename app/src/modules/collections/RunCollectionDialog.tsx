@@ -84,6 +84,7 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
+import { CONCURRENCY_LABEL } from "@/constants/load-test-modes";
 import { Callout, NumberField } from "@/components/shared";
 import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
 import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
@@ -517,10 +518,10 @@ export default function RunCollectionDialog({
 						<>
 							<div className="flex items-center justify-between gap-4">
 								<Label htmlFor="run-collection-vus" className="leading-snug">
-									Virtual users
+									{CONCURRENCY_LABEL}
 									<span className="block text-xs font-normal text-muted-foreground">
-										How many walk the sequence at once. The only concurrency
-										knob - in-flight requests are bounded by it.
+										How many walk the sequence at once. It is also the only
+										limit on in-flight requests.
 									</span>
 								</Label>
 								<Input
@@ -562,7 +563,7 @@ export default function RunCollectionDialog({
 							{(!virtualUsersValid || !durationValid) && (
 								<Callout severity="blocking" title="Load test">
 									{!virtualUsersValid
-										? "Virtual users must be a whole number of 1 or more."
+										? `${CONCURRENCY_LABEL} must be a whole number of 1 or more.`
 										: "Duration must be greater than zero seconds."}
 								</Callout>
 							)}

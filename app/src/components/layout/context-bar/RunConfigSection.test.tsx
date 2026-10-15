@@ -61,8 +61,8 @@ describe("RunConfigSection", () => {
 		run = makeRun("load", { mode: "ramp_up", concurrency: 64, startConcurrency: 8 });
 		render(<RunConfigSection tab={TAB} />);
 
-		expect(screen.getByText("64 VUs")).toBeInTheDocument();
-		expect(screen.getByText("8 VUs")).toBeInTheDocument();
+		expect(screen.getByText("64 virtual users")).toBeInTheDocument();
+		expect(screen.getByText("8 virtual users")).toBeInTheDocument();
 	});
 
 	it("calls a design run a single send instead of reporting no configuration", () => {

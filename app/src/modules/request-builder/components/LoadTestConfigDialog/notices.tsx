@@ -82,7 +82,7 @@ export function buildNotices({
 			key: "capacity-range",
 			severity: "blocking",
 			node: (
-				<Callout severity="blocking" title="Start concurrency is at or above the maximum">
+				<Callout severity="blocking" title="Start is at or above the maximum">
 					{capacityRangeError}
 				</Callout>
 			),
@@ -94,7 +94,7 @@ export function buildNotices({
 			key: "start-floor",
 			severity: "blocking",
 			node: (
-				<Callout severity="blocking" title="Start is below one connection">
+				<Callout severity="blocking" title="Start is below one virtual user">
 					{startFloorError}
 				</Callout>
 			),

@@ -287,7 +287,7 @@ Notes:
 
 - **`start_load_run`** requires confirmation - via elicitation when the client
   supports it, otherwise a `confirmed: true` flag - and enforces the RPS /
-  concurrency / duration caps. In `capacity` mode the concurrency cap bounds the
+  virtual-user (`concurrency`) / duration caps. In `capacity` mode the virtual-user cap bounds the
   search's *ceiling* (`concurrency`) and its starting level
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
@@ -1759,11 +1759,11 @@ configurable in **Settings → MCP** and persisted.
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
-- **Hard caps** - max RPS / concurrency / duration / iterations on
+- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations on
   `start_load_run`; over-cap requests are rejected. With the allowlist, these are
   the real limits on load, and they cover **every** field the tool forwards:
-    - `concurrency` **and** `startConcurrency` are both held to the concurrency
-      cap. A ramp is seeded with `startConcurrency` before its first duration
+    - `concurrency` **and** `startConcurrency` are both held to the virtual-user
+      cap (**Max virtual users** in Settings). A ramp is seeded with `startConcurrency` before its first duration
       check, so capping only the target would bound where a run ends and not
       where it starts.
     - An **iterations** run stops on a request count and never reads `duration`,
@@ -2038,7 +2038,7 @@ secrets; see the write toggle.
 | `allowlist`          | `[]`    | -           | Permitted hostnames (empty = deny all).                    |
 | `allowAll`           | `false` | -           | Bypass the allowlist for any resolvable host.              |
 | `maxRps`             | `1000`  | `1000000`   | Cap on `targetRps`, which only `constant_rps` carries.     |
-| `maxConcurrency`     | `200`   | `10000`     | Cap on `concurrency` and `startConcurrency` (closed-loop). |
+| `maxConcurrency`     | `200`   | `10000`     | Cap on virtual users: `concurrency` and `startConcurrency` (closed-loop). |
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
@@ -2064,7 +2064,7 @@ copy is tied to the renderer constant by `config.test.ts`, the way
 
 `maxRps` and `maxConcurrency` bound **different runs**, which is why neither is a
 general "load cap": `targetRps` exists only in `constant_rps`, so `maxRps` is
-inert against a closed-loop run, and `maxConcurrency` bounds the concurrency a
+inert against a closed-loop run, and `maxConcurrency` bounds the virtual users a
 closed-loop run holds (or a ramp starts from, or a capacity search climbs to) -
 not the in-flight requests of a rate-paced run, which `maxInFlight` governs.
 
@@ -2225,7 +2225,7 @@ from environment variables:
 | `VAYU_MCP_ALLOWLIST`            | (empty)                 | Comma-separated hostnames.             |
 | `VAYU_MCP_ALLOW_ALL`            | `false`                 | `true` bypasses the allowlist.         |
 | `VAYU_MCP_MAX_RPS`              | `1000`                  | RPS cap.                               |
-| `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Concurrency cap.                       |
+| `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Virtual-user cap.                      |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |

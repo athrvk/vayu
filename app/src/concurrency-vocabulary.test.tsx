@@ -54,9 +54,12 @@ function textNodes(root: Element): string[] {
 	return out;
 }
 
-/** The word a surface put immediately after the concurrency number, or null. */
+/**
+ * The unit a surface put immediately after the concurrency number, or null.
+ * "virtual users" is two words, so a trailing "user(s)" belongs to the unit.
+ */
 function unitAfterConcurrency(texts: string[]): string | null {
-	const pattern = new RegExp(`(?:^|\\s)${CONCURRENCY}\\s+(\\S+)`);
+	const pattern = new RegExp(`(?:^|\\s)${CONCURRENCY}\\s+(\\S+(?:\\s+users?)?)`);
 	for (const text of texts) {
 		const unit = pattern.exec(text)?.[1];
 		if (unit) return unit;

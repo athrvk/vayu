@@ -21,7 +21,13 @@ import { readFileSync } from "node:fs";
 import { globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { LOAD_TEST_MODES, loadTestModeLabel } from "./load-test-modes";
+import {
+	CONCURRENCY_LABEL,
+	CONCURRENCY_UNIT,
+	LOAD_TEST_MODES,
+	formatConcurrency,
+	loadTestModeLabel,
+} from "./load-test-modes";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -76,5 +82,27 @@ describe("load test mode vocabulary", () => {
 		}
 
 		expect(offences.join("\n")).toBe("");
+	});
+});
+
+describe("how the simulated-user count is worded (#2128)", () => {
+	it("says 'virtual users' in the label, the unit and the mode name", () => {
+		expect(CONCURRENCY_LABEL).toBe("Virtual users");
+		expect(CONCURRENCY_UNIT).toBe("virtual users");
+		expect(loadTestModeLabel("constant_concurrency")).toBe("Constant Virtual Users");
+	});
+
+	it("pluralises the count: one is singular, zero and many are plural", () => {
+		expect(formatConcurrency(1)).toBe("1 virtual user");
+		expect(formatConcurrency(64)).toBe("64 virtual users");
+		expect(formatConcurrency(0)).toBe("0 virtual users");
+	});
+
+	it("keeps the retired names out of every mode's words", () => {
+		for (const mode of LOAD_TEST_MODES) {
+			expect(`${mode.label} ${mode.description}`, mode.value).not.toMatch(
+				/\bVUs?\b|connections?|concurren/i
+			);
+		}
 	});
 });
