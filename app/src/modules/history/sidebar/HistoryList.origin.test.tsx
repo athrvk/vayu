@@ -201,6 +201,6 @@ describe("the history sidebar's origin filter", () => {
 		queryState.rows = [];
 		renderList();
 		expect(screen.queryByRole("button", { name: "Clear the filters" })).toBeNull();
-		expect(within(document.body).getByText("No test runs found")).toBeInTheDocument();
+		expect(within(document.body).getByText("No runs yet")).toBeInTheDocument();
 	});
 });

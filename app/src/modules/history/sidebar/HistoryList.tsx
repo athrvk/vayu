@@ -17,6 +17,7 @@ import {
 	type FilterStatus,
 	type FilterType,
 } from "@/modules/history/history-store";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import {
 	useRunsQuery,
 	useDeleteRunMutation,
@@ -163,6 +164,8 @@ export default function HistoryList() {
 		setFilterOrigin(value as FilterOrigin);
 	};
 	const originNarrowing = filterOrigin !== "all" || filterClient !== null;
+	const isNarrowed =
+		searchQuery !== "" || filterType !== "all" || filterStatus !== "all" || originNarrowing;
 	// Grouped after sorting/filtering, never before - a group is a label over
 	// whatever order `runs` is already in, not a second decision about it.
 	const runGroups = groupRunsByDay(runs);
@@ -193,7 +196,7 @@ export default function HistoryList() {
 	/*
 	 * The drawer has three sibling views. The collections tree already tells the
 	 * user when its load failed; a history list that answers the same failure
-	 * with "No test runs found" is not just wrong on its own terms, it makes the
+	 * with "No runs yet" is not just wrong on its own terms, it makes the
 	 * same event look like two different events depending on which view is open.
 	 * Nothing here offers a create CTA, so this is about that symmetry rather
 	 * than about preventing a duplicate.
@@ -313,9 +316,9 @@ export default function HistoryList() {
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="all">All types</SelectItem>
-								<SelectItem value="load">Load test</SelectItem>
-								<SelectItem value="design">Design mode</SelectItem>
-								<SelectItem value="scenario">Collection run</SelectItem>
+								<SelectItem value="load">{RUN_TYPE_NAME.load}</SelectItem>
+								<SelectItem value="design">{RUN_TYPE_NAME.design}</SelectItem>
+								<SelectItem value="scenario">{RUN_TYPE_NAME.scenario}</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -451,28 +454,28 @@ export default function HistoryList() {
 							<EmptyState
 								className="h-full"
 								icon={Clock}
-								title={pinnedOnly ? "No pinned runs found" : "No test runs found"}
+								title={
+									pinnedOnly
+										? "No pinned runs found"
+										: isNarrowed
+											? "No runs found"
+											: "No runs yet"
+								}
 								description={
 									// Order matters: with a search or a Select
 									// narrowing the list, "pin a run" would be
 									// advice for a state the user is not in.
-									searchQuery ||
-									filterType !== "all" ||
-									filterStatus !== "all" ||
-									originNarrowing
+									isNarrowed
 										? "Try widening the search or clearing the filters."
 										: pinnedOnly
 											? "Pin a run as its request's baseline to keep it here."
-											: "Run your first load test to see its results here."
+											: "Every send, collection run and load test is recorded here."
 								}
 								action={
 									// Only when a control is doing the narrowing:
 									// "Clear the filters" is not an offer to make
 									// when the list is empty because nothing ran.
-									searchQuery ||
-									filterType !== "all" ||
-									filterStatus !== "all" ||
-									originNarrowing ? (
+									isNarrowed ? (
 										<Button
 											variant="link"
 											onClick={() => {

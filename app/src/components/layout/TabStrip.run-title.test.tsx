@@ -99,7 +99,7 @@ describe("run tab title", () => {
 		const rail = tab.querySelector<HTMLElement>("[aria-hidden='true']");
 		expect(rail, "no method rail rendered").not.toBeNull();
 		expect(rail!.style.background).toContain("hsl(");
-		expect(tab.getAttribute("title")).toBe("Design run: POST /users");
+		expect(tab.getAttribute("title")).toBe("Send: POST /users");
 	});
 
 	it("marks a load run as a Load test in the tooltip", () => {
@@ -116,6 +116,16 @@ describe("run tab title", () => {
 		expect(screen.getByRole("tab").getAttribute("title")).toBe("Load test: GET /search");
 	});
 
+	it.each([
+		["design", "Send"],
+		["scenario", "Collection run"],
+		["load", "Load test"],
+	] as const)("names a %s run with no snapshot '%s'", (type, name) => {
+		state.run = { id: "run_1", type, status: "completed", startTime: 0, endTime: 0 };
+		renderWithRunTab();
+		expect(screen.getByRole("tab").getAttribute("title")).toBe(name);
+	});
+
 	it("falls back to 'Run' only while the run is still loading", () => {
 		state.run = undefined; // query not settled yet
 		renderWithRunTab();
@@ -124,11 +134,11 @@ describe("run tab title", () => {
 
 	/*
 	 * A collection run has no url or method - its work is a sequence - so a
-	 * tab for one used to fall all the way through to "Design run", the same
+	 * tab for one used to fall all the way through to the single-send name, the same
 	 * bug the history row had before it read `summary.scenario` (#357):
 	 * nothing distinguished it from a bare single-request send.
 	 */
-	it("names a collection run by the collection it ran, not 'Design run'", () => {
+	it("names a collection run by the collection it ran, not 'Send'", () => {
 		state.collections = [{ id: "col_1", name: "Checkout flow" }];
 		state.run = {
 			id: "run_1",
@@ -142,7 +152,7 @@ describe("run tab title", () => {
 
 		const tab = screen.getByRole("tab");
 		expect(tab.textContent).toContain("Checkout flow");
-		expect(tab.textContent).not.toContain("Design run");
+		expect(tab.textContent).not.toContain("Send");
 		expect(tab.getAttribute("title")).toBe("Collection run: Checkout flow");
 	});
 
