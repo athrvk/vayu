@@ -6,6 +6,7 @@ import {
 	buildRampOverlay,
 	buildPercentileChartData,
 	buildStatusOverTime,
+	stackStatusPoints,
 	buildCustomMetricsOverTime,
 	customMetricNames,
 	customMetricSeriesLabel,
@@ -197,6 +198,53 @@ describe("buildStatusOverTime", () => {
 
 	it("returns [] when no tick carries a status map", () => {
 		expect(buildStatusOverTime([tick({ elapsed_seconds: 1 })])).toEqual([]);
+	});
+});
+
+describe("stackStatusPoints", () => {
+	const cleanRun = [
+		tick({ elapsed_seconds: 0.5, status_codes: { "200": 9000 } }),
+		tick({ elapsed_seconds: 1.0, status_codes: { "200": 18000 } }),
+	];
+
+	it("gives a 200s-only run its interval count in 2xx and zero in every other class", () => {
+		const { own } = stackStatusPoints(buildStatusOverTime(cleanRun));
+		expect(own).toEqual([
+			[9000, 9000],
+			[0, 0],
+			[0, 0],
+			[0, 0],
+			[0, 0],
+		]);
+	});
+
+	it("stacks the same counts cumulatively, bottom to top, for plotting", () => {
+		const { times, stacked } = stackStatusPoints(
+			buildStatusOverTime([
+				tick({ elapsed_seconds: 0.5, status_codes: { "200": 100, "404": 5 } }),
+				tick({
+					elapsed_seconds: 1.0,
+					status_codes: { "200": 180, "404": 7, "500": 3, "0": 1 },
+				}),
+			])
+		);
+		expect(times).toEqual([0.5, 1.0]);
+		// 2xx, +3xx, +4xx, +5xx, +err
+		expect(stacked).toEqual([
+			[100, 80],
+			[100, 80],
+			[105, 82],
+			[105, 85],
+			[105, 86],
+		]);
+	});
+
+	it("is five empty bands over no times for no points", () => {
+		expect(stackStatusPoints(buildStatusOverTime([tick({ elapsed_seconds: 1 })]))).toEqual({
+			times: [],
+			own: [[], [], [], [], []],
+			stacked: [[], [], [], [], []],
+		});
 	});
 });
 

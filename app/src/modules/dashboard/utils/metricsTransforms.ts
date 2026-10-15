@@ -91,6 +91,32 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 }
 
 /**
+ * The status chart's two views of the same per-interval counts: `own` is how
+ * many responses of each class arrived in the 0.5 s bucket (what a tooltip
+ * reports), `stacked` is the running total up the stack (what the chart plots,
+ * so each class' band fills between consecutive lines). Both run bottom to top:
+ * 2xx, 3xx, 4xx, 5xx, err.
+ */
+export interface StatusStack {
+	times: number[];
+	own: number[][];
+	stacked: number[][];
+}
+
+export function stackStatusPoints(points: StatusPoint[]): StatusStack {
+	const own = [
+		points.map((p) => p.c2xx),
+		points.map((p) => p.c3xx),
+		points.map((p) => p.c4xx),
+		points.map((p) => p.c5xx),
+		points.map((p) => p.cErr),
+	];
+	const running = points.map(() => 0);
+	const stacked = own.map((band) => band.map((n, i) => (running[i] += n)));
+	return { times: points.map((p) => p.time), own, stacked };
+}
+
+/**
  * Latest instantaneous receive throughput in MB/s, derived by diffing the last
  * two cumulative `bytes_received` samples (mirrors how currentRps is derived).
  * Returns 0 when there aren't two samples or no byte data.
