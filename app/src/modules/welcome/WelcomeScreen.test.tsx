@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
 import { useTabsStore, useSessionStore, useLayoutStore } from "@/stores";
+import { useSettingsStore } from "@/modules/settings/settings-store";
 import { DEMO_REQUEST_PRESET } from "./demo-request";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import type { Run } from "@/types";
@@ -102,6 +103,44 @@ describe("WelcomeScreen", () => {
 					url: DEMO_REQUEST_PRESET.url,
 				})
 			);
+		});
+	});
+
+	describe("connecting a coding agent (issue #2122)", () => {
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("opens Settings on the MCP section from the first-run row", () => {
+			useSettingsStore.getState().setSelectedCategory("appearance");
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /Connect your coding agent/i }));
+
+			expect(useSettingsStore.getState().selectedCategory).toBe("mcp");
+			const { openTabs, activeTabId } = useTabsStore.getState();
+			expect(openTabs).toHaveLength(1);
+			expect(openTabs[0]).toMatchObject({ type: "settings" });
+			expect(activeTabId).toBe(openTabs[0].id);
+		});
+
+		it("is absent from the Launcher, with or without runs", () => {
+			mocks.collections = { data: [{ id: "c1", name: "API" }], isLoading: false };
+			for (const runs of [[], [run()]]) {
+				mocks.runs = { data: runs, isLoading: false };
+				const { unmount } = renderScreen();
+				expect(
+					screen.queryByRole("button", { name: /Connect your coding agent/i })
+				).not.toBeInTheDocument();
+				unmount();
+			}
+		});
+
+		it("links the footer to the MCP docs through the keyed channel", () => {
+			const openAppLink = vi.fn();
+			vi.stubGlobal("electronAPI", { openAppLink });
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /Connect an agent \(MCP\)/i }));
+			expect(openAppLink).toHaveBeenCalledExactlyOnceWith("mcp");
 		});
 	});
 

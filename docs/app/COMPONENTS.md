@@ -1084,10 +1084,10 @@ mock this window did not touch. The route table and the activity log are polled 
 
 Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
 
-It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
+It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. The one exception is `FirstRunWelcome`, which carries a single plain sentence on what Vayu is and an agent-connect row (#2122); no figures, nothing on the Launcher. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
 
 - `WelcomeScreen.tsx` - container: queries, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user. The new-request flow itself is `hooks/useNewRequest.ts`, shared with the palette's `new-request` command - two entry points must not disagree about where a request lands. This screen renders that hook's `pickerProps` and nothing more.
-- `FirstRunWelcome.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
+- `FirstRunWelcome.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding. Also carries the "Connect your coding agent" row, which opens Settings on the MCP section through `lib/commands/reveal-settings.ts`'s `revealSettingsCategory` (shared with the palette's settings commands).
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
 - `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
   request, Search, Import, History, Variables, Services. Services and History both reveal a
@@ -1102,7 +1102,7 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `LauncherSkeleton.tsx` - one skeleton tile per real tile. It has drifted a tile behind the
   Launcher before; `WelcomeScreen.test.tsx` now asserts both grids against one constant.
 
-Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
+Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel (keys in `electron/app-links.ts`) - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
 Design rationale: `app/src/modules/welcome/README.md`
 

@@ -73,27 +73,11 @@ import {
 	useSaveStore,
 	useTabsStore,
 } from "@/stores";
-import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
-import type { SettingsCategory } from "@/types";
 import { navigateHistory } from "@/lib/navigate-history";
+import { openSettingsTab, revealSettingsCategory } from "./reveal-settings";
 import type { Command, CommandContext } from "./types";
-
-/** Open the Settings tab. The Shell's own effect brings its drawer view with it. */
-function openSettingsTab(): void {
-	useTabsStore.getState().openTab({ type: "settings", entityId: null });
-}
-
-/**
- * Reveal one settings section - the same two calls the sidebar's `selectCategory`
- * makes, in the same order: select first, then open, so the tab renders the
- * asked-for panel rather than the previous selection for one frame.
- */
-function revealSettingsCategory(category: SettingsCategory): void {
-	useSettingsStore.getState().setSelectedCategory(category);
-	openSettingsTab();
-}
 
 /** Where the active tab sits in the strip, or -1 when none is active. */
 function activeTabIndex(ctx: CommandContext): number {

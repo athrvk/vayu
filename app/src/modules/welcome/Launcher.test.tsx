@@ -52,7 +52,14 @@ describe("the welcome screen's column", () => {
 					onServices={noop}
 				/>
 			),
-			classesOf(<FirstRunWelcome onImport={noop} onNewRequest={noop} onOpenDemo={noop} />),
+			classesOf(
+				<FirstRunWelcome
+					onImport={noop}
+					onNewRequest={noop}
+					onOpenDemo={noop}
+					onConnectAgent={noop}
+				/>
+			),
 			classesOf(<LauncherSkeleton />),
 		];
 
@@ -88,7 +95,12 @@ describe("the welcome screen's column", () => {
 			/>
 		);
 		const firstRunClass = classesOf(
-			<FirstRunWelcome onImport={noop} onNewRequest={noop} onOpenDemo={noop} />
+			<FirstRunWelcome
+				onImport={noop}
+				onNewRequest={noop}
+				onOpenDemo={noop}
+				onConnectAgent={noop}
+			/>
 		);
 
 		expect(launcherClass).toContain("enter-fade");

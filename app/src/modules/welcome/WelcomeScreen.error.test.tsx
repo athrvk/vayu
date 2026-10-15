@@ -118,7 +118,7 @@ describe("WelcomeScreen when the workspace fails to load", () => {
 		expect(screen.getByText(/failed to fetch/i)).toBeInTheDocument();
 		// The dangerous half: the first-run pitch aimed at someone who is not new.
 		expect(
-			screen.queryByText(/Send API requests, script them, and run load tests/i)
+			screen.queryByText(/run load tests on a fast native engine/i)
 		).not.toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: /Import a collection/i })
@@ -157,9 +157,7 @@ describe("WelcomeScreen when the workspace fails to load", () => {
 	it("still shows the first-run screen when the workspace is genuinely empty", () => {
 		renderScreen();
 
-		expect(
-			screen.getByText(/Send API requests, script them, and run load tests/i)
-		).toBeInTheDocument();
+		expect(screen.getByText(/run load tests on a fast native engine/i)).toBeInTheDocument();
 		expect(
 			screen.queryByText(/couldn't load your collections and runs/i)
 		).not.toBeInTheDocument();

@@ -24,9 +24,15 @@
  * as it is once the Launcher takes over. Its own row for the same reason as
  * the Launcher's: the two-tile grid above is icon-and-label only, with no
  * room for a chord hint.
+ *
+ * **The agent-connect row is this screen's alone** (#2122). MCP is a feature
+ * the user has to know to look for, and a fresh install is the one moment the
+ * app has their attention; once a workspace has content the Launcher keeps
+ * only the shared footer link. It opens Settings on the
+ * "AI agents (MCP)" section rather than explaining anything here.
  */
 
-import { Download, Plus } from "lucide-react";
+import { Download, Plug, Plus } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import { ActionTile } from "./components/ActionTile";
@@ -38,9 +44,15 @@ interface FirstRunWelcomeProps {
 	onImport: () => void;
 	onNewRequest: () => void;
 	onOpenDemo: () => void;
+	onConnectAgent: () => void;
 }
 
-export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRunWelcomeProps) {
+export function FirstRunWelcome({
+	onImport,
+	onNewRequest,
+	onOpenDemo,
+	onConnectAgent,
+}: FirstRunWelcomeProps) {
 	return (
 		// `enter-fade`: this replaces `LauncherSkeleton` on mount, a plain
 		// conditional swap with no Radix `data-state` to key off, the shape
@@ -54,7 +66,8 @@ export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRun
 					<span className="text-md font-semibold text-foreground">Vayu</span>
 				</div>
 				<p className="text-sm text-muted-foreground">
-					Send API requests, script them, and run load tests against them from one place.
+					Send requests and run load tests on a fast native engine, with a built-in MCP
+					server for coding agents, and your data stays on this machine.
 				</p>
 			</div>
 
@@ -75,6 +88,12 @@ export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRun
 					/>
 				</div>
 				<DemoApiTile onClick={onOpenDemo} />
+				<ActionTile
+					icon={Plug}
+					label="Connect your coding agent"
+					description="Let Claude Code, Cursor, or Codex send requests and run load tests through Vayu's MCP server."
+					onClick={onConnectAgent}
+				/>
 			</section>
 
 			<FooterLinks />

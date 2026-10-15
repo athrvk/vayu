@@ -34,6 +34,7 @@ import {
 	defaultSidecarSystem,
 } from "./sidecar.js";
 import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
+import { appLinkUrl } from "./app-links.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { hashDataFile, hashDataFileReply, readDataFile } from "./data-file.js";
 import { AppFocusStore } from "./app-focus.js";
@@ -1191,19 +1192,10 @@ function setupIpcHandlers() {
 		appLogger().warn("ipc", msg, fields)
 	);
 
-	// Open one of the app's own documentation links in the system browser.
-	// Keyed rather than URL-taking on purpose: the renderer cannot ask for an
-	// arbitrary URL, so this does not hand the web layer a general "open
-	// anything" capability. Same links as the Help menu.
+	// Open one of the app's own documentation links in the system browser. Keyed
+	// rather than URL-taking on purpose - see app-links.ts.
 	ipcMain.handle("shell:openAppLink", async (_e, key: string) => {
-		const links: Record<string, string> = {
-			docs: DOCS_URL,
-			scripting: SCRIPTING_DOCS_URL,
-			issues: ISSUES_URL,
-		};
-		const url = links[key];
-		if (!url) throw new Error(`Unknown app link: ${key}`);
-		await shell.openExternal(url);
+		await shell.openExternal(appLinkUrl(key));
 	});
 
 	// Handle engine restart request from renderer
