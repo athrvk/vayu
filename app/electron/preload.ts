@@ -30,12 +30,26 @@ function unwrapIpcError(error: unknown): Error {
 	return new Error(stripped || message);
 }
 
+/**
+ * The engine's port for this session, which the main process appends to this
+ * renderer's command line (`additionalArguments` in main.ts, #2118). Null when
+ * it is absent or not a port; the renderer falls back to its default then.
+ */
+function enginePortFromArgv(argv: readonly string[]): number | null {
+	const prefix = "--vayu-engine-port=";
+	const arg = argv.find((entry) => entry.startsWith(prefix));
+	const port = Number(arg?.slice(prefix.length));
+	return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+}
+
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
 	// Engine management
+	enginePort: enginePortFromArgv(process.argv),
 	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
+	getEngineStartFailure: (): Promise<string | null> => ipcRenderer.invoke("engine:startFailure"),
 
 	// MCP server (exposes Vayu to agents like Claude Code). See electron/mcp/.
 	getMcpStatus: (): Promise<{ running: boolean; url: string; enabled: boolean }> =>

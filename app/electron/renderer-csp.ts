@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
+import { ENGINE_CANDIDATE_ORIGINS } from "./engine-endpoint.js";
 
 /** The CSP source token for one inline script body, exactly as written in the file. */
 export function inlineScriptHash(scriptBody: string): string {
@@ -43,7 +43,10 @@ export function buildRendererCsp(inlineScripts: readonly string[]): string {
 		`script-src ${scriptSrc}`,
 		// Monaco and the charts set inline styles at runtime; styles cannot run code.
 		"style-src 'self' 'unsafe-inline'",
-		`connect-src 'self' http://${ENGINE_HOST}:${ENGINE_PORT}`,
+		// Every candidate, named: the port is chosen at runtime and this is a
+		// build-time <meta> (#2118). Never `127.0.0.1:*`, which would reach the
+		// MCP port and every other local service.
+		`connect-src 'self' ${ENGINE_CANDIDATE_ORIGINS.join(" ")}`,
 		"img-src 'self' data: blob:",
 		"font-src 'self' data:",
 		// Monaco's editor workers are blob URLs.

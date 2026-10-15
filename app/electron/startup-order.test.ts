@@ -167,6 +167,43 @@ describe("startup ordering", () => {
 	});
 
 	/*
+	 * #2118. Mutation check: drop the early return from the
+	 * `EnginePortInUseError` branch and this reddens - the launch ends on a
+	 * dialog the user can do nothing about, which is what the issue was.
+	 */
+	it("does not quit the app when another program holds every engine port", () => {
+		const start = main.indexOf("async function startEngine()");
+		const portInUseAt = main.indexOf("error instanceof EnginePortInUseError", start);
+		const quitAt = main.indexOf("app.quit();", portInUseAt);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(portInUseAt).toBeGreaterThan(start);
+		expect(quitAt).toBeGreaterThan(portInUseAt);
+		expect(main.slice(portInUseAt, quitAt)).toContain("return;");
+		// And the reason is kept for the renderer, not only logged.
+		expect(main.slice(portInUseAt, quitAt)).toContain("engineStartFailure = error.message;");
+	});
+
+	/*
+	 * #2118. The renderer is told the engine's port once, on its command line,
+	 * so the sidecar's choice must exist before the window does. Mutation check:
+	 * drop the `enginePortFixed()` wait and the window is built with the default
+	 * port while the engine may be on a fallback.
+	 */
+	it("fixes the engine's port before it creates the window that is told it", () => {
+		const fixedAt = main.indexOf("\n\tawait Promise.race([enginePortFixed(), engineStartup]);");
+		const windowAt = main.indexOf("\n\tcreateWindow();");
+
+		expect(fixedAt).toBeGreaterThan(-1);
+		expect(fixedAt).toBeLessThan(windowAt);
+		expect(main).toContain("additionalArguments: [`--vayu-engine-port=${enginePort()}`]");
+		// The sidecar's choice is what fixes it.
+		expect(main).toMatch(
+			/new EngineSidecar\(\s*ENGINE_PORT_CANDIDATES,\s*defaultSidecarSystem,\s*publishEnginePort\s*\)/
+		);
+	});
+
+	/*
 	 * Mutation check: move the `open-file` registration inside the `whenReady`
 	 * handler - which reads as the tidier place for it - and this reddens. That
 	 * move is silent at runtime on every platform but macOS, and on macOS it

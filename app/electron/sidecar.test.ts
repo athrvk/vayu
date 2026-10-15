@@ -57,13 +57,19 @@ vi.mock("electron", () => ({
 	},
 }));
 
-import { EngineSidecar, EngineNotReadyError, type SidecarSystem } from "./sidecar";
+import {
+	EngineSidecar,
+	EngineNotReadyError,
+	EnginePortInUseError,
+	type SidecarSystem,
+} from "./sidecar";
 import {
 	ENGINE_HEALTH_POLL_BUDGET_MS,
 	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
 	ENGINE_HEALTH_POLL_MAX_INTERVAL_MS,
 	ENGINE_LOCK_FILE,
 	ENGINE_PORT_RELEASE_DELAY_MS,
+	ENGINE_RESTART_BASE_DELAY_MS,
 } from "./constants";
 
 const TEST_PORT = 39876;
@@ -186,7 +192,7 @@ describe("EngineSidecar - adoption", () => {
 	it("adopts the engine the lock file points at, and knows it is running", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -197,7 +203,7 @@ describe("EngineSidecar - adoption", () => {
 	it("adopts an engine answering on the port with no readable lock PID", async () => {
 		const { system, state } = fakeSystem();
 		state.healthy = true;
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -219,7 +225,7 @@ describe("EngineSidecar - adoption", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -236,7 +242,7 @@ describe("EngineSidecar - adoption", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -249,7 +255,7 @@ describe("EngineSidecar - adoption", () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
 		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -272,7 +278,7 @@ describe("EngineSidecar - adoption", () => {
 			state.healthy = false;
 			const probeHealth = answersOnlyAfterSpawn(state);
 			system.probeHealth = probeHealth;
-			const sidecar = new EngineSidecar(TEST_PORT, system);
+			const sidecar = new EngineSidecar([TEST_PORT], system);
 
 			await sidecar.start();
 
@@ -291,7 +297,7 @@ describe("EngineSidecar - adoption", () => {
 			engineAlreadyRunning(state);
 			let probes = 0;
 			system.probeHealth = vi.fn(async () => ++probes > 3);
-			const sidecar = new EngineSidecar(TEST_PORT, system);
+			const sidecar = new EngineSidecar([TEST_PORT], system);
 
 			await sidecar.start();
 
@@ -305,32 +311,35 @@ describe("EngineSidecar - adoption", () => {
 		});
 	});
 
-	// The port-in-use message is for a port held by something that is not a
+	// The port-in-use error is for a port held by something that is not a
 	// Vayu engine - the lock names nothing alive, or names nothing at all.
-	it("reports a port held by another application when no lock names a live engine", async () => {
+	it("reports a port held by another program when no lock names a live engine", async () => {
 		const { system, state } = fakeSystem();
 		system.isPortFree = vi.fn(async () => false);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
-		await expect(sidecar.start()).rejects.toThrow(/already in use by another application/);
+		await expect(sidecar.start()).rejects.toThrow(EnginePortInUseError);
+		await expect(sidecar.start()).rejects.toThrow(
+			`Another program is using port ${TEST_PORT}. Quit it and press Retry.`
+		);
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 		expect(state.spawned).toHaveLength(0);
 	});
 
-	it("reports a port held by another application when the lock PID is dead", async () => {
+	it("reports a port held by another program when the lock PID is dead", async () => {
 		const { system } = fakeSystem();
 		writeFileSync(join(fake.userData, ENGINE_LOCK_FILE), `${ADOPTED_PID}\n`);
 		system.isPortFree = vi.fn(async () => false);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
-		await expect(sidecar.start()).rejects.toThrow(/already in use by another application/);
+		await expect(sidecar.start()).rejects.toThrow(EnginePortInUseError);
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 	});
 
 	it("stops an adopted engine on quit, force-killing one that ignores the request", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.stop();
@@ -351,7 +360,7 @@ describe("EngineSidecar - adoption", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.stop();
@@ -368,7 +377,7 @@ describe("EngineSidecar - adoption", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.restart(0);
@@ -396,7 +405,7 @@ describe("EngineSidecar - adoption", () => {
 			state.spawned.push(child);
 			return child as unknown as ChildProcess;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		const failure = await sidecar.restart(0).catch((error: unknown) => error);
@@ -409,13 +418,161 @@ describe("EngineSidecar - adoption", () => {
 	});
 });
 
+/*
+ * #2118: another program on the default port used to end the launch. The
+ * sidecar now walks a candidate list, and the port it settles on is fixed for
+ * its lifetime because the renderer is told it once.
+ */
+describe("EngineSidecar - choosing a port", () => {
+	const FALLBACK = TEST_PORT + 4;
+	const CANDIDATES = [TEST_PORT, FALLBACK, FALLBACK + 1];
+
+	/**
+	 * Ports as the OS sees them: `foreign` are held by a program that is not a
+	 * Vayu engine, `vayu` answer /health. A spawned engine takes the port its
+	 * `--port` names and lets it go when it exits.
+	 */
+	function ports(
+		system: SidecarSystem,
+		state: { spawned: FakeChild[] },
+		{ foreign = [], vayu = [] }: { foreign?: number[]; vayu?: number[] }
+	) {
+		const answering = new Set(vayu);
+		const held = new Set([...foreign, ...vayu]);
+		system.probeHealth = vi.fn(async (port: number) => answering.has(port));
+		system.isPortFree = vi.fn(async (port: number) => !held.has(port));
+		system.spawnEngine = vi.fn((_binary: string, args: string[]) => {
+			const port = Number(args[args.indexOf("--port") + 1]);
+			const child = new FakeChild();
+			child.once("exit", () => {
+				answering.delete(port);
+				held.delete(port);
+			});
+			state.spawned.push(child);
+			answering.add(port);
+			held.add(port);
+			return child as unknown as ChildProcess;
+		});
+		return { held };
+	}
+
+	function spawnedPorts(system: SidecarSystem): number[] {
+		return vi
+			.mocked(system.spawnEngine)
+			.mock.calls.map(([, args]) => Number(args[args.indexOf("--port") + 1]));
+	}
+
+	it("runs the engine on the next candidate when another program holds the first", async () => {
+		const { system, state } = fakeSystem();
+		ports(system, state, { foreign: [TEST_PORT] });
+		const onPortFixed = vi.fn();
+		const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
+
+		await sidecar.start();
+
+		expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		expect(sidecar.getApiUrl()).toBe(`http://127.0.0.1:${FALLBACK}`);
+		expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
+	});
+
+	it("adopts a healthy Vayu engine on a fallback port rather than spawning", async () => {
+		const { system, state } = fakeSystem();
+		engineAlreadyRunning(state);
+		ports(system, state, { foreign: [TEST_PORT], vayu: [FALLBACK] });
+		const onPortFixed = vi.fn();
+		const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
+
+		await sidecar.start();
+
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(sidecar.isRunning()).toBe(true);
+		expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
+		await sidecar.stop();
+		expect(system.requestShutdown).toHaveBeenCalledWith(FALLBACK);
+	});
+
+	// Mutation check: walk the candidates in order for a live lock too, and the
+	// free default is taken, the orphan waited out for the whole budget, killed
+	// and replaced.
+	it("adopts a crash orphan on a fallback port even once the default is free", async () => {
+		const { system, state } = fakeSystem();
+		engineAlreadyRunning(state);
+		ports(system, state, { vayu: [FALLBACK] });
+		const sidecar = new EngineSidecar(CANDIDATES, system);
+
+		await sidecar.start();
+
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(system.killEngineProcess).not.toHaveBeenCalled();
+		expect(sidecar.getApiUrl()).toBe(`http://127.0.0.1:${FALLBACK}`);
+	});
+
+	it("names the first port when every candidate is held, and fixes that one", async () => {
+		const { system, state } = fakeSystem();
+		ports(system, state, { foreign: CANDIDATES });
+		const onPortFixed = vi.fn();
+		const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
+
+		const failure = await sidecar.start().catch((error: unknown) => error);
+
+		expect(failure).toBeInstanceOf(EnginePortInUseError);
+		expect((failure as Error).message).toBe(
+			`Another program is using port ${TEST_PORT} and the fallback ports. Quit it and press Retry.`
+		);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(onPortFixed.mock.calls).toEqual([[TEST_PORT]]);
+	});
+
+	it("keeps the port it settled on across a restart, even once the default frees up", async () => {
+		const { system, state } = fakeSystem();
+		const { held } = ports(system, state, { foreign: [TEST_PORT] });
+		const onPortFixed = vi.fn();
+		const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
+		await sidecar.start();
+		held.delete(TEST_PORT);
+
+		await sidecar.restart(0);
+
+		expect(spawnedPorts(system)).toEqual([FALLBACK, FALLBACK]);
+		expect(onPortFixed).toHaveBeenCalledOnce();
+	});
+
+	it("retries only the port it named, without a timer, and spawns there once it is free", async () => {
+		const { system, state } = fakeSystem();
+		const { held } = ports(system, state, { foreign: CANDIDATES });
+		const sidecar = new EngineSidecar(CANDIDATES, system);
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EnginePortInUseError);
+
+		// A fallback coming free is no help: the renderer was told the first.
+		held.delete(FALLBACK);
+		const retry = await sidecar.restart().catch((error: unknown) => error);
+		// Thrown as written, not wrapped in the restart's generic sentence, and
+		// not retried on the backoff timer.
+		expect(retry).toBeInstanceOf(EnginePortInUseError);
+		expect((retry as Error).message).toBe(
+			`Another program is using port ${TEST_PORT}. Quit it and press Retry.`
+		);
+		const sleeps = vi.mocked(system.sleep).mock.calls.map(([ms]) => ms);
+		expect(sleeps).not.toContain(ENGINE_RESTART_BASE_DELAY_MS);
+
+		held.delete(TEST_PORT);
+		await sidecar.restart(0);
+		expect(spawnedPorts(system)).toEqual([TEST_PORT]);
+	});
+
+	it("refuses an empty candidate list", () => {
+		const { system } = fakeSystem();
+		expect(() => new EngineSidecar([], system)).toThrow(/at least one candidate/);
+	});
+});
+
 describe("EngineSidecar - spawned engine", () => {
 	const realPlatform = process.platform;
 	afterEach(() => stubPlatform(realPlatform));
 
 	it("spawns when nothing is on the port", async () => {
 		const { system } = fakeSystem();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -434,7 +591,7 @@ describe("EngineSidecar - spawned engine", () => {
 	 */
 	it("passes --verbose 0 outside development, 2 in it", async () => {
 		const { system } = fakeSystem();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
@@ -447,7 +604,7 @@ describe("EngineSidecar - spawned engine", () => {
 	it("stops what it spawned with SIGTERM off Windows", async () => {
 		stubPlatform("linux");
 		const { system, state } = fakeSystem();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.stop();
@@ -465,7 +622,7 @@ describe("EngineSidecar - spawned engine", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.stop();
@@ -480,7 +637,7 @@ describe("EngineSidecar - spawned engine", () => {
 	it("force-kills a spawned engine that ignores the graceful shutdown", async () => {
 		stubPlatform("linux");
 		const { system, state } = fakeSystem();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 		state.spawned[0].ignoresSigterm = true;
 
@@ -511,7 +668,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		// The outcome sidecar.ts calls expected: the engine could not take its own
 		// lock, so it is gone milliseconds after the spawn.
 		spawnsAndDies(state, system, (child) => child.exit(3, null));
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await expect(sidecar.start()).rejects.toThrow(/exit code 3/);
 
@@ -529,7 +686,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 			child.say("error while loading shared libraries: libssl.so.3");
 			child.exit(null, "SIGABRT");
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		// The stderr line is the whole diagnosis; an exit status alone sends the
 		// user to the logs for it.
@@ -546,7 +703,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		const { system, state } = fakeSystem();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		state.spawned[0].stdout.emit("data", "engine startup line\n");
@@ -563,7 +720,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		spawnsAndDies(state, system, (child) => {
 			queueMicrotask(() => child.emit("error", new Error("spawn EACCES")));
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await expect(sidecar.start()).rejects.toThrow(/EACCES/);
 		expect(sidecar.isRunning()).toBe(false);
@@ -574,7 +731,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		// Spawns, stays alive, never answers: the loop has nothing to shortcut on
 		// and must not mistake "not ready yet" for "dead".
 		spawnsAndDies(state, system, () => {});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await expect(sidecar.start()).rejects.toThrow(EngineNotReadyError);
 		// The early exit must not have shortened the wait for a live engine.
@@ -587,7 +744,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		// one is the renderer's problem and the app stays up (see main.ts).
 		const slow = fakeSystem();
 		spawnsAndDies(slow.state, slow.system, () => {});
-		await expect(new EngineSidecar(TEST_PORT, slow.system).start()).rejects.toBeInstanceOf(
+		await expect(new EngineSidecar([TEST_PORT], slow.system).start()).rejects.toBeInstanceOf(
 			EngineNotReadyError
 		);
 
@@ -595,9 +752,9 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		spawnsAndDies(dead.state, dead.system, (child) => {
 			queueMicrotask(() => child.emit("exit", 127, null));
 		});
-		await expect(new EngineSidecar(TEST_PORT, dead.system).start()).rejects.not.toBeInstanceOf(
-			EngineNotReadyError
-		);
+		await expect(
+			new EngineSidecar([TEST_PORT], dead.system).start()
+		).rejects.not.toBeInstanceOf(EngineNotReadyError);
 	});
 
 	it("ramps the health poll so a fast engine is not held for a full quantum", async () => {
@@ -611,7 +768,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 			state.healthy = true;
 		});
 
-		await new EngineSidecar(TEST_PORT, system).start();
+		await new EngineSidecar([TEST_PORT], system).start();
 
 		// The one sleep it paid is the ramp's first step, not the 500ms ceiling.
 		// Revert the ramp and this reads 500.
@@ -627,7 +784,7 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		const { system, state } = fakeSystem();
 		spawnsAndDies(state, system, () => {});
 
-		await expect(new EngineSidecar(TEST_PORT, system).start()).rejects.toBeInstanceOf(
+		await expect(new EngineSidecar([TEST_PORT], system).start()).rejects.toBeInstanceOf(
 			EngineNotReadyError
 		);
 
@@ -655,7 +812,7 @@ describe("EngineSidecar - the missing-binary message", () => {
 	it("points at the build entry point that exists", async () => {
 		const { system } = fakeSystem();
 		removeBinaries();
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		// Read exactly once by a user, at the moment nothing works, so every line
 		// of it has to lead somewhere real.
@@ -692,7 +849,7 @@ describe("EngineSidecar - restart racing quit", () => {
 			state.healthy = false;
 			return true;
 		});
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		// The port-release pause is the gap: the old engine is down and the new one
@@ -715,7 +872,7 @@ describe("EngineSidecar - restart racing quit", () => {
 	it("refuses to restart once the app is shutting down", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		const sidecar = new EngineSidecar(TEST_PORT, system);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.shutdown();

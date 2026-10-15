@@ -16,7 +16,7 @@ import path from "path";
 import fs from "fs";
 import net from "net";
 import {
-	ENGINE_PORT,
+	ENGINE_PORT_CANDIDATES,
 	ENGINE_LOCK_FILE,
 	ENGINE_HEALTH_POLL_BUDGET_MS,
 	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
@@ -264,16 +264,15 @@ function checkLockFile(
 	lockPath: string,
 	isAlive: (pid: number) => boolean
 ): {
-	locked: boolean;
 	pid: number | null;
 	running: boolean;
 } {
 	const pid = readPidFromLock(lockPath);
 	if (pid === null) {
-		return { locked: false, pid: null, running: false };
+		return { pid: null, running: false };
 	}
 
-	return { locked: true, pid, running: isAlive(pid) };
+	return { pid, running: isAlive(pid) };
 }
 
 /**
@@ -366,6 +365,26 @@ export class EngineNotReadyError extends Error {
 	}
 }
 
+/**
+ * Raised when every candidate port is held by something that is not a Vayu
+ * engine (#2118). Like `EngineNotReadyError` it leaves the app up: the user can
+ * free the port and press Retry, so the message is the sentence they read.
+ */
+export class EnginePortInUseError extends Error {
+	constructor(ports: readonly number[]) {
+		const held =
+			ports.length > 1 ? `port ${ports[0]} and the fallback ports` : `port ${ports[0]}`;
+		super(`Another program is using ${held}. Quit it and press Retry.`);
+		this.name = "EnginePortInUseError";
+	}
+}
+
+/** Where `start()` will run the engine, and whether something already answers `/health` there. */
+interface PortChoice {
+	port: number;
+	answering: boolean;
+}
+
 /** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
 function describeSpawnFailure(failure: SpawnFailure): string {
 	if (failure.kind === "error") {
@@ -388,7 +407,15 @@ function describeSpawnFailure(failure: SpawnFailure): string {
 export class EngineSidecar {
 	private process: ChildProcess | null = null;
 	private ownership: Ownership = { kind: "none" };
+	/**
+	 * The ports `start()` may use. Narrowed to the one it settles on by the first
+	 * start, so a restart never moves the engine out from under a renderer that
+	 * was told the port once.
+	 */
+	private candidates: readonly number[];
 	private port: number;
+	private portFixed = false;
+	private onPortFixed: (port: number) => void;
 	private dataDir: string;
 	private binaryPath: string;
 	private system: SidecarSystem;
@@ -401,8 +428,22 @@ export class EngineSidecar {
 	/** A restart in progress, so the quit path can wait it out rather than race it. */
 	private restartInFlight: Promise<void> | null = null;
 
-	constructor(port: number = ENGINE_PORT, system: SidecarSystem = defaultSidecarSystem) {
-		this.port = port;
+	/**
+	 * @param onPortFixed called once, when the first start settles the port, and
+	 *        also when every candidate was held (with the first, which the error
+	 *        names and a Retry tries again).
+	 */
+	constructor(
+		candidates: readonly number[] = ENGINE_PORT_CANDIDATES,
+		system: SidecarSystem = defaultSidecarSystem,
+		onPortFixed: (port: number) => void = () => {}
+	) {
+		if (candidates.length === 0) {
+			throw new Error("EngineSidecar needs at least one candidate port");
+		}
+		this.candidates = candidates;
+		this.port = candidates[0];
+		this.onPortFixed = onPortFixed;
 		this.system = system;
 		this.dataDir = engineDataDirectory();
 		this.binaryPath = this.getEngineBinaryPath();
@@ -509,24 +550,21 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Settle a live process the lock file names (issue #1905).
+	 * Settle a live process the lock file names that did not answer `/health`
+	 * (issue #1905).
 	 *
 	 * The lock PID is verified to be a Vayu engine, so a missing `/health`
 	 * answer means that engine is either still starting - an orphan from a
 	 * crashed session reads its database and runs migrations before it listens -
-	 * or hung. Spawning beside it loses the flock, and falling through to the
-	 * port check would blame "another application" for our own engine. So it is
-	 * given the budget a freshly spawned engine gets, adopted if it answers, and
-	 * stopped and replaced if it does not.
+	 * or hung. Spawning beside it loses the flock, and reporting the port as
+	 * held would blame another program for our own engine. So it is given the
+	 * budget a freshly spawned engine gets, adopted if it answers, and stopped
+	 * and replaced if it does not.
 	 *
 	 * @returns whether the engine was adopted. `false` means it was stopped
 	 *          instead, and the caller falls through to spawning.
 	 */
 	private async adoptLockedEngine(pid: number): Promise<boolean> {
-		if (await this.system.probeHealth(this.port)) {
-			return this.adoptIfVersionMatches(pid);
-		}
-
 		appLogger().warn(
 			"sidecar",
 			"Lock file indicates the process is running, but the engine is not responding on this port - waiting for it",
@@ -554,6 +592,118 @@ export class EngineSidecar {
 	}
 
 	/**
+	 * The lock file's PID when it names a live Vayu engine; a lock naming a dead
+	 * one is removed and answers null.
+	 */
+	private liveLockPid(lockPath: string): number | null {
+		const lockStatus = checkLockFile(lockPath, this.system.isEngineProcessAlive);
+		if (lockStatus.pid === null) return null;
+
+		if (lockStatus.running) {
+			appLogger().info("sidecar", "Lock file found, process is running", {
+				pid: lockStatus.pid,
+			});
+			return lockStatus.pid;
+		}
+
+		appLogger().warn("sidecar", "Stale lock file found, cleaning up", { pid: lockStatus.pid });
+		// Clean up stale lock file to prevent issues during install/reinstall
+		try {
+			fs.unlinkSync(lockPath);
+			appLogger().info("sidecar", "Removed stale lock file", { lockPath });
+		} catch (err) {
+			appLogger().warn("sidecar", "Failed to remove stale lock file", {
+				error: String(err),
+			});
+			// Continue anyway - the engine's lock mechanism will handle it
+		}
+		return null;
+	}
+
+	/**
+	 * Pick the candidate this start uses (#2118).
+	 *
+	 * With no live lock, each candidate in turn: one answering `/health` is
+	 * offered for adoption, a free one is taken, a held one is skipped. A live
+	 * lock means our own engine is up somewhere, so every candidate is asked
+	 * for `/health` before any free port is taken: a crash orphan on a fallback
+	 * port is adopted even once the default has come free. When it answers
+	 * nowhere it is starting (not listening, so its port reads free) or hung
+	 * (holding a port no probe can tell from another program's), and the wait
+	 * in `adoptLockedEngine` watches the first free candidate, or the first
+	 * candidate when none is free.
+	 */
+	private async choosePort(lockedPid: number | null): Promise<PortChoice> {
+		if (lockedPid !== null) {
+			const answering = await this.firstCandidate((port) => this.system.probeHealth(port));
+			if (answering !== null) return { port: answering, answering: true };
+			const free = await this.firstCandidate((port) => this.system.isPortFree(port));
+			return { port: free ?? this.candidates[0], answering: false };
+		}
+
+		for (const port of this.candidates) {
+			if (await this.system.probeHealth(port)) return { port, answering: true };
+			if (await this.system.isPortFree(port)) return { port, answering: false };
+		}
+		throw new EnginePortInUseError(this.candidates);
+	}
+
+	/** The first candidate `test` accepts, asked in order, or null. */
+	private async firstCandidate(test: (port: number) => Promise<boolean>): Promise<number | null> {
+		for (const port of this.candidates) {
+			if (await test(port)) return port;
+		}
+		return null;
+	}
+
+	/**
+	 * `choosePort`, then fix its answer for this sidecar's lifetime. A start that
+	 * found every candidate held fixes the first: the session needs one address
+	 * to give the renderer, and it is the one the error tells the user to free.
+	 */
+	private async claimPort(lockedPid: number | null): Promise<PortChoice> {
+		try {
+			const choice = await this.choosePort(lockedPid);
+			this.fixPort(choice.port);
+			return choice;
+		} catch (error) {
+			this.fixPort(this.candidates[0]);
+			throw error;
+		}
+	}
+
+	private fixPort(port: number): void {
+		this.port = port;
+		this.candidates = [port];
+		if (this.portFixed) return;
+		this.portFixed = true;
+		this.onPortFixed(port);
+	}
+
+	/**
+	 * Attach to the engine `choice` found, or to the one the lock names.
+	 *
+	 * @returns whether an engine was adopted. `false` means there was none, or
+	 *          it was stopped instead, and the caller spawns.
+	 */
+	private async adoptRunningEngine(
+		choice: PortChoice,
+		lockedPid: number | null,
+		lockPath: string
+	): Promise<boolean> {
+		if (lockedPid !== null) {
+			return choice.answering
+				? this.adoptIfVersionMatches(lockedPid)
+				: this.adoptLockedEngine(lockedPid);
+		}
+		// An engine from a previous session or crash with no live lock to read a
+		// PID from, so ownership is by port only - stop() falls back to watching
+		// health for the exit.
+		if (choice.answering) return this.adoptIfVersionMatches(readPidFromLock(lockPath));
+		return false;
+	}
+
+	/**
 	 * Start the engine process
 	 */
 	async start(): Promise<void> {
@@ -565,52 +715,17 @@ export class EngineSidecar {
 		// Ensure data directory exists first
 		this.ensureDataDirectory();
 
-		// Check lock file to see if engine is already running
 		const lockPath = this.getLockFilePath();
-		const lockStatus = checkLockFile(lockPath, this.system.isEngineProcessAlive);
-
-		if (lockStatus.locked) {
-			if (lockStatus.running && lockStatus.pid !== null) {
-				appLogger().info("sidecar", "Lock file found, process is running", {
-					pid: lockStatus.pid,
-				});
-				if (await this.adoptLockedEngine(lockStatus.pid)) {
-					return;
-				}
-				// Silent or mismatched daemon stopped instead of adopted - fall through to spawn.
-			} else if (lockStatus.pid !== null) {
-				// Lock file exists but process is not running - stale lock file
-				appLogger().warn("sidecar", "Stale lock file found, cleaning up", {
-					pid: lockStatus.pid,
-				});
-				// Clean up stale lock file to prevent issues during install/reinstall
-				try {
-					fs.unlinkSync(lockPath);
-					appLogger().info("sidecar", "Removed stale lock file", { lockPath });
-				} catch (err) {
-					appLogger().warn("sidecar", "Failed to remove stale lock file", {
-						error: String(err),
-					});
-					// Continue anyway - the engine's lock mechanism will handle it
-				}
-			}
+		const lockedPid = this.liveLockPid(lockPath);
+		const choice = await this.claimPort(lockedPid);
+		if (await this.adoptRunningEngine(choice, lockedPid, lockPath)) {
+			return;
 		}
 
-		// Check if engine is already running on this port (from previous session or
-		// crash). No lock file to read a PID from, so ownership is by port only -
-		// stop() falls back to watching health for the exit.
-		if (await this.system.probeHealth(this.port)) {
-			if (await this.adoptIfVersionMatches(readPidFromLock(lockPath))) {
-				return;
-			}
-			// Mismatched daemon stopped instead of adopted - fall through to spawn.
-		}
-
-		// Check if port is in use by something else
+		// Free when chosen, but an engine stopped instead of adopted may not have
+		// let go of it, and something else may have taken it since.
 		if (!(await this.system.isPortFree(this.port))) {
-			throw new Error(
-				`[Sidecar] Port ${this.port} is already in use by another application.`
-			);
+			throw new EnginePortInUseError([this.port]);
 		}
 
 		// Check if binary exists. The remediation names `build.py` because that is
@@ -989,6 +1104,12 @@ export class EngineSidecar {
 				// to be down, and retrying would spawn the orphan we just avoided.
 				if (this.stopping) {
 					throw lastError;
+				}
+
+				// Only the user can free the port, so a retry on a timer just
+				// delays the sentence that tells them to; it is thrown as written.
+				if (error instanceof EnginePortInUseError) {
+					throw error;
 				}
 
 				// If this was the last attempt, throw the error. The sentence is
