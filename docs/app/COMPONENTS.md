@@ -1712,7 +1712,7 @@ a load run (issue #2144 extracted it from two hand-rolled copies). Both
 (the per-step rows) render it, so a field added to the tally reaches both.
 
 A row with `deferred > 0` - a `script.post` the load path left to the post-run replay -
-reads "replayed on N sampled responses - results in Test Validation" instead of "0
+reads "N requests deferred to a post-run replay of sampled responses - results in Test Validation" instead of "0
 passed", because its verdicts live in the Test Validation card, not in the row. Passed,
 failed and skipped still print beside it when non-zero. A `script.pre` that was not
 inlined stays `skipped`: it has no replay. `deferred` is absent from a report stored

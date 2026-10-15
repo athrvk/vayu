@@ -233,7 +233,7 @@ describe("the per-step element tallies", () => {
 		const rows = screen.getAllByRole("row").slice(1);
 		expect(
 			within(rows[1]).getByText(
-				"replayed on 40 sampled responses - results in Test Validation"
+				"40 requests deferred to a post-run replay of sampled responses - results in Test Validation"
 			)
 		).toBeTruthy();
 		expect(within(rows[1]).queryByText(/passed/)).toBeNull();

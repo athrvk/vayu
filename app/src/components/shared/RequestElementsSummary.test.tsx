@@ -67,7 +67,7 @@ describe("RequestElementsSummary", () => {
 
 			expect(
 				screen.getByText(
-					"replayed on 235,690 sampled responses - results in Test Validation"
+					"235,690 requests deferred to a post-run replay of sampled responses - results in Test Validation"
 				)
 			).toBeTruthy();
 			expect(screen.queryByText(/passed/)).toBeNull();
@@ -77,7 +77,9 @@ describe("RequestElementsSummary", () => {
 		it("uses the singular for one response", () => {
 			render(<RequestElementsSummary elements={[deferredScript({ deferred: 1 })]} />);
 			expect(
-				screen.getByText("replayed on 1 sampled response - results in Test Validation")
+				screen.getByText(
+					"1 request deferred to a post-run replay of sampled responses - results in Test Validation"
+				)
 			).toBeTruthy();
 		});
 
@@ -87,7 +89,7 @@ describe("RequestElementsSummary", () => {
 					elements={[deferredScript({ deferred: 5, passed: 3, failed: 1, skipped: 2 })]}
 				/>
 			);
-			expect(screen.getByText(/replayed on 5 sampled responses/)).toBeTruthy();
+			expect(screen.getByText(/5 requests deferred to a post-run replay/)).toBeTruthy();
 			expect(screen.getByText("3 passed")).toBeTruthy();
 			expect(screen.getByText("1 failed")).toBeTruthy();
 			expect(screen.getByText("2 skipped")).toBeTruthy();

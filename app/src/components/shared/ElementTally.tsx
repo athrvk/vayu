@@ -7,8 +7,8 @@
 
 /**
  * One element's tally line - its kind and what happened to it across a load
- * run - shared by the single-request Elements card and the scenario Steps tab,
- * which used to spell the same row twice (issue #2144).
+ * run - shared by the single-request Elements card and the scenario Steps tab
+ * (issue #2144).
  *
  * **A `deferred` element is not a skipped one.** A post-request script is not
  * run inline on the load path; the engine replays it against the sampled
@@ -35,12 +35,12 @@ export function ElementTally({ element, className }: ElementTallyProps) {
 	const showPassed = deferred === 0 || element.passed > 0;
 
 	return (
-		<div className={cn("flex items-center gap-2", className)}>
+		<div className={cn("flex flex-wrap items-center gap-x-2", className)}>
 			<span className="text-muted-foreground font-mono">{element.kind}</span>
 			{deferred > 0 && (
 				<span className="font-mono text-muted-foreground">
-					replayed on {formatNumber(deferred)} sampled {pluralize(deferred, "response")} -
-					results in Test Validation
+					{formatNumber(deferred)} {pluralize(deferred, "request")} deferred to a post-run
+					replay of sampled responses - results in Test Validation
 				</span>
 			)}
 			{showPassed && (
