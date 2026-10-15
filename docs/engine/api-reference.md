@@ -6236,9 +6236,9 @@ rejected request leaves no trace. A `null` value reads as absent, the same
 rule the flat numeric fields follow.
 
 `maxErrorRatePct` is measured against every response outside 2xx/3xx **plus** the
-transport failures that never got one - the same figure `summary.errorRate`
-reports. This is deliberately wider than the script-level `pm.test` view: a run
-of nothing but HTTP 500s has a transport error rate of zero.
+transport failures that never got one - the
+[one error definition](#what-counts-as-an-error), the same figure
+`summary.errorRate` reports and the live tick streams.
 
 `maxAssertionFailureRatePct` (issue #1497) is measured against this run's
 combined assertion tally: every `assert.*` element outcome and every
@@ -7483,6 +7483,32 @@ keep-alive connection rather than the negative value it used to store.
 
 ## Metrics & Statistics
 
+### What counts as an error
+
+A load run counts a request as an **error** when its response status is outside
+2xx/3xx, or when it got no response at all - a transport failure (a timeout, a
+refused connection, a DNS or TLS failure), recorded under status code `0`. A
+3xx is a success. The count is derived from the run's status-code distribution
+(`vayu::count_status_failures`, issue #2124), so every surface reports the
+same number: the live tick's `totalErrors` / `errorRate`, the stored tick's
+`requests_failed` / `error_rate`, the stop response's `summary.errors` /
+`summary.errorRate`, the report's `summary.failedRequests` /
+`summary.errorRate`, the [`maxErrorRatePct`](#the-thresholds-block-passfail-budgets)
+budget and `pm.info.run.errorRate`.
+
+Each of those count surfaces also splits the errors in two, **HTTP errors** (a
+response came back, with an error status) and **No response**:
+
+| Surface | HTTP errors | No response |
+|---------|-------------|-------------|
+| Live tick (`GET /runs/:runId/live`) | `httpErrors` | `noResponse` |
+| Stored tick (`GET /runs/:runId/metrics`) | `http_errors` | `no_response` |
+| Stop response (`POST /runs/:runId/stop`) | `summary.httpErrors` | `summary.noResponse` |
+| Report (`GET /runs/:runId/report`) | `summary.httpErrorRequests` | `summary.noResponseRequests` |
+
+A request `POST /runs/:runId/stop` cancels before it is answered is recorded
+under code `0` too, so it counts as No response (issue #2136 separates it).
+
 ### GET /runs/:runId/metrics
 
 Paginated **historical time-series** (JSON) for a run's charts. The response is
@@ -7507,6 +7533,8 @@ capacity-breakpoint / saturation stats from stored data.
       "elapsed_seconds": 10.5,
       "requests_completed": 1500,
       "requests_failed": 5,
+      "http_errors": 5,
+      "no_response": 0,
       "current_rps": 150.5,
       "current_concurrency": 100,
       "send_rate": 150.0,
@@ -7527,9 +7555,13 @@ capacity-breakpoint / saturation stats from stored data.
 ```
 
 `requests_failed` is the producer's own error count, written into the tick at
-write time. It is not derived at read time from `error_rate` and
+write time, by the [one error definition](#what-counts-as-an-error) and from
+the same status-code snapshot as that tick's `status_codes`; `http_errors` and
+`no_response` split it. It is not derived at read time from `error_rate` and
 `requests_completed` any more - that derivation depended on the order the EAV
 rows came back in, and reported 0 failed requests for every bucket of every run.
+A tick an engine older than issue #2124 stored has no `http_errors` /
+`no_response`, and its `requests_failed` counted no-response failures only.
 
 A missing run returns `404` with the message `Run not found`.
 
@@ -7605,6 +7637,7 @@ event: metrics
 id: 0
 data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "totalRequests":1500,"totalSuccess":1495,"totalErrors":5,"errorRate":0.33,
+       "httpErrors":5,"noResponse":0,
        "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
@@ -7718,8 +7751,9 @@ no frame.
 
 | Field | Meaning |
 |-------|---------|
-| `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts |
-| `errorRate` | Error percentage |
+| `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts; `totalErrors` by the [one error definition](#what-counts-as-an-error) |
+| `httpErrors` / `noResponse` | `totalErrors` split: an error status came back, or no response did |
+| `errorRate` | `totalErrors` as a percentage of the status-code distribution's total |
 | `currentRps` | Instantaneous RPS (delta over the tick window) |
 | `sendRate` | Rate requests are dispatched (open model) |
 | `throughput` | Rate responses are received |
@@ -8145,7 +8179,8 @@ than sent, and transfers already in flight are cancelled (removed from curl and
 completed as an `INTERNAL_ERROR` "Request cancelled"), so the target stops
 receiving traffic immediately and the stop's latency does not belong to the
 upstream. A cancelled request was submitted, so it is counted: it lands in the
-run's errors, which is what keeps `requests_sent` and the recorded total equal.
+run's errors as No response (see [What counts as an error](#what-counts-as-an-error)),
+which is what keeps `requests_sent` and the recorded total equal.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
 up to its own `timeout` plus a 2s grace; anything still outstanding then is
@@ -8160,11 +8195,18 @@ hold the run in `running` indefinitely.
   "summary": {
     "totalRequests": 1500,
     "errors": 5,
+    "httpErrors": 3,
+    "noResponse": 2,
     "errorRate": 0.33,
     "avgLatencyMs": 38.9
   }
 }
 ```
+
+`errors` and `errorRate` are the [one error definition](#what-counts-as-an-error),
+the same figures the live tick and the report show; `httpErrors` and
+`noResponse` split `errors`, and the requests this stop cancelled are among
+`noResponse`.
 
 `avgLatencyMs` is the same average the final report and the live ticks show:
 the latency sum over the requests that contributed to it (successes). It is not
@@ -8353,6 +8395,8 @@ named it.
     "totalRequests": 6000,
     "successfulRequests": 5970,
     "failedRequests": 30,
+    "httpErrorRequests": 30,
+    "noResponseRequests": 0,
     "errorRate": 0.5,
     "totalDurationSeconds": 60.0,
     "avgRps": 100.0,
@@ -8617,6 +8661,11 @@ same shape `scenario.transactions` documents elsewhere on this page.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
+
+`summary.failedRequests` and `summary.errorRate` are the
+[one error definition](#what-counts-as-an-error), recounted from the run's
+status-code distribution; `summary.httpErrorRequests` and
+`summary.noResponseRequests` split `failedRequests` and always sum to it.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked
 for HTTP/2 and negotiated something older - see

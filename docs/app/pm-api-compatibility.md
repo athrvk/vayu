@@ -190,7 +190,7 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `iteration` | The 0-based pass this response was sent in - a collection run's pass, the iteration a load run's sampled response carried, or `0` for a send that bound a row, which is row 0 of 1 | An ordinary Send, which is one request rather than a pass of anything |
 | `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations, and `1` for a send that bound a row, beside its iteration `0` | An ordinary Send |
 | `iterationCount` | How many passes that run will make - a collection run's total, and `1` for a send that bound a row, which is row 0 of 1 | An ordinary Send, and a load run |
-| `run` | A run summary (issue #1499): `{requestsSent, errorRate, assertionsPassed, assertionsFailed}`, whole run | Every hook except `script.teardown` - the one script that runs after there is a run to summarize |
+| `run` | A run summary (issue #1499): `{requestsSent, errorRate, assertionsPassed, assertionsFailed}`, whole run; a load run's `errorRate` is the report's, by the [one error definition](../engine/api-reference.md#what-counts-as-an-error) | Every hook except `script.teardown` - the one script that runs after there is a run to summarize |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {

@@ -555,6 +555,54 @@ inline const char* to_string (ErrorCode code) {
 }
 
 /**
+ * @brief How many of a status distribution's requests are errors (#2124).
+ *
+ * The one definition of a load-test error: a status outside 2xx/3xx
+ * (`is_success_status`), or no response at all (code 0). Every surface that
+ * reports an error count - the live tick, the stop response, the report, the
+ * threshold verdict, `pm.info.run.errorRate` - derives it here, from the
+ * distribution, so none of them can count a different thing.
+ *
+ * A request a Stop cancels is recorded under code 0 too, so it lands in
+ * `no_response` (#2136).
+ */
+struct StatusFailures {
+    size_t total       = 0; ///< Every request the distribution holds.
+    size_t failed      = 0; ///< Of those, errors.
+    size_t no_response = 0; ///< Of the errors, those with no response (code 0).
+
+    /// Errors that did get a response: a 4xx, a 5xx, or a code outside 1-599.
+    [[nodiscard]] constexpr size_t http_errors () const noexcept {
+        return failed - no_response;
+    }
+
+    /// `failed` as a percentage of `total`. The denominator is the
+    /// distribution's own count, never a separately loaded request counter:
+    /// a live reader racing the recorders could otherwise see more than 100.
+    [[nodiscard]] constexpr double error_rate () const noexcept {
+        return total > 0 ?
+        static_cast<double> (failed) * 100.0 / static_cast<double> (total) :
+        0.0;
+    }
+};
+
+[[nodiscard]] inline StatusFailures count_status_failures (
+const std::map<int, size_t>& distribution) noexcept {
+    StatusFailures tally;
+    for (const auto& [code, count] : distribution) {
+        tally.total += count;
+        if (is_success_status (code)) {
+            continue;
+        }
+        tally.failed += count;
+        if (code == 0) {
+            tally.no_response += count;
+        }
+    }
+    return tally;
+}
+
+/**
  * @brief HTTP Response
  */
 // `optin.performance.Padding` is right that size-ordering these fields would
@@ -799,10 +847,11 @@ struct EventLoopStats {
  * Summary metrics for a stopped or completed run.
  */
 struct RunSummary {
-    size_t total_requests;
-    size_t errors;
-    double error_rate;
-    double avg_latency_ms;
+    size_t total_requests = 0;
+    size_t errors      = 0; ///< By `count_status_failures`, like `error_rate`.
+    size_t no_response = 0; ///< Of `errors`, those that got no response.
+    double error_rate  = 0.0;
+    double avg_latency_ms = 0.0;
 };
 
 /**

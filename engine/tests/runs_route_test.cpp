@@ -1048,6 +1048,10 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     // transport errors (code 0) land on the failed side.
     EXPECT_EQ (summary["successfulRequests"].get<size_t> (), 90u);
     EXPECT_EQ (summary["failedRequests"].get<size_t> (), 10u);
+    // ... and broken down the way the live tick and the stop response break
+    // them down (#2124): the 7 HTTP 500s got a response, the 3 did not.
+    EXPECT_EQ (summary["httpErrorRequests"].get<size_t> (), 7u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 3u);
     EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 10.0);
 
     const auto& latency = body["latency"];
@@ -1760,6 +1764,8 @@ TEST_F (RunsRouteTest, RunWithNoSummaryReportsFromSampledResults) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 1u);
     EXPECT_EQ (body["summary"]["failedRequests"].get<size_t> (), 1u);
+    EXPECT_EQ (body["summary"]["httpErrorRequests"].get<size_t> (), 1u);
+    EXPECT_EQ (body["summary"]["noResponseRequests"].get<size_t> (), 0u);
 }
 
 // ============================================================================

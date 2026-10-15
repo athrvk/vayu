@@ -597,7 +597,7 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     error.message = "Failed to create curl handle";
     vayu::core::handle_result (context, db, vayu::Result<vayu::Response> (error));
 
-    EXPECT_EQ (context->total_errors (), 1u);
+    EXPECT_EQ (context->metrics_collector->total_errors (), 1u);
     EXPECT_EQ (context->total_requests (), 1u);
     EXPECT_EQ (context->in_flight (), 0u);
 
@@ -606,6 +606,31 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     EXPECT_NE (errors.front ().trace_data.find ("internal_error"), std::string::npos);
     EXPECT_NE (errors.front ().trace_data.find ("Failed to create curl handle"),
     std::string::npos);
+}
+
+// #2124: an HTTP 500 is a completed response, so handle_result records it as
+// one (its latency counts) - and it is still an error on the live tick. The
+// live count used to read only the transport counter and showed 0 here.
+TEST_F (LoadStrategyTest, HttpErrorResponseMovesTheLiveFailedCount) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-http-error", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::Response response;
+    response.status_code     = 500;
+    response.timing.total_ms = 12.0;
+    vayu::core::handle_result (context, db, vayu::Result<vayu::Response> (response));
+
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_EQ (context->metrics_collector->total_errors (), 0u)
+    << "a response is not a transport failure";
+    const auto stats = context->metrics_collector->get_current_stats (0, 1.0, 1);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 1u);
+    EXPECT_EQ (stats["httpErrors"].get<size_t> (), 1u);
+    EXPECT_EQ (stats["noResponse"].get<size_t> (), 0u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 100.0);
+    EXPECT_DOUBLE_EQ (stats["avgLatencyMs"].get<double> (), 12.0);
 }
 
 // ============================================================================

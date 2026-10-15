@@ -741,6 +741,15 @@ class MetricsCollector {
         return total_requests_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Requests that got no response: the transport failures
+     *        record_error saw.
+     *
+     * success_count() subtracts it, so every average below divides by the
+     * requests that recorded a latency. It is not the error count any surface
+     * reports - that also counts an HTTP 4xx or 5xx, and is
+     * `vayu::count_status_failures` over status_code_distribution() (#2124).
+     */
     [[nodiscard]] size_t total_errors () const {
         return total_errors_.load (std::memory_order_relaxed);
     }
@@ -774,13 +783,6 @@ class MetricsCollector {
         return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
         static_cast<double> (count) :
                            0.0;
-    }
-
-    [[nodiscard]] double error_rate () const {
-        size_t total = total_requests ();
-        return total > 0 ?
-        (static_cast<double> (total_errors ()) * 100.0 / static_cast<double> (total)) :
-        0.0;
     }
 
     // ========================================================================
@@ -989,8 +991,8 @@ class MetricsCollector {
      * @param requests_expected Total expected requests for the run (0 for open-ended
      *        modes like constant_rps; feeds the dashboard ETA stat)
      * @param status_snapshot Optional precomputed status-code distribution. When
-     *        non-null it is used verbatim for the `statusCodes` field and the
-     *        derived class breakdown, avoiding a redundant scan when the caller
+     *        non-null it is used verbatim for the error counts, the `statusCodes`
+     *        field and the derived class breakdown, avoiding a redundant scan when the caller
      *        already snapshotted the distribution this tick. When null the
      *        distribution is computed internally.
      * @param window_percentiles Optional windowed (rolling) percentiles for the

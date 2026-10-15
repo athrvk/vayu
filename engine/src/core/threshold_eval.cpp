@@ -55,19 +55,14 @@ struct ThresholdMetric {
     bool (*has_data) (const RunSummaryInputs&);
 };
 
-/// Share of this run's requests that did not succeed, as a percentage - the
-/// same figure `GET /runs/:id/report` prints, derived the same way (from the
-/// status distribution, so the transport failures recorded under code 0 count).
+/// Share of this run's requests that were errors, as a percentage - the same
+/// figure `GET /runs/:id/report` prints, by the one definition
+/// (`vayu::count_status_failures`).
 double measured_error_rate (const RunSummaryInputs& inputs) {
     if (inputs.total_requests == 0) {
         return 0.0;
     }
-    size_t failed = 0;
-    for (const auto& [code, count] : inputs.status_codes) {
-        if (!vayu::is_success_status (code)) {
-            failed += count;
-        }
-    }
+    const size_t failed = vayu::count_status_failures (inputs.status_codes).failed;
     return static_cast<double> (failed) * 100.0 / static_cast<double> (inputs.total_requests);
 }
 

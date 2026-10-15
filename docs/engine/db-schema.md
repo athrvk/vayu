@@ -1422,6 +1422,7 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
 {
   "timestamp": 1730000001000, "elapsed_seconds": 1.0,
   "requests_completed": 120, "requests_failed": 2,
+  "http_errors": 0, "no_response": 2,
   "current_rps": 118.4, "current_concurrency": 10, "send_rate": 120.0,
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
   "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
@@ -1429,6 +1430,11 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
   "latency_p50_ms": 8.1, "latency_p95_ms": 20.4, "latency_p99_ms": 31.9
 }
 ```
+
+`requests_failed`, `http_errors` and `no_response` count errors by the one definition
+([What counts as an error](api-reference.md#what-counts-as-an-error)); the breakdown pair is
+absent from a tick an engine older than issue #2124 stored, whose `requests_failed` counted
+no-response failures only.
 
 Two consequences of the row being the tick:
 

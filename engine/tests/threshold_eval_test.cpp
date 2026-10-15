@@ -15,10 +15,10 @@
  * budget must produce no section, because "not judged" and "judged and passed
  * nothing" are different answers and only absence can say the first.
  *
- * The error rate is the case worth reading twice: the collector's own
- * `error_rate()` counts transport failures only, so a run of nothing but HTTP
- * 500s scores 0% by it. The report has always counted every non-2xx/3xx status
- * instead, and the verdict follows the report.
+ * The error rate is the case worth reading twice: the collector's transport
+ * counter (`total_errors()`) sees no HTTP 500 at all, so a run of nothing but
+ * 500s scores 0% by it. The verdict counts every non-2xx/3xx status, the one
+ * definition every surface reports (`vayu::count_status_failures`, #2124).
  */
 
 #include <gtest/gtest.h>
@@ -43,7 +43,7 @@ using vayu::core::validate_thresholds;
 
 /// A run that completed 1000 requests: 990 OK, 8 server errors, 2 transport
 /// failures (status 0). p50/p95/p99 = 10/40/47 ms at 500 rps - so the error
-/// rate is 1%, not the 0.2% the collector's transport-only count would give.
+/// rate is 1%, not the 0.2% the collector's transport counter alone would give.
 RunSummaryInputs measured_run () {
     RunSummaryInputs inputs;
     inputs.total_requests = 1000;
@@ -223,8 +223,8 @@ TEST (ThresholdEval, EachPercentileReadsItsOwnMeasurement) {
 }
 
 TEST (ThresholdEval, TheErrorRateCountsEveryNonSuccessStatus) {
-    // 8 server errors + 2 transport failures out of 1000 = 1%. The collector's
-    // own error_rate() would say 0.2% here, and a run of nothing but 500s would
+    // 8 server errors + 2 transport failures out of 1000 = 1%. The transport
+    // counter alone would say 0.2% here, and a run of nothing but 500s would
     // score a clean 0 - which is the bug this test exists to pin.
     auto check = only_check (evaluate_thresholds (
     config_with ({ { "maxErrorRatePct", 5 } }), measured_run ()));

@@ -1049,24 +1049,20 @@ vayu::DetailedReport& report) {
     // transport errors (status code 0) are counted. Runs with no stored
     // distribution keep the figures derived from the sampled results.
     if (extras.status_codes_overridden) {
-        report.successful_requests = 0;
-        report.failed_requests     = 0;
+        const auto tally = vayu::count_status_failures (report.status_codes);
+        report.successful_requests = tally.total - tally.failed;
+        report.failed_requests     = tally.failed;
         report.errors_by_status_code.clear ();
         for (const auto& [code, count] : report.status_codes) {
-            if (vayu::is_success_status (code)) {
-                report.successful_requests += count;
-            } else {
-                report.failed_requests += count;
-            }
             if (code == 0 || code >= 400) {
                 report.errors_by_status_code[code] = count;
             }
         }
     }
 
-    // Recompute the error rate from the reconciled successful/failed split -
-    // the sampled-results error_rate from calculate_detailed_report omits
-    // transport errors.
+    // Recompute the error rate from the reconciled successful/failed split:
+    // the one calculate_detailed_report derived describes the sampled results,
+    // whose successes are thinned and whose errors are capped.
     report.error_rate = report.total_requests > 0 ?
     static_cast<double> (report.failed_requests) * 100.0 /
     static_cast<double> (report.total_requests) :
@@ -1306,10 +1302,15 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
 nlohmann::json build_report_body (const vayu::DetailedReport& report,
 const ReportExtras& extras,
 double target_rps) {
+    // `failed_requests` is this tally's `failed` on both report paths, so the
+    // breakdown below always sums to it.
+    const auto failures = vayu::count_status_failures (report.status_codes);
     nlohmann::json json_report;
     json_report["summary"] = { { "totalRequests", report.total_requests },
         { "successfulRequests", report.successful_requests },
-        { "failedRequests", report.failed_requests }, { "errorRate", report.error_rate },
+        { "failedRequests", report.failed_requests },
+        { "httpErrorRequests", failures.http_errors () },
+        { "noResponseRequests", failures.no_response }, { "errorRate", report.error_rate },
         { "totalDurationSeconds", report.total_duration_s },
         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
         { "sendRate", report.send_rate }, { "throughput", report.throughput },

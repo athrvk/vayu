@@ -1224,11 +1224,3 @@ namespace elements {
 constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
 } // namespace elements
 } // namespace vayu::core::constants
-
-/**
- * @brief Metrics constants
- */
-namespace vayu::core::metrics {
-/// Multiplier for converting ratios to percentages
-constexpr double PERCENTAGE_MULTIPLIER = 100.0;
-} // namespace vayu::core::metrics
