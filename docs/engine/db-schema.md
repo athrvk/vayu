@@ -1130,7 +1130,10 @@ together and can never disagree. It exists apart from `summary` so
 [`GET /runs`](api-reference.md#get-runs)'s paginated list can read it straight
 off the row it already fetched for every page - no extra query, and no risk
 of the compact-summary cache (`RunSummaryCache`, keyed on the immutable
-`config_snapshot`) ever caching a completion-time fact.
+`config_snapshot`) ever caching a completion-time fact. The same cache's
+second table holds a terminal load run's list-row `resultSummary` (#2130),
+built from `summary` and only once `status` is terminal: every writer stores
+`summary` before the terminal status, so from then on the column is final.
 
 **`origin` / `origin_client`** (#1817, schema version 5) record who started
 the run, as the starting client asserted it on `POST /execute` or `POST /runs`
@@ -1230,6 +1233,14 @@ run row - status, end time, summary, baseline, the startup reconcile - is a
 read-modify-write that puts the same string back. **A change that edits a stored
 snapshot in place breaks that**, and would have to invalidate the cache in
 `engine/include/vayu/http/run_summary_cache.hpp`.
+
+The list row's `resultSummary` on a terminal load run (#2130) *is* read from
+this results summary (`rps`, `latency.p95`, the `status_codes` error rate and
+the `thresholds` verdict; `build_load_result_summary` in
+`http/routes/runs.cpp`) and held in the same cache, which is sound for the
+same reason: each `update_run_summary` writer stores the summary before the
+terminal status, and nothing rewrites it after. **A change that writes the
+summary after the terminal status, or rewrites it later, breaks that** too.
 
 **A scenario run's `summary`** is a different shape, written by
 `vayu::core::build_scenario_summary_payload` (`core/scenario_runner.cpp`): the

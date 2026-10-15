@@ -762,8 +762,10 @@ class Database {
      * @brief Status code and latency for a page of **design** runs, in one query.
      *
      * The paginated GET /runs list attaches each design run's outcome to its
-     * row (`resultSummary`), the way GET /runs/:id attaches the whole exchange.
-     * Three properties make that affordable, and all three are why this is not
+     * row (`resultSummary`), the way GET /runs/:id attaches the whole exchange;
+     * a load row's `resultSummary` comes from the run's stored `summary`
+     * instead, never from its results (#2130). Three properties make the
+     * design read affordable, and all three are why this is not
      * `get_results` in a loop:
      *
      * - Two columns, so `trace_data` is never read.

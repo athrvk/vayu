@@ -165,6 +165,23 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     return summary;
 }
 
+// The run's verdict against its declared budgets, as its stored summary's
+// `thresholds` object recorded it. Read by `read_threshold_outcome` for both
+// the report's `thresholdValidation` and a load row's `resultSummary.verdict`,
+// so the two surfaces cannot disagree about whether, or how, a run was judged.
+struct ThresholdOutcome {
+    // Per-budget rows verbatim from the summary, already in the report's
+    // camelCase shape - the evaluator writes the wire keys.
+    nlohmann::json checks = nlohmann::json::array ();
+    size_t passed         = 0;
+    size_t failed         = 0;
+
+    // Derived rather than stored so it cannot contradict the counts beside it.
+    [[nodiscard]] const char* verdict () const {
+        return failed == 0 ? "passed" : "failed";
+    }
+};
+
 // Report fields that live outside the DetailedReport struct: whole-run counters
 // the report injects into its `summary` object. Filled from the run's stored
 // summary.
@@ -194,16 +211,11 @@ struct ReportExtras {
     int tests_sampled = 0;
     int tests_passed  = 0;
     int tests_failed  = 0;
-    // The run's verdict against its declared budgets. `has_thresholds` false is
-    // a run that declared none (or one recorded before budgets existed), which
-    // leaves thresholdValidation out entirely - a run that declared nothing did
-    // not pass zero checks, it was never judged.
-    bool has_thresholds      = false;
-    size_t thresholds_passed = 0;
-    size_t thresholds_failed = 0;
-    // Per-budget rows verbatim from the summary, already in the report's
-    // camelCase shape - the evaluator writes the wire keys.
-    nlohmann::json threshold_checks = nlohmann::json::array ();
+    // The run's verdict against its declared budgets. Empty is a run that
+    // declared none (or one recorded before budgets existed), which leaves
+    // thresholdValidation out entirely - a run that declared nothing did not
+    // pass zero checks, it was never judged.
+    std::optional<ThresholdOutcome> thresholds;
     // This run's `metric.record` / `pm.metrics` values (issue #1500).
     // `has_custom_metrics` false is a run that recorded none, which leaves
     // the report's `customMetrics` section out entirely rather than an
@@ -352,6 +364,26 @@ void read_number (const nlohmann::json& obj, const char* key, T& out) {
     }
 }
 
+// The stored summary's budget verdict, or nothing when the run was never
+// judged. The checks are the section: a stored object with no readable rows
+// says nothing a reader can act on, so it is treated as absent rather than
+// reported as a run that passed and failed nothing.
+std::optional<ThresholdOutcome> read_threshold_outcome (const nlohmann::json& summary) {
+    if (!summary.contains ("thresholds") || !summary["thresholds"].is_object ()) {
+        return std::nullopt;
+    }
+    const auto& thresholds = summary["thresholds"];
+    if (!thresholds.contains ("checks") || !thresholds["checks"].is_array () ||
+    thresholds["checks"].empty ()) {
+        return std::nullopt;
+    }
+    ThresholdOutcome outcome;
+    outcome.checks = thresholds["checks"];
+    read_number (thresholds, "passed", outcome.passed);
+    read_number (thresholds, "failed", outcome.failed);
+    return outcome;
+}
+
 // Read a boolean out of a JSON object as an optional, so a key an older engine
 // never wrote stays *absent* rather than becoming `false`. A number reads as
 // nothing on purpose: the report says what the summary recorded, and a
@@ -460,22 +492,28 @@ ReportExtras& extras) {
     }
 }
 
+/** A stored summary's `status_codes` object as the distribution it records. */
+std::map<int, size_t> read_status_codes (const nlohmann::json& codes) {
+    std::map<int, size_t> distribution;
+    for (const auto& [code_str, count] : codes.items ()) {
+        try {
+            distribution[std::stoi (code_str)] = count.get<size_t> ();
+        } catch (...) {
+            // @deliberate: skip an unparseable code rather than losing the
+            // whole map - every other key is still an honest count.
+        }
+    }
+    return distribution;
+}
+
 /** The status-code map, which replaces the sampled one wholesale when stored. */
 void apply_summary_status_codes (const nlohmann::json& summary,
 vayu::DetailedReport& report,
 ReportExtras& extras) {
     if (summary.contains ("status_codes") &&
     summary["status_codes"].is_object () && !summary["status_codes"].empty ()) {
-        report.status_codes.clear ();
+        report.status_codes = read_status_codes (summary["status_codes"]);
         extras.status_codes_overridden = true;
-        for (const auto& [code_str, count] : summary["status_codes"].items ()) {
-            try {
-                report.status_codes[std::stoi (code_str)] = count.get<size_t> ();
-            } catch (...) {
-                // @deliberate: skip an unparseable code rather than losing the
-                // whole map - every other key is still an honest count.
-            }
-        }
     }
 }
 
@@ -623,19 +661,7 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
         extras.warnings = summary["warnings"];
     }
 
-    if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
-        const auto& thresholds = summary["thresholds"];
-        // The checks are the section: a stored object with no readable rows
-        // says nothing a reader can act on, so it is treated as absent rather
-        // than reported as a run that passed and failed nothing.
-        if (thresholds.contains ("checks") &&
-        thresholds["checks"].is_array () && !thresholds["checks"].empty ()) {
-            extras.has_thresholds   = true;
-            extras.threshold_checks = thresholds["checks"];
-            read_number (thresholds, "passed", extras.thresholds_passed);
-            read_number (thresholds, "failed", extras.thresholds_failed);
-        }
-    }
+    extras.thresholds = read_threshold_outcome (summary);
 
     // Pass-through, same shape both run modes wrote it in
     // (`build_custom_metrics_payload`, issue #1500). An empty object is a
@@ -688,6 +714,64 @@ ReportExtras& extras) {
     apply_summary_sections (summary, extras);
 }
 
+/**
+ * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
+ * error rate and budget verdict, read from the run's stored `summary` - the
+ * load-run counterpart of a design row's `{statusCode, latencyMs}`.
+ *
+ * Each key is omitted when the summary does not record it, never zeroed: no
+ * `verdict` means no budget judged the run, and how to show that is the
+ * reader's decision. `errorRate` is a percentage (0-100) by the one error
+ * definition every surface shares (`vayu::count_status_failures`). An empty or
+ * unreadable summary answers an empty object, which the caller leaves off the
+ * row. Runs under `RunSummaryCache`'s lock, so it parses and nothing more.
+ */
+nlohmann::json build_load_result_summary (const std::string& summary_json) {
+    nlohmann::json outcome = nlohmann::json::object ();
+    const auto summary =
+    nlohmann::json::parse (summary_json, nullptr, /*allow_exceptions=*/false);
+    if (!summary.is_object ()) {
+        return outcome;
+    }
+
+    if (summary.contains ("rps") && summary["rps"].is_number ()) {
+        outcome["rps"] = summary["rps"];
+    }
+    if (summary.contains ("latency") && summary["latency"].is_object () &&
+    summary["latency"].contains ("p95") && summary["latency"]["p95"].is_number ()) {
+        outcome["p95Ms"] = summary["latency"]["p95"];
+    }
+    if (summary.contains ("status_codes") && summary["status_codes"].is_object ()) {
+        const auto failures = vayu::count_status_failures (
+        read_status_codes (summary["status_codes"]));
+        // No request recorded is no rate at all, not a run with 0% errors.
+        if (failures.total > 0) {
+            outcome["errorRate"] = failures.error_rate ();
+        }
+    }
+    if (const auto thresholds = read_threshold_outcome (summary)) {
+        outcome["verdict"] = thresholds->verdict ();
+    }
+    return outcome;
+}
+
+// Whether a row of this run may carry a `resultSummary` built from its stored
+// summary: a load run at a terminal status. A Pending or Running row's summary
+// is not final yet (see RunSummaryCache), so it is neither read nor cached.
+bool carries_load_result_summary (const vayu::db::Run& run) {
+    if (run.type != vayu::RunType::Load) {
+        return false;
+    }
+    switch (run.status) {
+    case vayu::RunStatus::Completed:
+    case vayu::RunStatus::Failed:
+    case vayu::RunStatus::Stopped: return true;
+    case vayu::RunStatus::Pending:
+    case vayu::RunStatus::Running: return false;
+    }
+    return false;
+}
+
 // Serialize one run into a list row: identity + status + the compact summary,
 // deliberately *without* the full config_snapshot (that is what makes the list
 // cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
@@ -723,19 +807,22 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
  * default 50, capped at 500; offset floored at 0); `filter` holds the already
  * validated type/status/requestId/q constraints. Rows carry the compact
  * `summary` (nine keys) instead of the full `config_snapshot`, wrapped in the
- * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86); a
- * design run's row also carries `resultSummary` (statusCode + latencyMs), which
- * is what a reader would otherwise fetch a report per row to learn. A row
- * whose run finished with warnings carries `summary.hasWarnings: true`
- * (#1527), read fresh off this page's own `Run` rows rather than through
- * `summaries` - see the comment at its call site below for why.
+ * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
+ * design run's row also carries `resultSummary` (statusCode + latencyMs), and a
+ * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, each
+ * only when recorded; #2130) - what a reader would otherwise fetch a report
+ * per row to learn. A row whose run finished with warnings carries
+ * `summary.hasWarnings: true` (#1527), read fresh off this page's own `Run`
+ * rows rather than through `summaries` - see the comment at its call site
+ * below for why.
  *
  * `summaries` spares the poll the work it would otherwise repeat: this is the
  * endpoint a visible history surface re-asks every 5s, and each call used to
  * re-parse every row's immutable `config_snapshot` to rebuild the summary the
- * previous call had already built (#1150). It is a parameter rather than a
- * detail of this function so a caller - a test included - owns the cache's
- * lifetime and two of them never share one.
+ * previous call had already built (#1150), and a terminal load run's stored
+ * summary is just as fixed. It is a parameter rather than a detail of this
+ * function so a caller - a test included - owns the cache's lifetime and two
+ * of them never share one.
  *
  * Extracted so the envelope shape, clamping and filtering are covered without
  * an in-process HTTP server - see runs_route_test.cpp. Exceptions propagate to
@@ -751,9 +838,9 @@ vayu::http::RunSummaryCache& summaries) {
 
     // A design run is one exchange, so its outcome fits on its row and the page
     // pays one extra query for all of them (get_design_result_outcomes). A load
-    // or scenario run's results are many and unbounded, so its row carries none
-    // - the same split GET /runs/:id draws with attach_design_result, and the
-    // reason `resultSummary` is the two numbers rather than the exchange.
+    // run's results are many and unbounded, so they are never read here; its
+    // row's `resultSummary` comes from the whole-run summary already on the
+    // `Run` row instead. A scenario row carries none.
     std::vector<std::string> design_run_ids;
     for (const auto& run : runs) {
         if (run.type == vayu::RunType::Design) {
@@ -770,16 +857,23 @@ vayu::http::RunSummaryCache& summaries) {
         // `hasWarnings` (issue #1527) is read straight off the `Run` row this
         // page already fetched, never through `summaries` - `has_warnings` is
         // a completion-time fact (`Database::update_run_summary` stamps it),
-        // and that cache keys on the immutable `config_snapshot` alone. Merged
-        // into this call's own copy of the cached summary, never back into the
-        // cache entry, so a row polled while still running is never stuck
-        // reporting no warnings once the run finishes.
+        // and the summary table keys on the immutable `config_snapshot`
+        // alone. Merged into this call's own copy of the cached summary, never
+        // back into the cache entry, so a row polled while still running is
+        // never stuck reporting no warnings once the run finishes.
         if (run.has_warnings) {
             row["summary"]["hasWarnings"] = true;
         }
         if (const auto found = outcomes.find (run.id); found != outcomes.end ()) {
             row["resultSummary"]["statusCode"] = found->second.status_code;
             row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
+        }
+        if (carries_load_result_summary (run)) {
+            auto outcome = summaries.outcome_for (
+            run.id, [&run] { return build_load_result_summary (run.summary); });
+            if (!outcome.empty ()) {
+                row["resultSummary"] = std::move (outcome);
+            }
         }
         data.push_back (std::move (row));
     }
@@ -1271,12 +1365,11 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["elements"] = extras.elements;
     }
 
-    // The aggregate verdict, beside the per-response one. `verdict` is derived
-    // rather than stored so it cannot contradict the counts printed next to it.
-    if (extras.has_thresholds) {
-        json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
-            { "passed", extras.thresholds_passed }, { "failed", extras.thresholds_failed },
-            { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
+    // The aggregate verdict, beside the per-response one.
+    if (const auto& thresholds = extras.thresholds) {
+        json_report["thresholdValidation"] = { { "checks", thresholds->checks },
+            { "passed", thresholds->passed }, { "failed", thresholds->failed },
+            { "verdict", thresholds->verdict () } };
     }
 
     // This run's custom trends, counters and rates (issue #1500), by name -
@@ -1819,7 +1912,9 @@ void register_run_routes (RouteContext& ctx) {
      * config_snapshot, wrapped in the `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
      * with it. A design run's row also carries `resultSummary`
-     * (statusCode + latencyMs); see get_runs_response.
+     * (statusCode + latencyMs), a terminal load run's carries
+     * `resultSummary` (rps + p95Ms + errorRate + verdict, each only when
+     * recorded); see get_runs_response.
      *
      * Query params:
      * - limit: page size, default 50, capped at 500

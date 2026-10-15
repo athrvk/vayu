@@ -428,8 +428,10 @@ TEST_F (RunsRouteTest, EachDesignRowGetsItsOwnOutcome) {
 // The load-run guard, at the level that enforces it. A load run's results are
 // unbounded (one row per error), so they must not be read to be discarded - and
 // that is a property of the statement, not of the caller remembering to filter:
-// asking for a load run's outcome by id returns nothing.
-TEST_F (RunsRouteTest, LoadRowCarriesNoOutcomeAndItsResultsAreNeverRead) {
+// asking for a load run's outcome by id returns nothing. A load row's own
+// `resultSummary` comes from its stored summary (#2130), which this run never
+// wrote, so its results reaching the row would show up here as the key.
+TEST_F (RunsRouteTest, LoadAndScenarioRowsNeverReadTheirResults) {
     seed ({ .id = "run_load", .type = vayu::RunType::Load });
     seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .start_time = 1 });
     seed_result ("run_load", 500, 99.0);
@@ -1285,6 +1287,201 @@ TEST_F (RunsRouteTest, AThresholdVerdictPassesOnlyWhenNothingFailed) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["thresholdValidation"]["verdict"].get<std::string> (), "passed");
     EXPECT_EQ (body["thresholdValidation"]["failed"].get<size_t> (), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// GET /runs - a terminal load run's `resultSummary` (issue #2130)
+// ---------------------------------------------------------------------------
+
+/// The fixture's summary with budgets it meets (p99 30 <= 50, errors 10% <= 25%)
+/// or, with @p meets false, one it misses (errors 10% > 1%).
+std::string judged_summary (bool meets) {
+    auto inputs              = summary_inputs ();
+    const double error_limit = meets ? 25 : 1;
+    inputs.thresholds        = vayu::core::evaluate_thresholds (
+    nlohmann::json{
+           { "thresholds", { { "latencyP99Ms", 50 }, { "maxErrorRatePct", error_limit } } } },
+    inputs);
+    return vayu::core::build_run_summary_payload (inputs).dump ();
+}
+
+/// The one row of @p body whose id is @p id, or an empty object.
+nlohmann::json row_of (const nlohmann::json& body, const std::string& id) {
+    for (const auto& row : body["data"]) {
+        if (row["id"] == id) {
+            return row;
+        }
+    }
+    ADD_FAILURE () << "no row " << id;
+    return nlohmann::json::object ();
+}
+
+// The four numbers a history row needs to say how a load run went, read off
+// the summary the run stored rather than a report fetched per row.
+TEST_F (RunsRouteTest, TerminalLoadRowCarriesItsResultSummary) {
+    seed ({ .id = "run_load_done" });
+    db_->update_run_summary ("run_load_done", judged_summary (true));
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    const auto& row = body["data"][0];
+    ASSERT_TRUE (row.contains ("resultSummary"));
+    const auto& outcome = row["resultSummary"];
+    EXPECT_EQ (outcome.size (), 4u);
+    for (const char* key : { "rps", "p95Ms", "errorRate", "verdict" }) {
+        ASSERT_TRUE (outcome.contains (key)) << key;
+    }
+    EXPECT_DOUBLE_EQ (outcome["rps"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (outcome["p95Ms"].get<double> (), 25.0);
+    // 7 server errors and 3 with no response, of 100: a percentage, not 0.1.
+    EXPECT_DOUBLE_EQ (outcome["errorRate"].get<double> (), 10.0);
+    EXPECT_EQ (outcome["verdict"], "passed");
+}
+
+// A run `thresholds.failRun` failed reports the verdict that failed it, and the
+// same verdict the report's `thresholdValidation` prints.
+TEST_F (RunsRouteTest, FailedLoadRowCarriesTheVerdictThatFailedIt) {
+    seed ({ .id = "run_load_failed", .status = vayu::RunStatus::Failed });
+    db_->update_run_summary ("run_load_failed", judged_summary (false));
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (body["data"].size (), 1u);
+    ASSERT_TRUE (body["data"][0].contains ("resultSummary"));
+    EXPECT_EQ (body["data"][0]["resultSummary"]["verdict"], "failed");
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_load_failed");
+    ASSERT_EQ (report_status, 200);
+    EXPECT_EQ (body["data"][0]["resultSummary"]["verdict"],
+    report["thresholdValidation"]["verdict"]);
+}
+
+// Each key is absent when the summary does not record it, never zeroed: a run
+// with no budgets was never judged, a run with no status distribution has no
+// rate, and a run with no summary at all has no `resultSummary`.
+TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
+    seed ({ .id = "run_unjudged", .status = vayu::RunStatus::Stopped, .start_time = 1 });
+    db_->update_run_summary ("run_unjudged",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto no_codes         = summary_inputs ();
+    no_codes.status_codes = {};
+    seed ({ .id = "run_no_codes", .start_time = 2 });
+    db_->update_run_summary (
+    "run_no_codes", vayu::core::build_run_summary_payload (no_codes).dump ());
+
+    // A `thresholds` object with no rows is the report's "never judged" too.
+    seed ({ .id = "run_no_checks", .start_time = 3 });
+    db_->update_run_summary ("run_no_checks",
+    R"({"rps":5,"thresholds":{"checks":[],"passed":0,"failed":0}})");
+
+    seed ({ .id = "run_no_summary", .start_time = 4 });
+    seed ({ .id = "run_bad_summary", .start_time = 5 });
+    db_->update_run_summary ("run_bad_summary", "not valid json {{{");
+    seed ({ .id = "run_other_keys", .start_time = 6 });
+    db_->update_run_summary ("run_other_keys", R"({"total_requests":3})");
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto unjudged = row_of (body, "run_unjudged");
+    ASSERT_TRUE (unjudged.contains ("resultSummary"));
+    EXPECT_EQ (unjudged["resultSummary"].size (), 3u);
+    EXPECT_FALSE (unjudged["resultSummary"].contains ("verdict"));
+
+    const auto no_codes_row = row_of (body, "run_no_codes");
+    ASSERT_TRUE (no_codes_row.contains ("resultSummary"));
+    EXPECT_FALSE (no_codes_row["resultSummary"].contains ("errorRate"));
+    EXPECT_TRUE (no_codes_row["resultSummary"].contains ("rps"));
+    EXPECT_TRUE (no_codes_row["resultSummary"].contains ("p95Ms"));
+
+    const auto no_checks = row_of (body, "run_no_checks");
+    ASSERT_TRUE (no_checks.contains ("resultSummary"));
+    EXPECT_EQ (no_checks["resultSummary"], (nlohmann::json{ { "rps", 5 } }));
+
+    for (const char* id : { "run_no_summary", "run_bad_summary", "run_other_keys" }) {
+        EXPECT_FALSE (row_of (body, id).contains ("resultSummary")) << id;
+    }
+}
+
+// The gate is the status, not whether a summary is there yet: a Pending or
+// Running row is never read and never cached, so the poll after the run ends
+// builds its outcome fresh. Dropping the gate fails the second poll (the
+// summary lands before the status) and the third (an entry cached while
+// running would be served forever).
+TEST_F (RunsRouteTest, LoadRowGetsNoResultSummaryUntilItsStatusIsTerminal) {
+    seed ({ .id = "run_pending", .status = vayu::RunStatus::Pending, .start_time = 1 });
+    seed ({ .id = "run_live", .status = vayu::RunStatus::Running, .start_time = 2 });
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    ASSERT_EQ (first["data"].size (), 2u);
+    EXPECT_FALSE (first["data"][0].contains ("resultSummary"));
+    EXPECT_FALSE (first["data"][1].contains ("resultSummary"));
+
+    // The order every writer keeps: summary first, terminal status second.
+    db_->update_run_summary ("run_live", judged_summary (true));
+    auto [_, second] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_FALSE (row_of (second, "run_live").contains ("resultSummary"));
+    EXPECT_EQ (summaries_.outcome_build_count (), 0u);
+
+    db_->update_run_status_with_retry ("run_live", vayu::RunStatus::Completed);
+    auto [third_status, third] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (third_status, 200);
+    const auto finished = row_of (third, "run_live");
+    ASSERT_TRUE (finished.contains ("resultSummary"));
+    EXPECT_EQ (finished["resultSummary"]["verdict"], "passed");
+    EXPECT_FALSE (row_of (third, "run_pending").contains ("resultSummary"));
+    EXPECT_EQ (summaries_.outcome_build_count (), 1u);
+}
+
+// A terminal load run's summary is final, so the poll parses it once - and
+// only a load row's: a design or scenario row never asks for an outcome.
+TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {
+    for (const char* id : { "run_l1", "run_l2", "run_l3" }) {
+        seed ({ .id = id });
+        db_->update_run_summary (id, judged_summary (true));
+    }
+    seed ({ .id = "run_d", .type = vayu::RunType::Design, .start_time = 1 });
+    seed ({ .id = "run_s", .type = vayu::RunType::Scenario, .start_time = 2 });
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_EQ (summaries_.outcome_build_count (), 3u);
+    EXPECT_EQ (summaries_.build_count (), 5u);
+
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (second_status, 200);
+    EXPECT_EQ (summaries_.outcome_build_count (), 3u);
+    EXPECT_EQ (summaries_.build_count (), 5u);
+    EXPECT_EQ (second["data"], first["data"]);
+}
+
+// The design row keeps its own two numbers and a scenario row carries none,
+// even when either stored a summary a load row would read.
+TEST_F (RunsRouteTest, DesignAndScenarioRowsKeepTheirOwnResultSummary) {
+    const auto stored =
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ();
+    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 1 });
+    db_->update_run_summary ("run_design", stored);
+    seed_result ("run_design", 201, 7.5);
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .start_time = 2 });
+    db_->update_run_summary ("run_scenario", stored);
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    const auto design = row_of (body, "run_design");
+    ASSERT_TRUE (design.contains ("resultSummary"));
+    EXPECT_EQ (design["resultSummary"],
+    (nlohmann::json{ { "statusCode", 201 }, { "latencyMs", 7.5 } }));
+    EXPECT_FALSE (row_of (body, "run_scenario").contains ("resultSummary"));
+    EXPECT_EQ (summaries_.outcome_build_count (), 0u);
 }
 
 // ---------------------------------------------------------------------------

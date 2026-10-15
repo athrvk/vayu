@@ -7991,7 +7991,8 @@ before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The f
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
 the full `configSnapshot`, which already holds every key above. The same fourteen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
-with, since both are built by one function.
+with, since both are built by one function; that row carries no
+`resultSummary`.
 
 A **collection run** (`type: "scenario"`) carries none of the single-request
 keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
@@ -8042,15 +8043,30 @@ Metadata, not identity: nothing authorises on it.
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
-query; a load or collection run's results are many and unbounded, so its row
-carries no `resultSummary` at all and its result rows are never read to build
-one - the same split [GET /runs/:runId](#get-runsrunid) draws when it attaches
-`result`. The two numbers rather than that whole `result`: it carries the
-exchange's `trace`, request and response bodies included, which is a per-row
-cost a list cannot take. A design run with no stored result - still running, or
-one whose result write failed - **omits the key** rather than reporting
-`statusCode: 0`, which is the wire's own way of saying the request never reached
-a server.
+query. The two numbers rather than the whole `result`
+[GET /runs/:runId](#get-runsrunid) attaches: it carries the exchange's `trace`,
+request and response bodies included, which is a per-row cost a list cannot
+take. A design run with no stored result - still running, or one whose result
+write failed - **omits the key** rather than reporting `statusCode: 0`, which is
+the wire's own way of saying the request never reached a server.
+
+A **load run's** row carries its own `resultSummary` once the run is terminal
+(`completed`, `failed` or `stopped`; #2130), read from the whole-run summary the
+run stored, never from its result rows, which are many and unbounded:
+
+| Key | Meaning |
+|-----|---------|
+| `rps` | Achieved requests per second over the run, the report's `summary.avgRps` |
+| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
+| `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
+| `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
+
+Each key is **omitted** when the stored summary does not record it, never
+zeroed: `errorRate` is absent when the run recorded no status codes, and
+`verdict` is absent when the run declared no budgets - it was never judged,
+which is not the same claim as passing. A `pending` or `running` load row, and
+a terminal one with no stored summary (the engine stopped before writing it),
+carries no `resultSummary` at all. A collection run's row never carries one.
 
 **Response (envelope):**
 ```json
@@ -8076,7 +8092,8 @@ a server.
         "followRedirects": true,
         "maxRedirects": 10,
         "httpVersion": "auto"
-      }
+      },
+      "resultSummary": { "rps": 98.7, "p95Ms": 41.3, "errorRate": 0.4, "verdict": "passed" }
     },
     {
       "id": "run_1234567891",
@@ -8891,8 +8908,8 @@ which run - that selection is the client's, so a pin never unpins anything else.
 ```
 
 **Response `200`:** the updated run row, in the same shape
-[GET /runs](#get-runs) lists (including `summary` and `origin`), so a client can
-patch its cached row instead of re-listing.
+[GET /runs](#get-runs) lists (including `summary` and `origin`, but never
+`resultSummary`), so a client can patch its cached row instead of re-listing.
 
 **`400`** when the body is not JSON, has no `baseline`, or `baseline` is not a
 boolean - including `null`. Unlike the merge-patch resource updates, an
