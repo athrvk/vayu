@@ -847,6 +847,13 @@ struct RunContext {
     std::atomic<size_t> published_count{ 0 }; // total ticks ever published
     std::atomic<bool> closed{ false }; // set true AFTER final tick appended
     std::atomic<int64_t> completed_at_ms{ 0 }; // 0 while running; stamped at completion
+    // Set by `RunManager::retain_run`, the worker's last act, which every exit
+    // path reaches only after its attempt to write the run's terminal status
+    // and after every producer on the tick ring has stopped. `closed` alone
+    // flips before that tail on the load path, so `/runs/:id/live` waits for
+    // this before its `complete` frame reads the status (#2140). Release
+    // store, acquire load.
+    std::atomic<bool> settled{ false };
 
     // A batch of replayed ticks plus the absolute offset the consumer should ask
     // for next. `next_offset` is not always `from + payloads.size()`: a consumer

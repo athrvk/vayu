@@ -72,25 +72,31 @@ vi.mock("./os-icon", () => ({
 	},
 }));
 
-import { loadTestService } from "./load-test-service";
+import { loadTestService, SETTLE_POLL_INTERVAL_MS, SETTLE_POLL_MAX_MS } from "./load-test-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
 import { NOTIFY_KINDS } from "./notify";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import { ApiError } from "./http-client";
 
 /**
  * `handleClose` is private; the SSE client is what calls it in production, with
  * the status off the engine's completion frame (#1415). `null` is a stream that
- * ended without one - a dropped connection, or an older engine.
+ * ended without one. `frame` says whether the engine's frame arrived at all
+ * (#2140): a bare frame, as opposed to a connection that dropped.
  */
-function closeStream(status: "completed" | "stopped" | "failed" | null = null): Promise<void> {
+type CloseStatus = "completed" | "stopped" | "failed" | null;
+function closeStream(
+	status: CloseStatus = null,
+	info: { frame: boolean } = { frame: false }
+): Promise<void> {
 	return (
 		loadTestService as unknown as {
-			handleClose: (status: "completed" | "stopped" | "failed" | null) => Promise<void>;
+			handleClose: (status: CloseStatus, info: { frame: boolean }) => Promise<void>;
 		}
-	).handleClose(status);
+	).handleClose(status, info);
 }
 
 describe("LoadTestService", () => {
@@ -309,12 +315,249 @@ describe("LoadTestService", () => {
 			loadTestService.startMonitoring("run_drop_4");
 			mockSetError.mockClear();
 
-			await closeStream("completed");
+			await closeStream("completed", { frame: true });
 
 			expect(mockSetError).not.toHaveBeenCalled();
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
 			);
+		});
+	});
+
+	/*
+	 * The engine's 60 s timeout ends the stream with a bare `complete` frame
+	 * while the run is still being settled (#2140). The stored row catches up a
+	 * moment later, so this is waited out; a dropped connection, which says
+	 * nothing about the run, is not.
+	 */
+	describe("a completion frame that carries no status", () => {
+		type Report = Awaited<ReturnType<typeof apiService.getRunReport>>;
+		const reportWith = (status: string) =>
+			({ summary: {}, latency: {}, metadata: { status } }) as unknown as Report;
+		const getRunReport = vi.mocked(apiService.getRunReport);
+		const INTERVAL_MS = SETTLE_POLL_INTERVAL_MS;
+		const MAX_MS = SETTLE_POLL_MAX_MS;
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			// Stop first, so a wait the case left standing is cancelled against the
+			// fake clock it was armed on.
+			loadTestService.stopMonitoring();
+			vi.useRealTimers();
+			getRunReport.mockReset().mockResolvedValue({ summary: {}, latency: {} } as never);
+		});
+
+		/** Begin a run, end its stream with a bare frame, and sit mid-wait. */
+		async function startWaiting(runId: string): Promise<{ closed: Promise<void> }> {
+			dashboard.currentRunId = runId;
+			getRunReport.mockResolvedValue(reportWith("running"));
+			loadTestService.startMonitoring(runId);
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+			// Boxed: an async function would otherwise await the promise it returns.
+			return { closed };
+		}
+
+		/** The report now says completed: a wait still alive would finish the run. */
+		async function letReportComplete(closed: Promise<void>): Promise<void> {
+			getRunReport.mockResolvedValue(reportWith("completed"));
+			mockSetError.mockClear();
+			mockSetFinalReport.mockClear();
+			mockNotifyPost.mockClear();
+			getRunReport.mockClear();
+			await vi.advanceTimersByTimeAsync(MAX_MS * 2);
+			await closed;
+			// Stale means silent on the wire too, not only on the dashboard.
+			expect(getRunReport).not.toHaveBeenCalled();
+		}
+
+		/*
+		 * Mutation check: send `onClose(null)` for both endings (or ignore
+		 * `info.frame` in `handleClose`) and the stream error is raised at once,
+		 * for a run that was seconds from done.
+		 */
+		it("finishes the run once the report settles, raising no error", async () => {
+			dashboard.currentRunId = "run_settle_1";
+			getRunReport
+				.mockResolvedValueOnce(reportWith("running"))
+				.mockResolvedValueOnce(reportWith("running"))
+				.mockResolvedValueOnce(reportWith("completed"));
+			loadTestService.startMonitoring("run_settle_1");
+			mockSetError.mockClear();
+
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+			// Still running on this read: nothing has been decided either way.
+			expect(mockSetFinalReport).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+			await closed;
+
+			expect(getRunReport).toHaveBeenCalledTimes(3);
+			expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+				metadata: { status: "completed" },
+			});
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
+			);
+			expect(mockSetError).not.toHaveBeenCalled();
+			expect(loadTestService.getActiveRunId()).toBeNull();
+		});
+
+		it("reports a failure the report settles on as a failure", async () => {
+			dashboard.currentRunId = "run_settle_2";
+			getRunReport
+				.mockResolvedValueOnce(reportWith("running"))
+				.mockResolvedValueOnce(reportWith("failed"));
+			loadTestService.startMonitoring("run_settle_2");
+
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+			await closed;
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFailed })
+			);
+		});
+
+		it("keeps asking through a read that fails", async () => {
+			dashboard.currentRunId = "run_settle_3";
+			vi.spyOn(console, "warn").mockImplementation(() => {});
+			getRunReport
+				.mockResolvedValueOnce(reportWith("running"))
+				// A 4xx is final to the query client, so the read fails at once
+				// instead of sleeping through its retry backoff.
+				.mockRejectedValueOnce(new ApiError(404, "NOT_FOUND", "no such run"))
+				.mockResolvedValueOnce(reportWith("completed"));
+			loadTestService.startMonitoring("run_settle_3");
+			mockSetError.mockClear();
+
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS * 2);
+			await closed;
+
+			expect(mockSetFinalReport).toHaveBeenCalledTimes(1);
+			expect(mockSetError).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * Mutation check: drop the deadline from `waitForSettledReport` and the
+		 * second half never raises the error.
+		 */
+		it("gives up after 30 s and raises the stream error", async () => {
+			dashboard.currentRunId = "run_settle_4";
+			getRunReport.mockResolvedValue(reportWith("running"));
+			loadTestService.startMonitoring("run_settle_4");
+
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS * 3);
+			// Once for the close itself, then one per interval.
+			expect(getRunReport).toHaveBeenCalledTimes(4);
+			await vi.advanceTimersByTimeAsync(MAX_MS - INTERVAL_MS * 3 - 1);
+			expect(mockSetError).not.toHaveBeenLastCalledWith(
+				expect.stringContaining("still running")
+			);
+
+			await vi.advanceTimersByTimeAsync(1);
+			await closed;
+
+			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(mockSetFinalReport).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(loadTestService.getActiveRunId()).toBeNull();
+		});
+
+		it("raises the stream error at once for a connection that dropped", async () => {
+			dashboard.currentRunId = "run_settle_5";
+			getRunReport.mockResolvedValue(reportWith("running"));
+			loadTestService.startMonitoring("run_settle_5");
+
+			// No timer is advanced: a close that waited would never resolve.
+			await closeStream(null, { frame: false });
+
+			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(getRunReport).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not wait on a report that already settled", async () => {
+			dashboard.currentRunId = "run_settle_6";
+			getRunReport.mockResolvedValue(reportWith("completed"));
+			loadTestService.startMonitoring("run_settle_6");
+
+			await closeStream(null, { frame: true });
+
+			expect(mockSetFinalReport).toHaveBeenCalledTimes(1);
+			expect(getRunReport).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * A wait that outlives the thing that made it stale must do nothing:
+		 * finish a run nobody is watching, announce it, or paint an error over
+		 * the run that replaced it. Mutation check: remove the `generation`
+		 * comparisons from `handleClose` and `waitForSettledReport` and every
+		 * case here reddens.
+		 */
+		describe("a wait that has gone stale", () => {
+			it("does nothing after the user stops the run", async () => {
+				const { closed } = await startWaiting("run_stale_1");
+
+				loadTestService.stopMonitoring();
+				await letReportComplete(closed);
+
+				expect(mockSetFinalReport).not.toHaveBeenCalled();
+				expect(mockNotifyPost).not.toHaveBeenCalled();
+				expect(mockSetError).not.toHaveBeenCalled();
+			});
+
+			it("does nothing after Reconnect watches the same run again", async () => {
+				const { closed } = await startWaiting("run_stale_2");
+
+				loadTestService.startMonitoring("run_stale_2");
+				await letReportComplete(closed);
+
+				expect(mockSetFinalReport).not.toHaveBeenCalled();
+				expect(mockNotifyPost).not.toHaveBeenCalled();
+				// The run is being watched again, and the old wait forgot it.
+				expect(loadTestService.isMonitoring("run_stale_2")).toBe(true);
+			});
+
+			it("does nothing after a new run starts", async () => {
+				const { closed } = await startWaiting("run_stale_3");
+
+				loadTestService.startMonitoring("run_stale_4");
+				await letReportComplete(closed);
+
+				expect(mockSetFinalReport).not.toHaveBeenCalled();
+				expect(mockNotifyPost).not.toHaveBeenCalled();
+				expect(loadTestService.isMonitoring("run_stale_4")).toBe(true);
+			});
+
+			it("does nothing after the stream errors", async () => {
+				const { closed } = await startWaiting("run_stale_5");
+				vi.spyOn(console, "error").mockImplementation(() => {});
+
+				(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+					new Error("The stream failed.")
+				);
+				await letReportComplete(closed);
+
+				expect(mockSetFinalReport).not.toHaveBeenCalled();
+				expect(mockNotifyPost).not.toHaveBeenCalled();
+				expect(mockSetError).not.toHaveBeenCalled();
+			});
+
+			it("does nothing after another stream takes the client", async () => {
+				const { closed } = await startWaiting("run_stale_6");
+
+				(loadTestService as unknown as { handleSuperseded: () => void }).handleSuperseded();
+				await letReportComplete(closed);
+
+				expect(mockSetFinalReport).not.toHaveBeenCalled();
+				expect(mockNotifyPost).not.toHaveBeenCalled();
+				expect(mockSetError).not.toHaveBeenCalled();
+			});
 		});
 	});
 

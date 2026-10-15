@@ -12,6 +12,7 @@ export type {
 	SSEMessageHandler,
 	SSEErrorHandler,
 	SSECloseHandler,
+	SSECloseInfo,
 	SSEStepHandler,
 } from "./sse-client";
 export { loadTestService } from "./load-test-service";

@@ -937,6 +937,7 @@ void RunManager::retain_run (const std::string& run_id) {
         if (it == active_runs_.end ())
             return;
         it->second->completed_at_ms.store (now_ms ());
+        it->second->settled.store (true, std::memory_order_release);
         retained               = it->second;
         retained_runs_[run_id] = it->second;
         active_runs_.erase (it);

@@ -7648,16 +7648,21 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "statusCodes":{"200":1495,"404":3,"500":2}}
 
 event: complete
-data: {"event":"complete","runId":"run_1234567890","status":"Completed"}
+data: {"event":"complete","runId":"run_1234567890","status":"completed"}
 ```
 
-`status` is the run's own terminal status - `Completed`, `Stopped` or `Failed` -
+`status` is the run's own terminal status - `completed`, `stopped` or `failed` -
 and it is what tells a client which of the three happened while the run is
-ending, rather than after the stored report has been fetched (issue #1415). It
-is **omitted** when the stream closes before the run's status has been written,
-which a client must read as "ask the report", never as success: the field is
-absent on that frame, not `null`, and a client older than it saw no `status` at
-all.
+ending, rather than after the stored report has been fetched (issue #1415).
+`complete` is sent only once the run has written that status (issue #2140): the
+last tick can land while the run is still finishing - flushing results,
+replaying deferred scripts and schema validation, running `script.teardown`,
+storing the summary - and the stream stays open, sending nothing, until that
+pass ends. `status` is **omitted** only when the engine gave up waiting, 60s
+after the last tick was sent (`LIVE_SETTLE_TIMEOUT_MS`), or the status write
+itself failed. A client must read that as "ask the report", never as success:
+the field is absent on that frame, not `null`, and a client older than it saw
+no `status` at all.
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so
@@ -7676,7 +7681,7 @@ data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
                      "failures":[],"failuresTotal":0}}
 
 event: complete
-data: {"event":"complete","runId":"run_1234567890","status":"Completed"}
+data: {"event":"complete","runId":"run_1234567890","status":"completed"}
 ```
 
 `status` carries the same three values and the same absent-means-ask rule as on

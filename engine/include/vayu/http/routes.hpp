@@ -1318,6 +1318,38 @@ const nlohmann::json& scripts = nlohmann::json::object (),
 /// `scripts` precedent above. An empty array writes no node.
 const nlohmann::json& elements = nlohmann::json::array ());
 
+/** Where one `GET /runs/:id/live` stream has got to between polls. */
+struct LiveMetricsCursor {
+    /// The id of the next tick to send.
+    size_t offset = 0;
+    /// When the stream first found the run closed with every tick sent, which
+    /// starts `LIVE_SETTLE_TIMEOUT_MS`. Empty until then.
+    std::optional<std::chrono::steady_clock::time_point> drained_since;
+};
+
+/** What one poll of `GET /runs/:id/live` sends, in this order. */
+struct LiveMetricsStep {
+    /// Tick frames, already framed. Empty means nothing new arrived.
+    std::vector<std::string> ticks;
+    /// The `event: complete` frame. Set means the stream ends after it.
+    std::optional<std::string> completion;
+};
+
+/**
+ * One poll of the live metrics stream: the ticks since @p cursor, and the
+ * `complete` frame once the run is closed, drained and settled - or once
+ * `LIVE_SETTLE_TIMEOUT_MS` has passed since it was first closed and drained,
+ * in which case the frame carries a status only if the row already has one.
+ *
+ * @p now is the caller's clock, so the bound is testable without waiting.
+ * Defined in metrics.cpp; live_metrics_route_test.cpp drives it directly.
+ */
+LiveMetricsStep live_metrics_step (vayu::db::Database& db,
+const std::string& run_id,
+const vayu::core::RunContext& context,
+LiveMetricsCursor& cursor,
+std::chrono::steady_clock::time_point now);
+
 /**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup

@@ -987,14 +987,19 @@ collection run's per-step progress.
 - **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
   topic, so the client connects immediately after `POST /runs` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
-- **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end.
-  Transient `CONNECTING` errors are left to the browser's built-in `EventSource` retry; a
-  `CLOSED` readyState without a `complete` frame reaches the subscriber as `onClose(null)`, which
-  is not a terminal status. The load-test service then reads the stored report
-  (`GET /runs/:id/report`): a terminal `metadata.status` finishes the run, while `running` or
-  `pending` means only the stream was lost, so the dashboard shows its "Lost the live metrics
-  stream" callout and the user's Reconnect re-attaches (issue #1925). Nothing reconnects on its
-  own.
+- **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
+  carrying the run's terminal `status` (issue #2140). Transient `CONNECTING` errors are left to
+  the browser's built-in `EventSource` retry. `onClose` is called as `onClose(status, { frame })`
+  and the second argument is what tells the two `null` statuses apart: a `complete` frame with no
+  status (the engine's 60 s settle timeout, the rare case) is `{ frame: true }`, and a `CLOSED`
+  readyState with no frame at all is `{ frame: false }`. Neither is a terminal status. The
+  load-test service reads the stored report (`GET /runs/:id/report`) for both: a terminal
+  `metadata.status` finishes the run. On `running` or `pending`, a bare frame is polled again
+  every 500 ms for up to 30 s, since the engine ended the stream and the row is about to settle,
+  and finishes the run when it does; a dropped connection is not waited on, because the run may
+  well still be going. Either way, a report still live at the end shows the dashboard's "Lost the
+  live metrics stream" callout and the user's Reconnect re-attaches (issue #1925). Nothing
+  reconnects on its own. `ScenarioRunService` ignores the second argument.
 - **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
   `complete` event, `error` handling
 - **One client, and a hand-off when it changes hands**: the client is a singleton, so a second
@@ -1022,7 +1027,9 @@ sseClient.connect(
   runId: string,
   onMessage: (metrics: LoadTestMetrics) => void,
   onError: (error: Error) => void,
-  onClose: (status: SSETerminalStatus) => void,   // how the run ended, or null
+  onClose: (status: SSETerminalStatus, info: { frame: boolean }) => void,
+                                                  // how the run ended, or null; frame = the engine's
+                                                  // `complete` arrived (false: the connection dropped)
   onStep?: (step: ScenarioStepEvent) => void,     // scenario runs only
   onMonitor?: (sample: MonitorSample) => void,    // runs with a `monitor` block only
   onPlan?: (plan: ScenarioRunPlanEvent) => void,  // scenario runs only

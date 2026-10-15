@@ -182,14 +182,27 @@ export type SSEErrorHandler = (error: Error) => void;
 /**
  * How a run's stream ended, when the engine said (issue #1415).
  *
- * `null` for a stream that ended without one: a dropped connection, or a
- * completion frame from an engine that predates the status field. The caller
- * converges on the stored report either way, and a null here means "ask it",
- * never "it finished".
+ * `null` for a stream that ended without one. Since the engine reports the
+ * status on every `complete` frame this is rare for a frame (#2140: only the
+ * 60 s timeout sends it bare), so it mostly means a dropped connection - which
+ * {@link SSECloseInfo.frame} tells apart. The caller converges on the stored
+ * report either way, and a null here means "ask it", never "it finished".
  */
 export type SSETerminalStatus = "completed" | "stopped" | "failed" | null;
 
-export type SSECloseHandler = (status: SSETerminalStatus) => void;
+/**
+ * What ended the stream, beside what the engine said about the run.
+ *
+ * `frame` is true when the engine's own `complete` frame arrived, so a null
+ * status then means the engine closed the stream without settling the run, and
+ * the stored row is about to catch up. False is a dropped connection: the
+ * engine said nothing, and the run may well still be going (#2140).
+ */
+export interface SSECloseInfo {
+	frame: boolean;
+}
+
+export type SSECloseHandler = (status: SSETerminalStatus, info: SSECloseInfo) => void;
 
 /**
  * The status off a `complete` frame, or null for anything else.
@@ -389,7 +402,7 @@ export class SSEClient {
 				// The frame says how the run ended, and this is the only place
 				// that hears it: the stored report is fetched afterwards and a
 				// dropped stream never gets one at all (#1415).
-				onClose(parseTerminalStatus((event as MessageEvent).data));
+				onClose(parseTerminalStatus((event as MessageEvent).data), { frame: true });
 			});
 
 			this.eventSource.addEventListener("error", (_event) => {
@@ -415,7 +428,7 @@ export class SSEClient {
 					console.warn("SSE connection closed unexpectedly - reading the stored report");
 					this.disconnect();
 					// No frame arrived, so nothing here knows how the run ended.
-					onClose(null);
+					onClose(null, { frame: false });
 				}
 				// For CONNECTING state errors, wait - the browser will retry.
 			});
