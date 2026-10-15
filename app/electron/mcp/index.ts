@@ -72,6 +72,7 @@ export class VayuMcpService {
 		return this.httpServer.start();
 	}
 
+	/** Close the socket this service bound, if any, ending its open streams first. */
 	stop(): Promise<void> {
 		return this.httpServer.stop();
 	}

@@ -28,7 +28,7 @@
 import http from "node:http";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost, closeServer } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 
 export type McpRequestHandler = (
 	req: http.IncomingMessage,
@@ -81,7 +81,7 @@ export class McpListener {
 		const server = this.server;
 		this.server = null;
 		if (!server) return Promise.resolve();
-		return closeServer(server);
+		return new Promise((resolve) => server.close(() => resolve()));
 	}
 
 	private async dispatch(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

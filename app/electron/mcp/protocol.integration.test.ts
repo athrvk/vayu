@@ -1397,6 +1397,21 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		await subscription.close();
 	});
 
+	/*
+	 * A listen stream stays open for as long as the client likes; stopping the
+	 * host ends it rather than waiting on it (MCP switched off, the app quitting).
+	 */
+	it("stops while a client holds a listen stream open", async () => {
+		const port = await host();
+		const c = await connectTo(port, { modern: true });
+		const subscription = await c.listen({ toolsListChanged: true });
+		const stopped = httpServer!.stop().then(() => "stopped");
+		const waited = new Promise((resolve) => setTimeout(() => resolve("still waiting"), 3000));
+		expect(await Promise.race([stopped, waited])).toBe("stopped");
+		httpServer = null;
+		expect(await subscription.closed).not.toBe("local");
+	});
+
 	it("refuses a request a browser page sent from another origin", async () => {
 		const port = await host();
 		const res = await fetch(`http://${HOST}:${port}/mcp`, {

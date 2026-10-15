@@ -131,9 +131,10 @@ error while reading. That message is a fixed string too: the thrown error goes t
 the MCP log (`src: "mcp"`, with the request path), not to the client. The
 handler answers a failure to build the server the same way (500, `-32603`, its
 own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
-Stopping the server closes the connections still open on it, since a
-2026-07-28 client's `subscriptions/listen` stream stays open for as long as the
-client likes. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
+Stopping the server ends what a 2026-07-28 client holds open first - a
+`subscriptions/listen` stream lasts as long as the client likes, and the socket's
+close would wait on it - then closes the socket gracefully, so a request still
+arriving is answered rather than cut off. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping. The one thing carried
 from one request to the next is a 2025-era client's name from its handshake,
 under an `Mcp-Session-Id` the host issues - see

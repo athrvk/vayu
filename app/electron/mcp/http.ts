@@ -35,7 +35,7 @@ import {
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost, closeServer } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 
 export interface McpHttpServerOptions {
@@ -54,20 +54,14 @@ export class McpHttpServer {
 	private server: http.Server | null = null;
 	private readonly opts: McpHttpServerOptions;
 	private readonly sessions = new ClientSessions();
-	private readonly handler: McpHttpHandler;
+	private handler: McpHttpHandler;
 	private readonly serveMcp: ReturnType<typeof toNodeHandler>;
 	private readonly hostIsLoopback = localhostHostValidation();
 	private readonly originIsLoopback = localhostOriginValidation();
 
 	constructor(opts: McpHttpServerOptions) {
 		this.opts = opts;
-		this.handler = createMcpHandler(({ era, requestInfo }) => this.build(era, requestInfo), {
-			// Nearly every report is a client's mistake (a wrong Accept or media
-			// type, an unknown method), answered on the wire already. Vayu's own
-			// fault is logged at `error` where it happens (`build`).
-			onerror: (err) =>
-				opts.log?.debug("mcp", "MCP request rejected", { error: err.message }),
-		});
+		this.handler = this.createHandler();
 		this.serveMcp = toNodeHandler({
 			fetch: (request, options) => this.serve(request, options),
 		});
@@ -98,8 +92,32 @@ export class McpHttpServer {
 	stop(): Promise<void> {
 		const server = this.server;
 		this.server = null;
-		if (!server) return Promise.resolve();
-		return closeServer(server);
+		return this.endStreams().then(
+			() => new Promise((resolve) => (server ? server.close(() => resolve()) : resolve()))
+		);
+	}
+
+	/**
+	 * End every exchange a 2026-07-28 client holds open - a `subscriptions/listen`
+	 * stream lasts as long as the client likes - so a socket can close without
+	 * waiting on one. Everything else finishes as it would have: an upload still
+	 * arriving is drained and answered (see `readJsonBody`), not cut off. The
+	 * SDK's `close()` is final, so a fresh handler takes the next request.
+	 */
+	async endStreams(): Promise<void> {
+		const ending = this.handler;
+		this.handler = this.createHandler();
+		await ending.close();
+	}
+
+	private createHandler(): McpHttpHandler {
+		return createMcpHandler(({ era, requestInfo }) => this.build(era, requestInfo), {
+			// Nearly every report is a client's mistake (a wrong Accept or media
+			// type, an unknown method), answered on the wire already. Vayu's own
+			// fault is logged at `error` where it happens (`build`).
+			onerror: (err) =>
+				this.opts.log?.debug("mcp", "MCP request rejected", { error: err.message }),
+		});
 	}
 
 	/**

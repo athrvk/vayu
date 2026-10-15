@@ -8,8 +8,7 @@
 /**
  * @file gates.ts
  * @brief The answers the MCP endpoint gives without the SDK: the wrong path,
- *        the wrong method, and a handler that threw past its own error paths;
- *        and how either server lets go of its socket.
+ *        the wrong method, and a handler that threw past its own error paths.
  *
  * Shared by `listener.ts`, which binds the port at launch and must refuse a
  * stray GET before it pays to load the SDK, and `http.ts`, which answers the
@@ -83,16 +82,4 @@ export function answerInternalError(
 			id: null,
 		})
 	);
-}
-
-/**
- * Close @p server, ending the connections still open on it: a 2026-07-28
- * client's `subscriptions/listen` stream is held open for as long as the client
- * likes, and `close()` alone waits for it.
- */
-export function closeServer(server: http.Server): Promise<void> {
-	return new Promise((resolve) => {
-		server.close(() => resolve());
-		server.closeAllConnections();
-	});
 }
