@@ -7,23 +7,35 @@
 
 /**
  * @file http.ts
- * @brief Hosts the MCP server over Streamable HTTP on loopback. Each POST /mcp
- *        is handled statelessly (fresh Server + transport per request), which
- *        suits a low-traffic local proxy and keeps the safety config current on
- *        every call. The one thing carried across requests is the client's
- *        handshake name, keyed by an `Mcp-Session-Id` (`client-sessions.ts`).
- *        DNS rebinding protection is enabled so a browser tab cannot reach the
- *        endpoint via a forged Host header (MCP spec requirement).
+ * @brief Hosts the MCP server over Streamable HTTP on loopback, through the
+ *        SDK's `createMcpHandler`: a fresh server per request, for both
+ *        protocol eras. A 2026-07-28 client is served per request by design;
+ *        a 2025-era one statelessly, which keeps the safety config current on
+ *        every call. The one thing carried across requests is a 2025-era
+ *        client's handshake name, keyed by an `Mcp-Session-Id`
+ *        (`client-sessions.ts`). The Host and Origin checks the handler does
+ *        not make are made here, so a browser tab cannot reach the endpoint
+ *        through DNS rebinding (MCP spec requirement).
  */
 
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+	createMcpHandler,
+	isInitializeRequest,
+	type McpHandlerRequestOptions,
+	type McpHttpHandler,
+	type McpServer,
+} from "@modelcontextprotocol/server";
+import {
+	localhostHostValidation,
+	localhostOriginValidation,
+	toNodeHandler,
+} from "@modelcontextprotocol/node";
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost, closeServer } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 
 export interface McpHttpServerOptions {
@@ -41,12 +53,20 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 export class McpHttpServer {
 	private server: http.Server | null = null;
 	private readonly opts: McpHttpServerOptions;
-	private readonly allowedHosts: string[];
 	private readonly sessions = new ClientSessions();
+	private readonly handler: McpHttpHandler;
+	private readonly serveMcp: ReturnType<typeof toNodeHandler>;
+	private readonly hostIsLoopback = localhostHostValidation();
+	private readonly originIsLoopback = localhostOriginValidation();
 
 	constructor(opts: McpHttpServerOptions) {
 		this.opts = opts;
-		this.allowedHosts = [`${opts.host}:${opts.port}`, `localhost:${opts.port}`];
+		this.handler = createMcpHandler(({ era, requestInfo }) => this.build(era, requestInfo), {
+			onerror: (err) => opts.log?.warn("mcp", "MCP request rejected", { error: err.message }),
+		});
+		this.serveMcp = toNodeHandler({
+			fetch: (request, options) => this.serve(request, options),
+		});
 	}
 
 	get url(): string {
@@ -75,7 +95,16 @@ export class McpHttpServer {
 		const server = this.server;
 		this.server = null;
 		if (!server) return Promise.resolve();
-		return new Promise((resolve) => server.close(() => resolve()));
+		return closeServer(server);
+	}
+
+	/**
+	 * Tell every client that can hear it that `tools/list` has changed - a
+	 * 2026-07-28 client holding a `subscriptions/listen` stream. A 2025-era
+	 * client of this host has no stream to hear it on, and is not told it would.
+	 */
+	notifyToolsChanged(): void {
+		this.handler.notify.toolsChanged();
 	}
 
 	/**
@@ -92,16 +121,18 @@ export class McpHttpServer {
 
 	private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
 		if (answerUnlessMcpPost(req, res)) return;
+		if (!this.hostIsLoopback(req, res) || !this.originIsLoopback(req, res)) return;
 
 		let body: unknown;
 		try {
 			body = await readJsonBody(req);
 		} catch (err) {
 			// A client-side payload mistake is the client's, not a Vayu crash: the
-			// generic catch in `start()` would answer 500 / -32603 ("Internal
-			// error"), which reads as the server having fallen over. The SDK's own
-			// parse-error path is unreachable here because the body is parsed
-			// before the transport sees it, so the codes are answered directly.
+			// generic catch above would answer 500 / -32603 ("Internal error"),
+			// which reads as the server having fallen over. The body is read here
+			// rather than by the handler so that an oversized upload is drained
+			// rather than cut off (see `readJsonBody`), so the codes are answered
+			// here too.
 			//
 			// Only the two *client-caused* failures are answered here, each with a
 			// message written at its throw site. `readJsonBody` also rejects with
@@ -119,48 +150,64 @@ export class McpHttpServer {
 			);
 			return;
 		}
+		await this.serveMcp(req, res, body);
+	}
 
-		const transport = new StreamableHTTPServerTransport({
-			sessionIdGenerator: undefined,
-			enableJsonResponse: true,
-			enableDnsRebindingProtection: true,
-			allowedHosts: this.allowedHosts,
+	/** The web-standard face `toNodeHandler` calls: one request, both eras. */
+	private async serve(request: Request, options?: McpHandlerRequestOptions): Promise<Response> {
+		const response = await this.handler.fetch(request, options);
+		const handshake = handshakeOf(options?.parsedBody);
+		if (!handshake || !response.ok) return response;
+		// The stateless legacy leg sends no session id of its own and accepts any
+		// it is sent, so the host issues one and records the handshake's name
+		// under it. The body passes through untouched: the handler tears its
+		// server down when that stream ends, so it must not be read or teed here.
+		const issuedSessionId = randomUUID();
+		this.sessions.remember(issuedSessionId, handshake.clientName);
+		const headers = new Headers(response.headers);
+		headers.set("Mcp-Session-Id", issuedSessionId);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
 		});
-		// Set before the transport writes the head, which merges it in; the
-		// stateless transport sends no session id of its own and accepts any
-		// it is sent.
-		const issuedSessionId = isInitialize(body) ? randomUUID() : undefined;
-		if (issuedSessionId) res.setHeader("Mcp-Session-Id", issuedSessionId);
-		const server = createMcpServer(
-			this.opts.info,
-			this.opts.contextProvider,
-			this.sessions.clientName(sessionIdOf(req))
-		);
-		res.on("close", () => {
-			void transport.close();
-			void server.close();
-		});
-		await server.connect(transport);
-		await transport.handleRequest(req, res, body);
-		// Read from the SDK rather than the body: it is set only when the
-		// server actually accepted the handshake. The response has been
-		// written, but the client's next request cannot be read before this
-		// continuation runs.
-		const handshake = server.server.getClientVersion();
-		if (issuedSessionId && handshake) this.sessions.remember(issuedSessionId, handshake.name);
+	}
+
+	/** The handler's factory: a server for one request of era @p era. */
+	private build(era: "legacy" | "modern", request: Request | undefined): McpServer {
+		try {
+			return createMcpServer(this.opts.info, this.opts.contextProvider, {
+				toolListChanges: era === "modern",
+				sessionClientName: this.sessions.clientName(
+					request?.headers.get("mcp-session-id") ?? undefined
+				),
+			});
+		} catch (err) {
+			// The handler answers this with a fixed 500 / -32603 and reports it to
+			// `onerror` beside every client mistake; this one is Vayu's own fault,
+			// so it is logged as one, cause included. The wire carries none of it.
+			this.opts.log?.error("mcp", "Unhandled error serving an MCP request", {
+				path: request ? new URL(request.url).pathname : MCP_PATH,
+				error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+			});
+			throw err;
+		}
 	}
 }
 
-/** Whether a body is an `initialize`, alone or as the one-message batch the SDK also accepts. */
-function isInitialize(body: unknown): boolean {
+/**
+ * The client named by a body that is an `initialize`, alone or as the
+ * one-message batch the SDK also accepts. Read from the body rather than from a
+ * server: the one that answered is gone with its request, and the stateless leg
+ * runs no server that sees the `initialized` notification and the handshake
+ * both. `isInitializeRequest` is the SDK's own schema check of the handshake, so
+ * a name it passes is one the SDK accepted.
+ */
+function handshakeOf(body: unknown): { clientName: string } | undefined {
 	const message = Array.isArray(body) && body.length === 1 ? body[0] : body;
-	return isInitializeRequest(message);
-}
-
-/** The `Mcp-Session-Id` a request carries, if it carries exactly one. */
-function sessionIdOf(req: http.IncomingMessage): string | undefined {
-	const id = req.headers["mcp-session-id"];
-	return typeof id === "string" ? id : undefined;
+	return isInitializeRequest(message)
+		? { clientName: message.params.clientInfo.name }
+		: undefined;
 }
 
 /**

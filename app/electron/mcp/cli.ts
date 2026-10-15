@@ -20,7 +20,7 @@
  *        has no `app` module to derive one from).
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createMcpServer } from "./server.js";
 import { EngineClient } from "./engine-client.js";
 import { buildSafetyConfigFromEnv, formatSafetyEnvNotices } from "./config.js";
@@ -47,10 +47,12 @@ async function main(): Promise<void> {
 	}
 	const contextProvider = (): ToolContext => ({ client, config, log });
 
-	const server = createMcpServer({ name: "vayu", version }, contextProvider);
-	const transport = new StdioServerTransport();
-
-	await server.connect(transport);
+	// One server per connection, for whichever era the client opens with. The
+	// config is fixed for the process, so the tool list never changes under a
+	// client and no `list_changed` is advertised.
+	serveStdio(() => createMcpServer({ name: "vayu", version }, contextProvider), {
+		onerror: (err) => log.warn("mcp", "stdio request rejected", { error: err.message }),
+	});
 	log.info("mcp", "stdio server ready", { engineBaseUrl });
 }
 

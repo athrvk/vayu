@@ -106,7 +106,8 @@ describe("main process startup import graph", () => {
 	});
 
 	it("does not evaluate the MCP SDK or the tool registry", () => {
-		const sdk = [...packages].filter((p) => p.startsWith("@modelcontextprotocol/sdk"));
+		// The scope, not one package: the SDK ships as several (`server`, `node`, ...).
+		const sdk = [...packages].filter((p) => p.startsWith("@modelcontextprotocol/"));
 		expect(sdk).toEqual([]);
 
 		const mcpModules = [...relative].filter((f) => f.startsWith(`mcp${path.sep}`));

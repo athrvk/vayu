@@ -17,11 +17,15 @@
 
 import http from "node:http";
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+	Client,
+	InMemoryTransport,
+	StreamableHTTPClientTransport,
+	type ElicitResult,
+} from "@modelcontextprotocol/client";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createMcpServer } from "./server.js";
+import { VayuMcpService } from "./index.js";
 import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
@@ -100,7 +104,7 @@ async function connectClient(
 	opts: {
 		safety?: Partial<McpSafetyConfig>;
 		client?: EngineClient;
-		elicit?: (req: unknown) => { action: string; content?: Record<string, unknown> };
+		elicit?: (req: unknown) => ElicitResult;
 	} = {}
 ) {
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -115,7 +119,7 @@ async function connectClient(
 	);
 	if (opts.elicit) {
 		const handler = opts.elicit;
-		client.setRequestHandler(ElicitRequestSchema, async (req) => handler(req));
+		client.setRequestHandler("elicitation/create", async (req) => handler(req));
 	}
 	// connect() performs the initialize handshake.
 	await client.connect(clientTransport);
@@ -193,12 +197,10 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(ok.isError).toBeFalsy();
 		expect(ok.content[0].text).toContain("9.9.9");
 
-		const unknown = (await client.callTool({ name: "no_such_tool", arguments: {} })) as {
-			content: Array<{ text: string }>;
-			isError?: boolean;
-		};
-		expect(unknown.isError).toBe(true);
-		expect(unknown.content[0].text).toMatch(/not found/i);
+		// The SDK rejects a name it has no tool for as invalid params (-32602).
+		await expect(
+			client.callTool({ name: "no_such_tool", arguments: {} })
+		).rejects.toMatchObject({ code: -32602, message: expect.stringMatching(/not found/i) });
 		await server.close();
 	});
 
@@ -211,13 +213,12 @@ describe("MCP protocol handshake (in-memory)", () => {
 		const { client, server } = await connectClient({
 			safety: { disabledTools: ["create_collection"] },
 		});
-		const res = (await client.callTool({
-			name: "create_collection",
-			arguments: { name: "API" },
-		})) as { content: Array<{ text: string }>; isError?: boolean };
+		const call = client.callTool({ name: "create_collection", arguments: { name: "API" } });
 
-		expect(res.isError).toBe(true);
-		expect(res.content[0].text).not.toMatch(/write access in Vayu Settings/i);
+		await expect(call).rejects.toMatchObject({ code: -32602 });
+		await expect(call).rejects.not.toMatchObject({
+			message: expect.stringMatching(/write access in Vayu Settings/i),
+		});
 		await server.close();
 	});
 
@@ -375,13 +376,10 @@ describe("MCP protocol handshake (in-memory)", () => {
 		});
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name)).not.toContain("get_engine_health");
-		// Unregistered → the SDK returns an error result ("tool not found").
-		const res = (await client.callTool({ name: "get_engine_health", arguments: {} })) as {
-			content: Array<{ text: string }>;
-			isError?: boolean;
-		};
-		expect(res.isError).toBe(true);
-		expect(res.content[0].text).toMatch(/not found/i);
+		// Unregistered → the SDK rejects it as invalid params ("tool not found").
+		await expect(
+			client.callTool({ name: "get_engine_health", arguments: {} })
+		).rejects.toMatchObject({ code: -32602, message: expect.stringMatching(/not found/i) });
 		await server.close();
 	});
 
@@ -871,13 +869,7 @@ describe("Streamable HTTP host", () => {
 					let out = "";
 					res.on("data", (d) => (out += d));
 					res.on("end", () => {
-						let json: unknown;
-						try {
-							json = JSON.parse(out);
-						} catch {
-							json = undefined;
-						}
-						resolve({ status: res.statusCode ?? 0, json });
+						resolve({ status: res.statusCode ?? 0, json: parseAnswer(out) });
 					});
 				}
 			);
@@ -885,6 +877,19 @@ describe("Streamable HTTP host", () => {
 			if (data) req.write(data);
 			req.end();
 		});
+	}
+
+	/**
+	 * A JSON-RPC answer as either shape the host sends it: a JSON body, or the
+	 * `data:` line of the event stream a 2025-era request is answered on.
+	 */
+	function parseAnswer(text: string): unknown {
+		const event = text.split("\n").find((line) => line.startsWith("data: "));
+		try {
+			return JSON.parse(event ? event.slice("data: ".length) : text);
+		} catch {
+			return undefined;
+		}
 	}
 
 	const initBody = {
@@ -943,7 +948,7 @@ describe("Streamable HTTP host", () => {
 	 * client to check whether Vayu is alive instead of at its own JSON.
 	 */
 	it("answers a handler that throws with a fixed -32603 and logs the cause", async () => {
-		const log = { error: vi.fn() } as unknown as Logger;
+		const log = { error: vi.fn(), warn: vi.fn() } as unknown as Logger;
 		await start(undefined, {
 			log,
 			contextProvider: () => {
@@ -952,10 +957,11 @@ describe("Streamable HTTP host", () => {
 		});
 		const res = await request({ body: initBody });
 		expect(res.status).toBe(500);
-		expect(res.json).toEqual({
+		// The SDK's handler answers it now, with its own fixed message and the
+		// request's id; what matters is the code and that nothing leaks.
+		expect(res.json).toMatchObject({
 			jsonrpc: "2.0",
-			error: { code: -32603, message: "Internal error" },
-			id: null,
+			error: { code: -32603, message: "Internal server error" },
 		});
 		expect(JSON.stringify(res.json)).not.toContain("secret detail");
 		expect(log.error).toHaveBeenCalledWith(
@@ -1174,5 +1180,262 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 			{ kind: "mcp" },
 			{ kind: "mcp", client: "raw-client" },
 		]);
+	});
+});
+
+/*
+ * A 2026-07-28 client reaches the same factory through the same endpoint, and
+ * gets what the 2025-era stateless leg cannot give: a question put to the
+ * person over HTTP, and word when the tool list changes.
+ */
+describe("Streamable HTTP host - 2026-07-28 clients", () => {
+	const HOST = "127.0.0.1";
+	let nextPort = 9930;
+	let httpServer: McpHttpServer | null = null;
+	let service: VayuMcpService | null = null;
+	const clients: Client[] = [];
+
+	afterEach(async () => {
+		for (const c of clients.splice(0)) await c.close().catch(() => {});
+		await httpServer?.stop();
+		httpServer = null;
+		await service?.stop();
+		service = null;
+	});
+
+	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
+		const port = nextPort++;
+		httpServer = new McpHttpServer({
+			host: HOST,
+			port,
+			info: { name: "vayu", version: "test" },
+			contextProvider: contextProvider(opts.safety, opts.client),
+		});
+		await httpServer.start();
+		return port;
+	}
+
+	/** A client on @p port; `modern` probes for 2026-07-28, otherwise it speaks 2025. */
+	async function connectTo(
+		port: number,
+		opts: { modern: boolean; elicit?: (req: unknown) => ElicitResult }
+	) {
+		const c = new Client(
+			{ name: opts.modern ? "modern-e2e" : "legacy-e2e", version: "1.0.0" },
+			{
+				...(opts.modern ? { versionNegotiation: { mode: "auto" as const } } : {}),
+				...(opts.elicit ? { capabilities: { elicitation: {} } } : {}),
+			}
+		);
+		if (opts.elicit) {
+			const answer = opts.elicit;
+			c.setRequestHandler("elicitation/create", async (req) => answer(req));
+		}
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		clients.push(c);
+		return c;
+	}
+
+	const loadCall = {
+		name: "start_load_run",
+		arguments: { url: "https://api.example.com/x", mode: "constant_rps", targetRps: 50 },
+	};
+	const loadSafety = { allowlist: ["api.example.com"], maxRps: 1000 };
+
+	it("negotiates 2026-07-28 and serves tools and the server's identity", async () => {
+		const port = await host();
+		const c = await connectTo(port, { modern: true });
+		expect(c.getProtocolEra()).toBe("modern");
+		const identity = c.getServerVersion();
+		expect(identity?.name).toBe("vayu");
+		const res = (await c.callTool({ name: "get_engine_health", arguments: {} })) as {
+			content: Array<{ text: string }>;
+		};
+		expect(res.content[0].text).toContain("9.9.9");
+	});
+
+	/*
+	 * The one transport that used to fall back to the flag every time: a
+	 * stateless server could not carry the person's answer back to itself. The
+	 * question now travels in-band and the call is retried with the answer.
+	 */
+	it("asks the person over HTTP, and acts on their yes", async () => {
+		const startRun = vi.fn().mockResolvedValue({ runId: "run_9", status: "running" });
+		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
+		const asked: string[] = [];
+		const c = await connectTo(port, {
+			modern: true,
+			elicit: (req) => {
+				asked.push((req as { params: { message: string } }).params.message);
+				return { action: "accept", content: { proceed: true } };
+			},
+		});
+		const res = (await c.callTool(loadCall)) as { content: Array<{ text: string }> };
+		expect(asked).toHaveLength(1);
+		expect(asked[0]).toMatch(/api\.example\.com/);
+		expect(startRun).toHaveBeenCalledTimes(1);
+		expect(res.content[0].text).not.toMatch(/AWAITING CONFIRMATION/);
+	});
+
+	it("starts nothing when the person declines over HTTP", async () => {
+		const startRun = vi.fn();
+		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
+		const c = await connectTo(port, { modern: true, elicit: () => ({ action: "decline" }) });
+		const res = (await c.callTool(loadCall)) as { content: Array<{ text: string }> };
+		expect(startRun).not.toHaveBeenCalled();
+		expect(res.content[0].text).toMatch(/declined/i);
+	});
+
+	/*
+	 * Asking a client that declared no elicitation is a protocol error the tool
+	 * cannot catch (-32021), so such a client gets the preview and the flag.
+	 */
+	it("falls back to the confirmed flag for a 2026-07-28 client that cannot be asked", async () => {
+		const startRun = vi.fn();
+		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
+		const c = await connectTo(port, { modern: true });
+		const res = (await c.callTool(loadCall)) as { content: Array<{ text: string }> };
+		expect(startRun).not.toHaveBeenCalled();
+		expect(res.content[0].text).toMatch(/AWAITING CONFIRMATION/);
+	});
+
+	/*
+	 * A 2025-era client over HTTP declared elicitation to a server that is gone
+	 * by its first call; asking it would be refused, so it gets the flag.
+	 */
+	it("falls back to the confirmed flag for a 2025-era client over HTTP", async () => {
+		const startRun = vi.fn();
+		const elicit = vi.fn();
+		const port = await host({ safety: loadSafety, client: fakeClient({ startRun }) });
+		const c = await connectTo(port, { modern: false, elicit });
+		const res = (await c.callTool(loadCall)) as { content: Array<{ text: string }> };
+		expect(elicit).not.toHaveBeenCalled();
+		expect(startRun).not.toHaveBeenCalled();
+		expect(res.content[0].text).toMatch(/AWAITING CONFIRMATION/);
+	});
+
+	it("stamps a run with the name a 2026-07-28 client gives on each request", async () => {
+		const executeRequest = vi.fn().mockResolvedValue({ statusCode: 200 });
+		const port = await host({
+			safety: { allowlist: ["api.example.com"] },
+			client: fakeClient({ executeRequest }),
+		});
+		const c = await connectTo(port, { modern: true });
+		await c.callTool({ name: "run_request", arguments: { url: "https://api.example.com/x" } });
+		expect(executeRequest.mock.calls[0][0]).toMatchObject({
+			origin: { kind: "mcp", client: "modern-e2e" },
+		});
+	});
+
+	/*
+	 * Advertised only where it can be kept: a 2025-era client of this host has
+	 * no stream to be told on.
+	 */
+	it("advertises tool-list changes to a 2026-07-28 client and not to a 2025-era one", async () => {
+		const port = await host();
+		const modern = await connectTo(port, { modern: true });
+		const legacy = await connectTo(port, { modern: false });
+		expect(modern.getServerCapabilities()?.tools?.listChanged).toBe(true);
+		expect(legacy.getServerCapabilities()?.tools?.listChanged).toBe(false);
+	});
+
+	it("tells a listening client when a Settings change alters tools/list", async () => {
+		const port = nextPort++;
+		service = new VayuMcpService({
+			engineBaseUrl: "http://127.0.0.1:1",
+			host: HOST,
+			port,
+			version: "test",
+		});
+		await service.start();
+		const c = await connectTo(port, { modern: true });
+		let changed = 0;
+		c.setNotificationHandler("notifications/tools/list_changed", async () => {
+			changed++;
+		});
+		const subscription = await c.listen({ toolsListChanged: true });
+		expect(subscription.honoredFilter.toolsListChanged).toBe(true);
+
+		// A change that leaves the list as it was says nothing.
+		service.updateSafety({ maxRps: 10 });
+		service.updateSafety({ allowWrites: true });
+		await vi.waitFor(() => expect(changed).toBeGreaterThan(0));
+		const { tools } = await c.listTools();
+		expect(tools.map((t) => t.name)).toContain("create_collection");
+		// One stream, in order: a notice for the first change would have come
+		// before the one just counted.
+		expect(changed).toBe(1);
+		await subscription.close();
+	});
+
+	it("refuses a request a browser page sent from another origin", async () => {
+		const port = await host();
+		const res = await fetch(`http://${HOST}:${port}/mcp`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json, text/event-stream",
+				Origin: "https://evil.example",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "page", version: "1" },
+				},
+			}),
+		});
+		expect(res.status).toBe(403);
+	});
+});
+
+/*
+ * The stdio CLI's entry, driven over a linked pair in place of the process's
+ * pipes. A 2026-07-28 connection carries no handshake, so who the client is and
+ * whether it can be asked come from each request's own envelope.
+ */
+describe("stdio entry (serveStdio)", () => {
+	async function serve(opts: { client?: EngineClient; safety?: Partial<McpSafetyConfig> }) {
+		const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+		const handle = serveStdio(
+			() =>
+				createMcpServer(
+					{ name: "vayu", version: "test" },
+					contextProvider(opts.safety, opts.client)
+				),
+			{ transport: serverTransport }
+		);
+		return { clientTransport, handle };
+	}
+
+	it("asks the person on a 2026-07-28 connection and names the client", async () => {
+		const startRun = vi.fn().mockResolvedValue({ runId: "run_9", status: "running" });
+		const { clientTransport, handle } = await serve({
+			safety: { allowlist: ["api.example.com"], maxRps: 1000 },
+			client: fakeClient({ startRun }),
+		});
+		const c = new Client(
+			{ name: "stdio-modern", version: "1.0.0" },
+			{ versionNegotiation: { mode: "auto" }, capabilities: { elicitation: {} } }
+		);
+		const elicit = vi.fn().mockResolvedValue({ action: "accept", content: { proceed: true } });
+		c.setRequestHandler("elicitation/create", async (req) => elicit(req));
+		await c.connect(clientTransport);
+		expect(c.getProtocolEra()).toBe("modern");
+
+		await c.callTool({
+			name: "start_load_run",
+			arguments: { url: "https://api.example.com/x", mode: "constant_rps", targetRps: 50 },
+		});
+		expect(elicit).toHaveBeenCalledTimes(1);
+		expect(startRun).toHaveBeenCalledTimes(1);
+		expect(startRun.mock.calls[0][0]).toMatchObject({
+			origin: { kind: "mcp", client: "stdio-modern" },
+		});
+		await c.close();
+		await handle.close();
 	});
 });
