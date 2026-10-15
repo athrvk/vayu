@@ -27,6 +27,7 @@ import {
 	useMockServersQuery,
 } from "@/queries";
 import { collectionNamePath } from "@/modules/collections/tree-utils";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { pathLabel } from "@/lib/path-label";
 import {
 	collectionReference,
@@ -324,7 +325,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				// snapshot (resolved when it was sent), so it survives the
 				// request being renamed or deleted.
 				const snapshot = run?.configSnapshot;
-				const kind = run?.type === "load" ? "Load test" : "Design run";
+				const kind = run ? RUN_TYPE_NAME[run.type] : "Run";
 				const path = snapshot?.url ? pathLabel(snapshot.url) : "";
 				if (run && (snapshot?.method || path)) {
 					const label = path || kind;
@@ -341,8 +342,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					};
 				}
 				// Still loading, or a run with no snapshot to name it by.
-				const fallback = run ? kind : "Run";
-				return { label: fallback, title: fallback, icon, agentReference: runLine };
+				return { label: kind, title: kind, icon, agentReference: runLine };
 			}
 		}
 	});

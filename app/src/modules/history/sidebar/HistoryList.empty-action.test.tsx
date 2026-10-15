@@ -9,7 +9,7 @@
  */
 
 /**
- * "No test runs found" offers the undo only when there is something to undo
+ * The empty state offers the undo only when there is something to undo
  * (issue #1693).
  *
  * The description already split on this: with a search or a Select narrowing
@@ -132,7 +132,10 @@ beforeEach(() => {
 describe("the history sidebar's empty list", () => {
 	it("offers no undo when nothing has run yet", () => {
 		renderList();
-		expect(screen.getByText("No test runs found")).toBeInTheDocument();
+		expect(screen.getByText("No runs yet")).toBeInTheDocument();
+		expect(
+			screen.getByText("Every send, collection run and load test is recorded here.")
+		).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Clear the filters" })).toBeNull();
 	});
 
@@ -141,7 +144,7 @@ describe("the history sidebar's empty list", () => {
 		fireEvent.change(screen.getByPlaceholderText(/search/i), {
 			target: { value: "nothing matches this" },
 		});
-		expect(screen.getByText("No test runs found")).toBeInTheDocument();
+		expect(screen.getByText("No runs found")).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Clear the filters" }));
 		expect(useHistoryStore.getState().searchQuery).toBe("");
@@ -153,7 +156,8 @@ describe("the history sidebar's empty list", () => {
 		useHistoryStore.getState().setFilterStatus("failed");
 		renderList();
 
-		expect(screen.queryByText("No test runs found")).toBeNull();
+		expect(screen.queryByText("No runs found")).toBeNull();
+		expect(screen.queryByText("No runs yet")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Clear the filters" })).toBeNull();
 		expect(screen.getByRole("button", { name: "Load older runs" })).toBeInTheDocument();
 	});
@@ -162,7 +166,7 @@ describe("the history sidebar's empty list", () => {
 		useHistoryStore.getState().setFilterStatus("failed");
 		renderList();
 
-		expect(screen.getByText("No test runs found")).toBeInTheDocument();
+		expect(screen.getByText("No runs found")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Clear the filters" })).toBeInTheDocument();
 	});
 

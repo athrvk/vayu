@@ -13,8 +13,8 @@
  *
  * `useRunsQuery` is destructured as `{ data: allRuns = [] }`, and nothing sets
  * `throwOnError`, so a query that settles as an error never reaches the
- * ErrorBoundary - it resolves to `[]` and falls through to "No test runs
- * found", a claim about the user's data made when no data arrived.
+ * ErrorBoundary - it resolves to `[]` and falls through to "No runs
+ * yet", a claim about the user's data made when no data arrived.
  *
  * Unlike the collections tree there is no create CTA here to make things worse.
  * The reason is symmetry: the drawer has three sibling views, and one reporting
@@ -109,9 +109,9 @@ describe("HistoryList when the runs query fails", () => {
 
 		expect(screen.getByText(/couldn't load run history/i)).toBeInTheDocument();
 		expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
-		expect(screen.queryByText("No test runs found")).not.toBeInTheDocument();
+		expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
 		expect(
-			screen.queryByText("Run your first load test to see its results here.")
+			screen.queryByText("Every send, collection run and load test is recorded here.")
 		).not.toBeInTheDocument();
 	});
 
@@ -140,7 +140,10 @@ describe("HistoryList when the runs query fails", () => {
 	it("still shows the empty state when the query simply returned nothing", () => {
 		renderList();
 
-		expect(screen.getByText("No test runs found")).toBeInTheDocument();
+		expect(screen.getByText("No runs yet")).toBeInTheDocument();
+		expect(
+			screen.getByText("Every send, collection run and load test is recorded here.")
+		).toBeInTheDocument();
 		expect(screen.queryByText(/couldn't load run history/i)).not.toBeInTheDocument();
 	});
 });

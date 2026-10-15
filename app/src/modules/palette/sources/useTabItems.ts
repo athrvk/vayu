@@ -33,7 +33,7 @@ export function useTabItems(): PaletteItem[] {
 			kind: "tab" as const,
 			title: d.label,
 			// The descriptor's `title` is the strip's tooltip - "GET /v1/orders",
-			// "Design run: POST /login" - which is exactly the disambiguator two
+			// "Send: POST /login" - which is exactly the disambiguator two
 			// same-named tabs need here.
 			subtitle: d.title === d.label ? undefined : d.title,
 			keywords: [tab.type],
