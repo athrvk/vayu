@@ -371,6 +371,11 @@ export interface FileReferenceFolder {
 	count: number;
 }
 
+export interface FileReferenceNeeds {
+	folders: FileReferenceFolder[];
+	bodiesWithoutFile: number;
+}
+
 /**
  * What an import's file references need before they can be sent, read off the
  * drafts themselves rather than a counter, so every format answers alike.
@@ -385,10 +390,7 @@ export interface FileReferenceFolder {
  *   same state are the engine's `unattachedFileParts`, already a line of its
  *   own; this is the whole-body counterpart.
  */
-export function fileReferenceNeeds(results: readonly ImportResult[]): {
-	folders: FileReferenceFolder[];
-	bodiesWithoutFile: number;
-} {
+export function fileReferenceNeeds(results: readonly ImportResult[]): FileReferenceNeeds {
 	const counts = new Map<string, number>();
 	let bodiesWithoutFile = 0;
 
