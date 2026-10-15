@@ -413,10 +413,9 @@ export function UPlotChart({
 		};
 		// `shapeSig` is the serialized form of everything this effect reads -
 		// series identity, theme, height, sync key, live/x-axis flags, tooltip
-		// caption - so the
-		// omitted deps are all inside it. Listing `series` or `data` instead
-		// would tear the plot down and rebuild it on every data tick, which the
-		// `setData` effect below exists to avoid.
+		// caption - so the omitted deps are all inside it. Listing `series` or
+		// `data` instead would tear the plot down and rebuild it on every data
+		// tick, which the `setData` effect below exists to avoid.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shapeSig]);
 
