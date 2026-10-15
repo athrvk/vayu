@@ -37,6 +37,26 @@ describe("mapSseMetrics", () => {
 		expect(m.status_codes).toBeUndefined();
 	});
 
+	it("maps the error count and its HTTP errors / No response split (issue #2124)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			totalRequests: 100,
+			totalErrors: 17,
+			httpErrors: 15,
+			noResponse: 2,
+		});
+		expect(m.requests_failed).toBe(17);
+		expect(m.http_errors).toBe(15);
+		expect(m.no_response).toBe(2);
+	});
+
+	it("defaults the error split to 0 when the frame carries none", () => {
+		const m = mapSseMetrics({ timestamp: 1, totalRequests: 0 });
+		expect(m.requests_failed).toBe(0);
+		expect(m.http_errors).toBe(0);
+		expect(m.no_response).toBe(0);
+	});
+
 	it("renames customMetrics into custom_metrics (issue #1500)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,
@@ -266,6 +286,15 @@ class MockEventSource {
 	complete(status: string): void {
 		this.listeners.get("complete")?.({ data: JSON.stringify({ status }) } as MessageEvent);
 	}
+	/** The frame the engine's 60 s timeout sends: ended, with no word on how. */
+	completeWithoutStatus(): void {
+		this.listeners.get("complete")?.({ data: JSON.stringify({ runId: "r1" }) } as MessageEvent);
+	}
+	/** The browser giving up on the connection: an `error` in the CLOSED state. */
+	drop(): void {
+		this.readyState = MockEventSource.CLOSED;
+		this.listeners.get("error")?.({} as MessageEvent);
+	}
 }
 
 /** The four lifecycle handlers, named so a case can assert on one of them. */
@@ -285,6 +314,31 @@ function attach(client: SSEClient, runId: string, h: ReturnType<typeof handlers>
 		h.onSuperseded
 	);
 }
+
+describe("SSEClient - the placeholder before the first tick", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("reports zero errors, with the split, when the run ends before any tick", () => {
+		const client = new SSEClient();
+		const h = handlers();
+
+		attach(client, "run_1", h);
+		MockEventSource.instances[0]?.complete("completed");
+
+		expect(h.onMessage).toHaveBeenCalledTimes(1);
+		expect(h.onMessage.mock.calls[0][0]).toMatchObject({
+			requests_failed: 0,
+			http_errors: 0,
+			no_response: 0,
+		});
+	});
+});
 
 describe("SSEClient - the hand-off when a run is displaced", () => {
 	beforeEach(() => {
@@ -358,7 +412,7 @@ describe("SSEClient - the hand-off when a run is displaced", () => {
 
 		attach(client, "run_1", first);
 		MockEventSource.instances[0]?.complete("completed");
-		expect(first.onClose).toHaveBeenCalledWith("completed");
+		expect(first.onClose).toHaveBeenCalledWith("completed", { frame: true });
 
 		attach(client, "run_2", handlers());
 		expect(first.onSuperseded).not.toHaveBeenCalled();
@@ -368,5 +422,58 @@ describe("SSEClient - the hand-off when a run is displaced", () => {
 		const client = new SSEClient();
 		client.connect("run_1", vi.fn(), vi.fn(), vi.fn());
 		expect(() => client.connect("run_2", vi.fn(), vi.fn(), vi.fn())).not.toThrow();
+	});
+});
+
+describe("SSEClient - what the close handler is told (#2140)", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	/*
+	 * Mutation check: collapse the three endings into `onClose(null)` and the
+	 * bare-frame and dropped-connection cases below can no longer be told apart,
+	 * so the first of them reddens.
+	 */
+	it("reports a status frame as a frame, with its status", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.complete("failed");
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith("failed", { frame: true });
+	});
+
+	it("reports a frame with no status as a frame, with a null status", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.completeWithoutStatus();
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith(null, { frame: true });
+	});
+
+	it("reports a closed connection as no frame", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.drop();
+
+		expect(h.onClose).toHaveBeenCalledExactlyOnceWith(null, { frame: false });
+	});
+
+	it("says nothing for an error the browser is still retrying", () => {
+		const h = handlers();
+		attach(new SSEClient(), "run_1", h);
+
+		MockEventSource.instances[0]?.listeners.get("error")?.({} as MessageEvent);
+
+		expect(h.onClose).not.toHaveBeenCalled();
 	});
 });

@@ -224,6 +224,21 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 							</span>
 						</div>
 
+						<div className="grid grid-cols-2 gap-2">
+							<div className="flex justify-between items-center p-2 bg-muted rounded-md text-sm">
+								<span>HTTP errors</span>
+								<span className="font-medium">
+									{formatNumber(derived.httpErrors)}
+								</span>
+							</div>
+							<div className="flex justify-between items-center p-2 bg-muted rounded-md text-sm">
+								<span>No response</span>
+								<span className="font-medium">
+									{formatNumber(derived.noResponse)}
+								</span>
+							</div>
+						</div>
+
 						{report.errors.types && Object.entries(report.errors.types).length > 0 && (
 							<div className="space-y-2">
 								<p className="text-xs font-medium text-muted-foreground">

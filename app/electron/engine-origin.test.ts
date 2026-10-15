@@ -24,8 +24,9 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Session } from "electron";
 import { ENGINE_BASE_URL } from "@/config/network";
+import { ENGINE_PORT_CANDIDATES } from "./constants.js";
+import { ENGINE_CANDIDATE_ORIGINS } from "./engine-endpoint.js";
 import {
-	ENGINE_ORIGIN,
 	ENGINE_REQUEST_FILTER,
 	createEngineOriginBridge,
 	installEngineOriginBridge,
@@ -65,6 +66,8 @@ describe("the filter is the engine and nothing else", () => {
 		"http://localhost:9876/health",
 		"http://[::1]:9876/health",
 		"http://127.0.0.1:9877/health",
+		"http://127.0.0.1:9879/health",
+		"http://127.0.0.1:9890/health",
 		"http://127.0.0.1:98760/health",
 		"http://127.0.0.1/health",
 		"https://127.0.0.1:9876/health",
@@ -76,11 +79,14 @@ describe("the filter is the engine and nothing else", () => {
 		"file:///opt/Vayu/resources/app.asar/dist/index.html",
 	];
 
-	it("is one pattern, the renderer's own engine address", () => {
+	it("is one pattern per candidate port, the renderer's own spelling of each", () => {
 		// A renderer call to any other spelling of the engine keeps its Origin and
-		// is refused, so the two constants must be the same string.
-		expect(ENGINE_ORIGIN).toBe(ENGINE_BASE_URL);
-		expect(ENGINE_REQUEST_FILTER).toEqual({ urls: [`${ENGINE}/*`] });
+		// is refused, so the renderer's address must be one of these strings.
+		expect(ENGINE_REQUEST_FILTER).toEqual({
+			urls: ENGINE_PORT_CANDIDATES.map((port) => `http://127.0.0.1:${port}/*`),
+		});
+		expect(ENGINE_CANDIDATE_ORIGINS).toContain(ENGINE_BASE_URL);
+		expect(isEngineUrl(`${ENGINE_BASE_URL}/health`)).toBe(true);
 	});
 
 	it.each(engineUrls)("matches %s", (url) => {
@@ -96,6 +102,52 @@ describe("the filter is the engine and nothing else", () => {
 	it("refuses what does not parse", () => {
 		expect(isEngineUrl("not a url")).toBe(false);
 		expect(isEngineUrl("")).toBe(false);
+	});
+});
+
+/*
+ * #2118: Chromium's filter is registered once, so it names every port the
+ * engine may take; the handlers bridge only the one it did take, because a
+ * candidate the engine is not on may be another program's.
+ */
+describe("a candidate port the engine is not on", () => {
+	const fallback = ENGINE_PORT_CANDIDATES[1];
+	const fallbackUrl = `http://127.0.0.1:${fallback}/health`;
+
+	async function freshBridge() {
+		vi.resetModules();
+		const endpoint = await import("./engine-endpoint.js");
+		const origin = await import("./engine-origin.js");
+		return { endpoint, origin };
+	}
+
+	it("is in the filter but left alone while the engine is on the default", async () => {
+		const { origin } = await freshBridge();
+		expect(origin.ENGINE_REQUEST_FILTER.urls.some((p) => patternMatches(p, fallbackUrl))).toBe(
+			true
+		);
+		expect(origin.isEngineUrl(fallbackUrl)).toBe(false);
+		expect(origin.isEngineUrl(`${ENGINE}/health`)).toBe(true);
+		const bridge = origin.createEngineOriginBridge();
+		expect(
+			bridge.beforeSendHeaders(
+				request({ url: fallbackUrl, requestHeaders: { Origin: "null" } })
+			)
+		).toEqual({});
+	});
+
+	it("is the one bridged once the engine is fixed there, and the default is not", async () => {
+		const { endpoint, origin } = await freshBridge();
+		endpoint.fixEnginePort(fallback);
+
+		expect(origin.isEngineUrl(fallbackUrl)).toBe(true);
+		expect(origin.isEngineUrl(`${ENGINE}/health`)).toBe(false);
+		const bridge = origin.createEngineOriginBridge();
+		expect(
+			bridge.beforeSendHeaders(
+				request({ url: fallbackUrl, requestHeaders: { Origin: "null" } })
+			)
+		).toEqual({ requestHeaders: {} });
 	});
 });
 

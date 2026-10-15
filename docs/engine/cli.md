@@ -77,7 +77,7 @@ is a manual copy with the engine stopped, described in
 | `--version` | Show version information (long form only - `-v` is `--verbose`) |
 | *(anything else)* | Refused, naming the argument, with exit code 1 |
 | `--no-color` | Disable colored output |
-| `--daemon <url>` | Vayu Engine URL (default: http://127.0.0.1:9876) |
+| `--daemon <url>` | Vayu Engine URL (default: http://127.0.0.1:9876). When the desktop app fell back to another port because 9876 was held, pass the address its Dock shows (hover "Engine connected"), e.g. `--daemon http://127.0.0.1:9880` |
 
 ## Request File Format
 

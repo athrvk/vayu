@@ -143,15 +143,22 @@ a healthy engine on an ambiguous answer.
 alive and is a Vayu engine, but nothing answers on the port. It is either still
 starting - an orphan from a crashed session reads its database and runs
 migrations before it listens - or hung. Spawning beside it loses the flock, and
-falling through to the port check would report "another application" for
-Vayu's own engine. So `EngineSidecar` polls `/health` on the same ramped
+reporting the port as held would blame another program for Vayu's own engine.
+So `EngineSidecar` polls `/health` on the same ramped
 budget a freshly spawned engine gets (`ENGINE_HEALTH_POLL_BUDGET_MS`). An
 engine that answers in time goes through the version check above and is
 adopted. One that does not is stopped by PID (the name-verified kill, so a
 recycled PID is left alone), the port is given `ENGINE_PORT_RELEASE_DELAY_MS`
 to clear, the replaced PID is logged, and this instance spawns its own. The
-"port already in use by another application" error is left for a port held when
-the lock file names no live Vayu engine.
+port-in-use error (`EnginePortInUseError`) is left for ports held when the lock
+file names no live Vayu engine.
+
+**A live lock is looked for on every candidate port** (issue #2118). The engine
+may run on 9876 or a fallback (`ENGINE_PORT_CANDIDATES`), so with a live lock
+PID every candidate is asked for `/health` before any free port is taken: an
+orphan left on a fallback port is adopted even after 9876 has come free. When
+it answers on none, the wait above watches the first free candidate (where a
+still-starting engine, not yet listening, would be), or 9876 when none is free.
 
 ## Manual Cleanup
 

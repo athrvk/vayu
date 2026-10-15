@@ -540,6 +540,7 @@ Merged store managing engine connection status and restart-required notification
 {
   engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
+  engineStartFailure: string | null  // The main process's sentence when no engine can start (every port held), or null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
   workers: number | null  // The `workers` setting's effective value, or null before the first poll
   engineStartWindow: number | null  // When the engine now coming up began, or null
@@ -553,6 +554,7 @@ Merged store managing engine connection status and restart-required notification
 const {
   engineStatus, setEngineStatus,
   engineError, setEngineError,
+  engineStartFailure, setEngineStartFailure,
   recovery, setEngineRecovery,
   workers, setWorkers,
   engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
@@ -564,6 +566,16 @@ const {
 written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
+
+`engineStartFailure` is the main process's own account of why no engine is
+coming, when the user can fix it: another program holding every port the engine
+may use (issue #2118). `useHealthQuery` asks for it (`getEngineStartFailure`) on
+a failed poll and writes it here; the poll an engine answers clears it, and so
+does `useEngineRestart` when Retry is pressed. A reply that lands after a
+restart opened its start window is dropped, because it describes the start
+Retry just cleared. While it is set the status is `unreachable` whatever the
+startup grace says, and the Dock shows it in place of `engineError` and offers
+Retry.
 
 `workers` is the `workers` field from the same poll (issue #1508) - the
 `workers` setting's effective value, not the machine's raw core count - read by
@@ -2886,7 +2898,7 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 8. When the run completes, the engine sends a `complete` event
 9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, with `staleTime: 0` so a mid-run copy a History tab cached is not served as final, #1934) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
 10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll, and so are the run's detail, report and series, which a History tab on the same run read while it was live
-11. **A stream that ends without a `complete` frame is not a finished run** (issue #1925). `handleClose(null)` reads the same stored report, and if its `metadata.status` is still `running` or `pending` it sets `dashboard-store.error` instead of the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A collection run taking the shared stream (`handleSuperseded`) sets the error the same way, and fetches nothing. Either way the dashboard stays in its running layout, Stop included, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch keyed on `!isStreaming && !finalReport`, held off while that callout is up, and re-armed by the report callout's Retry
+11. **A stream that ends without a `complete` status is not a finished run** (issues #1925, #2140). The engine's `complete` frame normally carries the run's `status`, which `handleClose(status, { frame })` believes over the stored row. With no status it reads the same stored report, and if its `metadata.status` is still `running` or `pending` the two endings part ways. A dropped connection (`frame: false`) sets `dashboard-store.error` instead of the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A bare `complete` frame (`frame: true`, the engine's 60 s settle timeout) is waited out instead: the service re-reads the report every 500 ms for up to 30 s and finishes the run as soon as it is terminal, falling back to the report's own status to tell failed from finished, then raises the same error only if the bound passes. That wait is cancelled by a generation counter on the service (`settleGeneration`), bumped by `startMonitoring`, `releaseRun` (so `stopMonitoring` and `handleSuperseded`) and `handleError`; a bare `activeRunId` check could not do it, because Reconnect puts the same id back. A cancelled wait does nothing: no report, no notification, no error. A collection run taking the shared stream (`handleSuperseded`) sets the error the same way, and fetches nothing. Either way the dashboard stays in its running layout, Stop included, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch keyed on `!isStreaming && !finalReport`, held off while that callout is up, and re-armed by the report callout's Retry
 
 ### Saving a Request with Auto-Save
 

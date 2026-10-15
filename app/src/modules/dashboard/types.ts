@@ -94,7 +94,12 @@ export interface DashboardDerived {
 	avgQueueWaitMs: number;
 	// Counts
 	totalRequests: number;
+	/** Errors by the one definition: `httpErrors + noResponse` (issue #2124). */
 	failedRequests: number;
+	/** Of `failedRequests`, those that got a response with an error status. */
+	httpErrors: number;
+	/** Of `failedRequests`, those that got no response at all. */
+	noResponse: number;
 	statusCodes: Record<string, number>;
 	requestsExpected: number;
 	requestsSent: number;
@@ -134,6 +139,12 @@ export interface RequestResponseViewProps {
 export interface DisplayMetrics {
 	requests_completed: number;
 	requests_failed: number;
+	// The split of `requests_failed`; absent on a tick stored by an older engine.
+	http_errors?: number;
+	no_response?: number;
+	// The latest tick's status map. The completed view builds this from the
+	// report, which carries its own `statusCodes`, so it is absent there.
+	status_codes?: Record<string, number>;
 	current_rps: number;
 	latency_p50_ms: number;
 	latency_p95_ms: number;

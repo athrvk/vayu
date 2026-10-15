@@ -99,6 +99,7 @@ add_executable(vayu_tests
     script_request_body_test.cpp
     xml_body_test.cpp
     stats_route_test.cpp
+    live_metrics_route_test.cpp
     execution_timeout_test.cpp
     execution_http_version_test.cpp
     load_strategy_test.cpp
@@ -370,6 +371,7 @@ set(vayu_scratch_database_suites
     ImportParseRoute
     InboxListenerTest
     InboxStorageTest
+    LiveMetricsRouteTest
     LoadDataTest
     LoadIdentityTest
     ScenarioIdentityTest

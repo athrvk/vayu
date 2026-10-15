@@ -348,12 +348,23 @@ CI is unaffected: the workflows check out the exact `VCPKG_COMMIT`.
 
 ### Port 9876 Already in Use
 
-**Problem:** "Address already in use"
+**Problem:** Another program holds port 9876.
 
-**Solution:**
+The app does not need it freed: it runs the engine on the first free port of
+9880-9889 instead, and hovering "Engine connected" in the Dock shows the address
+it chose. If every one of those is held too, the app stays open on "Engine
+disconnected" with "Another program is using port 9876, and the fallback ports
+are held too. Free port 9876 and press Retry." - Retry looks at 9876 alone, so
+quit the program holding 9876 and press Retry in the Dock.
+
+A `vayu-engine` started by hand reports the same condition as
+`Could not bind 127.0.0.1:<port> - ...` and exits with code 1; it does not pick
+another port, so free the port or pass `--port`.
+
+**Find the holder:**
 ```bash
-cd app
-pnpm kill-ports
+lsof -ti:9876          # macOS/Linux
+netstat -ano | findstr :9876   # Windows
 ```
 
 ### Build Fails

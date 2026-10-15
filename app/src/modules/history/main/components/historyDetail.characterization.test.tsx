@@ -48,6 +48,8 @@ function report(mode: string, cfg: Record<string, unknown>): RunReport {
 			totalRequests: 600,
 			successfulRequests: 600,
 			failedRequests: 0,
+			httpErrorRequests: 0,
+			noResponseRequests: 0,
 			errorRate: 0,
 			totalDurationSeconds: 3,
 			avgRps: 195,

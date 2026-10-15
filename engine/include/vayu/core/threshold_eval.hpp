@@ -89,10 +89,9 @@ struct AssertionTotals {
  *
  * Evaluated off the same @ref RunSummaryInputs the stored summary is built
  * from, so the verdict and the numbers printed beside it cannot disagree. The
- * error rate is derived the way the report derives its own - every status
- * outside 2xx/3xx counts as a failure, including the transport errors recorded
- * under code 0 - rather than from the collector's transport-error-only count,
- * which would call a run of nothing but 500s clean.
+ * error rate is the one every surface reports (`vayu::count_status_failures`):
+ * every status outside 2xx/3xx, including the no-response failures recorded
+ * under code 0.
  *
  * @return `std::nullopt` when the config declared no usable budgets, which is
  *         what keeps the report's section absent rather than zeroed. A run

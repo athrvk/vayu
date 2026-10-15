@@ -15,7 +15,7 @@
  *
  * The renderer is a browser context as well, so this bridge is the only reason
  * it can talk to the engine at all. On the session the main window uses, every
- * request to `ENGINE_ORIGIN` loses its `Origin` and `Referer` (both name the
+ * request to `engineOrigin()` loses its `Origin` and `Referer` (both name the
  * renderer's location) and every response from it gains the headers the
  * renderer's own CORS check asks for. In development the renderer is the Vite
  * server and needs all of it. Packaged it is a `file:` load, which Electron 44
@@ -23,8 +23,10 @@
  * measured, not documented); the bridge is what keeps that build working the
  * day Chromium stops exempting it, so it is installed for both.
  *
- * **The URL filter is the whole boundary.** Nothing outside `ENGINE_ORIGIN` is
- * touched, and the bridge grants nothing beyond that origin. It is safe only
+ * **The URL filter is the whole boundary.** Chromium's filter is every
+ * candidate origin, because it is registered once and the port is chosen at
+ * runtime; the handlers then touch only the one the session's engine has
+ * (`isEngineUrl`), and the bridge grants nothing beyond that origin. It is safe only
  * because nothing but the app's own document runs in this session: the OAuth
  * windows load third-party pages in `oauth:` partitions of their own, and
  * `window-navigation.ts` keeps the main window on the app. Loading untrusted
@@ -42,18 +44,17 @@
  */
 
 import type { Session } from "electron";
-import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
-
-/** The engine's management API, exactly as the renderer addresses it (`src/config/network.ts`). */
-export const ENGINE_ORIGIN = `http://${ENGINE_HOST}:${ENGINE_PORT}`;
+import { ENGINE_CANDIDATE_ORIGINS, engineOrigin } from "./engine-endpoint.js";
 
 /**
- * What Chromium matches before any handler runs. One host, one port, one
- * scheme: `localhost:9876` and `[::1]:9876` reach the same engine but are not
- * the renderer's address for it, so a request to either keeps its `Origin` and
- * the engine refuses it.
+ * What Chromium matches before any handler runs. One host, one scheme, the
+ * candidate ports (#2118): `localhost:9876` and `[::1]:9876` reach the same
+ * engine but are not the renderer's address for it, so a request to either
+ * keeps its `Origin` and the engine refuses it.
  */
-export const ENGINE_REQUEST_FILTER = { urls: [`${ENGINE_ORIGIN}/*`] };
+export const ENGINE_REQUEST_FILTER = {
+	urls: ENGINE_CANDIDATE_ORIGINS.map((origin) => `${origin}/*`),
+};
 
 /** Request headers that say where the renderer is. The engine refuses the first. */
 const RENDERER_LOCATION_HEADERS = ["origin", "referer"];
@@ -62,10 +63,13 @@ const ALLOW_ORIGIN = "Access-Control-Allow-Origin";
 const ALLOW_METHODS = "Access-Control-Allow-Methods";
 const ALLOW_HEADERS = "Access-Control-Allow-Headers";
 
-/** Whether `url` is a request to the engine - the handlers' own copy of the filter. */
+/**
+ * Whether `url` is a request to this session's engine. Narrower than the
+ * filter: a candidate port the engine is not on may be another program's.
+ */
 export function isEngineUrl(url: string): boolean {
 	try {
-		return new URL(url).origin === ENGINE_ORIGIN;
+		return new URL(url).origin === engineOrigin();
 	} catch {
 		return false;
 	}

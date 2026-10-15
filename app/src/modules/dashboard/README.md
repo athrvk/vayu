@@ -43,6 +43,13 @@ consumes it.
   one memoized `DashboardDerived` bundle (shape in `types.ts`) and passes it to
   `HeroRow` and `ModeStatsRow`, which stay pure presentational components that
   read what they need.
+- **An error is counted once, by the engine (#2124).** A response outside
+  2xx/3xx, or no response at all; a 3xx is a success. `DashboardDerived`
+  carries `failedRequests` and its split `httpErrors` / `noResponse`, read off
+  the live tick or the report summary through `utils/errorBreakdown.ts`. No
+  card recounts them from the status map: `ErrorRateCard` only buckets that
+  map for its bar, and `MetricsView` feeds it the report's distribution once
+  there is one and the latest tick's before that.
 - **A chart card's render gate asks a predicate, not a series.**
   `utils/metricsTransforms.ts` owns both halves: the transform a chart plots,
   and the `spansMultipleBuckets` / `hasPercentileSignal` predicates a card reads

@@ -347,8 +347,11 @@ Manages the lifecycle of load test runs:
   counts still agree.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
   final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
-  removing rows (see the API reference). It is *not* the "worker thread has exited" signal -
-  the move is the worker's last statement, and the thread is still unwinding after it.
+  removing rows (see the API reference), and it sets `RunContext::settled`, which
+  `/runs/:runId/live` waits on before its `complete` frame reads the status (issue #2140) -
+  `closed` alone flips when the last tick lands, before that tail. It is *not* the "worker
+  thread has exited" signal - the move is the worker's last statement, and the thread is still
+  unwinding after it.
 - **Graceful shutdown drains, then joins**: `RunManager::shutdown()` sets `should_stop` on
   every active run, waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
   status, and then **joins** every worker thread. The manager owns those thread handles -
@@ -863,7 +866,9 @@ continue-on-failure policy** beyond "an errored step ends its iteration".
    writes per-tick snapshots into the retained tick topic + DB
    ↓
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
-   from the oldest retained tick then tailed to the `complete` event
+   from the oldest retained tick then tailed to the `complete` event,
+   which waits until the run has written its terminal status
+   (RunContext::settled)
    ↓
 10. On completion: batch-write results to DB; event loop, data rows
     and plan released; run retained (TTL) so late clients still get

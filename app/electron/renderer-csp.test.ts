@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { buildRendererCsp, inlineScriptBodies, inlineScriptHash } from "./renderer-csp.js";
 import { cspMeta } from "../vite-plugins/csp-meta";
-import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
+import { ENGINE_PORT_CANDIDATES, MCP_PORT } from "./constants.js";
 
 const indexHtml = readFileSync(path.resolve(__dirname, "../index.html"), "utf8");
 const scripts = inlineScriptBodies(indexHtml);
@@ -40,11 +40,21 @@ describe("buildRendererCsp", () => {
 		expect(directive("script-src")).not.toContain("'unsafe-inline'");
 	});
 
-	it("lets the renderer connect only to itself and the engine", () => {
+	it("lets the renderer connect only to itself and the engine's candidate ports", () => {
+		// The port is chosen at runtime and this policy is fixed at build time
+		// (#2118), so every candidate is named - and nothing wider.
 		expect(directive("connect-src")).toEqual([
 			"'self'",
-			`http://${ENGINE_HOST}:${ENGINE_PORT}`,
+			...ENGINE_PORT_CANDIDATES.map((port) => `http://127.0.0.1:${port}`),
 		]);
+	});
+
+	it("names no loopback port the engine cannot have", () => {
+		const connect = directive("connect-src");
+		expect(connect).toContain("http://127.0.0.1:9876");
+		expect(connect).not.toContain(`http://127.0.0.1:${MCP_PORT}`);
+		expect(connect).not.toContain("http://127.0.0.1:9890");
+		expect(connect.some((source) => source.includes("*"))).toBe(false);
 	});
 
 	it("keeps Monaco's workers, forbids plugins and a rebased document", () => {

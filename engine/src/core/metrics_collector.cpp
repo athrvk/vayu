@@ -1182,12 +1182,21 @@ size_t requests_sent,
 size_t requests_expected,
 const std::map<int, size_t>* status_snapshot,
 const Percentiles* window_percentiles) const {
+    // Snapshot the status-code distribution once: reuse the caller's snapshot
+    // when provided (the metrics tick takes one snapshot and feeds it to both
+    // the SSE builder and the persisted-rows builder), otherwise compute it.
+    // The error counts, the class breakdown and the full map below all derive
+    // from this single copy - no second scan.
+    std::map<int, size_t> local_dist;
+    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
+    *status_snapshot :
+    (local_dist = status_code_distribution ());
+
     // Lock-free reads from atomic counters
-    size_t total    = total_requests ();
-    size_t errors   = total_errors ();
-    size_t success  = total > errors ? total - errors : 0;
-    double avg_lat  = average_latency ();
-    double err_rate = error_rate ();
+    size_t total        = total_requests ();
+    const auto failures = vayu::count_status_failures (dist);
+    size_t success      = total > failures.failed ? total - failures.failed : 0;
+    double avg_lat      = average_latency ();
 
     // Calculate rate metrics (Open Model)
     // Send Rate: How fast Vayu is dispatching requests to the server
@@ -1200,9 +1209,11 @@ const Percentiles* window_percentiles) const {
 
     nlohmann::json stats;
     stats["totalRequests"]     = total;
-    stats["totalErrors"]       = errors;
+    stats["totalErrors"]       = failures.failed;
+    stats["httpErrors"]        = failures.http_errors ();
+    stats["noResponse"]        = failures.no_response;
     stats["totalSuccess"]      = success;
-    stats["errorRate"]         = err_rate;
+    stats["errorRate"]         = failures.error_rate ();
     stats["avgLatencyMs"]      = avg_lat;
     stats["sendRate"]          = send_rate;
     stats["throughput"]        = throughput;
@@ -1213,16 +1224,6 @@ const Percentiles* window_percentiles) const {
     // (iterations). requests_expected is 0 for open-ended modes (constant_rps).
     stats["requestsSent"]     = requests_sent;
     stats["requestsExpected"] = requests_expected;
-
-    // Snapshot the status-code distribution once: reuse the caller's snapshot
-    // when provided (the metrics tick takes one snapshot and feeds it to both
-    // the SSE builder and the persisted-rows builder), otherwise compute it.
-    // Both the class breakdown and the full map below derive from this single
-    // copy - no second scan.
-    std::map<int, size_t> local_dist;
-    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
-    *status_snapshot :
-    (local_dist = status_code_distribution ());
 
     // Status code class breakdown. The dedicated class atomics were removed to
     // keep the hot path a single increment; classes are derived here. Code 0

@@ -13,21 +13,22 @@
 #include <numeric>
 #include <thread>
 
-#include "vayu/core/constants.hpp"
-
 namespace vayu::utils {
 
 MetricsHelper::RunSummary MetricsHelper::calculate_summary (
 const vayu::core::RunContext& context) {
     RunSummary summary;
+    // Distribution first, request counter second: a recorder bumps the counter
+    // before the per-code slot, so this order keeps errors <= total_requests.
+    if (context.metrics_collector) {
+        const auto failures = vayu::count_status_failures (
+        context.metrics_collector->status_code_distribution ());
+        summary.errors      = failures.failed;
+        summary.no_response = failures.no_response;
+        summary.error_rate  = failures.error_rate ();
+    }
     summary.total_requests = context.total_requests ();
-    summary.errors         = context.total_errors ();
     summary.avg_latency_ms = context.average_latency_ms ();
-    summary.error_rate     = summary.total_requests > 0 ?
-        (static_cast<double> (summary.errors) * vayu::core::metrics::PERCENTAGE_MULTIPLIER /
-    static_cast<double> (summary.total_requests)) :
-        0.0;
-
     return summary;
 }
 
@@ -197,7 +198,8 @@ const RunSummary& summary) {
     response["status"]  = "stopped";
     response["runId"]   = run_id;
     response["summary"] = { { "totalRequests", summary.total_requests },
-        { "errors", summary.errors }, { "errorRate", summary.error_rate },
+        { "errors", summary.errors }, { "httpErrors", summary.errors - summary.no_response },
+        { "noResponse", summary.no_response }, { "errorRate", summary.error_rate },
         { "avgLatencyMs", summary.avg_latency_ms } };
     return response;
 }

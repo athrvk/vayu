@@ -60,9 +60,9 @@ export const TOOLTIPS = {
 
 	// ---- Hero card #3 (universal) ----
 	errorRate:
-		"Share of requests that failed at the transport layer (timeout, connection refused, TLS handshake failure, DNS). HTTP responses with 4xx / 5xx status codes are counted separately in the bar below - they don't contribute to this percentage.",
-	errorRateTransport:
-		"Transport-layer failures (connection refused, TLS handshake error, DNS failure, timeout). The request never received an HTTP status from the server.",
+		"Share of requests that count as errors: a response with a status outside 2xx and 3xx (HTTP errors), or no response at all (No response). A 3xx redirect is a success.",
+	errorRateNoResponse:
+		"Requests that got no response: a timeout, a refused connection, or a DNS or TLS failure. The server never sent an HTTP status.",
 
 	// ---- Row 4 stat cards ----
 	duration:

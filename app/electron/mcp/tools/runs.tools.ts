@@ -14,6 +14,7 @@
 import { z } from "zod";
 import { EngineRequestError } from "../engine-client.js";
 import { compareReports } from "../compare.js";
+import { RUN_ERROR_DEFINITION_SENTENCE } from "../error-definition.js";
 import { runOutputShape, WITHHELD_RUN_OUTPUT_SENTENCE } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -158,7 +159,8 @@ export const RUN_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream.",
+			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. " +
+			RUN_ERROR_DEFINITION_SENTENCE,
 		annotations: {
 			title: "Get live metrics",
 			readOnlyHint: true,
@@ -190,7 +192,8 @@ export const RUN_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. compressionNegotiationDiffers true means the two runs did not negotiate a compressed response the same way, so the byte and latency deltas are not a clean comparison - check the runs' config before reading a regression into them.",
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. compressionNegotiationDiffers true means the two runs did not negotiate a compressed response the same way, so the byte and latency deltas are not a clean comparison - check the runs' config before reading a regression into them. " +
+			RUN_ERROR_DEFINITION_SENTENCE,
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,

@@ -47,7 +47,9 @@ describe("hero cards (characterization)", () => {
 		snap(
 			<ErrorRateCard
 				totalRequests={600}
-				failedRequests={3}
+				failedRequests={5}
+				httpErrors={3}
+				noResponse={2}
 				statusCodes={{ "200": 595, "404": 2, "500": 1, "0": 2 }}
 			/>
 		));

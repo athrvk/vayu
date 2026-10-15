@@ -86,8 +86,8 @@ describe("RequestResponseView renders a sample's data row (#449)", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /server error/ }));
 
-		expect(screen.getByText(/Data row:/)).toBeTruthy();
-		expect(screen.getByText("0")).toBeTruthy();
+		// Scoped to the row: the error summary above it prints its own zeros.
+		expect(screen.getByText(/Data row:/).parentElement?.textContent).toMatch(/Data row:\s*0$/);
 	});
 
 	it("says nothing about rows for a run that had none", () => {

@@ -1260,6 +1260,10 @@ pm.info.run.assertionsPassed  // number
 pm.info.run.assertionsFailed  // number
 ```
 
+On a load run `errorRate` is the figure the report prints, by the
+[one error definition](api-reference.md#what-counts-as-an-error); on a
+sequential collection run it is the share of steps that errored.
+
 **A throwing `script.setup` fails the run before anything is sent.** Its
 outcome is checked the same way any element's is (`"error"` fails the check);
 the run reaches `Failed` before either run mode's strategy starts, so nothing

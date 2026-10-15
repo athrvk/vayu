@@ -78,6 +78,26 @@ describe("useEngineRestart", () => {
 		});
 	});
 
+	it("puts the held-port sentence in the toast as written, and drops the stale failure", async () => {
+		// #2118: Retry on a start failure that still holds answers with the same
+		// sentence, and the failure it replaces stops speaking for the engine
+		// while the restart runs (the next poll re-reads whether it still holds).
+		const sentence =
+			"Another program is using port 9876, and the fallback ports are held too. Free port 9876 and press Retry.";
+		stubElectron({ success: false, error: sentence });
+		useEngineStore.setState({ engineStartFailure: sentence });
+		const { result } = renderHook(() => useEngineRestart(), { wrapper });
+
+		await act(async () => {
+			await result.current.restart();
+		});
+
+		expect(showToast).toHaveBeenCalledWith(
+			expect.objectContaining({ message: expect.stringContaining(sentence) })
+		);
+		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+
 	it("says something even when the failure carries no reason", async () => {
 		stubElectron({ success: false });
 		const { result } = renderHook(() => useEngineRestart(), { wrapper });

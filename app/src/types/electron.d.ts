@@ -205,7 +205,18 @@ export type DataFileHashReply = { status: "found"; hash: string } | { status: "m
 
 interface ElectronAPI {
 	// Engine management
+	/**
+	 * The port the main process chose for this session's engine (#2118), or
+	 * null when the preload could not read one. Fixed for the window's life.
+	 */
+	enginePort: number | null;
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
+	/**
+	 * Why the launch (or the last restart) left the app without an engine, when
+	 * that is a reason the user can act on - another program holding the port.
+	 * Null otherwise.
+	 */
+	getEngineStartFailure: () => Promise<string | null>;
 
 	// MCP server (exposes Vayu to agents like Claude Code)
 	getMcpStatus: () => Promise<McpStatus>;

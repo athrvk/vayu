@@ -416,6 +416,13 @@ constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
 /// app/src/constants/live-window.ts) and reads this key too, so neither side
 /// promises a window the other cannot hold.
 constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
+/// How long `GET /runs/:id/live` waits, once it has sent the run's last tick,
+/// for the worker to settle (`RunContext::settled`) before it sends `complete`
+/// without a status (#2140). The wait normally lasts as long as the run's
+/// finishing pass - flush, deferred validation, teardown scripts, summary -
+/// so this is a backstop for a worker that never reaches `retain_run`, not a
+/// budget that pass is expected to approach.
+constexpr int64_t LIVE_SETTLE_TIMEOUT_MS = 60000;
 /// How long `RunManager::shutdown` waits for signalled runs to reach a terminal
 /// status before it logs that they have not. The *wait* is bounded; the join
 /// that follows it is not, because abandoning a still-running worker is exactly
@@ -1224,11 +1231,3 @@ namespace elements {
 constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
 } // namespace elements
 } // namespace vayu::core::constants
-
-/**
- * @brief Metrics constants
- */
-namespace vayu::core::metrics {
-/// Multiplier for converting ratios to percentages
-constexpr double PERCENTAGE_MULTIPLIER = 100.0;
-} // namespace vayu::core::metrics
