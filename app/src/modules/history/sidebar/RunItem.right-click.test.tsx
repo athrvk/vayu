@@ -76,7 +76,9 @@ describe("a history row's right-click menu", () => {
 
 		fireEvent.contextMenu(row());
 
-		expect(await screen.findByRole("menuitem", { name: "Unpin baseline" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("menuitem", { name: "Unpin baseline - kept past retention" })
+		).toBeInTheDocument();
 	});
 
 	it("offers no pin where the row has no pin button either", async () => {

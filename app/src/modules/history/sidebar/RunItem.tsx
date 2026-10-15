@@ -47,6 +47,10 @@ import {
 	AlertTriangle,
 } from "lucide-react";
 
+// What a pinned load run's chip says: the pin is its request's comparison
+// baseline and also keeps it past retention (#2163).
+const LOAD_PIN_STATE = "Baseline - kept past retention";
+
 interface RunItemProps {
 	run: Run;
 	onSelect: (runId: string) => void;
@@ -168,23 +172,26 @@ export default function RunItem({
 	const mcpClientLabel =
 		run.origin?.kind === "mcp" ? mcpClientDisplayName(run.origin.client) : null;
 
-	// A load run's pin is also its request's comparison baseline, so it keeps
-	// the more specific label; every other type just gets "Pin"/"Unpin".
+	// A load run's pin is two promises at once - its request's comparison
+	// baseline, and exempt from retention - and nothing but a tooltip said the
+	// second (#2163), so the visible chip and the action's name carry both. Every
+	// other type's pin makes only the retention promise and keeps "Pin"/"Unpin".
 	const isLoadRun = run.type === "load";
 	const pinActionLabel = run.baseline
 		? isLoadRun
-			? "Unpin baseline"
+			? "Unpin baseline - kept past retention"
 			: "Unpin"
 		: isLoadRun
 			? "Pin as baseline"
 			: "Pin";
 	const pinTooltip = run.baseline
 		? isLoadRun
-			? "Unpin this run as the baseline"
+			? "Unpin this run: it stops being the baseline and no longer outlives retention"
 			: "Unpin this run"
 		: isLoadRun
-			? "Pin this run as the baseline later runs are compared against"
+			? "Pin this run as the baseline later runs are compared against, and keep it past retention"
 			: "Pin this run to keep it past retention and find it again later";
+	const pinChipText = isLoadRun ? LOAD_PIN_STATE : "Pinned";
 
 	/*
 	 * The row's actions, offered on right-click (#1360). The same two handlers
@@ -352,10 +359,13 @@ export default function RunItem({
 					{run.baseline && (
 						<Badge
 							variant="chip"
-							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
+							className="min-w-0 max-w-1/2 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
+							title={pinChipText}
 						>
-							<Pin className="h-2.5 w-2.5" />
-							{isLoadRun ? "Baseline" : "Pinned"}
+							<Pin className="h-2.5 w-2.5 shrink-0" />
+							{/* The load run's chip is long; at a narrow drawer it gives way
+							    before the identity does, and the title keeps the full text. */}
+							<span className="truncate">{pinChipText}</span>
 						</Badge>
 					)}
 					{/* #1527: the run finished with something to say - an unresolved
