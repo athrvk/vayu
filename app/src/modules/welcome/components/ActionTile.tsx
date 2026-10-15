@@ -23,8 +23,8 @@ interface ActionTileProps {
 }
 
 /*
- * `onClick` is wrapped so the handler is called with no arguments: a bare
- * `onClick={onClick}` hands it the click event, and a handler whose first
+ * `onClick` is wrapped so the handler is called with no arguments: passing it
+ * to the button directly hands it the click event, and a handler whose first
  * parameter is optional data (`newRequest(preset?)`) would read the event as that.
  */
 export function ActionTile({ icon: Icon, label, description, onClick }: ActionTileProps) {
