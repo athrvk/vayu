@@ -240,7 +240,7 @@ error state, and keeps it - the terminal clear that follows skips the run that
 just reported a failure, or the flash would be wiped in the tick that painted
 it. A failure gets there two ways, and the second is the ordinary one: the SSE
 client failing to open the stream at all, and the engine's own `complete` frame
-arriving with `status: "Failed"`, which is what a run that fails while being
+arriving with `status: "failed"`, which is what a run that fails while being
 watched sends (issue #1415). Every other terminal path clears the bar, and main
 clears it itself when the renderer that asked for it is destroyed or reloads.
 The bar is not the app's own runs only: a run started by an MCP agent is watched

@@ -288,6 +288,20 @@ TEST (RunManagerRetention, RetainMovesOutOfActiveButKeepsLookup) {
     EXPECT_GT (found->completed_at_ms.load (), 0);
 }
 
+// `/runs/:id/live` ends on `settled`, not `closed` (#2140), and retain_run is
+// the one call every worker exit path makes after its terminal status write.
+TEST (RunManagerRetention, RetainMarksTheRunSettled) {
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("run_settled", cfg);
+    mgr.register_run ("run_settled", ctx);
+    EXPECT_FALSE (ctx->settled.load ());
+
+    mgr.retain_run ("run_settled");
+
+    EXPECT_TRUE (ctx->settled.load ());
+}
+
 // Retention is for the tick topic, and since #1154 that is all it holds: the
 // event loop (curl handle pools, the connections cached against the target,
 // the submission queues), the bound rows and the plan are released as the run

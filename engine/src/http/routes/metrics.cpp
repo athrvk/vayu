@@ -215,6 +215,77 @@ void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib
 }
 
 /**
+ * Whether the stream may end now. Terminates only once the producer has
+ * appended its final tick (`closed`), every tick has been sent, and the worker
+ * has settled - never on `is_running`, which flips before the final tick
+ * lands, and never on `closed` alone, which on the load path flips before the
+ * run's terminal status is written (#2140).
+ */
+bool live_stream_may_complete (const vayu::core::RunContext& context,
+LiveMetricsCursor& cursor,
+std::chrono::steady_clock::time_point now) {
+    // `settled` is read first: once it is set every producer has stopped, so
+    // the published count read after it is final.
+    const bool settled = context.settled.load (std::memory_order_acquire);
+    const bool drained = context.closed.load (std::memory_order_acquire) &&
+    cursor.offset >= context.published_count.load (std::memory_order_acquire);
+    if (!drained) {
+        return false;
+    }
+    if (settled) {
+        return true;
+    }
+    const auto since     = cursor.drained_since.value_or (now);
+    cursor.drained_since = since;
+    return now - since >= std::chrono::milliseconds (
+                          vayu::core::constants::server::LIVE_SETTLE_TIMEOUT_MS);
+}
+
+/**
+ * The frame a live stream ends on. It carries the run's status, so the client
+ * can tell a failed run from a finished one without going back for the report
+ * (issue #1415).
+ *
+ * Omitted rather than guessed when the row is not terminal: the stream waits
+ * for the run to settle first, so that means the wait hit its bound or the
+ * status write itself failed. The client then falls back to the report.
+ */
+std::string live_completion_frame (vayu::db::Database& db, const std::string& run_id) {
+    nlohmann::json completion_event;
+    completion_event["event"] = "complete";
+    completion_event["runId"] = run_id;
+    auto finished             = db.get_run (run_id);
+    if (finished &&
+    (finished->status == vayu::RunStatus::Completed || finished->status == vayu::RunStatus::Stopped ||
+    finished->status == vayu::RunStatus::Failed)) {
+        completion_event["status"] = to_string (finished->status);
+    }
+    return "event: complete\ndata: " + completion_event.dump () + "\n\n";
+}
+
+} // namespace
+
+LiveMetricsStep live_metrics_step (vayu::db::Database& db,
+const std::string& run_id,
+const vayu::core::RunContext& context,
+LiveMetricsCursor& cursor,
+std::chrono::steady_clock::time_point now) {
+    auto batch = context.ticks_since (cursor.offset);
+    // Adopt the producer's offset rather than advancing by the batch size: a
+    // resume from before the retained window skips ahead.
+    cursor.offset = batch.next_offset;
+
+    LiveMetricsStep step;
+    step.ticks = std::move (batch.payloads);
+    if (live_stream_may_complete (context, cursor, now)) {
+        step.completion = live_completion_frame (db, run_id);
+    }
+    return step;
+}
+
+namespace {
+
+/**
  * The live stream itself: every tick the run's topic has published from
  * @p start_offset on, then its completion event.
  *
@@ -226,49 +297,20 @@ const std::string& run_id,
 const std::shared_ptr<vayu::core::RunContext>& context,
 size_t start_offset,
 httplib::DataSink& sink) {
-    size_t offset = start_offset;
+    LiveMetricsCursor cursor{ start_offset, std::nullopt };
     while (sink.is_writable ()) {
-        auto batch = context->ticks_since (offset);
-        for (const auto& payload : batch.payloads) {
+        const auto step = live_metrics_step (
+        db, run_id, *context, cursor, std::chrono::steady_clock::now ());
+        for (const auto& payload : step.ticks) {
             if (!sink.write (payload.data (), payload.size ())) {
                 return false;
             }
         }
-        // Adopt the producer's offset rather than advancing by the batch
-        // size: a resume from before the retained window skips ahead.
-        offset = batch.next_offset;
-
-        // Terminate only once the producer has appended its final tick
-        // (closed) AND we have drained the buffer - never gate on
-        // is_running, which can flip before the final tick lands.
-        if (context->closed.load (std::memory_order_acquire) &&
-        offset >= context->published_count.load (std::memory_order_acquire)) {
-            nlohmann::json completion_event;
-            completion_event["event"] = "complete";
-            completion_event["runId"] = run_id;
-            // The status, so the client can tell a failed run from a finished
-            // one without going back for the report (issue #1415). This is the
-            // frame an ordinary live run ends on, so without it nothing
-            // downstream could see a failure.
-            //
-            // Omitted rather than guessed when the row is not terminal yet:
-            // `closed` says the producer appended its last tick, which can
-            // land just before the run's own status is written. A frame with
-            // no status reads exactly as it always did, and the client falls
-            // back to the report it fetches next.
-            auto finished = db.get_run (run_id);
-            if (finished &&
-            (finished->status == vayu::RunStatus::Completed ||
-            finished->status == vayu::RunStatus::Stopped ||
-            finished->status == vayu::RunStatus::Failed)) {
-                completion_event["status"] = to_string (finished->status);
-            }
-            std::string payload =
-            "event: complete\ndata: " + completion_event.dump () + "\n\n";
-            sink.write (payload.data (), payload.size ());
+        if (step.completion) {
+            sink.write (step.completion->data (), step.completion->size ());
             return false;
         }
-        if (batch.payloads.empty ()) {
+        if (step.ticks.empty ()) {
             std::this_thread::sleep_for (std::chrono::milliseconds (50));
         }
     }
