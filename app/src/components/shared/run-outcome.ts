@@ -67,8 +67,9 @@ export interface RunOutcomeInput {
 	errorRate?: number;
 }
 
-/** Whole requests per second, thousands separated: `12,400`. */
+/** Requests per second, thousands separated: `12,400`; one decimal below 10 so a slow run is not `0`. */
 export function formatRps(value: number): string {
+	if (value > 0 && value < 10) return value.toFixed(1);
 	return Math.round(value).toLocaleString("en-US");
 }
 

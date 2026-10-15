@@ -212,7 +212,9 @@ describe("formatRps", () => {
 	it.each([
 		[485.2, "485"],
 		[12400, "12,400"],
-		[4.5, "5"],
+		[4.5, "4.5"],
+		[0.3, "0.3"],
+		[12.4, "12"],
 	])("%s reads %s", (rps, text) => {
 		expect(formatRps(rps)).toBe(text);
 	});
