@@ -348,19 +348,18 @@ class StepHistograms {
 const ScenarioPlan& plan);
 
 /**
- * @brief Per-step, per-element pass/fail/skip tallies for a load run's report
- *        (issue #1495) - `scenario.steps[i].elements[] = { id, kind, passed,
- *        failed, skipped }`, the load-path sibling of the sequential run's
- *        per-step `elements` trace.
+ * @brief Per-step, per-element pass/fail/skip/defer tallies for a load run's
+ *        report (issue #1495) - `scenario.steps[i].elements[] = { id, kind,
+ *        passed, failed, skipped, deferred }`, the load-path sibling of the
+ *        sequential run's per-step `elements` trace.
  *
  * Sized once at construction from the plan's already-compiled `elements` per
  * step, so recording is a lookup by element id into a fixed-size atomic array
- * - no lock and no allocation on the completion path. `passed` is an `"ok"`
- * outcome; `failed` folds in `"error"`; `skipped` folds in `"missing"` (no
- * kind reports it yet) beside `"skipped"` itself - the report answers "did
- * this run's steps see this element pass", not which of two failure shapes it
- * was, matching `scenario.steps[i].elements`'s own three-bucket shape from
- * #1512's Model section.
+ * - no lock and no allocation on the completion path. The buckets are
+ * `ElementOutcomeCounts::record`'s, shared with `RequestElementTallies`:
+ * `failed` folds in `"error"`, `skipped` folds in `"missing"` (no kind reports
+ * it yet), and a `script.*` element left to the post-run replay is `deferred`,
+ * not `skipped` (#2144), because it does run, later.
  */
 class StepElementTallies {
     public:
@@ -369,7 +368,7 @@ class StepElementTallies {
     /// A no-op for a step or an element id this run's plan does not have -
     /// the pipeline runs no element outside a step's own compiled list, so
     /// this only guards against a caller passing the wrong step index.
-    void record (size_t step, const std::string& element_id, const std::string& status);
+    void record (size_t step, const ElementOutcome& outcome);
 
     /// This step's `elements` array, or an empty one for a step with no
     /// compiled elements or none that ever ran - the same "absent when
@@ -386,12 +385,7 @@ class StepElementTallies {
     [[nodiscard]] AssertionTotals assertion_totals (const ScenarioPlan& plan) const;
 
     private:
-    struct Counts {
-        std::atomic<size_t> passed{ 0 };
-        std::atomic<size_t> failed{ 0 };
-        std::atomic<size_t> skipped{ 0 };
-    };
-    std::vector<std::vector<Counts>> counts_by_step_;
+    std::vector<std::vector<ElementOutcomeCounts>> counts_by_step_;
     std::vector<std::unordered_map<std::string, size_t>> index_of_id_by_step_;
 };
 

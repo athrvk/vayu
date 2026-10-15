@@ -670,7 +670,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
     // scenario path's `run_step_before` (scenario_load.cpp) records on the
     // same edge.
     for (const auto& outcome : outcomes) {
-        context->element_tallies.record (outcome.id, outcome.status);
+        context->element_tallies.record (outcome);
     }
     // `pre_result.tests` is populated only when `script.pre` actually ran
     // inline (a deferred one never invokes `run_pre_script`), the same inline
@@ -746,7 +746,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
-        context->element_tallies.record (outcome.id, outcome.status);
+        context->element_tallies.record (outcome);
     }
     // Same rule as `run_request_elements_step_before`: empty unless
     // `script.post` ran inline.
@@ -787,7 +787,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
     int64_t total_wait_ms = 0;
     for (const auto& outcome : between_outcomes) {
         total_wait_ms += outcome.waited_ms.value_or (0);
-        context->element_tallies.record (outcome.id, outcome.status);
+        context->element_tallies.record (outcome);
     }
     context->reserve_think_wait (total_wait_ms);
 }

@@ -382,10 +382,16 @@ an inline element runs after `Client::send`'s own timing already stopped and bef
 figures measure. Setting the run's `elements.includeScriptTime` folds the pipeline's own
 elapsed time back in for anyone who wants the scripted cost in the figures.
 
-**Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, passed, failed, skipped }`
-beside the existing `tests` node, one row per element that ran at least once this run -
+**Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, passed, failed, skipped,
+deferred }` beside the existing `tests` node, one row per element that ran at least once this run -
 `StepElementTallies`, sized once from the plan's compiled elements so recording on the
-completion path is a lookup, never a lock or an allocation.
+completion path is a lookup, never a lock or an allocation. A single-request run's
+`summary.elements` is `RequestElementTallies`, classifying by the same rule
+(`ElementOutcomeCounts`). `deferred` (issue #2144) is an un-inlined `script.post` left to the
+replay: the load path's `skip_reason` hook answers it with `ElementSkip::deferred` set, which the
+pipeline copies onto the outcome. `skipped` is every other `skipped` or `missing` outcome,
+including the two that never run at all: a disabled element and an un-inlined `script.pre`
+(no pre-request replay exists).
 
 **A controller's skip, under load too (issue #1515).** `control.if` / `control.once` /
 `control.throughput` write the same `ScriptControl::Skip` a script's own `skipRequest()` would -

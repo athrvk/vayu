@@ -277,24 +277,15 @@ StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
     }
 }
 
-void StepElementTallies::record (size_t step,
-const std::string& element_id,
-const std::string& status) {
+void StepElementTallies::record (size_t step, const ElementOutcome& outcome) {
     if (step >= index_of_id_by_step_.size ()) {
         return;
     }
-    const auto found = index_of_id_by_step_[step].find (element_id);
+    const auto found = index_of_id_by_step_[step].find (outcome.id);
     if (found == index_of_id_by_step_[step].end ()) {
         return;
     }
-    Counts& counts = counts_by_step_[step][found->second];
-    if (status == "ok") {
-        counts.passed.fetch_add (1, std::memory_order_relaxed);
-    } else if (status == "failed" || status == "error") {
-        counts.failed.fetch_add (1, std::memory_order_relaxed);
-    } else { // "skipped" | "missing"
-        counts.skipped.fetch_add (1, std::memory_order_relaxed);
-    }
+    counts_by_step_[step][found->second].record (outcome);
 }
 
 nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step) const {
@@ -306,14 +297,7 @@ nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step)
     const auto& counts   = counts_by_step_[step];
     const size_t count   = std::min (elements.size (), counts.size ());
     for (size_t i = 0; i < count; ++i) {
-        const size_t passed = counts[i].passed.load (std::memory_order_relaxed);
-        const size_t failed = counts[i].failed.load (std::memory_order_relaxed);
-        const size_t skipped = counts[i].skipped.load (std::memory_order_relaxed);
-        if (passed + failed + skipped == 0) {
-            continue; // never ran under this run - omitted, not a row of zeros
-        }
-        array.push_back ({ { "id", elements[i].id }, { "kind", elements[i].kind },
-        { "passed", passed }, { "failed", failed }, { "skipped", skipped } });
+        counts[i].append_report_row (array, elements[i].id, elements[i].kind);
     }
     return array;
 }
@@ -544,7 +528,7 @@ const nlohmann::json* data_row) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
-        state.element_tallies.record (step_index, outcome.id, outcome.status);
+        state.element_tallies.record (step_index, outcome);
     }
     // A controller kind's skip (issue #1515) - the load path's own
     // `pm.execution.skipRequest()`.
@@ -664,7 +648,7 @@ const nlohmann::json* data_row) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
-        state.element_tallies.record (step_index, outcome.id, outcome.status);
+        state.element_tallies.record (step_index, outcome);
     }
     // A `control.transaction` closing occurrence (issue #1515) - see
     // `scenario_runner.cpp`'s identical fold for why `waited_ms` alone
@@ -1030,7 +1014,7 @@ class ScenarioLoadDriver {
         int64_t total_wait_ms = 0;
         for (const auto& outcome : outcomes) {
             total_wait_ms += outcome.waited_ms.value_or (0);
-            state.element_tallies.record (step_index, outcome.id, outcome.status);
+            state.element_tallies.record (step_index, outcome);
         }
         if (total_wait_ms > 0) {
             vu.ready_at_ms = std::max (vu.ready_at_ms, steady_now_ms () + total_wait_ms);

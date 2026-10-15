@@ -337,7 +337,7 @@ struct ReportExtras {
     nlohmann::json lifecycle = nlohmann::json::object ();
     // A single-request run's own `requestElements` outcomes (issue #1594),
     // passed through verbatim - the summary already writes them in the
-    // report's `{id, kind, passed, failed, skipped}` shape, the exact
+    // report's `{id, kind, passed, failed, skipped, deferred}` shape, the exact
     // sibling of a scenario run's per-step `scenario.steps[].elements`
     // (`step_breakdown` above). The two never coexist: `run_manager.cpp`
     // writes this key only on the branch that has no `scenario_state`.

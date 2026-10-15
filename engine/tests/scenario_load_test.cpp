@@ -1459,8 +1459,53 @@ TEST_F (ScenarioLoadTest, PerStepElementTalliesAreAttachedToTheBreakdown) {
     EXPECT_EQ (elements[0]["passed"], 2);
     EXPECT_EQ (elements[0]["failed"], 0);
     EXPECT_EQ (elements[0]["skipped"], 0);
+    EXPECT_EQ (elements[0]["deferred"], 0);
     EXPECT_FALSE (summary["steps"][1].contains ("elements"))
     << "a step with no elements at all must carry no such key";
+}
+
+// A deferral is its own count (#2144): an un-inlined `script.post` is left to
+// the post-run replay, so it runs - later - and must not read as a script
+// that was never run. The two skips that are not deferrals stay `skipped`:
+// an un-inlined `script.pre` has no replay to go to, and a disabled element
+// is never offered to the deferral hook at all.
+TEST_F (ScenarioLoadTest, AnUninlinedScriptPostTalliesDeferredNotSkipped) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo") });
+    auto disabled  = vayu::tests::script_element_json (
+    "el_disabled", "script.post", "pm.test('never', function () {});");
+    disabled["enabled"]              = false;
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements ({
+    vayu::tests::script_element_json ("el_post",
+    "script.post", "pm.test('status', function () { pm.expect(pm.response.code).to.equal(200); });"),
+    vayu::tests::script_element_json ("el_pre", "script.pre", "pm.variables.set('a', '1');"),
+    disabled,
+    });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary["steps"][0].contains ("elements")) << summary.dump ();
+    const auto& elements = summary["steps"][0]["elements"];
+    ASSERT_EQ (elements.size (), 3u) << summary.dump ();
+    const auto row = [&elements] (const std::string& id) {
+        for (const auto& entry : elements) {
+            if (entry["id"] == id) {
+                return entry;
+            }
+        }
+        return json ();
+    };
+
+    EXPECT_EQ (row ("el_post")["deferred"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_post")["skipped"], 0) << summary.dump ();
+    EXPECT_EQ (row ("el_pre")["skipped"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_pre")["deferred"], 0) << summary.dump ();
+    EXPECT_EQ (row ("el_disabled")["skipped"], 3) << summary.dump ();
+    EXPECT_EQ (row ("el_disabled")["deferred"], 0) << summary.dump ();
 }
 
 // ============================================================================

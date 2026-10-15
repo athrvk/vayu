@@ -167,6 +167,33 @@ nlohmann::json ElementOutcome::to_json () const {
     return node;
 }
 
+void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
+    if (outcome.status == "ok") {
+        passed.fetch_add (1, std::memory_order_relaxed);
+    } else if (outcome.status == "failed" || outcome.status == "error") {
+        failed.fetch_add (1, std::memory_order_relaxed);
+    } else if (outcome.deferred) {
+        deferred.fetch_add (1, std::memory_order_relaxed);
+    } else {
+        skipped.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+void ElementOutcomeCounts::append_report_row (nlohmann::json& rows,
+const std::string& id,
+const std::string& kind) const {
+    const size_t passed_count   = passed.load (std::memory_order_relaxed);
+    const size_t failed_count   = failed.load (std::memory_order_relaxed);
+    const size_t skipped_count  = skipped.load (std::memory_order_relaxed);
+    const size_t deferred_count = deferred.load (std::memory_order_relaxed);
+    if (passed_count + failed_count + skipped_count + deferred_count == 0) {
+        return;
+    }
+    rows.push_back ({ { "id", id }, { "kind", kind },
+    { "passed", passed_count }, { "failed", failed_count },
+    { "skipped", skipped_count }, { "deferred", deferred_count } });
+}
+
 nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
 const std::vector<ElementOutcome>& run_end) {
     nlohmann::json node = nlohmann::json::object ();
@@ -314,7 +341,7 @@ void ElementPipeline::run (Phase phase,
 ElementContext& ctx,
 const std::vector<CompiledElement>& elements,
 std::vector<ElementOutcome>& sink,
-const std::function<std::optional<std::string> (const CompiledElement&)>& skip_reason) {
+const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_reason) {
     for (const auto& compiled : elements) {
         if (!compiled.element || compiled.element->phase () != phase) {
             continue;
@@ -326,10 +353,14 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.element_id = compiled.id;
 
         std::optional<std::string> skipped;
+        bool deferred = false;
         if (!compiled.enabled) {
             skipped = "disabled";
         } else if (skip_reason) {
-            skipped = skip_reason (compiled);
+            if (auto skip = skip_reason (compiled)) {
+                skipped  = std::move (skip->message);
+                deferred = skip->deferred;
+            }
         }
 
         if (skipped) {
@@ -351,6 +382,7 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.outcome_status,
         ctx.outcome_message,
         ctx.outcome_waited_ms,
+        deferred,
         });
     }
 }
