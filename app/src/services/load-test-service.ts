@@ -77,8 +77,8 @@ const STREAM_SUPERSEDED_MESSAGE =
  * row still says running. The row settles a moment later, so read it again
  * rather than report a stream error for a run that is about to be over.
  */
-const SETTLE_POLL_INTERVAL_MS = 500;
-const SETTLE_POLL_MAX_MS = 30_000;
+export const SETTLE_POLL_INTERVAL_MS = 500;
+export const SETTLE_POLL_MAX_MS = 30_000;
 
 class LoadTestService {
 	private activeRunId: string | null = null;
@@ -442,6 +442,8 @@ class LoadTestService {
 		if (status !== null || !isRunInProgress(report?.metadata?.status)) {
 			this.finishRun(runId, status, report);
 		} else {
+			// Stopped during the fetch above: do not arm a wait for a stale close.
+			if (generation !== this.settleGeneration) return;
 			const settled = info.frame ? await this.waitForSettledReport(runId, generation) : null;
 			// Stopped, or the run is being watched again: whoever did that owns
 			// `activeRunId` now, and nothing below may speak for this wait.

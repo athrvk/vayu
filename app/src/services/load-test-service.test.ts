@@ -72,7 +72,7 @@ vi.mock("./os-icon", () => ({
 	},
 }));
 
-import { loadTestService } from "./load-test-service";
+import { loadTestService, SETTLE_POLL_INTERVAL_MS, SETTLE_POLL_MAX_MS } from "./load-test-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
@@ -335,9 +335,8 @@ describe("LoadTestService", () => {
 		const reportWith = (status: string) =>
 			({ summary: {}, latency: {}, metadata: { status } }) as unknown as Report;
 		const getRunReport = vi.mocked(apiService.getRunReport);
-		// Mirrors SETTLE_POLL_INTERVAL_MS / SETTLE_POLL_MAX_MS in the service.
-		const INTERVAL_MS = 500;
-		const MAX_MS = 30_000;
+		const INTERVAL_MS = SETTLE_POLL_INTERVAL_MS;
+		const MAX_MS = SETTLE_POLL_MAX_MS;
 
 		beforeEach(() => {
 			vi.useFakeTimers();
