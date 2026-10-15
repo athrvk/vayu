@@ -39,6 +39,7 @@ import {
 	WITHHELD_RUN_OUTPUT_SENTENCE,
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
+import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
 import type { ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -343,6 +344,7 @@ export const RUN_REPORT_RESOURCE = {
 	title: "Run report",
 	description:
 		"Full report for a run: latency percentiles, throughput, error rate, and status-code mix. Attach as context for analysis. " +
+		`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 		WITHHELD_RUN_OUTPUT_SENTENCE,
 	read: (ctx: ToolContext, runId: string, signal?: AbortSignal) =>
 		withheldRunOutput(ctx, ctx.client.getRunReport(runId, signal), signal),

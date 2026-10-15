@@ -248,7 +248,8 @@ TEST_F (RunStopAccountingTest, StoppedRunAccountsForItsCancelledRequests) {
     EXPECT_EQ (context->total_requests (), context->requests_sent.load ())
     << "cancelled requests were submitted but never recorded";
     EXPECT_EQ (context->in_flight (), 0u);
-    EXPECT_EQ (context->total_errors (), context->requests_sent.load ())
+    EXPECT_EQ (
+    context->metrics_collector->total_errors (), context->requests_sent.load ())
     << "a request cancelled before it got a response is an error, not a "
        "success";
 }

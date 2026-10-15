@@ -198,7 +198,13 @@ describe("detectAnomalies - throughput drops", () => {
 describe("detectAnomalies - first 5xx", () => {
 	it("marks the tick the first server error appeared on, once", () => {
 		const run = healthyRun(40, (i) =>
-			i >= 12 ? { status_codes: { "200": i * 490, "503": (i - 11) * 10 } } : {}
+			i >= 12
+				? {
+						status_codes: { "200": i * 490, "503": (i - 11) * 10 },
+						// An HTTP error is an error (#2124): the counter moves with the map.
+						requests_failed: (i - 11) * 10,
+					}
+				: {}
 		);
 
 		const found = detectAnomalies(run).filter((a) => a.kind === "first_5xx");
@@ -209,7 +215,10 @@ describe("detectAnomalies - first 5xx", () => {
 	});
 
 	it("ignores a status map that carries only non-5xx codes", () => {
-		const run = healthyRun(40, () => ({ status_codes: { "200": 1000, "404": 12 } }));
+		const run = healthyRun(40, () => ({
+			status_codes: { "200": 1000, "404": 12 },
+			requests_failed: 12,
+		}));
 
 		expect(detectAnomalies(run).filter((a) => a.kind === "first_5xx")).toEqual([]);
 	});
@@ -299,7 +308,8 @@ function noisyRun(ticks: number, rand: () => number): LoadTestMetrics[] {
 				current_rps: rps,
 				current_concurrency: 50,
 				requests_completed: completed,
-				requests_failed: failed,
+				// 5xx responses are errors too (#2124), so the counter carries both.
+				requests_failed: failed + serverErrors,
 				status_codes:
 					serverErrors > 0
 						? { "200": completed - serverErrors, "503": serverErrors }
@@ -476,7 +486,9 @@ describe("createAnomalyDetector - what a commit costs", () => {
 		expect(measure(() => detector.detect(clean.slice(0, 910))).statusScans).toBe(10);
 
 		// Once the onset is found the rest of the run's maps are never opened.
-		const dirty = healthyRun(1000, (i) => (i >= 100 ? { status_codes: { "503": 4 } } : {}));
+		const dirty = healthyRun(1000, (i) =>
+			i >= 100 ? { status_codes: { "503": 4 }, requests_failed: 4 } : {}
+		);
 		const known = createAnomalyDetector();
 		known.detect(dirty.slice(0, 900));
 		expect(measure(() => known.detect(dirty.slice(0, 910))).statusScans).toBe(0);
@@ -488,9 +500,9 @@ describe("createAnomalyDetector - what a commit costs", () => {
 		// so it re-reads nothing it had already cleared.
 		const run = healthyRun(80, (i): Partial<LoadTestMetrics> =>
 			i >= 20 && i < 40
-				? { status_codes: { "503": 4 } }
+				? { status_codes: { "503": 4 }, requests_failed: 4 }
 				: i >= 60
-					? { status_codes: { "500": 9 } }
+					? { status_codes: { "500": 9 }, requests_failed: 9 }
 					: {}
 		);
 		const detector = createAnomalyDetector();

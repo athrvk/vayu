@@ -1930,11 +1930,11 @@ double setup_overhead_s,
 double target_rps,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     size_t completed   = context->total_requests ();
-    size_t errors      = context->total_errors ();
     double avg_latency = context->average_latency_ms ();
     double actual_rps =
     total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
-    double error_rate = context->metrics_collector->error_rate ();
+    const auto failures = vayu::count_status_failures (
+    context->metrics_collector->status_code_distribution ());
 
     // Calculate percentiles using MetricsCollector (HdrHistogram)
     auto percentiles = context->metrics_collector->calculate_percentiles ();
@@ -1982,7 +1982,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // after schema validation rather than immediately once the drain ends.
     vayu::runtime::RunSummaryInfo run_summary_info;
     run_summary_info.requests_sent = completed;
-    run_summary_info.error_rate    = error_rate;
+    run_summary_info.error_rate    = failures.error_rate ();
     run_summary_info.assertions_passed = validation.run ? validation.run->passed : 0;
     run_summary_info.assertions_failed = validation.run ? validation.run->failed : 0;
     auto teardown_outcomes =
@@ -2036,10 +2036,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     vayu::utils::log_debug ("run",
     std::string ("Load test ") + vayu::to_string (final_status),
     { { "runId", context->run_id }, { "totalRequests", completed },
-    { "errors", errors }, { "errorRate", error_rate }, { "durationS", total_duration_s },
-    { "targetRps", target_rps }, { "actualRps", actual_rps },
-    { "avgLatencyMs", avg_latency }, { "p50", percentiles.p50 },
-    { "p95", percentiles.p95 }, { "p99", percentiles.p99 } });
+    { "errors", failures.failed }, { "errorRate", failures.error_rate () },
+    { "durationS", total_duration_s }, { "targetRps", target_rps },
+    { "actualRps", actual_rps }, { "avgLatencyMs", avg_latency },
+    { "p50", percentiles.p50 }, { "p95", percentiles.p95 }, { "p99", percentiles.p99 } });
 }
 
 void execute_load_test (const std::shared_ptr<RunContext>& context,
@@ -2275,6 +2275,8 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["elapsed_seconds"]     = sample.elapsed_seconds;
     payload["requests_completed"]  = sample.requests_completed;
     payload["requests_failed"]     = sample.requests_failed;
+    payload["http_errors"]         = sample.http_errors;
+    payload["no_response"]         = sample.no_response;
     payload["current_rps"]         = sample.current_rps;
     payload["current_concurrency"] = sample.current_concurrency;
     payload["send_rate"]           = sample.send_rate;
@@ -2491,14 +2493,14 @@ const std::map<int, size_t>& status_snapshot,
 const TickWindow& window,
 size_t& last_total,
 int64_t& first_tick_steady_ms) {
-    size_t current_total  = context->total_requests ();
-    size_t current_errors = context->total_errors ();
-    size_t delta          = current_total - last_total;
+    size_t current_total = context->total_requests ();
+    size_t delta         = current_total - last_total;
+    // The same snapshot the live tick counted its errors from, so the stored
+    // row and the SSE frame for one tick cannot disagree.
+    const auto failures = vayu::count_status_failures (status_snapshot);
 
     double current_rps = elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
-    double error_rate = current_total > 0 ?
-    (static_cast<double> (current_errors) * 100.0 / static_cast<double> (current_total)) :
-    0.0;
+    double error_rate = failures.error_rate ();
 
     // Calculate send rate (requests dispatched per second) and throughput (responses per second)
     size_t requests_sent = context->requests_sent.load ();
@@ -2554,7 +2556,9 @@ int64_t& first_tick_steady_ms) {
         sample.elapsed_seconds =
         static_cast<double> (tick_steady_ms - first_tick_steady_ms) / 1000.0;
         sample.requests_completed  = current_total;
-        sample.requests_failed     = current_errors;
+        sample.requests_failed     = failures.failed;
+        sample.http_errors         = failures.http_errors ();
+        sample.no_response         = failures.no_response;
         sample.current_rps         = current_rps;
         sample.current_concurrency = active_now;
         sample.send_rate           = send_rate;

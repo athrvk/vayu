@@ -50,6 +50,34 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe("reportToDerived", () => {
+	it("carries the report's HTTP errors / No response split (issue #2124)", () => {
+		const base = baseReport();
+		const d = reportToDerived(
+			baseReport({
+				summary: {
+					...base.summary,
+					totalRequests: 100,
+					failedRequests: 17,
+					httpErrorRequests: 15,
+					noResponseRequests: 2,
+					errorRate: 17,
+				},
+			})
+		);
+		expect(d.failedRequests).toBe(17);
+		expect(d.httpErrors).toBe(15);
+		expect(d.noResponse).toBe(2);
+	});
+
+	it("reads a report without the split as all HTTP errors", () => {
+		const base = baseReport();
+		const d = reportToDerived(
+			baseReport({ summary: { ...base.summary, failedRequests: 4, errorRate: 0.7 } })
+		);
+		expect(d.httpErrors).toBe(4);
+		expect(d.noResponse).toBe(0);
+	});
+
 	it("maps a constant_rps report to a completed DashboardDerived", () => {
 		const d = reportToDerived(baseReport());
 		expect(d.mode).toBe("constant_rps");

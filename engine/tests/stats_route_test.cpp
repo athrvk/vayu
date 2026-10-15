@@ -171,6 +171,8 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "elapsed_seconds", nlohmann::json::value_t::number_float },
         { "requests_completed", nlohmann::json::value_t::number_unsigned },
         { "requests_failed", nlohmann::json::value_t::number_unsigned },
+        { "http_errors", nlohmann::json::value_t::number_unsigned },
+        { "no_response", nlohmann::json::value_t::number_unsigned },
         { "current_rps", nlohmann::json::value_t::number_float },
         { "current_concurrency", nlohmann::json::value_t::number_unsigned },
         { "send_rate", nlohmann::json::value_t::number_float },
@@ -246,6 +248,8 @@ TEST_F (StatsRouteTest, StoredTickCarriesTheProducersFailedCount) {
     const std::string id   = seed_run ();
     auto sample            = sample_at (1000, 0.0);
     sample.requests_failed = 3;
+    sample.http_errors     = 2;
+    sample.no_response     = 1;
     sample.error_rate      = 30.0;
     add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
 
@@ -254,6 +258,8 @@ TEST_F (StatsRouteTest, StoredTickCarriesTheProducersFailedCount) {
     ASSERT_EQ (status, 200);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["requests_failed"].get<int> (), 3);
+    EXPECT_EQ (body["data"][0]["http_errors"].get<int> (), 2);
+    EXPECT_EQ (body["data"][0]["no_response"].get<int> (), 1);
     EXPECT_DOUBLE_EQ (body["data"][0]["error_rate"].get<double> (), 30.0);
 }
 

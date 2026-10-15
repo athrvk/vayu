@@ -420,6 +420,30 @@ describe("LoadTestService", () => {
 			});
 		});
 
+		it("reports the share of HTTP errors, not only transport failures (issue #2124)", async () => {
+			// The report's errorRate is the one definition: 15 responses of 100 with a
+			// 5xx status are errors even though every request got an answer.
+			dashboard.currentRunId = "run_10";
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				summary: {
+					totalRequests: 100,
+					failedRequests: 15,
+					httpErrorRequests: 15,
+					noResponseRequests: 0,
+					errorRate: 15,
+				},
+				statusCodes: { "200": 85, "500": 15 },
+				latency: { p95: 50 },
+			} as never);
+			loadTestService.startMonitoring("run_10");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ body: "100 requests, p95 50 ms, 15.0% errors" })
+			);
+		});
+
 		it("says so plainly when the report cannot supply the numbers", async () => {
 			// The shipped fixture for a report the engine answered with nothing
 			// usable. Reverting `runSummaryLine`'s checks turns this body into

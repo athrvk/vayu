@@ -45,6 +45,33 @@ TEST_F (MetricsHelperTest, CalculatesSummaryCorrectly) {
     // report for the same run, worse the higher the error rate.
     EXPECT_DOUBLE_EQ (summary.avg_latency_ms, 150.0);
     EXPECT_DOUBLE_EQ (summary.error_rate, 5.0); // 5 * 100 / 100
+    EXPECT_EQ (summary.no_response, 5u);
+}
+
+// #2124: the stop response counts errors the way the report and the live tick
+// do. An HTTP 5xx went through record_success and used to be missing here.
+TEST_F (MetricsHelperTest, StopSummaryCountsHttpErrorsLikeTheReport) {
+    for (int i = 0; i < 10; ++i) {
+        test_context->metrics_collector->record_success (503, 150.0, 0.0);
+    }
+    auto summary = MetricsHelper::calculate_summary (*test_context);
+
+    EXPECT_EQ (summary.total_requests, 110u);
+    EXPECT_EQ (summary.errors, 15u);
+    EXPECT_EQ (summary.no_response, 5u);
+    EXPECT_DOUBLE_EQ (summary.error_rate, 15.0 * 100.0 / 110.0);
+    // The 503s recorded a latency, so they are in the average as before.
+    EXPECT_DOUBLE_EQ (summary.avg_latency_ms, 150.0);
+
+    // The figure the report prints for the same distribution.
+    const auto reported = vayu::count_status_failures (
+    test_context->metrics_collector->status_code_distribution ());
+    EXPECT_EQ (summary.errors, reported.failed);
+
+    auto response = MetricsHelper::create_stop_response ("run", summary);
+    EXPECT_EQ (response["summary"]["errors"], 15);
+    EXPECT_EQ (response["summary"]["httpErrors"], 10);
+    EXPECT_EQ (response["summary"]["noResponse"], 5);
 }
 
 // The disagreement above, asserted directly against the source the report and
@@ -76,6 +103,7 @@ TEST_F (MetricsHelperTest, CreatesStopResponseCorrectly) {
     MetricsHelper::RunSummary summary;
     summary.total_requests = 100;
     summary.errors         = 5;
+    summary.no_response    = 2;
     summary.avg_latency_ms = 150.0;
     summary.error_rate     = 5.0;
 
@@ -85,6 +113,8 @@ TEST_F (MetricsHelperTest, CreatesStopResponseCorrectly) {
     EXPECT_EQ (response["runId"], "test_run_123");
     EXPECT_EQ (response["summary"]["totalRequests"], 100);
     EXPECT_EQ (response["summary"]["errors"], 5);
+    EXPECT_EQ (response["summary"]["httpErrors"], 3);
+    EXPECT_EQ (response["summary"]["noResponse"], 2);
     EXPECT_DOUBLE_EQ (response["summary"]["avgLatencyMs"], 150.0);
     EXPECT_DOUBLE_EQ (response["summary"]["errorRate"], 5.0);
 }

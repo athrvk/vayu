@@ -13,6 +13,7 @@
 
 import { z } from "zod";
 import { DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT } from "../engine-client.js";
+import { RUN_ERROR_DEFINITION_SENTENCE } from "../error-definition.js";
 import { precedenceNote } from "../variable-origins.js";
 import {
 	DATA_CONTRACT_SENTENCE,
@@ -313,6 +314,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance. " +
+			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 			"A run may also carry `warnings`: what it did not do, even though it finished and its numbers look fine - a request sent with an unresolved `{{token}}`, or a step whose pre-request script load mode never runs. Each entry carries `code`, a human-readable `message`, and either `count`/`names` or `steps`. Absent for a run with nothing to report. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
 			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history. ` +
@@ -387,6 +389,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. " +
+			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. \`pagination\` says how many exist; read the rest with \`offset\`.`,
 		annotations: {
 			title: "Get run time series",

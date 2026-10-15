@@ -260,7 +260,8 @@ run shares, so its writes are visible from the very first step or submission. A 
 the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
 `ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
-propagating one. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate`,
+propagating one. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate` - on a load run
+the report's, by the [one error definition](api-reference.md#what-counts-as-an-error) -
 `assertionsPassed`, `assertionsFailed`) - the one context that can report a run summary, because it is
 the one that runs after there is one. Neither kind gets a per-element `allowRequests` toggle: `pm.sendRequest`
 inside either script is gated by the run's own `allowScriptRequests` (`ScriptConfig::allow_send_request`,

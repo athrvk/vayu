@@ -25,6 +25,8 @@ interface RawSseMetrics {
 	elapsedSeconds?: number;
 	totalRequests?: number;
 	totalErrors?: number;
+	httpErrors?: number;
+	noResponse?: number;
 	currentRps?: number;
 	activeConnections?: number;
 	latencyP50Ms?: number;
@@ -52,6 +54,8 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		elapsed_seconds: m.elapsedSeconds || 0,
 		requests_completed: m.totalRequests || 0,
 		requests_failed: m.totalErrors || 0,
+		http_errors: m.httpErrors || 0,
+		no_response: m.noResponse || 0,
 		current_rps: m.currentRps || 0,
 		current_concurrency: m.activeConnections || 0,
 		latency_p50_ms: m.latencyP50Ms || 0,
@@ -248,6 +252,8 @@ export class SSEClient {
 			elapsed_seconds: 0,
 			requests_completed: 0,
 			requests_failed: 0,
+			http_errors: 0,
+			no_response: 0,
 			current_rps: 0,
 			current_concurrency: 0,
 			latency_p50_ms: 0,

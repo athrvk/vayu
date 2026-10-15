@@ -14,36 +14,55 @@ import { HeroCardShell } from "./HeroCardShell";
 
 /** Status-code buckets: stack-bar fill + legend entry share one definition. */
 interface StatusSegment {
-	key: "s2" | "s4" | "s5" | "err";
+	key: "ok" | "s4" | "s5" | "none";
 	label: string;
 	bg: string; // Tailwind bg-* class for the stack bar
 	color: string; // CSS color for the legend swatch
 	infoTip?: React.ReactNode;
 }
 const STATUS_SEGMENTS: readonly StatusSegment[] = [
-	{ key: "s2", label: "2xx", bg: "bg-success", color: "hsl(var(--success))" },
+	{ key: "ok", label: "2xx/3xx", bg: "bg-success", color: "hsl(var(--success))" },
 	{ key: "s4", label: "4xx", bg: "bg-warning", color: "hsl(var(--warning))" },
 	{ key: "s5", label: "5xx", bg: "bg-destructive", color: "hsl(var(--destructive))" },
 	{
-		key: "err",
-		label: "err",
+		key: "none",
+		label: "No response",
 		bg: "bg-subtle-foreground",
 		color: "hsl(var(--subtle-foreground))",
-		infoTip: TOOLTIPS.errorRateTransport,
+		infoTip: TOOLTIPS.errorRateNoResponse,
 	},
 ];
 
 /**
- * Universal hero card #3 - transport-layer error rate + status-code stack.
- * Bespoke body (gap-2 value row with a right-aligned count + stack + legend).
+ * The bucket a status code draws in. The engine counts 200-399 as success
+ * (3xx included) and status 0 as no response; anything else it counts as an
+ * HTTP error, so a code outside the 4xx and 5xx classes lands with 5xx rather
+ * than being dropped from the bar.
+ */
+function bucketFor(code: number): StatusSegment["key"] {
+	if (code === 0) return "none";
+	if (code >= 200 && code < 400) return "ok";
+	if (code >= 400 && code < 500) return "s4";
+	return "s5";
+}
+
+/**
+ * Universal hero card #3 - error rate + status-code stack. An error is a
+ * response outside 2xx/3xx or no response at all (issue #2124); the legend
+ * splits the count into "HTTP errors" and "No response". Bespoke body (gap-2
+ * value row with a right-aligned count + stack + legend).
  */
 export function ErrorRateCard({
 	totalRequests,
 	failedRequests,
+	httpErrors,
+	noResponse,
 	statusCodes,
 }: {
 	totalRequests: number;
 	failedRequests: number;
+	httpErrors: number;
+	noResponse: number;
 	statusCodes: Record<string, number>;
 }) {
 	const errorRate = totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0;
@@ -54,15 +73,11 @@ export function ErrorRateCard({
 
 	// Bucket status codes by class
 	const buckets = useMemo(() => {
-		const out: Record<StatusSegment["key"], number> = { s2: 0, s4: 0, s5: 0, err: 0 };
+		const out: Record<StatusSegment["key"], number> = { ok: 0, s4: 0, s5: 0, none: 0 };
 		for (const [codeStr, count] of Object.entries(statusCodes ?? {})) {
-			const code = Number(codeStr);
-			if (code >= 200 && code < 300) out.s2 += count;
-			else if (code >= 400 && code < 500) out.s4 += count;
-			else if (code >= 500 && code < 600) out.s5 += count;
-			else out.err += count; // 0 / unknown - transport errors
+			out[bucketFor(Number(codeStr))] += count;
 		}
-		const total = out.s2 + out.s4 + out.s5 + out.err;
+		const total = out.ok + out.s4 + out.s5 + out.none;
 		return { ...out, total };
 	}, [statusCodes]);
 
@@ -83,8 +98,8 @@ export function ErrorRateCard({
 				</span>
 			</div>
 			{/* Always render the stack + legend so the card height doesn't jump
-			    when the final report arrives. During live the bar is empty;
-			    after completion it fills with the real distribution. */}
+			    when the final report arrives. The bar fills from the live tick's
+			    status map and is replaced by the report's distribution at the end. */}
 			<div className="flex h-2 mt-2 rounded-sm bg-accent overflow-hidden">
 				{STATUS_SEGMENTS.map((s) => (
 					<span
@@ -100,11 +115,14 @@ export function ErrorRateCard({
 						key={s.key}
 						color={s.color}
 						label={s.label}
-						count={buckets[s.key]}
+						count={s.key === "none" ? noResponse : buckets[s.key]}
 						infoTip={s.infoTip}
 					/>
 				))}
 			</div>
+			<p className="text-label font-mono text-muted-foreground">
+				HTTP errors {formatNumber(httpErrors)}
+			</p>
 		</HeroCardShell>
 	);
 }

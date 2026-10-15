@@ -116,7 +116,7 @@ function DurationStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Total requests - cumulative count with failed-count sub. */
+/** Total requests - cumulative count with error-count sub. */
 function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -124,7 +124,7 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 			value={formatNumber(d.totalRequests)}
 			sub={
 				<>
-					failed{" "}
+					errors{" "}
 					<span
 						className={cn(
 							"transition-colors duration-150",

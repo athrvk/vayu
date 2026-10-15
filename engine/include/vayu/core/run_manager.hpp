@@ -1000,9 +1000,6 @@ struct RunContext {
         }
         return base + purge_expired_think_reservations ();
     }
-    [[nodiscard]] size_t total_errors () const {
-        return metrics_collector ? metrics_collector->total_errors () : 0;
-    }
     // The one average-latency definition for this run: the latency sum over the
     // requests that contributed to it (successes). Every caller - the stop
     // response, the per-tick rows, the final report - goes through here so they
@@ -1052,8 +1049,10 @@ struct RunContext {
 struct MetricTickSample {
     int64_t timestamp = 0; // Unix ms; the tick's single wall-clock sample
     double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
-    size_t requests_completed  = 0; // Responses received (success + error)
-    size_t requests_failed     = 0; // Of those, errors
+    size_t requests_completed = 0; // Responses received (success + error)
+    size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
+    size_t http_errors         = 0; // Of the errors, those that got a response
+    size_t no_response         = 0; // Of the errors, those that got none
     double current_rps         = 0.0;
     size_t current_concurrency = 0;
     double send_rate           = 0.0;

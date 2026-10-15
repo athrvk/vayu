@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -36,7 +37,8 @@ TEST_F (MetricsCollectorTest, InitialStateIsEmpty) {
     EXPECT_EQ (collector->success_count (), 0);
     EXPECT_DOUBLE_EQ (collector->total_latency_sum (), 0.0);
     EXPECT_DOUBLE_EQ (collector->average_latency (), 0.0);
-    EXPECT_DOUBLE_EQ (collector->error_rate (), 0.0);
+    EXPECT_DOUBLE_EQ (
+    collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (), 0.0);
 }
 
 TEST_F (MetricsCollectorTest, RecordsSuccessCorrectly) {
@@ -49,7 +51,8 @@ TEST_F (MetricsCollectorTest, RecordsSuccessCorrectly) {
     EXPECT_EQ (collector->success_count (), 3);
     EXPECT_DOUBLE_EQ (collector->total_latency_sum (), 225.0);
     EXPECT_DOUBLE_EQ (collector->average_latency (), 75.0);
-    EXPECT_DOUBLE_EQ (collector->error_rate (), 0.0);
+    EXPECT_DOUBLE_EQ (
+    collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (), 0.0);
 }
 
 TEST_F (MetricsCollectorTest, RecordsErrorsCorrectly) {
@@ -59,7 +62,8 @@ TEST_F (MetricsCollectorTest, RecordsErrorsCorrectly) {
     EXPECT_EQ (collector->total_requests (), 2);
     EXPECT_EQ (collector->total_errors (), 2);
     EXPECT_EQ (collector->success_count (), 0);
-    EXPECT_DOUBLE_EQ (collector->error_rate (), 100.0);
+    EXPECT_DOUBLE_EQ (
+    collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (), 100.0);
 }
 
 TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
@@ -75,7 +79,8 @@ TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
     EXPECT_EQ (collector->success_count (), 8);
     EXPECT_DOUBLE_EQ (collector->total_latency_sum (), 800.0);
     EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0); // 800 / 8 successes
-    EXPECT_DOUBLE_EQ (collector->error_rate (), 20.0);       // 2/10 * 100
+    EXPECT_DOUBLE_EQ (collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (),
+    20.0); // 2/10 * 100
 }
 
 // ============================================================================
@@ -732,6 +737,84 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsDerivesStatusClasses) {
     EXPECT_EQ (stats["status3xx"].get<size_t> (), 1u);
     EXPECT_EQ (stats["status4xx"].get<size_t> (), 2u);
     EXPECT_EQ (stats["status5xx"].get<size_t> (), 1u);
+}
+
+// #2124: an HTTP 500 or 429 goes through record_success, never record_error, so
+// a live error count read off the transport counter showed 0% for a run the
+// report called 15% failed. The live figures come from the status distribution.
+TEST_F (MetricsCollectorTest, GetCurrentStatsCountsHttpErrorsAsErrors) {
+    for (int i = 0; i < 85; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    for (int i = 0; i < 10; ++i) {
+        collector->record_success (500, 30.0, 0.0);
+    }
+    for (int i = 0; i < 5; ++i) {
+        collector->record_success (429, 30.0, 0.0);
+    }
+
+    auto stats = collector->get_current_stats (0, 1.0, 100);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 15.0);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 15u);
+    EXPECT_EQ (stats["httpErrors"].get<size_t> (), 15u);
+    EXPECT_EQ (stats["noResponse"].get<size_t> (), 0u);
+    EXPECT_EQ (stats["totalSuccess"].get<size_t> (), 85u);
+
+    // The average divides the latency sum by the requests that recorded one,
+    // which an HTTP error does: redefining the error count must not move it.
+    const double average_before = collector->average_latency ();
+    EXPECT_DOUBLE_EQ (average_before, (85.0 * 10.0 + 15.0 * 30.0) / 100.0);
+
+    for (int i = 0; i < 5; ++i) {
+        collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+    }
+    stats = collector->get_current_stats (0, 1.0, 105);
+    EXPECT_EQ (stats["noResponse"].get<size_t> (), 5u);
+    EXPECT_EQ (stats["httpErrors"].get<size_t> (), 15u);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 20u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 20.0 * 100.0 / 105.0);
+    EXPECT_DOUBLE_EQ (collector->average_latency (), average_before);
+}
+
+// The live tick hands its own snapshot in; the error counts must come from it,
+// the same copy the persisted row counts from, not from a second read.
+TEST_F (MetricsCollectorTest, GetCurrentStatsCountsErrorsFromTheCallersSnapshot) {
+    collector->record_success (200, 10.0, 0.0);
+    const std::map<int, size_t> snapshot{ { 200, 3 }, { 503, 1 } };
+
+    auto stats = collector->get_current_stats (0, 1.0, 0, 0, &snapshot);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 25.0);
+}
+
+// ============================================================================
+// count_status_failures - the one definition of a load-test error (#2124)
+// ============================================================================
+
+TEST (StatusFailures, ThreeHundredsSucceedAndEverythingElseFails) {
+    const auto tally = vayu::count_status_failures ({ { 200, 80 }, { 301, 5 },
+    { 304, 5 }, { 404, 4 }, { 503, 3 }, { 0, 2 }, { 999, 1 } });
+    EXPECT_EQ (tally.total, 100u);
+    EXPECT_EQ (tally.failed, 10u);
+    EXPECT_EQ (tally.no_response, 2u);
+    // 4xx, 5xx and a code outside the HTTP ranges all got a response.
+    EXPECT_EQ (tally.http_errors (), 8u);
+    EXPECT_DOUBLE_EQ (tally.error_rate (), 10.0);
+}
+
+TEST (StatusFailures, AnEmptyDistributionIsAZeroRateNotADivisionByZero) {
+    const auto tally = vayu::count_status_failures ({});
+    EXPECT_EQ (tally.total, 0u);
+    EXPECT_EQ (tally.failed, 0u);
+    EXPECT_DOUBLE_EQ (tally.error_rate (), 0.0);
+}
+
+TEST (StatusFailures, ATransportOnlyRunHasNoHttpErrors) {
+    const auto tally = vayu::count_status_failures ({ { 0, 7 } });
+    EXPECT_EQ (tally.failed, 7u);
+    EXPECT_EQ (tally.no_response, 7u);
+    EXPECT_EQ (tally.http_errors (), 0u);
+    EXPECT_DOUBLE_EQ (tally.error_rate (), 100.0);
 }
 
 // ============================================================================

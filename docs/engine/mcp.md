@@ -1717,6 +1717,16 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
 
+`summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
+error definition in their text, from `error-definition.ts`'s
+`RUN_ERROR_DEFINITION_SENTENCE` (issue #2124); so do the descriptions of
+`get_live_metrics`, `compare_runs`, `get_run_report`, `get_run_timeseries` and
+the `vayu://run/{runId}/report` resource. An agent reading `errorRate` is told
+what counts: a status outside 2xx/3xx or no response, a 3xx being a success, with
+the `httpErrors` / `noResponse` split beside the count. The fields themselves are
+the engine's, passed through unchanged (see [What counts as an
+error](api-reference.md#what-counts-as-an-error)).
+
 ## Safety model
 
 Enforced in the MCP layer (`safety.ts`, `config.ts`), with one exception noted

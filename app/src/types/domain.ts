@@ -2118,7 +2118,15 @@ export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
 	requests_completed: number;
+	/**
+	 * Errors so far: a response outside 2xx/3xx plus every request that got no
+	 * response (issue #2124). `http_errors + no_response`.
+	 */
 	requests_failed: number;
+	/** The part of `requests_failed` that got a response. Absent on a tick stored by an older engine. */
+	http_errors?: number;
+	/** The part of `requests_failed` that got none (status code 0). Absent on a tick stored by an older engine. */
+	no_response?: number;
 	current_rps: number;
 	current_concurrency: number;
 	latency_p50_ms: number;
@@ -2361,7 +2369,12 @@ export interface RunReport {
 	summary: {
 		totalRequests: number;
 		successfulRequests: number;
+		/** Errors by the one definition (issue #2124): `httpErrorRequests + noResponseRequests`. */
 		failedRequests: number;
+		/** The part of `failedRequests` that got a response. Absent from an engine older than #2124. */
+		httpErrorRequests?: number;
+		/** The part of `failedRequests` that got none (status code 0). Absent from an engine older than #2124. */
+		noResponseRequests?: number;
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;

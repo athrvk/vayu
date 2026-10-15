@@ -17,6 +17,7 @@ import { z } from "zod";
 import type { ToolContext } from "./tools.js";
 import { resolveBaseline } from "./tools.js";
 import { compareReports } from "./compare.js";
+import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
 import { withheldRunOutput } from "./resources.js";
 
 export interface PromptMessage {
@@ -68,7 +69,7 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						"Summarize this Vayu run for an engineer in a few sentences. Call out throughput " +
 							"(RPS), latency p50/p95/p99, error rate, and the status-code mix, and say whether " +
-							`it looks healthy or concerning.\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`it looks healthy or concerning. ${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
 					),
 				],
 			};
@@ -113,7 +114,8 @@ export const PROMPTS: McpPromptDef[] = [
 				messages: [
 					userText(
 						"Did performance regress between these two Vayu runs? Focus on latency percentiles, " +
-							"throughput, and error rate; quantify each change and give a clear verdict.\n\n" +
+							"throughput, and error rate; quantify each change and give a clear verdict. " +
+							`${RUN_ERROR_DEFINITION_SENTENCE}\n\n` +
 							`Comparison (${baseRunId} -> ${targetRunId}):\n${JSON.stringify(comparison, null, 2)}`
 					),
 				],
@@ -137,7 +139,7 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						"Diagnose the errors in this Vayu run. Identify which status codes / error types " +
 							"dominate, whether failures correlate with load (latency climbing toward saturation), " +
-							`and suggest likely causes and the next checks to run.\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`and suggest likely causes and the next checks to run. ${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
 					),
 				],
 			};

@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "mock_server.hpp"
@@ -517,6 +518,74 @@ TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
     ASSERT_FALSE (batch.payloads.empty ());
     EXPECT_NE (batch.payloads[0].find ("\"activeConnections\":0"), std::string::npos)
     << "tick payload did not carry the zero default: " << batch.payloads[0];
+
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2124: the persisted tick and the live frame count errors by the one
+// definition, from the one snapshot a tick takes, so an HTTP 500 is an error
+// on both - the stored row used to read the transport-only counter and record
+// 0 failures for a run whose report said 15%.
+TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
+    const std::string db_path = "test_collect_metrics_errors.db";
+    vayu::tests::remove_database_files (db_path);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "errors_run";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> (run.id, cfg);
+    auto& mc = *ctx->metrics_collector;
+    for (int i = 0; i < 80; ++i) {
+        mc.record_success (200, 5.0, 0.0);
+    }
+    for (int i = 0; i < 15; ++i) {
+        mc.record_success (500, 5.0, 0.0);
+    }
+    for (int i = 0; i < 5; ++i) {
+        mc.record_error (vayu::ErrorCode::Timeout, "timed out");
+    }
+    ctx->start_time_ms = 1;
+    ctx->is_running    = true;
+
+    // Held past one second so the DB-gated branch persists at least one tick.
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    ctx->is_running = false;
+    metrics.join ();
+
+    const auto ticks = db.get_metric_ticks_since (run.id, 0);
+    ASSERT_FALSE (ticks.empty ()) << "no tick was persisted; nothing is proven";
+    const auto stored = nlohmann::json::parse (ticks.front ().payload);
+    EXPECT_EQ (stored["requests_failed"].get<size_t> (), 20u);
+    EXPECT_EQ (stored["http_errors"].get<size_t> (), 15u);
+    EXPECT_EQ (stored["no_response"].get<size_t> (), 5u);
+    EXPECT_DOUBLE_EQ (stored["error_rate"].get<double> (), 20.0);
+
+    const auto frames = ctx->ticks_since (0);
+    ASSERT_FALSE (frames.payloads.empty ());
+    // The frame is SSE-framed; its JSON is the one `data:` line.
+    constexpr std::string_view data_field = "data: ";
+    const std::string_view frame          = frames.payloads.back ();
+    const auto data_at                    = frame.find (data_field);
+    ASSERT_NE (data_at, std::string_view::npos) << frame;
+    const auto json_at = data_at + data_field.size ();
+    const auto live    = nlohmann::json::parse (
+    frame.substr (json_at, frame.find ('\n', json_at) - json_at));
+    EXPECT_EQ (live["totalErrors"].get<size_t> (),
+    stored["requests_failed"].get<size_t> ());
+    EXPECT_EQ (live["httpErrors"].get<size_t> (), 15u);
+    EXPECT_EQ (live["noResponse"].get<size_t> (), 5u);
+    EXPECT_DOUBLE_EQ (
+    live["errorRate"].get<double> (), stored["error_rate"].get<double> ());
 
     vayu::tests::remove_database_files (db_path);
 }
