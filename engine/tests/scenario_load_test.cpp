@@ -1655,6 +1655,37 @@ TEST_F (ScenarioLoadTest, AnUninlinedScriptPostTalliesDeferredNotSkipped) {
     EXPECT_EQ (row ("el_disabled")["deferred"], 0) << summary.dump ();
 }
 
+// Every un-inlined, enabled `script.post` of a step is replayed, the way a
+// single-request run joins them, so the `deferred` tally and the replay count
+// the same elements (#2167). A disabled one never runs.
+TEST_F (ScenarioLoadTest, EveryUninlinedScriptPostOfAStepIsReplayedAndADisabledOneIsNot) {
+    ScenarioMockServer server;
+    auto execution      = plan_over ({ server.url ("/echo") });
+    auto disabled       = vayu::tests::script_element_json ("el_disabled",
+          "script.post", "pm.test('never', function () { throw new Error('x'); });");
+    disabled["enabled"] = false;
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements ({
+    vayu::tests::script_element_json ("el_a",
+    "script.post", "pm.test('a', function () { pm.expect(pm.response.code).to.equal(200); });"),
+    disabled,
+    vayu::tests::script_element_json ("el_b",
+    "script.post", "pm.test('b', function () { pm.expect(pm.response.code).to.equal(200); });"),
+    });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& step = validation.steps[0];
+    ASSERT_HAS_VALUE (step);
+    EXPECT_EQ (step->failed, 0u) << "the disabled script ran";
+    EXPECT_EQ (step->passed, 4u)
+    << "both enabled scripts must replay on each of the 2 samples";
+}
+
 // ============================================================================
 // The combined assertion tally (issue #1497): assert.* elements and an
 // inline script's own pm.test calls, summed for maxAssertionFailureRatePct.
