@@ -113,6 +113,13 @@ const SCRIPT_KIND = kindSchema({
 	description: "Runs before the request is sent.",
 });
 
+const POST_SCRIPT_KIND = kindSchema({
+	kind: "script.post",
+	label: "Post-request script",
+	category: "script",
+	description: "Runs after the response arrives.",
+});
+
 /** Consumed by the engine at compose time, never offered as a row to add by hand. */
 const INHERIT_DISABLE_KIND = kindSchema({
 	kind: "inherit.disable",
@@ -851,7 +858,7 @@ describe("ElementList - empty state", () => {
 	it("shows quick-add chips instead of the list when there are no elements", () => {
 		renderList([]);
 
-		expect(screen.getByText(/no elements yet/i)).toBeInTheDocument();
+		expect(screen.getByText(/^Elements run around a send:/)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Extract from JSON" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Assert status code" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Pre-request script" })).toBeInTheDocument();
@@ -863,7 +870,7 @@ describe("ElementList - empty state", () => {
 	it("hides the chips once an element exists", () => {
 		renderList([extractElement("e1")]);
 
-		expect(screen.queryByText(/no elements yet/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/^Elements run around a send:/)).not.toBeInTheDocument();
 	});
 
 	it("adds the chip's kind, expanded, on click", () => {
@@ -873,5 +880,31 @@ describe("ElementList - empty state", () => {
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect((onChange.mock.calls[0][0] as ElementDef[])[0].kind).toBe("assert.status");
+	});
+
+	it("offers a Post-request script chip that adds a script.post element", () => {
+		// The Tests tab's results come from this kind, and a Postman user's
+		// `pm.test(...)` belongs in it; the chip is how an empty list finds it
+		// (#2129). `POST_SCRIPT_KIND` is a request tab's addable set: not
+		// `collectionOnly`.
+		const onChange = vi.fn();
+		render(
+			<ElementList elements={[]} onChange={onChange} kinds={[...KINDS, POST_SCRIPT_KIND]} />
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Post-request script" }));
+
+		expect(onChange).toHaveBeenCalledTimes(1);
+		const [added] = onChange.mock.calls[0][0] as ElementDef[];
+		expect(added.kind).toBe("script.post");
+		expect(added.config).toEqual({ script: "" });
+	});
+
+	it("offers no Post-request chip where the catalogue lacks the kind", () => {
+		renderList([]);
+
+		expect(
+			screen.queryByRole("button", { name: "Post-request script" })
+		).not.toBeInTheDocument();
 	});
 });

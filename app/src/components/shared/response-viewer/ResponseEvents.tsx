@@ -41,7 +41,7 @@
  */
 
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Radio } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
@@ -254,9 +254,7 @@ export default function ResponseEvents({
 		return (
 			<EmptyState
 				variant="inline"
-				icon={Radio}
-				title="Not an event stream"
-				description="Turn on Event stream in the request's Settings tab to consume a text/event-stream endpoint live."
+				title="Not an event stream. Turn on Event stream in the request's Settings tab to consume a text/event-stream endpoint live."
 			/>
 		);
 	}
@@ -313,12 +311,10 @@ export default function ResponseEvents({
 				{events.length === 0 ? (
 					<EmptyState
 						variant="inline"
-						icon={Radio}
-						title={isStreaming ? "Waiting for the first event" : "No events received"}
-						description={
+						title={
 							isStreaming
-								? "The stream is open and nothing has arrived yet."
-								: "The stream opened but the server sent no events before it ended."
+								? "Waiting for the first event. The stream is open and nothing has arrived yet."
+								: "No events received. The stream opened but the server sent no events before it ended."
 						}
 					/>
 				) : (

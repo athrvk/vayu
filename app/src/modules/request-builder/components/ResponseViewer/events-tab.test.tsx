@@ -101,6 +101,22 @@ describe("the Events tab", () => {
 		// coming back, and an absence would be no answer at all.
 		openEventsTab();
 		expect(screen.getByText(/not an event stream/i)).toBeTruthy();
+		// The way out is in the same line: the inline state has no second one.
+		expect(screen.getByText(/Event stream in the request's Settings tab/)).toBeTruthy();
+	});
+
+	it("says the stream is open while it has produced nothing", () => {
+		state.response = okResponse();
+		useExecutionEventsStore.getState().startStream({
+			requestId: "req_1",
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText(/Waiting for the first event/)).toBeTruthy();
+		expect(screen.getByText(/nothing has arrived yet/)).toBeTruthy();
 	});
 
 	it("shows live rows while the stream is open", () => {
@@ -222,6 +238,7 @@ describe("the Events tab", () => {
 		openEventsTab();
 
 		expect(screen.getByText(/no events received/i)).toBeTruthy();
+		expect(screen.getByText(/server sent no events before it ended/)).toBeTruthy();
 		expect(screen.queryByText(/not an event stream/i)).toBeNull();
 	});
 

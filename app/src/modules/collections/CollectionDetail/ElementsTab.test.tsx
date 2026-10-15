@@ -234,7 +234,7 @@ describe("ElementsTab - what it renders", () => {
 	it("shows the empty-state label when the collection declares no elements", () => {
 		renderTab(makeCollection([]));
 
-		expect(screen.getByText(/no elements yet/i)).toBeInTheDocument();
+		expect(screen.getByText(/elements run around a send/i)).toBeInTheDocument();
 	});
 });
 
