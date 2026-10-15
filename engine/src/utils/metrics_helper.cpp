@@ -18,8 +18,8 @@ namespace vayu::utils {
 MetricsHelper::RunSummary MetricsHelper::calculate_summary (
 const vayu::core::RunContext& context) {
     RunSummary summary;
-    summary.total_requests = context.total_requests ();
-    summary.avg_latency_ms = context.average_latency_ms ();
+    // Distribution first, request counter second: a recorder bumps the counter
+    // before the per-code slot, so this order keeps errors <= total_requests.
     if (context.metrics_collector) {
         const auto failures = vayu::count_status_failures (
         context.metrics_collector->status_code_distribution ());
@@ -27,6 +27,8 @@ const vayu::core::RunContext& context) {
         summary.no_response = failures.no_response;
         summary.error_rate  = failures.error_rate ();
     }
+    summary.total_requests = context.total_requests ();
+    summary.avg_latency_ms = context.average_latency_ms ();
     return summary;
 }
 
