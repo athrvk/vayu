@@ -8534,13 +8534,21 @@ named it.
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
 submission as `{id, kind, passed, failed, skipped, deferred}`. `deferred` (issue #2144)
 counts the submissions an un-inlined `script.post` was left to the completion replay on:
-its verdicts are the report's `tests`, drawn from the sampled responses, so it is not a
+its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is what never runs: a disabled element, or an un-inlined
 `script.pre`. Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
 [Scenario load runs](#scenario-load-runs)), and the two never coexist on one report.
+
+**`testValidation`** counts in two units: `samplesTested` is a number of *responses*
+(each sampled response the post-run replay evaluated the plan's `script.post` against),
+while `testsPassed` and `testsFailed` are numbers of *assertions* (`pm.test` calls) across
+those responses, so `testsPassed + testsFailed` is not `samplesTested` once a script holds
+more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
+`samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
+(`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/

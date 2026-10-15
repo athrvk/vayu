@@ -249,6 +249,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			<TestValidationSummary
 				testValidation={report.testValidation}
 				sampling={report.sampling}
+				totalRequests={report.summary.totalRequests}
 			/>
 
 			{/* Sampled Request/Response Results */}

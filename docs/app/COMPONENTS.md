@@ -670,11 +670,11 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead) and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
+| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead) and `TestValidationSummary` (the last carrying the run's named `pm.test` failures and passed `totalRequests`, so its tested-of-total line has a denominator) |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle |
-| `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below |
+| `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below; its element rows are the shared `ElementTally` |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts. A failed time-series fetch (`LoadTestDetail`'s `seriesFailure`) draws the shared `ErrorState` with Try again instead of the "insufficient data" sentence, or, when some pages loaded, a warning `Callout` naming how many points did, whose retry resumes at the failed page (issue #1944). A failed server-vitals fetch (`monitorFailure`) is a warning `Callout` with Try again drawn above the section whatever the time series holds, and holds the auto-paging back while the query is in error (issue #2062) |
 | `MonitorSummary.tsx` | Per-series min/avg/max for the run's server-vitals scrape, under the Performance tab's chart. Present whenever `report.monitor` is - including the run whose every scrape failed, which has a failure count and no line to draw, and read as an unexplained empty chart before it |
@@ -1656,8 +1656,24 @@ The file keeps the name it was given for the load-mode block it was written for.
 ## Test Validation Summary (`components/shared/TestValidationSummary.tsx`)
 
 Whether a load run's own `pm.test` assertions passed (`RunReport.testValidation`,
-issue #726): samples tested, assertions passed and failed, the success rate, and
-- for the surfaces that have nowhere else to put them - the named failures.
+issue #726): responses tested, assertions passed and failed, the assertion success
+rate, and - for the surfaces that have nowhere else to put them - the named failures.
+
+**The labels name the unit** (issue #2144): the engine's `samplesTested` counts
+*responses* and `testsPassed` / `testsFailed` count *assertions*, which are different
+quantities (a script with three `pm.test` calls over 100 responses makes 300), so the
+cells read "Responses tested", "Assertions passed", "Assertions failed" and "Assertion
+success rate". The wire keys are unchanged. Every count goes through `formatNumber`.
+
+**The optional `totalRequests` prop** (both callers pass `summary.totalRequests`) adds
+one line, "Tested N of M requests. The rest had no response or were not kept." - or
+"Tested all M requests." when nothing was left out. The gap is deliberately not worded
+as "displaced": a request that errored before a response has nothing to test, so
+`M - N` is not `sampling.responseSamplesDropped`. It is omitted when the prop is
+undefined or 0, never "of 0". The line states no uniformity; `SampleRetentionNote`
+beneath it stays the one place that does, because only it reads
+`responseSampleBudgetSpent` and so never claims a uniform sample for a run whose byte
+budget was spent.
 
 It is the **assertion** counterpart of `SampledSchemaValidation` above it: that
 one judges a response against the contract the run was planned with, this one
@@ -1687,6 +1703,21 @@ it, and the status-0 code alone would also match a real connection failure.
 Absent-vs-zero, as everywhere in this family: a run that asserted nothing has no
 `testValidation` at all and renders **nothing**. A shorter failure list than
 `totalFailed` says "Showing N of M" rather than reading as the whole set.
+
+## Element Tally (`components/shared/ElementTally.tsx`)
+
+One element's row - its `kind` and the passed / failed / skipped counts, tallied across
+a load run (issue #2144 extracted it from two hand-rolled copies). Both
+`RequestElementsSummary` (a single-request run's Elements card) and `ScenarioStepsTab`
+(the per-step rows) render it, so a field added to the tally reaches both.
+
+A row with `deferred > 0` - a `script.post` the load path left to the post-run replay -
+reads "replayed on N sampled responses - results in Test Validation" instead of "0
+passed", because its verdicts live in the Test Validation card, not in the row. Passed,
+failed and skipped still print beside it when non-zero. A `script.pre` that was not
+inlined stays `skipped`: it has no replay. `deferred` is absent from a report stored
+before the engine wrote it, and such a row keeps the older "N passed / N skipped"
+reading; there is no fallback that guesses a script from its zeros.
 
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 

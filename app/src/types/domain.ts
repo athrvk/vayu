@@ -2196,12 +2196,20 @@ export interface LoadTestMetrics {
 }
 
 /**
- * One element's pass/fail/skip tally within a load run's step, from
+ * One element's pass/fail/skip/defer tally within a load run's step, from
  * `scenario.steps[i].elements` (`StepElementTallies::build`,
  * `engine/src/core/scenario_load.cpp`) - the load-path sibling of the
  * sequential run's per-execution {@link ElementOutcome}. Aggregated across
  * every virtual user and iteration rather than one outcome per execution,
  * which is why the shape is a set of counts instead of a single `outcome`.
+ *
+ * `deferred` counts a post-request script (`script.post`) that the load path
+ * left to the post-run replay against the sampled responses (issue #2144), so
+ * its verdicts are in {@link RunReport.testValidation}, not in `passed` or
+ * `failed`. It is **not** a kind of `skipped`: a script that did not run at
+ * all (an un-inlined `script.pre`, a disabled element) stays `skipped`.
+ * Absent from a report stored before #2144, which tallied the replayed script
+ * as `skipped`; those rows keep their stored numbers.
  */
 export interface RunScenarioStepElementTally {
 	id: string;
@@ -2209,6 +2217,7 @@ export interface RunScenarioStepElementTally {
 	passed: number;
 	failed: number;
 	skipped: number;
+	deferred?: number;
 }
 
 /**
@@ -2669,7 +2678,7 @@ export interface RunReport {
 	 * {@link RunReport.scenario} instead - the two never coexist) and for a
 	 * single-request run that declared no `requestElements`, or one whose
 	 * elements never ran. Reuses {@link RunScenarioStepElementTally}: both
-	 * come off the same `{id, kind, passed, failed, skipped}` tally shape.
+	 * come off the same `{id, kind, passed, failed, skipped, deferred}` tally shape.
 	 */
 	elements?: RunScenarioStepElementTally[];
 	/**

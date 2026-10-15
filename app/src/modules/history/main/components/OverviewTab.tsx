@@ -148,6 +148,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 				sampling={report.sampling}
 				failures={testFailures?.messages}
 				failuresTotal={testFailures?.total}
+				totalRequests={report.summary.totalRequests}
 			/>
 
 			{/* When the run went wrong, in words. Above the status/error totals

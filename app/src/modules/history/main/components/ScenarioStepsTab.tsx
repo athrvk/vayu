@@ -29,7 +29,7 @@
 import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { TruncatedText } from "@/components/shared";
+import { ElementTally, TruncatedText } from "@/components/shared";
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
@@ -224,24 +224,7 @@ export default function ScenarioStepsTab({
 										className="border-b last:border-b-0 bg-muted/20"
 									>
 										<td colSpan={8} className="px-3 py-1.5 pl-9">
-											<div className="flex items-center gap-2 text-xs">
-												<span className="text-muted-foreground font-mono">
-													{element.kind}
-												</span>
-												<span className="font-mono text-status-success-text">
-													{formatNumber(element.passed)} passed
-												</span>
-												{element.failed > 0 && (
-													<span className="font-mono text-status-error-text">
-														{formatNumber(element.failed)} failed
-													</span>
-												)}
-												{element.skipped > 0 && (
-													<span className="font-mono text-muted-foreground">
-														{formatNumber(element.skipped)} skipped
-													</span>
-												)}
-											</div>
+											<ElementTally element={element} className="text-xs" />
 										</td>
 									</tr>
 								))}
