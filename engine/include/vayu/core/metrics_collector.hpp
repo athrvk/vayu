@@ -500,6 +500,20 @@ class MetricsCollector {
     const Response* capture_source = nullptr);
 
     /**
+     * @brief Record a request a user Stop cancelled before it answered (#2136).
+     *
+     * Lock-free, and deliberately nothing else: not total_requests_, not the
+     * status-code distribution, not the error store, no latency. A cancelled
+     * request is neither a success nor an error, so every figure derived from
+     * those (success count, error rate, throughput) stays a statement about
+     * requests that got an outcome. `RunContext::in_flight` reads cancelled()
+     * beside total_requests() so the slot is still released.
+     */
+    void record_cancelled () {
+        cancelled_.fetch_add (1, std::memory_order_relaxed);
+    }
+
+    /**
      * @brief Number of error records discarded because the store was full.
      * Non-zero means errors() (and the flushed results) are a prefix, not the
      * whole set - total_errors() remains exact.
@@ -752,6 +766,14 @@ class MetricsCollector {
      */
     [[nodiscard]] size_t total_errors () const {
         return total_errors_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Requests a user Stop cancelled: sent, never answered, and in
+     *        neither total_requests() nor any error count (#2136).
+     */
+    [[nodiscard]] size_t cancelled () const {
+        return cancelled_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -1017,6 +1039,7 @@ class MetricsCollector {
     // Lock-free atomic counters for real-time stats
     std::atomic<size_t> total_requests_{ 0 };
     std::atomic<size_t> total_errors_{ 0 };
+    std::atomic<size_t> cancelled_{ 0 };
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
     std::atomic<double> total_queue_wait_sum_{ 0.0 };

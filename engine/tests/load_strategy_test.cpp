@@ -579,11 +579,98 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     EXPECT_EQ (payload["status_codes"]["404"].get<size_t> (), 1u);
 }
 
+// #2136: the persisted tick carries the Stop-cancelled count beside the error
+// split, which does not include it.
+TEST_F (LoadStrategyTest, MetricTickPayloadCarriesTheCancelledCount) {
+    vayu::core::MetricTickSample sample;
+    sample.cancelled = 4;
+    auto payload     = vayu::core::build_metric_tick_payload (sample);
+    ASSERT_TRUE (payload.contains ("cancelled"));
+    EXPECT_EQ (payload["cancelled"].get<size_t> (), 4u);
+}
+
+namespace {
+/** The Error the event loop completes a cancelled transfer with. */
+vayu::Result<vayu::Response> cancellation_result () {
+    return vayu::Result<vayu::Response> (
+    vayu::Error{ vayu::ErrorCode::Cancelled, "Request cancelled" });
+}
+} // namespace
+
+// #2136: a transfer a user Stop cancelled is not an error. It is counted on
+// its own, outside total_requests and the status distribution - and it still
+// releases its in-flight slot, or the closed-loop controller would see a
+// phantom request for every one the Stop cancelled.
+TEST_F (LoadStrategyTest, StopCancelledResultIsCountedApartFromErrors) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-stop-cancelled", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    context->should_stop = true;
+    vayu::core::handle_result (context, db, cancellation_result ());
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.cancelled (), 1u);
+    EXPECT_EQ (mc.total_errors (), 0u);
+    EXPECT_EQ (context->total_requests (), 0u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_TRUE (mc.status_code_distribution ().empty ())
+    << "a cancelled request has no status, not status 0";
+    EXPECT_TRUE (mc.errors ().empty ());
+
+    const auto stats = mc.get_current_stats (0, 1.0, 1);
+    EXPECT_EQ (stats["totalErrors"].get<size_t> (), 0u);
+    EXPECT_EQ (stats["cancelled"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 0.0);
+}
+
+// The same result at a run's natural end is the drain deadline cancelling a
+// request that never answered, and stays an error under its own type.
+TEST_F (LoadStrategyTest, DrainDeadlineCancellationIsStillAnError) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-drain-cancelled", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (context, db, cancellation_result ());
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.cancelled (), 0u);
+    EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_EQ (context->total_requests (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    const auto dist = mc.status_code_distribution ();
+    ASSERT_EQ (dist.count (0), 1u);
+    EXPECT_EQ (dist.at (0), 1u);
+    ASSERT_EQ (mc.errors ().size (), 1u);
+    EXPECT_NE (mc.errors ().front ().trace_data.find ("\"cancelled\""), std::string::npos);
+}
+
+// A Stop does not turn every failure into a cancellation: only the event
+// loop's own cancellation is one.
+TEST_F (LoadStrategyTest, OtherErrorsDuringAStopStayErrors) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-stop-other-error", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    context->should_stop = true;
+    vayu::core::handle_result (context, db,
+    vayu::Result<vayu::Response> (
+    vayu::Error{ vayu::ErrorCode::InternalError, "Failed to create curl handle" }));
+
+    EXPECT_EQ (context->metrics_collector->cancelled (), 0u);
+    EXPECT_EQ (context->metrics_collector->total_errors (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+}
+
 // A transport-level Error result (curl-handle creation failure, or the
-// stop(false) cancellation drain) is a real completion. Dropping it would
-// leave requests_sent counted with no matching completion, so in_flight()
-// would stay permanently inflated and the closed-loop controller would keep
-// shrinking effective concurrency for the rest of the run.
+// natural-end drain cancelling what outlived its deadline) is a real
+// completion. Dropping it would leave requests_sent counted with no matching
+// completion, so in_flight() would stay permanently inflated and the
+// closed-loop controller would keep shrinking effective concurrency for the
+// rest of the run.
 TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "test-transport-error", nlohmann::json{ { "mode", "constant_rps" } });

@@ -1726,7 +1726,9 @@ the `vayu://run/{runId}/report` resource. An agent reading `errorRate` is told
 what counts: a status outside 2xx/3xx or no response, a 3xx being a success, with
 the `httpErrors` / `noResponse` split beside the count. The fields themselves are
 the engine's, passed through unchanged (see [What counts as an
-error](api-reference.md#what-counts-as-an-error)).
+error](api-reference.md#what-counts-as-an-error)), including the separate
+`cancelled` / `cancelledRequests` count of requests a Stop cancelled, which is
+no error (issue #2136).
 
 ## Safety model
 

@@ -111,10 +111,10 @@ void complete_transfer (TransferData& data, Result<Response> result) {
  * that never left the pending queue - go through here, so a stopped run's
  * accounting sees one shape rather than two. The result is an Error rather
  * than a zero-status Response because no response was ever received;
- * load_strategy::handle_result records it against the run.
+ * load_strategy::handle_result decides from the run whether it is an error.
  */
 void complete_as_cancelled (TransferData& data) {
-    complete_transfer (data, Error{ ErrorCode::InternalError, "Request cancelled" });
+    complete_transfer (data, Error{ ErrorCode::Cancelled, "Request cancelled" });
 }
 
 } // namespace

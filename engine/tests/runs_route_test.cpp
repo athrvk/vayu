@@ -1084,6 +1084,46 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_EQ (body["testValidation"]["testsFailed"].get<int> (), 1);
 }
 
+// #2136: a healthy run stopped with requests in flight reports what the Stop
+// cancelled on its own line, and errorRate 0 - the cancelled requests are in
+// neither the total nor the failed count.
+TEST_F (RunsRouteTest, ReportCountsStopCancelledRequestsApartFromErrors) {
+    seed ({ .id = "run_stopped", .status = vayu::RunStatus::Stopped, .start_time = 1000 });
+    auto inputs           = summary_inputs ();
+    inputs.total_requests = 70000;
+    inputs.status_codes   = { { 200, 70000 } };
+    inputs.cancelled      = 10;
+    db_->update_run_summary (
+    "run_stopped", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_stopped");
+    ASSERT_EQ (status, 200);
+
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary["cancelledRequests"].get<size_t> (), 10u);
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 70000u);
+    EXPECT_EQ (summary["successfulRequests"].get<size_t> (), 70000u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 0u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 0.0);
+    EXPECT_EQ (body["errors"]["total"].get<size_t> (), 0u);
+}
+
+// A summary stored before the key existed still answers the field, as 0, so a
+// reader never has to tell "absent" from "none".
+TEST_F (RunsRouteTest, ReportReadsZeroCancelledFromAnOlderSummary) {
+    seed ({ .id = "run_older", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_TRUE (stored.contains ("cancelled"));
+    stored.erase ("cancelled");
+    db_->update_run_summary ("run_older", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_older");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body["summary"].contains ("cancelledRequests"));
+    EXPECT_EQ (body["summary"]["cancelledRequests"].get<size_t> (), 0u);
+}
+
 // Every store a run keeps is bounded, so the report has to say how much each
 // one thinned away - a Samples tab showing 1000 traces from a 3M-request run
 // is honest only if the reader can also see that 29,000 candidates were

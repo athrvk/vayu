@@ -988,16 +988,18 @@ struct RunContext {
     [[nodiscard]] size_t total_requests () const {
         return metrics_collector ? metrics_collector->total_requests () : 0;
     }
-    // True in-flight requests: submitted but not yet completed (success or
-    // error). This is the correct quantity for the maxInFlight cap and ramp
-    // backpressure, unlike EventLoop::pending_count() which only measures the
+    // True in-flight requests: submitted but not yet settled (success, error,
+    // or cancelled by a Stop - which total_requests() leaves out, #2136). This
+    // is the correct quantity for the maxInFlight cap and ramp backpressure,
+    // unlike EventLoop::pending_count() which only measures the
     // submission-queue depth that workers drain to ~0. The subtraction is
     // guarded against size_t underflow because requests_sent (written by the
-    // strategy thread) and total_requests (written by worker callbacks) are
-    // read with relaxed ordering and may momentarily disagree.
+    // strategy thread) and the completion counters (written by worker
+    // callbacks) are read with relaxed ordering and may momentarily disagree.
     [[nodiscard]] size_t in_flight () const {
         size_t sent = requests_sent.load ();
-        size_t done = total_requests ();
+        size_t done = total_requests () +
+        (metrics_collector ? metrics_collector->cancelled () : 0);
         size_t base = sent > done ? sent - done : 0;
         // A run with no `timer.think` element (the overwhelming common case)
         // never reserves one, so this is one relaxed load and nothing else -
@@ -1060,6 +1062,7 @@ struct MetricTickSample {
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
     size_t http_errors         = 0; // Of the errors, those that got a response
     size_t no_response         = 0; // Of the errors, those that got none
+    size_t cancelled           = 0; // By a Stop; in none of the above (#2136)
     double current_rps         = 0.0;
     size_t current_concurrency = 0;
     double send_rate           = 0.0;
@@ -1224,6 +1227,7 @@ struct SamplingRetention {
  */
 struct RunSummaryInputs {
     size_t total_requests    = 0;
+    size_t cancelled         = 0; // By a Stop; not in total_requests (#2136)
     double rps               = 0.0;
     double send_rate         = 0.0;
     double throughput        = 0.0;

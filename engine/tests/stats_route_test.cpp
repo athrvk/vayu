@@ -173,6 +173,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "requests_failed", nlohmann::json::value_t::number_unsigned },
         { "http_errors", nlohmann::json::value_t::number_unsigned },
         { "no_response", nlohmann::json::value_t::number_unsigned },
+        { "cancelled", nlohmann::json::value_t::number_unsigned },
         { "current_rps", nlohmann::json::value_t::number_float },
         { "current_concurrency", nlohmann::json::value_t::number_unsigned },
         { "send_rate", nlohmann::json::value_t::number_float },

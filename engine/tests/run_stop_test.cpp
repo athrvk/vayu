@@ -216,7 +216,9 @@ class RunStopAccountingTest : public EventLoopStopTest {
 
 // A stopped run's books balance: every request it submitted is accounted for,
 // so in_flight() lands at zero instead of reporting requests that were
-// cancelled and then silently discarded by handle_result.
+// cancelled and then silently discarded by handle_result. Against an upstream
+// that never answers, every one of them was cancelled by the Stop, which is
+// not an error (#2136).
 TEST_F (RunStopAccountingTest, StoppedRunAccountsForItsCancelledRequests) {
     nlohmann::json config = { { "mode", "constant_rps" }, { "duration", "30s" },
         { "targetRps", 50.0 }, { "maxInFlight", 1000 } };
@@ -245,13 +247,13 @@ TEST_F (RunStopAccountingTest, StoppedRunAccountsForItsCancelledRequests) {
     << "a stopped run took " << elapsed << "ms to wind down against a hung upstream";
     ASSERT_GT (context->requests_sent.load (), 0u)
     << "nothing was submitted; nothing is proven";
-    EXPECT_EQ (context->total_requests (), context->requests_sent.load ())
+    EXPECT_EQ (context->metrics_collector->cancelled (), context->requests_sent.load ())
     << "cancelled requests were submitted but never recorded";
     EXPECT_EQ (context->in_flight (), 0u);
-    EXPECT_EQ (
-    context->metrics_collector->total_errors (), context->requests_sent.load ())
-    << "a request cancelled before it got a response is an error, not a "
-       "success";
+    EXPECT_EQ (context->total_requests (), 0u);
+    EXPECT_EQ (context->metrics_collector->total_errors (), 0u)
+    << "a request the Stop cancelled is not an error";
+    EXPECT_TRUE (context->metrics_collector->status_code_distribution ().empty ());
 }
 
 // The acceptance criterion end to end: a real run, started through RunManager
@@ -320,6 +322,15 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
 
     EXPECT_LE (context->requests_sent.load () - sent_at_stop, 10u)
     << "the run kept submitting requests after the stop was signalled";
+
+    // #2136: the stored summary is the only record of what the Stop cancelled
+    // - nothing answered, so the status distribution holds none of it.
+    const auto summary = nlohmann::json::parse (stored->summary);
+    ASSERT_TRUE (summary.contains ("cancelled")) << stored->summary;
+    EXPECT_EQ (summary["cancelled"].get<size_t> (), context->requests_sent.load ());
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 0u);
+    EXPECT_FALSE (summary["status_codes"].contains ("0"))
+    << "a cancelled request was recorded as a request with no response";
 }
 
 // ---------------------------------------------------------------------------
