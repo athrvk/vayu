@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { MAX_RESPONSE_SAMPLES, RESPONSE_SAMPLE_PERIOD } from "@/constants/load-test";
 import { requestsPhrase } from "./summary";
 import type { DraftErrors } from "./validation";
@@ -44,6 +45,11 @@ export interface NoticeInputs extends DraftErrors {
 	defaultHeaderDifference: string | null;
 	/** Set only for a host that is not local; never gates Start (#2117). */
 	remoteTarget: RemoteTarget | null;
+	/**
+	 * Budgets the dialog opened with that the user did not type this time
+	 * (issue #2194): the sentence naming them, and what clears exactly those.
+	 */
+	carriedBudgets?: { summary: string; onClear: () => void } | null;
 }
 
 /**
@@ -63,6 +69,7 @@ export function buildNotices({
 	scriptsOverride,
 	defaultHeaderDifference,
 	remoteTarget,
+	carriedBudgets,
 }: NoticeInputs): Notice[] {
 	const list: Notice[] = [];
 
@@ -191,6 +198,25 @@ export function buildNotices({
 				<Callout severity="info" title="This target is not on your machine or network">
 					Starting sends {sendsPhrase(remoteTarget)} to{" "}
 					<span className="font-mono">{remoteTarget.host}</span>.
+				</Callout>
+			),
+		});
+	}
+
+	if (carriedBudgets) {
+		list.push({
+			key: "carried-budgets",
+			severity: "info",
+			node: (
+				<Callout
+					severity="info"
+					action={
+						<Button size="sm" variant="outline" onClick={carriedBudgets.onClear}>
+							Clear carried-over budgets
+						</Button>
+					}
+				>
+					{carriedBudgets.summary}
 				</Callout>
 			),
 		});

@@ -31,6 +31,7 @@ import {
 import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import type { Collection, Request } from "@/types";
+import { BUDGETS_EXPLAINER } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
 
 const mutate = vi.fn();
 const startRunState = {
@@ -934,7 +935,30 @@ describe("the elements override", () => {
  * blocks Run, and that neither is gated by the Load test switch.
  */
 describe("pass/fail budgets", () => {
-	const openBudgets = () => fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+	const openBudgets = () =>
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
+
+	it("says on the closed card that no budget is active, and counts them as they are declared", () => {
+		// Mutation check: drop `summary` from the DisclosureCard and both reds.
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		const card = () => screen.getByRole("button", { name: /pass\/fail budgets/i });
+		expect(card()).toHaveTextContent("No budgets");
+
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		expect(card()).toHaveTextContent("1 budget active - Error rate at most 0.1%");
+		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
+		expect(card()).toHaveTextContent("2 budgets active");
+	});
+
+	it("uses the explainer the load-test dialog shows, without a latency hint it never seeds", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+
+		expect(screen.getByText(BUDGETS_EXPLAINER)).toBeInTheDocument();
+		// Nothing seeds p99 here, so the Settings hint would be false.
+		expect(screen.queryByText(/SLO threshold/)).not.toBeInTheDocument();
+	});
 
 	it("sends no thresholds at all when nothing is declared", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);

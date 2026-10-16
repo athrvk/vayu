@@ -10,7 +10,13 @@ import { Label, Switch } from "@/components/ui";
 import { CopyForAgentButton, NumberField } from "@/components/shared";
 import { thresholdReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { DisclosureCard } from "./DisclosureCard";
-import { BUDGET_FIELDS, type BudgetDraft, type CustomBudgetDraft } from "./budgets";
+import {
+	BUDGETS_EXPLAINER,
+	BUDGET_FIELDS,
+	summariseBudgets,
+	type BudgetDraft,
+	type CustomBudgetDraft,
+} from "./budgets";
 import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
 
 interface BudgetsSectionProps {
@@ -40,12 +46,13 @@ export function BudgetsSection({
 	const [open, setOpen] = useState(false);
 
 	return (
-		<DisclosureCard open={open} onOpenChange={setOpen} title="Pass/fail budgets">
-			<p className="text-label leading-relaxed text-muted-foreground">
-				The run is judged against whatever you declare here and reports a verdict. Leave a
-				field blank to skip that budget; leave them all blank and the run is measured but
-				not judged, as before.
-			</p>
+		<DisclosureCard
+			open={open}
+			onOpenChange={setOpen}
+			title="Pass/fail budgets"
+			summary={summariseBudgets(budgets, customBudgets)}
+		>
+			<p className="text-label leading-relaxed text-muted-foreground">{BUDGETS_EXPLAINER}</p>
 			{BUDGET_FIELDS.map((field) => (
 				<NumberField
 					key={field.key}
@@ -58,7 +65,7 @@ export function BudgetsSection({
 					min={field.min}
 					max={field.max}
 					placeholder="No budget"
-					hint={field.hint}
+					hint={field.seededHint ?? field.hint}
 					action={
 						referenceOwner && (
 							<CopyForAgentButton

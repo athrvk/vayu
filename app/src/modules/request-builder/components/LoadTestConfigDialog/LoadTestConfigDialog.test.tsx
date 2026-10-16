@@ -1009,8 +1009,9 @@ describe("ceilings from Settings", () => {
  * the user already has rather than adding a second notion of "too slow".
  */
 describe("pass/fail budgets", () => {
-	const openBudgets = () => fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
-	const p99 = () => screen.getByLabelText(/p99 latency/i) as HTMLInputElement;
+	const openBudgets = () =>
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
+	const p99 = () => screen.getByLabelText(/^p99 latency/i) as HTMLInputElement;
 
 	it("prefills the p99 budget from the capacity SLO rather than inventing a default", () => {
 		// `sloThresholdMs` existed as a chart annotation and never reached the
@@ -1122,6 +1123,185 @@ describe("pass/fail budgets", () => {
 		openBudgets();
 		expect(p99().value).toBe("");
 		expect(started(second.onStart).thresholds).toBeUndefined();
+	});
+
+	/*
+	 * What the closed card and the notice stack say about the budgets that will
+	 * judge the run (issue #2194). The wording rules are `budgets.ts`'s and
+	 * `carried-budgets.ts`'s; these pin that the dialog shows them.
+	 */
+	describe("what is active and what was carried over (#2194)", () => {
+		const seedMemo = (memo: Record<string, unknown>) =>
+			localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(memo));
+		const trigger = () => screen.getByRole("button", { name: /pass\/fail budgets/i });
+		const clearCarriedButton = () =>
+			screen.queryByRole("button", { name: "Clear carried-over budgets" });
+		const carriedNotice = () => screen.queryByText(/budgets (carried over|prefilled)/i);
+
+		it("names the seeded p99 on the closed card", () => {
+			// Mutation check: drop the `summary` prop from BudgetsSection and this
+			// reds - the card is silent again.
+			useClientSettingsStore.getState().setSloThresholdMs(200);
+			open();
+			expect(trigger()).toHaveTextContent("1 budget active - p99 latency at most 200 ms");
+		});
+
+		it("counts several budgets and says none once they are cleared", () => {
+			seedMemo({ budgets: { latencyP99Ms: "100", maxErrorRatePct: "1" } });
+			open();
+			expect(trigger()).toHaveTextContent("2 budgets active");
+
+			openBudgets();
+			fireEvent.change(p99(), { target: { value: "" } });
+			fireEvent.change(screen.getByLabelText(/error rate at most/i), {
+				target: { value: "" },
+			});
+			expect(trigger()).toHaveTextContent("No budgets");
+		});
+
+		it("counts a custom row alongside the fixed fields", () => {
+			seedMemo({
+				budgets: { latencyP99Ms: "" },
+				customBudgets: [{ id: "c1", name: "cart", stat: "p95", value: "5" }],
+			});
+			open();
+			expect(trigger()).toHaveTextContent("1 budget active - custom.cart.p95 at most 5");
+		});
+
+		it("keeps the summary on the card while it is open", () => {
+			open();
+			openBudgets();
+			expect(trigger()).toHaveTextContent("1 budget active");
+		});
+
+		it("explains the card without leaning on a history the user may not have", () => {
+			open();
+			openBudgets();
+			expect(
+				screen.getByText(/with every field blank the run is measured but not judged/i)
+			).toBeInTheDocument();
+			expect(screen.queryByText(/as before/i)).not.toBeInTheDocument();
+			expect(
+				screen.getByText(/Starts from Settings > Dashboard > SLO threshold/)
+			).toBeInTheDocument();
+		});
+
+		it("names the request whose Start set the carried budgets", () => {
+			seedMemo({
+				budgets: { latencyP99Ms: "150", maxErrorRatePct: "2" },
+				budgetsFrom: { requestName: "Orders" },
+			});
+			open();
+			expect(carriedNotice()).toHaveTextContent(
+				'Budgets carried over from "Orders": p99 latency at most 150 ms, Error rate at most 2%. They will judge this run.'
+			);
+		});
+
+		it("falls back to the last load test for a memo that predates the origin", () => {
+			seedMemo({ budgets: { latencyP99Ms: "150" } });
+			open();
+			expect(carriedNotice()).toHaveTextContent("carried over from your last load test");
+		});
+
+		it("says a first-run p99 came from the SLO setting rather than from a past run", () => {
+			useClientSettingsStore.getState().setSloThresholdMs(200);
+			open();
+			expect(carriedNotice()).toHaveTextContent(
+				"Budgets prefilled: p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+			);
+			expect(carriedNotice()).not.toHaveTextContent(/last load test/);
+		});
+
+		it("clears exactly the carried budgets and sends no thresholds", () => {
+			seedMemo({
+				budgets: { latencyP99Ms: "150", maxErrorRatePct: "2" },
+				budgetsFrom: { requestName: "Orders" },
+			});
+			const { onStart } = open();
+			// A budget the user adds on top is theirs and must survive the clear.
+			openBudgets();
+			fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "500" } });
+
+			fireEvent.click(clearCarriedButton()!);
+
+			expect(p99().value).toBe("");
+			expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(null);
+			expect(screen.getByLabelText(/throughput/i)).toHaveValue(500);
+			expect(carriedNotice()).not.toBeInTheDocument();
+			expect(started(onStart).thresholds).toEqual({ minThroughputRps: 500 });
+		});
+
+		it("clears a carried custom row and keeps one added since", () => {
+			seedMemo({
+				budgets: { latencyP99Ms: "" },
+				customBudgets: [{ id: "c1", name: "cart", stat: "p95", value: "5" }],
+			});
+			const { onStart } = open();
+			openBudgets();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 2 metric name/i), {
+				target: { value: "mine" },
+			});
+			fireEvent.change(screen.getByLabelText(/custom budget 2 ceiling/i), {
+				target: { value: "9" },
+			});
+
+			fireEvent.click(clearCarriedButton()!);
+
+			expect(started(onStart).thresholds).toEqual({ "custom.mine.p50": 9 });
+		});
+
+		it("stops claiming a budget once the user edits it", () => {
+			seedMemo({ budgets: { latencyP99Ms: "150" }, budgetsFrom: { requestName: "Orders" } });
+			open();
+			openBudgets();
+			fireEvent.change(p99(), { target: { value: "90" } });
+			expect(carriedNotice()).not.toBeInTheDocument();
+		});
+
+		it("says nothing about a budget the memo recorded as cleared", () => {
+			seedMemo({ budgets: { latencyP99Ms: "" } });
+			open();
+			expect(carriedNotice()).not.toBeInTheDocument();
+		});
+
+		it("attributes the budgets to this request on a Start that changed them", () => {
+			seedMemo({ budgets: { latencyP99Ms: "150" }, budgetsFrom: { requestName: "Orders" } });
+			const { onStart } = open({
+				referenceOwner: { type: "request", request: { id: "req_9", name: "Invoices" } },
+			});
+			openBudgets();
+			fireEvent.change(p99(), { target: { value: "90" } });
+			started(onStart);
+
+			cleanup();
+			open();
+			expect(carriedNotice()).toHaveTextContent('carried over from "Invoices"');
+		});
+
+		it("keeps naming the original request when a Start leaves the budgets alone", () => {
+			seedMemo({ budgets: { latencyP99Ms: "150" }, budgetsFrom: { requestName: "Orders" } });
+			const { onStart } = open({
+				referenceOwner: { type: "request", request: { id: "req_9", name: "Invoices" } },
+			});
+			started(onStart);
+
+			cleanup();
+			open();
+			expect(carriedNotice()).toHaveTextContent('carried over from "Orders"');
+		});
+
+		it("falls back to the last load test when the changing Start had no saved request", () => {
+			seedMemo({ budgets: { latencyP99Ms: "150" }, budgetsFrom: { requestName: "Orders" } });
+			const { onStart } = open();
+			openBudgets();
+			fireEvent.change(p99(), { target: { value: "90" } });
+			started(onStart);
+
+			cleanup();
+			open();
+			expect(carriedNotice()).toHaveTextContent("carried over from your last load test");
+		});
 	});
 
 	it("hands the saved request to each budget's Copy for agent (#2047)", () => {
@@ -1295,7 +1475,7 @@ describe("a saved config missing a field a newer build added", () => {
 			})
 		);
 		open();
-		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
 		expect(screen.getByLabelText(/p99 latency at most/i)).toHaveValue(500);
 		expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(2);
 	});
@@ -1491,7 +1671,7 @@ describe("the target (issue #2117)", () => {
 
 	it("withholds the count while a blocking error is live, as the summary does", () => {
 		open({ url: "https://api.example.com/" });
-		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
 		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
 
 		const advisory = screen.getByText(ADVISORY).parentElement;

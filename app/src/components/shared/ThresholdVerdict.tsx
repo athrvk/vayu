@@ -27,8 +27,10 @@
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { thresholdReference } from "@/lib/agent-reference";
 import { cn } from "@/lib/utils";
+import { formatDuration } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types/domain";
 import { CopyForAgentButton } from "./CopyForAgentButton";
+import type { StoppedRun } from "./stopped-run";
 import { THRESHOLD_METRICS } from "./threshold-metrics";
 
 /** Trailing zeros are noise on a budget the user typed as a whole number. */
@@ -36,14 +38,39 @@ function formatValue(value: number): string {
 	return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
+/** Prose-sized: "3s", "1m", never "1m 0s". */
+function formatSpan(seconds: number): string {
+	return formatDuration(seconds * 1000, { omitZeroUnit: true });
+}
+
+/**
+ * The verdict's pass/fail counts are the engine's and stay as they are; this
+ * only says how much of the plan they were judged over. The planned span is
+ * dropped once the run reached it (a stop in the last instant), where "of a
+ * planned" would describe a shortfall that did not happen.
+ */
+function stoppedNote({ elapsedSeconds, plannedSeconds }: StoppedRun): string {
+	const judged = "Judged on what was measured up to that point.";
+	if (elapsedSeconds === undefined) return `Run stopped early. ${judged}`;
+	const after = `Run stopped after ${formatSpan(elapsedSeconds)}`;
+	if (plannedSeconds === undefined || elapsedSeconds >= plannedSeconds)
+		return `${after}. ${judged}`;
+	return `${after} of a planned ${formatSpan(plannedSeconds)}. ${judged}`;
+}
+
 export interface ThresholdVerdictProps {
 	verdict: RunReport["thresholdValidation"];
+	/**
+	 * Present for a run that was stopped (`stoppedRunOf`): the card then says the
+	 * verdict covers only what ran. Absent for every other run.
+	 */
+	stopped?: StoppedRun;
 	/** The run that was judged; each check's "Copy for agent" is absent without it. */
 	runId?: string;
 	className?: string;
 }
 
-export function ThresholdVerdict({ verdict, runId, className }: ThresholdVerdictProps) {
+export function ThresholdVerdict({ verdict, runId, stopped, className }: ThresholdVerdictProps) {
 	if (!verdict || verdict.checks.length === 0) return null;
 
 	const failed = verdict.failed > 0;
@@ -84,10 +111,13 @@ export function ThresholdVerdict({ verdict, runId, className }: ThresholdVerdict
 				</Badge>
 			</CardHeader>
 			<CardContent>
-				<p className="mb-3 text-xs text-muted-foreground">
+				<p className={cn("text-xs text-muted-foreground", stopped ? "mb-1" : "mb-3")}>
 					{verdict.passed} of {verdict.passed + verdict.failed} budgets met
 					{unmeasurable > 0 ? `, ${unmeasurable} not measurable` : ""}.
 				</p>
+				{stopped && (
+					<p className="mb-3 text-xs text-muted-foreground">{stoppedNote(stopped)}</p>
+				)}
 				<ul className="space-y-1.5">
 					{verdict.checks.map((check) => {
 						const meta = THRESHOLD_METRICS[check.metric];

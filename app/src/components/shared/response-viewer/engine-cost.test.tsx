@@ -84,4 +84,10 @@ describe("the hover sentence", () => {
 		expect(ENGINE_COST_TIP).not.toMatch(/\u2014/);
 		expect(ENGINE_COST_TIP).not.toMatch(/\d/);
 	});
+
+	// A first-use OAuth 2.0 token fetch is the identity provider's wait and the
+	// engine leaves it out (#2185); the tip must not claim it as Vayu's.
+	it("does not claim a token fetch as Vayu's cost", () => {
+		expect(ENGINE_COST_TIP).not.toMatch(/token/i);
+	});
 });

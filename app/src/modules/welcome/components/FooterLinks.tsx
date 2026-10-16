@@ -27,9 +27,16 @@ export function FooterLinks() {
 			<button
 				type="button"
 				className={linkClass}
-				onClick={() => openTab({ type: "settings", entityId: null })}
+				onClick={() => window.electronAPI?.openAppLink("docs")}
 			>
-				Settings
+				Documentation
+			</button>
+			<button
+				type="button"
+				className={linkClass}
+				onClick={() => window.electronAPI?.openAppLink("mcp")}
+			>
+				Connect an agent (MCP)
 			</button>
 			<button
 				type="button"
@@ -41,16 +48,9 @@ export function FooterLinks() {
 			<button
 				type="button"
 				className={linkClass}
-				onClick={() => window.electronAPI?.openAppLink("docs")}
+				onClick={() => openTab({ type: "settings", entityId: null })}
 			>
-				Documentation
-			</button>
-			<button
-				type="button"
-				className={linkClass}
-				onClick={() => window.electronAPI?.openAppLink("mcp")}
-			>
-				Connect an agent (MCP)
+				Settings
 			</button>
 		</div>
 	);

@@ -39,6 +39,7 @@ export * from "./SampleRetentionNote";
 
 // "p99 was 47ms against a 50ms budget" - wherever a run's verdict is shown
 export * from "./ThresholdVerdict";
+export * from "./stopped-run";
 export * from "./CapacitySummary";
 export * from "./ContractCoverage";
 

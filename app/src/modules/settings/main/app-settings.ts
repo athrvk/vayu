@@ -412,7 +412,7 @@ export const APP_SETTINGS = [
 		panel: "shortcuts",
 		label: "Keyboard shortcuts",
 		searchText:
-			"Every chord the app listens for, listed for this platform - send, save, close tab, the drawer views and the tab digits.",
+			"Every chord the app listens for, listed for this platform - send, save, close tab, the sidebar views and the tab digits.",
 		keywords: ["hotkey", "keybinding", "chord", "accelerator", "cheat sheet"],
 	},
 

@@ -66,7 +66,7 @@ describe("an empty tab strip", () => {
 		// The chord is read from the registry here too: asserting "Ctrl+N" would
 		// be a test that passes only on the platform CI happens to run on.
 		const hint = screen.getByText(
-			`Open a request from the drawer, or press ${formatChord(NEW_REQUEST_CHORD)}`
+			`Open a request from the sidebar, or press ${formatChord(NEW_REQUEST_CHORD)}`
 		);
 		expect(hint).toBeInTheDocument();
 		expect(hint.className).toContain("text-muted-foreground");
@@ -88,7 +88,7 @@ describe("an empty tab strip", () => {
 			activeTabId: "t0",
 		});
 		renderStrip();
-		expect(screen.queryByText(/Open a request from the drawer/)).toBeNull();
+		expect(screen.queryByText(/Open a request from the sidebar/)).toBeNull();
 		expect(screen.getAllByRole("tab")).toHaveLength(1);
 	});
 });

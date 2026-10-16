@@ -177,6 +177,81 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText("0%")).toBeInTheDocument();
 	});
 
+	describe("on a stopped run (issue #2194)", () => {
+		const JUDGED = "Judged on what was measured up to that point.";
+
+		it("says how much of the plan the verdict covers, leaving the counts alone", () => {
+			// Mutation check: dropping the `stopped` branch removes the note;
+			// ignoring `plannedSeconds` prints "after 3s." with no "of a planned".
+			render(
+				<ThresholdVerdict
+					verdict={verdict()}
+					stopped={{ elapsedSeconds: 3, plannedSeconds: 20 }}
+				/>
+			);
+			expect(
+				screen.getByText(`Run stopped after 3s of a planned 20s. ${JUDGED}`)
+			).toBeInTheDocument();
+			expect(screen.getByText("1 of 1 budgets met.")).toBeInTheDocument();
+			expect(screen.getByText("Passed")).toBeInTheDocument();
+		});
+
+		it("keeps a failed verdict failed", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({ passed: 0, failed: 1, verdict: "failed" })}
+					stopped={{ elapsedSeconds: 3, plannedSeconds: 20 }}
+				/>
+			);
+			expect(screen.getByText("Failed")).toBeInTheDocument();
+			expect(screen.getByText("0 of 1 budgets met.")).toBeInTheDocument();
+		});
+
+		it("prints a planned minute as 1m, not 1m 0s", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict()}
+					stopped={{ elapsedSeconds: 75, plannedSeconds: 120 }}
+				/>
+			);
+			expect(
+				screen.getByText(`Run stopped after 1m 15s of a planned 2m. ${JUDGED}`)
+			).toBeInTheDocument();
+		});
+
+		it("drops the planned clause when the run declared no duration", () => {
+			render(<ThresholdVerdict verdict={verdict()} stopped={{ elapsedSeconds: 3 }} />);
+			expect(screen.getByText(`Run stopped after 3s. ${JUDGED}`)).toBeInTheDocument();
+		});
+
+		it("drops the planned clause once the run reached the plan", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict()}
+					stopped={{ elapsedSeconds: 20, plannedSeconds: 20 }}
+				/>
+			);
+			expect(screen.getByText(`Run stopped after 20s. ${JUDGED}`)).toBeInTheDocument();
+		});
+
+		it("says only that it stopped early when the elapsed time is unknown", () => {
+			render(<ThresholdVerdict verdict={verdict()} stopped={{ plannedSeconds: 20 }} />);
+			expect(screen.getByText(`Run stopped early. ${JUDGED}`)).toBeInTheDocument();
+		});
+
+		it("prints no note for a run that was not stopped", () => {
+			render(<ThresholdVerdict verdict={verdict()} />);
+			expect(screen.queryByText(/Run stopped/)).not.toBeInTheDocument();
+		});
+
+		it("prints no note when there is no verdict to qualify", () => {
+			const { container } = render(
+				<ThresholdVerdict verdict={undefined} stopped={{ elapsedSeconds: 3 }} />
+			);
+			expect(container).toBeEmptyDOMElement();
+		});
+	});
+
 	it("paints the verdict chip through the Badge primitive, radius included", () => {
 		// Rendered and read off `className`, not source-scanned: the colour
 		// arrives in a variable, and a box with *no* radius class is exactly

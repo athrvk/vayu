@@ -1543,7 +1543,7 @@ read and parsed per poll, to compute aggregates that never look at a body.
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
 latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
 spent queued inside the generator. A buffered design send adds a ninth, **`engineMs`** (#2132):
-Vayu's own cost for that exchange, the handler's elapsed time less `wireMs` and script time, taken
+Vayu's own cost for that exchange, the handler's elapsed time less `wireMs`, script time and an OAuth 2.0 token fetch, taken
 before the write (see [One timing
 convention](api-reference.md#post-execute)). No other writer stores it.
 

@@ -36,6 +36,7 @@ import type { ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
 import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTestConfig";
 import { buildNotices } from "./notices";
+import { budgetsChanged, clearCarried, describeCarried, stillCarried } from "./carried-budgets";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
@@ -204,6 +205,20 @@ export default function LoadTestConfigDialog({
 				}
 			: null;
 
+	// The carried fields the user has not edited since the dialog opened.
+	const carried = stillCarried(
+		initial.carried,
+		{ budgets: initial.budgets, customBudgets: initial.customBudgets },
+		{ budgets, customBudgets }
+	);
+	const carriedSummary = describeCarried(carried, budgets, customBudgets, initial.budgetsFrom);
+
+	const clearCarriedBudgets = () => {
+		const cleared = clearCarried(carried, budgets, customBudgets);
+		setBudgets(cleared.budgets);
+		setCustomBudgets(cleared.customBudgets);
+	};
+
 	const notices = buildNotices({
 		...errors,
 		hasPreRequestScript,
@@ -211,7 +226,25 @@ export default function LoadTestConfigDialog({
 		scriptsOverride,
 		defaultHeaderDifference,
 		remoteTarget,
+		carriedBudgets: carriedSummary
+			? { summary: carriedSummary, onClear: clearCarriedBudgets }
+			: null,
 	});
+
+	/**
+	 * The memo's budgets are attributed to this request only when this Start is
+	 * what changed them; an untouched carry keeps naming whoever set it.
+	 */
+	const budgetsOriginToSave = () => {
+		const changed = budgetsChanged(
+			{ budgets: initial.budgets, customBudgets: initial.customBudgets },
+			{ budgets, customBudgets }
+		);
+		if (!changed) return initial.budgetsFrom;
+		return referenceOwner?.type === "request"
+			? { requestName: referenceOwner.request.name }
+			: undefined;
+	};
 
 	const handleStart = () => {
 		if (blockingError) return;
@@ -225,6 +258,7 @@ export default function LoadTestConfigDialog({
 			slowThreshold,
 			saveTimingBreakdown,
 			budgets,
+			budgetsFrom: budgetsOriginToSave(),
 			customBudgets,
 			failRun,
 			monitor,
