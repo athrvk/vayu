@@ -139,7 +139,7 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
  * address is not one of these, and stays subject to the allowlist. Resolving it
  * here would make the guard's answer depend on the network it is asked on.
  */
-function isPrivateHost(host: string): boolean {
+export function isPrivateHost(host: string): boolean {
 	if (host === "localhost" || host.endsWith(".localhost")) return true;
 
 	if (host.startsWith("[") && host.endsWith("]")) {

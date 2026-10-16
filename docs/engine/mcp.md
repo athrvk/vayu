@@ -1815,6 +1815,10 @@ configurable in **Settings → MCP** and persisted.
   target's own `localhost:9100`. The test is textual, like the allowlist itself:
   a DNS name that *resolves* to a private address still needs an entry, because
   resolving it here would make the answer depend on the network it was asked on.
+  The renderer's load-test dialog uses the same classification to tell a local
+  target from a remote one (`isLocalHost` in `src/lib/host-locality.ts`, a mirror
+  of `isPrivateHost` that the main process cannot share);
+  `host-locality.conformance.test.ts` fails on any divergence.
   Because the check happens here, before the engine is called, a request sent
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
