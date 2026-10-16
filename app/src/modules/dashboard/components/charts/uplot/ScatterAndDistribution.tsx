@@ -20,6 +20,7 @@ import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { buildConcurrencyScatter } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
+import { hdrPercentileMarkers, pctToX } from "./hdrMarkers";
 
 /**
  * Response time vs virtual users - a scatter of (virtual users, p99), one point per
@@ -98,22 +99,18 @@ export function ResponseTimeVsConcurrencyChart({
 	);
 }
 
-/** Log-scale percentile → 0..1 x position (tail dominates), mirroring the old plot. */
-function pctToX(pct: number): number {
-	const p = Math.min(99.99, Math.max(0, pct));
-	if (p === 0) return 0;
-	return Math.log10(1 / (1 - p / 100)) / Math.log10(1 / (1 - 99.99 / 100));
-}
-
 const HDR_MARKS = [0, 50, 90, 95, 99, 99.9];
 
 /** HDR percentile distribution - latency at each percentile, tail-weighted x. */
 export function HdrPercentileChart({
 	report,
 	height,
+	sloMs,
 }: {
 	report: RunReport | null;
 	height?: number;
+	/** The SLO in ms. A p95/p99 marker takes a status colour only past it; omit it and none does. */
+	sloMs?: number;
 }) {
 	const data = useMemo<uPlot.AlignedData | null>(() => {
 		const lat = report?.latency;
@@ -138,18 +135,10 @@ export function HdrPercentileChart({
 		{ label: "latency", role: "categorical", kind: "area", width: 1.8, format: fmtMs },
 	];
 
-	const markers = useMemo<Marker[]>(() => {
-		const lat = report?.latency;
-		if (!lat) return [];
-		const out: Marker[] = [];
-		if (lat.p50 != null)
-			out.push({ orient: "vertical", value: pctToX(50), role: "success", label: "p50" });
-		if (lat.p95 != null)
-			out.push({ orient: "vertical", value: pctToX(95), role: "warning", label: "p95" });
-		if (lat.p99 != null)
-			out.push({ orient: "vertical", value: pctToX(99), role: "destructive", label: "p99" });
-		return out;
-	}, [report]);
+	const markers = useMemo<Marker[]>(
+		() => hdrPercentileMarkers(report?.latency, sloMs),
+		[report, sloMs]
+	);
 
 	if (!data) return null;
 	const xTickLabel = (x: number) => {
