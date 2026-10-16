@@ -51,7 +51,7 @@ import {
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type ImportResult } from "@/services/importers/types";
-import { describeCounts, importNotices } from "./import-notices";
+import { describeCarriedOver, describeCounts, importNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
@@ -1112,6 +1112,7 @@ function PreviewView({
 }) {
 	const { meta, collections, environments, globals } = result;
 	const globalCount = Object.keys(globals).length;
+	const carriedOver = describeCarriedOver([result]);
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
@@ -1167,6 +1168,7 @@ function PreviewView({
 			{/* The examples count is here rather than only in the tree because a
 			    saved example lands inside a request with no row of its own (#481). */}
 			<p className="text-label text-muted-foreground">{describeCounts(meta)}</p>
+			{carriedOver && <p className="text-label text-muted-foreground">{carriedOver}</p>}
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
 				<FieldError icon={AlertTriangle}>
 					{importEnvironments

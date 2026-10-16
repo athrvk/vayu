@@ -32,6 +32,7 @@ import type {
 } from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { containsVariableToken } from "@/constants/variables";
+import { isBlankScriptElement } from "@/lib/elements";
 import { formatNumber } from "@/lib/format-number";
 import { parentFolder } from "@/lib/file-path";
 
@@ -458,4 +459,64 @@ export function bodiesWithoutFileNotice(n: number): ImportNotice | null {
 		tier: "action",
 		text: `${n} ${pluralize(n, "file body", "file bodies")} ${pluralize(n, "needs", "need")} ${pluralize(n, "a file", "files")}`,
 	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+/** `elements` is `unknown[]` on a draft (#1516); a script is the one kind read here. */
+function isRunnableScript(element: unknown): boolean {
+	if (!isRecord(element) || typeof element.kind !== "string" || !isRecord(element.config)) {
+		return false;
+	}
+	if (element.kind !== "script.pre" && element.kind !== "script.post") return false;
+	if (element.enabled === false) return false;
+	return !isBlankScriptElement({ kind: element.kind, config: element.config });
+}
+
+const NO_AUTH_MODES: readonly string[] = ["none", "noauth", "inherit"];
+
+interface CarriedOver {
+	variables: number;
+	requestsWithAuth: number;
+	requestsWithScripts: number;
+}
+
+function tallyCarriedOver(results: readonly ImportResult[]): CarriedOver {
+	const tally: CarriedOver = { variables: 0, requestsWithAuth: 0, requestsWithScripts: 0 };
+	const visit = (collection: CollectionDraft) => {
+		tally.variables += Object.keys(collection.variables).length;
+		for (const request of collection.requests) {
+			if (!NO_AUTH_MODES.includes(request.auth.mode)) tally.requestsWithAuth += 1;
+			// The engine leaves `elements` off a request that has none, whatever the type says.
+			if ((request.elements ?? []).some(isRunnableScript)) tally.requestsWithScripts += 1;
+		}
+		collection.children.forEach(visit);
+	};
+	for (const result of results) result.collections.forEach(visit);
+	return tally;
+}
+
+/**
+ * What survived the import beyond names and URLs, read off the drafts like
+ * `fileReferenceNeeds` so every format answers alike: collection variables,
+ * and the requests that carry their own auth or a script that will run.
+ *
+ * - auth: a request with a mode other than none, noauth or inherit; a request
+ *   that inherits is not counted, its collection's auth is not a request's.
+ * - scripts: an enabled, non-blank `script.pre` / `script.post` element.
+ *
+ * An empty string when none of the three is present, so the caller renders
+ * nothing rather than an empty line.
+ */
+export function describeCarriedOver(results: readonly ImportResult[]): string {
+	const { variables, requestsWithAuth, requestsWithScripts } = tallyCarriedOver(results);
+	const count = (n: number, noun: string) => `${formatNumber(n)} ${pluralize(n, noun)}`;
+	const segments = [
+		variables > 0 && count(variables, "variable"),
+		requestsWithAuth > 0 && `auth on ${count(requestsWithAuth, "request")}`,
+		requestsWithScripts > 0 && `scripts on ${count(requestsWithScripts, "request")}`,
+	].filter((segment): segment is string => segment !== false);
+	return segments.length > 0 ? `Carried over: ${segments.join(" · ")}` : "";
 }

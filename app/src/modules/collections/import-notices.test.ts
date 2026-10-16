@@ -13,9 +13,10 @@
 
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
-import type { ImportMeta, RequestDraft } from "@/services/importers/types";
+import type { CollectionDraft, ImportMeta, RequestDraft } from "@/services/importers/types";
 import {
 	bodiesWithoutFileNotice,
+	describeCarriedOver,
 	describeCounts,
 	fileReferenceNeeds,
 	importNotices,
@@ -316,5 +317,125 @@ describe("fileReferenceNeeds", () => {
 			text: "2 file bodies need files",
 		});
 		expect(bodiesWithoutFileNotice(0)).toBeNull();
+	});
+});
+
+describe("describeCarriedOver", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
+	const vars = (...keys: string[]) =>
+		Object.fromEntries(keys.map((key) => [key, { value: "v", enabled: true }]));
+	const bearer = () => request({ auth: { mode: "bearer", token: "t" } });
+	const script = (kind: string, text: unknown, enabled?: boolean): unknown => ({
+		id: "e1",
+		kind,
+		...(enabled === undefined ? {} : { enabled }),
+		config: { script: text },
+	});
+	const withScripts = (...elements: unknown[]) => request({ elements });
+	const describeTree = (root: CollectionDraft) =>
+		describeCarriedOver([result({ collections: [root] })]);
+
+	it("says nothing when the drafts carry no variables, auth or scripts", () => {
+		const tree = collection({
+			requests: [request(), request({ auth: { mode: "none" } })],
+			children: [collection({ requests: [request({ auth: { mode: "noauth" } })] })],
+		});
+
+		expect(describeTree(tree)).toBe("");
+		expect(describeCarriedOver([])).toBe("");
+	});
+
+	it("counts variables, authed requests and scripted requests across nested folders", () => {
+		const tree = collection({
+			variables: vars("baseUrl", "token"),
+			requests: [bearer(), withScripts(script("script.pre", "pm.test()"))],
+			children: [
+				collection({
+					variables: vars("page"),
+					requests: [bearer(), withScripts(script("script.post", "console.log(1)"))],
+					children: [
+						collection({
+							requests: [
+								request({ auth: { mode: "basic", username: "u", password: "p" } }),
+								withScripts(
+									script("script.pre", "a()"),
+									script("script.post", "b()")
+								),
+							],
+						}),
+					],
+				}),
+			],
+		});
+
+		expect(describeTree(tree)).toBe(
+			"Carried over: 3 variables · auth on 3 requests · scripts on 3 requests"
+		);
+	});
+
+	it("counts a request with auth once and leaves out none, noauth and inherit", () => {
+		const tree = collection({
+			requests: [
+				request({ auth: { mode: "inherit" } }),
+				request({ auth: { mode: "none" } }),
+				request({ auth: { mode: "noauth" } }),
+				bearer(),
+			],
+		});
+
+		expect(describeTree(tree)).toBe("Carried over: auth on 1 request");
+	});
+
+	it("leaves out disabled and blank scripts, and elements that are not scripts", () => {
+		const tree = collection({
+			requests: [
+				withScripts(script("script.pre", "pm.test()", false)),
+				withScripts(script("script.pre", "   \n")),
+				withScripts(script("script.post", undefined)),
+				withScripts({ id: "a", kind: "assert.status", config: { script: "x" } }),
+				withScripts(null, "script.pre", { kind: "script.pre" }),
+			],
+		});
+
+		expect(describeTree(tree)).toBe("");
+	});
+
+	it("counts an element with no enabled flag, and one scripted request once", () => {
+		const tree = collection({
+			requests: [
+				withScripts(script("script.pre", "a()"), script("script.pre", "b()", true)),
+				withScripts(script("script.pre", "   ", true), script("script.post", "c()")),
+			],
+		});
+
+		expect(describeTree(tree)).toBe("Carried over: scripts on 2 requests");
+	});
+
+	it("reads a request the engine sent with no elements key", () => {
+		const bare: RequestDraft = JSON.parse(
+			JSON.stringify({ ...request(), elements: undefined })
+		);
+
+		expect("elements" in bare).toBe(false);
+		expect(describeTree(collection({ requests: [bare] }))).toBe("");
+	});
+
+	it("omits the segments that are zero, and spans every file of a batch", () => {
+		const one = result({ collections: [collection({ variables: vars("a") })] });
+		const two = result({ collections: [collection({ variables: vars("b", "c") })] });
+
+		expect(describeCarriedOver([one])).toBe("Carried over: 1 variable");
+		expect(describeCarriedOver([one, two])).toBe("Carried over: 3 variables");
+	});
+
+	it("groups thousands in a count", () => {
+		const requests = Array.from({ length: 1200 }, bearer);
+
+		expect(describeTree(collection({ requests }))).toBe("Carried over: auth on 1,200 requests");
 	});
 });
