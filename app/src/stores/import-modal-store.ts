@@ -15,26 +15,45 @@ interface ImportModalState {
 	 * argument on the command line. Null once nothing is waiting.
 	 */
 	pendingPath: string | null;
+	/**
+	 * Files dropped on the window outside the dialog (issue #2252), waiting for
+	 * the dialog to import them. Empty once nothing is waiting.
+	 */
+	pendingFiles: File[];
 	open: () => void;
 	/** Open the dialog already carrying a file to import. */
 	openWithFile: (path: string) => void;
+	/** Open the dialog already carrying dropped files. An empty list changes nothing. */
+	openWithFiles: (files: File[]) => void;
 	close: () => void;
 	/**
 	 * Read and clear `pendingPath` in one step, so a re-render of the dialog
 	 * cannot see the same path twice and import it twice.
 	 */
 	takePendingPath: () => string | null;
+	/** `takePendingPath` for `pendingFiles`: read and clear in one step. */
+	takePendingFiles: () => File[];
 }
 
 export const useImportModalStore = create<ImportModalState>((set, get) => ({
 	isOpen: false,
 	pendingPath: null,
+	pendingFiles: [],
 	open: () => set({ isOpen: true }),
 	openWithFile: (path) => set({ isOpen: true, pendingPath: path }),
-	close: () => set({ isOpen: false, pendingPath: null }),
+	openWithFiles: (files) => {
+		if (files.length === 0) return;
+		set({ isOpen: true, pendingFiles: files });
+	},
+	close: () => set({ isOpen: false, pendingPath: null, pendingFiles: [] }),
 	takePendingPath: () => {
 		const path = get().pendingPath;
 		set({ pendingPath: null });
 		return path;
+	},
+	takePendingFiles: () => {
+		const files = get().pendingFiles;
+		set({ pendingFiles: [] });
+		return files;
 	},
 }));
