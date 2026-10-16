@@ -15,10 +15,20 @@ import { useState } from "react";
 import { Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
 import { EmptyState, SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
+import { formatNumber } from "@/lib/format-number";
 import { useRunSamplesQuery } from "@/queries/runs";
 import SampleRequestCard from "./SampleRequestCard";
 import { sampleResultsWithoutValidationRow } from "../test-validation";
 import type { TabProps, SampleResult } from "../../types";
+
+// `resultsStored > resultsCap` is the engine's own statement that `results` is a
+// selection and not everything stored. A report without the pair predates it
+// (#2210), and says nothing rather than guessing.
+function storedBeyondCap(report: TabProps["report"]): number | null {
+	const { resultsStored, resultsCap } = report;
+	if (resultsStored === undefined || resultsCap === undefined) return null;
+	return resultsStored > resultsCap ? resultsStored : null;
+}
 
 export default function SamplesTab({ report }: TabProps) {
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -34,6 +44,7 @@ export default function SamplesTab({ report }: TabProps) {
 	// response, so this tab would draw it as a status-0 card with nothing behind
 	// it. Its failures are named in the Overview instead (issue #726).
 	const samples = sampleResultsWithoutValidationRow(report.results);
+	const storedTotal = storedBeyondCap(report);
 
 	if (samples.length === 0) {
 		return (
@@ -56,9 +67,16 @@ export default function SamplesTab({ report }: TabProps) {
 			<CardHeader>
 				<div className="flex items-center justify-between">
 					<CardTitle>Sampled Request Details</CardTitle>
-					<Badge variant="secondary" className="text-xs">
-						{samples.length} samples shown
-					</Badge>
+					<div className="flex items-center gap-2">
+						<Badge variant="secondary" className="text-xs">
+							{samples.length} samples shown
+						</Badge>
+						{storedTotal !== null && (
+							<Badge variant="outline" className="text-xs">
+								{`${samples.length} of ${formatNumber(storedTotal)} stored`}
+							</Badge>
+						)}
+					</div>
 				</div>
 			</CardHeader>
 			{/* `p-0` + a `divide-y` strip below, matching the dashboard's live

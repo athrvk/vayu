@@ -161,9 +161,11 @@ export function boundTraceNode(node: unknown): unknown {
  * How many bytes of stored trace one run report carries in total (issue #769).
  *
  * The per-node bound above does not bound the *result*: the report route caps
- * `results[]` at 100 rows and each row may keep up to `MAX_INLINE_BODY_BYTES`
- * on each of three nodes, so a 100-step scenario measured at 3.3M characters
- * with every node honestly flagged as truncated - 2.5x the 1.3M that made #767
+ * `results[]` at 100 rows for a single-request run (every stored step for a
+ * scenario run, bounded when written), choosing failing rows first and listing
+ * them by time (`resultsStored` / `resultsCap` say if it cut), and each row may
+ * keep up to `MAX_INLINE_BODY_BYTES` on each of three nodes, so a 100-step
+ * scenario measured at 3.3M characters with every node honestly flagged as truncated - 2.5x the 1.3M that made #767
  * fail in the first place. Truncation stops being the binding constraint at
  * that row count: 100 steps of an 8KB body, well under the per-node bound and
  * so never touched, still totalled 845K characters.

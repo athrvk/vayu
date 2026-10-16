@@ -48,9 +48,14 @@ describe("SampleRetentionNote", () => {
 
 		// Both trace budgets are one story to a reader looking at one list.
 		expect(screen.getByText(/29,000 further samples were displaced/)).toBeInTheDocument();
+		// `results` is a failures-first selection (#2210), so the note must not
+		// call it uniform.
 		expect(
-			screen.getByText(/100 shown are drawn uniformly from the whole run/)
+			screen.getByText(
+				/Requests with an error are kept ahead of successful ones in the 100 shown, so they are not a uniform sample of the run/
+			)
 		).toBeInTheDocument();
+		expect(screen.queryByText(/drawn uniformly from the whole run/)).not.toBeInTheDocument();
 	});
 
 	it("reads the response budget for the validation surface, not the trace one", () => {
@@ -153,8 +158,9 @@ describe("SampleRetentionNote", () => {
 		);
 
 		expect(
-			screen.getByText(/100 shown are drawn uniformly from the whole run/)
+			screen.getByText(/kept ahead of successful ones in the 100 shown/)
 		).toBeInTheDocument();
+		expect(screen.queryByText(/whose bodies fit/)).not.toBeInTheDocument();
 	});
 
 	it("says nothing when the run displaced nothing", () => {

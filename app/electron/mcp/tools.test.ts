@@ -3842,9 +3842,10 @@ describe("run_collection", () => {
 			status: "pending",
 			plannedSteps: 2,
 		});
-		// The report's own bound, stated where the agent reads the run id -
-		// a 200-step plan does not come back as 200 rows.
-		expect(firstText(res)).toMatch(/at most 100 step rows/);
+		// The report's own bound, stated where the agent reads the run id: the
+		// rows are the stored steps, and resultsStored/resultsCap say if cut.
+		expect(firstText(res)).toMatch(/every stored step row/);
+		expect(firstText(res)).toMatch(/resultsStored/);
 		expect(firstText(res)).toMatch(/get_run_report/);
 		// And that the rows carry bodies inline. A design-mode step trace embeds
 		// the request and response bodies (`build_result_trace`), unlike a load
