@@ -1079,9 +1079,16 @@ jobs:
           # per the config's `HeaderFilterRegex` - headers are still never
           # inputs. `nproc` is coreutils and ships with Git for Windows, so it
           # answers on both legs.
+          #
+          # `-Wno-unused-command-line-argument`: the MSVC compile database
+          # carries `/Zc:preprocessor`, which the image's clang-tidy 20.1.8
+          # does not consume in its clang-cl mode, and `WarningsAsErrors: '*'`
+          # makes that diagnostic fail every file before any check runs. The
+          # flag is a build-time one with no bearing on what is linted.
           printf '%s\0' "${changed[@]}" \
             | xargs -0 -n 1 -P "$(nproc)" \
-                "$tidy" -p engine/build-release --quiet --allow-no-checks
+                "$tidy" -p engine/build-release --quiet --allow-no-checks \
+                --extra-arg=-Wno-unused-command-line-argument
 
       # The escape says so in the job summary as well as on the pull request.
       # Same rule as the step above: a gate that narrowed to nothing must not

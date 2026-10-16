@@ -1421,7 +1421,8 @@ under the same key, so `responseFromExecuteResult` and `responseFromRunResult`
 agree - see `client-certificate-funnels.test.ts`.
 
 `timing.engineMs` is Vayu's own cost for the exchange: the engine's elapsed time
-less the transfer and the user's scripts (issue #2132; the engine's definition
+less the transfer, the user's scripts and an OAuth 2.0 token fetch (issue #2132,
+#2185; the engine's definition
 is under [One timing convention](../engine/api-reference.md#post-execute)). It
 is optional - a stream, an auth-failure reply and rows stored before the key
 existed carry none - and the stored trace holds it **flat** as

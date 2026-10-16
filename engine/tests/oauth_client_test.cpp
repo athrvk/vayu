@@ -226,6 +226,21 @@ TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
     EXPECT_EQ (idp.last_content_type (), "application/x-www-form-urlencoded");
 }
 
+// The caller's `network_ms` is how a send tells the provider's wait from its own
+// cost (#2185): a round trip adds to it, a cached token leaves it untouched.
+TEST_F (OAuthClientTest, NetworkMsCountsTheProviderRoundTripAndNotACacheHit) {
+    MockTokenServer idp;
+    double network_ms = 0.0;
+    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, &network_ms);
+    ASSERT_EQ (idp.hits (), 1);
+    EXPECT_GT (network_ms, 0.0);
+
+    const double after_fetch = network_ms;
+    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, &network_ms);
+    ASSERT_EQ (idp.hits (), 1) << "the second call must be a cache hit";
+    EXPECT_EQ (network_ms, after_fetch);
+}
+
 TEST_F (OAuthClientTest, BasicHeaderClientAuthIsDefault) {
     MockTokenServer idp;
     oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt);

@@ -124,7 +124,8 @@ std::variant<vayu::db::OAuthToken, TokenError> post_token_request (vayu::db::Dat
 const nlohmann::json& config,
 const std::string& url,
 TokenRequest& req,
-const std::string& key) {
+const std::string& key,
+double* network_ms) {
     req.headers["Content-Type"] = "application/x-www-form-urlencoded";
     req.headers["Accept"]       = "application/json";
 
@@ -135,7 +136,13 @@ const std::string& key) {
     vayu::http::ClientConfig client_config;
     client_config.transport = vayu::http::resolve_transport_policy (db);
     vayu::http::Client client (client_config);
+    const auto sent_at = std::chrono::steady_clock::now ();
     auto result = client.post (url, vayu::utils::form_encode (req.form), req.headers);
+    if (network_ms != nullptr) {
+        *network_ms += std::chrono::duration<double, std::milli> (
+        std::chrono::steady_clock::now () - sent_at)
+                       .count ();
+    }
     if (!result.is_ok ()) {
         return TokenError{ 502, "oauth2_network_error",
             "Token request failed: " + client.last_error () };
@@ -226,7 +233,8 @@ const nlohmann::json& config,
 const std::string& key,
 const std::string& token_url,
 bool force_refresh,
-int64_t now) {
+int64_t now,
+double* network_ms) {
     // Cache hit
     if (auto cached = db.get_oauth_token (key)) {
         if (!force_refresh && !is_expired (*cached, now)) {
@@ -245,7 +253,8 @@ int64_t now) {
 
             vayu::utils::log_info (
             "oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
-            auto refreshed = post_token_request (db, config, refresh_url, req, key);
+            auto refreshed =
+            post_token_request (db, config, refresh_url, req, key, network_ms);
             if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
                 // Rotation: keep the previous refresh token when the provider
                 // did not issue a new one.
@@ -308,7 +317,8 @@ TokenRequest& req) {
 std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
 const nlohmann::json& config,
 bool force_refresh,
-const std::optional<InteractiveExchange>& interactive) {
+const std::optional<InteractiveExchange>& interactive,
+double* network_ms) {
     if (!config.is_object ()) {
         return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
     }
@@ -329,7 +339,8 @@ const std::optional<InteractiveExchange>& interactive) {
     const std::string key = cache_key (config);
     const int64_t now     = now_ms ();
 
-    if (auto answer = token_from_cache (db, config, key, token_url, force_refresh, now)) {
+    if (auto answer = token_from_cache (
+        db, config, key, token_url, force_refresh, now, network_ms)) {
         return *answer;
     }
 
@@ -341,7 +352,7 @@ const std::optional<InteractiveExchange>& interactive) {
 
     vayu::utils::log_info ("oauth", "OAuth2: requesting token",
     { { "grant", grant }, { "url", token_url } });
-    return post_token_request (db, config, token_url, req, key);
+    return post_token_request (db, config, token_url, req, key, network_ms);
 }
 
 nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {

@@ -144,6 +144,17 @@ class StreamServer {
             res.set_content (R"({"ok":true})", "application/json");
         });
 
+        // An OAuth 2.0 token endpoint that answers a client-credentials grant
+        // after `token_delay_ms_`, for the cost a first-use token fetch adds
+        // to a send.
+        svr_.Post ("/token", [this] (const httplib::Request&, httplib::Response& res) {
+            token_count_.fetch_add (1);
+            std::this_thread::sleep_for (
+            std::chrono::milliseconds (token_delay_ms_.load ()));
+            res.set_content (R"({"access_token":"tok-1","token_type":"Bearer","expires_in":3600})",
+            "application/json");
+        });
+
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Fixture", "silent");
             res.set_chunked_content_provider (
@@ -203,6 +214,16 @@ class StreamServer {
         return aside_count_.load ();
     }
 
+    /// Make `/token` take @p ms to answer. Set before the request.
+    void delay_token (int ms) {
+        token_delay_ms_ = ms;
+    }
+
+    /// Grants `/token` has served; a cached token leaves it where it was.
+    int token_requests () const {
+        return token_count_.load ();
+    }
+
     /// A `Set-Cookie` every `/scripted` answer carries from now on; "" for none.
     void set_cookie (std::string value) {
         std::lock_guard<std::mutex> lock (received_mutex_);
@@ -235,6 +256,8 @@ class StreamServer {
     std::string set_cookie_;
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
+    std::atomic<int> token_delay_ms_{ 0 };
+    std::atomic<int> token_count_{ 0 };
 };
 
 vayu::Request get_request (const std::string& url) {
@@ -1499,7 +1522,9 @@ TEST_F (StreamExecuteTest, ABufferedSendWithoutScriptsStoresNoScriptNode) {
 // accumulating `script_ms` in `execute_exchange` (request_exchange.cpp) and the
 // two slow-script cases red; write a different value to the trace than to the
 // body in `run_buffered_execution` and the parity case reds; stop passing
-// `engine_ms` to `record_design_result` and the stored-key cases red.
+// `engine_ms` to `record_design_result` and the stored-key cases red; stop
+// subtracting `auth_fetch_ms` in `engine_cost_ms` (#2185) and the first-use
+// token case reds.
 // ---------------------------------------------------------------------------
 
 /// A script that does nothing for @p ms, so its run is the bulk of the send.
@@ -1539,6 +1564,45 @@ TEST_F (StreamExecuteTest, ASlowPostRequestScriptIsNotCountedAsEngineCost) {
 
     EXPECT_LT (body["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
     << body["timing"].dump (2);
+}
+
+/// A client-credentials config whose token comes from the fixture's `/token`.
+json oauth2_auth_for (const std::string& token_url) {
+    return { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", token_url }, { "clientId", "vayu-test" },
+        { "clientSecret", "shh" }, { "autoFetchToken", true } } } };
+}
+
+// The wait on the identity provider is someone else's time, as a slow origin
+// is. The second send proves the subtraction is of the fetch and not of a
+// constant: a cached token costs no round trip, so the figure stays small
+// because there is nothing slow in the send, not because something was removed.
+TEST_F (StreamExecuteTest, AFirstUseTokenFetchIsNotCountedAsEngineCost) {
+    serve (1);
+    origin_->delay_token (SLOW_SCRIPT_MS);
+    const json payload{ { "auth", oauth2_auth_for (origin_->url ("/token")) } };
+
+    const auto started    = std::chrono::steady_clock::now ();
+    const auto first      = send_buffered (payload);
+    const auto elapsed_ms = std::chrono::duration<double, std::milli> (
+    std::chrono::steady_clock::now () - started)
+                            .count ();
+
+    // The fetch ran inside this handler; without that the figure below proves
+    // nothing.
+    ASSERT_EQ (origin_->token_requests (), 1);
+    ASSERT_GE (elapsed_ms, static_cast<double> (SLOW_SCRIPT_MS));
+    EXPECT_LT (first["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << first["timing"].dump (2);
+    EXPECT_EQ (latest_design_trace ()["engineMs"], first["timing"]["engineMs"]);
+
+    const auto second = send_buffered (payload);
+    EXPECT_EQ (origin_->token_requests (), 1)
+    << "the second send must hit the cache";
+    EXPECT_LT (second["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << second["timing"].dump (2);
 }
 
 // The restored response shows the figure the live one did: one value, taken

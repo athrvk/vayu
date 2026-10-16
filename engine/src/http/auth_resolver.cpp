@@ -84,11 +84,12 @@ resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Data
         return it == config.end () || !it->is_boolean () || it->get<bool> ();
     }();
 
+    double token_fetch_ms = 0.0;
     std::variant<vayu::db::OAuthToken, oauth::TokenError> result =
     oauth::TokenError{ 409, "oauth2_interactive_required",
         "OAuth 2.0 token required (auto-fetch is disabled)" };
     if (auto_fetch) {
-        result = oauth::acquire_token (*db, config, false, std::nullopt);
+        result = oauth::acquire_token (*db, config, false, std::nullopt, &token_fetch_ms);
     } else if (auto cached = db->get_oauth_token (oauth::cache_key (config))) {
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
@@ -115,7 +116,9 @@ resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Data
             req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
         }
     }
-    return {};
+    AuthApplyResult applied;
+    applied.token_fetch_ms = token_fetch_ms;
+    return applied;
 }
 
 } // namespace

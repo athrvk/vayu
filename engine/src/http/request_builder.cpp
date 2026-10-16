@@ -40,6 +40,7 @@ AuthResolution auth_resolution) {
     }
 
     auto auth = apply_auth (out.request, config.value ("auth", nlohmann::json ()), db);
+    out.auth_fetch_ms = auth.token_fetch_ms;
     if (!auth.ok) {
         out.ok            = false;
         out.error_code    = auth.code;
