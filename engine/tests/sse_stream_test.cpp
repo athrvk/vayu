@@ -1492,6 +1492,101 @@ TEST_F (StreamExecuteTest, ABufferedSendWithoutScriptsStoresNoScriptNode) {
 }
 
 // ---------------------------------------------------------------------------
+// `timing.engineMs` (#2132): Vayu's own cost for a buffered send
+//
+// The handler's elapsed time less the transfer and the scripts, measured once
+// and stored on the trace beside the other timing keys. Mutation checks: stop
+// accumulating `script_ms` in `execute_exchange` (request_exchange.cpp) and the
+// two slow-script cases red; write a different value to the trace than to the
+// body in `run_buffered_execution` and the parity case reds; stop passing
+// `engine_ms` to `record_design_result` and the stored-key cases red.
+// ---------------------------------------------------------------------------
+
+/// A script that does nothing for @p ms, so its run is the bulk of the send.
+std::string busy_script (int ms) {
+    return "var t0 = Date.now(); while (Date.now() - t0 < " + std::to_string (ms) + ") {}";
+}
+
+// A loopback send's own cost is milliseconds; a figure this far over it means
+// the wire or a script leaked in, which is what the cases below separate.
+constexpr double LOOPBACK_ENGINE_CEILING_MS = 1000.0;
+constexpr int SLOW_SCRIPT_MS                = 400;
+
+TEST_F (StreamExecuteTest, ABufferedSendReportsItsEngineCostInTheTimingNode) {
+    serve (1);
+    const auto body = send_buffered (json::object ());
+
+    ASSERT_TRUE (body["timing"].contains ("engineMs")) << body["timing"].dump (2);
+    ASSERT_TRUE (body["timing"]["engineMs"].is_number ()) << body["timing"].dump (2);
+    const double engine_ms = body["timing"]["engineMs"].get<double> ();
+    EXPECT_GE (engine_ms, 0.0);
+    EXPECT_LT (engine_ms, LOOPBACK_ENGINE_CEILING_MS);
+}
+
+TEST_F (StreamExecuteTest, ASlowPreRequestScriptIsNotCountedAsEngineCost) {
+    serve (1);
+    const auto body = send_buffered (
+    json{ { "elements", script_elements (busy_script (SLOW_SCRIPT_MS)) } });
+
+    EXPECT_LT (body["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << body["timing"].dump (2);
+}
+
+TEST_F (StreamExecuteTest, ASlowPostRequestScriptIsNotCountedAsEngineCost) {
+    serve (1);
+    const auto body = send_buffered (
+    json{ { "elements", script_elements ("", busy_script (SLOW_SCRIPT_MS)) } });
+
+    EXPECT_LT (body["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << body["timing"].dump (2);
+}
+
+// The restored response shows the figure the live one did: one value, taken
+// before the write, so the two homes cannot disagree by construction.
+TEST_F (StreamExecuteTest, TheStoredTraceCarriesTheEngineMsTheLiveBodyReturned) {
+    serve (1);
+    const auto body  = send_buffered (json::object ());
+    const auto trace = latest_design_trace ();
+
+    ASSERT_TRUE (trace.contains ("engineMs")) << trace.dump (2);
+    EXPECT_EQ (trace["engineMs"], body["timing"]["engineMs"]);
+    // Flat on the trace beside the other timing keys, never inside a node.
+    EXPECT_TRUE (trace.contains ("wireMs")) << trace.dump (2);
+}
+
+// A streaming send answers 202 before any exchange has finished and has no
+// handler-scoped figure to give; the stored trace says nothing either.
+TEST_F (StreamExecuteTest, AStreamingSendCarriesNoEngineMs) {
+    serve (1);
+    json payload = { { "method", "GET" }, { "url", origin_->url ("/scripted") },
+        { "stream", true } };
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    auto response = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (response);
+    ASSERT_EQ (response->status, 202) << response->body;
+    const auto accepted = json::parse (response->body);
+    EXPECT_FALSE (accepted.contains ("timing")) << accepted.dump (2);
+
+    const auto trace = trace_for (accepted.value ("runId", std::string ()));
+    EXPECT_FALSE (trace.contains ("engineMs")) << trace.dump (2);
+}
+
+// The early return before any exchange: no figure, and no error for lacking it.
+TEST_F (StreamExecuteTest, AnAuthFailureReplyCarriesNoEngineMs) {
+    serve (1);
+    const auto body = send_buffered (json{ { "auth",
+    { { "mode", "oauth2" }, { "autoFetchToken", false },
+    { "accessTokenUrl", origin_->url ("/token") } } } });
+    ASSERT_TRUE (body.contains ("authErrorCode")) << body.dump (2);
+
+    if (body.contains ("timing")) {
+        EXPECT_FALSE (body["timing"].contains ("engineMs")) << body.dump (2);
+    }
+    EXPECT_FALSE (latest_design_trace ().contains ("engineMs"));
+}
+
+// ---------------------------------------------------------------------------
 // `persistVariables: false` (#1904), on both transports
 //
 // An extractor writing the globals and a post-request script writing the

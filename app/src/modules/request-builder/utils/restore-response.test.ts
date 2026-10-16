@@ -452,6 +452,20 @@ describe("timingFromTrace", () => {
 		expect(timing).not.toHaveProperty("queueWaitMs");
 	});
 
+	it("maps the flat trace.engineMs onto timing.engineMs (#2132)", () => {
+		const timing = timingFromTrace({ firstByteMs: 12, engineMs: 0.4 }, 14);
+
+		expect(timing?.engineMs).toBe(0.4);
+	});
+
+	it("leaves engineMs unset on a row that stored none, and ignores a non-number", () => {
+		expect(timingFromTrace({ firstByteMs: 12 }, 14)).not.toHaveProperty("engineMs");
+		const odd = { firstByteMs: 12, engineMs: "3" } as unknown as Parameters<
+			typeof timingFromTrace
+		>[0];
+		expect(timingFromTrace(odd, 14)).not.toHaveProperty("engineMs");
+	});
+
 	it("is undefined when no phase was stored, so no empty Timing tab appears", () => {
 		expect(timingFromTrace({}, 90)).toBeUndefined();
 		expect(timingFromTrace({ isSlow: true, thresholdMs: 500 }, 90)).toBeUndefined();

@@ -1367,7 +1367,7 @@ since been pinned, gone back in flight or been deleted (issue #1906). The cascad
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
 is wired into both at once. `prune_runs_configured()` reads the two
 knobs (config, `data_retention`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
-after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
+after a run reaches a **terminal** status (design mode's `record_design_result`, and the load-run
 completion/failure paths in `run_manager.cpp`). What a prune frees is disk the file keeps until
 [Reclaiming freed pages](#reclaiming-freed-pages) gives it back.
 
@@ -1542,16 +1542,19 @@ read and parsed per poll, to compute aggregates that never look at a body.
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
 latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
-spent queued inside the generator.
+spent queued inside the generator. A buffered design send adds a ninth, **`engineMs`** (#2132):
+Vayu's own cost for that exchange, the handler's elapsed time less `wireMs` and script time, taken
+before the write (see [One timing
+convention](api-reference.md#post-execute)). No other writer stores it.
 
 **The writers store different subsets, at different nesting**, so read the one you need rather
-than assuming all eight are there and flat:
+than assuming all eight are there and flat (`engineMs` aside, above):
 
 | Writer | What lands in `trace_data` |
 |--------|----------------------------|
 | Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys. Written for a completion the 1-in-`success_sample_rate` sampler selects (only while `save_timing_breakdown` is on), **or** one that crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`, and is stored whether or not the breakdown toggle is on). The two have separate retention budgets - `max_success_results` and `max_slow_results` - and an outlier never consumes a sampling slot. A **scenario** load run started with `scenario.data` adds **`dataRowIndex`**, the row that iteration bound - the only per-result record of it, since a scenario load run stores no per-step rows. |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`, plus **`dataRowIndex`** for a scenario load run given `scenario.data`. A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing. |
-| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
+| Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** for a buffered send, the one value the live `timing.engineMs` returned; absent for a streaming send, an auth-failure row and any row stored before #2132. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
 | Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
@@ -1617,7 +1620,7 @@ stored at all. When a body is cut, its node gains two keys:
 | `bodyBytes`                   | int  | The **original** body length in bytes (the stored `body` is the first `maxTraceBodyBytes` of it) |
 
 The cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8 sequence is
-possible; `store_result` dumps the trace with `error_handler_t::replace`, turning a stray
+possible; `record_design_result` dumps the trace with `error_handler_t::replace`, turning a stray
 continuation byte into U+FFFD rather than throwing. The cap is applied by
 `vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
 (`http/request_exchange.cpp`) produces. It applies to the design-mode writer and

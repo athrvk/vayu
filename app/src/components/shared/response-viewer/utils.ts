@@ -210,6 +210,21 @@ export function formatResponseTime(ms: number): string {
 }
 
 /**
+ * What `timing.engineMs` counts, worded once for the status bar's hover and the
+ * Timing tab's tip (#2132). It must stay a statement of scope: the figure is
+ * not a verdict on anyone else's speed, and `queueWaitMs` is a different,
+ * smaller thing that is never presented as this.
+ */
+export const ENGINE_COST_TIP =
+	"Time Vayu's engine spent on this send: building the request, auth, cookies and " +
+	"assembling the answer. It leaves out the network transfer, your scripts and rendering. " +
+	"A token fetched on first use counts as auth.";
+
+/** A figure the engine reported: absent, NaN and negative all mean "nothing to show". */
+export const isReportedMs = (ms: number | undefined): ms is number =>
+	typeof ms === "number" && Number.isFinite(ms) && ms >= 0;
+
+/**
  * A duration split into its number and its unit, so a caller can style the unit
  * separately (these are rendered smaller and in `subtle-foreground` throughout).
  *

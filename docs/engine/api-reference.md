@@ -5776,7 +5776,8 @@ run-shaped way of stating the same field, not a second store.
     "connectMs": 12.3,
     "tlsMs": 45.1,
     "firstByteMs": 180.2,
-    "downloadMs": 2.7
+    "downloadMs": 2.7,
+    "engineMs": 3.4
   },
   "testResults": [
     {
@@ -6024,9 +6025,10 @@ nothing in the API said so. The same field is stored on a design run's
 `summary.httpVersionDowngraded` in
 [`GET /runs/:runId/report`](#get-runsrunidreport).
 
-**One timing convention.** The `timing` keys above are the same `*Ms` names the
-stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
-`GET /runs/:runId/report`), and the design-mode writer stores all eight keys
+**One timing convention.** The eight phase keys above (`totalMs` through
+`downloadMs`) are the same `*Ms` names the stored trace uses
+(`record_design_result` / `load_strategy` → `results[].trace` in
+`GET /runs/:runId/report`), and the design-mode writer stores all eight
 unconditionally - so a live response and one restored from the stored trace
 carry the same fields with the same names, Wire/Queue included. Traces written
 by earlier releases differ two ways, and readers must tolerate both: stored
@@ -6034,6 +6036,26 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 (see [db-schema.md](db-schema.md)), and the live response named its keys
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
+
+**`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
+the ninth key and the only one a buffered `/execute` alone carries. It is the
+time from the handler receiving the request to the answer being assembled,
+less the transfer (`wireMs`) and the pre- and post-request scripts
+(`pm.sendRequest` inside them included). What it counts is request
+composition, auth resolution (an OAuth 2.0 token fetched on first use is
+counted: the engine waits on the identity provider there, and no clock
+separates that wait from the rest), the cookie jar, residual `{{token}}` resolution,
+the element pipeline other than the user's scripts (extractors, assertions,
+metrics) and building the response; `queueWaitMs`, the sliver between the
+engine's stopwatch and libcurl, is part of it. A design send blocks on no
+timer, so there is no timer wait to leave out. It does **not** count the wire,
+scripts, the hop from the Electron shell to the engine, persisting the run row
+and trace, serialising the body, or the renderer drawing it: the figure is
+taken once, before the write, and that same value is both returned and stored
+on the trace as a flat `engineMs`, so a restored response shows what the live
+one did. It is absent - not `0` - from a streaming send (the route answers
+`202` before any exchange finishes), from the auth-failure reply (no exchange
+ran), and from rows stored before this key existed.
 
 **Variables the scripts and extractors wrote are persisted, and only those.**
 After the post-request elements run, the engine writes back the three variable

@@ -11,7 +11,7 @@
  * Per-request timing breakdown for a single (design-mode) response. The five
  * network phases (DNS → Connect → TLS → TTFB → Download) are sequential, so
  * they render as one continuous timeline track with proportional segments,
- * followed by a precise legend and a Wire · Queue · Total summary.
+ * followed by a precise legend and a Wire · Queue · Vayu · Total summary.
  *
  * **Every phase is a fixed categorical hue**, and the list of them - label,
  * hue, tooltip, the field each one reads - now comes from `TIMING_PHASES` in
@@ -36,7 +36,12 @@
  */
 
 import { type ReactNode } from "react";
-import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import {
+	ENGINE_COST_TIP,
+	formatDuration,
+	formatPhaseDuration,
+	isReportedMs,
+} from "@/components/shared/response-viewer/utils";
 import { phaseColor, phasesFromTrace } from "@/components/shared/response-viewer/timing-phases";
 import { Eyebrow, InfoChip } from "@/components/ui";
 import type { ResponseTiming } from "../../types";
@@ -111,7 +116,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 				))}
 			</div>
 
-			{/* Summary: wire vs generator-side overhead vs perceived total. */}
+			{/* Summary: wire vs generator-side overhead vs Vayu's own cost vs perceived total. */}
 			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat
@@ -126,6 +131,9 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 						value={timing.queueWaitMs}
 						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
 					/>
+				)}
+				{isReportedMs(timing.engineMs) && (
+					<TimingStat label="Vayu" value={timing.engineMs} tip={ENGINE_COST_TIP} />
 				)}
 				<TimingStat
 					label="Total"

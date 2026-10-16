@@ -431,6 +431,7 @@ export default function ResponseViewer() {
 				statusText={shown.statusText}
 				time={shown.time}
 				size={shown.size}
+				engineMs={shown.timing?.engineMs}
 				httpVersion={shown.httpVersion}
 				httpVersionDowngraded={shown.httpVersionDowngraded}
 				clientCertificate={shown.clientCertificate}

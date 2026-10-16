@@ -84,6 +84,36 @@ describe("ResponseTimingTab", () => {
 		expect(screen.getByText("Total")).toBeInTheDocument();
 	});
 
+	it("shows Vayu's own cost between Queue and Total when the engine reported it (#2132)", () => {
+		renderTab({ timing: { ...sample, engineMs: 0.4 } });
+
+		const labels = ["Wire", "Queue", "Vayu", "Total"].map((l) => screen.getByText(l));
+		labels.slice(1).forEach((el, i) => {
+			expect(
+				labels[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING
+			).toBeTruthy();
+		});
+		expect(screen.getByText("0.40")).toBeInTheDocument();
+	});
+
+	it("omits the Vayu stat when none was reported, and never relabels Queue as it", () => {
+		renderTab({ timing: sample });
+
+		expect(screen.queryByText("Vayu")).not.toBeInTheDocument();
+		// Queue keeps its own label and its own number.
+		expect(screen.getByText("Queue")).toBeInTheDocument();
+		expect(screen.getByText("0.20")).toBeInTheDocument();
+	});
+
+	it("keeps Queue and Vayu as two stats with two values", () => {
+		renderTab({ timing: { ...sample, engineMs: 0.4 } });
+
+		expect(screen.getByText("Queue")).toBeInTheDocument();
+		expect(screen.getByText("0.20")).toBeInTheDocument();
+		expect(screen.getByText("Vayu")).toBeInTheDocument();
+		expect(screen.getByText("0.40")).toBeInTheDocument();
+	});
+
 	it("handles all-zero phases without dividing by zero", () => {
 		const zero: ResponseTiming = {
 			totalMs: 0,

@@ -1346,6 +1346,8 @@ export interface RunResultTrace {
 	 * writers store them now, but rows persisted by older engines lack them. */
 	wireMs?: number;
 	queueWaitMs?: number;
+	/** Design-mode writer only, flat; see {@link ResponseTiming.engineMs}. */
+	engineMs?: number;
 	dnsMs?: number;
 	connectMs?: number;
 	tlsMs?: number;
@@ -2004,11 +2006,18 @@ export interface MonitorSample {
  * restored from a stored design run agree without renaming. `wireMs` /
  * `queueWaitMs` stay optional because traces stored by older engines omitted
  * them (current ones store all eight); consumers must treat both as optional.
+ *
+ * `engineMs` is Vayu's own cost for the exchange (#2132): the engine's elapsed
+ * time less the transfer and the user's scripts. Not a phase and not part of
+ * `totalMs`' arithmetic, and distinct from `queueWaitMs`, which is the sliver
+ * before libcurl. Absent for a stream, an auth-failure reply and rows stored
+ * before the key existed.
  */
 export interface ResponseTiming {
 	totalMs: number;
 	wireMs?: number;
 	queueWaitMs?: number;
+	engineMs?: number;
 	dnsMs: number;
 	connectMs: number;
 	tlsMs: number;

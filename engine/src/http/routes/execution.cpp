@@ -16,7 +16,9 @@
  * - Server's HTTP status code is always in the response body, never translated to engine status
  */
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <optional>
@@ -1066,7 +1068,8 @@ const vayu::Response& response,
 const StreamRecord* stream,
 const std::optional<vayu::core::ValidationVerdict>& validation,
 const nlohmann::json& scripts,
-const nlohmann::json& elements) {
+const nlohmann::json& elements,
+std::optional<double> engine_ms) {
     if (!run_id) {
         return;
     }
@@ -1085,6 +1088,9 @@ const nlohmann::json& elements) {
         // the configured limit so one large exchange cannot bloat the DB forever.
         // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
         nlohmann::json trace = build_result_trace (request, response);
+        if (engine_ms) {
+            trace["engineMs"] = *engine_ms;
+        }
         const auto max_trace_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxTraceBodyBytes",
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
@@ -2022,11 +2028,37 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
 }
 
 /**
+ * Vayu's own cost for one buffered exchange (issue #2132): the handler's
+ * elapsed time since @p handler_start less what Vayu waited on someone else
+ * for - the transfer (`wireMs`) and the user's scripts, `pm.sendRequest`
+ * included. What remains is request composition, auth, cookies, residual
+ * token resolution, the element pipeline and assembling the answer.
+ *
+ * `queueWaitMs` is deliberately left inside it: that is the sliver between
+ * the engine's stopwatch and libcurl, engine-side by construction. A design
+ * send blocks on no timer (`timer.pacing` never delays a first pass and
+ * `timer.think` runs at `step.between`, which `execute_exchange` does not
+ * dispatch), so there is no timer wait to subtract. Clamped at zero because
+ * the three clocks are read independently.
+ */
+double engine_cost_ms (std::chrono::steady_clock::time_point handler_start,
+const vayu::Response& response,
+double script_ms) {
+    const double elapsed_ms = std::chrono::duration<double, std::milli> (
+    std::chrono::steady_clock::now () - handler_start)
+                              .count ();
+    return std::max (0.0, elapsed_ms - response.timing.wire_ms - script_ms);
+}
+
+/**
  * The buffered half of a design send: pre-request script, send, test script -
  * the sequence a scenario step performs too, which is why it lives in
  * request_exchange.cpp rather than here (issue #353).
  */
-void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSend& send) {
+void run_buffered_execution (RouteContext& ctx,
+httplib::Response& res,
+DesignSend& send,
+std::chrono::steady_clock::time_point handler_start) {
     vayu::runtime::ScriptEngine script_engine (send.script_config);
 
     // Load variables. Mutated in place by both scripts, then persisted
@@ -2086,11 +2118,17 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // two-homes rule as `scripts` above.
     const nlohmann::json elements = build_element_outcomes_node (exchange.element_outcomes);
 
+    // Taken before the write below and stored *and* returned, so the live
+    // body and the restored trace carry one value. Persistence and the final
+    // serialisation therefore fall outside it, by construction.
+    const double engine_ms =
+    engine_cost_ms (handler_start, exchange.response, exchange.script_ms);
+
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
     // exchange carries never reach disk - and neither do these results.
     record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
-    /*send.stream=*/nullptr, validation, scripts, elements);
+    /*send.stream=*/nullptr, validation, scripts, elements, engine_ms);
 
     persist_send_variables (ctx.db, scopes, send.persist_variables);
 
@@ -2099,6 +2137,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     res.status = 200;
     nlohmann::json body =
     build_response_json (exchange.response, scripts, validation, elements);
+    body["timing"]["engineMs"] = engine_ms;
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);
     }
@@ -2119,6 +2158,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
 void handle_execute_request (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
+    const auto handler_start = std::chrono::steady_clock::now ();
     ExecutePayload payload;
     if (auto rejection = read_execute_payload (ctx, req, payload)) {
         send_error (res, 400, *rejection);
@@ -2163,7 +2203,7 @@ httplib::Response& res) {
         run_streaming_execution (ctx, res, send);
         return;
     }
-    run_buffered_execution (ctx, res, send);
+    run_buffered_execution (ctx, res, send, handler_start);
 }
 
 
