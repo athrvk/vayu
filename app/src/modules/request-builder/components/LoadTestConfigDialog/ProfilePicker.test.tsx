@@ -78,6 +78,45 @@ describe("ProfilePicker with a subset of modes", () => {
 	});
 });
 
+describe("ProfilePicker grid", () => {
+	// Every card carries the variant; the selector inside it is what applies it
+	// to the trailing card of an odd count, so a card "spans" when it has the
+	// class and the selector matches it.
+	const FULL_WIDTH = "[&:last-child:nth-child(odd)]:col-span-2";
+	const VARIANT_SELECTOR = ":last-child:nth-child(odd)";
+	const MODES: LoadTestMode[] = [
+		"constant_rps",
+		"constant_concurrency",
+		"iterations",
+		"ramp_up",
+		"capacity",
+	];
+
+	function lastCard(count: number) {
+		render(
+			<ProfilePicker value="constant_rps" onChange={vi.fn()} modes={MODES.slice(0, count)} />
+		);
+		const radios = screen.getAllByRole("radio");
+		expect(radios).toHaveLength(count);
+		return radios[count - 1];
+	}
+
+	const spansRow = (card: HTMLElement) =>
+		card.classList.contains(FULL_WIDTH) && card.matches(VARIANT_SELECTOR);
+
+	it("spans the lone last card of five across the row", () => {
+		expect(spansRow(lastCard(5))).toBe(true);
+	});
+
+	it("leaves the last card of four at one column", () => {
+		expect(spansRow(lastCard(4))).toBe(false);
+	});
+
+	it("spans the lone last card of three, as the collection dialog shows", () => {
+		expect(spansRow(lastCard(3))).toBe(true);
+	});
+});
+
 describe("ProfilePicker without a subset", () => {
 	it("offers every mode", () => {
 		render(<ProfilePicker value="constant_rps" onChange={vi.fn()} />);
