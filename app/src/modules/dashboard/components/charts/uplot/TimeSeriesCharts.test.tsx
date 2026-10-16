@@ -24,7 +24,7 @@ import { render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import type { RampOverlay } from "../../../utils/metricsTransforms";
 import { CONCURRENCY_LABEL, IN_FLIGHT_LABEL } from "@/constants/load-test-modes";
-import { RequestRateChart, ConnectionsChart } from "./TimeSeriesCharts";
+import { RequestRateChart, ConnectionsChart, LatencyBreakdownChart } from "./TimeSeriesCharts";
 import { ResponseTimeVsConcurrencyChart } from "./ScatterAndDistribution";
 
 const mockState = vi.hoisted(() => ({
@@ -137,6 +137,16 @@ describe("ConnectionsChart - what the series is called", () => {
 
 	it("reads a run of unknown mode as open-loop, as the dashboard's default branch does", () => {
 		expect(seriesLabel(undefined)).toBe(IN_FLIGHT_LABEL);
+	});
+});
+
+describe("LatencyBreakdownChart - what the series are called", () => {
+	it("names the average latency as including queue wait, and the other series wire time", () => {
+		render(<LatencyBreakdownChart history={historyOf(4)} />);
+		expect(mockState.series.map((s) => s.label)).toEqual([
+			"average latency (incl. queue wait)",
+			"wire time",
+		]);
 	});
 });
 

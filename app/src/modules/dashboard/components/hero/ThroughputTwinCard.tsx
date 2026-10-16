@@ -5,10 +5,10 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatMs } from "@/lib/format-number";
+import { formatMs, formatRate } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow } from "../shared";
-import { fmt } from "../format";
+import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 
 /** constant_rps hero card #2 - twin send/throughput rates from the open model. */
@@ -43,7 +43,7 @@ export function ThroughputTwinCard({
 			<div className="grid grid-cols-2 gap-4 items-end mt-1">
 				<div>
 					<div className="text-metric leading-none font-bold font-mono tabular-nums text-foreground">
-						{fmt(sendRate, 1)}
+						{fmtRate(sendRate)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s
 						</span>
@@ -55,7 +55,7 @@ export function ThroughputTwinCard({
 				</div>
 				<div>
 					<div className="text-metric leading-none font-bold font-mono tabular-nums text-foreground">
-						{fmt(throughput, 1)}
+						{fmtRate(throughput)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s
 						</span>
@@ -76,7 +76,7 @@ export function ThroughputTwinCard({
 								: "bg-destructive/10 text-destructive-text"
 						)}
 					>
-						Δ {delta.toFixed(1)} req/s
+						Δ {formatRate(delta)} req/s
 					</span>
 					<span>
 						{deltaOk ? "server kept pace with dispatch" : "server is lagging dispatch"}

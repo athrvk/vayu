@@ -129,7 +129,7 @@ export function LatencyPercentilesChart({
 	);
 }
 
-/** Latency breakdown: perceived latency vs wire time, with the queue-wait gap band. */
+/** Latency breakdown: average latency (queue wait included) vs wire time, with the queue-wait gap band. */
 export function LatencyBreakdownChart({
 	history,
 	isCompleted,
@@ -148,17 +148,17 @@ export function LatencyBreakdownChart({
 			bucketSeconds
 		);
 		const aligned: uPlot.AlignedData = [times, ...cols];
-		// Band between latency (idx 1) and wire (idx 2) = the generator queue-wait gap.
+		// Band between average latency (idx 1) and wire time (idx 2) = the generator queue-wait gap.
 		const spec: UPlotSeriesSpec[] = [
 			{
-				label: "latency",
+				label: "average latency (incl. queue wait)",
 				role: "categorical",
 				width: 1.8,
 				format: fmtMs,
 				bandTo: 2,
 				bandRole: "warning",
 			},
-			{ label: "wire", role: "info", format: fmtMs },
+			{ label: "wire time", role: "info", format: fmtMs },
 		];
 		return { data: aligned, series: spec };
 	}, [history, bucketSeconds]);

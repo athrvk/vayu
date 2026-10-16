@@ -6,7 +6,7 @@
  */
 
 import { CONCURRENCY_UNIT_SINGULAR, concurrencyUnit } from "@/constants/load-test-modes";
-import { fmt } from "../format";
+import { fmt, fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
@@ -29,14 +29,14 @@ export function AchievedThroughputCard({
 
 	return (
 		<HeroCardShell label="Achieved throughput" tip={TOOLTIPS.achievedThroughput}>
-			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
+			<HeroValue value={fmtRate(throughput)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				from{" "}
 				<span className="text-foreground font-semibold">
 					{fmt(configuredConcurrency, 0)}
 				</span>{" "}
 				{concurrencyUnit(configuredConcurrency ?? 0)} ·{" "}
-				<span className="text-foreground font-semibold">{fmt(perUser, 2)}</span> req/s per{" "}
+				<span className="text-foreground font-semibold">{fmtRate(perUser)}</span> req/s per{" "}
 				{CONCURRENCY_UNIT_SINGULAR}
 			</p>
 		</HeroCardShell>

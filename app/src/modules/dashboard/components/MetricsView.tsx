@@ -10,12 +10,13 @@
  *
  * Reads the run mode (useMode), computes a single memoized {@link DashboardDerived}
  * bundle, and composes the rows:
- *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate)
+ *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate; the
+ *                             throughput-led modes add a p95/p99 latency card)
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
- *   Row 2.5 - Latency over time      (perceived vs wire, queue-wait gap)
+ *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
  *   Row 3   - HDR percentile plot + Avg request timing waterfall
- *   Row 4   - ModeStatsRow   (mode-adaptive: 4 stat cards)
+ *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
  *
  * Card/chart variants live in hero/, charts/, stats/. This file routes and
  * derives - it does not render metric chrome inline.
@@ -198,7 +199,9 @@ function MetricsView({
 				: (metrics.latency_p99_ms ?? 0),
 			meanLatency: metrics.avg_latency_ms ?? 0,
 			medianLatency: finalReport?.latency?.p50 ?? metrics.latency_p50_ms ?? 0,
-			p95Latency: finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0,
+			p95Latency: isCompleted
+				? (finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0)
+				: (metrics.latency_p95_ms ?? 0),
 			testDuration: finalReport?.summary?.testDuration,
 			elapsedSeconds: lastElapsedSeconds,
 			setupOverhead: finalReport?.summary?.setupOverhead,
@@ -342,14 +345,14 @@ function MetricsView({
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 									style={{ background: "hsl(var(--primary))" }}
 								/>
-								latency
+								average latency (incl. queue wait)
 							</span>
 							<span>
 								<span
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 									style={{ background: "hsl(var(--info))" }}
 								/>
-								wire
+								wire time
 							</span>
 							<span>
 								<span

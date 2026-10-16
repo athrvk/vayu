@@ -6,7 +6,7 @@
  */
 
 import { formatMs } from "@/lib/format-number";
-import { fmt } from "../format";
+import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
@@ -23,7 +23,7 @@ export function ThroughputCard({
 }) {
 	return (
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
-			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
+			<HeroValue value={fmtRate(throughput)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				mean iter{" "}
 				<span className="text-foreground font-semibold">{formatMs(meanLatency)}</span>ms
