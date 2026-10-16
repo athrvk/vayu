@@ -19,7 +19,10 @@
  * `TabStrip.overflow.test.tsx` does for the document strip.
  *
  * Mutation check: render every trigger regardless of `visibleIds` and the
- * narrow cases fail (all eight tabs, no "more tabs" button).
+ * narrow cases fail (all eight tabs, no "more tabs" button). *
+ * Mutation check (marks): set the `attention` map to `undefined` and the trigger
+ * dot and name cases fail; drop `{tab.mark}` in `TabOverflowMenu` and the item
+ * cases fail.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -179,5 +182,89 @@ describe("the response tab strip, fitted to its pane", () => {
 		const wrapper = screen.getByRole("tablist").parentElement as HTMLElement;
 		expect(wrapper.contains(save)).toBe(false);
 		expect(within(wrapper).getAllByRole("tab").length).toBeGreaterThan(0);
+	});
+
+	describe("what the hidden tabs carry", () => {
+		/** The strip at a width where Console and Tests are both in the menu. */
+		function renderNarrow() {
+			stubStripWidth(240);
+			renderViewer();
+		}
+
+		const errorDot = (el: HTMLElement) => el.querySelector('[data-slot="tab-error-dot"]');
+		const menuItem = (label: string) => {
+			const item = screen
+				.getAllByRole("menuitem")
+				.find((el) => el.textContent?.startsWith(label));
+			if (!item) throw new Error(`no menu item starting "${label}"`);
+			return item;
+		};
+
+		it("flags a script error on the trigger, names the tab, and keeps the dot on its item", () => {
+			state.response = { ...aResponse(), postScriptError: "boom is not defined" };
+			renderNarrow();
+			const more = moreButton() as HTMLElement;
+			expect(more).toHaveAccessibleName(/^\d+ more tabs, Console has an error$/);
+			expect(errorDot(more)).not.toBeNull();
+
+			openMore(more);
+			expect(errorDot(menuItem("Console"))).not.toBeNull();
+		});
+
+		it("flags a failing test run the same way, and puts the result chip on the item", () => {
+			state.response = {
+				...aResponse(),
+				testResults: [
+					{ name: "a", passed: true },
+					{ name: "b", passed: false },
+				],
+			};
+			renderNarrow();
+			const more = moreButton() as HTMLElement;
+			expect(more).toHaveAccessibleName(/^\d+ more tabs, Tests has an error$/);
+			expect(errorDot(more)).not.toBeNull();
+
+			openMore(more);
+			expect(menuItem("Tests")).toHaveTextContent("1/2");
+		});
+
+		it("names every hidden tab that has an error, in strip order", () => {
+			state.response = {
+				...aResponse(),
+				preScriptError: "boom",
+				testResults: [{ name: "b", passed: false }],
+			};
+			renderNarrow();
+			expect(moreButton()).toHaveAccessibleName(
+				/^\d+ more tabs, Console has an error, Tests has an error$/
+			);
+		});
+
+		it("leaves the trigger plain for a passing run, and still shows the chip on the item", () => {
+			state.response = {
+				...aResponse(),
+				consoleLogs: ["a log line", "another"],
+				testResults: [
+					{ name: "a", passed: true },
+					{ name: "b", passed: true },
+				],
+			};
+			renderNarrow();
+			const more = moreButton() as HTMLElement;
+			expect(more).toHaveAccessibleName(/^\d+ more tabs$/);
+			expect(errorDot(more)).toBeNull();
+
+			openMore(more);
+			expect(menuItem("Tests")).toHaveTextContent("2/2");
+			expect(menuItem("Console")).toHaveTextContent("2");
+		});
+
+		it("does not flag a tab that is on the strip", () => {
+			state.response = { ...aResponse(), postScriptError: "boom" };
+			stubStripWidth(2000);
+			renderViewer();
+			expect(moreButton()).toBeNull();
+			expect(screen.getAllByRole("tab").map(labelOf)).toContain("Console");
+		});
 	});
 });
