@@ -10,30 +10,25 @@
  *
  * Location: Main content area only
  *
- * Displays real-time metrics and results for load tests.
+ * A running load test's live metrics, and the same run's report once it ends.
  *
  * Architecture:
  * - DashboardHeader: Title, status, stop button
  * - MetricsView: Live metrics, charts
- * - RequestResponseView: Status codes, errors, timing breakdown
+ * - LoadTestDetail: the finished run's report, the component History renders
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import {
-	EmptyState,
-	Callout,
-	RunOutcomeBanner,
-	TabBreadcrumb,
-	reportOutcome,
-} from "@/components/shared";
-import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
-import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
+import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/shared";
+import { Button } from "@/components/ui";
+import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
+import { DashboardHeader, MetricsView } from "./components";
 import { TIMING } from "@/config/timing";
 import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress } from "@/lib/run-status";
-import type { DashboardView, DisplayMetrics } from "./types";
+import type { DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
@@ -43,11 +38,9 @@ export default function LoadTestDashboard() {
 	const currentMetrics = useDashboardStore((s) => s.currentMetrics);
 	const historicalMetrics = useDashboardStore((s) => s.historicalMetrics);
 	const finalReport = useDashboardStore((s) => s.finalReport);
-	const activeView = useDashboardStore((s) => s.activeView);
 	const isStopping = useDashboardStore((s) => s.isStopping);
 	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
 	const requestInfo = useDashboardStore((s) => s.requestInfo);
-	const setActiveView = useDashboardStore((s) => s.setActiveView);
 	const stopRun = useDashboardStore((s) => s.stopRun);
 	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
 	const setStopping = useDashboardStore((s) => s.setStopping);
@@ -151,7 +144,7 @@ export default function LoadTestDashboard() {
 						setIsLoadingReport(false);
 					} else {
 						console.warn(
-							"Report still has zero data after retries, using historical metrics"
+							"Report still has zero data after retries; showing it as stored"
 						);
 						setFinalReport(report);
 						loadAttemptRef.current = 0;
@@ -229,145 +222,39 @@ export default function LoadTestDashboard() {
 		[currentRunId, setStopping, stopRun, showToast]
 	);
 
-	// A failed or stopped run is a finished one: it lays out as the report, only
-	// the header's pill says how it ended (#1932, #2136). A stopped run's store
-	// mode flips on the Stop click, before its report is fetched, and never
-	// becomes `completed`; it takes the report layout once the report is here, so
-	// the live view does not blank into placeholders in between.
-	const isReport =
-		mode === "completed" || mode === "failed" || (mode === "stopped" && !!finalReport);
+	// A finished run - completed, failed or stopped - is shown as History's own
+	// report once its report is here, so the run reads the same now and later
+	// (#1932, #2136, #2220). Until then (a stopped run's report still on its way,
+	// or a fetch that failed) it keeps the live view, which carries the Retry.
+	const report =
+		mode === "completed" || mode === "failed" || mode === "stopped" ? finalReport : null;
 
-	// What `completed` leaves unsaid: whether the run held its budgets (#2130).
-	// Only a settled report has a verdict; a live run's, or a report still being
-	// fetched, answers null and draws nothing.
-	const judgement = useMemo(
-		() => (isReport ? reportOutcome(finalReport) : null),
-		[isReport, finalReport]
+	// The header pill's half of the verdict (#2130); the report draws the banner.
+	const judgement = useMemo(() => reportOutcome(report), [report]);
+
+	const lastTick =
+		historicalMetrics.length > 0 ? historicalMetrics[historicalMetrics.length - 1] : null;
+	const displayMetrics: DisplayMetrics | null = currentMetrics || lastTick;
+	const elapsedDuration = lastTick ? lastTick.elapsed_seconds * 1000 : 0;
+
+	// Memoised: MetricsView is memo'd, and a fresh object per tick would defeat it.
+	const rampConfig = useMemo(
+		() => ({
+			rampUpDurationSeconds: durationSeconds(loadTestConfig?.rampUpDuration) ?? undefined,
+			startConcurrency: loadTestConfig?.startConcurrency,
+			targetConcurrency: loadTestConfig?.concurrency,
+		}),
+		[loadTestConfig]
 	);
-
-	// Compute derived state
-	const lastHistoricalMetrics = useMemo(() => {
-		return historicalMetrics.length > 0
-			? historicalMetrics[historicalMetrics.length - 1]
-			: null;
-	}, [historicalMetrics]);
-
-	const historicalTotalRequests = lastHistoricalMetrics?.requests_completed ?? 0;
-	const hasValidReportData = finalReport && finalReport.summary?.totalRequests > 0;
-
-	const displayMetrics = useMemo((): DisplayMetrics | null => {
-		if (isReport && finalReport) {
-			if (finalReport.summary.totalRequests === 0 && historicalTotalRequests > 0) {
-				return lastHistoricalMetrics as DisplayMetrics;
-			}
-			return {
-				requests_completed: finalReport.summary.totalRequests,
-				requests_failed: finalReport.summary.failedRequests,
-				http_errors: finalReport.summary.httpErrorRequests,
-				no_response: finalReport.summary.noResponseRequests,
-				current_rps: finalReport.summary.avgRps,
-				latency_p50_ms: finalReport.latency.p50,
-				latency_p95_ms: finalReport.latency.p95,
-				latency_p99_ms: finalReport.latency.p99,
-				avg_latency_ms: finalReport.latency.avg,
-				bytes_sent: 0,
-				bytes_received: 0,
-				// Rate metrics from report
-				send_rate: finalReport.summary.sendRate,
-				throughput: finalReport.summary.throughput,
-				// Carry run-progress so the iterations Progress card reads 100%
-				// (not 0/0) once complete; requests_expected falls back to the
-				// last live tick, then to the completed total.
-				requests_sent: finalReport.summary.totalRequests,
-				requests_expected:
-					lastHistoricalMetrics?.requests_expected ?? finalReport.summary.totalRequests,
-			};
-		}
-		return (currentMetrics || lastHistoricalMetrics) as DisplayMetrics | null;
-	}, [isReport, finalReport, currentMetrics, lastHistoricalMetrics, historicalTotalRequests]);
-
-	const runMetadata = hasValidReportData ? finalReport?.metadata : null;
-
-	// Build configuration from stored config or final report
-	// This ensures config is shown during live streaming, not just after report loads
-	const runConfiguration = runMetadata?.configuration;
-	const displayConfiguration = useMemo(() => {
-		if (runConfiguration) {
-			// The report carries the ramp fields; the config we started with only
-			// fills what an older report lacks.
-			return {
-				...runConfiguration,
-				rampUpDuration: runConfiguration.rampUpDuration ?? loadTestConfig?.rampUpDuration,
-				startConcurrency:
-					runConfiguration.startConcurrency ?? loadTestConfig?.startConcurrency,
-			};
-		}
-		if (loadTestConfig) {
-			return {
-				mode: loadTestConfig.mode,
-				duration: loadTestConfig.duration,
-				targetRps: loadTestConfig.targetRps,
-				concurrency: loadTestConfig.concurrency,
-				comment: loadTestConfig.comment,
-				rampUpDuration: loadTestConfig.rampUpDuration,
-				startConcurrency: loadTestConfig.startConcurrency,
-				dataRowCount: loadTestConfig.dataRowCount,
-				dataFileName: loadTestConfig.dataFileName,
-				dataFileHash: loadTestConfig.dataFileHash,
-			};
-		}
-		return undefined;
-	}, [runConfiguration, loadTestConfig]);
-
-	// Typed intermediate for ramp-specific fields that only exist on the loadTestConfig branch
-	const rampCfg = displayConfiguration as
-		{ rampUpDuration?: string; startConcurrency?: number; concurrency?: number } | undefined;
-
-	// Build request info from stored info or final report
-	const displayRequestUrl = runMetadata?.requestUrl ?? requestInfo?.url;
-	const displayRequestMethod = runMetadata?.requestMethod ?? requestInfo?.method;
-
-	// Calculate times
-	const historicalStartTime =
-		historicalMetrics.length > 0 ? historicalMetrics[0].timestamp : null;
-	const historicalEndTime =
-		isReport && historicalMetrics.length > 0
-			? historicalMetrics[historicalMetrics.length - 1].timestamp
-			: null;
-
-	const startTime =
-		runMetadata?.startTime &&
-		(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
-			? runMetadata.startTime
-			: historicalStartTime;
-
-	const endTime =
-		runMetadata?.endTime && runMetadata.endTime > 0 ? runMetadata.endTime : historicalEndTime;
-
-	const elapsedDuration = useMemo(() => {
-		// Use accurate testDuration from report if available (in seconds, convert to ms)
-		if (isReport && finalReport?.summary?.testDuration) {
-			return finalReport.summary.testDuration * 1000;
-		}
-		if (historicalMetrics.length > 0) {
-			const lastMetric = historicalMetrics[historicalMetrics.length - 1];
-			return lastMetric.elapsed_seconds * 1000;
-		}
-		return startTime && endTime ? endTime - startTime : 0;
-	}, [isReport, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
 	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
 	const crumbs = useMemo(
 		() => [
 			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
-			{
-				id: "run",
-				// The live view and the finished report are different places to be,
-				// and the crumb is the only line that says which one this is.
-				label: isReport ? "Load test report" : "Live load test",
-			},
+			// The finished run's crumb is the report's own ("Load test run").
+			{ id: "run", label: "Live load test" },
 		],
-		[isReport, revealDrawerView]
+		[revealDrawerView]
 	);
 
 	// Empty state - placed after all hooks so the hook call order stays stable
@@ -385,23 +272,90 @@ export default function LoadTestDashboard() {
 		);
 	}
 
+	/*
+	 * One notice slot for both failures the dashboard can hit. The stream error
+	 * comes first: without live metrics the page has nothing to show, whereas a
+	 * missing report still leaves whatever was captured. A report on screen has
+	 * nothing left to retry, so only the stream error can reach it.
+	 */
+	const reportNotice = report ? null : reportError;
+	const notices = (streamError || reportNotice) && (
+		<div className="enter-fade px-5 pt-3 shrink-0">
+			{streamError ? (
+				<Callout
+					severity="blocking"
+					title="Lost the live metrics stream"
+					action={
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								setStreamError(null);
+								loadTestService.startMonitoring(currentRunId);
+							}}
+						>
+							Reconnect
+						</Button>
+					}
+				>
+					{streamError} Anything already received is still shown below.
+				</Callout>
+			) : (
+				<Callout
+					severity="blocking"
+					title="Couldn't load the run report"
+					action={
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								loadAttemptRef.current = 0;
+								setReportError(null);
+							}}
+						>
+							Retry
+						</Button>
+					}
+				>
+					{reportNotice} The live metrics below are whatever was captured before the run
+					finished.
+				</Callout>
+			)}
+		</div>
+	);
+
+	if (report) {
+		return (
+			<div className="flex-1 flex flex-col overflow-hidden">
+				{/* Identity only: the report below carries the crumb, the URL, the
+				    configuration and the verdict banner. */}
+				<DashboardHeader
+					mode={mode}
+					isStreaming={isStreaming}
+					isStopping={isStopping}
+					onStop={handleStop}
+					outcome={judgement?.outcome}
+				/>
+				{notices}
+				<div className="flex-1 min-h-0 overflow-hidden">
+					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />
+				</div>
+			</div>
+		);
+	}
+
 	return (
-		<Tabs
-			value={activeView}
-			onValueChange={(next) => setActiveView(next as DashboardView)}
-			className="flex-1 flex flex-col overflow-hidden"
-		>
+		<div className="flex-1 flex flex-col overflow-hidden">
 			{/* Compact single-row header */}
 			<DashboardHeader
 				mode={mode}
 				isStreaming={isStreaming}
 				isStopping={isStopping}
 				onStop={handleStop}
-				requestUrl={displayRequestUrl}
-				requestMethod={displayRequestMethod}
+				requestUrl={requestInfo?.url}
+				requestMethod={requestInfo?.method}
 				elapsedDuration={elapsedDuration}
-				outcome={judgement?.outcome}
-				configuration={displayConfiguration}
+				configuration={loadTestConfig ?? undefined}
 			/>
 
 			{/*
@@ -413,103 +367,21 @@ export default function LoadTestDashboard() {
 			 */}
 			<TabBreadcrumb label="Run location" crumbs={crumbs} className="bg-transparent px-5" />
 
-			{/*
-			 * One notice slot for both failures the dashboard can hit. The stream
-			 * error comes first: without live metrics the page has nothing to show,
-			 * whereas a missing report still leaves whatever was captured.
-			 *
-			 * Both used to be invisible - the report failure retried forever behind
-			 * a `console.error`, and the stream failure was written to the store and
-			 * never read by anything.
-			 */}
-			{(streamError || reportError) && (
-				<div className="enter-fade px-5 pt-3 shrink-0">
-					{streamError ? (
-						<Callout
-							severity="blocking"
-							title="Lost the live metrics stream"
-							action={
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => {
-										setStreamError(null);
-										loadTestService.startMonitoring(currentRunId);
-									}}
-								>
-									Reconnect
-								</Button>
-							}
-						>
-							{streamError} Anything already received is still shown below.
-						</Callout>
-					) : (
-						<Callout
-							severity="blocking"
-							title="Couldn't load the run report"
-							action={
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => {
-										loadAttemptRef.current = 0;
-										setReportError(null);
-									}}
-								>
-									Retry
-								</Button>
-							}
-						>
-							{reportError} The live metrics below are whatever was captured before
-							the run finished.
-						</Callout>
-					)}
-				</div>
-			)}
+			{notices}
 
-			{judgement && (
-				<div className="enter-fade px-5 pt-3 shrink-0">
-					<RunOutcomeBanner judgement={judgement} />
-				</div>
-			)}
-
-			{/* Tab bar */}
-			<TabsList variant="pane" size="sm" className="shrink-0 justify-start">
-				<TabsTrigger value="metrics">
-					<TabLabel>Metrics</TabLabel>
-				</TabsTrigger>
-				<TabsTrigger value="request-response">
-					<TabLabel>Request / Response</TabLabel>
-				</TabsTrigger>
-			</TabsList>
-
-			{/* Content */}
-			<TabsContent value="metrics" className="flex-1 overflow-auto bg-background">
+			<div className="flex-1 overflow-auto bg-background">
 				<MetricsView
 					metrics={displayMetrics}
 					historicalMetrics={historicalMetrics}
-					isCompleted={isReport}
-					finalReport={finalReport}
-					targetRps={
-						displayConfiguration?.targetRps ??
-						finalReport?.metadata?.configuration?.targetRps
-					}
-					concurrency={rampCfg?.concurrency}
-					mode={displayConfiguration?.mode}
-					rampConfig={{
-						rampUpDurationSeconds:
-							durationSeconds(rampCfg?.rampUpDuration) ?? undefined,
-						startConcurrency: rampCfg?.startConcurrency,
-						targetConcurrency: rampCfg?.concurrency,
-					}}
+					targetRps={loadTestConfig?.targetRps}
+					concurrency={loadTestConfig?.concurrency}
+					mode={loadTestConfig?.mode}
+					rampConfig={rampConfig}
 				/>
-			</TabsContent>
-			<TabsContent value="request-response" className="flex-1 overflow-auto bg-background">
-				<RequestResponseView report={finalReport} />
-			</TabsContent>
-		</Tabs>
+			</div>
+		</div>
 	);
 }
 
 // Re-export types
-export type { DashboardMode, DashboardView, DisplayMetrics } from "./types";
+export type { DashboardMode, DisplayMetrics } from "./types";

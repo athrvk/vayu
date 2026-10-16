@@ -6,17 +6,11 @@
  */
 
 import type { RunReport } from "@/types";
+import { durationSeconds } from "@/constants/load-test";
 import type { DashboardDerived } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { isRateLimitedRun } from "./metricsTransforms";
-
-/** Parse a duration string like "10s" to seconds; undefined/empty → undefined. */
-function parseSeconds(s: string | undefined): number | undefined {
-	if (!s) return undefined;
-	const n = parseInt(s, 10);
-	return Number.isFinite(n) ? n : undefined;
-}
 
 /**
  * Adapt a completed-run RunReport into the DashboardDerived bundle the live
@@ -67,7 +61,8 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		// "Server saturating" warning).
 		showDropped: isRateLimitedRun(mode, targetRps) && (s.droppedRequests ?? 0) > 0,
 		rampDeviationPct: undefined, // needs per-tick concurrency (deferred to W1)
-		rampUpDurationSeconds: parseSeconds(cfg.rampUpDuration),
+		// A unit-aware parse: "2m" is 120 s, not 2 (#1945).
+		rampUpDurationSeconds: durationSeconds(cfg.rampUpDuration) ?? undefined,
 		startConcurrency: cfg.startConcurrency,
 		targetConcurrency: cfg.concurrency,
 		breakpoint: { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null },

@@ -210,7 +210,7 @@ export default function PerformanceTab({
 			    one request across five phases, so a p99 here is not comparable to
 			    the p99 above. Absent section = no card, as everywhere else. */}
 			{report.timingBreakdown?.phases && (
-				<Card className="enter-fade">
+				<Card className="enter-fade surface-card">
 					<CardHeader>
 						<CardTitle>Phase latency percentiles</CardTitle>
 					</CardHeader>
@@ -224,7 +224,7 @@ export default function PerformanceTab({
 			    the same run's time to first event; absent for every run that did
 			    not stream, as the engine omits the section rather than write zeros. */}
 			{report.stream && (
-				<Card className="enter-fade">
+				<Card className="enter-fade surface-card">
 					<CardHeader>
 						<CardTitle>
 							Stream events

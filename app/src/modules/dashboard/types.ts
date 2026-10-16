@@ -21,7 +21,6 @@ import type { Breakpoint } from "./utils/computeBreakpoint";
 // ============================================================================
 
 export type DashboardMode = "idle" | "running" | "completed" | "stopped" | "failed";
-export type DashboardView = "metrics" | "request-response";
 
 // ============================================================================
 // Component Props Types
@@ -70,8 +69,6 @@ export interface DashboardHeaderProps {
 export interface MetricsViewProps {
 	metrics: DisplayMetrics | null;
 	historicalMetrics: LoadTestMetrics[];
-	isCompleted: boolean;
-	finalReport: RunReport | null;
 	targetRps?: number;
 	/** Configured concurrency for closed-loop modes (constant_concurrency). */
 	concurrency?: number;
@@ -150,8 +147,7 @@ export interface DisplayMetrics {
 	// The split of `requests_failed`; absent on a tick stored by an older engine.
 	http_errors?: number;
 	no_response?: number;
-	// The latest tick's status map. The completed view builds this from the
-	// report, which carries its own `statusCodes`, so it is absent there.
+	// The latest tick's status map.
 	status_codes?: Record<string, number>;
 	current_rps: number;
 	latency_p50_ms: number;

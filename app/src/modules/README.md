@@ -112,7 +112,9 @@ Some modules have components displayed in both the sidebar and main content area
 #### `dashboard/`
 
 - **Location:** Main content area only
-- **Component:** Real-time load test metrics dashboard
+- **Component:** Real-time load test metrics dashboard. A finished run (one
+  whose report has arrived) renders History's `LoadTestDetail` instead, so the
+  dashboard and History never draw the same run two ways (#2220)
 - **Usage:**
     ```tsx
     import LoadTestDashboard from "@/modules/dashboard";

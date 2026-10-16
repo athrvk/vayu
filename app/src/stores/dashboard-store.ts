@@ -18,7 +18,7 @@ import {
 } from "@/constants/live-window";
 import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress } from "@/lib/run-status";
-import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
+import type { DashboardMode } from "@/modules/dashboard/types";
 
 /**
  * Retention seeded before the window is known. The real value is the engine's
@@ -124,7 +124,6 @@ interface DashboardState {
 	monitorSamples: MonitorSample[];
 	finalReport: RunReport | null;
 	error: string | null;
-	activeView: DashboardView;
 	isStopping: boolean;
 	// Config and request info (available during live streaming)
 	loadTestConfig: LoadTestRunConfig | null;
@@ -175,7 +174,6 @@ interface DashboardState {
 	addMonitorSamples: (batch: MonitorSample[]) => void;
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
-	setActiveView: (view: DashboardView) => void;
 	setStopping: (stopping: boolean) => void;
 }
 
@@ -188,7 +186,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	monitorSamples: [],
 	finalReport: null,
 	error: null,
-	activeView: "metrics",
 	isStopping: false,
 	loadTestConfig: null,
 	requestInfo: null,
@@ -208,7 +205,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			monitorSamples: [],
 			finalReport: null,
 			error: null,
-			activeView: "metrics",
 			isStopping: false,
 			loadTestConfig: config ?? null,
 			requestInfo: requestInfo ?? null,
@@ -322,6 +318,5 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		}),
 
 	setError: (error) => set({ error }),
-	setActiveView: (view) => set({ activeView: view }),
 	setStopping: (stopping) => set({ isStopping: stopping }),
 }));

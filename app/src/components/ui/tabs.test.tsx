@@ -456,12 +456,13 @@ describe("every TabsList call site declares its variant", () => {
 				tags.push([relative(".", file), m[0]]);
 			}
 		}
-		// The seven strips this issue converted. A drop below that is a strip
-		// deleted or a scan that stopped seeing them.
+		// The seven strips this issue converted, less the dashboard's, which went
+		// with #2220. A drop below that is a strip deleted or a scan that stopped
+		// seeing them.
 		expect(
 			tags.length,
 			"no TabsList call sites found - has the scan broken?"
-		).toBeGreaterThanOrEqual(7);
+		).toBeGreaterThanOrEqual(6);
 		for (const [file, tag] of tags) {
 			expect(tag, `${file} renders a TabsList with no variant`).toMatch(/variant=/);
 		}

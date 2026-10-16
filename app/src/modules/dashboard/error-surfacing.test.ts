@@ -50,8 +50,8 @@ vi.mock("@/services", () => ({
 vi.mock("./components", () => ({
 	DashboardHeader: () => null,
 	MetricsView: () => null,
-	RequestResponseView: () => null,
 }));
+vi.mock("@/modules/history/main/LoadTestDetail", () => ({ default: () => null }));
 
 import { loadTestService } from "@/services/load-test-service";
 import LoadTestDashboard from "./index";

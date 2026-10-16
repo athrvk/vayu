@@ -16,15 +16,16 @@
  * declares `bg-card surface-card` and its dividers say `border-rule`.
  *
  * `border-rule` alone proves nothing: under no declared surface it falls back
- * to the invisible default. So this renders a completed ramp-up run that
- * reaches every divider the view can draw (ramp footer, HDR footer, timing
- * footer, phase percentiles, stream events) and asserts the declarations.
+ * to the invisible default. So this renders a ramp-up run that reaches every
+ * divider the live view can draw (ramp footer, HDR footer, timing footer) and
+ * asserts the declarations. The phase-percentile and stream-event dividers are
+ * the finished report's, guarded by `PerformanceTab.surface-rule.test.tsx`.
  */
 
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { LoadTestMetrics, RunReport } from "@/types";
+import type { LoadTestMetrics } from "@/types";
 import type { DisplayMetrics, MetricsViewProps } from "../types";
 import MetricsView from "./MetricsView";
 
@@ -54,37 +55,6 @@ function tick(i: number): LoadTestMetrics {
 	};
 }
 
-const phase = { p50: 2, p95: 3, p99: 4, max: 6, count: 100 };
-
-const finalReport = {
-	summary: {
-		totalRequests: 500,
-		successfulRequests: 496,
-		failedRequests: 4,
-		errorRate: 0.8,
-		totalDurationSeconds: 6,
-		avgRps: 83,
-	},
-	latency: { min: 5, max: 120, avg: 27, p50: 22, p90: 40, p95: 48, p99: 96 },
-	statusCodes: { "200": 496, "500": 4 },
-	errors: { total: 4, withDetails: 0, types: {} },
-	timingBreakdown: {
-		avgDnsMs: 1,
-		avgConnectMs: 2,
-		avgTlsMs: 3,
-		avgFirstByteMs: 10,
-		avgDownloadMs: 4,
-		phases: { dns: phase, connect: phase, tls: phase, firstByte: phase, download: phase },
-	},
-	stream: {
-		completions: 3,
-		totalEvents: 120,
-		capped: 0,
-		eventsPerSecond: 12.5,
-		events: { min: 1, max: 60, p50: 40, p90: 55, p95: 58, p99: 60, count: 3 },
-	},
-} as unknown as RunReport;
-
 const props: MetricsViewProps = {
 	metrics: {
 		requests_completed: 500,
@@ -98,8 +68,6 @@ const props: MetricsViewProps = {
 		bytes_received: 25000,
 	} as DisplayMetrics,
 	historicalMetrics: Array.from({ length: 6 }, (_, i) => tick(i)),
-	isCompleted: true,
-	finalReport,
 	mode: "ramp_up",
 	rampConfig: { rampUpDurationSeconds: 10, startConcurrency: 1, targetConcurrency: 100 },
 };
@@ -120,10 +88,9 @@ describe("MetricsView declares the surface its dividers read", () => {
 	it("every border-rule sits under a declared surface", () => {
 		const rules = Array.from(renderView().querySelectorAll(".border-rule"));
 
-		// Ramp footer, HDR footer, timing footer, the two section rules, phase
-		// percentiles and stream metrics: a render that reached none of them
-		// would pass the loop below having checked nothing.
-		expect(rules.length).toBeGreaterThanOrEqual(7);
+		// Ramp footer, HDR footer and timing footer: a render that reached none
+		// of them would pass the loop below having checked nothing.
+		expect(rules.length).toBeGreaterThanOrEqual(3);
 		for (const rule of rules) {
 			expect(
 				rule.closest(SURFACE),

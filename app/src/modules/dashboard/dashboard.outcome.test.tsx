@@ -11,14 +11,17 @@
 /**
  * The verdict a finished run opens on (#2130).
  *
- * `completed` says the run ended, not that it held its budgets, so the
- * dashboard states the verdict above the tabs and hands the header the same
- * one for its pill. A run still streaming, or a report that has not arrived,
- * has no verdict and gets no banner - never "Not judged" over a missing report.
+ * `completed` says the run ended, not that it held its budgets. The finished
+ * run is History's report (#2220), which draws the verdict banner, and the
+ * dashboard hands its header the same verdict for the pill. A run still
+ * streaming, or a report that has not arrived, has no verdict and gets no
+ * banner - never "Not judged" over a missing report.
  */
 
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { withQueryClient } from "@/test/query-wrapper";
 import { useDashboardStore } from "@/stores";
 import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
@@ -28,7 +31,6 @@ vi.mock("./components", () => ({
 		<div data-testid="header" data-outcome={outcome ?? ""} />
 	),
 	MetricsView: () => null,
-	RequestResponseView: () => null,
 }));
 
 vi.mock("@/services", () => ({
@@ -69,6 +71,8 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
 			p99: 1,
 			p999: 1,
 		},
+		statusCodes: { "200": 100 },
+		errors: { total: 0, withDetails: 0, types: {} },
 		...overrides,
 	} as RunReport;
 }
@@ -91,6 +95,8 @@ function seed(
 	useDashboardStore.setState({ currentRunId: "run_1", mode, isStreaming, finalReport });
 }
 
+const renderDashboard = () => render(withQueryClient(<LoadTestDashboard />));
+
 afterEach(() => {
 	useDashboardStore.setState({ currentRunId: null, finalReport: null });
 });
@@ -98,16 +104,15 @@ afterEach(() => {
 describe("the dashboard's verdict banner", () => {
 	it("names the missed budgets and tells the header", () => {
 		seed("completed", report({ thresholdValidation: MISSED }));
-		render(<LoadTestDashboard />);
+		renderDashboard();
 
-		expect(screen.getByText("Failed")).toBeInTheDocument();
 		expect(screen.getByText(/1 of 2 budgets missed: p95/)).toBeInTheDocument();
 		expect(screen.getByTestId("header").dataset.outcome).toBe("failed");
 	});
 
 	it("says Not judged for a run with no budgets, never Passed", () => {
 		seed("completed", report());
-		render(<LoadTestDashboard />);
+		renderDashboard();
 
 		expect(screen.getByText("Not judged")).toBeInTheDocument();
 		expect(screen.getByText(/No budgets set. 0.0% errors/)).toBeInTheDocument();
@@ -129,17 +134,16 @@ describe("the dashboard's verdict banner", () => {
 				thresholdValidation: MISSED,
 			})
 		);
-		render(<LoadTestDashboard />);
+		renderDashboard();
 
 		expect(screen.getByText("Not judged")).toBeInTheDocument();
 		expect(screen.getByText(/Stopped before it finished/)).toBeInTheDocument();
-		expect(screen.queryByText("Failed")).toBeNull();
 		expect(screen.getByTestId("header").dataset.outcome).toBe("not-judged");
 	});
 
 	it("draws no banner while the run is streaming", () => {
 		seed("running", report({ metadata: undefined }), true);
-		render(<LoadTestDashboard />);
+		renderDashboard();
 
 		expect(screen.queryByText("Not judged")).toBeNull();
 		expect(screen.queryByText("Failed")).toBeNull();
@@ -148,7 +152,7 @@ describe("the dashboard's verdict banner", () => {
 
 	it("draws no banner for a finished run whose report has not arrived", () => {
 		seed("completed", null);
-		render(<LoadTestDashboard />);
+		renderDashboard();
 
 		expect(screen.queryByText("Not judged")).toBeNull();
 		expect(screen.getByTestId("header").dataset.outcome).toBe("");

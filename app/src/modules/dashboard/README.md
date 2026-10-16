@@ -2,7 +2,10 @@
 
 **Location:** Main content area only
 
-This module displays real-time load test metrics and results.
+This module displays real-time load test metrics. A finished run - completed,
+failed or stopped - renders History's `LoadTestDetail` over its report once the
+report has arrived (#2220), so the dashboard and History never draw one run two
+ways; until then the live view stays, with the report fetch's Retry.
 
 ## Structure
 
@@ -10,7 +13,8 @@ This module displays real-time load test metrics and results.
 - `components/` - Sub-components (DashboardHeader, MetricsView, etc.). The header takes the
   finished run's verdict (`outcome`, from `components/shared/run-outcome.ts`) as a string so a
   `completed` pill does not wear the success tick for a run that missed a budget; it is a string
-  because the header is memo'd on `Object.is`. The same verdict is the banner above the tabs.
+  because the header is memo'd on `Object.is`. The verdict's banner is the report's own
+  (`LoadTestDetail`), so a finished run's header is only Back and that pill.
 - `hooks/` - Dashboard-scoped hooks (`useMode`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions
@@ -36,8 +40,7 @@ consumes it.
 - **No chart geometry constants in component files.** `utils/chartGeometry.ts`
   owns `TIME_SERIES_DIMS` and `HDR_DIMS`. The full-width time-series charts must
   stay dimensionally identical or the dashboard rows stop lining up, and the HDR
-  plot must match its own skeleton or the card shifts height when the final
-  report arrives.
+  plot and the live view's skeleton of it hold one height.
 - **The mode mapping lives in exactly one place.** `hooks/useMode.ts` is the only
   interpreter of the freeform engine `mode` string. Mode-adaptive components take
   the discriminator from it instead of re-parsing the raw value, and the mode
@@ -51,17 +54,17 @@ consumes it.
   carries `failedRequests` and its split `httpErrors` / `noResponse`, read off
   the live tick or the report summary through `utils/errorBreakdown.ts`. No
   card recounts them from the status map: `ErrorRateCard` only buckets that
-  map for its bar, and `MetricsView` feeds it the report's distribution once
-  there is one and the latest tick's before that.
+  map for its bar, which `MetricsView` feeds from the latest tick and
+  `reportToDerived` from the report's distribution.
 - **A request a Stop cancelled is not an error (#2136).** The engine counts it
   apart (`summary.cancelledRequests`) and leaves it out of `totalRequests`, the
   status-code distribution and every error figure, so the Error rate card and
-  its bar never include it. The two report views draw it as one muted line,
+  its bar never include it. The report draws it as one muted line,
   `CancelledRequestsNote` ("N requests cancelled by Stop"), beside the error
   card rather than inside it, since a stopped run with no errors still has it.
   The card's colour follows its digits (`formatErrorPercent`): a rate above zero
-  is never printed as `0.0` in red. A `stopped` run lays out as the final report
-  like `completed` and `failed` do.
+  is never printed as `0.0` in red. A `stopped` run renders the report like
+  `completed` and `failed` do.
 - **A chart card's render gate asks a predicate, not a series.**
   `utils/metricsTransforms.ts` owns both halves: the transform a chart plots,
   and the `spansMultipleBuckets` / `hasPercentileSignal` predicates a card reads

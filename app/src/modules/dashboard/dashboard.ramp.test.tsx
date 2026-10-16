@@ -9,25 +9,19 @@
  */
 
 /**
- * The ramp fields the metrics view reads come from the report first (#1945).
+ * The ramp fields the live metrics view reads (#1945).
  *
- * `build_run_report_config` emits `rampUpDuration` and `startConcurrency`, so a
- * loaded report is the source of truth; the launch config only fills what a
- * report lacks. A back-fill spread over the report would replace its values
- * with `undefined` whenever the launch config is gone (a run opened from
- * History), and the ramp duration was parsed with a seconds-only `parseInt`,
- * so "2m" read as 2.
+ * The ramp duration was parsed with a seconds-only `parseInt`, so "2m" read as
+ * 2. A finished run's ramp comes from its report through `reportToDerived`,
+ * which `reportToDerived.test.ts` holds to the same parse (#2220).
  *
- * Mutation check: put the unconditional `loadTestConfig?.` spread back in
- * `displayConfiguration` and the report-first cases redden; swap
- * `durationSeconds` for `parseInt` in the `rampConfig` prop and the minutes
- * case reddens.
+ * Mutation check: swap `durationSeconds` for `parseInt` in the `rampConfig`
+ * memo and the minutes case reddens.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { useDashboardStore } from "@/stores";
-import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
 
 interface RampConfig {
@@ -44,7 +38,6 @@ vi.mock("./components", () => ({
 		metricsProps.latest = props;
 		return null;
 	},
-	RequestResponseView: () => null,
 }));
 
 vi.mock("@/services", () => ({
@@ -58,50 +51,26 @@ vi.mock("@/services", () => ({
 
 const rampConfig = () => (metricsProps.latest as { rampConfig: RampConfig }).rampConfig;
 
-function reportWith(configuration: Record<string, unknown>): RunReport {
-	return {
-		metadata: {
-			runId: "run_1",
-			runType: "load",
-			status: "completed",
-			startTime: 0,
-			endTime: 1000,
-			configuration,
-		},
-		summary: {
-			totalRequests: 10,
-			successfulRequests: 10,
-			failedRequests: 0,
-			errorRate: 0,
-			totalDurationSeconds: 1,
-			avgRps: 10,
-		},
-		latency: { min: 1, max: 2, avg: 1, p50: 1, p90: 1, p95: 1, p99: 2 },
-		statusCodes: {},
-		errors: { total: 0, withDetails: 0, types: {} },
-	} as unknown as RunReport;
-}
-
 beforeEach(() => {
 	metricsProps.latest = null;
 	useDashboardStore.setState({
 		currentRunId: "run_1",
-		mode: "completed",
-		isStreaming: false,
+		mode: "running",
+		isStreaming: true,
 		loadTestConfig: null,
 		finalReport: null,
 	});
 });
 
 describe("the dashboard's ramp configuration", () => {
-	it("reads the ramp from the report when no launch config remains", () => {
+	it("reads a ramp given in minutes as seconds", () => {
 		useDashboardStore.setState({
-			finalReport: reportWith({
+			loadTestConfig: {
 				mode: "ramp_up",
 				concurrency: 50,
 				startConcurrency: 5,
 				rampUpDuration: "2m",
-			}),
+			},
 		});
 		render(<LoadTestDashboard />);
 
@@ -112,36 +81,9 @@ describe("the dashboard's ramp configuration", () => {
 		});
 	});
 
-	it("prefers the report's ramp over the launch config's", () => {
-		useDashboardStore.setState({
-			loadTestConfig: { mode: "ramp_up", rampUpDuration: "30s", startConcurrency: 1 },
-			finalReport: reportWith({
-				mode: "ramp_up",
-				concurrency: 50,
-				startConcurrency: 5,
-				rampUpDuration: "60s",
-			}),
-		});
-		render(<LoadTestDashboard />);
-
-		expect(rampConfig().rampUpDurationSeconds).toBe(60);
-		expect(rampConfig().startConcurrency).toBe(5);
-	});
-
-	it("fills a report that lacks the ramp from the launch config", () => {
-		useDashboardStore.setState({
-			loadTestConfig: { mode: "ramp_up", rampUpDuration: "30s", startConcurrency: 1 },
-			finalReport: reportWith({ mode: "ramp_up", concurrency: 50 }),
-		});
-		render(<LoadTestDashboard />);
-
-		expect(rampConfig().rampUpDurationSeconds).toBe(30);
-		expect(rampConfig().startConcurrency).toBe(1);
-	});
-
 	it("passes no ramp duration for a value that is not a duration", () => {
 		useDashboardStore.setState({
-			finalReport: reportWith({ mode: "ramp_up", rampUpDuration: "soon" }),
+			loadTestConfig: { mode: "ramp_up", rampUpDuration: "soon" },
 		});
 		render(<LoadTestDashboard />);
 

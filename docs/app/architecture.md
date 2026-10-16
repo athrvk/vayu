@@ -273,7 +273,7 @@ sections themselves.
 4. `useDashboardStore().startRun()` initializes dashboard state
 5. `loadTestService.startMonitoring(runId)` connects to the `/runs/:runId/live` SSE endpoint
 6. Metrics stream in real-time and update dashboard
-7. When test completes, final report is fetched via `GET /runs/:id/report`
+7. When test completes, final report is fetched via `GET /runs/:id/report`, and the dashboard swaps the live view for History's `LoadTestDetail` over that report, so the run reads the same there as when it is reopened from History later (issue #2220)
 
 ### Collection Run Flow
 
