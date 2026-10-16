@@ -401,6 +401,8 @@ set(vayu_scratch_database_suites
     ResourceWriteRouteTest
     ResponseCaptureTest
     RunConfigValidationRouteTest
+    RunExportSchemaTest
+    RunExportTest
     RunOriginRouteTest
     RunRetentionReleaseTest
     RunShutdownTest
