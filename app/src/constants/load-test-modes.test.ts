@@ -51,6 +51,13 @@ describe("load test mode vocabulary", () => {
 		}
 	});
 
+	it("calls the iterations mode 'Fixed request count' (#2228)", () => {
+		// The stored value stays `iterations`; only the words changed.
+		const mode = LOAD_TEST_MODES.find((m) => m.value === "iterations");
+		expect(mode?.label).toBe("Fixed request count");
+		expect(loadTestModeLabel("iterations")).toBe("Fixed request count");
+	});
+
 	it("humanises a mode it does not know, rather than showing the raw token", () => {
 		// Runs come back from storage and from the engine; a newer engine sending
 		// a mode this build has never heard of should still read as a name.

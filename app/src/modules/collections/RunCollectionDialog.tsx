@@ -150,9 +150,9 @@ export interface RunCollectionDialogProps {
 const MIN_ITERATIONS = 1;
 
 /**
- * Fixed Iterations counts passes through the sequence here, not requests, and
- * `LOAD_TEST_MODES` is not reworded for it: `loadTestModeLabel` names stored
- * runs on every other screen.
+ * In the Fixed request count mode the count is passes through the sequence
+ * here, not requests, and `LOAD_TEST_MODES` is not reworded for it:
+ * `loadTestModeLabel` names stored runs on every other screen.
  */
 const SEQUENCE_PROFILE_COPY: ProfilePickerCopy = {
 	iterations: {
