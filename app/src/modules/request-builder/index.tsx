@@ -293,7 +293,7 @@ export default function RequestBuilder() {
 	// Preview-only since #226: execution resolves engine-side (POST /compose).
 	// `resolveObject` still backs the load dialog's OAuth token-expiry guard,
 	// which previews the effective config without sending anything.
-	const { resolveObject } = useVariableResolver({
+	const { resolveObject, resolveString } = useVariableResolver({
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
@@ -313,6 +313,14 @@ export default function RequestBuilder() {
 		if (!auth || auth.mode !== "oauth2") return null;
 		return resolveObject(auth.config) as OAuth2Config;
 	}, [pendingLoadTestRequest, collectionAncestors, resolveObject]);
+
+	// The URL the load dialog names as the target and classifies for its
+	// off-network advisory (#2117). Resolved from the same scopes the preview
+	// uses, so a `{{baseUrl}}` with no value stays a token and reads as unknown.
+	const pendingLoadTestUrl = useMemo(
+		() => (pendingLoadTestRequest ? resolveString(pendingLoadTestRequest.url) : undefined),
+		[pendingLoadTestRequest, resolveString]
+	);
 
 	// The pending request in the stored row's shapes, for the load dialog's
 	// data-column audit (issue #2050). The draft rather than the stored row,
@@ -1067,6 +1075,8 @@ export default function RequestBuilder() {
 					collectionId={fetchedRequest?.collectionId}
 					request={pendingLoadTestAuditRequest}
 					referenceOwner={thresholdOwner}
+					method={pendingLoadTestRequest?.method}
+					url={pendingLoadTestUrl}
 				/>
 			)}
 		</>

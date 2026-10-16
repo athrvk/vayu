@@ -108,6 +108,13 @@ scattered strings land the same way.
   is friction with no purpose.
 - **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format:
   `Send request (⌘↵)`.
+- **A bare noun on the rail gets a gloss.** An icon-only rail button's tooltip
+  is the only place its name is explained, so a name that is a category rather
+  than a thing ("Services") carries a one-line fragment beneath the label that
+  lists what is behind it ("Webhook inbox, OAuth issuer, mock servers"). A name
+  that explains itself ("Trash", "History") gets none, and the gloss is never
+  part of the accessible name. It is the `hint` on the view's entry in
+  `constants/drawer-views.ts`, not a string written in the rail.
 - **State-machine copy** uses one vocabulary per state machine, not
   synonyms: `Saving… / Saved / Unsaved changes` for persistence,
   `Running / Stopped / Completed / Failed` for a load test run. The present

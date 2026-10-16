@@ -99,13 +99,14 @@ export function ActivityRail() {
 			aria-label="Sidebar views"
 			{...regionProps("rail")}
 		>
-			{DRAWER_VIEWS.map(({ view, label, icon: Icon, motion }) => {
+			{DRAWER_VIEWS.map(({ view, label, hint, icon: Icon, motion }) => {
 				return (
 					<RailButton
 						key={view}
 						active={drawerOpen && drawerView === view}
 						onClick={() => activateDrawerView(view)}
 						label={label}
+						hint={hint}
 						shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
 						side="left"
 						variant="indicator"

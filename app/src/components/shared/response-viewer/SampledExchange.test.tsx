@@ -107,6 +107,36 @@ describe("SampledExchange", () => {
 		expect(container.querySelector(".text-status-success-text")).toBeNull();
 	});
 
+	it.each([
+		[200, "success"],
+		[301, "success"],
+		[404, "error"],
+		[429, "error"],
+		[500, "error"],
+		[0, "error"],
+	] as const)("reads a %i with no error string as %s", (statusCode, expected) => {
+		// The engine's error definition is 200-399 succeeds, anything else does
+		// not (#2124), so a 4xx or 5xx must not wear the success tick.
+		const { container } = render(<SampledExchange {...base} statusCode={statusCode} />);
+
+		const error = container.querySelector(".text-destructive-text");
+		const success = container.querySelector(".text-status-success-text");
+		expect(error !== null).toBe(expected === "error");
+		expect(success !== null).toBe(expected === "success");
+	});
+
+	it("lets a caller-supplied state win over the status code", () => {
+		// A collection step can fail a test over a 200 and skip over nothing.
+		const { container, rerender } = render(
+			<SampledExchange {...base} statusCode={200} state="error" />
+		);
+		expect(container.querySelector(".text-destructive-text")).not.toBeNull();
+
+		rerender(<SampledExchange {...base} statusCode={500} state="success" />);
+		expect(container.querySelector(".text-destructive-text")).toBeNull();
+		expect(container.querySelector(".text-status-success-text")).not.toBeNull();
+	});
+
 	it("marks a slow sample on both the icon and the latency", () => {
 		const { container } = render(<SampledExchange {...base} isSlow />);
 
