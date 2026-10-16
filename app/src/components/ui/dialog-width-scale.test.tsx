@@ -6,15 +6,17 @@
  */
 
 /**
- * Every dialog is one of two widths (issue #701, review follow-up).
+ * Every dialog is one of a closed set of widths (issue #701, review follow-up).
  *
  * The sizes had drifted to five values across eleven call sites - `sm:max-w-md`,
  * `sm:max-w-lg`, `sm:max-w-xl`, `sm:max-w-[560px]` and a hard `w-[500px]` - so
  * two dialogs of the same kind came out different sizes depending on who wrote
  * them, and the most cramped of them held a data-file preview table. There are
- * now three: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
- * holding something with a shape of its own, and `2xl` (672px) for one whose job
- * is *browsing* that shape - the data-row picker, added by issue #892.
+ * now four: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
+ * holding something with a shape of its own, `2xl` (672px) for one whose job
+ * is *browsing* that shape - the data-row picker, added by issue #892 - and
+ * `lg:max-w-4xl` (896px, from the `lg` breakpoint only) for a dense config that
+ * is two independent groups laid in two panes, the load-test dialog (#2231).
  *
  * The scale grows by widening it here with a reason, which is what the last
  * assertion's message asks for; it does not grow by a call site quietly taking a
@@ -62,7 +64,7 @@ function panelWidths(source: string): string[] {
 		// read as the widths "w-hidden" and "w-y-auto".
 		for (const literal of tag.matchAll(/"([^"]*)"/g)) {
 			for (const cls of literal[1].matchAll(
-				/(?:^|\s)((?:sm:)?(?:max-)?w-\[?[\w.%[\]()-]+)/g
+				/(?:^|\s)((?:sm:|lg:)?(?:max-)?w-\[?[\w.%[\]()-]+)/g
 			)) {
 				// `w-full` is the primitive's own base and says nothing about size.
 				if (cls[1] !== "w-full") widths.push(cls[1]);
@@ -78,10 +80,13 @@ const ALLOWED = new Set([
 	"max-w-xl",
 	"sm:max-w-xl",
 	// `2xl` (672px) is the browser size, opened for the data-row picker in
-	// issue #892 - see the rationale on `DialogContent`. It is the last size the
-	// scale takes: past it a modal is competing with a pane.
+	// issue #892 - see the rationale on `DialogContent`.
 	"max-w-2xl",
 	"sm:max-w-2xl",
+	// The two-pane size (#2231), spelled with the breakpoint so below `lg` the
+	// dialog stays the `xl` single column. Only the prefixed spelling is listed:
+	// a bare `max-w-4xl` would be the wider modal the scale does not take.
+	"lg:max-w-4xl",
 ]);
 
 describe("the dialog width scale", () => {
@@ -95,7 +100,7 @@ describe("the dialog width scale", () => {
 		expect(files.length).toBeGreaterThanOrEqual(8);
 	});
 
-	it("gives every dialog one of the two sizes", () => {
+	it("gives every dialog one of the sizes on the scale", () => {
 		const offenders: string[] = [];
 		for (const file of files) {
 			for (const width of panelWidths(readFileSync(file, "utf8"))) {
@@ -107,6 +112,17 @@ describe("the dialog width scale", () => {
 		// A dialog that genuinely needs its own width should widen the scale in
 		// `dialog.tsx` and say why, rather than open a one-off here.
 		expect(offenders).toEqual([]);
+	});
+
+	it("reads a breakpoint-prefixed width and refuses a bare unlisted one", () => {
+		// `lg:max-w-4xl` is on the scale; the same size with no breakpoint, or
+		// at another one, is a one-off the scan has to surface.
+		const tag = (cls: string) => `<DialogContent className="${cls}">`;
+		expect(panelWidths(tag("max-w-xl lg:max-w-4xl"))).toEqual(["max-w-xl", "lg:max-w-4xl"]);
+		expect(panelWidths(tag("max-w-4xl")).filter((w) => !ALLOWED.has(w))).toEqual(["max-w-4xl"]);
+		expect(panelWidths(tag("lg:max-w-5xl")).filter((w) => !ALLOWED.has(w))).toEqual([
+			"lg:max-w-5xl",
+		]);
 	});
 
 	it("still finds the widths it is checking, on the dialogs that set one", () => {

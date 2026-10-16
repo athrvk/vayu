@@ -97,25 +97,24 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// one present the panel never scrolls at all and the button
 					// stays pinned.
 					//
-					// Three widths, not eleven. A dialog is either a form or a
+					// Four widths, not eleven. A dialog is either a form or a
 					// decision, which is `sm:max-w-lg` (512px); or it holds
 					// something with a shape of its own - a table, a diff, a
 					// preview, a dense config - which is `max-w-xl` (576px) and
-					// the default here; or it is a *browser*, where the content is
-					// the whole point and picking one row out of it is the task,
-					// which is `sm:max-w-2xl` (672px). They were spread across five
-					// values including two one-off pixel widths, so the same kind of
-					// dialog came out a different size depending on who wrote it.
+					// the default here; or it is a *browser*, where reading a grid
+					// is the task, which is `sm:max-w-2xl` (672px, opened for the
+					// data-row picker, issue #892: seven CSV columns at 576px leave
+					// ~60px each); or it is a dense config that is two independent
+					// groups, which is `max-w-xl lg:max-w-4xl` (896px from the `lg`
+					// breakpoint, one column below it) and lays them in two panes
+					// (issue #2231). They had been five values including two
+					// one-off pixel widths, so the same kind of dialog came out a
+					// different size depending on who wrote it.
 					//
-					// `2xl` was opened for the data-row picker (issue #892), which
-					// is the one dialog whose job is reading a grid rather than
-					// confirming something about it: seven columns of ordinary CSV
-					// at 576px leaves ~60px a column, which is a truncated cell per
-					// column and nothing scannable. It is deliberately the last
-					// size - a dialog is a focus device before it is a container, so
-					// anything that wants more room wants a pane, not a wider modal.
-					// See docs/design-system.md; go wider only with content that
-					// earns it.
+					// A dialog is a focus device before it is a container: widen the
+					// scale only for content that earns it, in
+					// `dialog-width-scale.test.tsx` and docs/design-system.md with the
+					// reason, never at a call site.
 					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto [scrollbar-gutter:auto] rounded-lg border bg-background p-5 shadow-lg",
 					className
 				)}

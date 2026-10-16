@@ -2561,13 +2561,14 @@ directly. **Tailwind emits no rule for `grid-cols-[minmax(0,1fr)]`** (verified
 against the built CSS), so that spelling is a class that reads correctly, passes
 a `className` assertion, and styles nothing.
 
-### Dialog widths: three sizes
+### Dialog widths: four sizes
 
 | Size | Class | For |
 | ---- | ----- | --- |
 | Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
 | Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
 | Browser | `sm:max-w-2xl` (672px) | A dialog whose job is *reading* that shape and picking out of it, not confirming something about it. One call site: the data-row picker beside Send. |
+| Two-pane | `max-w-xl lg:max-w-4xl` (576px, 896px from the `lg` breakpoint) | A dense config that is two independent groups, which a single column makes scroll past one to reach the other. One call site: the load-test dialog, with the run's shape on the left and what it records and checks on the right. Below `lg` it is the Wide column. |
 
 These had drifted to five values across eleven call sites, including two one-off
 pixel widths, so the same kind of dialog came out a different size depending on
@@ -2577,9 +2578,16 @@ reason, rather than opening a one-off.
 
 `2xl` was opened for the row picker (issue #892): seven columns of ordinary CSV
 at 576px leaves about 60px a column, which is one truncated cell per column and
-nothing scannable. It is deliberately the last size on the scale - a dialog is a
-focus device before it is a container, so content that wants more room than this
-wants a pane, not a wider modal.
+nothing scannable.
+
+`lg:max-w-4xl` was opened for the load-test dialog (issue #2231), whose fields
+had grown to a single column taller than a laptop viewport. The width is not
+what earns it: the content is two groups that do not depend on each other, laid
+side by side from `lg` (1024px). The size is the two-pane one only - a dialog
+that is one group wanting more room still wants a pane elsewhere, not a wider
+modal. A two-pane dialog pins anything that explains a disabled Start (its
+notices) between the header and `DialogBody`, so it cannot scroll away inside one
+column.
 
 Prefer a **cap** (`max-w-*`) over a fixed `w-[…]`: a fixed width is one the panel
 keeps on a viewport narrower than it, where `w-full` under a cap gives the same

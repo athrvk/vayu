@@ -306,7 +306,7 @@ export default function LoadTestConfigDialog({
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-xl">
+			<DialogContent className="max-w-xl lg:max-w-4xl">
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
@@ -332,102 +332,121 @@ export default function LoadTestConfigDialog({
 					</p>
 				</DialogHeader>
 
+				{/*
+				 * Pinned between header and body, not inside the scroller: a blocking
+				 * notice explains why Start is disabled, and in a two-pane body it would
+				 * scroll out of sight with the column it sits in. Capped so a stack of
+				 * them cannot take the fields' height. `-mx-1 px-1 py-px` is DialogBody's
+				 * clearance (#1627), so a focused notice button's ring is not clipped.
+				 */}
+				{notices.length > 0 && (
+					<div
+						data-slot="load-test-notices"
+						className="-mx-1 max-h-[30vh] shrink-0 space-y-3 overflow-y-auto px-1 py-px"
+					>
+						{notices.map((n) => (
+							<div key={n.key}>{n.node}</div>
+						))}
+					</div>
+				)}
+
 				<DialogBody className="space-y-4">
-					{notices.map((n) => (
-						<div key={n.key}>{n.node}</div>
-					))}
+					{/* Two panes from `lg`: what the run does on the left, what it records and checks on the right. */}
+					<div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+						<div className="min-w-0 space-y-4">
+							{/*
+							 * First field in the dialog, not the last one inside "Recording
+							 * & limits": naming the run is what a user does before picking
+							 * its profile, not an afterthought behind a collapsed advanced
+							 * section - a comment written after the run started is a comment
+							 * about a run already forgotten which one it was.
+							 */}
+							<div className="space-y-1.5">
+								<Label htmlFor="lt-comment" className="text-xs">
+									Run label
+									<span className="ml-1 font-normal text-muted-foreground">
+										(optional)
+									</span>
+								</Label>
+								<Input
+									id="lt-comment"
+									type="text"
+									value={comment}
+									onChange={(e) => setComment(e.target.value)}
+									placeholder="Checkout after the cache change"
+									aria-describedby="lt-comment-hint"
+									className="text-sm"
+								/>
+								<p
+									id="lt-comment-hint"
+									className="text-label leading-relaxed text-muted-foreground"
+								>
+									Shown with this run in History.
+								</p>
+							</div>
 
-					{/*
-					 * First field in the dialog, not the last one inside "Recording
-					 * & limits": naming the run is what a user does before picking
-					 * its profile, not an afterthought behind a collapsed advanced
-					 * section - a comment written after the run started is a comment
-					 * about a run already forgotten which one it was.
-					 */}
-					<div className="space-y-1.5">
-						<Label htmlFor="lt-comment" className="text-xs">
-							Run label
-							<span className="ml-1 font-normal text-muted-foreground">
-								(optional)
-							</span>
-						</Label>
-						<Input
-							id="lt-comment"
-							type="text"
-							value={comment}
-							onChange={(e) => setComment(e.target.value)}
-							placeholder="Checkout after the cache change"
-							aria-describedby="lt-comment-hint"
-							className="text-sm"
-						/>
-						<p
-							id="lt-comment-hint"
-							className="text-label leading-relaxed text-muted-foreground"
-						>
-							Shown with this run in History.
-						</p>
+							<div className="space-y-1.5">
+								<Label className="text-xs">Load profile</Label>
+								<ProfilePicker
+									value={profile.mode}
+									onChange={(next) => updateProfile({ mode: next })}
+									disabled={isStarting}
+								/>
+							</div>
+
+							<ProfileFields
+								profile={profile}
+								onChange={updateProfile}
+								limits={limits}
+								isStreamingRequest={isStreamingRequest}
+							/>
+
+							<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
+								{summarise(profile, blockingError !== null)}
+							</p>
+						</div>
+
+						<div className="min-w-0 space-y-4">
+							<ScriptsOverrideToggle
+								value={scriptsOverride}
+								onChange={setScriptsOverride}
+							/>
+
+							<DataFileSection dataFile={dataFile} disabled={isStarting} />
+
+							<RecordingSection
+								mode={profile.mode}
+								limits={limits}
+								sampleRate={sampleRate}
+								onSampleRateChange={setSampleRate}
+								slowThreshold={slowThreshold}
+								onSlowThresholdChange={setSlowThreshold}
+								maxInFlight={maxInFlight}
+								onMaxInFlightChange={setMaxInFlight}
+								saveTimingBreakdown={saveTimingBreakdown}
+								onSaveTimingBreakdownChange={setSaveTimingBreakdown}
+							/>
+
+							<BudgetsSection
+								budgets={budgets}
+								onBudgetsChange={setBudgets}
+								customBudgets={customBudgets}
+								onCustomBudgetsChange={setCustomBudgets}
+								failRun={failRun}
+								onFailRunChange={setFailRun}
+								disabled={isStarting}
+								referenceOwner={referenceOwner}
+							/>
+
+							<MonitoringSection
+								monitor={monitor}
+								onMonitorChange={setMonitor}
+								maxSeries={monitorSettings.maxSeries}
+							/>
+						</div>
 					</div>
 
-					<div className="space-y-1.5">
-						<Label className="text-xs">Load profile</Label>
-						<ProfilePicker
-							value={profile.mode}
-							onChange={(next) => updateProfile({ mode: next })}
-							disabled={isStarting}
-						/>
-					</div>
-
-					<ProfileFields
-						profile={profile}
-						onChange={updateProfile}
-						limits={limits}
-						isStreamingRequest={isStreamingRequest}
-					/>
-
-					<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
-						{summarise(profile, blockingError !== null)}
-					</p>
-
-					{/*
-					 * After the profile summary, not before it: the summary is still
-					 * describing the profile fields directly above it, and Scripts is the
-					 * first control that is not about the profile.
-					 */}
-					<ScriptsOverrideToggle value={scriptsOverride} onChange={setScriptsOverride} />
-
-					<DataFileSection dataFile={dataFile} disabled={isStarting} />
-
-					<RecordingSection
-						mode={profile.mode}
-						limits={limits}
-						sampleRate={sampleRate}
-						onSampleRateChange={setSampleRate}
-						slowThreshold={slowThreshold}
-						onSlowThresholdChange={setSlowThreshold}
-						maxInFlight={maxInFlight}
-						onMaxInFlightChange={setMaxInFlight}
-						saveTimingBreakdown={saveTimingBreakdown}
-						onSaveTimingBreakdownChange={setSaveTimingBreakdown}
-					/>
-
-					<BudgetsSection
-						budgets={budgets}
-						onBudgetsChange={setBudgets}
-						customBudgets={customBudgets}
-						onCustomBudgetsChange={setCustomBudgets}
-						failRun={failRun}
-						onFailRunChange={setFailRun}
-						disabled={isStarting}
-						referenceOwner={referenceOwner}
-					/>
-
-					<MonitoringSection
-						monitor={monitor}
-						onMonitorChange={setMonitor}
-						maxSeries={monitorSettings.maxSeries}
-					/>
-
-					{/* Sits last because it gates Start, so it reads immediately above it. */}
+					{/* Full width under both panes: it gates Start, so it reads just above it. */}
 					{oauth2Config && (
 						<OAuth2LoadTestGuard
 							config={oauth2Config}
