@@ -6112,6 +6112,7 @@ Start a load test run (Vayu Mode).
   "dataFileName": "users.csv",  // Optional, only beside data: the file's display name - see below
   "dataFileHash": "<sha256>",   // Optional, only beside data: 64 lowercase hex chars - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
+  "carriedBudgets": [],      // Optional, which of those budgets were carried over rather than set - see below
   "elements": {},            // Optional element-pipeline override, either run shape - see below
   "lifecycleElements": [],   // Optional script.setup/script.teardown for THIS run only - see below
   "monitor": {},             // Optional server-vitals scrape - see below
@@ -6349,6 +6350,33 @@ counts toward `failed`: a budget the run could not measure was not met. The
 error rate and the throughput floor have no such gap - `maxErrorRatePct` is
 0/0-safe by request count, and a starved `minThroughputRps` already fails on
 its own - so both are always `evaluated: true`.
+
+#### Carried-over budgets (`carriedBudgets`)
+
+`thresholds` says what a run was judged against, not who chose it. The app
+seeds its load dialog's budgets from an earlier run's (or from the SLO
+setting), so a budget can reach a run the user never set it for (issue #2195). `carriedBudgets` is the app's
+record of which: an array of the `thresholds` keys it sent as carried over
+rather than set for this run, spelled as they are in that block - a fixed
+budget key such as `latencyP99Ms`, a custom row as `custom.<name>.<stat>`.
+
+```jsonc
+{
+  "thresholds": { "latencyP99Ms": 200, "maxErrorRatePct": 1 },
+  "carriedBudgets": ["latencyP99Ms"]
+}
+```
+
+The engine stores the list in the run's config snapshot as sent and echoes it
+as the report's
+[`metadata.configuration.carriedBudgets`](#get-runsrunidreport); it never
+reads the entries, so it does not check them against `thresholds`, and the
+verdict is computed the same with or without it. Absent or `null` means none
+were carried, and the report then has no such key. A non-array, a non-string
+entry, more than **64 entries**, or an entry longer than **512 bytes** of
+UTF-8 is a `400` `invalid_run_config` naming `carriedBudgets`, before the run
+row exists. MCP's `start_load_run` does not accept the key: an agent declares
+its budgets explicitly, so none of them are carried over.
 
 #### The `elements` block (element-pipeline override)
 
@@ -7351,6 +7379,7 @@ default, and whose message names the offending field and why the bound exists:
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event histogram. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the SLO setting. |
+| `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of
 them has a default. The route erases every top-level `null` before anything
@@ -8365,7 +8394,8 @@ one).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
-rows for the timing breakdown and the `results[]` array. A run with no summary never reached a
+rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
+first - see "`results[]` is not a uniform sample" below). A run with no summary never reached a
 terminal status - the engine died mid-run - and its report is built from those sampled `results`
 alone rather than erroring. **The response shape is the same either way.**
 
@@ -8510,6 +8540,7 @@ named it.
       "dataRowCount": 2,
       "dataFileName": "users.csv",
       "dataFileHash": "<sha256>",
+      "carriedBudgets": ["latencyP99Ms"],
       "acceptEncoding": true
     },
     "openapi": {
@@ -8622,7 +8653,9 @@ named it.
     { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0, "deferred": 0 },
     { "id": "el_3", "kind": "script.post", "passed": 0, "failed": 0, "skipped": 0, "deferred": 10 }
   ],
-  "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
+  "results": [ { "id": 41, "...": "request/response outcomes, failures first" } ],
+  "resultsStored": 4812,
+  "resultsCap": 100
 }
 ```
 
@@ -8832,10 +8865,25 @@ the per-response `httpVersionDowngraded`, which is exact for the exchange it
 describes.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
-`results[]` array and the tested responses are the complete set, and a non-zero
-count means they are a **uniform sample of the whole run** (reservoir retention)
-rather than a truncated prefix of it. The section is absent on a run recorded
-before it was reported, which is not the same claim as "nothing was dropped".
+error, trace and tested-response sets are complete, and a non-zero count means
+they are a **uniform sample of the whole run** (reservoir retention) rather than
+a truncated prefix of it. The section is absent on a run recorded before it was
+reported, which is not the same claim as "nothing was dropped". It does not
+describe `results[]`, which has its own selection rule below.
+
+**`results[]` is not a uniform sample (#2210).** A non-scenario run returns at
+most 100 stored rows. When it stored more, the rows are chosen by value: every
+row with a failing status (anything outside 2xx/3xx, including the `0` of a
+transport failure) takes a slot first, up to the cap, and rows that succeeded
+fill the remainder in storage order. The chosen rows are listed in `timestamp`
+order, ties broken by row id, whichever way they were selected. A `Scenario`
+run keeps every stored step (bounded at write time by `maxScenarioStoredSteps`,
+see `stepsStored`). Two top-level keys, always present, say whether the array
+was cut: `resultsStored` is the number of rows stored for the run and
+`resultsCap` is the cap applied (equal to `resultsStored` for a scenario run).
+`resultsStored > resultsCap` is the only signal that `results[]` is a selection
+and not the whole set; both sit beside `results` rather than inside `sampling`
+because that section is optional.
 
 `responseSamplesDropped` counts responses the post-run test scripts and schema
 checks never saw, for either of the two bounds on that store: the count cap
@@ -8883,7 +8931,7 @@ readings are served separately by
 
 `results[].id` is the `results` row id, and the join key against
 `GET /runs/:runId/samples`. It is absent on reports served by an engine older
-than 0.15.0.
+than 0.15.0. The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
@@ -8898,7 +8946,11 @@ of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
 SHA-256 of its bytes, never its path. A single-request run's are read off the
 snapshot's top level; a collection run's off its `scenario` manifest, so every
 report of a run that named a file carries them here, and a run that named none
-has neither key.
+has neither key. `carriedBudgets` (issue #2195) is the list of `thresholds`
+keys the client sent as carried over from an earlier run rather than set for
+this one, echoed as sent and omitted when the run sent none (see
+[Carried-over budgets](#carried-over-budgets-carriedbudgets)); `GET /runs`'s
+`summary` does not carry it.
 
 ### GET /runs/:runId/samples
 

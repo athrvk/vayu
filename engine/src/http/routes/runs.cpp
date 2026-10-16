@@ -22,6 +22,7 @@
 #include <map>
 #include <optional>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 namespace vayu::http::routes {
@@ -1007,7 +1008,8 @@ int64_t offset) {
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
- * bound (thirteen keys total) and, when the snapshot carries one,
+ * bound and the budgets it carried (fourteen keys total) and, when the
+ * snapshot carries one,
  * `acceptEncoding` (issue #1488), built from an already-parsed
  * config_snapshot. `rps`/`targetRps` is the one rename, so it stays as an
  * inline branch in the caller rather than living in this key list.
@@ -1026,7 +1028,11 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
          // recoverable from the report rather than only from the payload the
          // caller no longer has. The file's name and content hash beside it
          // (issue #2051), never its path.
-         "dataRowCount", "dataFileName", "dataFileHash" }) {
+         "dataRowCount", "dataFileName", "dataFileHash",
+         // The metric keys whose budgets were carried over from an earlier
+         // run rather than set for this one (issue #2195): the thresholds
+         // alone cannot say which is which, so a verdict needs this to.
+         "carriedBudgets" }) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
@@ -1498,7 +1504,9 @@ double target_rps) {
     // run (reservoir retention), not its opening - except where
     // `responseSampleBudgetSpent` says the byte budget stopped admitting, which
     // is the one bound that leaves the tested set drawn from the part of the
-    // run whose bodies fit.
+    // run whose bodies fit. This describes the error, trace and response
+    // stores, not `results`: that array is a failures-first selection and says
+    // so through `resultsStored` / `resultsCap` (#2210).
     if (extras.has_sampling) {
         json_report["sampling"] = { { "errorsDropped", extras.errors_dropped },
             { "successTracesDropped", extras.success_traces_dropped },
@@ -1521,32 +1529,63 @@ double target_rps) {
     return json_report;
 }
 
-/**
- * A sample of the run's own exchanges, for a design or load run - a design
- * run has exactly one and a load run's percentiles do not need per-request
- * rows past a representative few. The row id travels so a client can ask
- * `GET /runs/:id/samples` for the captured bodies, which deliberately do not
- * ride this payload (see run_samples_response).
- *
- * A `Scenario` run's `results` are not a sample: they are the steps
- * `ScenarioRunView` renders one row per, already bounded at write time by
- * `maxScenarioStoredSteps` (`scenario_runner.cpp`) rather than by this
- * function - the 100-row sample cap silently dropped every step past the
- * 100th, which read as a run that executed only 100 steps to a reader who
- * had just been told (by the same report) that it ran more.
- */
-nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results,
-bool is_scenario_run) {
-    nlohmann::json results_array = nlohmann::json::array ();
-    size_t max_results           = is_scenario_run ? results.size () : 100;
-    size_t count                 = 0;
+/// Rows a non-scenario run's report `results` carries at most.
+constexpr size_t REPORT_RESULTS_CAP = 100;
+
+/// How many of @p stored rows the report returns. A `Scenario` run's rows are
+/// the steps `ScenarioRunView` renders one row per, already bounded at write
+/// time by `maxScenarioStoredSteps` (`scenario_runner.cpp`); a second, smaller
+/// cap here silently dropped every step past the 100th, which read as a run
+/// that executed only 100 steps to a reader just told (by the same report)
+/// that it ran more.
+size_t report_results_cap (size_t stored, bool is_scenario_run) {
+    return is_scenario_run ? stored : REPORT_RESULTS_CAP;
+}
+
+/// The rows a capped report returns, in `timestamp` order (ties by row id).
+///
+/// Chosen by value, not position: a failing status (`!is_success_status`,
+/// which includes the 0 of a transport failure) takes a slot first, and
+/// healthy rows fill what is left in storage order. The first @p cap stored
+/// rows are the run's opening, which on a long run holds none of the failures
+/// a reader opened the report to find (#2210). Selection reads `status_code`
+/// only - `trace_data` is parsed for the chosen rows alone.
+std::vector<const vayu::db::Result*>
+select_report_results (const std::vector<vayu::db::Result>& results, size_t cap) {
+    std::vector<const vayu::db::Result*> chosen;
+    chosen.reserve (std::min (results.size (), cap));
     for (const auto& result : results) {
-        if (count >= max_results)
+        if (chosen.size () < cap && !vayu::is_success_status (result.status_code)) {
+            chosen.push_back (&result);
+        }
+    }
+    for (const auto& result : results) {
+        if (chosen.size () >= cap) {
             break;
+        }
+        if (vayu::is_success_status (result.status_code)) {
+            chosen.push_back (&result);
+        }
+    }
+    std::ranges::sort (chosen, [] (const auto* a, const auto* b) {
+        return std::tie (a->timestamp, a->id) < std::tie (b->timestamp, b->id);
+    });
+    return chosen;
+}
+
+/**
+ * The run's own exchanges, for a design or load run - a design run has exactly
+ * one and a load run's percentiles do not need per-request rows past a
+ * representative few. Past @p cap rows the kept ones are the failures first,
+ * not a uniform sample (see select_report_results). The row id travels so a
+ * client can ask `GET /runs/:id/samples` for the captured bodies, which
+ * deliberately do not ride this payload (see run_samples_response).
+ */
+nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results, size_t cap) {
+    nlohmann::json results_array = nlohmann::json::array ();
+    for (const auto* row : select_report_results (results, cap)) {
+        const auto& result = *row;
         nlohmann::json result_obj;
-        // The row id, and the only way a client can ask GET /runs/:id/samples
-        // for this sample's captured exchange - the bodies deliberately do not
-        // travel on this payload (see run_samples_response).
         result_obj["id"]         = result.id;
         result_obj["timestamp"]  = result.timestamp;
         result_obj["statusCode"] = result.status_code;
@@ -1562,7 +1601,6 @@ bool is_scenario_run) {
             }
         }
         results_array.push_back (result_obj);
-        count++;
     }
     return results_array;
 }
@@ -1611,8 +1649,11 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
 
     nlohmann::json json_report = build_report_body (report, extras, target_rps);
     json_report["metadata"]    = build_report_metadata (run_id, *run);
-    json_report["results"] =
-    build_report_results (results, run->type == vayu::RunType::Scenario);
+    const size_t results_cap =
+    report_results_cap (results.size (), run->type == vayu::RunType::Scenario);
+    json_report["results"]       = build_report_results (results, results_cap);
+    json_report["resultsStored"] = results.size ();
+    json_report["resultsCap"]    = results_cap;
 
     return { 200, json_report };
 }

@@ -729,6 +729,14 @@ export interface StartLoadTestRequest {
 	// engine rejects an empty object rather than starting an unjudged run.
 	thresholds?: RunThresholds;
 
+	/**
+	 * Which of the `thresholds` keys were carried over rather than set for this
+	 * run (issue #2195): the engine stores the list and the report echoes it as
+	 * `metadata.configuration.carriedBudgets`; it never changes the verdict.
+	 * Omitted when none were.
+	 */
+	carriedBudgets?: string[];
+
 	// The server-vitals endpoint to scrape during the run. camelCase for the
 	// same reason `thresholds` is - these are the engine's own field names.
 	// Omitted entirely when no endpoint was given; the engine rejects a block

@@ -876,6 +876,7 @@ export default function RequestBuilder() {
 					// rejects an empty `thresholds` object rather than starting a
 					// run whose verdict nothing can compute.
 					thresholds: config.thresholds,
+					carriedBudgets: config.carriedBudgets,
 					// Undefined when the dialog named no metrics endpoint, for the
 					// same reason - and a run without it behaves exactly as it did
 					// before server monitoring existed.

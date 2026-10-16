@@ -1478,7 +1478,14 @@ The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
 dashboard's Sampled Requests, the history Samples tab and the Test Validation
 card, and the sample-count badges say **shown** rather than *captured*, since
-`results` is capped at 100 by the report route irrespective of retention.
+`results` is capped at 100 for a single-request run by the report route irrespective of retention.
+That cap is a failures-first selection listed by time, not a uniform sample
+(#2210): the top-level `resultsStored` and `resultsCap` say how many rows the
+run stored and the cap applied, `resultsStored > resultsCap` is the only sign
+the array was cut, and the history Samples tab reads the pair as "N of M
+stored". Both are absent from an older engine, which is read as "say nothing",
+not "nothing was cut". The traces note therefore never calls `results` uniform;
+only the tested-response buffer's sentence does.
 The Test Validation card also states the arithmetic from `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
 response as well as for displaced ones; `samplesTested` counts responses and
@@ -1590,6 +1597,17 @@ that declared none - not a run that passed nothing - so a report without the
 section renders exactly as it did before budgets existed. The dialog seeds its
 p99 field from the client `sloThresholdMs` setting, which until then only
 annotated a chart.
+
+`LoadTestConfigDialog` also tells the engine which of those budgets the user did
+not set for this run (issue #2195): top-level `carriedBudgets: string[]` on
+`POST /runs` (`StartLoadTestRequest`), the `thresholds` keys still holding a
+value the memo or the SLO seed filled in and the user left alone, spelled as
+they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`). The engine
+only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
+`ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is
+computed the same either way. The list is cut at the engine's 64-entry cap
+(each key may be up to 512 bytes of UTF-8). It is omitted when nothing was carried, and
+`RunCollectionDialog` and MCP never send it.
 
 `maxAssertionFailureRatePct` (issue #1497) is the sixth budget, judged against
 the run's combined `assert.*` element and `pm.test` tally rather than against

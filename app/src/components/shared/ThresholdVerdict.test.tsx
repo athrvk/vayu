@@ -252,6 +252,83 @@ describe("ThresholdVerdict", () => {
 		});
 	});
 
+	describe("carried budgets (issue #2195)", () => {
+		const THREE = verdict({
+			checks: [
+				{ metric: "latencyP50Ms", limit: 20, actual: 10, passed: true },
+				{ metric: "latencyP99Ms", limit: 200, actual: 150, passed: true },
+				{ metric: "maxErrorRatePct", limit: 1, actual: 2, passed: false },
+			],
+			passed: 2,
+			failed: 1,
+			verdict: "failed",
+		});
+
+		it("tags the carried row and no other", () => {
+			// Mutation check: tagging every row, or none, fails the row scoping.
+			render(<ThresholdVerdict verdict={THREE} carriedBudgets={["latencyP99Ms"]} />);
+			const tags = screen.getAllByText("carried over");
+			expect(tags).toHaveLength(1);
+			const row = tags[0].closest("li");
+			expect(row).toHaveTextContent(/p99 latency/);
+			expect(row).not.toHaveTextContent(/p50 latency|Error rate/);
+		});
+
+		it("counts the carried checks in the summary", () => {
+			render(<ThresholdVerdict verdict={THREE} carriedBudgets={["latencyP99Ms"]} />);
+			expect(screen.getByText("2 of 3 budgets met (1 carried over).")).toBeInTheDocument();
+		});
+
+		it("puts the carried count before the not-measurable clause", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({
+						checks: [
+							{ metric: "latencyP50Ms", limit: 20, actual: 10, passed: true },
+							{ metric: "latencyP99Ms", limit: 200, passed: false, evaluated: false },
+							{ metric: "maxErrorRatePct", limit: 1, actual: 0, passed: true },
+						],
+						passed: 2,
+						failed: 1,
+						verdict: "failed",
+					})}
+					carriedBudgets={["latencyP99Ms"]}
+				/>
+			);
+			expect(
+				screen.getByText("2 of 3 budgets met (1 carried over), 1 not measurable.")
+			).toBeInTheDocument();
+		});
+
+		it("counts a carried key once per check, and ignores one with no check", () => {
+			// The list is the client's record; the engine may have judged fewer
+			// budgets. Mutation check: using the list's length for the count prints
+			// "(3 carried over)" here.
+			render(
+				<ThresholdVerdict
+					verdict={THREE}
+					carriedBudgets={["latencyP99Ms", "minThroughputRps", "custom.cart.p95"]}
+				/>
+			);
+			expect(screen.getAllByText("carried over")).toHaveLength(1);
+			expect(screen.getByText("2 of 3 budgets met (1 carried over).")).toBeInTheDocument();
+		});
+
+		it.each([
+			["absent", undefined],
+			["empty", []],
+		])("looks as it always did when the list is %s", (_name, carriedBudgets) => {
+			render(<ThresholdVerdict verdict={THREE} carriedBudgets={carriedBudgets} />);
+			expect(screen.queryByText("carried over")).not.toBeInTheDocument();
+			expect(screen.getByText("2 of 3 budgets met.")).toBeInTheDocument();
+		});
+
+		it("paints the tag through the Badge primitive, radius included", () => {
+			render(<ThresholdVerdict verdict={verdict()} carriedBudgets={["latencyP99Ms"]} />);
+			expect(screen.getByText("carried over").className).toMatch(/\brounded-(sm|md|lg)\b/);
+		});
+	});
+
 	it("paints the verdict chip through the Badge primitive, radius included", () => {
 		// Rendered and read off `className`, not source-scanned: the colour
 		// arrives in a variable, and a box with *no* radius class is exactly

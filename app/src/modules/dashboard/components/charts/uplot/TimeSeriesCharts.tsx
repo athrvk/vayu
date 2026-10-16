@@ -14,6 +14,7 @@
  * cursor; pass `breakpoint` to mark the W1 capacity elbow.
  */
 
+import { formatMs } from "@/lib/format-number";
 import { useMemo } from "react";
 import type uPlot from "uplot";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
@@ -79,7 +80,7 @@ function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
 			orient: "vertical",
 			value: breakpoint.timeSeconds,
 			role: "warning",
-			label: breakpoint.p99Ms != null ? `SLO · ${Math.round(breakpoint.p99Ms)}ms` : "SLO",
+			label: breakpoint.p99Ms != null ? `SLO · ${formatMs(breakpoint.p99Ms)}ms` : "SLO",
 		},
 	];
 }

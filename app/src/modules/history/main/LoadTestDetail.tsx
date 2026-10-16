@@ -33,7 +33,7 @@ import {
 	TabLabel,
 	ScrollArea,
 } from "@/components/ui";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber, formatPercent } from "@/lib/format-number";
 import {
 	CONCURRENCY_LABEL,
 	formatConcurrency,
@@ -457,7 +457,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<span className="text-xs text-muted-foreground">P99 latency</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
-							{formatNumber(report.latency.p99)}ms
+							{formatMs(report.latency.p99)}ms
 						</p>
 					</div>
 					<div className="bg-muted/50 p-3">
@@ -475,7 +475,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<span className="text-xs text-muted-foreground">Success rate</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
-							{successRate.toFixed(1)}%
+							{formatPercent(successRate)}%
 						</p>
 					</div>
 				</div>

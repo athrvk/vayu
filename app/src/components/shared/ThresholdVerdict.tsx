@@ -67,16 +67,32 @@ export interface ThresholdVerdictProps {
 	stopped?: StoppedRun;
 	/** The run that was judged; each check's "Copy for agent" is absent without it. */
 	runId?: string;
+	/**
+	 * The `thresholds` keys the run's client sent as carried over rather than set
+	 * for it (issue #2195), from `metadata.configuration.carriedBudgets`. A check
+	 * whose metric is listed is tagged; a listed key with no check is ignored.
+	 */
+	carriedBudgets?: readonly string[];
 	className?: string;
 }
 
-export function ThresholdVerdict({ verdict, runId, stopped, className }: ThresholdVerdictProps) {
+export function ThresholdVerdict({
+	verdict,
+	runId,
+	stopped,
+	carriedBudgets,
+	className,
+}: ThresholdVerdictProps) {
 	if (!verdict || verdict.checks.length === 0) return null;
 
 	const failed = verdict.failed > 0;
 	// Absent (a pre-#1484 engine) reads as evaluated - that engine never wrote
 	// the field and never had the gap it now closes either.
 	const unmeasurable = verdict.checks.filter((check) => check.evaluated === false).length;
+	const carried = new Set(carriedBudgets);
+	// Counted over the checks, not the list: the list is the client's record and
+	// can name a key the engine did not judge.
+	const carriedCount = verdict.checks.filter((check) => carried.has(check.metric)).length;
 
 	return (
 		<Card className={className}>
@@ -113,6 +129,7 @@ export function ThresholdVerdict({ verdict, runId, stopped, className }: Thresho
 			<CardContent>
 				<p className={cn("text-xs text-muted-foreground", stopped ? "mb-1" : "mb-3")}>
 					{verdict.passed} of {verdict.passed + verdict.failed} budgets met
+					{carriedCount > 0 ? ` (${carriedCount} carried over)` : ""}
 					{unmeasurable > 0 ? `, ${unmeasurable} not measurable` : ""}.
 				</p>
 				{stopped && (
@@ -142,6 +159,14 @@ export function ThresholdVerdict({ verdict, runId, stopped, className }: Thresho
 										({comparator} {formatValue(check.limit)}
 										{unit})
 									</span>
+									{carried.has(check.metric) && (
+										<Badge
+											variant="outline"
+											className="ml-1.5 px-1.5 py-0 font-normal text-muted-foreground"
+										>
+											carried over
+										</Badge>
+									)}
 								</span>
 								<span className="flex items-center gap-1.5">
 									<span

@@ -10,6 +10,7 @@ import { emptyBudgetDraft, type BudgetDraft, type CustomBudgetDraft } from "./bu
 import {
 	NO_CARRIED,
 	budgetsChanged,
+	carriedThresholdKeys,
 	clearCarried,
 	describeCarried,
 	findCarriedBudgets,
@@ -102,6 +103,32 @@ describe("clearCarried", () => {
 	it("is a no-op for nothing carried", () => {
 		const budgets = draft({ latencyP99Ms: "200" });
 		expect(clearCarried(NO_CARRIED, budgets, []).budgets).toEqual(budgets);
+	});
+});
+
+describe("carriedThresholdKeys", () => {
+	it("names a fixed budget whichever source carried it", () => {
+		// Mutation check: filtering to `memo` drops the SLO seed from the list.
+		const carried = {
+			fixed: { latencyP99Ms: "slo", maxErrorRatePct: "memo" },
+			customIds: [],
+		} as const;
+		expect(carriedThresholdKeys({ fixed: { ...carried.fixed }, customIds: [] }, [])).toEqual([
+			"latencyP99Ms",
+			"maxErrorRatePct",
+		]);
+	});
+
+	it("spells a carried custom row as the thresholds key, name trimmed", () => {
+		const keys = carriedThresholdKeys({ fixed: {}, customIds: ["a"] }, [
+			row({ id: "a", name: " cart ", stat: "p99" }),
+			row({ id: "mine", name: "mine" }),
+		]);
+		expect(keys).toEqual(["custom.cart.p99"]);
+	});
+
+	it("is empty when nothing is carried", () => {
+		expect(carriedThresholdKeys(NO_CARRIED, [row()])).toEqual([]);
 	});
 });
 

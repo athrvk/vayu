@@ -36,10 +36,15 @@ export interface LoadTestDraft {
 	failRun: boolean;
 	monitor: MonitorDraft;
 	comment: string;
+	/** `thresholds` keys still holding a value the user did not set this time (issue #2195). */
+	carriedBudgets?: readonly string[];
 	scriptsOverride: ScriptsOverride;
 	dataFile: SelectedDataFile | null;
 	isStreamingRequest: boolean;
 }
+
+/** `MAX_CARRIED_BUDGETS` in `engine/src/http/routes/execution.cpp`. */
+const MAX_CARRIED_BUDGETS = 64;
 
 type NumericParam = Exclude<keyof ProfileParams, "mode">;
 
@@ -65,8 +70,25 @@ function engineFields(params: ProfileParams) {
 	return fields;
 }
 
+/**
+ * The carried keys that the payload actually judges, or `undefined` when none
+ * remain - a key with no budget behind it (an unparseable field the payload
+ * skipped) names nothing the report holds. At most `MAX_CARRIED_BUDGETS`: the
+ * engine refuses a longer list, and this one only labels rows.
+ */
+function carriedInThresholds(
+	carried: readonly string[] | undefined,
+	thresholds: LoadTestConfig["thresholds"]
+): string[] | undefined {
+	const declared = new Set(Object.keys(thresholds ?? {}));
+	const judged = (carried ?? []).filter((key) => declared.has(key)).slice(0, MAX_CARRIED_BUDGETS);
+	return judged.length > 0 ? judged : undefined;
+}
+
 export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 	const { profile, dataFile } = draft;
+	const thresholds = buildThresholds(draft.budgets, draft.failRun, draft.customBudgets);
+	const carriedBudgets = carriedInThresholds(draft.carriedBudgets, thresholds);
 
 	const config: LoadTestConfig = {
 		mode: profile.mode,
@@ -79,9 +101,10 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 		comment: draft.comment || undefined,
 		// Absent when nothing was declared - the engine rejects an empty
 		// object rather than starting a run no verdict can be computed for.
-		thresholds: buildThresholds(draft.budgets, draft.failRun, draft.customBudgets),
+		thresholds,
 		// Absent when no endpoint was given, for the same reason.
 		monitor: buildMonitor(draft.monitor),
+		...(carriedBudgets ? { carriedBudgets } : {}),
 		// Absent at the default, the same "absent already means what the
 		// user asked for" rule `failOnSchemaError` follows on the
 		// collection-run dialog (issue #1594).

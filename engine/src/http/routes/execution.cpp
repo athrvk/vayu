@@ -20,6 +20,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <regex>
@@ -968,6 +969,47 @@ std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config
            "'constant_concurrency' with 'concurrency'.";
 }
 
+// `carriedBudgets` (#2195) is a label list the engine stores and echoes and
+// never interprets, so the bounds only keep a client from parking an unbounded
+// payload in the snapshot and every report: the app names one metric key per
+// carried-over budget, far fewer than this. A length is bytes of UTF-8 (what
+// the parser hands over), not characters. The byte bound must admit every key
+// the app can build: `custom.<name>.<stat>` with a name of 100 UTF-16 units at
+// up to 3 bytes each is about 320 bytes, and a key refused here fails a run
+// start over a field that never changes the run.
+constexpr std::size_t MAX_CARRIED_BUDGETS      = 64;
+constexpr std::size_t MAX_CARRIED_BUDGET_BYTES = 512;
+
+std::optional<std::string> check_carried_budgets (const nlohmann::json& config) {
+    const auto list = config.find ("carriedBudgets");
+    if (list == config.end () || list->is_null ()) {
+        return std::nullopt;
+    }
+    if (!list->is_array ()) {
+        return "'carriedBudgets' must be an array of strings (got " +
+        std::string (list->type_name ()) + ")";
+    }
+    if (list->size () > MAX_CARRIED_BUDGETS) {
+        return "'carriedBudgets' must hold at most " +
+        std::to_string (MAX_CARRIED_BUDGETS) + " entries (got " +
+        std::to_string (list->size ()) + ")";
+    }
+    for (std::size_t i = 0; i < list->size (); ++i) {
+        const auto& entry = list->at (i);
+        if (!entry.is_string ()) {
+            return "'carriedBudgets' entries must be strings (got " +
+            std::string (entry.type_name ()) + " at index " + std::to_string (i) + ")";
+        }
+        const auto bytes = entry.get_ref<const std::string&> ().size ();
+        if (bytes > MAX_CARRIED_BUDGET_BYTES) {
+            return "'carriedBudgets' entries must be at most " +
+            std::to_string (MAX_CARRIED_BUDGET_BYTES) + " bytes of UTF-8 (got " +
+            std::to_string (bytes) + " bytes at index " + std::to_string (i) + ")";
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -1300,6 +1342,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // evaluator (`core/threshold_eval.cpp`), which reads the same metric table
     // - a budget this accepts is one the run will actually judge.
     if (auto reason = vayu::core::validate_thresholds (config)) {
+        return reason;
+    }
+    if (auto reason = check_carried_budgets (config)) {
         return reason;
     }
 

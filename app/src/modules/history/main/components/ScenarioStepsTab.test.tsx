@@ -60,11 +60,13 @@ describe("the step table", () => {
 	});
 
 	it("shows a sub-millisecond latency rather than rounding it to 0ms", () => {
-		// A loopback step's p50 is routinely a fraction of a millisecond, and the
-		// locale integer format would render every one of them "0ms" - a table of
+		// A loopback step's p50 is routinely a fraction of a millisecond, and a
+		// whole-number format would render every one of them "0ms" - a table of
 		// zeroes that looks like a broken measurement.
-		render(<ScenarioStepsTab steps={STEPS} virtualUsers={1} />);
-		expect(within(rowFor("Log in")).getByText("4.00ms")).toBeTruthy();
+		const loopback = { ...STEPS[0], latency: { ...STEPS[0].latency, p50: 0.4 } };
+		render(<ScenarioStepsTab steps={[loopback]} virtualUsers={1} />);
+		expect(within(rowFor("Log in")).getByText("0.4ms")).toBeTruthy();
+		expect(within(rowFor("Log in")).getByText("9ms")).toBeTruthy();
 	});
 
 	it("says how far short of the first step a later one ran", () => {

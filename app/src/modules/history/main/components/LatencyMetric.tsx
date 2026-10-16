@@ -12,7 +12,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs } from "@/lib/format-number";
 
 interface LatencyMetricProps {
 	label: string;
@@ -39,7 +39,7 @@ export default function LatencyMetric({ label, value, variant = "default" }: Lat
 		<div className={cn("p-3 text-center", bgClass)}>
 			<p className="text-xs text-muted-foreground mb-1">{label}</p>
 			<p className={cn("text-lg font-bold", colorClass)}>
-				{formatNumber(value)}
+				{formatMs(value)}
 				<span className="text-xs ml-0.5">ms</span>
 			</p>
 		</div>
