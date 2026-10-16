@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatMs } from "@/lib/format-number";
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
@@ -94,7 +95,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 				<span>Avg total</span>
 				<span className="font-mono font-semibold">
 					{hasData ? (
-						<span className="text-foreground">{total.toFixed(0)} ms</span>
+						<span className="text-foreground">{formatMs(total)} ms</span>
 					) : (
 						<span className="text-subtle-foreground">-</span>
 					)}

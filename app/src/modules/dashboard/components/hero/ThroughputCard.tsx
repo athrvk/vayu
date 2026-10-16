@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatMs } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
@@ -25,7 +26,7 @@ export function ThroughputCard({
 			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				mean iter{" "}
-				<span className="text-foreground font-semibold">{meanLatency.toFixed(0)}</span>ms
+				<span className="text-foreground font-semibold">{formatMs(meanLatency)}</span>ms
 			</p>
 		</HeroCardShell>
 	);

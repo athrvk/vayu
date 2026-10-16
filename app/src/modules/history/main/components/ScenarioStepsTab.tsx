@@ -32,7 +32,7 @@ import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Badge, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { ElementTally, TruncatedText } from "@/components/shared";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
 
@@ -44,13 +44,9 @@ export interface ScenarioStepsTabProps {
 	iterationsAbandoned?: number;
 }
 
-/**
- * One latency cell. Two decimals under 10ms, none above: a loopback step's p50
- * is often a fraction of a millisecond, and `formatNumber` (which rounds to the
- * locale's integer form) would render every one of them as "0ms".
- */
+/** One latency cell; a loopback step's p50 is often a fraction of a millisecond. */
 function latency(ms: number) {
-	return ms < 10 ? `${ms.toFixed(2)}ms` : `${formatNumber(Math.round(ms))}ms`;
+	return `${formatMs(ms)}ms`;
 }
 
 /**

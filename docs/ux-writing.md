@@ -88,7 +88,13 @@ scattered strings land the same way.
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis.
 - **Numbers and units.** Always state the unit (ms or s, never a bare
   number). One format via `Intl`, not hand-built string concatenation. Real
-  plural handling via `Intl.PluralRules`, never "request(s)".
+  plural handling via `Intl.PluralRules`, never "request(s)". The digits come
+  from `lib/format-number.ts`: `formatNumber` for counts, `formatMs` for
+  milliseconds and `formatRate` for per-second rates (two decimals under 10,
+  whole numbers above, thousands separators), `formatPercent` for percentages
+  (one decimal). They return digits only; the caller adds the unit, so a p99
+  reads `2.27ms` in the History tile, the step table, the stat card and a chart
+  tooltip. Do not `toFixed` a new latency, rate or percentage for display.
 - **Truncation.**
   - URLs truncate in the middle, keeping the host and the last path segment.
   - Variable names and file paths truncate keeping the final segment (never

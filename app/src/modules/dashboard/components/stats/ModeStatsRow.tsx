@@ -26,7 +26,7 @@
 
 import { cn } from "@/lib/utils";
 import { CONCURRENCY_UNIT, isClosedLoopMode } from "@/constants/load-test-modes";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
@@ -168,18 +168,18 @@ export function P99StatCard({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="p99 latency"
-			value={d.p99Latency.toFixed(0)}
+			value={formatMs(d.p99Latency)}
 			unit="ms"
 			sub={
 				d.p99Latency > 0 ? (
 					<>
 						mean{" "}
-						<span className="text-muted-foreground">{d.meanLatency.toFixed(0)} ms</span>
+						<span className="text-muted-foreground">{formatMs(d.meanLatency)} ms</span>
 						{d.medianLatency > 0 && (
 							<>
 								{" · "}median{" "}
 								<span className="text-muted-foreground">
-									{d.medianLatency.toFixed(0)} ms
+									{formatMs(d.medianLatency)} ms
 								</span>
 							</>
 						)}

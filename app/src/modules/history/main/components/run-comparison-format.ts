@@ -7,7 +7,7 @@
 
 /** How a compared metric is named and given its unit, for the strip and the full view alike. */
 
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber, formatRate } from "@/lib/format-number";
 
 export const METRIC_LABELS: Record<string, string> = {
 	"latency.p50": "P50 latency",
@@ -24,9 +24,9 @@ export const METRIC_LABELS: Record<string, string> = {
 
 /** Units belong to the metric, not to the delta arithmetic. */
 export function formatValue(metric: string, value: number): string {
-	if (metric.startsWith("latency.")) return `${formatNumber(value)}ms`;
+	if (metric.startsWith("latency.")) return `${formatMs(value)}ms`;
 	if (metric === "summary.avgRps" || metric === "summary.throughput") {
-		return `${formatNumber(value)} rps`;
+		return `${formatRate(value)} rps`;
 	}
 	if (metric === "summary.errorRate") return `${value.toFixed(2)}%`;
 	return formatNumber(value);

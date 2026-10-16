@@ -23,7 +23,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
@@ -625,7 +625,9 @@ function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
 	return (
 		<span>
 			<span className="text-muted-foreground">{k}</span>{" "}
-			<span className="text-foreground font-semibold">{fmt(v, 0)}</span>
+			<span className="text-foreground font-semibold">
+				{v === undefined ? "-" : formatMs(v)}
+			</span>
 			<span className="text-muted-foreground">{v === undefined ? "" : "ms"}</span>
 		</span>
 	);
