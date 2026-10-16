@@ -94,7 +94,7 @@ scattered strings land the same way.
   whole numbers above, thousands separators), `formatPercent` for percentages
   (one decimal). They return digits only; the caller adds the unit, so a p99
   reads `2.27ms` in the History tile, the step table, the stat card and a chart
-  tooltip. Never `toFixed` a latency, rate or percentage for display.
+  tooltip. Do not `toFixed` a new latency, rate or percentage for display.
 - **Truncation.**
   - URLs truncate in the middle, keeping the host and the last path segment.
   - Variable names and file paths truncate keeping the final segment (never

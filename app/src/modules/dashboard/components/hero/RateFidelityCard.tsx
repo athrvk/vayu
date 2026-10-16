@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { fmt } from "../format";
+import { formatPercent, formatRate } from "@/lib/format-number";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
@@ -48,11 +48,12 @@ export function RateFidelityCard({
 
 	return (
 		<HeroCardShell label="Rate fidelity" tip={TOOLTIPS.rateFidelity}>
-			<HeroValue value={fmt(achievement, 1)} unit="%" color={textColor} />
+			<HeroValue value={formatPercent(achievement)} unit="%" color={textColor} />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
-				target <span className="text-foreground font-semibold">{fmt(targetRps, 1)}</span> ·
-				actual <span className="text-foreground font-semibold">{fmt(actualRps, 2)}</span>{" "}
-				req/s
+				target{" "}
+				<span className="text-foreground font-semibold">{formatRate(targetRps)}</span> ·
+				actual{" "}
+				<span className="text-foreground font-semibold">{formatRate(actualRps)}</span> req/s
 			</p>
 			{achievement !== undefined && targetRps && (
 				<MiniBar pct={Math.min(100, achievement)} color={fillColor} showTarget />

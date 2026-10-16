@@ -11,7 +11,7 @@ import { formatMs, formatPercent, formatRate } from "@/lib/format-number";
 
 export const fmtMs = (v: number | null | undefined): string => {
 	if (v == null) return "-";
-	return v >= 1000 ? `${formatMs(v / 1000)}s` : `${formatMs(v)}ms`;
+	return v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${formatMs(v)}ms`;
 };
 
 export const axisMs = (v: number): string =>
