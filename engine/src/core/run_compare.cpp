@@ -22,6 +22,7 @@
 #include "vayu/utils/parse.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
@@ -282,7 +283,7 @@ std::optional<Difference> compression_difference (const json& base, const json& 
 }
 
 /// In `compareReports`' `comparability` order.
-constexpr auto DIFFERENCE_RULES = std::to_array<Rule> ({
+constexpr std::array<Rule, 9> DIFFERENCE_RULES = { {
 [] (const json& b, const json& t) {
     return differ ("mode", config_text (b, "mode"), config_text (t, "mode"));
 },
@@ -303,7 +304,7 @@ duration_difference,
 data_file_difference,
 request_difference,
 compression_difference,
-});
+} };
 
 ordered differences (const json& base, const json& target) {
     ordered out = ordered::array ();
