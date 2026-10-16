@@ -132,6 +132,11 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         # below rather than a strict/lax toggle.
         /WX
         /permissive-
+        # The conforming preprocessor. VS 2022's toolset (14.44) still defaults
+        # to the traditional one, which mis-splits a raw string literal passed
+        # as a macro argument (`EXPECT_EQ (x, R"({"a":"b"})")` -> C2017/C2187);
+        # Windows CI's newer toolset does not, so only a local build failed.
+        /Zc:preprocessor
         /FS
         # Not a warning flag, and here for the same reason /FS is: it is MSVC
         # build hygiene the whole tree needs. `database.cpp` instantiates
