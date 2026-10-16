@@ -213,7 +213,8 @@ enforces it); Dependabot moves them.
 **Release notes are published from a file - no manual paste.** On tag push,
 the `publish` job in `.github/workflows/release.yml` fetches
 `.github/release-notes/<tag>.md` from the tagged commit (there is no checkout),
-appends a one-line "verify with `gh attestation verify`" footer, and sets it as
+appends a footer (the `gh attestation verify` line and an "If your OS warns you"
+block for the unsigned-download warnings), and sets it as
 the GitHub Release body via `softprops/action-gh-release`'s `body_path`.
 If that file is missing for the tag, the workflow falls back to GitHub's
 automatically generated PR-based notes (`generate_release_notes`) so a release is

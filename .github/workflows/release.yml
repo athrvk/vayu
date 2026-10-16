@@ -552,6 +552,22 @@ jobs:
           # auto-generated fallback this footer is followed by GitHub's notes.
           printf '\n\nEvery asset carries a build-provenance attestation: `gh attestation verify <asset> --repo %s`.\n' \
             "$GITHUB_REPOSITORY" >> "$notes"
+          # What to do when the OS warns about an unsigned download. A separate
+          # block so a later footer section can be appended beside it.
+          cat >> "$notes" <<'EOF'
+
+          ### If your OS warns you
+
+          Vayu is not code-signed, so the OS can stop a downloaded file on first launch. Nothing is wrong with the file.
+
+          **macOS** says an app downloaded from this page (.dmg or .zip) is "damaged", because Vayu is not notarized. This command installs it without the warning:
+
+          ```sh
+          bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
+          ```
+
+          **Windows** shows "Windows protected your PC". Choose **More info**, then **Run anyway**. `winget install athrvk.Vayu` skips it.
+          EOF
           echo "path=$notes" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts to release

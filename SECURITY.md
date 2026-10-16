@@ -213,7 +213,7 @@ after #1779). Check a download with
 you when an authenticated `gh` is present and refuses an asset whose checksum
 is missing or wrong. Every third-party action in the release workflow is pinned
 to a commit SHA, and only the final publish job can write to the release. They
-are not yet code-signed, so macOS and Windows will warn on first
+are not code-signed, so macOS and Windows will warn on first
 launch, and `install.sh` strips the macOS quarantine attribute for that reason.
 If you find a way to break any statement in this document, report it privately
 through GitHub Security Advisories.

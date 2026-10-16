@@ -52,13 +52,17 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
     it. The installer refuses an older macOS before downloading.
 
     Installs the latest release to `/Applications`, and asks for your password
-    once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
-    quarantine flag - without that, macOS reports it as damaged. Unsigned is
-    not unverifiable: the script checks the download against its published
+    once. Vayu is not code-signed, so the script ad-hoc signs the app and clears
+    the quarantine flag - without that, macOS reports it as damaged. Not signed
+    is not unverifiable: the script checks the download against its published
     checksum and refuses to install without one, and every asset of a release
     from 0.40.0 on carries a build-provenance attestation - confirm one by hand
     with `gh attestation verify <file> --repo athrvk/vayu`. When it finishes,
     it offers to open Vayu.
+
+    **If you downloaded the .dmg or .zip from the release page instead**, macOS
+    says Vayu is "damaged". The file is fine; the quarantine flag on a download
+    is what trips it. Run the command above, which is the supported route.
 
     **Updating is the same command.** It keeps your collections and settings,
     offers to quit Vayu if it is running (and reopens it after), and does
@@ -81,8 +85,14 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
     Or download the installer directly:
 
     1. Download [**Vayu-x64.exe**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe).
-    2. Run the installer and follow the wizard.
-    3. Launch **Vayu** from the Start menu.
+    2. Run the installer and follow the wizard. When it finishes, it offers to
+       launch Vayu.
+
+    **If Windows shows "Windows protected your PC"**, that is SmartScreen
+    stopping a file it does not recognise. Vayu is not code-signed, and a
+    checksum and a build-provenance attestation are how you verify a download
+    (`gh attestation verify <file> --repo athrvk/vayu`). Choose **More info**,
+    then **Run anyway**. `winget install athrvk.Vayu` skips the prompt.
 
 === "Linux"
 

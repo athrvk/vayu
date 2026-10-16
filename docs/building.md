@@ -197,9 +197,10 @@ the AppImage carry a version while the exe and the deb do not.
 - **macOS**: `Vayu-<version>-<arch>.dmg` and `Vayu-<version>-<arch>.zip`. The
   zip carries the macOS install and update path - `install.sh` downloads it and
   `latest-mac.yml` names it - while the dmg is the drag-to-Applications route.
-  `<arch>` is `universal` in a released build and the host arch (`x64` or
-  `arm64`) for a local `python build.py`, which has only the host-arch engine
-  to package.
+  That route is unsigned: macOS reports a bundle copied out of it as damaged,
+  so users are pointed at `install.sh`. `<arch>` is `universal` in a released
+  build and the host arch (`x64` or `arm64`) for a local `python build.py`,
+  which has only the host-arch engine to package.
 - **Windows**: `Vayu-<arch>.exe`, the NSIS installer.
 - **Linux**: `Vayu-<version>-x86_64.AppImage` and `Vayu-amd64.deb`.
 
