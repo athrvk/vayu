@@ -97,7 +97,7 @@ scattered strings land the same way.
   tooltip. A measured latency under 0.01 ms reads `<0.01`, never `0`: a
   request that took 0.4 ms did not take no time, and only an exact 0 prints
   as `0`. `formatLatency` carries the unit for a surface with no slot of its
-  own (`999ms`, then `1.23s` from 1000 ms). A chart axis labels its ticks
+  own (`999ms`, then `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), which takes its decimals from the tick
   spacing so no two neighbouring ticks print alike. Do not `toFixed` a new
   latency, rate or percentage for display.

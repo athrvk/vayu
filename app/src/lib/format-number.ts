@@ -43,13 +43,14 @@ const LATENCY_FLOOR_MS = 0.01;
  * time (#2243); only an exact 0 prints as "0".
  */
 export function formatMs(ms: number | undefined | null): string {
-	if (!isMissing(ms) && ms > 0 && ms < LATENCY_FLOOR_MS) return `<${LATENCY_FLOOR_MS}`;
+	if (!isMissing(ms) && ms > 0 && ms < LATENCY_FLOOR_MS) return "<0.01"; // keep in step with LATENCY_FLOOR_MS
 	return formatMagnitude(ms);
 }
 
 /**
  * A duration in milliseconds with its unit: `formatMs` digits and "ms" up to
- * 999, then seconds with two decimals from 1000 ms ("1.23s"). The rule behind
+ * 999, then seconds with two decimals once it rounds to 1000 ms ("1.23s"); a missing
+ * value reads "0ms" (`fmtMs` draws "-" for it). The rule behind
  * every chart tooltip and any surface that has no slot of its own for a unit.
  */
 export function formatLatency(ms: number | undefined | null): string {

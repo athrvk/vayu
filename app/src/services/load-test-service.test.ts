@@ -687,6 +687,21 @@ describe("LoadTestService", () => {
 			);
 		});
 
+		it("does not round a sub-millisecond p95 to 0 ms (issue #2243)", async () => {
+			dashboard.currentRunId = "run_11";
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				summary: { totalRequests: 500, errorRate: 0 },
+				latency: { p95: 0.42 },
+			} as never);
+			loadTestService.startMonitoring("run_11");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ body: "500 requests, p95 0.42 ms, 0.0% errors" })
+			);
+		});
+
 		it("says so plainly when the report cannot supply the numbers", async () => {
 			// The shipped fixture for a report the engine answered with nothing
 			// usable. Reverting `runSummaryLine`'s checks turns this body into
