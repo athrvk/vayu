@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { elementsParts, scriptTextFor } from "./elements-parts";
+import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./elements-parts";
 import type { Collection, ElementDef } from "@/types";
 
 /** Minimal `Collection` fixture - only `id`, `name` and `elements` matter here. */
@@ -157,5 +157,49 @@ describe("scriptTextFor", () => {
 			element({ id: "p1", kind: "script.pre", config: { script: "   \n\t" } }),
 		];
 		expect(scriptTextFor(blank, "script.pre")).toBeUndefined();
+	});
+});
+
+describe("hasReplayedPostScript", () => {
+	const post = (overrides: Partial<ElementDef> = {}, config: Record<string, unknown> = {}) =>
+		element({
+			id: "p1",
+			kind: "script.post",
+			config: { script: "pm.test('ok', () => {});", ...config },
+			...overrides,
+		});
+
+	it("is true for an enabled, non-blank script.post that is not marked inline", () => {
+		expect(hasReplayedPostScript([post()])).toBe(true);
+		expect(hasReplayedPostScript([post({}, { inline: false })])).toBe(true);
+	});
+
+	it("is false when the script is marked inline", () => {
+		expect(hasReplayedPostScript([post({}, { inline: true })])).toBe(false);
+	});
+
+	it("is false for a disabled, blank or absent script, and for a pre-request one", () => {
+		expect(hasReplayedPostScript([post({ enabled: false })])).toBe(false);
+		expect(hasReplayedPostScript([post({}, { script: "  \n" })])).toBe(false);
+		expect(hasReplayedPostScript([post({}, { script: undefined })])).toBe(false);
+		expect(hasReplayedPostScript([element({ id: "x", kind: "script.pre" })])).toBe(false);
+		expect(hasReplayedPostScript([element({ id: "a", kind: "assert.status" })])).toBe(false);
+		expect(hasReplayedPostScript([])).toBe(false);
+		expect(hasReplayedPostScript(undefined)).toBe(false);
+	});
+
+	it("counts a collection's script.post that elementsParts resolves into the list", () => {
+		const chain = [collection("c", "C", [post({ id: "inherited" })])];
+		expect(hasReplayedPostScript(elementsParts(chain, "req", []))).toBe(true);
+	});
+
+	it("does not count an inherited script.post the request disables", () => {
+		const chain = [collection("c", "C", [post({ id: "inherited" })])];
+		const disable = element({
+			id: "d",
+			kind: "inherit.disable",
+			config: { elementId: "inherited" },
+		});
+		expect(hasReplayedPostScript(elementsParts(chain, "req", [disable]))).toBe(false);
 	});
 });
