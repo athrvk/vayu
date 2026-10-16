@@ -190,6 +190,7 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });

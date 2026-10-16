@@ -502,6 +502,29 @@ export function useLastCollectionRunQuery(collectionId: string | null | undefine
 }
 
 /**
+ * The load runs of one request, newest first, for the compare picker.
+ *
+ * One page of the engine's own `start_time DESC` order, so a request run more
+ * than a page's worth of times offers its newest runs and not its oldest. The
+ * rows are returned whole: which of them are comparable (finished, not the open
+ * run) is the caller's rule, because a status takes one value engine-side and
+ * the picker wants two.
+ */
+export function useRequestRunsQuery(requestId: string | null | undefined) {
+	return useQuery({
+		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.requestRuns`.
+		queryKey: queryKeys.runs.requestRun(requestId ?? ""),
+		queryFn: () =>
+			apiService.listRuns({
+				requestId: requestId!,
+				type: "load",
+				limit: RUNS_PAGE_LIMIT,
+			}),
+		enabled: !!requestId,
+	});
+}
+
+/**
  * How the run being viewed says which request it was - the two ways a baseline
  * can be looked up, in the order they are tried.
  *
@@ -687,6 +710,8 @@ export function useDeleteRunMutation() {
 			// same reason: the deleted run may have been the pin, and its id
 			// gives no way back to the request it was pinned for.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+			// And the compare picker's per-request lists, for the same reason.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 			// And the per-request last-design caches, for the fourth time and
 			// the same reason. This one is the tab-visible case: every open
 			// request tab mounts `useLastDesignRunQuery`, so without it a tab
@@ -741,6 +766,8 @@ export function useSetRunBaselineMutation() {
 				old ? { ...old, baseline: updated.baseline } : old
 			);
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+			// The picker marks the pinned run, and the pin just moved.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		},
 	});
 }
@@ -748,9 +775,9 @@ export function useSetRunBaselineMutation() {
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
  * all-runs Settings query, the per-request Recent sends and per-collection
- * Last run lists, the per-request baseline lookups and the per-request
- * last-design lookups, which are their own families and would otherwise survive
- * a cleared history.
+ * Last run lists, the per-request baseline lookups, the compare picker's
+ * per-request lists and the per-request last-design lookups, which are their
+ * own families and would otherwise survive a cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();
@@ -761,6 +788,7 @@ export function useInvalidateRuns() {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 	};
 }

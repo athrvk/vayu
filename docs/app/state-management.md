@@ -58,6 +58,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
   specTabTarget: string | null           // Collection whose Spec tab something pointed at
   dataRowTarget: { requestId, rowIndex } | null  // Request a repro pointed at, and the row
+  compareRunTarget: string | null        // Load run whose report a History row asked to open on its comparison
   navHistory: TabLocation[]              // Visited locations this session, oldest first
   navIndex: number                       // Cursor into navHistory; -1 before anything is visited
 }
@@ -131,6 +132,14 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   it points into a data file whose rows are deliberately never persisted, so a
   remembered index would name a different row in a file that has since changed.
   A non-integer or negative index throws rather than being stored
+- Pointing *into* a load run's report the same way: `compareRunTarget` carries the
+  run whose report should open on its compare view, because `openTab` can only name
+  the run. The History row's "Compare with…" sets it through `openRunComparison(runId)`
+  (issue #2164); `LoadTestDetail` opens the view when that run's report is on screen
+  and clears the target, so it holds whether the tab was opened by the row or was
+  already open, and fires once. Session-scoped like `specTabTarget`, absent from
+  `partialize`: a persisted copy would open yesterday's report on a comparison
+  nobody asked for today
 - Navigation history (issue #1245): `navHistory` is a `TabLocation` per visit
   (a `Tab` without its instance id, so a closed tab's place survives it), with
   `navIndex` as the cursor - `-1` before anything is visited. `openTab` and
@@ -2075,6 +2084,8 @@ runs: {
   lastCollectionRun: (collectionId) => ["runs", "lastCollectionRun", collectionId],
   baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's pin
   baseline: (requestId) => ["runs", "baseline", requestId],
+  requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's compare picker
+  requestRun: (requestId) => ["runs", "requestRun", requestId],
   allRuns: () => ["runs", "allRuns"],
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -2091,7 +2102,8 @@ query is keyed on is `list()` / `detail(id)`. `requests.examples(id)` sits
 *under* `detail(id)` rather than beside it, because examples are owned by the
 request: invalidating one request's subtree drops its examples with it, which is
 what a request delete needs. `runs.lastDesign`,
-`runs.recentDesign`, `runs.lastCollectionRun` and `runs.baseline` sit under
+`runs.recentDesign`, `runs.lastCollectionRun`, `runs.baseline` and
+`runs.requestRun` sit under
 `runs.all` but deliberately **not** under `runs.lists()` - see below.
 
 `runs.baseline(requestId)` caches the run pinned as that request's baseline
@@ -2103,6 +2115,16 @@ request has no `requestId` at all. The pin *flag* on the loaded list rows is
 patched in place from the mutation's response, the same way a delete patches
 them, because the sidebar polls only its first page and a refetch would leave a
 pin invisible on any page the user had scrolled to.
+
+`runs.requestRun(requestId)` caches the load runs of one request
+(`useRequestRunsQuery`: `GET /runs?requestId=&type=load&limit=50`, newest first),
+which the History compare view's run picker reads. A plain `RunListResponse`, so
+its own family for the sixth time and the same shape reason as the five above it,
+and under the `requestRuns()` prefix that a delete, a pin, a cleared history
+(`useInvalidateRuns`) and an MCP `run` event all invalidate. The query returns
+the rows whole: which are comparable (completed or stopped, never the open run)
+is `comparableRuns`'s rule, and the pinned baseline is added to the picker even
+when it is older than the page, because that is what a pin is for.
 
 `specs.detail(id)` and `specs.meta(id)` are the same document under two keys
 (issue #712): the full read carries `content` and both extracted indexes, the
@@ -2194,7 +2216,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` because the warm-cache pass succeeds once and would stay fresh forever, so a collection created mid-session never gets one - the same invalidation `useCreateCollectionMutation` and `useRestoreTrashMutation` do (#1438) |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it fans out one list fetch per collection, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
-| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The four prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
+| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first: four of them (`negotiateCompression`, `loadNegotiateCompression`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys. At the root, because design and load are separate cache entries and one write can move both (#1438) |
 | `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |

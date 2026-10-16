@@ -15,6 +15,7 @@ import { truncateUrl } from "@/lib/truncate-url";
 import { dataFileFromSummary } from "@/lib/run-data-file";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import { runReference } from "@/lib/agent-reference";
+import { isRunInProgress } from "@/lib/run-status";
 import { useCopy } from "@/hooks/useCopy";
 import type { TimeRow } from "@/lib/time-value";
 import {
@@ -45,6 +46,7 @@ import {
 	Pin,
 	PinOff,
 	AlertTriangle,
+	GitCompareArrows,
 } from "lucide-react";
 
 // What a pinned load run's chip says: the pin is its request's comparison
@@ -68,6 +70,12 @@ interface RunItemProps {
 	 * label differs by type - see the action's own comment.
 	 */
 	onToggleBaseline?: (runId: string, baseline: boolean, event?: React.MouseEvent) => void;
+	/**
+	 * Open this run's report on its comparison with another run of the same
+	 * request (#2164). Offered only for a finished load run of a saved request:
+	 * a comparison needs a final report and a request to find the other runs by.
+	 */
+	onCompare?: (runId: string) => void;
 	isDeleting: boolean;
 	isTogglingBaseline?: boolean;
 	isSelected?: boolean;
@@ -88,6 +96,7 @@ export default function RunItem({
 	onSelect,
 	onDelete,
 	onToggleBaseline,
+	onCompare,
 	isDeleting,
 	isTogglingBaseline = false,
 	isSelected = false,
@@ -208,6 +217,15 @@ export default function RunItem({
 						icon: run.baseline ? PinOff : Pin,
 						onSelect: () => onToggleBaseline(run.id, !run.baseline),
 						disabled: isTogglingBaseline,
+					},
+				]
+			: []),
+		...(onCompare && isLoadRun && run.requestId && !isRunInProgress(run.status)
+			? [
+					{
+						label: "Compare with…",
+						icon: GitCompareArrows,
+						onSelect: () => onCompare(run.id),
 					},
 				]
 			: []),
