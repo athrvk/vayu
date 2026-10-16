@@ -1478,7 +1478,7 @@ The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
 dashboard's Sampled Requests, the history Samples tab and the Test Validation
 card, and the sample-count badges say **shown** rather than *captured*, since
-`results` is capped at 100 by the report route irrespective of retention.
+`results` is capped at 100 for a single-request run by the report route irrespective of retention.
 That cap is a failures-first selection listed by time, not a uniform sample
 (#2210): the top-level `resultsStored` and `resultsCap` say how many rows the
 run stored and the cap applied, `resultsStored > resultsCap` is the only sign
