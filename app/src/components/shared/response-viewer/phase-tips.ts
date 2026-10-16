@@ -9,8 +9,8 @@
  * Per-phase explanations for the network timing breakdown (DNS -> Connect ->
  * TLS -> TTFB -> Download).
  *
- * These five sentences were copied byte-for-byte between the dashboard's
- * `RequestResponseView` and the request-builder's `ResponseTimingTab`, with a
+ * These five sentences were copied byte-for-byte between the dashboard's report
+ * view and the request-builder's `ResponseTimingTab`, with a
  * comment admitting the manual "keep in sync" obligation that nothing enforced.
  * They live here now so every renderer of the same five numbers reads from one
  * string, the way `formatPhaseDuration` already unified the numbers themselves.

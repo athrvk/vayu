@@ -12,7 +12,7 @@
  */
 
 import type { RunOutcome } from "@/components/shared/run-outcome";
-import type { LoadTestMetrics, RunReport } from "@/types";
+import type { LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
 
@@ -131,10 +131,6 @@ export interface DashboardDerived {
 	startConcurrency?: number;
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
-}
-
-export interface RequestResponseViewProps {
-	report: RunReport | null;
 }
 
 // ============================================================================

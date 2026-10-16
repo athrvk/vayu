@@ -13,15 +13,14 @@
  * Issue #76 guard: every renderer of the five network phases derives its list
  * from `TIMING_PHASES`.
  *
- * There are five of them - the request-builder's timing tab, the dashboard's
- * run-level averages card, the dashboard's timing waterfall, the dashboard's
- * per-sample tiles, and the history sample card - and each used to declare its
- * own copy of the list. Two had already drifted: the waterfall painted TTFB
+ * There are four of them - the request-builder's timing tab, the history
+ * Performance tab's averages card, the dashboard's timing waterfall, and the
+ * history sample card - and each used to declare its own copy of the list. Two had already drifted: the waterfall painted TTFB
  * with `--primary` and Download with `--success` (the tab had the same bug and
  * fixed it, in its own copy), and the waterfall carried private tooltip strings
  * that `phase-tips.ts` was written to replace.
  *
- * **Asserting that the current five render is not a guard** - a renderer with a
+ * **Asserting that the current five phases render is not a guard** - a renderer with a
  * hardcoded list of the same five passes that. So the descriptor is mocked with
  * a sixth phase and each renderer is asked to show it. A renderer wired to the
  * shared list picks it up; a renderer that went back to a local one cannot.
@@ -34,11 +33,10 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
 import type { RunReport } from "@/types";
-import { withQueryClient } from "@/test/query-wrapper";
 
 /** The synthetic sixth phase. Nothing in the app declares it. */
 const PROBE = {
@@ -152,16 +150,6 @@ describe("every timing renderer reads TIMING_PHASES (#76)", () => {
 		expect(screen.getByText(PROBE.label)).toBeInTheDocument();
 	});
 
-	it("the dashboard run-level averages card (which reads longLabel)", async () => {
-		const RequestResponseView = (
-			await import("@/modules/dashboard/components/RequestResponseView")
-		).default;
-
-		withTooltips(withQueryClient(<RequestResponseView report={reportWithSample()} />));
-
-		expect(screen.getByText(PROBE.longLabel)).toBeInTheDocument();
-	});
-
 	it("the history performance-tab averages card (which reads longLabel)", async () => {
 		const { PhaseAveragesCard } =
 			await import("@/modules/history/main/components/PhaseAveragesCard");
@@ -169,19 +157,6 @@ describe("every timing renderer reads TIMING_PHASES (#76)", () => {
 		withTooltips(<PhaseAveragesCard timingBreakdown={reportWithSample().timingBreakdown} />);
 
 		expect(screen.getByText(PROBE.longLabel)).toBeInTheDocument();
-	});
-
-	it("the dashboard per-sample tiles", async () => {
-		const RequestResponseView = (
-			await import("@/modules/dashboard/components/RequestResponseView")
-		).default;
-
-		withTooltips(withQueryClient(<RequestResponseView report={reportWithSample()} />));
-		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
-
-		// The averages card prints `longLabel`, the tiles print `label` - so a
-		// match on the short one can only have come from the tiles.
-		expect(screen.getByText(PROBE.label)).toBeInTheDocument();
 	});
 
 	it("the history sample card", async () => {

@@ -136,9 +136,8 @@ export default function SamplesTab({
 					</div>
 				</div>
 			</CardHeader>
-			{/* `p-0` + a `divide-y` strip below, matching the dashboard's live
-			    sample list (`RequestResponseView.tsx`) - a flat row per sample,
-			    not a boxed card per row. `surface-card` declares the `--rule`
+			{/* `p-0` + a `divide-y` strip below - a flat row per sample, not a
+			    boxed card per row. `surface-card` declares the `--rule`
 			    the strip's dividers read; a bare `divide-y` on `Card`'s
 			    `border bg-card` falls back to `--border`, invisible in dark
 			    (issue #1650). */}

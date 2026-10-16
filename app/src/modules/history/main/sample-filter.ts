@@ -52,7 +52,7 @@ export function numberByTime(samples: SampleResult[]): NumberedSample[] {
 /**
  * Slow is the engine's own verdict, `trace.isSlow` - a completion at or over the
  * run's `slow_threshold_ms`, stamped when it was traced - which is what the
- * dashboard's live row reads. Re-deriving it from `slowRequests.thresholdMs`
+ * sample row's slow callout reads. Re-deriving it from `slowRequests.thresholdMs`
  * and `latencyMs` would be a second definition; a sample with no trace carries
  * no verdict and is not slow.
  */

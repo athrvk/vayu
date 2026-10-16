@@ -10,9 +10,9 @@
  * split (issue #2124), then the engine's two breakdowns - by transport error
  * type and by status code.
  *
- * The history Overview and the dashboard's Request / Response tab are two
- * reports of one run, so both draw it from here. A copy of each had drifted
- * apart: the dashboard's printed the bare total and the raw type keys and
+ * Drawn by the history Overview, which the dashboard also shows for a finished
+ * run (#2220). It was shared out because the dashboard's own report once kept
+ * a copy that had drifted: it printed the bare total and the raw type keys and
  * omitted By status code, which left a run whose errors were all HTTP 500
  * showing an empty list under a non-zero total.
  *

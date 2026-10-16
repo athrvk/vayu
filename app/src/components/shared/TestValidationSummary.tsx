@@ -14,17 +14,15 @@
  * The engine writes `testValidation` (`run_manager.cpp` -> `runs.cpp`) into
  * every load-run report whose plan carried a post-request script, and stores
  * the named per-test failures on a synthetic result row. Before #726 the only
- * reader of either was the live dashboard's `RequestResponseView`, mounted only
- * while a run was being watched - so a run reopened from History showed
- * thresholds, status codes and schema validation but never said whether its
- * assertions ran at all. This is the one block, rendered by both surfaces.
+ * reader of either was the dashboard's own report view, mounted only while a
+ * run was being watched - so a run reopened from History showed thresholds,
+ * status codes and schema validation but never said whether its assertions ran
+ * at all. The History Overview renders this block, and the dashboard shows that
+ * Overview for a finished run (#2220).
  *
- * **`failures` is the History half only.** The live dashboard lists each named
- * failure beside the sample it came from, so it passes the aggregate alone; the
- * History Overview has no per-sample failure surface (its failure row is
- * filtered out of the Samples tab, see `test-validation.ts`), so it passes the
- * failures here. The stats card renders on the same `testValidation` both draw
- * from, so the two cannot disagree on the numbers.
+ * **`failures` lists the named failures.** The Overview passes them because
+ * the synthetic failure row is filtered out of the Samples tab (see
+ * `test-validation.ts`), so this is the one place they reach the screen.
  */
 
 import { XCircle } from "lucide-react";
@@ -138,8 +136,8 @@ export function TestValidationSummary({
 				{/*
 				 * The named failures, so a run that failed 13 of 100 assertions is
 				 * not indistinguishable from one that asserted nothing. Modelled on
-				 * the request-builder Tests tab and the live dashboard's per-sample
-				 * list, so the same failure reads the same wherever it is shown.
+				 * the request-builder Tests tab and the sample row's failure list,
+				 * so the same failure reads the same wherever it is shown.
 				 */}
 				{hasFailures && (
 					<div className={cn("space-y-1", testValidation && "mt-4")}>

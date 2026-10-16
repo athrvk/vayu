@@ -10,9 +10,9 @@
  *
  * Every such test needs the same three lines - a fresh client, retries off so a
  * failure surfaces immediately instead of after three backoffs, and the
- * provider around the tree. Written once here rather than six times across the
- * files that render `RequestResponseView` and `SamplesTab`, both of which pull
- * their captured response bodies from `GET /runs/:id/samples`.
+ * provider around the tree. Written once here rather than in every file that
+ * renders `SamplesTab`, which pulls its captured response bodies from
+ * `GET /runs/:id/samples`, or anything else that fetches.
  *
  * A fresh client per call is deliberate: a shared one would carry one test's
  * cached page into the next.

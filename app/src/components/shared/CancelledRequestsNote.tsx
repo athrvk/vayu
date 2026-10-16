@@ -12,8 +12,7 @@
  * status-code distribution, not the error rate. Without a line of their own a
  * stopped run's request count silently falls short of what it sent. The line is
  * muted and never destructive, because a cancellation the user asked for is not
- * an error. The dashboard's Request / Response tab and the history Overview are
- * two reports of one run, so both draw it from here.
+ * an error. Drawn by the history Overview, beside the error card.
  *
  * Silent for zero and for `undefined`, which is a report from an engine older
  * than the count: absent means none.

@@ -15,9 +15,8 @@
  * recorded none - an absent card, not an empty one, for every run that never
  * called `pm.metrics` and every report from an engine that predates it.
  *
- * Two surfaces show it, the same two `ThresholdVerdict` does - the live
- * dashboard's report view and the history detail's Overview - so it lives
- * here once.
+ * The history detail's Overview shows it, which is also the dashboard's view of
+ * a finished run (#2220).
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

@@ -544,7 +544,6 @@ after the frame left the run's retained ring.
 |---|---|
 | `DashboardHeader.tsx` | Run status, method and URL, stop button, and the config summary line (virtual users, mode, a data-driven run's row count and the file it came from, elapsed) |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
-| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests. An expanded validation-failure sample lists each failing test's `trace.failures` message, not just the `ERR` chip and pass/fail counts |
 | `shared.tsx`, `tooltips.tsx`, `format.ts` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording + the `fmt()` / `fmtRate()` number formatters (their own module so `shared.tsx` exports only components; `fmtRate` is `formatRate` with a "-" for a missing value, which `formatRate` alone would print as a measured `0`) |
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`, and `LatencyPercentilesCard` (live p95 and p99 with mean/median beneath, added by `HeroRow` for the throughput-led modes - `constant_rps`, `constant_concurrency`, `iterations` - which therefore carry no p99 stat; `ramp_up` and `capacity` keep theirs as p99 at peak in the stats row). Throughput on these cards prints through `formatRate`, so 3940 reads `3,940`. The closed-loop count reads "virtual users" on every card ("Active virtual users", "Virtual user utilisation", "Throughput per virtual user", "Peak virtual users"); under `constant_rps` the same series counts requests, so that mode's stat says "Peak in-flight requests". `isClosedLoopMode` and `concurrencyMeasureLabel` in `constants/load-test-modes.ts` make that call, and the card components and their props keep the `Concurrency` identifiers.
@@ -2219,12 +2218,13 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 - `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
-- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered by both sampled-exchange views
+- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered inside the sampled-exchange shell
 - `SampledExchange.tsx` - the sampled-exchange shell: summary row, expansion, error block and timing tiles
 
-> **One shell, two sample lists.** The dashboard's live sample list and the
-> history detail's stored one show the same thing - a sampled HTTP exchange you
-> can expand - and were two components. #60 gave them the same per-concern
+> **One shell for a sample row.** The dashboard's live sample list and the
+> history detail's stored one showed the same thing - a sampled HTTP exchange
+> you can expand - and were two components (the dashboard's went with #2220,
+> when it began rendering History's report). #60 gave them the same per-concern
 > primitives, which moved the drift up into the shells rather than removing it:
 > each still owned its summary row, its expansion chrome and its section order,
 > so a spacing or empty-state fix to one did not reach the other. By the time
@@ -2234,14 +2234,12 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 >
 > `SampledExchange` is **presentational over already-shaped data**: a status
 > code, a latency, a pre-resolved phase list. Expansion stays the parent's
-> state, as it already was on the history side - the dashboard holds a `Set` of
-> open indices, the history detail a single one. Sections that genuinely differ
-> arrive as slots (`details` before the timing tiles, `children` after, and
+> state; the history detail holds a single open row. What the caller adds
+> arrives as slots (`details` before the timing tiles, `children` after, and
 > `actions` beside the summary, outside its button), not as
-> boolean flags; the callers keep their own chrome (the history card's
-> outcome-tinted border) and their own timestamp formatting, because a live row
-> placing a sample inside a seconds-old run wants milliseconds where a stored
-> row dating a run wants the day.
+> boolean flags; the caller keeps its own chrome and its own timestamp
+> formatting, because a stored row dating a run wants the day where a row
+> placing a sample inside a seconds-old run would want milliseconds.
 >
 > Its icon reads **error** for a transport `error` or any status outside
 > 200-399 (`isErrorStatus` in `constants/http-status.ts`, the renderer's copy of
@@ -2249,21 +2247,21 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > success tick; a caller that knows better passes `state`.
 >
 > Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
-> sentinel, so a view that hand-rolls a row again fails) and
+> sentinel, so a view that hand-rolls a row fails) and
 > `SampledExchange.test.tsx` (the shell's own behaviour).
 
-> **One list, five renderers.** The five network phases are drawn by the
-> request-builder's `ResponseTimingTab` (timeline + legend), the dashboard's
-> run-level averages card and per-sample tiles, the dashboard's
+> **One list, four renderers.** The five network phases are drawn by the
+> request-builder's `ResponseTimingTab` (timeline + legend), the history
+> Performance tab's `PhaseAveragesCard`, the dashboard's
 > `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
-> declare its own copy of the list, so adding a phase meant finding all five and
-> nothing pointed you at the other four. Two had already drifted: the waterfall
+> declare its own copy of the list, so adding a phase meant finding every
+> renderer and nothing pointed you at the others. Two had already drifted: the waterfall
 > painted TTFB with `--primary` - an accent-tracking token the design system
 > forbids for a chart series, and the very bug `ResponseTimingTab`'s header
 > comment describes fixing in its own copy - and carried private tooltip strings
 > that `phase-tips.ts` existed to replace.
 >
-> Add a phase to `TIMING_PHASES` and all five pick it up.
+> Add a phase to `TIMING_PHASES` and every renderer picks it up.
 > `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
 > each renderer to show it, so a call site that goes back to a local array fails.
 

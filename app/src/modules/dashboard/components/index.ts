@@ -11,4 +11,3 @@
 
 export { default as DashboardHeader } from "./DashboardHeader";
 export { default as MetricsView } from "./MetricsView";
-export { default as RequestResponseView } from "./RequestResponseView";
