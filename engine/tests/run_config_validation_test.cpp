@@ -33,6 +33,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <gtest/gtest.h>
@@ -706,6 +707,58 @@ TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
     }
 }
 
+// --- carriedBudgets: a stored label list, bounded (#2195) -------------------
+//
+// The engine never reads the entries, so nothing downstream would refuse a bad
+// one: these bounds are the only ones the snapshot and every report echoing it
+// get. A length is bytes of UTF-8, which is what the error names.
+//
+// Mutation check: delete the `check_carried_budgets` call in
+// validate_run_config and every rejection case below is accepted.
+
+namespace {
+
+/// @p count entries, each @p bytes long.
+nlohmann::json carried_budgets (std::size_t count, std::size_t bytes) {
+    return nlohmann::json (std::vector<std::string> (count, std::string (bytes, 'k')));
+}
+
+} // namespace
+
+TEST (RunConfigValidation, CarriedBudgetsThatAreNotAListOfStringsAreRejected) {
+    for (const nlohmann::json& bad : { nlohmann::json ("latencyP99Ms"), nlohmann::json (1),
+         nlohmann::json::object (), nlohmann::json::array ({ "latencyP99Ms", 7 }),
+         nlohmann::json::array ({ nullptr }) }) {
+        auto config              = valid_config ();
+        config["carriedBudgets"] = bad;
+        expect_rejected (config, "carriedBudgets");
+    }
+}
+
+TEST (RunConfigValidation, CarriedBudgetsPastEitherBoundAreRejected) {
+    auto too_many              = valid_config ();
+    too_many["carriedBudgets"] = carried_budgets (65, 1);
+    expect_rejected (too_many, "carriedBudgets");
+    expect_rejected (too_many, "64 entries");
+
+    auto too_long              = valid_config ();
+    too_long["carriedBudgets"] = carried_budgets (1, 201);
+    expect_rejected (too_long, "carriedBudgets");
+    expect_rejected (too_long, "200 bytes");
+}
+
+TEST (RunConfigValidation, CarriedBudgetsAtTheirBoundsEmptyOrNullAreAccepted) {
+    for (const nlohmann::json& good : { carried_budgets (64, 200),
+         nlohmann::json::array (), nlohmann::json (nullptr),
+         nlohmann::json::array ({ "latencyP99Ms", "custom.checkout.p95" }) }) {
+        auto config              = valid_config ();
+        config["carriedBudgets"] = good;
+        const auto reason        = validate_run_config (config);
+        EXPECT_FALSE (reason.has_value ())
+        << good.dump ().substr (0, 80) << " was refused: " << reason.value_or ("");
+    }
+}
+
 // --- 8. The boolean run-config settings (issues #476, #504) ---------------
 
 // Each is read as a bool inside RunContext's constructor, which throws on a
@@ -891,6 +944,8 @@ TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
         { { "mode", "ramp_up" }, { "duration", "1s" }, { "rampUpDuration", "10sec" } } },
         { "iterations", { { "mode", "iterations" }, { "iterations", -1 } } },
         { "targetRps", { { "mode", "constant_rps" }, { "duration", "1s" } } },
+        { "carriedBudgets",
+        { { "mode", "iterations" }, { "iterations", 1 }, { "carriedBudgets", "latencyP99Ms" } } },
     };
     for (const auto& [field, fields] : cases) {
         auto payload = url;
@@ -905,6 +960,24 @@ TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
         << body.dump ();
     }
     EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+// The snapshot is the body, so the list the validator admitted is the list the
+// report later echoes, with no copy step to forget it (#2195).
+TEST_F (RunConfigValidationRouteTest, AcceptedCarriedBudgetsAreStoredWithTheRun) {
+    const vayu::tests::EchoServer echo;
+    auto payload = iterations_run (echo);
+    payload["carriedBudgets"] = json::array ({ "latencyP99Ms", "custom.checkout.p95" });
+    const auto [status, body] = post_run (payload);
+    ASSERT_EQ (status, 202) << body.dump ();
+
+    const std::string run_id = body.value ("runId", std::string ());
+    EXPECT_EQ (settled_status (run_id), vayu::RunStatus::Completed);
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (json::parse (run->config_snapshot).value ("carriedBudgets", json ()),
+    payload["carriedBudgets"])
+    << run->config_snapshot;
 }
 
 // `requestId` / `environmentId` were read with `get<std::string> ()`, so a
