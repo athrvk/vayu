@@ -30,7 +30,7 @@ Windows takes the winget line; macOS and Linux take the script. [Details for eve
 ## See it in action
 
 ![Load test run view with the history sidebar](docs/images/vayu-loadtest2.png)
-*The load-test run view, with the run kept in the history sidebar: rate fidelity, throughput, error counters, and latency percentiles from the C++ engine.*
+*The load-test run view, with the run kept in the history sidebar: rate fidelity, throughput, error counters, and the pass/fail budget verdict.*
 
 ![GraphQL request builder with a collection sidebar](docs/images/vayu-graphql.png)
 *The request builder with a GraphQL query, its variables, and the response, beside the collection sidebar.*
