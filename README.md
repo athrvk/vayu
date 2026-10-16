@@ -6,6 +6,20 @@
 - **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API
 - **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed (via the stdio CLI) drive the same engine the UI does
 
+MCP ([Model Context Protocol](https://athrvk.github.io/vayu/engine/mcp/)) is the open standard that lets coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine as one, so an agent can send the request it just wrote, load test it and read the report without leaving your editor.
+
+**Install:**
+
+```powershell
+winget install athrvk.Vayu
+```
+
+```sh
+bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
+```
+
+Windows takes the winget line; macOS and Linux take the script. [Details for every platform](#install).
+
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/athrvk/vayu/total)](https://github.com/athrvk/vayu/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
@@ -14,11 +28,6 @@
 ---
 
 ## See it in action
-
-<!-- The lead asset here should MOVE: a <30s GIF/MP4 of build request -> send ->
-     flip to load test -> dashboard streaming at 50k req/s. The owner records it;
-     drop it in as docs/images/vayu-demo.gif above the two stills below and the
-     section is done. Structure is deliberately GIF-ready. -->
 
 ![Load test dashboard](docs/images/vayu-loadtest2.png)
 *The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
