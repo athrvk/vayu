@@ -74,7 +74,10 @@ vi.mock("@/queries", async (importOriginal) => {
 
 vi.mock("@/hooks", () => ({
 	useEngine: () => ({ composeRequest, executeRequest }),
-	useVariableResolver: () => ({ resolveObject: <T,>(value: T) => value }),
+	useVariableResolver: () => ({
+		resolveObject: <T,>(value: T) => value,
+		resolveString: (value: string) => value,
+	}),
 }));
 
 vi.mock("@/services", () => ({
