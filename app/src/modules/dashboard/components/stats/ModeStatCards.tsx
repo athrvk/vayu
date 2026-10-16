@@ -13,7 +13,7 @@
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
 
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatLatency, formatMs, formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
@@ -92,11 +92,14 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
 	const { crossed, concurrency, sloMs } = d.breakpoint;
 	const reached = crossed && concurrency !== null;
+	// A null SLO means no tick was ever judged (report-only History, run not started):
+	// "not crossed" would assert a result nobody measured, so that stays "-".
+	const value = reached ? formatNumber(concurrency) : sloMs === null ? "-" : "not crossed";
 	return (
 		<StatCard
 			label="Breakpoint"
-			value={reached ? formatNumber(concurrency) : "not crossed"}
-			sub={!reached && sloMs ? `SLO ${formatMs(sloMs)} ms` : undefined}
+			value={value}
+			sub={!reached && sloMs ? `SLO ${formatLatency(sloMs)}` : undefined}
 			infoTip={TOOLTIPS.breakpoint}
 		/>
 	);

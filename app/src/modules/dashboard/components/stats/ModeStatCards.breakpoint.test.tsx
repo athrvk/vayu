@@ -28,12 +28,11 @@ describe("BreakpointStat", () => {
 	it("names the SLO an uncrossed run never reached, rather than a bare dash", () => {
 		const text = renderStat(notCrossed(200)).textContent;
 		expect(text).toContain("not crossed");
-		expect(text).toContain("SLO 200 ms");
-		expect(text).not.toContain("-");
+		expect(text).toContain("SLO 200ms");
 	});
 
 	it("reads the SLO off the breakpoint, so a later settings change cannot rewrite it", () => {
-		expect(renderStat(notCrossed(350)).textContent).toContain("SLO 350 ms");
+		expect(renderStat(notCrossed(350)).textContent).toContain("SLO 350ms");
 	});
 
 	it("shows the concurrency once the SLO was crossed, with no SLO line", () => {
@@ -49,8 +48,14 @@ describe("BreakpointStat", () => {
 		expect(text).not.toContain("SLO");
 	});
 
-	it.each([null, 0])("falls back to a bare 'not crossed' when the SLO is %s", (sloMs) => {
-		const text = renderStat(notCrossed(sloMs)).textContent;
+	it("shows a dash, not a verdict, when no SLO was ever judged", () => {
+		const text = renderStat(notCrossed(null)).textContent;
+		expect(text).toContain("-");
+		expect(text).not.toContain("not crossed");
+	});
+
+	it("falls back to a bare 'not crossed' when the SLO is 0", () => {
+		const text = renderStat(notCrossed(0)).textContent;
 		expect(text).toContain("not crossed");
 		expect(text).not.toContain("SLO");
 	});
