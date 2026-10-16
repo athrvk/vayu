@@ -342,7 +342,7 @@ export default function LoadTestConfigDialog({
 				{notices.length > 0 && (
 					<div
 						data-slot="load-test-notices"
-						className="-mx-1 max-h-40 shrink-0 space-y-3 overflow-y-auto px-1 py-px"
+						className="-mx-1 max-h-[30vh] shrink-0 space-y-3 overflow-y-auto px-1 py-px"
 					>
 						{notices.map((n) => (
 							<div key={n.key}>{n.node}</div>

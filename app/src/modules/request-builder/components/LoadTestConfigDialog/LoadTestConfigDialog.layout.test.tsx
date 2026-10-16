@@ -14,8 +14,7 @@
  *
  * jsdom has no layout, so what is asserted is the declaration on the element
  * that carries it and where each node sits in the tree, per the rule in
- * app/CLAUDE.md. The behaviour was measured in Chromium at 1024x700: both
- * panes side by side, the notices band above the scroller, Start pinned.
+ * app/CLAUDE.md.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -95,7 +94,7 @@ describe("the load-test dialog layout", () => {
 		expect(band!.parentElement).toBe(panel);
 		expect(body.parentElement).toBe(panel);
 		expect(band!.className).toContain("shrink-0");
-		expect(band!.className).toContain("max-h-40");
+		expect(band!.className).toContain("max-h-[30vh]");
 		expect(band!.className).toContain("overflow-y-auto");
 	});
 
