@@ -220,6 +220,37 @@ describe("useImportMutation", () => {
 	});
 
 	/**
+	 * The caller learns the new roots' real ids from the mutation's result: the
+	 * import dialog closes and then expands and opens them, and the engine's
+	 * answer is the only place those ids exist.
+	 */
+	it("resolves with each root and environment keyed by temp id, mapped to its real id", async () => {
+		vi.mocked(apiService.applyImport).mockResolvedValue({
+			idMap: { c1: "col_1", c2: "col_2", e1: "env_1" },
+		});
+		const qc = appDefaultsClient();
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: qc }, children);
+		const { result } = renderHook(() => useImportMutation(), { wrapper });
+
+		const twoRootsAndAnEnvironment: ImportResult = {
+			...structuredClone(COLLECTION_ONLY),
+			collections: [
+				structuredClone(COLLECTION_ONLY.collections[0]),
+				structuredClone(COLLECTION_ONLY.collections[0]),
+			],
+			environments: [{ name: "Prod", description: "", variables: {} }],
+		};
+		const applied = await result.current.mutateAsync({
+			result: twoRootsAndAnEnvironment,
+			opts: { importEnvironments: true, importScripts: true },
+		});
+
+		expect(applied.rootIds).toEqual({ c1: "col_1", c2: "col_2" });
+		expect(applied.idMap).toEqual({ c1: "col_1", c2: "col_2", e1: "env_1" });
+	});
+
+	/**
 	 * The id-map check throws *after* the atomic apply committed the tree. Invalidating
 	 * only in onSuccess left that tree invisible - `refetchOnWindowFocus` is off - until
 	 * the user reloaded the app.

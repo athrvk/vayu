@@ -13,6 +13,12 @@ export { useDashboardStore, deriveRunProgress } from "./dashboard-store";
 export { useScenarioRunStore } from "./scenario-run-store";
 export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";
+export {
+	useImportReportStore,
+	selectImportReport,
+	hasReport,
+	type ImportReport,
+} from "./import-report-store";
 export { useSessionStore } from "./session-store";
 export { useDataFileStore, type DataFileLocation } from "./data-file-store";
 export { useBoundRowStore, boundRowFor, type BoundDataRow } from "./bound-row-store";

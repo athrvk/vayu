@@ -49,6 +49,27 @@ function rememberSpecFiles(
 	}
 }
 
+/** What an applied import hands back: the real ids behind the temp ids it was sent with. */
+export interface ImportApplied {
+	/** The engine's whole temp-id -> real-id map. */
+	idMap: Record<string, string>;
+	/** Each root collection's temp id -> real id, in the order the file listed them. */
+	rootIds: Record<string, string>;
+}
+
+/** The real id of every temp-id-stamped item in `items`, keyed by its temp id. */
+function realIds(
+	items: readonly { tempId?: string }[],
+	idMap: Record<string, string>
+): Record<string, string> {
+	const ids: Record<string, string> = {};
+	for (const { tempId } of items) {
+		const id = tempId ? idMap[tempId] : undefined;
+		if (tempId && id) ids[tempId] = id;
+	}
+	return ids;
+}
+
 export function useImportMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
@@ -74,10 +95,14 @@ export function useImportMutation() {
 			 * binding that does not exist.
 			 */
 			specFile?: SpecFileLocation;
-		}) => {
+		}): Promise<ImportApplied> => {
 			const withTempIds = assignTempIds(result);
 			const idMap = await new ImportOrchestrator(createImportApi()).run(withTempIds, opts);
 			rememberSpecFiles(withTempIds, idMap, specFile);
+			return {
+				idMap,
+				rootIds: realIds(withTempIds.collections, idMap),
+			};
 		},
 		// Settled, not success: `run()` can throw *after* the tree is committed (the
 		// id-map completeness check, or the globals write behind it), and with

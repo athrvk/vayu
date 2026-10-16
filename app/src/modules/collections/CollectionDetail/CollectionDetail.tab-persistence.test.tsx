@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
@@ -145,6 +145,40 @@ describe("the active collection tab, kept per collection id", () => {
 
 		activeCollectionId = "c1";
 		rerender(<Screen />);
+		expect(activeTabName()).toMatch(/elements/i);
+	});
+});
+
+describe("a sub-tab chosen from outside the screen", () => {
+	// The import toast's "Review import notes" writes the store and opens the
+	// collection; when the user is already inside it on another sub-tab the
+	// screen is not remounted, so only a read of the store can move it.
+	it("switches a collection already on screen to the tab the store was told", () => {
+		render(<Screen />);
+		selectTab(/auth/i);
+		expect(activeTabName()).toMatch(/auth/i);
+
+		act(() => useTabSelectionStore.getState().setCollectionTab("c1", "info"));
+
+		expect(activeTabName()).toMatch(/info/i);
+	});
+
+	it("leaves the screen alone when the write names another collection", () => {
+		render(<Screen />);
+		selectTab(/auth/i);
+
+		act(() => useTabSelectionStore.getState().setCollectionTab("c2", "elements"));
+
+		expect(activeTabName()).toMatch(/auth/i);
+	});
+
+	it("shows the other collection's tab once it is opened", () => {
+		const { rerender } = render(<Screen />);
+		act(() => useTabSelectionStore.getState().setCollectionTab("c2", "elements"));
+
+		activeCollectionId = "c2";
+		rerender(<Screen />);
+
 		expect(activeTabName()).toMatch(/elements/i);
 	});
 });

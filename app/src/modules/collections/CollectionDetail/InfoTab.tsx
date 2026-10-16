@@ -29,6 +29,7 @@ import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
+import { ImportNotesCallout } from "./ImportNotesCallout";
 import { Field, RelativeTime, SaveFailed, Stat } from "./shared";
 
 interface InfoTabProps {
@@ -154,6 +155,7 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 
 	return (
 		<div className="max-w-[540px] flex flex-col gap-5">
+			<ImportNotesCallout rootId={collection.id} />
 			{nameConflict && <ExternalChangeCallout what="name" onTakeTheirs={takeTheirName} />}
 			{descriptionConflict && (
 				<ExternalChangeCallout what="description" onTakeTheirs={takeTheirDescription} />
