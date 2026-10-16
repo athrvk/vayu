@@ -252,7 +252,7 @@ export function TabStrip() {
 			 */}
 			{openTabs.length === 0 && (
 				<span className="flex min-w-0 items-center truncate px-3 text-xs text-muted-foreground">
-					Open a request from the drawer, or press {formatChord(NEW_REQUEST_CHORD)}
+					Open a request from the sidebar, or press {formatChord(NEW_REQUEST_CHORD)}
 				</span>
 			)}
 
