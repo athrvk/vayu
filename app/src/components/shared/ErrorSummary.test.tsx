@@ -16,7 +16,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { ErrorSummary, type ErrorRowTarget, type ErrorSummaryProps } from "./ErrorSummary";
 
 const props = (over: Partial<ErrorSummaryProps> = {}): ErrorSummaryProps => ({
@@ -226,10 +227,8 @@ describe("ErrorSummary", () => {
 			const refused = screen.getByRole("button", { name: /HTTP 500/ });
 			expect(refused).toBeDisabled();
 			expect(refused).toHaveTextContent("No sample of this was kept");
-			expect(refused.closest("[title]")).toHaveAttribute(
-				"title",
-				"No sample of this was kept"
-			);
+			// The reason is reachable by hover and Tab through DisabledHint's tab stop.
+			expect(refused.closest("[data-slot=disabled-hint]")).toHaveAttribute("tabindex", "0");
 			expect(screen.getByRole("button", { name: /Timeout/ })).toBeDisabled();
 			expect(screen.getByRole("button", { name: /DNS failed/ })).toBeDisabled();
 

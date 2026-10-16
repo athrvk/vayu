@@ -24,7 +24,7 @@
 
 import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, DisabledHint } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { formatErrorPercent } from "@/modules/dashboard/utils/format";
@@ -83,25 +83,22 @@ function CountRow({ label, count, mono, onSelect, unavailable }: CountRowProps) 
 	);
 	if (!onSelect) return <div className={ROW_CLASS}>{text}</div>;
 
-	const button = (
-		<Button
-			type="button"
-			variant="listRow"
-			className={cn(ROW_CLASS, "justify-between font-normal hover:bg-accent")}
-			disabled={unavailable}
-			onClick={onSelect}
-		>
-			{text}
-			{unavailable && <span className="sr-only">{NO_SAMPLE_REASON}</span>}
-		</Button>
-	);
-	if (!unavailable) return button;
-	// A disabled button takes no pointer events, so the hover text rides on a
-	// wrapper that does.
+	// DisabledHint's wrapper is inline-flex; the row has to stay full width.
 	return (
-		<span className="block" title={NO_SAMPLE_REASON}>
-			{button}
-		</span>
+		<div className="[&>[data-slot=disabled-hint]]:flex [&>[data-slot=disabled-hint]]:w-full">
+			<DisabledHint reason={unavailable && NO_SAMPLE_REASON}>
+				<Button
+					type="button"
+					variant="listRow"
+					className={cn(ROW_CLASS, "justify-between font-normal hover:bg-accent")}
+					disabled={unavailable}
+					onClick={onSelect}
+				>
+					{text}
+					{unavailable && <span className="sr-only">{NO_SAMPLE_REASON}</span>}
+				</Button>
+			</DisabledHint>
+		</div>
 	);
 }
 
