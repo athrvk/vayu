@@ -1355,6 +1355,27 @@ LiveMetricsCursor& cursor,
 std::chrono::steady_clock::time_point now);
 
 /**
+ * Testable core of `GET /runs/:id/report`: `{http_status, json_body}`, 404 for
+ * a missing run. Defined in runs.cpp.
+ */
+std::pair<int, nlohmann::json>
+run_report_response (vayu::db::Database& db, const std::string& run_id);
+
+/**
+ * Testable core of `GET /runs/:id/metrics`: one `{data, pagination}` page of
+ * the run's ticks, 404 for a missing run. @p limit and @p offset arrive
+ * clamped (at most `RUN_TIME_SERIES_PAGE_MAX` ticks a page). Defined in
+ * metrics.cpp.
+ */
+std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
+const std::string& run_id,
+int64_t limit,
+int64_t offset);
+
+/// The most ticks one `run_time_series_response` page returns.
+constexpr int64_t RUN_TIME_SERIES_PAGE_MAX = 50000;
+
+/**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */

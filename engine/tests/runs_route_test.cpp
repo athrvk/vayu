@@ -52,9 +52,6 @@ nlohmann::json build_run_report_config (const nlohmann::json& config);
 // Defined in runs.cpp; the report's `metadata` object for one stored run.
 nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db::Run& run);
 // Defined in runs.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
-// Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
 const std::string& body);

@@ -28,15 +28,12 @@
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 
 using nlohmann::json;
 
 namespace vayu::http::routes {
 // Defined in metrics.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
-const std::string& run_id,
-int64_t limit,
-int64_t offset);
 std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
 const std::string& run_id,
 int64_t limit,

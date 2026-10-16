@@ -50,20 +50,12 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/routes.hpp"
 
 using nlohmann::json;
 using vayu::core::ElementSpan;
 using vayu::core::Registry;
 using vayu::tests::compiled_elements;
-
-namespace vayu::http::routes {
-// Defined in runs.cpp; returns {http_status, json_body}. Declared here, the
-// same way `runs_route_test.cpp` does, so `ControlTransactionReports...`
-// below can assert on `GET /runs/:id/report`'s own shape (issue #1515's
-// reopened criterion 1) instead of the stored summary column directly.
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
-} // namespace vayu::http::routes
 
 namespace {
 
