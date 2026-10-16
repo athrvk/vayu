@@ -1711,6 +1711,25 @@ describe("a pick declares the contract (issue #2050)", () => {
 	});
 });
 
+describe("the timeout and think-time hint (issue #2229)", () => {
+	it("names where the per-request timeout and the pacing live", () => {
+		open();
+
+		const hint = screen.getByText(/times out after Default Request Timeout/);
+		expect(hint).toHaveTextContent("Settings › Network & connectivity");
+		expect(hint).toHaveTextContent("Think time element");
+		expect(hint).toHaveTextContent("Elements tab");
+		expect(hint).toHaveTextContent("virtual users");
+	});
+
+	it("sits under the target line, in the header", () => {
+		open({ url: "https://api.example.com/" });
+
+		const hint = screen.getByText(/times out after Default Request Timeout/);
+		expect(hint.parentElement).toHaveAttribute("data-slot", "dialog-header");
+	});
+});
+
 describe("the target (issue #2117)", () => {
 	const ADVISORY = /not on your machine or network/i;
 	const dialog = () => screen.getByRole("dialog");
