@@ -4,7 +4,7 @@
 
 - **50k+ req/s from the app's own UI** - 56,880 standalone, matching `wrk` and edging past `vegeta` on the same machine
 - **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API
-- **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed drive the same engine the UI does
+- **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed (via the stdio CLI) drive the same engine the UI does
 
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/athrvk/vayu/total)](https://github.com/athrvk/vayu/releases)
@@ -73,17 +73,18 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 | **Mock servers** | Collection mock + OAuth issuer + webhook inbox | No | No | No | Yes (cloud tier) |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON | Yes (in script) | CSV | CSV / JSON |
 | **Postman Collection Import** | Yes (v2.0 + v2.1) | Yes (via converter) | Limited | No | Native |
-| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | No | No | No | Yes |
+| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | Yes (2.0 / 3.x) | No | No | Yes |
 | **Open Source** | Yes (dual-license) | Yes (MIT) | Yes (AGPL v3) | Yes (Apache 2.0) | Partial |
 
 ---
 
-## Coming from Postman, Insomnia, or an OpenAPI spec?
+## Coming from Postman, Insomnia, JMeter, or an OpenAPI spec?
 
-Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments - from an Insomnia workspace, or from the separate file Postman exports them as.
+Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments - from an Insomnia v4 workspace, or from the separate file Postman exports them as.
 
 - **Postman** - Collection v2.0 and v2.1 JSON exports, plus environment and globals exports
 - **Insomnia** - v4 exports
+- **JMeter** - `.jmx` test plans: HTTP samplers, extractors, assertions, timers and logic controllers; a class with no equivalent is counted rather than dropped ([what carries over](https://athrvk.github.io/vayu/app/import-collections/jmeter/))
 - **OpenAPI / Swagger** - 3.1, 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
 
 ---
@@ -96,7 +97,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
 - **Scenario collection runs** - run a collection as an ordered scenario, in design mode or under load, with per-step results and threshold verdicts
 - **Data-driven runs** - drive a collection from a CSV, TSV, JSON or JSONL file; columns arrive as `{{data.column}}` tokens and `pm.iterationData`, declared up front on the collection's Data tab
-- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.1/3.0, Swagger 2.0
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, JMeter `.jmx`, OpenAPI 3.1/3.0, Swagger 2.0
 - **Saved response examples** - capture a real response against a request and keep it as a named example
 - **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
 - **MCP server for coding agents** - 77 typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off (and withholds the write tools until it is on)
@@ -106,13 +107,13 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Composable scripting** - pre/post-request scripts compose down the hierarchy (root → folder → request)
 - **Command palette + deep search** - one shortcut to jump to any collection, request, environment or setting, searching inside them rather than just their names
 - **Private by default** - 100% offline execution; no telemetry, no account, no cloud sync
-- **Cross-platform** - native installers for Windows (x64), macOS (universal), and Linux (AppImage)
+- **Cross-platform** - native installers for Windows (x64), macOS (universal), and Linux (x86_64 AppImage and .deb)
 
 ---
 
 ## Install
 
-Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sign-in.
+Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No account, no sign-in.
 
 **Windows** - [winget](https://learn.microsoft.com/windows/package-manager/winget/), or the [installer](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe):
 
@@ -126,7 +127,7 @@ winget install athrvk.Vayu
 bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
-Re-run it to update. Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage route, FUSE 2 on Linux - is on the site:
+Re-run it to update. Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage and .deb routes, FUSE 2 on Linux - is on the site:
 **[Install Vayu →](https://athrvk.github.io/vayu/#install)**
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
@@ -201,7 +202,7 @@ Those are excellent API clients, but they do not load test - for that, you reach
 The C++ engine sustains tens of thousands of requests per second on modern hardware; see the [Performance](#performance) section. Exact numbers depend on your machine, the target server, and network conditions.
 
 **Can my coding agent use Vayu?**
-Yes. Vayu ships an MCP server inside the app on `127.0.0.1:9877`, and one command registers it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 77 typed tools - inspection (`list_collections`, `get_run_report`, `compare_runs`), execution (`run_request`, `run_collection_smoke`), load runs (`start_load_run`, `stop_run`) and writes over collections, requests and environments. Because an agent pointed at your engine is a real capability, it is gated: network tools refuse any host outside an allowlist that starts empty, load runs are capped on RPS, concurrency and duration, and the tools that mutate saved data sit behind a write toggle that ships off. Nothing leaves the machine.
+Yes. Vayu ships an MCP server inside the app on `127.0.0.1:9877`, and one command registers it with Claude Code, Cursor, VS Code or Codex, and Zed connects through the stdio CLI described in the [MCP reference](https://athrvk.github.io/vayu/engine/mcp/). The agent gets 77 typed tools - inspection (`list_collections`, `get_run_report`, `compare_runs`), execution (`run_request`, `run_collection_smoke`), load runs (`start_load_run`, `stop_run`) and writes over collections, requests and environments. Because an agent pointed at your engine is a real capability, it is gated: network tools refuse any host outside an allowlist that starts empty, load runs are capped on RPS, concurrency and duration, and the tools that mutate saved data sit behind a write toggle that ships off. Nothing leaves the machine. The agent can see what you have open (`get_app_focus`), and every request, run, variable or GraphQL operation has a Copy for agent button that puts a reference on the clipboard - so "load test this" means the thing on your screen.
 
 **Does Vayu support SSE / streaming endpoints?**
 Yes. Turn on Event stream for a request and Vayu consumes `text/event-stream` as a first-class request type: events arrive in a live Events tab as they stream, you can stop the stream yourself, scripts can assert on the buffered events after it closes, and the event list is restored when you reopen the run from history. Streams are bounded under load rather than buffering without limit.
@@ -213,7 +214,7 @@ Yes. All execution happens locally. Vayu never contacts external servers during 
 No. Download, install, and use it immediately with no sign-up.
 
 **Can I import my Postman collections?**
-Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file; drop that in too and it imports as a Vayu environment. A Postman globals export imports the same way, merging into Vayu's globals scope. Insomnia workspace environments import as well.
+Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file; drop that in too and it imports as a Vayu environment. A Postman globals export imports the same way, merging into Vayu's globals scope. Insomnia v4 workspace environments import as well, and a JMeter `.jmx` test plan imports as a collection.
 
 **Can I import OpenAPI / Swagger specs?**
 Yes. Drop in an OpenAPI 3.1, OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.
@@ -223,7 +224,7 @@ QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment
 
 **Which platforms does Vayu support?**
 Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon + Intel universal), and Linux
-(x86_64 AppImage, glibc 2.35 or later: Ubuntu 22.04, Debian 12 or newer).
+(x86_64 AppImage or .deb, glibc 2.35 or later: Ubuntu 22.04, Debian 12 or newer).
 
 ---
 
