@@ -109,6 +109,9 @@ export const API_ENDPOINTS = {
 	// The same collection as a Postman Collection v2.1 document. A read like the
 	// one above: the engine assembles it and nothing is stored.
 	POSTMAN_EXPORT: `/export/postman`,
+	// One environment as a Postman environment document (issue #2253). Also a
+	// read; the secret values are written empty unless the request asks.
+	POSTMAN_ENVIRONMENT_EXPORT: `/export/postman-environment`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

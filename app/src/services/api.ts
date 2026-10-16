@@ -84,6 +84,8 @@ import type {
 	SpecExportResponse,
 	PostmanExportRequest,
 	PostmanExportResponse,
+	PostmanEnvironmentExportRequest,
+	PostmanEnvironmentExportResponse,
 	SpecDescribeRequest,
 	SpecDescribeResponse,
 	SpecDiffRequest,
@@ -411,6 +413,19 @@ export const apiService = {
 	 */
 	async exportPostman(payload: PostmanExportRequest): Promise<PostmanExportResponse> {
 		return await httpClient.post<PostmanExportResponse>(API_ENDPOINTS.POSTMAN_EXPORT, payload);
+	},
+
+	/**
+	 * An environment as a Postman environment document (issue #2253). Secret
+	 * values are written empty unless `includeSecrets` is set.
+	 */
+	async exportPostmanEnvironment(
+		payload: PostmanEnvironmentExportRequest
+	): Promise<PostmanEnvironmentExportResponse> {
+		return await httpClient.post<PostmanEnvironmentExportResponse>(
+			API_ENDPOINTS.POSTMAN_ENVIRONMENT_EXPORT,
+			payload
+		);
 	},
 
 	/**

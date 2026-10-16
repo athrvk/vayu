@@ -2266,6 +2266,41 @@ export interface PostmanExportResponse {
 	notes: PostmanExportNotes;
 }
 
+/**
+ * What `POST /export/postman-environment` is asked: an environment, and whether
+ * its secret values travel with it. Nothing but the id is sent - the engine
+ * reads the variables itself.
+ */
+export interface PostmanEnvironmentExportRequest {
+	environmentId: string;
+	/**
+	 * Write secret values as stored. Defaults to `false` engine-side, where each
+	 * secret variable keeps its row and name but its value is written `""` and
+	 * counted in `PostmanEnvironmentExportNotes.secretsOmitted`.
+	 */
+	includeSecrets?: boolean;
+}
+
+/**
+ * What a Postman environment export wrote and what it could not. `notCarried`
+ * is open-ended for the reason `PostmanExportNotes.notCarried` is.
+ */
+export interface PostmanEnvironmentExportNotes {
+	variablesExported: number;
+	/** Secret values written as `""`. Zero when `includeSecrets` was set. */
+	secretsOmitted: number;
+	/** One `variable_types` entry when `json`-typed variables were written as `default`. */
+	notCarried: PostmanNotCarried[];
+}
+
+export interface PostmanEnvironmentExportResponse {
+	/** The Postman environment document, as JSON text. */
+	text: string;
+	/** `<name>.postman_environment.json`. */
+	fileName: string;
+	notes: PostmanEnvironmentExportNotes;
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;

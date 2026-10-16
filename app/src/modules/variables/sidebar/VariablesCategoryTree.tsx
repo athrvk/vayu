@@ -63,7 +63,18 @@ import {
 	type RowAction,
 } from "@/components/shared";
 import type { Environment } from "@/types";
-import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy, CopyPlus } from "lucide-react";
+import {
+	Globe,
+	Layers,
+	Cloud,
+	Plus,
+	Trash2,
+	Loader2,
+	Edit2,
+	Copy,
+	CopyPlus,
+	FileOutput,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -78,6 +89,8 @@ import {
 	environmentDeleteDescription,
 } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
+import { apiService } from "@/services/api";
+import { downloadJsonFile, postmanEnvironmentExportMessage } from "./postman-environment-export";
 
 /**
  * Globals, Environments, Collections - the level-1 rows a screen reader counts
@@ -281,6 +294,29 @@ export default function VariablesCategoryTree() {
 			});
 		} catch (error) {
 			reportFailure(error, "Couldn't duplicate the environment");
+		}
+	};
+
+	/**
+	 * Secret values are written blank (`includeSecrets` left to the engine's
+	 * default): a file leaving the machine should not carry them by one click on
+	 * a menu item. One export at a time, since a second click would download the
+	 * file twice.
+	 */
+	const exportingRef = useRef(false);
+	const exportEnvironment = async (env: Environment) => {
+		if (exportingRef.current) return;
+		exportingRef.current = true;
+		try {
+			const { text, fileName, notes } = await apiService.exportPostmanEnvironment({
+				environmentId: env.id,
+			});
+			downloadJsonFile(fileName, text);
+			showToast(postmanEnvironmentExportMessage(fileName, notes), "success");
+		} catch (error) {
+			reportFailure(error, "Couldn't export the environment");
+		} finally {
+			exportingRef.current = false;
 		}
 	};
 
@@ -555,6 +591,11 @@ export default function VariablesCategoryTree() {
 												icon: Copy,
 												hint: reference,
 												onSelect: () => void copy(reference, "Reference"),
+											},
+											{
+												label: "Export as Postman Environment",
+												icon: FileOutput,
+												onSelect: () => void exportEnvironment(environment),
 											},
 											{
 												label: "Delete",
