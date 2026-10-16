@@ -51,6 +51,28 @@ function virtualUsers(n: number): string {
 	return plural(n, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT);
 }
 
+/** `6000` → `"6,000 requests"`. */
+export function requestsPhrase(n: number): string {
+	return plural(n, "request");
+}
+
+/**
+ * How many requests the run sends, or null for a mode whose count is the
+ * target's answer rather than a number on this form. The one place the
+ * `iterations` and `constant_rps` arithmetic lives: the summary sentence and
+ * the off-network advisory both read it.
+ */
+export function totalRequests({
+	mode,
+	iterations,
+	rps,
+	duration,
+}: Pick<SummaryInput, "mode" | "iterations" | "rps" | "duration">): number | null {
+	if (mode === "iterations") return iterations;
+	if (mode === "constant_rps") return rps * duration;
+	return null;
+}
+
 /**
  * @param blocked  When a validation error is live the numbers describe a run
  *                 that cannot start, so the estimate is withheld rather than
@@ -62,7 +84,6 @@ export function summarise(input: SummaryInput, blocked = false): string {
 		duration,
 		rps,
 		concurrency,
-		iterations,
 		rampDuration,
 		startConcurrency,
 		stepDuration,
@@ -78,14 +99,16 @@ export function summarise(input: SummaryInput, blocked = false): string {
 		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${virtualUsers(concurrency)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
 	}
 
-	if (mode === "iterations") {
-		return `Sends exactly ${plural(iterations, "request")} using ${virtualUsers(concurrency)}, then stops.`;
+	const total = totalRequests(input);
+
+	if (mode === "iterations" && total !== null) {
+		return `Sends exactly ${requestsPhrase(total)} using ${virtualUsers(concurrency)}, then stops.`;
 	}
 
-	if (mode === "constant_rps") {
+	if (mode === "constant_rps" && total !== null) {
 		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
-		return `${shape} - about ${plural(rps * duration, "request")} in total.`;
+		return `${shape} - about ${requestsPhrase(total)} in total.`;
 	}
 
 	if (mode === "constant_concurrency") {

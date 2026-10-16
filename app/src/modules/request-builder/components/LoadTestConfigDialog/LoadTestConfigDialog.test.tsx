@@ -1397,3 +1397,118 @@ describe("a pick declares the contract (issue #2050)", () => {
 		expect(screen.getByText(/requests reference 1 column/i)).toBeInTheDocument();
 	});
 });
+
+describe("the target (issue #2117)", () => {
+	const ADVISORY = /not on your machine or network/i;
+	const dialog = () => screen.getByRole("dialog");
+	const startButton = () => screen.getByRole("button", { name: "Start" });
+
+	it("names a public host and advises about the default run without blocking it", () => {
+		const { onStart } = open({ method: "GET", url: "https://api.example.com/v1/orders" });
+
+		expect(dialog()).toHaveAccessibleDescription(/GET\s*api\.example\.com/);
+		expect(screen.getByTitle("https://api.example.com/v1/orders")).toBeInTheDocument();
+		// 100 requests/s for 60s, the defaults.
+		const advisory = screen.getByText(ADVISORY).parentElement;
+		expect(advisory).toHaveTextContent(
+			"Starting sends about 6,000 requests to api.example.com."
+		);
+		expect(startButton()).toBeEnabled();
+		expect(started(onStart).mode).toBe("constant_rps");
+	});
+
+	it("counts the advisory from the profile on screen", () => {
+		open({ url: "https://api.example.com/" });
+		pickProfile("Fixed Iterations");
+		expect(screen.getByText(ADVISORY).parentElement).toHaveTextContent(
+			/about 1,000 requests to api\.example\.com/
+		);
+	});
+
+	it.each(["Constant Virtual Users", "Ramp-Up", "Capacity Discovery"])(
+		"does not invent a count for %s",
+		(profile) => {
+			open({ url: "https://api.example.com/" });
+			pickProfile(profile);
+			const advisory = screen.getByText(ADVISORY).parentElement;
+			expect(advisory).toHaveTextContent(
+				"Starting sends as many requests as the target can answer to api.example.com."
+			);
+			expect(advisory).not.toHaveTextContent(/\d,\d{3}/);
+		}
+	);
+
+	it.each([
+		["a localhost URL", "http://localhost:3000/x", "localhost"],
+		["a private IPv4 address", "http://192.168.1.20:8080/health", "192.168.1.20"],
+		["a scheme-less loopback URL", "127.0.0.1:9000/ping", "127.0.0.1"],
+	])("names %s and raises no advisory", (_name, url, host) => {
+		open({ method: "POST", url });
+
+		expect(dialog()).toHaveAccessibleDescription(
+			new RegExp(`POST\\s*${host.replace(/\./g, "\\.")}`)
+		);
+		expect(screen.queryByText(ADVISORY)).not.toBeInTheDocument();
+		expect(startButton()).toBeEnabled();
+	});
+
+	it("middle-truncates a long URL and keeps the whole of it in the title", () => {
+		const long = `https://api.example.com/${"segment/".repeat(5)}last`;
+		open({ url: long });
+
+		const line = screen.getByTitle(long);
+		expect(line.textContent?.startsWith("https://api.")).toBe(true);
+		expect(line.textContent).toContain("…");
+		expect(line.textContent?.endsWith("last")).toBe(true);
+		expect(line.textContent?.length).toBeLessThan(long.length);
+	});
+
+	it("says the host is unknown, naming the variable, and raises no advisory", () => {
+		const { onStart } = open({ method: "GET", url: "{{baseUrl}}/orders" });
+
+		expect(dialog()).toHaveAccessibleDescription(
+			/Host unknown: \{\{baseUrl\}\} has no value in the active environment/
+		);
+		expect(screen.queryByText(ADVISORY)).not.toBeInTheDocument();
+		// Unknown is not a block: the user may be right and the variable resolved
+		// somewhere the preview cannot see.
+		expect(started(onStart).mode).toBe("constant_rps");
+	});
+
+	it("names the first unresolved variable when the host holds several", () => {
+		open({ url: "https://{{subdomain}}.{{domain}}/x" });
+		expect(dialog()).toHaveAccessibleDescription(
+			expect.stringContaining("{{subdomain}} has no value")
+		);
+	});
+
+	it("stays plain when a URL has no host and no variable to blame", () => {
+		open({ url: "" });
+		expect(dialog()).toHaveAccessibleDescription("Host unknown");
+		expect(screen.queryByText(ADVISORY)).not.toBeInTheDocument();
+	});
+
+	it("reads a variable in the path as a known host", () => {
+		open({ url: "https://api.example.com/users/{{id}}" });
+		expect(dialog()).toHaveAccessibleDescription(/api\.example\.com/);
+		expect(dialog()).not.toHaveAccessibleDescription(/Host unknown/);
+		expect(screen.getByText(ADVISORY)).toBeInTheDocument();
+	});
+
+	it("keeps the old description, and no advisory, when the caller gives no URL", () => {
+		open();
+		expect(dialog()).toHaveAccessibleDescription(
+			"Pick a profile, set its parameters, then start the run."
+		);
+		expect(screen.queryByText(ADVISORY)).not.toBeInTheDocument();
+	});
+
+	it("keeps Start gated by a blocking error while the advisory shows", () => {
+		open({ url: "https://api.example.com/" });
+		pickProfile("Ramp-Up");
+		fireEvent.change(screen.getByLabelText(/ramp duration/i), { target: { value: "9999" } });
+
+		expect(screen.getByText(ADVISORY)).toBeInTheDocument();
+		expect(startButton()).toBeDisabled();
+	});
+});

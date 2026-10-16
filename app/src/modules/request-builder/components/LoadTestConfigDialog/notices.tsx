@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import { requestsPhrase } from "./summary";
 import type { DraftErrors } from "./validation";
 
 export interface Notice {
@@ -15,12 +16,21 @@ export interface Notice {
 	node: ReactNode;
 }
 
-/** The validation messages, plus the two facts that raise an advisory. */
+/** A target outside the user's own network, and what starting sends to it. */
+export interface RemoteTarget {
+	host: string;
+	/** From `totalRequests`; null where the count is the target's answer. */
+	requestCount: number | null;
+}
+
+/** The validation messages, plus the facts that raise an advisory. */
 export interface NoticeInputs extends DraftErrors {
 	hasPreRequestScript: boolean;
 	scriptsOverride: string;
 	/** What differs between the design and load default headers, or null. */
 	defaultHeaderDifference: string | null;
+	/** Set only for a host that is not local; never gates Start (#2117). */
+	remoteTarget: RemoteTarget | null;
 }
 
 /**
@@ -38,6 +48,7 @@ export function buildNotices({
 	hasPreRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
+	remoteTarget,
 }: NoticeInputs): Notice[] {
 	const list: Notice[] = [];
 
@@ -138,6 +149,22 @@ export function buildNotices({
 			node: (
 				<Callout severity="info" title="This load run's default headers differ">
 					{defaultHeaderDifference}
+				</Callout>
+			),
+		});
+	}
+
+	if (remoteTarget) {
+		list.push({
+			key: "remote-target",
+			severity: "info",
+			node: (
+				<Callout severity="info" title="This target is not on your machine or network">
+					Starting sends{" "}
+					{remoteTarget.requestCount === null
+						? "as many requests as the target can answer"
+						: `about ${requestsPhrase(remoteTarget.requestCount)}`}{" "}
+					to <span className="font-mono">{remoteTarget.host}</span>.
 				</Callout>
 			),
 		});

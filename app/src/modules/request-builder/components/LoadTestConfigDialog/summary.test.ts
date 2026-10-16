@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { summarise } from "./summary";
+import { summarise, totalRequests } from "./summary";
 
 const base = {
 	duration: 60,
@@ -71,5 +71,27 @@ describe("summarise", () => {
 		// The count no field shows is exactly the count nothing can predict
 		// here - how many levels the search holds is the target's answer.
 		expect(s).not.toMatch(/in total/);
+	});
+});
+
+describe("totalRequests", () => {
+	it("multiplies the rate by the duration for a constant rate", () => {
+		expect(totalRequests({ ...base, mode: "constant_rps" })).toBe(6000);
+	});
+
+	it("is the iteration count, whatever the rate and duration say", () => {
+		expect(totalRequests({ ...base, mode: "iterations" })).toBe(1000);
+	});
+
+	it.each(["constant_concurrency", "ramp_up", "capacity"] as const)(
+		"is null for %s, whose count is the target's answer",
+		(mode) => {
+			expect(totalRequests({ ...base, mode })).toBeNull();
+		}
+	);
+
+	it("is the figure the summary states", () => {
+		expect(summarise({ ...base, mode: "constant_rps" })).toContain("6,000 requests");
+		expect(summarise({ ...base, mode: "iterations" })).toContain("1,000 requests");
 	});
 });

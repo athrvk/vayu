@@ -18,6 +18,7 @@ const CLEAN: NoticeInputs = {
 	hasPreRequestScript: false,
 	scriptsOverride: "asMarked",
 	defaultHeaderDifference: null,
+	remoteTarget: null,
 };
 
 const keys = (overrides: Partial<NoticeInputs>) =>
@@ -36,6 +37,19 @@ describe("buildNotices", () => {
 				budgetsError: "p99 is out of range",
 			})
 		).toEqual(["budgets", "pre-script", "default-headers"]);
+	});
+
+	it("raises the off-network advisory as info, below every blocking notice", () => {
+		const remoteTarget = { host: "api.example.com", requestCount: 6000 };
+		expect(keys({ remoteTarget })).toEqual(["remote-target"]);
+		expect(buildNotices({ ...CLEAN, remoteTarget })[0].severity).toBe("info");
+		expect(
+			keys({
+				remoteTarget,
+				hasPreRequestScript: true,
+				budgetsError: "p99 is out of range",
+			})
+		).toEqual(["budgets", "pre-script", "remote-target"]);
 	});
 
 	it("warns about a pre-request script at both settings that skip it", () => {

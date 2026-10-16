@@ -46,7 +46,9 @@ import { ScriptsOverrideToggle } from "./ScriptsOverrideToggle";
 import { ProfileFields } from "./ProfileFields";
 import { usesDuration } from "./profile";
 import { ProfilePicker } from "./ProfilePicker";
-import { summarise } from "./summary";
+import { summarise, totalRequests } from "./summary";
+import { classifyTarget } from "./target";
+import { TargetLine } from "./TargetLine";
 import { describeDefaultHeaderDifference } from "./default-headers";
 import { firstBlockingError, validateLoadTestDraft } from "./validation";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
@@ -94,6 +96,14 @@ export interface LoadTestConfigDialogProps {
 	 * tools know. Absent for a request with no saved row.
 	 */
 	referenceOwner?: ThresholdOwner;
+	/** The request's HTTP method, for the target line. */
+	method?: string;
+	/**
+	 * The request's URL with its variables resolved, as the run will send it
+	 * (#2117). It names the target and decides the off-network advisory; absent,
+	 * the dialog says nothing about where the run is aimed.
+	 */
+	url?: string;
 }
 
 export default function LoadTestConfigDialog({
@@ -106,6 +116,8 @@ export default function LoadTestConfigDialog({
 	collectionId,
 	request,
 	referenceOwner,
+	method,
+	url,
 }: LoadTestConfigDialogProps) {
 	/**
 	 * The ceilings are a user setting (Settings -> Load testing), so every range
@@ -174,11 +186,19 @@ export default function LoadTestConfigDialog({
 	// reason; this is what stops the Start button.
 	const blockingError = firstBlockingError(errors) ?? dataFile.error;
 
+	// Classified once: the target line and the advisory read the same answer.
+	const target = useMemo(() => (url === undefined ? null : classifyTarget(url)), [url]);
+	const remoteTarget =
+		target?.kind === "host" && !target.isLocal
+			? { host: target.host, requestCount: totalRequests(profile) }
+			: null;
+
 	const notices = buildNotices({
 		...errors,
 		hasPreRequestScript,
 		scriptsOverride,
 		defaultHeaderDifference,
+		remoteTarget,
 	});
 
 	const handleStart = () => {
@@ -223,7 +243,11 @@ export default function LoadTestConfigDialog({
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
-						Pick a profile, set its parameters, then start the run.
+						{target && url !== undefined ? (
+							<TargetLine method={method} url={url} target={target} />
+						) : (
+							"Pick a profile, set its parameters, then start the run."
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
