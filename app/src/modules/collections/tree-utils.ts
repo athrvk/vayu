@@ -147,6 +147,19 @@ export function collectSubtreeIds<T extends TreeNode>(
 }
 
 /**
+ * How many requests sit anywhere in `rootId`'s subtree, the root's own included.
+ * Requests only: a folder is never counted. Built on `collectSubtreeIds`, so a
+ * `parentId` cycle ends the walk rather than hanging it.
+ */
+export function countSubtreeRequests(
+	rootId: string,
+	nodes: readonly TreeNode[],
+	requestCountIn: (collectionId: string) => number
+): number {
+	return collectSubtreeIds(rootId, nodes).reduce((sum, id) => sum + requestCountIn(id), 0);
+}
+
+/**
  * Every entity id a cascade delete of `rootId` reaches: the collection itself,
  * its descendant folders, and the requests all of them hold.
  *

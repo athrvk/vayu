@@ -2059,7 +2059,8 @@ header band, body below it.
   exported for a *row* to use the same idiom, which is how the collection tree
   stays in step without gaining a section header - its panel band already says
   "Collections", and a section of the same name inside it would be a double
-  heading.
+  heading. A root folder's count is the requests in its whole subtree; a nested
+  folder's is its direct children.
 - **The section's ARIA stays at the call site.** Variables' headers are
   `role="treeitem"` rows in a roving-tabindex tree and their "+" sits outside that
   row on purpose (the tree has no create key, so the button is the drawer's own

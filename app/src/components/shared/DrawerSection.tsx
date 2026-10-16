@@ -53,6 +53,10 @@ const HEADER_TEXT = "text-xs tracking-wider text-muted-foreground";
  * The one count idiom. Exported so a row inside a section (the collection tree's
  * folder rows) writes it the same way its section header does.
  *
+ * What a folder row counts: a root shows every request in its whole subtree
+ * (folders not counted, matching the import preview); a nested folder shows its
+ * direct children, requests and child folders.
+ *
  * `shrink-0`: the count is short and load-bearing, so the name yields first.
  */
 export function DrawerSectionCount({
