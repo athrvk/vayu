@@ -35,6 +35,7 @@ not import one. It can now (`import_document`, see
 | Postman Collection v2.1 / v2.0 | `info.schema` contains `v2.1.0` / `v2.0.0` (or `info`+`item` with no schema) | [postman.md](./postman.md) |
 | Postman Environment / Globals | `_postman_variable_scope` is `"environment"` or `"globals"` && `values` is an array | [postman-environment.md](./postman-environment.md) |
 | Insomnia Export v4 | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
+| Insomnia Export v5 | `type` is `collection.insomnia.rest/5.x` or `environment.insomnia.rest/5.x` (YAML); a design document, a mock server or another format version is refused by name | [insomnia-v5.md](./insomnia-v5.md) |
 | OpenAPI 3.0 | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
 | OpenAPI 2.0 (Swagger) | `swagger` is `2.0` (string or number) | [openapi-v2.md](./openapi-v2.md) |
 | JMeter `.jmx` test plan | the raw text contains `<jmeterTestPlan` | [jmeter.md](./jmeter.md) |
@@ -143,7 +144,7 @@ Engine-side, in `core::parse_import`:
    one parser has an opinion about a document" true.
 2. Detection in a fixed **most-specific-first** order:
    `Postman v2.1 → Postman v2.0 → Postman environment/globals → Insomnia v4 →
-   OpenAPI 3.x → OpenAPI 2.0` - the order the renderer's `PARSERS` list ran in,
+   Insomnia v5 (or its named refusal) → OpenAPI 3.x → OpenAPI 2.0` - the order the renderer's `PARSERS` list ran in,
    so the same bytes are claimed by the same format they always were.
 3. No match → `400 Unrecognised format`, which `factory.ts` turns back into
    `UnrecognisedFormatError`. Kept apart from a document that *claimed* a format
@@ -484,6 +485,7 @@ the environment drafts). Honoring is **per-parser**:
 | Postman v2.1 / v2.0 | Honored - scripts emitted as `""` when false | Moot - collection files embed no environments |
 | Postman Environment / Globals | Moot - this shape carries no scripts | Honored - gates both `environments` and `globals` at parse time, so the Preview counts report 0 |
 | Insomnia v4 | Honored | Honored - `environment` resources become `EnvironmentDraft`s |
+| Insomnia v5 | Honored | Honored - the `environments` object becomes `EnvironmentDraft`s; an environment document carries nothing else |
 | OpenAPI 3.0 | Ignored - never generates scripts | Ignored - never generates environments |
 | OpenAPI 2.0 (Swagger) | Ignored | Ignored |
 
