@@ -1573,6 +1573,17 @@ not change. Both hosts pass `stoppedRunOf(report)` (`stopped-run.ts`), which is
 `undefined` unless `metadata.status` is `stopped`; it reads the planned span
 from `metadata.configuration.duration` (`durationSeconds`) and the elapsed one
 from `summary.totalDurationSeconds`, falling back to the start and end stamps.
+
+A check judged against a value the user did not set for this run is tagged
+**carried over** (#2195): the optional `carriedBudgets` prop is the list of
+`thresholds` keys the run was started with as carried, both hosts pass
+`report.metadata.configuration.carriedBudgets`, and a row whose `check.metric`
+is in it gets an outline `Badge`. The summary counts the *checks* that are
+carried, not the list's length (a key the engine did not judge cannot inflate
+it), and the clause sits between the counts and "not measurable": "2 of 3
+budgets met (1 carried over), 1 not measurable." The wording is "carried over"
+without "from an earlier run" because the SLO-seeded p99 comes from Settings,
+not from a run. Absent or empty, the card renders exactly as before.
 A run with no declared duration (iterations, ramp, scenarios) drops the "of a
 planned" clause, as does one that reached its plan, and a report with no usable
 elapsed time says only "Run stopped early."
