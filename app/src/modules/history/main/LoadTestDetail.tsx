@@ -116,7 +116,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// composed out of nodes it would have to flatten.
 	const virtualUsers = report.scenario?.virtualUsers;
 	const sequenceLabel = isScenarioLoad
-		? `${scenarioSteps.length} ${pluralize(scenarioSteps.length, "step")} per iteration` +
+		? `${formatNumber(scenarioSteps.length)} ${pluralize(scenarioSteps.length, "step")} per iteration` +
 			(virtualUsers === undefined ? "" : ` - ${formatConcurrency(virtualUsers)}`)
 		: "";
 

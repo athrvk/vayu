@@ -21,6 +21,7 @@
  */
 
 import type { LoadTestMode } from "@/types";
+import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface LoadTestModeInfo {
@@ -100,7 +101,7 @@ export const CONCURRENCY_LABEL = "Virtual users";
  * the noun without a count reads `CONCURRENCY_UNIT` / `CONCURRENCY_LABEL`.
  */
 export function formatConcurrency(concurrency: number): string {
-	return `${concurrency} ${concurrencyUnit(concurrency)}`;
+	return `${formatNumber(concurrency)} ${concurrencyUnit(concurrency)}`;
 }
 
 /** The unit agreeing with a count, for a surface that styles the number apart from the noun. */

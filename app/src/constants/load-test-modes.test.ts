@@ -113,3 +113,10 @@ describe("how the simulated-user count is worded (#2128)", () => {
 		}
 	});
 });
+
+describe("formatConcurrency", () => {
+	it("groups thousands in the count", () => {
+		// Mutation check: drop `formatNumber` from the helper and this reddens.
+		expect(formatConcurrency(12345)).toBe(`12,345 ${CONCURRENCY_UNIT}`);
+	});
+});
