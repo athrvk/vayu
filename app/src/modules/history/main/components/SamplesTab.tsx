@@ -46,6 +46,12 @@ interface SamplesTabProps extends TabProps {
 	 */
 	filter?: SampleFilter;
 	onFilterChange?: (filter: SampleFilter) => void;
+	/**
+	 * The row, by number, that is open when the tab mounts. Read once: the tab
+	 * unmounts when another is chosen, so the owner decides whether the next
+	 * mount gets it again.
+	 */
+	initialExpandedNumber?: number;
 }
 
 // `resultsStored > resultsCap` is the engine's own statement that `results` is a
@@ -57,10 +63,17 @@ function storedBeyondCap(report: TabProps["report"]): number | null {
 	return resultsStored > resultsCap ? resultsStored : null;
 }
 
-export default function SamplesTab({ report, filter, onFilterChange }: SamplesTabProps) {
+export default function SamplesTab({
+	report,
+	filter,
+	onFilterChange,
+	initialExpandedNumber,
+}: SamplesTabProps) {
 	// Keyed by the row's number, not its array position, so the open row stays the
 	// same sample when a chip narrows the list.
-	const [expandedNumber, setExpandedNumber] = useState<number | null>(null);
+	const [expandedNumber, setExpandedNumber] = useState<number | null>(
+		initialExpandedNumber ?? null
+	);
 	const [localFilter, setLocalFilter] = useState<SampleFilter>("all");
 	const activeFilter = filter ?? localFilter;
 

@@ -64,6 +64,7 @@ import {
 	ScenarioStepsTab,
 } from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
+import type { SampleDestination, SampleFilter } from "./sample-filter";
 import type {
 	LoadTestDetailProps,
 	MonitorSeriesResponse,
@@ -73,6 +74,12 @@ import type {
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
+	// Held here, not in SamplesTab: Radix unmounts an inactive panel, so the tab
+	// would forget a chip or an open row the moment another tab was chosen. The
+	// open row is a one-shot (#2213) - a tab the user picks drops it, so going
+	// back to Samples does not re-open what an Overview row once pointed at.
+	const [sampleFilter, setSampleFilter] = useState<SampleFilter>("all");
+	const [sampleToExpand, setSampleToExpand] = useState<number>();
 	const [comparing, setComparing] = useState(false);
 	const config = report.metadata?.configuration;
 	// Requested protocol, not the negotiated one (`RunResultTrace.response.httpVersion`
@@ -247,6 +254,16 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		setComparing(true);
 		clearCompareRunTarget();
 	}, [compareRequested, clearCompareRunTarget]);
+
+	const openSample = ({ filter, number }: SampleDestination) => {
+		setSampleFilter(filter);
+		setSampleToExpand(number);
+		setActiveTab("samples");
+	};
+	const selectTab = (next: string) => {
+		setSampleToExpand(undefined);
+		setActiveTab(next);
+	};
 
 	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
 	const crumbs = useMemo(
@@ -492,7 +509,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				/* Tabbed Content */
 				<Tabs
 					value={tab}
-					onValueChange={setActiveTab}
+					onValueChange={selectTab}
 					className="flex-1 flex flex-col min-h-0"
 				>
 					<TabsList variant="inset" className="mx-4 mt-3">
@@ -528,6 +545,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									runId={runId}
 									derived={derived}
 									anomalies={anomalies}
+									onOpenSample={openSample}
 								/>
 							</TabsContent>
 
@@ -562,7 +580,13 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							)}
 
 							<TabsContent value="samples" className="mt-0 space-y-4">
-								<SamplesTab report={report} derived={derived} />
+								<SamplesTab
+									report={report}
+									derived={derived}
+									filter={sampleFilter}
+									onFilterChange={setSampleFilter}
+									initialExpandedNumber={sampleToExpand}
+								/>
 							</TabsContent>
 						</div>
 					</ScrollArea>
