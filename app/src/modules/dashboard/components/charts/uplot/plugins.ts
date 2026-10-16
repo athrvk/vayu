@@ -33,7 +33,7 @@ export interface Marker {
 	scale?: string;
 	label: string;
 	role: ColorRole;
-	/** Horizontal label side (default "right"); vertical always insets from the line. */
+	/** Horizontal label side (default "right"); a vertical label sits right of its line, left when that would leave the canvas. */
 	align?: "left" | "right";
 }
 
@@ -61,8 +61,12 @@ export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uP
 						ctx.moveTo(cx, top);
 						ctx.lineTo(cx, top + height);
 						ctx.stroke();
-						ctx.textAlign = "left";
-						ctx.fillText(m.label, cx + 4 * dpr(), top + 11 * dpr());
+						// A marker on the last point sits at the plot's right edge, where the
+						// label would run off the canvas: flip it to the line's left.
+						const inset = 4 * dpr();
+						const flip = cx + inset + ctx.measureText(m.label).width > ctx.canvas.width;
+						ctx.textAlign = flip ? "right" : "left";
+						ctx.fillText(m.label, flip ? cx - inset : cx + inset, top + 11 * dpr());
 					} else {
 						const cy = u.valToPos(m.value, m.scale ?? "y", true);
 						if (cy < top || cy > top + height) continue;
