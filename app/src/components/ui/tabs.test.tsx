@@ -578,3 +578,90 @@ describe("a count going away fades rather than being cut", () => {
 		expect(slotIn(container).textContent).toBe("7");
 	});
 });
+
+/*
+ * `presence` (#2199): Info, Body, Auth and Settings say "something is here",
+ * not "there is one of something", so they draw a dot where Params and Headers
+ * draw a number. The dot rides the same track and held exit as a count.
+ *
+ * Mutation check (confirmed): draw `shown` instead of the dot in `TabCount` and
+ * "draws a dot, not the value" fails on the digit text and the missing dot;
+ * drop `aria-hidden` from `PresenceDot` and "hides the dot from assistive
+ * technology" fails; stop passing `presence` from `RequestTabs` and the
+ * Info, Body, Auth and Settings cases fail on the missing dot.
+ */
+describe("a presence mark is a dot, not a number", () => {
+	const dotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-presence-dot']");
+	const slotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-count']")!;
+
+	function Marked({ present }: { present: boolean }) {
+		return (
+			<Tabs defaultValue="one">
+				<TabsList variant="inset">
+					<TabsTrigger value="one">
+						<TabLabel>Body</TabLabel>
+						<TabCount value={present ? 1 : undefined} presence />
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("draws a dot, not the value", () => {
+		const { container } = render(<TabCount value={1} presence />);
+		expect(dotIn(container)).not.toBeNull();
+		expect(slotIn(container).textContent).toBe("");
+		expect(slotIn(container)).toHaveAttribute("data-presence");
+		expect(slotIn(container).className).toContain("grid-cols-[1fr]");
+	});
+
+	it("draws the number, with no dot, when it is not a presence mark", () => {
+		const { container } = render(<TabCount value={1} />);
+		expect(dotIn(container)).toBeNull();
+		expect(slotIn(container).textContent).toBe("1");
+		expect(slotIn(container)).not.toHaveAttribute("data-presence");
+	});
+
+	it("keeps the trigger's accessible name exact, marked or not", () => {
+		const { rerender } = render(<Marked present />);
+		expect(screen.getByRole("tab")).toHaveAccessibleName("Body");
+		rerender(<Marked present={false} />);
+		expect(screen.getByRole("tab")).toHaveAccessibleName("Body");
+	});
+
+	it("hides the dot from assistive technology", () => {
+		const { container } = render(<TabCount value={1} presence />);
+		expect(dotIn(container)).toHaveAttribute("aria-hidden", "true");
+	});
+
+	it("renders nothing, at a collapsed track, for none", () => {
+		for (const value of [undefined, null, 0]) {
+			const { container, unmount } = render(<TabCount value={value} presence />);
+			expect(dotIn(container)).toBeNull();
+			expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+			unmount();
+		}
+	});
+
+	it("holds the dot through its fade, then removes it", () => {
+		vi.useFakeTimers();
+		const { container, rerender } = render(<TabCount value={1} presence />);
+		rerender(<TabCount value={undefined} presence />);
+
+		expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+		expect(dotIn(container)).not.toBeNull();
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS);
+		});
+		expect(dotIn(container)).toBeNull();
+	});
+});
