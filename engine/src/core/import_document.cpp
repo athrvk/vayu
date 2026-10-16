@@ -261,8 +261,8 @@ bool is_vayu_variable_type (const std::string& type) {
  * stores nothing and counts no more than an absent `type` does.
  *
  * @p keep_description is set for a collection's or folder's variables, which
- * the Postman exporter writes back with their `description`; an environment
- * or globals file has no exporter to read one, so there it is dropped.
+ * the Postman exporter writes back with their `description`; the environment
+ * exporter writes none, so there it is dropped.
  * @p skipped_variable_metadata counts a row whose `description` (when not
  * kept) or a declared `type` Vayu has no counterpart for (`"any"`, a custom
  * string) was read and discarded, once per row however many it carried.

@@ -187,6 +187,51 @@ std::time_t received_at);
 /// `PostmanExportNotes` as the route answers with it.
 [[nodiscard]] nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes);
 
+/// One stored environment, as the environment exporter reads it.
+struct PostmanExportEnvironment {
+    std::string id;
+    std::string name;
+    /// The stored variables column, in stored key order:
+    /// `{name: {value, enabled?, secret?, type?}}`.
+    nlohmann::ordered_json variables = nlohmann::ordered_json::object ();
+    /// Write secret values as stored; off blanks each (see
+    /// `PostmanExportOptions::include_secrets`), keeping its `secret` type.
+    bool include_secrets = false;
+};
+
+struct PostmanEnvironmentExportNotes {
+    /// Rows written, which is every stored variable that is an object.
+    int variables_exported = 0;
+    int secrets_omitted    = 0;
+    /// Only `variable_types`, and only when a `json`-typed variable was
+    /// written as `default`.
+    std::vector<PostmanNotCarried> not_carried;
+};
+
+struct PostmanEnvironmentExportOutcome {
+    /// The document, tab-indented with no trailing newline, as the collection
+    /// export is.
+    std::string text;
+    /// `<environment name>.postman_environment.json`.
+    std::string file_name;
+    PostmanEnvironmentExportNotes notes;
+};
+
+/**
+ * @brief @p environment as a Postman environment export, the inverse of the
+ *        environment half of `parse_postman_variables`: re-importing it gives
+ *        the same variable names, values, enabled flags, secret flags and (bar
+ *        `json`) types.
+ *
+ * Writes no export timestamp: nothing in the collection export does either.
+ */
+[[nodiscard]] PostmanEnvironmentExportOutcome export_postman_environment (
+const PostmanExportEnvironment& environment);
+
+/// `PostmanEnvironmentExportNotes` as the route answers with it.
+[[nodiscard]] nlohmann::json postman_environment_export_notes_json (
+const PostmanEnvironmentExportNotes& notes);
+
 /// The Postman object form of @p raw (`raw`, `protocol`, `host[]`, `port`,
 /// `path[]`, `hash`), split the way Postman's own URL parser splits it.
 [[nodiscard]] nlohmann::ordered_json postman_url_parts (const std::string& raw);

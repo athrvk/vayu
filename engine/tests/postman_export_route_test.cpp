@@ -1,6 +1,7 @@
 /**
  * @file tests/postman_export_route_test.cpp
- * @brief `POST /export/postman`, and the round trip through the importer.
+ * @brief `POST /export/postman` and `POST /export/postman-environment`, and
+ *        the round trip of each through the importer.
  *
  * `fixtures/postman-export-roundtrip.json` is written in Postman's own export
  * shape and exercises every field the importer reads; importing it and
@@ -28,6 +29,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -36,6 +38,8 @@ namespace vayu::http::routes {
 // {http_status, json_body}.
 std::pair<int, nlohmann::json>
 export_postman_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+export_postman_environment_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 import_response (vayu::db::Database& db, const nlohmann::json& body);
 // Defined in requests.cpp and collections.cpp.
@@ -948,6 +952,180 @@ TEST_F (PostmanExportRouteTest, ImportExportImportIsAFixedPoint) {
         EXPECT_EQ (without_postman_id (second), without_postman_id (first)) << name;
         EXPECT_EQ (without_postman_id (third), without_postman_id (second)) << name;
     }
+}
+
+// --- POST /export/postman-environment (#2253) --------------------------------
+
+/// The document's rows as `name -> {value, enabled, secret?, type?}`, the shape
+/// the importer stores a Postman environment's variables in.
+json imported_variables (const std::string& text) {
+    const vayu::core::ImportParse parsed = vayu::core::parse_import (text, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    if (!parsed.ok () || parsed.result.at ("environments").size () != 1) {
+        ADD_FAILURE () << "not one environment: " << text;
+        return json ();
+    }
+    return json::parse (parsed.result.at ("environments")[0].at ("variables").dump ());
+}
+
+class PostmanEnvironmentExportTest : public PostmanExportRouteTest {
+    protected:
+    /// Stores @p variables verbatim: the create route would re-sort the keys.
+    std::string save_environment (const std::string& name, const std::string& variables) {
+        vayu::db::Environment row;
+        row.id        = "env_" + name;
+        row.name      = name;
+        row.variables = variables;
+        db_->save_environment (row);
+        return row.id;
+    }
+
+    json export_environment (const std::string& id, bool secrets) {
+        auto [status, body] = vayu::http::routes::export_postman_environment_response (
+        *db_, json{ { "environmentId", id }, { "includeSecrets", secrets } });
+        EXPECT_EQ (status, 200) << body.dump ();
+        return body;
+    }
+};
+
+constexpr const char* MIXED_VARIABLES = R"({
+  "zeta": {"value": "z", "enabled": true, "type": "string"},
+  "token": {"value": "tok-live", "enabled": true, "secret": true},
+  "alpha": {"value": "1", "enabled": false, "type": "number"},
+  "flag": {"value": "true", "enabled": true, "type": "boolean"},
+  "plain": {"value": "p", "enabled": true}
+})";
+
+TEST_F (PostmanEnvironmentExportTest, RefusesABadBodyAndAnUnknownId) {
+    using vayu::http::routes::export_postman_environment_response;
+    for (const json& body : { json::array (), json{ { "environmentId", 5 } },
+         json{ { "environmentId", "" } }, json::object (), json{ { "collectionId", "env_x" } },
+         json{ { "environmentId", "env_x" }, { "includeSecrets", "yes" } } }) {
+        auto [status, response] = export_postman_environment_response (*db_, body);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_TRUE (response["error"]["message"].is_string ()) << response.dump ();
+    }
+    auto [status, response] = export_postman_environment_response (
+    *db_, json{ { "environmentId", "env_nope" } });
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (response["error"]["message"], "Environment not found");
+}
+
+// Mutation check: write secrets unconditionally in `export_postman_environment`
+// and the default-case assertions red.
+TEST_F (PostmanEnvironmentExportTest, ASecretIsBlankedUnlessAskedFor) {
+    const std::string id = save_environment ("Prod", MIXED_VARIABLES);
+
+    auto [status, withheld] = vayu::http::routes::export_postman_environment_response (
+    *db_, json{ { "environmentId", id } });
+    ASSERT_EQ (status, 200) << withheld.dump ();
+    const std::string blanked = withheld["text"].get<std::string> ();
+    EXPECT_EQ (blanked.find ("tok-live"), std::string::npos);
+    EXPECT_EQ (withheld["notes"]["secretsOmitted"], 1);
+    const json blanked_rows = json::parse (blanked)["values"];
+    EXPECT_EQ (blanked_rows[1]["key"], "token");
+    EXPECT_EQ (blanked_rows[1]["value"], "");
+    EXPECT_EQ (blanked_rows[1]["type"], "secret")
+    << "a blanked secret is still a secret";
+
+    const json kept = export_environment (id, /*secrets=*/true);
+    EXPECT_NE (kept["text"].get<std::string> ().find ("tok-live"), std::string::npos);
+    EXPECT_EQ (kept["notes"]["secretsOmitted"], 0);
+    EXPECT_EQ (
+    json::parse (kept["text"].get<std::string> ())["values"][1]["value"], "tok-live");
+}
+
+TEST_F (PostmanEnvironmentExportTest, TheDocumentIsPostmansEnvironmentShape) {
+    const std::string id = save_environment ("Prod: eu/1", MIXED_VARIABLES);
+    const json body      = export_environment (id, /*secrets=*/true);
+    EXPECT_EQ (body["fileName"], "Prod_ eu_1.postman_environment.json");
+    EXPECT_EQ (body["notes"]["variablesExported"], 5);
+    EXPECT_EQ (body["notes"]["notCarried"], json::array ());
+
+    const ordered doc = ordered::parse (body["text"].get<std::string> ());
+    std::vector<std::string> members;
+    for (const auto& member : doc.items ()) {
+        members.push_back (member.key ());
+    }
+    EXPECT_EQ (members,
+    (std::vector<std::string>{ "id", "name", "values", "_postman_variable_scope" }));
+    EXPECT_EQ (doc["id"], id);
+    EXPECT_EQ (doc["name"], "Prod: eu/1");
+    EXPECT_EQ (doc["_postman_variable_scope"], "environment");
+    EXPECT_EQ (doc["values"][0].dump (),
+    R"({"key":"zeta","value":"z","type":"string","enabled":true})");
+    EXPECT_EQ (doc["values"][2].dump (),
+    R"({"key":"alpha","value":"1","type":"number","enabled":false})");
+    EXPECT_EQ (doc["values"][4].dump (),
+    R"({"key":"plain","value":"p","type":"default","enabled":true})");
+}
+
+TEST_F (PostmanEnvironmentExportTest, VariablesComeOutInStoredKeyOrder) {
+    const std::string id = save_environment ("Ordered", MIXED_VARIABLES);
+    const ordered doc =
+    ordered::parse (export_environment (id, true)["text"].get<std::string> ());
+    std::vector<std::string> keys;
+    for (const ordered& row : doc["values"]) {
+        keys.push_back (row["key"].get<std::string> ());
+    }
+    EXPECT_EQ (keys,
+    (std::vector<std::string>{ "zeta", "token", "alpha", "flag", "plain" }));
+}
+
+// What the importer reads back is what was stored: names, values, enabled
+// flags (a disabled row included), the secret flag and the types Postman has.
+TEST_F (PostmanEnvironmentExportTest, ReimportingTheExportGivesTheSameVariables) {
+    const std::string id = save_environment ("Prod", MIXED_VARIABLES);
+    const json again =
+    imported_variables (export_environment (id, true)["text"].get<std::string> ());
+
+    json expected     = json::parse (MIXED_VARIABLES);
+    expected["plain"] = json{ { "value", "p" }, { "enabled", true } };
+    EXPECT_EQ (again, expected);
+    EXPECT_EQ (again["alpha"]["enabled"], false);
+    EXPECT_EQ (again["token"]["secret"], true);
+    EXPECT_FALSE (again["token"].contains ("type"));
+}
+
+TEST_F (PostmanEnvironmentExportTest, AJsonTypedVariableIsWrittenAsDefaultAndCounted) {
+    const std::string id = save_environment ("Typed", R"({
+      "payload": {"value": 5, "enabled": true, "type": "json"},
+      "also": {"value": "[1]", "enabled": true, "type": "json"},
+      "name": {"value": "x", "enabled": true, "type": "string"}})");
+    const json body      = export_environment (id, true);
+
+    ASSERT_EQ (body["notes"]["notCarried"].size (), 1u) << body.dump ();
+    const json& entry = body["notes"]["notCarried"][0];
+    EXPECT_EQ (entry["code"], "variable_types");
+    EXPECT_EQ (entry["count"], 2);
+    EXPECT_TRUE (entry["message"].is_string ());
+
+    const json rows = json::parse (body["text"].get<std::string> ())["values"];
+    EXPECT_EQ (rows[0]["type"], "default");
+    EXPECT_EQ (rows[0]["value"], "5") << "a stored number is written as text";
+    EXPECT_EQ (rows[2]["type"], "string");
+}
+
+TEST_F (PostmanEnvironmentExportTest, MalformedStoredVariablesExportAsNone) {
+    for (const char* stored : { "not json", "[1,2]", "null", "" }) {
+        const std::string id = save_environment (std::string ("Bad") + stored, stored);
+        const json body = export_environment (id, true);
+        EXPECT_EQ (body["notes"]["variablesExported"], 0) << stored;
+        EXPECT_EQ (json::parse (body["text"].get<std::string> ())["values"], json::array ())
+        << stored;
+    }
+}
+
+TEST_F (PostmanEnvironmentExportTest, WritesNothing) {
+    const std::string id = save_environment ("Prod", MIXED_VARIABLES);
+    const auto before    = db_->get_environment (id);
+    ASSERT_HAS_VALUE (before);
+    export_environment (id, true);
+    export_environment (id, false);
+    const auto after = db_->get_environment (id);
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->variables, before->variables);
+    EXPECT_EQ (after->updated_at, before->updated_at);
 }
 
 } // namespace

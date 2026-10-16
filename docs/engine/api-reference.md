@@ -3864,6 +3864,67 @@ none), with `cookie: []`.
 - `400` `Invalid 'includeSecrets': must be true or false`.
 - `404` `Collection not found`.
 
+### POST /export/postman-environment
+
+One environment as a Postman environment export (`core/postman_export.hpp`), the
+inverse of the Postman environment importer: importing the document gives back
+the same variable names, values, enabled flags, secret flags and types, apart
+from `json` (below). **Reads only.**
+
+**Request:**
+```json
+{
+  "environmentId": "env_9a1f...",  // Required, non-empty
+  "includeSecrets": false          // Optional - default false
+}
+```
+
+`includeSecrets: false` writes the value of every variable marked secret as
+`""`, counted in `secretsOmitted`; the row stays, still typed `secret`, so the
+name is visible for the person importing it to fill in. A secret whose value is
+exactly one `{{variable}}` reference names a secret without being one and is
+kept, uncounted. `true` writes every value as stored.
+
+**Response:**
+```json
+{
+  "text": "{\n\t\"id\": \"env_9a1f...\",\n\t\"name\": \"Production\",\n ...",
+  "fileName": "Production.postman_environment.json",
+  "notes": {
+    "variablesExported": 6,
+    "secretsOmitted": 1,
+    "notCarried": [
+      { "code": "variable_types", "count": 2,
+        "message": "JSON variable types have no Postman equivalent" }
+    ]
+  }
+}
+```
+
+- `text` is `JSON.stringify(document, null, "\t")`: tab-indented, no trailing
+  newline. The document is `{id, name, values, _postman_variable_scope:
+  "environment"}`: `id` is the environment's id, `values` holds one
+  `{key, value, type, enabled}` row per variable in the stored order, and no
+  export timestamp is written. A row has no `description`.
+- A row's `value` is the stored value as text, spelled as JavaScript's `String()`
+  would (a stored number `5` is `"5"`, an absent or `null` value `""`). Its `type` is `secret` for a secret variable, else the stored `string`,
+  `number` or `boolean`, else `default`, Postman's unset marker. `enabled` is the
+  stored flag, `true` when absent.
+- `fileName` is `<environment name>.postman_environment.json`, with every
+  character a filesystem refuses replaced by `_` (`environment` when nothing is
+  left of the name).
+- `variablesExported` counts the rows written. A stored variables column that
+  does not parse as an object exports as no variables.
+- `notCarried` holds one `variable_types` entry when variables are typed `json`,
+  which Postman has no type for: they are written as `default` and the entry's
+  `count` is how many. No entry means every type was carried.
+
+**Errors:**
+- `400` `Invalid body: must be an object`.
+- `400` `Invalid 'environmentId': must be a non-empty string`.
+- `400` `Invalid 'includeSecrets': must be true or false`.
+- `404` `Environment not found`.
+
 ## Environments
 
 ### GET /environments
