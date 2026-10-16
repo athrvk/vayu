@@ -44,7 +44,7 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 	},
 	{
 		value: "iterations",
-		label: "Fixed Iterations",
+		label: "Fixed request count",
 		description: "Send an exact number of requests, then stop.",
 	},
 	{

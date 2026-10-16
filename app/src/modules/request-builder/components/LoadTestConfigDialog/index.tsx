@@ -14,7 +14,9 @@
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
-import type { ThresholdOwner } from "@/lib/agent-reference";
+import { requestReference, type ThresholdOwner } from "@/lib/agent-reference";
+import { appSetting } from "@/modules/settings/main/app-settings";
+import { getAppPanel } from "@/modules/settings/main/app-panels";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
@@ -109,6 +111,12 @@ export interface LoadTestConfigDialogProps {
 	 * tools know. Absent for a request with no saved row.
 	 */
 	referenceOwner?: ThresholdOwner;
+	/**
+	 * The collection names above the saved request, root first, so the target
+	 * line's "Copy request for agent" says where the request lives the way the
+	 * sidebar's copy does. Read only when `referenceOwner` is a request.
+	 */
+	collectionPath?: readonly string[];
 	/** The request's HTTP method, for the target line. */
 	method?: string;
 	/**
@@ -118,6 +126,11 @@ export interface LoadTestConfigDialogProps {
 	 */
 	url?: string;
 }
+
+/** Both names are the Settings screen's own, so a rename there reaches this footer. */
+const ALLOWLIST = appSetting("mcp-allowlist");
+const ALLOWLIST_LABEL = ALLOWLIST.label;
+const AGENT_PANEL_LABEL = getAppPanel(ALLOWLIST.panel)?.label;
 
 export default function LoadTestConfigDialog({
 	onClose,
@@ -130,6 +143,7 @@ export default function LoadTestConfigDialog({
 	collectionId,
 	request,
 	referenceOwner,
+	collectionPath = [],
 	method,
 	url,
 }: LoadTestConfigDialogProps) {
@@ -297,11 +311,25 @@ export default function LoadTestConfigDialog({
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
 						{target && url !== undefined ? (
-							<TargetLine method={method} url={url} target={target} />
+							<TargetLine
+								method={method}
+								url={url}
+								target={target}
+								agentReference={
+									referenceOwner?.type === "request"
+										? requestReference(referenceOwner.request, collectionPath)
+										: undefined
+								}
+							/>
 						) : (
 							"Pick a profile, set its parameters, then start the run."
 						)}
 					</DialogDescription>
+					<p className="text-label leading-relaxed text-muted-foreground">
+						A request that sets no timeout of its own times out after Default Request
+						Timeout (Settings › Network &amp; connectivity). To pace virtual users, add
+						a Think time element on the request&apos;s Elements tab.
+					</p>
 				</DialogHeader>
 
 				<DialogBody className="space-y-4">
@@ -407,6 +435,12 @@ export default function LoadTestConfigDialog({
 							onGateChange={setOauthGated}
 						/>
 					)}
+
+					<p className="text-label leading-relaxed text-muted-foreground">
+						An agent can start this run too with{" "}
+						<span className="font-mono">start_load_run</span> (Settings ›{" "}
+						{AGENT_PANEL_LABEL}). Its host must be on the {ALLOWLIST_LABEL}.
+					</p>
 				</DialogBody>
 
 				<DialogFooter>

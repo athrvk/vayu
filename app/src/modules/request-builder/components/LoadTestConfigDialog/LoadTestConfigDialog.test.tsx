@@ -23,6 +23,7 @@ import {
 	within,
 	cleanup,
 	act,
+	waitFor,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
@@ -205,12 +206,21 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/target rate/i)).not.toBeInTheDocument();
 	});
 
-	it("hides Duration entirely for Fixed Iterations", () => {
+	it("names the fixed-count card 'Fixed request count', not by iteration (#2228)", () => {
+		// k6 reads "iteration" as one VU loop; the field this mode sets is Requests.
+		open();
+		const card = screen.getByRole("radio", { name: /fixed request count/i });
+		expect(card.textContent).toContain("Fixed request count");
+		expect(card.textContent).toContain("Send an exact number of requests, then stop.");
+		expect(screen.queryByRole("radio", { name: /fixed iterations/i })).not.toBeInTheDocument();
+	});
+
+	it("hides Duration entirely for Fixed request count", () => {
 		// The defect this re-cut exists to fix. The engine stops on
 		// `requests_sent < iterations` and never reads duration, so offering the
 		// field invites tuning something inert - and it used to persist.
 		open();
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		expect(screen.getByLabelText(/^requests/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/^virtual users/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
@@ -238,9 +248,9 @@ describe("load profile → fields", () => {
 });
 
 describe("payload", () => {
-	it("omits duration_seconds for Fixed Iterations", () => {
+	it("omits duration_seconds for Fixed request count", () => {
 		const { onStart } = open();
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		const config = started(onStart);
 		expect(config.mode).toBe("iterations");
 		expect(config.iterations).toBeGreaterThan(0);
@@ -1421,6 +1431,71 @@ describe("pass/fail budgets", () => {
 	});
 });
 
+describe("the agent affordances (#2230)", () => {
+	const OWNER = { type: "request", request: { id: "req_7", name: "Orders" } } as const;
+	const COPY_REQUEST = { name: "Copy request for agent" };
+	const writeText = vi.fn();
+
+	beforeEach(() => {
+		writeText.mockReset().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+	});
+
+	it("tells every caller an agent can start the run, naming Settings' own labels", () => {
+		open();
+
+		const footer = screen.getByText(/An agent can start this run too/);
+		expect(footer).toHaveTextContent(
+			"An agent can start this run too with start_load_run (Settings › AI agents (MCP)). Its host must be on the Target allowlist."
+		);
+		expect(footer).toHaveClass("text-label", "text-muted-foreground");
+	});
+
+	it("copies the saved request, with its collection path, from beside the host", async () => {
+		open({
+			method: "GET",
+			url: "https://api.example.com/v1/orders",
+			referenceOwner: OWNER,
+			collectionPath: ["Payments", "Auth"],
+		});
+
+		// Inside the description, so it must keep the host's room to truncate.
+		const button = screen.getByRole("button", COPY_REQUEST);
+		expect(screen.getByRole("dialog")).toHaveAccessibleDescription(/api\.example\.com/);
+		expect(button).toHaveClass("shrink-0");
+		fireEvent.click(button);
+
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith(
+				'Vayu request "Orders" (req_7) in Payments / Auth'
+			)
+		);
+	});
+
+	it("copies the bare line for a request at the root", async () => {
+		open({ url: "https://api.example.com/", referenceOwner: OWNER });
+		fireEvent.click(screen.getByRole("button", COPY_REQUEST));
+
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith('Vayu request "Orders" (req_7)')
+		);
+	});
+
+	it("offers no request copy for an unsaved request or a run owner", () => {
+		// Mutation check: drop the `referenceOwner?.type === "request"` gate and
+		// the unsaved case grows a button copying a line with no id; this reds.
+		open({ url: "https://api.example.com/" });
+		expect(screen.queryByRole("button", COPY_REQUEST)).not.toBeInTheDocument();
+		cleanup();
+
+		open({
+			url: "https://api.example.com/",
+			referenceOwner: { type: "run", run: { id: "run_1" } },
+		});
+		expect(screen.queryByRole("button", COPY_REQUEST)).not.toBeInTheDocument();
+	});
+});
+
 /**
  * Server monitoring: the run's optional second data source. The rules live in
  * `monitor.ts` and are tested there; these pin the wiring - that what the user
@@ -1726,6 +1801,25 @@ describe("a pick declares the contract (issue #2050)", () => {
 	});
 });
 
+describe("the timeout and think-time hint (issue #2229)", () => {
+	it("names where the per-request timeout and the pacing live", () => {
+		open();
+
+		const hint = screen.getByText(/times out after Default Request Timeout/);
+		expect(hint).toHaveTextContent("Settings › Network & connectivity");
+		expect(hint).toHaveTextContent("Think time element");
+		expect(hint).toHaveTextContent("Elements tab");
+		expect(hint).toHaveTextContent("virtual users");
+	});
+
+	it("sits under the target line, in the header", () => {
+		open({ url: "https://api.example.com/" });
+
+		const hint = screen.getByText(/times out after Default Request Timeout/);
+		expect(hint.parentElement).toHaveAttribute("data-slot", "dialog-header");
+	});
+});
+
 describe("the target (issue #2117)", () => {
 	const ADVISORY = /not on your machine or network/i;
 	const dialog = () => screen.getByRole("dialog");
@@ -1747,7 +1841,7 @@ describe("the target (issue #2117)", () => {
 
 	it("counts the advisory from the profile on screen", () => {
 		open({ url: "https://api.example.com/" });
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		expect(screen.getByText(ADVISORY).parentElement).toHaveTextContent(
 			/about 1,000 requests to api\.example\.com/
 		);

@@ -81,7 +81,7 @@ const FIELDS: readonly CeilingField[] = [
 	{
 		key: "iterations",
 		setting: appSetting("load-max-requests"),
-		description: "Upper bound on the Requests field for Fixed Iterations runs.",
+		description: "Upper bound on the Requests field for Fixed request count runs.",
 	},
 ];
 
