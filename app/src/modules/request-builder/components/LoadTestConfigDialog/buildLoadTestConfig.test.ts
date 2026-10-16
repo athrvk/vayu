@@ -95,4 +95,40 @@ describe("buildLoadTestConfig", () => {
 		expect(build({ comment: "" }).comment).toBeUndefined();
 		expect(build({ comment: "after the cache change" }).comment).toBe("after the cache change");
 	});
+
+	describe("carried budgets (issue #2195)", () => {
+		const budgets = { ...emptyBudgetDraft(), latencyP99Ms: "200", maxErrorRatePct: "1" };
+		const customBudgets = [{ id: "c1", name: "cart", stat: "p95" as const, value: "5" }];
+
+		it("passes the carried keys through beside the thresholds they name", () => {
+			const config = build({
+				budgets,
+				customBudgets,
+				carriedBudgets: ["latencyP99Ms", "custom.cart.p95"],
+			});
+			expect(config.carriedBudgets).toEqual(["latencyP99Ms", "custom.cart.p95"]);
+			expect(config.thresholds).toMatchObject({ latencyP99Ms: 200, "custom.cart.p95": 5 });
+		});
+
+		it("is absent, not empty, when nothing was carried", () => {
+			expect(build({ budgets })).not.toHaveProperty("carriedBudgets");
+			expect(build({ budgets, carriedBudgets: [] })).not.toHaveProperty("carriedBudgets");
+		});
+
+		it("names only keys the payload actually judges", () => {
+			// Mutation check: skipping the filter sends "maxErrorRatePct" and
+			// "custom.gone.p95", which the thresholds below do not hold.
+			const config = build({
+				budgets: { ...emptyBudgetDraft(), latencyP99Ms: "200" },
+				carriedBudgets: ["latencyP99Ms", "maxErrorRatePct", "custom.gone.p95"],
+			});
+			expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+		});
+
+		it("is absent when no budget is declared at all", () => {
+			const config = build({ carriedBudgets: ["latencyP99Ms"] });
+			expect(config.thresholds).toBeUndefined();
+			expect(config).not.toHaveProperty("carriedBudgets");
+		});
+	});
 });

@@ -301,6 +301,41 @@ describe("a load run started with a data file", () => {
 });
 
 /*
+ * Not `dataColumns` either: which of the run's budgets the user did not set
+ * for it (issue #2195) rides on the same `onStart` hand-off to `POST /runs`.
+ */
+describe("a load run started with carried budgets", () => {
+	async function startLoadRun(config: LoadTestConfig) {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)(REQUEST);
+		});
+		await act(async () => {
+			await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(config);
+		});
+	}
+
+	it("forwards the carried keys to the run", async () => {
+		await startLoadRun({
+			...LOAD_CONFIG,
+			thresholds: { latencyP99Ms: 200 },
+			carriedBudgets: ["latencyP99Ms"],
+		});
+
+		expect(startLoadTest.mock.calls[0][0]).toMatchObject({ carriedBudgets: ["latencyP99Ms"] });
+	});
+
+	it("sends none for a run that carried nothing", async () => {
+		await startLoadRun({ ...LOAD_CONFIG, thresholds: { latencyP99Ms: 200 } });
+
+		// Undefined, which JSON drops: the report then has no such key.
+		expect(
+			(startLoadTest.mock.calls[0][0] as Record<string, unknown>).carriedBudgets
+		).toBeUndefined();
+	});
+});
+
+/*
  * Not `dataColumns`, but the same two compose sites and the same harness: an
  * inline compose carries the editor's path rows (#1764), because the engine
  * fills `:name` segments from them and the editor may be ahead of the saved

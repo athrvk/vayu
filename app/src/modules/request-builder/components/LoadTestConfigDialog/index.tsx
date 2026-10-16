@@ -36,7 +36,13 @@ import type { ColumnAuditRequest } from "@/hooks/useColumnAudit";
 import { useRequestDefaultsQuery } from "@/queries";
 import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTestConfig";
 import { buildNotices } from "./notices";
-import { budgetsChanged, clearCarried, describeCarried, stillCarried } from "./carried-budgets";
+import {
+	budgetsChanged,
+	carriedThresholdKeys,
+	clearCarried,
+	describeCarried,
+	stillCarried,
+} from "./carried-budgets";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
 import { MonitoringSection } from "./MonitoringSection";
@@ -252,6 +258,7 @@ export default function LoadTestConfigDialog({
 				failRun,
 				monitor,
 				comment,
+				carriedBudgets: carriedThresholdKeys(carried, customBudgets),
 				scriptsOverride,
 				dataFile: dataFile.file,
 				isStreamingRequest,
