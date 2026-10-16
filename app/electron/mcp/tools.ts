@@ -59,13 +59,11 @@ import { MOCK_SERVER_TOOLS } from "./tools/mock-server.tools.js";
 import { WEBHOOK_INBOX_TOOLS } from "./tools/webhook-inbox.tools.js";
 
 export type {
-	ElicitParams,
-	ElicitOutcome,
-	ElicitFn,
 	McpDataEntity,
 	McpDataChangedEvent,
 	StartedRun,
 	ToolContext,
+	UserInput,
 	ToolResult,
 	ToolCategory,
 	McpTool,
@@ -97,6 +95,27 @@ export { DEFAULT_INBOX_CAPTURE_LIMIT, MAX_INBOX_CAPTURE_LIMIT } from "./tools/we
 export { MAX_EXAMPLES_BODY_BYTES } from "./tools/examples.js";
 export { MAX_INTROSPECTION_BYTES, MAX_SCHEMA_SDL_BYTES } from "./tools/graphql-schema.js";
 export { MAX_SPEC_DIFF_ENTRIES } from "./tools/spec-bindings.js";
+
+/**
+ * Whether a session under @p config lists @p tool. One predicate for the two
+ * readers that must agree: registration (`server.ts`) and the check that tells
+ * clients the list changed when Settings do (`index.ts`).
+ *
+ * A write tool that cannot succeed does not ship its schema (#1429): writes are
+ * off by default, and on a default install those tools were ~40% of a
+ * `tools/list` an agent could do nothing with. The handler check stays
+ * (`writesDisabled`), so a client holding a list from a session where writes
+ * were on still gets the actionable error.
+ */
+export function isListed(tool: McpTool, config: ToolContext["config"]): boolean {
+	if (config.disabledTools.includes(tool.name)) return false;
+	return tool.category !== "write" || config.allowWrites;
+}
+
+/** The names a session under @p config lists, in registry order. */
+export function listedToolNames(config: ToolContext["config"]): string[] {
+	return TOOLS.filter((tool) => isListed(tool, config)).map((tool) => tool.name);
+}
 
 /**
  * The answer for a write tool the toggle withheld from registration, or null

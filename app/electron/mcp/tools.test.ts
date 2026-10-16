@@ -31,7 +31,9 @@ import {
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
+	type ToolResult,
 } from "./tools.js";
+import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
 import {
@@ -390,6 +392,23 @@ function ctxWith(client: EngineClient, safety?: Partial<McpSafetyConfig>): ToolC
 }
 
 const firstText = (r: { content: Array<{ text: string }> }) => r.content[0].text;
+
+/** A context whose client can put a question to the person and answered @p answers. */
+function ctxAsking(
+	client: EngineClient,
+	safety: Partial<McpSafetyConfig>,
+	answers?: Record<string, unknown>
+): ToolContext {
+	return { ...ctxWith(client, safety), userInput: { responses: answers } };
+}
+
+/** The confirmation question a result asks the person, failing if it asks none. */
+function askedQuestion(result: ToolResult): string {
+	const pending = INPUT_REQUIRED.get(result);
+	expect(pending).toBeDefined();
+	const request = pending?.inputRequests?.confirm as { params: { message: string } };
+	return request.params.message;
+}
 
 describe("tool registry", () => {
 	test("exposes stable, unique tool names", () => {
@@ -1681,15 +1700,12 @@ describe("destructive deletes ask first", () => {
 		});
 	}
 
-	/** A context whose client answers elicitation with `outcome`. */
-	function ctxElicits(
+	/** A context whose client answered the confirmation question with `outcome`. */
+	function ctxAnswered(
 		client: EngineClient,
 		outcome: { action: string; content?: Record<string, unknown> }
 	): ToolContext {
-		return {
-			...ctxWith(client, { allowWrites: true }),
-			elicit: vi.fn().mockResolvedValue(outcome),
-		};
+		return ctxAsking(client, { allowWrites: true }, { confirm: outcome });
 	}
 
 	test("delete_collection previews the real subtree counts and deletes nothing", async () => {
@@ -1721,25 +1737,47 @@ describe("destructive deletes ask first", () => {
 		expect(res.content.map((c) => c.text).join("\n")).toContain("2 sub-collection(s)");
 	});
 
-	test("delete_collection takes elicitation as the confirmation", async () => {
+	test("delete_collection asks the person, and deletes nothing while it asks", async () => {
 		const client = treeClient();
-		const ctx = ctxElicits(client, { action: "accept", content: { proceed: true } });
-		// No `confirmed` flag - the human answered the prompt instead.
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1" },
+			ctxAsking(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+		// The person answering sees the counts, not just an id.
+		const question = askedQuestion(res);
+		expect(question).toContain("2 sub-collection(s)");
+		expect(question).toContain("3 saved request(s)");
+	});
+
+	test("delete_collection takes the person's answer as the confirmation", async () => {
+		const client = treeClient();
+		const ctx = ctxAnswered(client, { action: "accept", content: { proceed: true } });
+		// No `confirmed` flag - the human answered the question instead.
 		const res = await dispatchTool("delete_collection", { collectionId: "col_1" }, ctx);
 		expect(res.isError).toBeFalsy();
+		expect(INPUT_REQUIRED.has(res)).toBe(false);
 		expect(firstText(res)).not.toMatch(/awaiting confirmation/i);
 		expect(client.deleteCollection).toHaveBeenCalledTimes(1);
-		const prompt = (ctx.elicit as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
-			message: string;
-		};
-		// The person answering sees the counts, not just an id.
-		expect(prompt.message).toContain("2 sub-collection(s)");
-		expect(prompt.message).toContain("3 saved request(s)");
+	});
+
+	test("a cancelled question deletes nothing", async () => {
+		const client = treeClient();
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1" },
+			ctxAnswered(client, { action: "cancel" })
+		);
+		expect(firstText(res)).toMatch(/declined/i);
+		expect(INPUT_REQUIRED.has(res)).toBe(false);
+		expect(client.deleteCollection).not.toHaveBeenCalled();
 	});
 
 	test("a declined prompt deletes nothing, even with the flag set", async () => {
 		const client = treeClient();
-		const ctx = ctxElicits(client, { action: "accept", content: { proceed: false } });
+		const ctx = ctxAnswered(client, { action: "accept", content: { proceed: false } });
 		const res = await dispatchTool(
 			"delete_collection",
 			{ collectionId: "col_1", confirmed: true },
@@ -4310,12 +4348,9 @@ describe("start_load_run scenario runs", () => {
 		expect(client.startRun).toHaveBeenCalledTimes(1);
 	});
 
-	test("a declined elicitation starts nothing", async () => {
+	test("a declined question starts nothing", async () => {
 		const client = scenarioLoadClient();
-		const ctx: ToolContext = {
-			...ctxWith(client, allowed),
-			elicit: vi.fn().mockResolvedValue({ action: "decline" }),
-		};
+		const ctx = ctxAsking(client, allowed, { confirm: { action: "decline" } });
 		const res = await dispatchTool("start_load_run", { scenario: { collectionId: "c1" } }, ctx);
 		expect(firstText(res)).toMatch(/declined/);
 		expect(client.startRun).not.toHaveBeenCalled();
@@ -10818,19 +10853,17 @@ describe("secret withholding", () => {
 				auth: { mode: "none" },
 			}),
 		});
-		const elicit = vi.fn().mockResolvedValue({ action: "decline" });
-		const ctx = { ...ctxWith(client, { allowWrites: true, ...safety }), elicit };
 		const unprompted = await dispatchTool(
 			"delete_request",
 			{ requestId: "req_1" },
-			{
-				...ctx,
-				elicit: undefined,
-			}
+			ctxWith(client, { allowWrites: true, ...safety })
 		);
-		await dispatchTool("delete_request", { requestId: "req_1" }, ctx);
-		const prompt = (elicit.mock.calls[0][0] as { message: string }).message;
-		return { preview: firstText(unprompted), prompt };
+		const asked = await dispatchTool(
+			"delete_request",
+			{ requestId: "req_1" },
+			ctxAsking(client, { allowWrites: true, ...safety })
+		);
+		return { preview: firstText(unprompted), prompt: askedQuestion(asked) };
 	};
 
 	test("delete_request names the URL in its preview and prompt without the password or the credential values", async () => {
@@ -11800,8 +11833,7 @@ describe("secret withholding", () => {
 	};
 
 	const planLoadRun = (client: EngineClient, safety: Partial<McpSafetyConfig> = {}) => {
-		const elicit = vi.fn().mockRejectedValue(new Error("client does not support elicitation"));
-		const ctx = { ...ctxWith(client, { ...ALLOW_API, ...safety }), elicit };
+		const ctx = ctxWith(client, { ...ALLOW_API, ...safety });
 		return dispatchTool("start_load_run", { requestId: "req_1", duration: "10s" }, ctx);
 	};
 
@@ -11824,13 +11856,12 @@ describe("secret withholding", () => {
 
 	test("start_load_run's confirmation question names the masked target", async () => {
 		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
-		const elicit = vi.fn().mockResolvedValue({ action: "decline" });
-		await dispatchTool(
+		const asked = await dispatchTool(
 			"start_load_run",
 			{ requestId: "req_1", duration: "10s" },
-			{ ...ctxWith(client, ALLOW_API), elicit }
+			ctxAsking(client, ALLOW_API)
 		);
-		const { message } = elicit.mock.calls[0][0] as { message: string };
+		const message = askedQuestion(asked);
 		expect(message).toContain("https://api.example.com/v1?key=<redacted>");
 		expect(message).not.toContain("p@ss");
 	});

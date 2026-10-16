@@ -12,32 +12,27 @@
  */
 
 import { z } from "zod";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { EngineClient } from "../engine-client.js";
 import type { McpSafetyConfig } from "../config.js";
 import type { Logger } from "../../log.js";
 import type { AppFocus } from "../../app-focus.js";
 import type { DataFileLocation } from "../../data-file-locations.js";
 
-// --- Elicitation -------------------------------------------------------------
+// --- Asking the person ------------------------------------------------------
 
-/** A restricted, flat object schema the client renders as a form. */
-export interface ElicitParams {
-	message: string;
-	requestedSchema: {
-		type: "object";
-		properties: Record<string, unknown>;
-		required?: string[];
-	};
+/**
+ * A call's line to the person, present only when the client can put a question
+ * to them on this call (it declared elicitation, and the transport can carry
+ * the round trip - the stateless legacy HTTP leg cannot).
+ */
+export interface UserInput {
+	/**
+	 * What the client answered to the previous round's questions, keyed as
+	 * asked. Absent on a call's first round. From the client, so untrusted.
+	 */
+	responses?: Record<string, unknown>;
 }
-
-export interface ElicitOutcome {
-	action: "accept" | "decline" | "cancel";
-	content?: Record<string, unknown>;
-}
-
-/** Ask the human via the client; throws if the client can't elicit. */
-export type ElicitFn = (params: ElicitParams) => Promise<ElicitOutcome>;
 
 // --- Data-change notification ------------------------------------------------
 
@@ -172,11 +167,11 @@ export interface ToolContext {
 	client: EngineClient;
 	config: McpSafetyConfig;
 	/**
-	 * Present when the connected client supports elicitation; lets a tool ask the
-	 * human to confirm. Absent (or throwing) → the tool falls back to its
-	 * agent-side gate (e.g. the `confirmed` flag).
+	 * Present when the person can be asked on this call; lets a tool ask them to
+	 * confirm (`confirmDestructive`). Absent → the tool falls back to its
+	 * agent-side gate (the `confirmed` flag).
 	 */
-	elicit?: ElicitFn;
+	userInput?: UserInput;
 	/**
 	 * Called once per entity a successful call changed, so the renderer can
 	 * invalidate the matching queries. Absent when there is nothing to notify -
