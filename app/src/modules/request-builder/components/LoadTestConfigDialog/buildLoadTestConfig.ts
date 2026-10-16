@@ -11,7 +11,7 @@ import { runDataFileName } from "@/lib/run-data-file";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { type BudgetDraft, type CustomBudgetDraft, buildThresholds } from "./budgets";
 import { type MonitorDraft, buildMonitor } from "./monitor";
-import { usesDuration } from "./profile";
+import { type ProfileParams, profileParams } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
@@ -41,40 +41,28 @@ export interface LoadTestDraft {
 	isStreamingRequest: boolean;
 }
 
-/** The profile's own parameters, which differ per mode. */
-function applyProfile(
-	config: LoadTestConfig,
-	profile: LoadTestProfile,
-	maxInFlight: number | null
-) {
-	switch (profile.mode) {
-		case "constant_rps":
-			config.rps = profile.rps;
-			if (maxInFlight != null && maxInFlight > 0) config.max_in_flight = maxInFlight;
-			break;
-		case "constant_concurrency":
-			config.concurrency = profile.concurrency;
-			break;
-		case "iterations":
-			config.iterations = profile.iterations;
-			config.concurrency = profile.concurrency;
-			break;
-		case "ramp_up":
-			config.concurrency = profile.concurrency;
-			config.ramp_duration_seconds = profile.rampDuration;
-			config.start_concurrency = profile.startConcurrency;
-			break;
-		case "capacity":
-			// `concurrency` is the ceiling the search will not climb past and
-			// `start_concurrency` is where it begins - the same two fields the
-			// ramp owns, reused rather than respelled, so one cap in Settings
-			// bounds both modes.
-			config.concurrency = profile.concurrency;
-			config.start_concurrency = profile.startConcurrency;
-			config.slo_ms = profile.sloMs;
-			config.step_duration_seconds = profile.stepDuration;
-			break;
+type NumericParam = Exclude<keyof ProfileParams, "mode">;
+
+/** The single-request payload's spelling of each neutral parameter. */
+const ENGINE_FIELD = {
+	duration: "duration_seconds",
+	rps: "rps",
+	concurrency: "concurrency",
+	iterations: "iterations",
+	rampDuration: "ramp_duration_seconds",
+	startConcurrency: "start_concurrency",
+	sloMs: "slo_ms",
+	stepDuration: "step_duration_seconds",
+	maxInFlight: "max_in_flight",
+} as const satisfies Record<NumericParam, keyof LoadTestConfig>;
+
+function engineFields(params: ProfileParams) {
+	const fields: Partial<Record<(typeof ENGINE_FIELD)[NumericParam], number>> = {};
+	for (const key of Object.keys(ENGINE_FIELD) as NumericParam[]) {
+		const value = params[key];
+		if (value !== undefined) fields[ENGINE_FIELD[key]] = value;
 	}
+	return fields;
 }
 
 export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
@@ -102,10 +90,6 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 			: {}),
 	};
 
-	// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
-	// discards makes the stored run config claim something untrue about it.
-	if (usesDuration(profile.mode)) config.duration_seconds = profile.duration;
-
 	// The parsed rows themselves - the same array the preview showed, never
 	// a re-parse (issue #993). Absent when no file was picked, which is what
 	// keeps a run without data on exactly the path it took before.
@@ -130,6 +114,9 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 		config.stream_max_events = profile.streamMaxEvents;
 	}
 
-	applyProfile(config, profile, draft.maxInFlight);
+	// `profileParams` leaves the duration out of `iterations` (see
+	// `usesDuration`): sending a value the engine discards makes the stored run
+	// config claim something untrue about it.
+	Object.assign(config, engineFields(profileParams(profile, draft.maxInFlight)));
 	return config;
 }

@@ -17,6 +17,12 @@ interface ProfileFieldsProps {
 	limits: LoadTestLimits;
 	/** True when the request streams: the two stream caps are shown. */
 	isStreamingRequest: boolean;
+	/**
+	 * The Fixed Iterations count's label. "Requests" for a single request; a
+	 * collection run counts passes through its sequence, where a request count
+	 * would understate the load by the sequence's length.
+	 */
+	iterationsLabel?: string;
 }
 
 type NumericProfileKey = Exclude<keyof LoadTestProfile, "mode">;
@@ -27,6 +33,7 @@ export function ProfileFields({
 	onChange,
 	limits,
 	isStreamingRequest,
+	iterationsLabel = "Requests",
 }: ProfileFieldsProps) {
 	const { mode } = profile;
 	const set = (key: NumericProfileKey) => (raw: string) => onChange({ [key]: Number(raw) });
@@ -70,7 +77,7 @@ export function ProfileFields({
 			{mode === "iterations" && (
 				<NumberField
 					id="lt-iterations"
-					label="Requests"
+					label={iterationsLabel}
 					value={profile.iterations}
 					onChange={set("iterations")}
 					min={limits.ITERATIONS.MIN}
