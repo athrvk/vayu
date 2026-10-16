@@ -8365,7 +8365,8 @@ one).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
-rows for the timing breakdown and the `results[]` array. A run with no summary never reached a
+rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
+first - see "`results[]` is not a uniform sample" below). A run with no summary never reached a
 terminal status - the engine died mid-run - and its report is built from those sampled `results`
 alone rather than erroring. **The response shape is the same either way.**
 
@@ -8622,7 +8623,9 @@ named it.
     { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0, "deferred": 0 },
     { "id": "el_3", "kind": "script.post", "passed": 0, "failed": 0, "skipped": 0, "deferred": 10 }
   ],
-  "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
+  "results": [ { "id": 41, "...": "request/response outcomes, failures first" } ],
+  "resultsStored": 4812,
+  "resultsCap": 100
 }
 ```
 
@@ -8832,10 +8835,25 @@ the per-response `httpVersionDowngraded`, which is exact for the exchange it
 describes.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
-`results[]` array and the tested responses are the complete set, and a non-zero
-count means they are a **uniform sample of the whole run** (reservoir retention)
-rather than a truncated prefix of it. The section is absent on a run recorded
-before it was reported, which is not the same claim as "nothing was dropped".
+error, trace and tested-response sets are complete, and a non-zero count means
+they are a **uniform sample of the whole run** (reservoir retention) rather than
+a truncated prefix of it. The section is absent on a run recorded before it was
+reported, which is not the same claim as "nothing was dropped". It does not
+describe `results[]`, which has its own selection rule below.
+
+**`results[]` is not a uniform sample (#2210).** A non-scenario run returns at
+most 100 stored rows. When it stored more, the rows are chosen by value: every
+row with a failing status (anything outside 2xx/3xx, including the `0` of a
+transport failure) takes a slot first, up to the cap, and rows that succeeded
+fill the remainder in storage order. The chosen rows are listed in `timestamp`
+order, ties broken by row id, whichever way they were selected. A `Scenario`
+run keeps every stored step (bounded at write time by `maxScenarioStoredSteps`,
+see `stepsStored`). Two top-level keys, always present, say whether the array
+was cut: `resultsStored` is the number of rows stored for the run and
+`resultsCap` is the cap applied (equal to `resultsStored` for a scenario run).
+`resultsStored > resultsCap` is the only signal that `results[]` is a selection
+and not the whole set; both sit beside `results` rather than inside `sampling`
+because that section is optional.
 
 `responseSamplesDropped` counts responses the post-run test scripts and schema
 checks never saw, for either of the two bounds on that store: the count cap
@@ -8883,7 +8901,7 @@ readings are served separately by
 
 `results[].id` is the `results` row id, and the join key against
 `GET /runs/:runId/samples`. It is absent on reports served by an engine older
-than 0.15.0.
+than 0.15.0. The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,

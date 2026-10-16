@@ -19,11 +19,12 @@
  * whose summary predates the counts, gets no notice at all. "Nothing was
  * displaced" and "we cannot tell" are both worse as prose than as absence.
  *
- * What it says about the tested responses depends on which bound thinned them:
- * the count cap displaces an incumbent and leaves a uniform sample of the run,
- * while a spent byte budget stops admitting and leaves the part of it whose
- * bodies fit. `sampling.responseSampleBudgetSpent` is the engine's answer to
- * which one happened (issue #1192).
+ * What it says about the set on screen depends on which list it is. The traces
+ * behind `results` are a failures-first selection (#2210), so it never calls
+ * them uniform. The tested responses are a uniform sample of the run when the
+ * count cap displaced an incumbent, and the part of it whose bodies fit when a
+ * spent byte budget stopped admitting; `sampling.responseSampleBudgetSpent` is
+ * the engine's answer to which one happened (issue #1192).
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -62,25 +63,35 @@ export function SampleRetentionNote({
 	if (displaced <= 0) return null;
 
 	const noun = budget === "traces" ? "samples" : "responses";
-	const verb = budget === "traces" ? "shown" : "tested";
-
-	// The uniformity the reservoir buys holds for every bound but one: the
-	// response store's byte budget stops admitting rather than displacing, so a
-	// run that spent it was graded on the part of it whose bodies fit. An
-	// `undefined` marker is a run recorded before the engine reported which
-	// bound applied - it keeps today's sentence, because weakening the claim for
-	// every older run costs the accurate message in the case that is nearly all
-	// of them (only a target whose retained bodies average more than ~256 KiB
-	// can reach the budget at the defaults).
-	const budgetSpent = budget === "responses" && sampling.responseSampleBudgetSpent === true;
 
 	return (
 		<Callout severity="info" title="Bounded retention" className={className}>
 			{formatNumber(displaced)} further {noun} were displaced by this run&apos;s retention
-			limit.{" "}
-			{budgetSpent
-				? `Its response-sample budget was spent, so the ${formatNumber(shown)} tested are drawn from the part of the run whose bodies fit, not uniformly from the whole of it.`
-				: `The ${formatNumber(shown)} ${verb} are drawn uniformly from the whole run, not from its opening.`}
+			limit. {describeShownSet(budget, sampling, shown)}
 		</Callout>
 	);
+}
+
+// The response store's byte budget stops admitting rather than displacing, so a
+// run that spent it was graded on the part of it whose bodies fit. An
+// `undefined` marker is a run recorded before the engine reported which bound
+// applied - it keeps the uniformity sentence, because weakening the claim for
+// every older run costs the accurate message in the case that is nearly all of
+// them (only a target whose retained bodies average more than ~256 KiB can
+// reach the budget at the defaults).
+function describeShownSet(
+	budget: SampleRetentionNoteProps["budget"],
+	sampling: NonNullable<RunReport["sampling"]>,
+	shown: number
+): string {
+	const count = formatNumber(shown);
+	// `results` is chosen by the report route, not drawn from the reservoir: rows
+	// with an error take the slots before any success does.
+	if (budget === "traces") {
+		return `Requests with an error are kept ahead of successful ones in the ${count} shown, so they are not a uniform sample of the run.`;
+	}
+	if (sampling.responseSampleBudgetSpent === true) {
+		return `Its response-sample budget was spent, so the ${count} tested are drawn from the part of the run whose bodies fit, not uniformly from the whole of it.`;
+	}
+	return `The ${count} tested are drawn uniformly from the whole run, not from its opening.`;
 }

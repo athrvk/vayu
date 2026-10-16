@@ -684,7 +684,7 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `RunTrend.tsx`, `run-trend.ts` | p95, throughput and error rate across the open run's request's runs, from the runs list's `resultSummary`; mounted under the Performance tab, absent for a run with no `requestId` or fewer than two summarised runs (#2165) |
-| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle |
+| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. When the report says the engine cut `results` (`resultsStored > resultsCap`, #2210) a second badge beside "N samples shown" reads "N of M stored"; it is absent when every stored row is shown or on a report from an engine that predates the pair. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below; its element rows are the shared `ElementTally` |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts. A failed time-series fetch (`LoadTestDetail`'s `seriesFailure`) draws the shared `ErrorState` with Try again instead of the "insufficient data" sentence, or, when some pages loaded, a warning `Callout` naming how many points did, whose retry resumes at the failed page (issue #1944). A failed server-vitals fetch (`monitorFailure`) is a warning `Callout` with Try again drawn above the section whatever the time series holds, and holds the auto-paging back while the query is in error (issue #2062) |
@@ -1520,10 +1520,13 @@ refreshes the run's detail, report and lists; the dashboard header goes through
 ## Sample Retention Note (`components/shared/SampleRetentionNote.tsx`)
 
 One sentence, wherever a sampled set is displayed: how many records the run's
-bounded stores displaced, and that what is on screen is drawn uniformly from
-the whole run rather than its opening - except on the `responses` surface when
-the run's response-sample byte budget was spent, where it says instead that
-what is on screen is drawn from the part of the run whose bodies fit. Several
+bounded stores displaced, and what is on screen. On the `responses` surface
+that is drawn uniformly from the whole run rather than its opening - except
+when the run's response-sample byte budget was spent, where it says instead
+that what is on screen is drawn from the part of the run whose bodies fit. On
+the `traces` surface (`report.results`) it says requests with an error are kept
+ahead of successful ones and the set is not a uniform sample, because the
+report route picks its rows failures first (#2210). Several
 surfaces show such a set - the dashboard's Sampled Requests card, the history
 Samples tab, and the shared `TestValidationSummary` (itself rendered in both
 the dashboard and the history Overview) - so the wording lives here once
