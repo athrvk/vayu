@@ -552,6 +552,20 @@ jobs:
           # auto-generated fallback this footer is followed by GitHub's notes.
           printf '\n\nEvery asset carries a build-provenance attestation: `gh attestation verify <asset> --repo %s`.\n' \
             "$GITHUB_REPOSITORY" >> "$notes"
+          # Which file each platform takes, ahead of the unsigned-download
+          # block. The install command matches docs/index.md; the file names
+          # are load-bearing (README.md and docs/index.md link
+          # releases/latest/download/Vayu-x64.exe, winget-publish.yml matches
+          # it), so this block names them and does not rename anything.
+          cat >> "$notes" <<'EOF'
+
+          ### Which file do I download?
+
+          - **macOS** (Apple Silicon and Intel): run `bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"`. The `.dmg` and `.zip` are the same universal build, unsigned.
+          - **Windows** (x64): `winget install athrvk.Vayu`, or `Vayu-x64.exe`.
+          - **Linux** (x86_64 only, there is no arm64 build): the `.AppImage`, or `sudo apt install ./Vayu-amd64.deb`.
+          - The `.yml`, `.blockmap` and `.sha256` files are for the auto-updater and for checking a download. You do not need them.
+          EOF
           # What to do when the OS warns about an unsigned download. A separate
           # block so a later footer section can be appended beside it.
           cat >> "$notes" <<'EOF'
