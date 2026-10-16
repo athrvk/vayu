@@ -110,6 +110,26 @@ describe("ActivityRail - the six view buttons", () => {
 		).toBeInTheDocument();
 	});
 
+	it("glosses Services in its tooltip and keeps the gloss out of the accessible name", async () => {
+		renderRail();
+		const services = screen.getByRole("button", { name: "Services" });
+		expect(services).toHaveAccessibleName("Services");
+		fireEvent.focus(services);
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(
+			"Webhook inbox, OAuth issuer, mock servers"
+		);
+	});
+
+	it.each(DRAWER_VIEWS.filter(({ view }) => view !== "services"))(
+		"adds no gloss line to the $label tooltip",
+		async ({ label, view }) => {
+			renderRail();
+			fireEvent.focus(screen.getByRole("button", { name: label }));
+			const tooltip = await screen.findByRole("tooltip");
+			expect(tooltip.textContent).toBe(`${label} ${formatChord(DRAWER_VIEW_CHORDS[view])}`);
+		}
+	);
+
 	it("does not reuse an icon another button already owns", () => {
 		renderRail();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
