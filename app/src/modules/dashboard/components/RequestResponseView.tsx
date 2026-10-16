@@ -245,6 +245,7 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 				verdict={report.thresholdValidation}
 				runId={report.metadata?.runId}
 				stopped={stoppedRunOf(report)}
+				carriedBudgets={report.metadata?.configuration?.carriedBudgets}
 			/>
 
 			{/* The run's own named trends, counters and rates (issue #1500),

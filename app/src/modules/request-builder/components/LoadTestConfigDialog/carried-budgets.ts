@@ -16,6 +16,7 @@
 
 import {
 	BUDGET_FIELDS,
+	customBudgetKey,
 	describeCustomBudget,
 	describeFixedBudget,
 	isDeclaredCustomBudget,
@@ -95,6 +96,23 @@ export function stillCarried(
 
 function sameCustomRow(a: CustomBudgetDraft, b: CustomBudgetDraft | undefined): boolean {
 	return !!b && a.name === b.name && a.stat === b.stat && a.value === b.value;
+}
+
+/**
+ * The `thresholds` keys of the carried fields, as they travel on `POST /runs`
+ * (issue #2195). Both sources count: the user typed neither a memo value nor
+ * the SLO seed for this run. A key is named whether or not it ends up in
+ * `thresholds`; `buildLoadTestConfig` drops the ones that do not.
+ */
+export function carriedThresholdKeys(
+	carried: CarriedBudgets,
+	customBudgets: readonly CustomBudgetDraft[]
+): string[] {
+	const fixed = Object.keys(carried.fixed);
+	const custom = customBudgets
+		.filter((row) => carried.customIds.includes(row.id))
+		.map((row) => customBudgetKey(row.name.trim(), row.stat));
+	return [...fixed, ...custom];
 }
 
 /** The draft with exactly the carried fields blanked and the carried rows dropped. */

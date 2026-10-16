@@ -1008,7 +1008,8 @@ int64_t offset) {
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
- * bound (thirteen keys total) and, when the snapshot carries one,
+ * bound and the budgets it carried (fourteen keys total) and, when the
+ * snapshot carries one,
  * `acceptEncoding` (issue #1488), built from an already-parsed
  * config_snapshot. `rps`/`targetRps` is the one rename, so it stays as an
  * inline branch in the caller rather than living in this key list.
@@ -1027,7 +1028,11 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
          // recoverable from the report rather than only from the payload the
          // caller no longer has. The file's name and content hash beside it
          // (issue #2051), never its path.
-         "dataRowCount", "dataFileName", "dataFileHash" }) {
+         "dataRowCount", "dataFileName", "dataFileHash",
+         // The metric keys whose budgets were carried over from an earlier
+         // run rather than set for this one (issue #2195): the thresholds
+         // alone cannot say which is which, so a verdict needs this to.
+         "carriedBudgets" }) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);

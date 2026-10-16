@@ -1047,6 +1047,22 @@ TEST (RunReportConfigTest, CarriesTheDataFileBesideTheRowCount) {
     EXPECT_FALSE (unnamed.contains ("dataFileHash"));
 }
 
+// The budgets a run carried over rather than set (issue #2195), echoed as the
+// client sent them so the verdict can tag those rows. Mutation check: drop
+// `carriedBudgets` from `build_run_report_config`'s key list and this reds.
+TEST (RunReportConfigTest, CarriesTheCarriedBudgetsAndOmitsThemWhenAbsent) {
+    auto config = json::parse (
+    R"({"mode":"once","carriedBudgets":["latencyP99Ms","custom.checkout.p95"]})");
+
+    const auto config_obj = vayu::http::routes::build_run_report_config (config);
+    EXPECT_EQ (config_obj.value ("carriedBudgets", json ()),
+    json::parse (R"(["latencyP99Ms","custom.checkout.p95"])"));
+
+    const auto set_here =
+    vayu::http::routes::build_run_report_config (json::parse (R"({"mode":"once"})"));
+    EXPECT_FALSE (set_here.contains ("carriedBudgets"));
+}
+
 // A collection run's file is in its manifest, not the snapshot's top level, so
 // `metadata.configuration` reaches into `scenario` for it and every report that
 // had a file names it in one place (issue #2051). Mutation check: drop the

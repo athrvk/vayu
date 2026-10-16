@@ -1910,6 +1910,11 @@ export interface LoadTestConfig {
 	max_in_flight?: number;
 	/** Absent when the run declared no budgets - never an empty object. */
 	thresholds?: RunThresholds;
+	/**
+	 * Which `thresholds` keys still hold a value the user did not set for this run
+	 * (issue #2195). Absent when none do, and never names a key `thresholds` lacks.
+	 */
+	carriedBudgets?: string[];
 	/** Absent when the run monitors no endpoint - never an empty object. */
 	monitor?: RunMonitorConfig;
 	/**
@@ -2372,6 +2377,12 @@ export interface RunReport {
 			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
+			/**
+			 * The `thresholds` keys the app sent as carried over rather than set for
+			 * this run (issue #2195), echoed as sent. Absent when none were, and for
+			 * runs that predate the key.
+			 */
+			carriedBudgets?: string[];
 			/**
 			 * Requested protocol - see {@link RunConfigSnapshot.httpVersion}. Built by
 			 * `build_run_report_config` (`engine/src/http/routes/runs.cpp`), which

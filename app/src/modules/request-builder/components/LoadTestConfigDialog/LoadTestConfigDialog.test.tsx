@@ -1302,6 +1302,88 @@ describe("pass/fail budgets", () => {
 			open();
 			expect(carriedNotice()).toHaveTextContent("carried over from your last load test");
 		});
+
+		/*
+		 * The same set the notice names rides to the engine as `carriedBudgets`
+		 * (issue #2195), so the stored report can tag those checks.
+		 */
+		describe("what Start sends as carried (#2195)", () => {
+			it("sends the memo's budgets under their thresholds keys", () => {
+				// Mutation check: drop `carriedBudgets` from the draft handed to
+				// buildLoadTestConfig and every case here reds.
+				seedMemo({ budgets: { latencyP99Ms: "150", maxErrorRatePct: "2" } });
+				const { onStart } = open();
+				const config = started(onStart);
+				expect(config.carriedBudgets).toEqual(["latencyP99Ms", "maxErrorRatePct"]);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 150, maxErrorRatePct: 2 });
+			});
+
+			it("includes the p99 the SLO setting seeded", () => {
+				useClientSettingsStore.getState().setSloThresholdMs(200);
+				const { onStart } = open();
+				expect(started(onStart).carriedBudgets).toEqual(["latencyP99Ms"]);
+			});
+
+			it("drops a carried budget the user edits, keeping the untouched ones", () => {
+				seedMemo({ budgets: { latencyP99Ms: "150", maxErrorRatePct: "2" } });
+				const { onStart } = open();
+				openBudgets();
+				fireEvent.change(p99(), { target: { value: "90" } });
+				const config = started(onStart);
+				expect(config.carriedBudgets).toEqual(["maxErrorRatePct"]);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 90, maxErrorRatePct: 2 });
+			});
+
+			it("omits the key when the only budget was typed this time", () => {
+				const { onStart } = open();
+				openBudgets();
+				fireEvent.change(p99(), { target: { value: "90" } });
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 90 });
+				expect(config).not.toHaveProperty("carriedBudgets");
+			});
+
+			it("omits the key when the carried budgets were cleared", () => {
+				seedMemo({ budgets: { latencyP99Ms: "150", maxErrorRatePct: "2" } });
+				const { onStart } = open();
+				openBudgets();
+				fireEvent.change(screen.getByLabelText(/throughput/i), {
+					target: { value: "500" },
+				});
+				fireEvent.click(clearCarriedButton()!);
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ minThroughputRps: 500 });
+				expect(config).not.toHaveProperty("carriedBudgets");
+			});
+
+			it("sends a carried custom row as custom.<name>.<stat>, trimmed", () => {
+				seedMemo({
+					budgets: { latencyP99Ms: "" },
+					customBudgets: [{ id: "c1", name: " cart ", stat: "p95", value: "5" }],
+				});
+				const { onStart } = open();
+				const config = started(onStart);
+				expect(config.carriedBudgets).toEqual(["custom.cart.p95"]);
+				expect(config.thresholds).toEqual({ "custom.cart.p95": 5 });
+			});
+
+			it("does not claim a custom row the user added beside a carried one", () => {
+				seedMemo({
+					budgets: { latencyP99Ms: "" },
+					customBudgets: [{ id: "c1", name: "cart", stat: "p95", value: "5" }],
+				});
+				const { onStart } = open();
+				openBudgets();
+				addCustomRow();
+				fireEvent.change(screen.getByLabelText(/custom budget 2 metric name/i), {
+					target: { value: "mine" },
+				});
+				fireEvent.change(screen.getByLabelText(/custom budget 2 ceiling/i), {
+					target: { value: "9" },
+				});
+				expect(started(onStart).carriedBudgets).toEqual(["custom.cart.p95"]);
+			});
+		});
 	});
 
 	it("hands the saved request to each budget's Copy for agent (#2047)", () => {
