@@ -130,7 +130,7 @@ describe("describeCarried", () => {
 	it("names the request that set a memo value", () => {
 		const carried = findCarriedBudgets(budgets, []);
 		expect(describeCarried(carried, budgets, [], { requestName: "Orders" })).toBe(
-			"Budgets carried over from Orders: p99 latency at most 150 ms, Error rate at most 2%. They will judge this run."
+			'Budgets carried over from "Orders": p99 latency at most 150 ms, Error rate at most 2%. They will judge this run.'
 		);
 	});
 
@@ -163,7 +163,7 @@ describe("describeCarried", () => {
 		const rows = [row()];
 		const carried = findCarriedBudgets({ latencyP99Ms: "" }, rows);
 		expect(describeCarried(carried, draft(), rows, { requestName: "Orders" })).toBe(
-			"Budgets carried over from Orders: custom.cart.p95 at most 5. They will judge this run."
+			'Budgets carried over from "Orders": custom.cart.p95 at most 5. They will judge this run.'
 		);
 	});
 

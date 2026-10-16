@@ -1142,7 +1142,7 @@ describe("pass/fail budgets", () => {
 			});
 			open();
 			expect(carriedNotice()).toHaveTextContent(
-				"Budgets carried over from Orders: p99 latency at most 150 ms, Error rate at most 2%. They will judge this run."
+				'Budgets carried over from "Orders": p99 latency at most 150 ms, Error rate at most 2%. They will judge this run.'
 			);
 		});
 
@@ -1225,7 +1225,7 @@ describe("pass/fail budgets", () => {
 
 			cleanup();
 			open();
-			expect(carriedNotice()).toHaveTextContent("carried over from Invoices");
+			expect(carriedNotice()).toHaveTextContent('carried over from "Invoices"');
 		});
 
 		it("keeps naming the original request when a Start leaves the budgets alone", () => {
@@ -1237,7 +1237,7 @@ describe("pass/fail budgets", () => {
 
 			cleanup();
 			open();
-			expect(carriedNotice()).toHaveTextContent("carried over from Orders");
+			expect(carriedNotice()).toHaveTextContent('carried over from "Orders"');
 		});
 
 		it("falls back to the last load test when the changing Start had no saved request", () => {

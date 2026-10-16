@@ -161,7 +161,7 @@ export function describeCarried(
 	if (items.length === 0) return null;
 
 	const lead = fromMemo
-		? `Budgets carried over from ${origin?.requestName ?? UNNAMED_ORIGIN}`
+		? `Budgets carried over from ${origin ? `"${origin.requestName}"` : UNNAMED_ORIGIN}`
 		: "Budgets prefilled";
 	return `${lead}: ${items.join(", ")}. They will judge this run.`;
 }
