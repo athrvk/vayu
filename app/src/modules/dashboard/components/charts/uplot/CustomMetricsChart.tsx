@@ -74,6 +74,7 @@ export function CustomMetricsChart({
 			xTime
 			height={height}
 			yFormat={axisVitals}
+			yMin={null}
 			isLive={!isCompleted}
 			syncKey={syncKey}
 		/>

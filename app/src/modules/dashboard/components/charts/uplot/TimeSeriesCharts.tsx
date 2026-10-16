@@ -193,10 +193,11 @@ export function RequestRateChart({
 	height,
 	targetRps,
 	rampOverlay,
+	mode,
 	breakpoint,
 	anomalies,
 	sleeps,
-}: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null }) {
+}: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null; mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series, hasRamp } = useMemo(() => {
@@ -267,6 +268,7 @@ export function RequestRateChart({
 			height={height}
 			yFormat={axisRate}
 			y2Format={(v) => `${Math.round(v)}`}
+			y2Label={hasRamp ? concurrencyMeasureLabel(mode) : undefined}
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={markers}
@@ -413,6 +415,7 @@ export function ServerVitalsChart({
 			xTime
 			height={height}
 			yFormat={axisVitals}
+			yMin={null}
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			annotations={annotations}

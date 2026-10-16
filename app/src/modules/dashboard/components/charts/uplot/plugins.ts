@@ -39,6 +39,55 @@ export interface Marker {
 
 const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
 
+const ABOVE_RANGE = " (above range)";
+const BELOW_RANGE = " (below range)";
+
+/** `label` plus `suffix`, with the label cut short and ellipsised when the pair would not fit `maxWidth`. */
+function fitLabel(
+	ctx: CanvasRenderingContext2D,
+	label: string,
+	suffix: string,
+	maxWidth: number
+): string {
+	if (ctx.measureText(label + suffix).width <= maxWidth) return label + suffix;
+	let base = label;
+	while (base.length > 0 && ctx.measureText(`${base}…${suffix}`).width > maxWidth) {
+		base = base.slice(0, -1);
+	}
+	return `${base}…${suffix}`;
+}
+
+/**
+ * A horizontal marker at canvas-pixel `cy`. One whose value is off the visible y
+ * range is pinned to the plot's top or bottom edge and says which way it is off,
+ * because a threshold the data never reaches is itself a finding ("the SLO is
+ * far above anything this run did") and dropping it silently reads as no SLO.
+ */
+function drawHorizontalMarker(
+	ctx: CanvasRenderingContext2D,
+	bbox: uPlot.BBox,
+	m: Marker,
+	cy: number
+): void {
+	const { left, top, width, height } = bbox;
+	const above = cy < top;
+	const below = cy > top + height;
+	const y = Math.min(Math.max(cy, top), top + height);
+	ctx.beginPath();
+	ctx.moveTo(left, y);
+	ctx.lineTo(left + width, y);
+	ctx.stroke();
+
+	const inset = 4 * dpr();
+	const suffix = above ? ABOVE_RANGE : below ? BELOW_RANGE : "";
+	const label = suffix ? fitLabel(ctx, m.label, suffix, width - 2 * inset) : m.label;
+	const right = (m.align ?? "right") === "right";
+	ctx.textAlign = right ? "right" : "left";
+	// A line on the top edge has no room above it, so its label hangs below.
+	const labelY = above ? top + 11 * dpr() : y - inset;
+	ctx.fillText(label, right ? left + width - inset : left + inset, labelY);
+}
+
 /** Draw reference markers each frame (survives zoom/pan) via the `draw` hook. */
 export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uPlot.Plugin {
 	return {
@@ -56,6 +105,9 @@ export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uP
 					ctx.fillStyle = color;
 					if (m.orient === "vertical") {
 						const cx = u.valToPos(m.value, "x", true);
+						// Unlike a horizontal marker, an x marker off the plot is skipped: the
+						// user zoomed past it, and clamping it to an edge would pin a moment
+						// to a place it is not.
 						if (cx < left || cx > left + width) continue;
 						ctx.beginPath();
 						ctx.moveTo(cx, top);
@@ -68,18 +120,11 @@ export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uP
 						ctx.textAlign = flip ? "right" : "left";
 						ctx.fillText(m.label, flip ? cx - inset : cx + inset, top + 11 * dpr());
 					} else {
-						const cy = u.valToPos(m.value, m.scale ?? "y", true);
-						if (cy < top || cy > top + height) continue;
-						ctx.beginPath();
-						ctx.moveTo(left, cy);
-						ctx.lineTo(left + width, cy);
-						ctx.stroke();
-						const right = (m.align ?? "right") === "right";
-						ctx.textAlign = right ? "right" : "left";
-						ctx.fillText(
-							m.label,
-							right ? left + width - 4 * dpr() : left + 4 * dpr(),
-							cy - 4 * dpr()
+						drawHorizontalMarker(
+							ctx,
+							u.bbox,
+							m,
+							u.valToPos(m.value, m.scale ?? "y", true)
 						);
 					}
 				}
@@ -107,6 +152,9 @@ export interface Annotation {
 	label: string;
 	role: ColorRole;
 }
+
+/** How far, in CSS pixels, the cursor may be from an annotation and still be hovering it - what makes an instant (zero width) reachable. */
+const ANNOTATION_HOVER_PX = 5;
 
 /** Below this width a band would read as a smudge, so it is drawn as a line. */
 const MIN_BAND_PX = 2;
@@ -168,7 +216,34 @@ export function annotationsPlugin(
 	};
 }
 
+/** The annotations with something to say that sit under the cursor at `left` (CSS px). */
+export function annotationsUnderCursor(
+	u: uPlot,
+	annotations: readonly Annotation[],
+	left: number
+): Annotation[] {
+	return annotations.filter((a) => {
+		if (a.label === "") return false;
+		const x1 = u.valToPos(a.startSeconds, "x", false);
+		const x2 = u.valToPos(a.endSeconds, "x", false);
+		return left >= x1 - ANNOTATION_HOVER_PX && left <= x2 + ANNOTATION_HOVER_PX;
+	});
+}
+
 export type ValueFormatter = (v: number | null | undefined) => string;
+
+/** A tooltip line naming an annotation under the cursor: a swatch in its colour, then its label. */
+function annotationRow(label: string, stroke: string): HTMLElement {
+	const row = document.createElement("div");
+	row.style.cssText = "display:flex;gap:5px;align-items:center";
+	const swatch = document.createElement("span");
+	swatch.style.cssText = "width:8px;height:8px;flex:none;display:inline-block";
+	swatch.style.background = stroke;
+	const text = document.createElement("span");
+	text.textContent = label;
+	row.append(swatch, text);
+	return row;
+}
 
 /** One legend row of the hover tooltip: swatch and label on the left, value on the right. */
 function tooltipRow(label: string, value: string, stroke: string): HTMLElement {
@@ -208,6 +283,11 @@ export function tooltipPlugin(opts: {
 	 * A series listed here is a per-band amount, so a zero is not a row.
 	 */
 	tipValues?: () => Record<number, (number | null)[]>;
+	/**
+	 * The shaded windows to name when the cursor is over one. A getter for the
+	 * same reason as `tipValues`: annotations stream in without a rebuild.
+	 */
+	annotations?: () => Annotation[];
 }): uPlot.Plugin {
 	let tip: HTMLDivElement | null = null;
 	const fmt = opts.format ?? {};
@@ -277,6 +357,9 @@ export function tooltipPlugin(opts: {
 					else rows.push(row);
 				}
 				if (rows.length === headRows && firstZeroRow) rows.push(firstZeroRow);
+				for (const a of annotationsUnderCursor(u, opts.annotations?.() ?? [], left)) {
+					rows.push(annotationRow(a.label, opts.theme.color(a.role)));
+				}
 				// Built from text, never markup: series labels include script-defined
 				// custom-metric names, which an imported collection can fill with HTML.
 				tip.replaceChildren(...rows);
