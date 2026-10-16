@@ -33,7 +33,8 @@ export type RunResultSample = NonNullable<RunReport["results"]>[number];
  * `connectMs`/`tlsMs`) and never stored `wireMs`/`queueWaitMs`. The current
  * writer stores all eight keys, so on fresh rows the restored Timing tab shows
  * exactly what the live one did, Wire and Queue included; on old rows a
- * missing phase means zero and Wire/Queue stay absent.
+ * missing phase means zero and Wire/Queue stay absent. `engineMs` is stored only
+ * by a buffered send, so it is absent on a stream, an auth failure and old rows.
  *
  * Returns `undefined` when the trace carries no phase at all, so the caller
  * does not surface a Timing tab that would render an all-zero timeline.
@@ -49,6 +50,8 @@ export function timingFromTrace(
 		totalMs: latencyMs ?? trace.totalMs ?? 0,
 		...(typeof trace.wireMs === "number" && { wireMs: trace.wireMs }),
 		...(typeof trace.queueWaitMs === "number" && { queueWaitMs: trace.queueWaitMs }),
+		// Flat on the trace, nested under `timing` on the live body (#2132).
+		...(typeof trace.engineMs === "number" && { engineMs: trace.engineMs }),
 		dnsMs: trace.dnsMs ?? 0,
 		connectMs: trace.connectMs ?? 0,
 		tlsMs: trace.tlsMs ?? 0,

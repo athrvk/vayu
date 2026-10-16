@@ -26,7 +26,7 @@ import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { TimeRow } from "@/lib/time-value";
-import { formatResponseTime, formatSize } from "./utils";
+import { ENGINE_COST_TIP, formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
 
@@ -37,6 +37,13 @@ export interface ResponseStatusBarProps {
 	time?: number;
 	/** Omitted by callers that have no size. */
 	size?: number;
+	/**
+	 * Vayu's own share of `time` (#2132), in ms - `timing.engineMs`. Absent for a
+	 * stream, an auth-failure reply and rows stored before the engine reported
+	 * it; the bar then shows nothing rather than a zero. Drawn beside `time`, so
+	 * it needs `time` to be present too.
+	 */
+	engineMs?: number;
 	/**
 	 * The protocol this exchange negotiated - a display string ("HTTP/1.1"),
 	 * not the request-side `HttpVersion` union. Only read when
@@ -93,11 +100,16 @@ export interface ResponseStatusBarProps {
 	className?: string;
 }
 
+/** A figure the engine reported: absent, NaN and negative all mean "nothing to show". */
+const isReportedMs = (ms: number | undefined): ms is number =>
+	typeof ms === "number" && Number.isFinite(ms) && ms >= 0;
+
 export function ResponseStatusBar({
 	status,
 	statusText,
 	time,
 	size,
+	engineMs,
 	httpVersion,
 	httpVersionDowngraded,
 	clientCertificate,
@@ -198,6 +210,12 @@ export function ResponseStatusBar({
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
 					<Clock className="size-icon-sm" />
 					<span className="tabular-nums">{formatResponseTime(time)}</span>
+					{/* Plain text, no `bg-`: see the variant="chip" rule in badge-hover.test.tsx. */}
+					{isReportedMs(engineMs) && (
+						<span className="tabular-nums" title={ENGINE_COST_TIP}>
+							- {formatResponseTime(engineMs)} in Vayu
+						</span>
+					)}
 				</div>
 			)}
 

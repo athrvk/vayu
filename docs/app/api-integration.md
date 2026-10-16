@@ -1359,7 +1359,7 @@ replay puts the run's recorded list back on its seeded rows.
   httpVersionDowngraded: false,
   clientCertificate: "",
   bodyCapped: false,
-  timing: { total: 150, dns: 10, connect: 20, ... },
+  timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
     { name: "Status 200", passed: true, source: "test" }
@@ -1414,6 +1414,17 @@ has to say which was used: two calls to what looks like the same API can differ
 only in which registry entry matched. The stored trace carries the same value
 under the same key, so `responseFromExecuteResult` and `responseFromRunResult`
 agree - see `client-certificate-funnels.test.ts`.
+
+`timing.engineMs` is Vayu's own cost for the exchange: the engine's elapsed time
+less the transfer and the user's scripts (issue #2132; the engine's definition
+is under [One timing convention](../engine/api-reference.md#post-execute)). It
+is optional - a stream, an auth-failure reply and rows stored before the key
+existed carry none - and the stored trace holds it **flat** as
+`trace.engineMs` where the live body nests it under `timing`, so
+`timingFromTrace` copies it across. `ResponseStatusBar` draws it as "in Vayu"
+beside the elapsed time and the Timing tab as its **Vayu** stat; neither shows a
+figure that is absent, and `queueWaitMs` (the sliver before libcurl) is never
+presented as it. `engine-ms-funnels.test.ts` holds the two funnels together.
 
 `bodyCapped` says the engine stopped **reading** this response at
 `maxDesignResponseBodyBytes` (Settings → Limits, default 32MB), so `body`,
