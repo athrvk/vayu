@@ -570,6 +570,10 @@ for macos in 13.3 13.6.1 14.5 26.0; do
 	sw_vers() { printf '%s\n' "$macos"; }
 	(VAYU_DRYRUN=0 require_supported_os) >/dev/null 2>&1 || fail "macOS $macos should be accepted"
 done
+# Uninstall is never blocked by the floor.
+sw_vers() { printf '12.7.6\n'; }
+(VAYU_DRYRUN=0 require_supported_os uninstall) >/dev/null 2>&1 \
+	|| fail "an old macOS must still be able to uninstall"
 # A Mac without sw_vers is refused as a missing tool, not read as version "".
 unset -f sw_vers
 if (VAYU_DRYRUN=0 PATH=/nonexistent require_supported_os) >/dev/null 2>&1; then
@@ -896,6 +900,7 @@ fi
 
 printf 'PASS: running-app guard\n'
 
+# Must stay last: this leaves running_pids and platform stubbed.
 # A fresh install (nothing running to reopen) reaches the offer; an update that
 # reopened the app does not get asked about the same thing twice.
 running_pids() { :; }

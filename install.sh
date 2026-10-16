@@ -613,6 +613,8 @@ require_macos_floor() {
 		|| die_with "$EXIT_UNSUPPORTED" "Vayu needs macOS $MACOS_MIN_VERSION (Ventura) or later (this Mac is $have)."
 }
 
+# "uninstall" skips the macOS floor: a Mac older than 13.3 may already have
+# Vayu installed, and must still be able to remove it.
 require_supported_os() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
@@ -631,7 +633,7 @@ require_supported_os() {
 			for tool in curl codesign xattr shasum ditto plutil osascript sudo sw_vers; do
 				command -v "$tool" >/dev/null 2>&1 || die "Required tool missing: $tool"
 			done
-			require_macos_floor
+			[ "${1:-}" = uninstall ] || require_macos_floor
 			;;
 		Linux)
 			# Only x86_64 AppImages are published, so an arm64 Linux box would
@@ -1124,7 +1126,7 @@ do_install() {
 }
 
 do_uninstall() {
-	require_supported_os
+	require_supported_os uninstall
 	acquire_lock
 	trap release_lock EXIT
 	# Point at the copy that actually exists before looking for its processes,
@@ -1272,8 +1274,8 @@ Updating quits a running Vayu first (it asks). Set VAYU_ASSUME_YES=1 to skip
 the prompt. Re-running when the latest version is already installed does
 nothing unless --force is given.
 
-When it finishes it offers to open Vayu (never with VAYU_ASSUME_YES=1 or
-without a terminal). It refuses a macOS older than 13.3 before downloading
+When it finishes it offers to open Vayu (never with VAYU_ASSUME_YES=1,
+without a terminal, or on Linux without a display). It refuses a macOS older than 13.3 before downloading
 anything (exit 4).
 
 Exit codes: 0 done (including "already installed"), 1 failed, 2 bad usage,
