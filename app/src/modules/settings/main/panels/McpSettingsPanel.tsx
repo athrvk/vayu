@@ -73,6 +73,7 @@ import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { Callout } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { loadTestModeLabel } from "@/constants/load-test-modes";
 import { appSetting } from "../app-settings";
 import { CollapsibleText, NumberSettingRow, ToggleRow } from "./SettingControls";
 
@@ -267,14 +268,13 @@ const CAP_FIELDS: CapField[] = [
 		label: "Max RPS",
 		unit: "req/s",
 		description:
-			"Ceiling on the request rate an agent may ask for. Only a Constant RPS run carries a rate - the closed-loop modes are held by Max concurrency and Max iterations instead.",
+			"Ceiling on the request rate an agent may ask for. Only a Constant RPS run carries a rate - the closed-loop modes are held by Max virtual users and Max iterations instead.",
 		ceiling: LOAD_TEST_CEILING_BOUNDS.rps.MAX,
 	},
 	{
 		key: "maxConcurrency",
-		label: "Max concurrency",
-		description:
-			"Ceiling on the connections a closed-loop run may hold: what Constant Concurrency holds, what a Ramp-Up starts from, and the top a Capacity Discovery search climbs to. A Constant RPS run is paced by its rate instead, so this cap does not bound its in-flight requests.",
+		label: "Max virtual users",
+		description: `Ceiling on the virtual users a closed-loop run may hold: what ${loadTestModeLabel("constant_concurrency")} holds, what a Ramp-Up starts from, and the top a Capacity Discovery search climbs to. A Constant RPS run is paced by its rate instead, so this cap does not bound its in-flight requests.`,
 		ceiling: LOAD_TEST_CEILING_BOUNDS.concurrency.MAX,
 	},
 	{

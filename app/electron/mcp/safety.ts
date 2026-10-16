@@ -372,7 +372,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 		if (typeof value === "number" && value > config.maxConcurrency) {
 			return {
 				ok: false,
-				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency}. Lower it or raise the cap in Settings.`,
+				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency} virtual users. Lower it or raise the cap in Settings.`,
 			};
 		}
 	}

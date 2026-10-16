@@ -28,7 +28,7 @@ the request comes back green.
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON |
 | **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | In Preferences - proxy and CA file; certs per collection |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Yes (via converter) |
-| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
+| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | Yes (2.0 / 3.x) |
 | **Open source** | Yes (dual-license) | Yes (MIT) |
 
 \* **One asterisk that row has earned.** `system` proxy mode resolves a PAC
@@ -72,7 +72,10 @@ exposes **77 typed tools** covering inspection, execution, **load runs**, and
 writes over collections, requests and environments. The distinction worth caring
 about is the load engine: an agent can start a capped load run and read the
 report back. It is gated accordingly - an allowlist that starts empty, caps on
-RPS, concurrency and duration, and a write toggle that ships off. See the
+RPS, concurrency and duration, and a write toggle that ships off. The agent can
+see what you have open (`get_app_focus`), and every request, run, variable or
+GraphQL operation has a Copy for agent button that puts a reference on the
+clipboard - so "load test this" means the thing on your screen. See the
 [MCP reference](../engine/mcp.md).
 
 ## When to choose Bruno

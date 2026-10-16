@@ -12,7 +12,7 @@
  * the engine's: the engine range-checks a run config too, but those bounds are
  * crash guards (a negative `concurrency` is an eager pre-allocation of ~1.8e19
  * curl handles), so they sit far above anything a dialog should offer and are
- * not settings. What was left was a shipped default of 1000 connections that a
+ * not settings. What was left was a shipped default of 1000 virtual users that a
  * user on real hardware had no way to raise.
  *
  * Each field here is clamped to the engine's guard on the way into the store,
@@ -54,7 +54,7 @@ interface CeilingField {
 
 /**
  * Four ceilings, not six: ramp duration follows the duration ceiling and ramp
- * start follows the connection ceiling, because each pair is the same physical
+ * start follows the virtual-user ceiling, because each pair is the same physical
  * quantity (see `resolveLoadTestLimits`).
  */
 const FIELDS: readonly CeilingField[] = [
@@ -62,7 +62,7 @@ const FIELDS: readonly CeilingField[] = [
 		key: "concurrency",
 		setting: appSetting("load-max-connections"),
 		description:
-			"Upper bound on the Connections field, and on where a ramp may start or finish. The engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
+			"Upper bound on the Virtual users field, and on where a ramp may start or finish. The engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
 	},
 	{
 		key: "rps",

@@ -1075,12 +1075,16 @@ function sendMcpDataChanged(event: McpDataChangedEvent): void {
 
 async function stopMcp() {
 	const listener = mcpListener;
+	const service = mcpService;
 	mcpListener = null;
-	// The service never bound a socket of its own, so closing the port is all
-	// there is to stop; a later start builds a fresh one on first request.
+	// The service binds no socket of its own (the listener's carries its
+	// requests), but it holds the exchanges a 2026-07-28 client keeps open, which
+	// the listener's close would otherwise wait on. A later start builds a fresh
+	// service on first request.
 	mcpService = null;
 	if (!listener) return;
 	try {
+		await service?.stop();
 		await listener.stop();
 		appLogger().info("mcp", "MCP server stopped");
 	} catch (error) {

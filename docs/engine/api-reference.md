@@ -3286,6 +3286,7 @@ is claimed by the same one it always was:
 | `_postman_variable_scope: "environment"` + `values[]` | `Postman Environment` |
 | `_postman_variable_scope: "globals"` + `values[]` | `Postman Globals` |
 | `_type: "export"` + `__export_format: 4` | `Insomnia Export v4` |
+| `type: collection.insomnia.rest/5.x` or `environment.insomnia.rest/5.x` | `Insomnia Export v5` |
 | `openapi` starting `3.` | `OpenAPI 3.0` |
 | `swagger` being `2.0` (string or number) | `OpenAPI 2.0 (Swagger)` |
 | the raw text contains `<jmeterTestPlan` | `JMeter <version> Test Plan` |
@@ -3299,6 +3300,19 @@ exception to "read once through `read_document`": it is XML, checked on the
 raw text (issue #1518, `is_jmeter_document`) before that reader ever runs,
 since XML fails both of its formats the same way genuinely unrecognised bytes
 do - see `docs/app/import-collections/jmeter.md` for the class mapping.
+
+**Insomnia v5** (issue [#2119](https://github.com/athrvk/vayu/issues/2119)) is
+the YAML document Insomnia 11 and later export, one per collection or
+environment. It is read through the v4 mapping: the nested `collection[]` tree
+(a `children` array makes a folder) and the `environments` object with its
+`subEnvironments[]` are flattened into v4's resource list, so both versions of
+one workspace import as the same tree and only `meta.format` tells them apart.
+An `environment.insomnia.rest/5.x` document imports environments only, under
+`importEnvironments` like a Postman environment export; with no
+sub-environment its one environment is named after the document. A gRPC or
+WebSocket item is counted in `meta.skipped` as `grpc` / `websocket`, as in v4,
+and `cookieJar` and `certificates` are not imported. The member spellings are
+those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 
 **Request:**
 ```json
@@ -3416,8 +3430,17 @@ the reason `x-vayu-elements` is not.
   are different answers.
 - `400` `Could not read the document: <detail>` - neither JSON nor YAML, with
   the line named.
-- `400` `Malformed Insomnia export: <field> must be an array` - the one format
-  whose export is a flat resource list, so a broken one leaves nothing to walk.
+- `400` `Could not read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
+  that is not a collection or an environment: `<kind>` reads `design document
+  (spec)` for `spec.insomnia.rest/`, `mock server` for `mock.insomnia.rest/`,
+  and the `type`'s own prefix otherwise. A collection or environment in a
+  format other than 5.x gets `... this is an Insomnia collection export in
+  format 6.0, which this version of Vayu does not read. It reads format 5.`
+  Neither is `Unrecognised format`, so the app shows the sentence as written.
+- `400` `Malformed Insomnia export: <field> must be an array` (or
+  `an object`) - Insomnia's resource list (v4) or nested tree (v5) broken
+  where the walk needs it, so there is nothing to walk; a v5 field is named by
+  its path (`collection[0].children[2]`).
 - `400` `Malformed JMeter test plan: <detail>` - XML pugixml could not parse,
   or well-formed XML with no `<jmeterTestPlan>` root.
 - `400` `Invalid 'importScripts': must be a boolean` (and the same for
@@ -7124,7 +7147,10 @@ knob.
 - **A script that did not run inline stays deferred, keyed per step.** After
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
-  the breakdown as `tests` (see `scenario.steps` below). A step that carries
+  the breakdown as `tests` (see `scenario.steps` below). A step with several
+  un-inlined, enabled `script.post` elements replays all of them, joined in
+  order, as a single-request run does; a disabled one never runs and tallies
+  `skipped`. A step that carries
   no script, whose script ran inline this run, or whose script never got a
   sampled response, carries no `tests` object at all rather than a row of
   zeros.

@@ -141,7 +141,8 @@ export const DOC_READING_GUARDS = {
 	 * registry grows by a tool, and every page that says how many there are
 	 * stays on the figure that was true when it was written - 24 on two pages,
 	 * 49 on two more, against 68 in `TOOLS`. The pages that name no count are
-	 * listed too, so the guard covers them from the day one is added.
+	 * listed too, so the guard covers them from the day one is added. The
+	 * resource and prompt totals ride the same pages (#2108).
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
@@ -389,7 +390,8 @@ export const ROOT_READING_GUARDS = {
 	},
 	/*
 	 * The README states the MCP tool count twice, so the doc guard above reads
-	 * it as well - the same number, drifting for the same reason (#1431).
+	 * it as well - the same number, drifting for the same reason (#1431), and
+	 * the resource and prompt totals with it (#2108).
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",

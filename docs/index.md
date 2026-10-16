@@ -28,7 +28,7 @@ Coming from another tool? Read the honest comparison:
 
 ## Install
 
-Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sign-in.
+Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No account, no sign-in.
 
 <!-- This section is the canonical install copy (flipped from README.md in #631).
      The README carries the three one-liners only and links back here for the
@@ -49,7 +49,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     **macOS 13.3 (Ventura) or later.** Electron sets a macOS 13 floor for the
     app, and the engine raises it to 13.3: libc++ only ships floating-point
     `std::to_chars` from that release, and the engine cannot be built without
-    it. On anything older the installed app will not launch.
+    it. The installer refuses an older macOS before downloading.
 
     Installs the latest release to `/Applications`, and asks for your password
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
@@ -57,7 +57,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     not unverifiable: the script checks the download against its published
     checksum and refuses to install without one, and every asset of a release
     from 0.40.0 on carries a build-provenance attestation - confirm one by hand
-    with `gh attestation verify <file> --repo athrvk/vayu`.
+    with `gh attestation verify <file> --repo athrvk/vayu`. When it finishes,
+    it offers to open Vayu.
 
     **Updating is the same command.** It keeps your collections and settings,
     offers to quit Vayu if it is running (and reopens it after), and does
@@ -92,7 +93,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     The same command as macOS. It installs the AppImage under
     `~/.local/share/vayu` and registers a launcher entry, so Vayu shows up in
     your applications menu. Nothing it writes leaves your home directory, so it
-    never asks for root. Re-run it to update. x86_64 only.
+    never asks for root. Re-run it to update. x86_64 only. When it finishes, it
+    offers to open Vayu if a desktop session is running.
 
     **glibc 2.35 or later**: Ubuntu 22.04, Linux Mint 21, Debian 12, Fedora 36
     or newer. The release is built on the oldest supported Ubuntu LTS so it runs
@@ -105,6 +107,19 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     If it does not start, your system is probably missing FUSE 2:
     `sudo apt install libfuse2`, or run it once with
     `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+    **On Debian or Ubuntu you can install the .deb instead.** Download
+    [**Vayu-amd64.deb**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-amd64.deb)
+    from the latest release and let apt install it, which also pulls in what it
+    depends on:
+
+    ```sh
+    sudo apt install ./Vayu-amd64.deb
+    ```
+
+    This route installs system-wide and needs `sudo`, and updates are not
+    automatic: Vayu tells you when a new version is out, and you install the new
+    .deb the same way. Same x86_64 and glibc 2.35 requirements as above.
 
 [All releases](https://github.com/athrvk/vayu/releases){ .md-button }
 [Build from source instead](building.md){ .md-button }
@@ -123,8 +138,9 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
 
 - :material-import: **Bring what you already have**
 
-    Drop in a Postman, Insomnia, OpenAPI or Swagger export and keep your folders,
-    variables, auth and scripts. [What carries over](#bring-your-existing-collections).
+    Drop in a Postman or Insomnia (v4 or v5) export, a JMeter test plan, or an OpenAPI or
+    Swagger spec and keep your folders, variables, auth and scripts.
+    [What carries over](#bring-your-existing-collections).
 
 - :material-code-braces: **Keep your Postman tests**
 
@@ -173,8 +189,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
 
 - :material-robot-outline: **Hand it to your coding agent**
 
-    A built-in MCP server exposes the engine to Claude Code, Cursor, VS Code,
-    Codex and Zed - behind a host allowlist and load caps you set.
+    A built-in MCP server exposes the engine to Claude Code, Cursor, VS Code and
+    Codex (Zed via the stdio CLI) - behind a host allowlist and load caps you set.
     [Drive Vayu from your agent](#drive-vayu-from-your-coding-agent).
 
 - :material-shield-lock-outline: **Private by default**
@@ -203,19 +219,38 @@ the tree, variables, auth and scripts.
     into Vayu's globals scope rather than creating an environment; variables you
     already had are kept, and a name that clashes is overwritten.
 
-    Binary and file bodies, a custom HTTP verb, and an auth scheme Vayu cannot
-    execute (hawk, oauth1, edgegrid) are dropped and reported with a count
-    rather than silently, and Digest / AWS / NTLM auth imports as data but will
-    not execute.
+    **Three things come across but will not behave as they did.** A file body
+    (or a form-data file) keeps the path the export named, marked to relink:
+    choose the file again in the request before it will send. A custom HTTP verb
+    such as `PROPFIND` imports as `GET` and is counted. And Digest, AWS, NTLM,
+    Hawk, OAuth 1.0, EdgeGrid and JWT auth are kept as data and not executed.
+    The import preview counts each of them rather than dropping them silently.
 
 === "Insomnia"
 
-    **Export v4.** Vayu rebuilds the workspace, folder and request tree from
+    **Insomnia v4 and v5 exports.** Vayu rebuilds the workspace, folder and request tree from
     Insomnia's flat resource list, and workspace **environments do come across**.
 
     `{{var}}` templates are converted to Vayu's own. Nunjucks tags (`{% ... %}`)
     and filtered expressions (`{{ x | filter }}`) are left verbatim as text, since
     Vayu has no equivalent - they stay visible instead of silently breaking.
+
+=== "JMeter"
+
+    **`.jmx` test plans.** An HTTP sampler becomes a request, with its URL,
+    headers, parameters and body. Loop, if, once-only, transaction and
+    throughput controllers become folders carrying the matching control element.
+    Extractors (JSON, regex, boundary), assertions (response, duration, size,
+    JSONPath) and timers (constant, random, Gaussian, throughput) become
+    elements on the request, and User Defined Variables become collection
+    variables.
+
+    JSR223 and BeanShell scripts import **disabled**, since Groovy and BeanShell
+    are not JavaScript. A class with no equivalent (a listener, CSV Data Set,
+    the cookie manager) is counted in the import preview by name rather than
+    dropped silently. Thread and loop counts are not imported: you set the load
+    profile when you start a load run.
+    [JMeter import in detail](app/import-collections/jmeter.md).
 
 === "OpenAPI & Swagger"
 
@@ -281,12 +316,17 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**77 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+**77 tools, 9 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections, saved requests and environments, plus globals and
 the cookie jar) - each with a typed schema, so the agent gets validation rather
-than guesswork.
+than guesswork. The agent can see what you have open (`get_app_focus`), and every request,
+run, variable or GraphQL operation has a Copy for agent button that puts a
+reference on the clipboard - so "load test this" means the thing on your screen.
+
+Zed speaks stdio only, so it connects through the stdio CLI rather than a URL;
+the [MCP reference](engine/mcp.md#stdio-cli-zed--headless--ci) has the details.
 
 **An agent pointed at your engine is a real capability, so it is gated.** Tools
 that touch the network refuse any host outside an **allowlist that starts empty**
@@ -360,7 +400,7 @@ persists.
     Yes - v2.0 and v2.1 exports, including folders, collection variables, auth,
     and pre/post-request scripts. Postman environments are a separate export;
     import that file too and it becomes a Vayu environment, and a globals export
-    merges into Vayu's globals scope. Insomnia v4,
+    merges into Vayu's globals scope. Insomnia v4 and v5, JMeter `.jmx` test plans,
     OpenAPI 3.1/3.0 and Swagger 2.0 import too; see
     [what carries over](#bring-your-existing-collections).
 
@@ -374,10 +414,13 @@ persists.
 ??? question "Can my coding agent use it?"
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
-    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 77 tools
+    it with Claude Code, Cursor, VS Code or Codex (Zed connects through the stdio
+    CLI). The agent gets 77 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off - and while it is off the write
-    tools are not listed at all. See the
+    tools are not listed at all. It can see what you have open (`get_app_focus`),
+    and every request, run, variable or GraphQL operation has a Copy for agent
+    button, so "load test this" means the thing on your screen. See the
     [MCP reference](engine/mcp.md).
 
 ??? question "Does it work offline, and does it need an account?"
@@ -398,8 +441,8 @@ persists.
 ??? question "Which platforms are supported?"
 
     Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon and Intel,
-    universal), and Linux (x86_64 AppImage, glibc 2.35 or later: Ubuntu 22.04,
-    Debian 12 or newer).
+    universal), and Linux (x86_64 AppImage or .deb, glibc 2.35 or later: Ubuntu
+    22.04, Debian 12 or newer).
 
 ## Contribute
 

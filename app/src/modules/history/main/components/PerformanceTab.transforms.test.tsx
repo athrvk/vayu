@@ -140,7 +140,7 @@ describe("PerformanceTab percentile series", () => {
 		// `ResponseTimeVsConcurrencyChart`, which builds no percentile series at
 		// all - so the only remaining caller would be a gate.
 		const { getByText } = renderTab(withLatency(6), "ramp_up");
-		expect(getByText("Response time vs concurrency")).toBeTruthy();
+		expect(getByText("Response time vs virtual users")).toBeTruthy();
 		expect(spies.buildPercentileChartData).not.toHaveBeenCalled();
 	});
 });

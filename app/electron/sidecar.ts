@@ -73,7 +73,9 @@ function isPortAvailable(port: number): Promise<boolean> {
 }
 
 /** `GET /health`'s body, or null on any transport, timeout or parse failure. */
-async function fetchHealth(port: number): Promise<{ status?: string; version?: string } | null> {
+async function fetchHealth(
+	port: number
+): Promise<{ status?: unknown; version?: unknown; workers?: unknown } | null> {
 	try {
 		const response = await fetch(`http://127.0.0.1:${port}/health`, {
 			signal: AbortSignal.timeout(ENGINE_HEALTH_REQUEST_TIMEOUT_MS),
@@ -85,11 +87,19 @@ async function fetchHealth(port: number): Promise<{ status?: string; version?: s
 }
 
 /**
- * Check if our engine is already running on a port
+ * Does a Vayu engine answer on this port (#2153)? `status: "ok"` alone is what
+ * any service's health route says, and a positive answer here puts the port
+ * through adoption, which stops a version mismatch with `POST /shutdown`. The
+ * engine's `/health` also carries a string `version` and a numeric `workers`;
+ * a reply without both is another program, treated as a held port.
  */
 async function isEngineRunning(port: number): Promise<boolean> {
 	const data = await fetchHealth(port);
-	return data?.status === "ok";
+	return (
+		data?.status === "ok" &&
+		typeof data.version === "string" &&
+		typeof data.workers === "number"
+	);
 }
 
 /**
@@ -291,7 +301,7 @@ export interface SidecarSystem {
 	isEngineProcessAlive(pid: number): boolean;
 	/** Force-kill a name-verified engine PID. Returns whether a kill was issued. */
 	killEngineProcess(pid: number): boolean;
-	/** Does an engine answer `/health` with `status: ok` on this port? */
+	/** Does a Vayu engine answer `/health` on this port: `status: ok` plus its `version` and `workers`? */
 	probeHealth(port: number): Promise<boolean>;
 	/** The `version` a healthy engine on this port answers with, or null. */
 	probeVersion(port: number): Promise<string | null>;
@@ -525,10 +535,10 @@ export class EngineSidecar {
 	 * already refuses the *file* on that mismatch; nothing stopped the app
 	 * from talking to a live *process* built for a different one). Adopting
 	 * it silently would run every request through a sidecar this session
-	 * never agreed to. `probeVersion` returning null - the probe answered but
-	 * the version could not be read - adopts rather than disrupts a healthy
-	 * engine on an ambiguous answer, the same direction `isPidCertainlyDead`
-	 * takes for its own unclear case.
+	 * never agreed to. `probeVersion` returning null - the engine answered
+	 * `probeHealth` but the version could not be read a moment later - adopts
+	 * rather than disrupts a healthy engine on an ambiguous answer, the same
+	 * direction `isPidCertainlyDead` takes for its own unclear case.
 	 *
 	 * @returns whether the engine on the port was adopted. `false` means it
 	 *          was stopped instead, and the caller falls through to spawning.

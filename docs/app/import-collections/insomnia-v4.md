@@ -5,6 +5,8 @@ description: >-
 
 # Insomnia v4
 
+> Insomnia 11 and later export a YAML document instead; that is [Insomnia v5](./insomnia-v5.md), which reads through the mapping on this page.
+
 Parses an Insomnia "Export v4" JSON document into the Vayu draft model. Insomnia exports are a single flat array of typed resources joined by `_id`/`parentId`; the parser reconstructs the workspace → request_group → request tree and emits one root collection per workspace.
 
 - **Source:** `engine/src/core/import_document.cpp`

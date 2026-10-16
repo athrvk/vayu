@@ -71,15 +71,18 @@ plainly below: nothing syncs itself between machines either.
 ## Your agent can drive it
 
 Vayu hosts an [MCP server](../engine/mcp.md) inside the app on
-`127.0.0.1:9877`, so Claude Code, Cursor, VS Code, Codex or Zed can use the same
-engine the UI does - send a request, start a load run, read the report, compare
-two runs. Postman also exposes MCP, but against its cloud workspace; Vayu's runs
-locally and hands the agent the load engine itself. Because that is a real
-capability, it is gated: network tools refuse any host outside an allowlist that
+`127.0.0.1:9877`, so Claude Code, Cursor, VS Code or Codex (Zed through the
+stdio CLI) can use the same engine the UI does - send a request, start a load
+run, read the report, compare two runs. Postman also exposes MCP, but against
+its cloud workspace; Vayu's runs locally and hands the agent the load engine
+itself. Because that is a real capability, it is gated: network tools refuse any host outside an allowlist that
 **starts empty**, load runs are capped on RPS, concurrency and duration, and the
 tools that write to saved data sit behind a toggle that ships off - while it is
 off those tools are not offered to the agent at all, and calling one by name
-answers with the setting to turn on rather than an unknown-tool error.
+answers with the setting to turn on rather than an unknown-tool error. The
+agent can see what you have open (`get_app_focus`), and every request, run,
+variable or GraphQL operation has a Copy for agent button that puts a reference
+on the clipboard - so "load test this" means the thing on your screen.
 
 ## When to choose Postman
 

@@ -277,9 +277,9 @@ export const APP_SETTINGS = [
 	{
 		anchor: "load-max-connections",
 		panel: "load-testing",
-		label: "Max connections",
-		searchText: "The largest Connections value the load-test dialog will offer.",
-		keywords: ["concurrency", "ceiling", "limit"],
+		label: "Max virtual users",
+		searchText: "The largest Virtual users value the load-test dialog will offer.",
+		keywords: ["concurrency", "virtual users", "connections", "VUs", "ceiling", "limit"],
 	},
 	{
 		anchor: "load-max-rate",
@@ -372,7 +372,7 @@ export const APP_SETTINGS = [
 		panel: "mcp",
 		label: "Load caps",
 		searchText: "Hard ceilings on the load runs an agent may start.",
-		keywords: ["safety", "rps", "concurrency", "iterations"],
+		keywords: ["safety", "rps", "concurrency", "virtual users", "iterations"],
 	},
 	{
 		anchor: "mcp-writes",

@@ -6,7 +6,7 @@
  */
 
 /**
- * What a capacity-discovery run found: the highest concurrency the target held
+ * What a capacity-discovery run found: the most virtual users the target held
  * inside its latency budget, the level it gave out at, and the per-level trail
  * the search left behind.
  *
@@ -23,6 +23,7 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
 import { formatRps } from "./run-outcome";
 import type { RunReport } from "@/types/domain";
 
@@ -43,11 +44,11 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 	},
 	plateau: {
 		label: "Throughput plateaued",
-		detail: "More concurrency stopped buying more throughput, while latency still held.",
+		detail: "More virtual users stopped buying more throughput, while latency still held.",
 		degraded: true,
 	},
 	cap_reached: {
-		label: "Reached the concurrency ceiling",
+		label: "Reached the virtual user ceiling",
 		detail: "The target held its budget all the way up. Raise the ceiling to find the limit.",
 		degraded: false,
 	},
@@ -84,7 +85,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 	// finding that says to lengthen the run or shorten the step. Absent levels
 	// and absent `maxHealthy*` are therefore two different states, and only this
 	// flag separates them: without it the "no level met the budget" sentence
-	// below claims a measurement at the lowest concurrency that was never taken,
+	// below claims a measurement at the lowest level that was never taken,
 	// directly contradicting the "Ran out of time" badge beside it.
 	const judgedNothing = capacity.levels.length === 0;
 
@@ -130,7 +131,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 							<span className="font-mono font-semibold">
 								{capacity.maxHealthyConcurrency}
 							</span>{" "}
-							concurrent connections at{" "}
+							{concurrencyUnit(capacity.maxHealthyConcurrency ?? 0)} at{" "}
 							<span className="font-mono font-semibold">
 								{formatRps(capacity.maxHealthyRps ?? 0)}
 							</span>{" "}
@@ -143,7 +144,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 					) : (
 						<>
 							No level met the {formatMs(capacity.sloMs)}ms budget - the target was
-							already over it at the lowest concurrency the search tried.
+							already over it at the fewest virtual users the search tried.
 						</>
 					)}
 				</p>
@@ -153,7 +154,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 						<span className="font-mono font-medium text-foreground">
 							{capacity.kneeConcurrency}
 						</span>{" "}
-						connections, where p99 reached{" "}
+						{concurrencyUnit(capacity.kneeConcurrency)}, where p99 reached{" "}
 						<span className="font-mono font-medium text-warning-text">
 							{formatMs(capacity.kneeP99Ms ?? 0)}ms
 						</span>
@@ -168,7 +169,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 							<thead>
 								<tr className="border-b border-rule text-xs text-muted-foreground">
 									<th className="py-1.5 pr-3 text-left font-medium">
-										Connections
+										{CONCURRENCY_LABEL}
 									</th>
 									<th className="py-1.5 pr-3 text-right font-medium">
 										Throughput

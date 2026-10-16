@@ -28,6 +28,7 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | Environment variables and script options (`tlsAuth`) |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Limited |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
+| **k6 script import** | No - a k6 test is code, not a request record | N/A |
 | **Open source** | Yes (dual-license) | Yes (AGPL v3) |
 
 \* **One asterisk that row has earned.** `system` proxy mode resolves a PAC
@@ -39,6 +40,11 @@ in both PEM-pair and PKCS#12 form. Detail:
 [proxy settings](../engine/api-reference.md#proxy-settings),
 [TLS trust](../engine/api-reference.md#tls-trust-settings) and
 [client certificates](../engine/api-reference.md#client-certificates).
+
+k6 scripts do not import. Bring the OpenAPI spec or Postman collection the
+script was written against, then set the load profile in the Load test dialog.
+The load-test format that does import is a JMeter `.jmx` plan:
+[what carries over](../app/import-collections/jmeter.md).
 
 ## The throughput is in the same class
 
@@ -61,13 +67,10 @@ against k6 itself is not published here, because it has not been run on this
 hardware - the [benchmarks page](../engine/benchmarks.md) carries the full
 methodology and a one-command reproduction so you can measure your own.
 
-One caveat, carried over from the benchmarks page: an earlier
-2026-07 CLI session measured the opposite curve shape - Vayu at **66%** of
-`wrk` at this same concurrency 64 - and the two measurements have not been
-reconciled. The 105% above is the newer of the two, not a settled result; the
-gap is too large to be run-to-run noise, so one of them is not measuring what
-it claims. Read both before quoting either:
-[prior results (2026-07, CLI, unreconciled)](../engine/benchmarks.md#prior-results-2026-07-cli-unreconciled).
+One caveat: an earlier 2026-07 CLI session measured Vayu at 66% of `wrk` at
+this concurrency, so treat the 105% as unsettled until a re-run on a quiet
+machine reconciles the two
+([details and plan](../engine/benchmarks.md#prior-results-2026-07-cli-unreconciled)).
 
 ## No translation step, and a dashboard while it runs
 

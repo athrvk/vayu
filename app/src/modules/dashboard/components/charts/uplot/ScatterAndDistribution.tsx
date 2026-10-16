@@ -15,16 +15,17 @@ import { useMemo } from "react";
 import type uPlot from "uplot";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import { type Breakpoint } from "../../../utils/computeBreakpoint";
+import { formatConcurrency } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { buildConcurrencyScatter } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
 
 /**
- * Response time vs concurrency - a scatter of (concurrency, p99), one point per
+ * Response time vs virtual users - a scatter of (virtual users, p99), one point per
  * chart bucket. The flat-left headroom, the elbow (breakpoint) and the
  * steep-right saturation read against the origin. Amber marker at the
- * SLO-crossing concurrency.
+ * SLO-crossing user count.
  */
 export function ResponseTimeVsConcurrencyChart({
 	history,
@@ -74,7 +75,7 @@ export function ResponseTimeVsConcurrencyChart({
 				orient: "vertical",
 				value: breakpoint.concurrency,
 				role: "warning",
-				label: `~${breakpoint.concurrency} conc`,
+				label: `~${formatConcurrency(breakpoint.concurrency)}`,
 			});
 		}
 		return m;

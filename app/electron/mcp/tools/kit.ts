@@ -12,13 +12,19 @@
  *
  * The bottom of the `tools/` import graph beside `contract.ts`: a section file
  * may import from here and this file imports from no section, so a helper two
- * sections need lives here rather than in either of them. `NOTHING_CHANGED` and
- * `STARTED_RUNS` are module state the dispatch path reads after a handler
+ * sections need lives here rather than in either of them. `NOTHING_CHANGED`,
+ * `STARTED_RUNS` and `INPUT_REQUIRED` are module state the dispatch path reads after a handler
  * returns; they are defined here and nowhere else, so the handlers that mark a
  * result and the dispatcher that reads the mark share one instance.
  */
 
 import { z } from "zod";
+import {
+	acceptedContent,
+	inputRequired,
+	inputResponse,
+	type InputRequiredResult,
+} from "@modelcontextprotocol/server";
 import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
 import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
@@ -359,14 +365,34 @@ interface ConfirmationPrompt {
 }
 
 /**
+ * Results that stand for a question to the person rather than an answer
+ * (`input_required`), keyed by the question the client is to put to them.
+ *
+ * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet. The result
+ * itself carries the preview text, so a reader that only knows `ToolResult`
+ * (a test, the dispatch log) sees what the question is about; `server.ts`
+ * answers the SDK with the marked question instead.
+ */
+export const INPUT_REQUIRED = new WeakMap<ToolResult, InputRequiredResult>();
+
+/** The key the confirmation question travels under, both ways. */
+const CONFIRM_KEY = "confirm";
+
+const confirmAnswer = z.object({ proceed: z.boolean() });
+
+/**
  * Ask the human before something destructive, however the client can manage it.
  *
- * Preferred path is elicitation - a real prompt to a real person. A client that
- * cannot elicit falls back to the agent-side flag: the first call returns a
- * preview and does nothing, and only a second call carrying `confirmed: true`
- * proceeds. Anti-accident rather than anti-adversary (an agent can set the flag
- * itself), which is the same posture `start_load_run` has always had; the
- * elicitation path is what upgrades it to a human decision.
+ * Preferred path is a question to the person, put by the client
+ * (`ctx.userInput`): the first call returns it as `input_required` and does
+ * nothing, and the client calls again carrying the answer. That handler entry
+ * is a fresh one, so everything a gated tool does before this gate must be a
+ * read. A client that cannot be asked falls back to the agent-side flag: the
+ * first call returns a preview and does nothing, and only a second call
+ * carrying `confirmed: true` proceeds. Anti-accident rather than
+ * anti-adversary (an agent can set the flag itself), which is the same posture
+ * `start_load_run` has always had; the question is what upgrades it to a human
+ * decision.
  *
  * Returns `null` when the caller may proceed, or the result to return instead.
  */
@@ -375,29 +401,37 @@ export async function confirmDestructive(
 	ctx: ToolContext,
 	prompt: ConfirmationPrompt
 ): Promise<ToolResult | null> {
-	if (ctx.elicit) {
-		try {
-			const outcome = await ctx.elicit({
-				message: prompt.message,
-				requestedSchema: {
-					type: "object",
-					properties: {
-						proceed: {
-							type: "boolean",
-							title: prompt.acceptTitle,
-							description: prompt.acceptDescription,
-						},
-					},
-					required: ["proceed"],
-				},
-			});
-			if (outcome.action !== "accept" || outcome.content?.proceed === false) {
-				return unchanged(textResult(prompt.declined));
-			}
-			return null;
-		} catch {
-			// Client can't elicit - fall through to the flag-based gate.
+	if (ctx.userInput) {
+		const answer = inputResponse(ctx.userInput.responses, CONFIRM_KEY);
+		if (answer.kind === "elicit") {
+			const accepted = acceptedContent(ctx.userInput.responses, CONFIRM_KEY, confirmAnswer);
+			return answer.action === "accept" && accepted?.proceed === true
+				? null
+				: unchanged(textResult(prompt.declined));
 		}
+		const question = unchanged(textResult(prompt.preview));
+		INPUT_REQUIRED.set(
+			question,
+			inputRequired({
+				inputRequests: {
+					[CONFIRM_KEY]: inputRequired.elicit({
+						message: prompt.message,
+						requestedSchema: {
+							type: "object",
+							properties: {
+								proceed: {
+									type: "boolean",
+									title: prompt.acceptTitle,
+									description: prompt.acceptDescription,
+								},
+							},
+							required: ["proceed"],
+						},
+					}),
+				},
+			})
+		);
+		return question;
 	}
 	if (args.confirmed !== true) return unchanged(textResult(prompt.preview));
 	return null;

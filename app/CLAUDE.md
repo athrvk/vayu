@@ -27,7 +27,9 @@ everything.
   `docs/app/import-collections/`. `ref-bundler.ts` is the one file that still
   walks a document, and it reads it through the engine (`POST /import/document`):
   inlining a `$ref` target is deterministic re-serialization, not an opinion
-  about what the document declares.
+  about what the document declares. What the preview told the user about a file
+  outlives the dialog: `import-report-store` holds each applied file's loss
+  report by root collection id (#2109).
 - **An Enter that acts uses `isCommitEnter`** (`@/lib/keyboard`), never a bare
   `e.key === "Enter"` (#939). An IME commits its composition buffer with Enter
   and that commit reaches the handler as an ordinary keydown, so an unguarded

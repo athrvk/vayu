@@ -364,3 +364,4 @@ This parser does **not** use the Postman/Insomnia-shaped helpers in `import_docu
 - [OpenAPI v2 (Swagger 2.0)](./openapi-v2.md)
 - [Postman Collection v2.1 / v2.0](./postman.md)
 - [Insomnia v4](./insomnia-v4.md)
+- [Insomnia v5](./insomnia-v5.md)

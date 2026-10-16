@@ -17,7 +17,7 @@ import type http from "node:http";
 import { EngineClient } from "./engine-client.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import type { McpDataChangedEvent, ToolContext } from "./tools.js";
+import { listedToolNames, type McpDataChangedEvent, type ToolContext } from "./tools.js";
 import type { Logger } from "../log.js";
 import type { AppFocus } from "../app-focus.js";
 import type { DataFileLocation } from "../data-file-locations.js";
@@ -72,6 +72,7 @@ export class VayuMcpService {
 		return this.httpServer.start();
 	}
 
+	/** Close the socket this service bound, if any, ending its open streams first. */
 	stop(): Promise<void> {
 		return this.httpServer.stop();
 	}
@@ -89,9 +90,15 @@ export class VayuMcpService {
 		return this.httpServer.url;
 	}
 
-	/** Replace the safety config at runtime (e.g. when Settings change). */
+	/**
+	 * Replace the safety config at runtime (e.g. when Settings change). The next
+	 * request is served under it either way; a change to what `tools/list`
+	 * answers is also announced, to the clients that can hear it.
+	 */
 	updateSafety(override: Partial<McpSafetyConfig>): void {
+		const listed = listedToolNames(this.config).join(",");
 		this.config = resolveSafetyConfig({ ...this.config, ...override });
+		if (listedToolNames(this.config).join(",") !== listed) this.httpServer.notifyToolsChanged();
 	}
 
 	getSafety(): McpSafetyConfig {

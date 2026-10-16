@@ -32,7 +32,11 @@ import { useFileRootsQuery } from "@/queries";
 import { isUnderFolder } from "@/lib/file-path";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { ImportResult } from "@/services/importers/types";
-import { bodiesWithoutFileNotice, fileReferenceNeeds } from "./import-notices";
+import {
+	bodiesWithoutFileNotice,
+	fileReferenceNeeds,
+	type FileReferenceNeeds,
+} from "./import-notices";
 
 /** Whether `folder` is an allowed folder, or inside one. */
 function covered(folder: string, roots: readonly { path: string }[]): boolean {
@@ -40,7 +44,16 @@ function covered(folder: string, roots: readonly { path: string }[]): boolean {
 }
 
 export function ImportFileFolders({ results }: { results: readonly ImportResult[] }) {
-	const { folders, bodiesWithoutFile } = fileReferenceNeeds(results);
+	return <FileReferenceNeedsView needs={fileReferenceNeeds(results)} />;
+}
+
+/**
+ * The same list from needs computed earlier. The report kept after an apply
+ * stores these rather than the drafts they were read from, which hold every
+ * request body and the spec document.
+ */
+export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds }) {
+	const { folders, bodiesWithoutFile } = needs;
 	const { data: roots = [] } = useFileRootsQuery();
 	const { allow, isPending } = useAllowFolder();
 	const bodiesNotice = bodiesWithoutFileNotice(bodiesWithoutFile);

@@ -17,7 +17,6 @@ import {
 	AlertTriangle,
 	FileWarning,
 	Link2,
-	Info,
 } from "lucide-react";
 import {
 	Button,
@@ -37,7 +36,7 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import { useImportModalStore, useTabsStore } from "@/stores";
+import { useImportModalStore, useTabsStore, type ImportReport } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { useCollectionsQuery } from "@/queries/collections";
 import { useBoundSpecReader } from "@/queries/specs";
@@ -49,7 +48,9 @@ import {
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type ImportResult } from "@/services/importers/types";
-import { importNotices, type ImportNotice } from "./import-notices";
+import { importNotices } from "./import-notices";
+import { NoticeList } from "./NoticeList";
+import { announceImport, buildImportReport } from "./import-report";
 import { ImportFileFolders } from "./ImportFileFolders";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import {
@@ -99,6 +100,7 @@ const FORMAT_BADGES = [
 	"Postman Env",
 	"Postman Globals",
 	"Insomnia v4",
+	"Insomnia v5",
 	"OpenAPI 3.0",
 	"OpenAPI 2.0",
 	"JMeter .jmx",
@@ -594,13 +596,14 @@ export function ImportModal() {
 		const t = tab;
 		const at = generation.current[t];
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
+		const reports: ImportReport[] = [];
 		// The apply is one transaction per file and always was; the only sign of it
 		// used to be a button reading "Importing…" for all of them.
 		patchTab(t, at, { progress: { stage: "applying", done: 0, total: applicable.length } });
 		for (const entry of applicable) {
 			const result = entry.result as ImportResult;
 			try {
-				await importMutation.mutateAsync({
+				const applied = await importMutation.mutateAsync({
 					result,
 					opts: { importEnvironments, importScripts },
 					// Only meaningful for a spec import; the mutation ignores it when
@@ -609,6 +612,7 @@ export function ImportModal() {
 						? { specFile: { path: entry.specPath, fileName: result.meta.fileName } }
 						: {}),
 				});
+				reports.push(buildImportReport(result, Object.values(applied?.rootIds ?? {})));
 				outcomes.set(entry.id, { ok: true, message: "Imported" });
 			} catch (e) {
 				// There is no rollback since #145: the engine write is atomic, so a validation
@@ -628,6 +632,7 @@ export function ImportModal() {
 		const failures = [...outcomes.values()].filter((o) => o && !o.ok);
 		if (failures.length === 0) {
 			handleClose();
+			announceImport(reports);
 			return;
 		}
 		setTabs((current) => {
@@ -1286,41 +1291,6 @@ function BatchRow({
 				)}
 			</span>
 		</label>
-	);
-}
-
-/**
- * What a file lost or changed, one line each (see `import-notices.ts`): red
- * for what the user has to finish by hand, muted for what the import decided.
- * `as="span"` for a host that is itself phrasing content (a ledger row's
- * `<label>`).
- */
-function NoticeList({
-	notices,
-	as: Tag = "div",
-}: {
-	notices: readonly ImportNotice[];
-	as?: "div" | "span";
-}) {
-	if (notices.length === 0) return null;
-	return (
-		<Tag className="block space-y-0.5">
-			{notices.map((notice, i) =>
-				notice.tier === "action" ? (
-					<FieldError key={i} as="span" icon={AlertTriangle}>
-						{notice.text}
-					</FieldError>
-				) : (
-					<span
-						key={i}
-						className="flex items-start gap-1.5 text-xs text-muted-foreground"
-					>
-						<Info className="mt-0.5 size-icon-sm shrink-0" />
-						{notice.text}
-					</span>
-				)
-			)}
-		</Tag>
 	);
 }
 

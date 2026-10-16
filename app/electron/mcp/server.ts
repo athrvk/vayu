@@ -11,19 +11,25 @@
  *        with the Vayu tool registry. Each enabled tool is registered with its
  *        Zod input schema (validated automatically), annotations, and optional
  *        output schema. A per-instance context (engine client + current safety
- *        config + an elicitation bridge) is closed over each tool. Transport-
- *        agnostic: connected to Streamable HTTP (Electron) or stdio (CLI).
+ *        config) is closed over each tool, and each call adds what only it
+ *        knows (`callContext`). Transport-agnostic: built per request by the
+ *        Streamable HTTP host (Electron) and per connection by the stdio CLI.
  */
 
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import {
-	TOOLS,
-	dispatchTool,
-	withheldWriteRefusal,
-	type ElicitFn,
-	type ToolContext,
-} from "./tools.js";
+	CLIENT_CAPABILITIES_META_KEY,
+	CLIENT_INFO_META_KEY,
+	McpServer,
+	ResourceTemplate,
+	type CallToolResult,
+	type ClientCapabilities,
+	type InputRequiredResult,
+	type ServerContext,
+} from "@modelcontextprotocol/server";
+import { TOOLS, dispatchTool, isListed, withheldWriteRefusal, type ToolContext } from "./tools.js";
+import { INPUT_REQUIRED } from "./tools/kit.js";
+import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
 
@@ -65,7 +71,7 @@ const INSTRUCTIONS_HEAD =
 	"real traffic to a target), write (mutate saved data or engine config), and " +
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
-	"and load runs additionally enforce hard RPS/concurrency/duration caps. Write " +
+	"and load runs additionally enforce hard RPS, virtual-user and duration caps. Write " +
 	"tools require write access, and the destructive ones ask " +
 	"for confirmation - via elicitation where the client supports it, otherwise by " +
 	"returning what the call would destroy and waiting for a `confirmed: true` " +
@@ -136,21 +142,34 @@ function instructionsFor(config: ToolContext["config"]): string {
 	);
 }
 
+/** How one built server is to behave beyond the session's safety config. */
+export interface McpServerOptions {
+	/**
+	 * Whether this server's client can be told the tool list changed. Only a
+	 * client that holds a stream open for it can: a 2026-07-28 client of the
+	 * HTTP host, through `subscriptions/listen`. Advertising it to anyone else
+	 * would promise a notification that never comes, so it defaults to false.
+	 */
+	toolListChanges?: boolean;
+	/**
+	 * The client name an earlier request's handshake recorded, for a host whose
+	 * server never sees the handshake itself (the stateless legacy HTTP leg, see
+	 * `client-sessions.ts`). A server that did see one reads it from the SDK.
+	 */
+	sessionClientName?: string;
+}
+
 /**
  * Create an MCP server exposing the Vayu tools. `contextProvider` is invoked
  * once per built server so the safety config can change at runtime (the HTTP
- * host builds a fresh server per request; the stdio CLI builds one per process).
- * Disabled tools are not registered, so they are absent from `tools/list`.
- *
- * `sessionClientName` is the client name an earlier request's handshake
- * recorded, for a host whose server never sees the handshake itself (the
- * stateless HTTP host, see `client-sessions.ts`). A server that did see one
- * reads it from the SDK instead.
+ * host builds a fresh server per request; the stdio CLI builds one per
+ * connection). Tools a session does not list are not registered, so they are
+ * absent from `tools/list`.
  */
 export function createMcpServer(
 	info: McpServerInfo,
 	contextProvider: ToolContextProvider,
-	sessionClientName?: string
+	opts: McpServerOptions = {}
 ): McpServer {
 	const baseCtx = contextProvider();
 
@@ -161,80 +180,109 @@ export function createMcpServer(
 			title: VAYU_TITLE,
 			description: VAYU_DESCRIPTION,
 			websiteUrl: VAYU_WEBSITE,
+			icons: SERVER_ICONS,
 		},
-		{
-			capabilities: { tools: {} },
-			instructions: instructionsFor(baseCtx.config),
-		}
+		// No `capabilities` here: declaring `tools` up front makes the SDK install
+		// its `tools/call` handler at construction, before the capture below can
+		// see it. Registration declares what is registered.
+		{ instructions: instructionsFor(baseCtx.config) }
 	);
-
-	// Bridge a tool's elicitation request to the client - but only if the client
-	// negotiated the elicitation capability; otherwise throw so the tool falls
-	// back to its flag-based gate rather than hanging.
-	const elicit: ElicitFn = async (params) => {
-		const caps = mcp.server.getClientCapabilities();
-		if (!caps?.elicitation) throw new Error("client does not support elicitation");
-		const res = await mcp.server.elicitInput(
-			params as Parameters<typeof mcp.server.elicitInput>[0]
-		);
-		return { action: res.action, content: res.content };
-	};
-
-	const clientName = () => mcp.server.getClientVersion()?.name ?? sessionClientName;
-
-	const ctx: ToolContext = { ...baseCtx, elicit, clientName };
+	// Before the first registration, which otherwise defaults each to true. The
+	// resource and prompt lists change under no client: the prompts are fixed,
+	// and the one list that moves (runs, under the run-report template) is moved
+	// by the app as much as by an agent, which this process does not see.
+	mcp.server.registerCapabilities({
+		tools: { listChanged: opts.toolListChanges ?? false },
+		resources: { listChanged: false },
+		prompts: { listChanged: false },
+	});
 
 	const sdkCallTool = captureCallToolHandler(mcp);
 
 	for (const tool of TOOLS) {
-		if (baseCtx.config.disabledTools.includes(tool.name)) continue;
-		/*
-		 * A write tool that cannot succeed does not ship its schema. Writes are
-		 * off by default, and every write handler already refuses without
-		 * `allowWrites`, so on a default install those 28 tools were ~40% of a
-		 * `tools/list` an agent could do nothing with - paid for on every
-		 * session, by every agent, to describe capabilities it does not have.
-		 *
-		 * Registration, not just refusal, because the cost is the schema rather
-		 * than the call. The handler check stays: a client that cached a list
-		 * from a session where writes were on still gets the actionable error
-		 * rather than a silent failure.
-		 */
-		if (tool.category === "write" && !baseCtx.config.allowWrites) continue;
+		if (!isListed(tool, baseCtx.config)) continue;
 		mcp.registerTool(
 			tool.name,
 			{
 				title: tool.annotations.title,
 				description: tool.description,
-				inputSchema: tool.inputSchema,
+				inputSchema: z.object(tool.inputSchema),
 				...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 				annotations: tool.annotations,
 			},
-			async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => {
+			async (args, sdkCtx): Promise<CallToolResult | InputRequiredResult> => {
 				// Through `dispatchTool`, not `tool.handler` directly: one dispatch
 				// path means the disabled-tool rejection and the argument-error
 				// translation cannot diverge between production and the tests.
 				const result = await dispatchTool(
 					tool.name,
-					(args ?? {}) as Record<string, unknown>,
-					ctx,
-					extra?.signal
+					args,
+					callContext(mcp, baseCtx, sdkCtx, opts.sessionClientName),
+					sdkCtx.mcpReq.signal
 				);
-				return result as {
-					content: Array<{ type: "text"; text: string }>;
-					structuredContent?: Record<string, unknown>;
-					isError?: boolean;
-				};
+				return INPUT_REQUIRED.get(result) ?? (result as CallToolResult);
 			}
 		);
 	}
 
-	answerWithheldWriteCalls(mcp, ctx, sdkCallTool());
+	answerWithheldWriteCalls(mcp, baseCtx, sdkCallTool());
 
-	registerResources(mcp, ctx);
-	registerPrompts(mcp, ctx);
+	registerResources(mcp, baseCtx);
+	registerPrompts(mcp, baseCtx);
 
 	return mcp;
+}
+
+/**
+ * The tool context for one call: the session's, plus what only the call knows -
+ * who the client is and whether the person behind it can be asked.
+ *
+ * A 2026-07-28 request carries both in its own envelope; a 2025-era one has
+ * them only from the handshake, which a stdio or in-memory server saw and the
+ * stateless legacy HTTP leg did not. That leg therefore never offers the
+ * question: it has no way to carry the client's answer back to the server that
+ * asked, and the SDK would refuse it anyway.
+ */
+function callContext(
+	mcp: McpServer,
+	base: ToolContext,
+	sdkCtx: ServerContext,
+	sessionClientName: string | undefined
+): ToolContext {
+	const envelope = sdkCtx.mcpReq.envelope as EnvelopeView | undefined;
+	const capabilities =
+		envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? mcp.server.getClientCapabilities();
+	const clientName =
+		envelope?.[CLIENT_INFO_META_KEY]?.name ??
+		mcp.server.getClientVersion()?.name ??
+		sessionClientName;
+	return {
+		...base,
+		clientName: () => clientName,
+		...(canAskForm(capabilities)
+			? { userInput: { responses: sdkCtx.mcpReq.inputResponses } }
+			: {}),
+	};
+}
+
+/**
+ * Whether a client with @p capabilities can answer a form question - the kind
+ * `confirmDestructive` puts. The SDK's own rule, which it applies by refusing
+ * the call (`-32021`) rather than falling back: a mode named outright must
+ * include `form`, and a bare `elicitation: {}` is the pre-mode form-only
+ * declaration. The client package exports this as `getSupportedElicitationModes`;
+ * the server package does not.
+ */
+function canAskForm(capabilities: ClientCapabilities | undefined): boolean {
+	const elicitation = capabilities?.elicitation;
+	if (!elicitation) return false;
+	return elicitation.form !== undefined || elicitation.url === undefined;
+}
+
+/** The two envelope members `callContext` reads, as the 2026-07-28 revision defines them. */
+interface EnvelopeView {
+	[CLIENT_CAPABILITIES_META_KEY]?: ClientCapabilities;
+	[CLIENT_INFO_META_KEY]?: { name?: string };
 }
 
 /**
@@ -246,46 +294,41 @@ export function createMcpServer(
  */
 type CallToolHandler = (
 	request: { params: { name: string } },
-	extra: unknown
+	ctx: unknown
 ) => unknown | Promise<unknown>;
 
 /**
  * Watch for the `tools/call` handler `registerTool` installs, and return a
  * getter for it.
  *
- * The SDK offers no pre-dispatch hook (1.30.0): its handler looks the name up in
- * its own registry and throws before anything of Vayu's runs, and it refuses to
- * be installed twice (`assertCanSetRequestHandler`), so a wrapper can only be
- * put in front of it by replacing it - which needs the original to delegate to.
- * `setRequestHandler` is public on both sides of this, and the interception is
- * removed again as soon as the registration loop is done.
+ * The SDK offers no pre-dispatch hook (2.3.1): its handler looks the name up in
+ * its own registry and rejects before anything of Vayu's runs, and its
+ * `fallbackRequestHandler` serves only methods with no handler at all. So a
+ * wrapper can only be put in front of it by replacing it - which needs the
+ * original to delegate to. `setRequestHandler` is public on both sides of
+ * this, and the interception is removed again as soon as the registration loop
+ * is done.
  *
- * A capture that came back empty would leave the refusal unshipped exactly as
- * it is unshipped today, so what holds this to the SDK across an upgrade is the
- * protocol test that calls a withheld name and reads the answer.
+ * A capture that came back empty would leave the refusal unshipped, so what
+ * holds this to the SDK across an upgrade is the protocol test that calls a
+ * withheld name and reads the answer.
  */
 function captureCallToolHandler(mcp: McpServer): () => CallToolHandler | undefined {
 	const server = mcp.server as unknown as {
-		setRequestHandler: (schema: unknown, handler: CallToolHandler) => void;
+		setRequestHandler: (method: string, handler: CallToolHandler) => void;
 	};
 	const install = server.setRequestHandler.bind(server);
 	let captured: CallToolHandler | undefined;
 
-	server.setRequestHandler = (schema: unknown, handler: CallToolHandler) => {
-		if (methodOf(schema) === "tools/call") captured = handler;
-		install(schema, handler);
+	server.setRequestHandler = (method: string, handler: CallToolHandler) => {
+		if (method === "tools/call") captured = handler;
+		install(method, handler);
 	};
 
 	return () => {
 		delete (server as Partial<typeof server>).setRequestHandler;
 		return captured;
 	};
-}
-
-/** The JSON-RPC method a request schema pins, or undefined for any other shape. */
-function methodOf(schema: unknown): string | undefined {
-	const method = (schema as { shape?: { method?: { value?: unknown } } })?.shape?.method?.value;
-	return typeof method === "string" ? method : undefined;
 }
 
 /**
@@ -297,7 +340,7 @@ function methodOf(schema: unknown): string | undefined {
  * write tool's name - from its own memory, or from a list it fetched while
  * writes were on - with an unknown-tool error and nothing to ask the user for
  * (#1431). Every other name reaches the SDK's handler unchanged, so schema
- * validation, structured output and task support are untouched.
+ * validation and structured output are untouched.
  */
 function answerWithheldWriteCalls(
 	mcp: McpServer,
@@ -306,11 +349,11 @@ function answerWithheldWriteCalls(
 ): void {
 	if (ctx.config.allowWrites || !sdkCallTool) return;
 	const server = mcp.server as unknown as {
-		setRequestHandler: (schema: unknown, handler: CallToolHandler) => void;
+		setRequestHandler: (method: string, handler: CallToolHandler) => void;
 	};
-	server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
+	server.setRequestHandler("tools/call", (request, callCtx) => {
 		const refusal = withheldWriteRefusal(request.params.name, ctx);
-		return refusal ?? sdkCallTool(request, extra);
+		return refusal ?? sdkCallTool(request, callCtx);
 	});
 }
 
@@ -322,16 +365,16 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 		mimeType: "application/json",
 	});
 
-	// Every callback below forwards `extra.signal` - the SDK aborts it when the
+	// Every callback below forwards `ctx.mcpReq.signal` - the SDK aborts it when the
 	// client cancels the request, and the engine client turns that into an
 	// aborted fetch instead of a detached request running to its own timeout.
 	for (const r of STATIC_RESOURCES) {
-		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri, extra) => ({
+		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri, sdkCtx) => ({
 			contents: [
 				{
 					uri: uri.href,
 					mimeType: "application/json",
-					text: JSON.stringify(await r.read(ctx, extra.signal), null, 2),
+					text: JSON.stringify(await r.read(ctx, sdkCtx.mcpReq.signal), null, 2),
 				},
 			],
 		}));
@@ -340,8 +383,8 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 	mcp.registerResource(
 		RUN_REPORT_RESOURCE.name,
 		new ResourceTemplate(RUN_REPORT_RESOURCE.uriTemplate, {
-			list: async (extra) => {
-				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx, extra.signal);
+			list: async (sdkCtx) => {
+				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx, sdkCtx.mcpReq.signal);
 				return {
 					resources: extractRunIds(runs).map((id) => ({
 						uri: `vayu://run/${id}/report`,
@@ -352,7 +395,7 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 			},
 			complete: {
 				// Unsignalled by necessity: the SDK's completion callback is
-				// `(value, context?)` with no `RequestHandlerExtra`, so there is
+				// `(value, context?)` with no handler context, so there is
 				// no signal to forward here. Autocomplete is a single cheap
 				// `/runs` read, so an uncancelled one costs little.
 				runId: async (value: string) => {
@@ -364,10 +407,10 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 			},
 		}),
 		meta(RUN_REPORT_RESOURCE.title, RUN_REPORT_RESOURCE.description),
-		async (uri, variables, extra) => {
+		async (uri, variables, sdkCtx) => {
 			const raw = variables.runId;
 			const runId = Array.isArray(raw) ? (raw[0] ?? "") : String(raw ?? "");
-			const report = await RUN_REPORT_RESOURCE.read(ctx, runId, extra.signal);
+			const report = await RUN_REPORT_RESOURCE.read(ctx, runId, sdkCtx.mcpReq.signal);
 			return {
 				contents: [
 					{
@@ -386,13 +429,9 @@ function registerPrompts(mcp: McpServer, ctx: ToolContext): void {
 	for (const p of PROMPTS) {
 		mcp.registerPrompt(
 			p.name,
-			{ title: p.title, description: p.description, argsSchema: p.argsSchema },
-			async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => {
-				const result = await p.build(
-					(args ?? {}) as Record<string, unknown>,
-					ctx,
-					extra?.signal
-				);
+			{ title: p.title, description: p.description, argsSchema: z.object(p.argsSchema) },
+			async (args, sdkCtx) => {
+				const result = await p.build(args, ctx, sdkCtx.mcpReq.signal);
 				return result as typeof result & Record<string, unknown>;
 			}
 		);

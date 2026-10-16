@@ -10,8 +10,8 @@ description: >-
 Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
-[`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk),
-and proxies the engine's REST API on `:9876` (or the fallback port the app chose
+[MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (v2:
+`@modelcontextprotocol/server`), and proxies the engine's REST API on `:9876` (or the fallback port the app chose
 when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
@@ -31,8 +31,8 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
-- **Local-only.** Binds `127.0.0.1`, with Host-header (DNS-rebinding) validation
-  on `/mcp`.
+- **Local-only.** Binds `127.0.0.1`, with Host- and Origin-header
+  (DNS-rebinding) validation on `/mcp`.
 - **Configurable from Settings.** Server on/off, the allowlist, caps, the write
   toggle, and per-tool switches live in **Settings → MCP** and persist across
   restarts.
@@ -99,31 +99,53 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 `listener.ts` binds `127.0.0.1:9877` at launch and answers what needs no SDK
 (`gates.ts`: non-`/mcp` paths `404`, `GET`/`DELETE` `405`); `http.ts` serves
-each `POST /mcp` once the first one has loaded it. Serving is **stateless**:
-each `POST /mcp` gets a fresh SDK server + transport
-(`sessionIdGenerator: undefined`, `enableJsonResponse: true`).
-DNS-rebinding protection is on (Host must be `127.0.0.1:9877` / `localhost:9877`).
-A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
+each `POST /mcp` once the first one has loaded it, through the SDK's
+`createMcpHandler`. Every request gets a fresh server, in both protocol eras:
+
+- A **2026-07-28** client (the revision with no `initialize` handshake and an
+  envelope on every request) is served per request by the protocol's own
+  design. It is answered with a JSON body, or an event stream when the reply
+  needs one.
+- A **2025-era** client (an `initialize` handshake) is served **statelessly** by
+  the same factory, on an event stream that carries the one answer. There is no
+  session: `GET` and `DELETE` are `405`.
+
+The handler checks no headers of its own, so `http.ts` checks them in front of
+it: the Host must be a loopback name (`127.0.0.1`, `localhost` or `[::1]`), and
+an `Origin`, when a browser sends one, must be a loopback origin too; anything
+else is `403`. That is the DNS-rebinding protection, and it also turns away a
+page on another site that posts to the port. The handler itself answers `415`
+to a `POST` whose `Content-Type` is not `application/json`, and a 2025-era
+request `406` when its `Accept` does not take both `application/json` and
+`text/event-stream`, as the transport specification requires; an SDK client
+always sends both. A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
 error), and one over the 4 MB cap `413` with `-32600` - past the cap the rest of
 the upload is drained and discarded rather than the socket being closed under it,
 since resetting the connection mid-upload loses the very response the status code
 exists to deliver. The cap bounds what is held in memory, not what crosses the
-wire. The body is read before the transport sees it, so these are answered
+wire. The body is read before the handler sees it, so these are answered
 directly rather than by the SDK. Both messages are fixed strings - nothing
 derived from the underlying error reaches the wire - and `-32603`
 ("Internal error") is left to mean a genuine handler failure, including a socket
 error while reading. That message is a fixed string too: the thrown error goes to
-the MCP log (`src: "mcp"`, with the request path), not to the client.
-The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
+the MCP log (`src: "mcp"`, with the request path), not to the client. The
+handler answers a failure to build the server the same way (500, `-32603`, its
+own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
+Stopping the server ends what a 2026-07-28 client holds open first - a
+`subscriptions/listen` stream lasts as long as the client likes, and the socket's
+close would wait on it - then closes the socket gracefully, so a request still
+arriving is answered rather than cut off. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping. The one thing carried
-from one request to the next is the client's name from its handshake, under an
-`Mcp-Session-Id` the host issues - see
+from one request to the next is a 2025-era client's name from its handshake,
+under an `Mcp-Session-Id` the host issues - see
 [How History names the client](#how-history-names-the-client).
 
 ### stdio CLI (Zed / headless / CI)
 
 `cli.ts` is a standalone stdio server that reuses the same server factory and
-tool registry. It is for stdio-only clients (Zed) and headless/CI. Run:
+tool registry, through the SDK's `serveStdio`: one server per connection, for
+whichever era the client opens with. It is for stdio-only clients (Zed) and
+headless/CI. Run:
 
 ```bash
 node dist-electron/mcp/cli.js
@@ -143,11 +165,24 @@ Electron-hosted transport each leave a `src: "mcp"` record; see
 
 ### What is live on each transport
 
-Elicitation (human confirmation) and `tools/list_changed` (live tool-set updates)
-need a server→client channel, which exists on **stdio** but not on the stateless
-HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to a
-`confirmed: true` flag, and a tool toggle applies on the client's next
-`tools/list`. Both are safe on HTTP, just not instantaneous. See
+Two things need the person or the client to hear from the server mid-session:
+a confirmation question before a destructive tool runs (elicitation), and word
+that `tools/list` changed when a Settings change alters it.
+
+| Client | Confirmation question | `tools/list` changed |
+| ------ | --------------------- | -------------------- |
+| 2026-07-28, HTTP | ✅ asked in-band, the call retried with the answer | ✅ on a `subscriptions/listen` stream |
+| 2026-07-28, stdio | ✅ asked in-band | - (the CLI's config cannot change) |
+| 2025-era, stdio | ✅ the SDK puts the question to the client | - (as above) |
+| 2025-era, HTTP | `confirmed: true` flag | on the client's next `tools/list` |
+
+Only a client that declared elicitation is asked; any other client gets the
+`confirmed: true` flag instead, because asking one that cannot answer is a
+protocol error the tool cannot recover from. A 2025-era client over HTTP gets
+the flag even when it declared elicitation: the server that would ask is gone
+when its request ends, so there is no one to carry the answer back to. Neither
+fallback is unsafe, only less direct. `tools.listChanged` is advertised only to
+the clients in the ✅ row, so no client waits for a notice that never comes. See
 [Design notes](#design-notes).
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
@@ -163,7 +198,8 @@ Every run an MCP tool starts is sent with
 under [`POST /execute`](api-reference.md#post-execute)): `run_request`,
 streaming or not, every request `run_collection_smoke` sends, `run_collection`,
 and both shapes of `start_load_run`. The name is the `clientInfo.name` the
-client gave in its `initialize` handshake, forwarded as given: the engine trims
+client gave - in its `initialize` handshake, or for a 2026-07-28 client on each
+request - forwarded as given: the engine trims
 it and caps it at 128 characters, and the renderer turns a known identifier into
 a product name through `app/src/lib/mcp-client-names.ts`. When no name is known
 the run carries `{"kind": "mcp"}` alone, and History shows it as an unnamed MCP
@@ -171,15 +207,19 @@ client. The origin is set after every argument has been folded into the
 payload, so no tool argument can claim another one. It is metadata the client
 asserts, not identity.
 
-How the name reaches the tool differs by transport:
+How the name reaches the tool differs by era and transport:
 
-- **stdio** - one server serves the whole connection and reads the handshake
-  itself.
-- **Streamable HTTP** - every request gets a fresh server, so the one that read
-  the handshake is gone before the first `tools/call`. The host answers each
-  `initialize` with an `Mcp-Session-Id` header and records the handshake's name
-  under it; a Streamable HTTP client echoes that id on every later request, and
-  the host looks the name up for that request's server (`client-sessions.ts`).
+- **2026-07-28, either transport** - every request carries it in its own
+  envelope, so the server serving it reads it there.
+- **2025-era stdio** - one server serves the whole connection and reads the
+  handshake itself.
+- **2025-era Streamable HTTP** - every request gets a fresh server, so the one
+  that read the handshake is gone before the first `tools/call`. The host answers
+  each `initialize` with an `Mcp-Session-Id` header and records the handshake's
+  name under it, read from the request (the SDK's own schema check of the
+  handshake decides that it is one); a Streamable HTTP client echoes that id on
+  every later request, and the host looks the name up for that request's server
+  (`client-sessions.ts`).
   The record is bounded: 256 sessions of at most 128 characters of name each, the least recently used evicted first,
   and one idle for 24 hours forgotten. The transport still validates no
   session, so a request with no id, or one the host does not know (a restart of
@@ -237,7 +277,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `export_postman`       | read     | `POST /export/postman`                       | - (credentials always written empty - auth, secret variables, and by name header, parameter, URL and cookie values - counted in `notes.secretsOmitted`; bodies and scripts are not judged; including them is a choice the app's dialog asks a person for; `notes.notCarried` names what Postman has no place for; document text capped at 32 KB, with `contentBytes` for the true size) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept; the returned row is withheld as `list_collections` answers it |
 | `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
-| `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
+| `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
@@ -285,9 +325,10 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 
 Notes:
 
-- **`start_load_run`** requires confirmation - via elicitation when the client
-  supports it, otherwise a `confirmed: true` flag - and enforces the RPS /
-  concurrency / duration caps. In `capacity` mode the concurrency cap bounds the
+- **`start_load_run`** requires confirmation - a question to the person when the
+  client can be asked, otherwise a `confirmed: true` flag (see
+  [What is live on each transport](#what-is-live-on-each-transport)) - and enforces the RPS /
+  virtual-user (`concurrency`) / duration caps. In `capacity` mode the virtual-user cap bounds the
   search's *ceiling* (`concurrency`) and its starting level
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
@@ -1778,11 +1819,11 @@ configurable in **Settings → MCP** and persisted.
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
-- **Hard caps** - max RPS / concurrency / duration / iterations on
+- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations on
   `start_load_run`; over-cap requests are rejected. With the allowlist, these are
   the real limits on load, and they cover **every** field the tool forwards:
-    - `concurrency` **and** `startConcurrency` are both held to the concurrency
-      cap. A ramp is seeded with `startConcurrency` before its first duration
+    - `concurrency` **and** `startConcurrency` are both held to the virtual-user
+      cap (**Max virtual users** in Settings). A ramp is seeded with `startConcurrency` before its first duration
       check, so capping only the target would bound where a run ends and not
       where it starts.
     - An **iterations** run stops on a request count and never reads `duration`,
@@ -1810,13 +1851,16 @@ configurable in **Settings → MCP** and persisted.
   quietly substituting 60s; a zero `duration` is rejected here for the same reason the
   engine `400`s it, while a zero `rampUpDuration` stays legal (an instant ramp).
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
-  call from starting load or destroying saved work, but on HTTP it is agent-side
-  (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Eight tools carry it - `start_load_run`,
+  call from starting load or destroying saved work, but where the client cannot
+  be asked it is agent-side (the caps/allowlist are the enforcement). A question
+  to the person upgrades it to a human decision where the client can be asked.
+  The question is an `input_required` result: the call does nothing, the client
+  asks, and the call is made again carrying the answer, so a gated tool reads
+  and nothing more before its gate. Eight tools carry it - `start_load_run`,
   `delete_collection`, `delete_request`, `delete_request_example`,
   `delete_run`, `delete_environment`, `delete_webhook_inbox` and
   `purge_trash_entry` - through one
-  implementation, so the elicitation path cannot drift between them. A preview is a *successful* result
+  implementation (`confirmDestructive`), so the question cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
   `restore_trash_entry` deliberately does **not** carry it: it puts data back
   rather than destroying it, so the write toggle alone is its gate (below).
@@ -1825,8 +1869,12 @@ configurable in **Settings → MCP** and persisted.
   they are absent from `tools/list`, not merely refused by `tools/call`. A call
   on one of their names anyway - guessed, or held over from a list fetched while
   the toggle was on - is answered with the handlers' own refusal, which names the
-  setting to turn on; the SDK would otherwise reject the unregistered name with
-  `Tool <name> not found`, which tells an agent nothing it can act on. The
+  setting to turn on; the SDK would otherwise reject the unregistered name as
+  invalid params (`-32602`, `Tool <name> not found`), which tells an agent
+  nothing it can act on. The SDK has no hook in front of its own dispatch, so
+  `server.ts` captures the `tools/call` handler it installs and puts the refusal
+  in front of it; the protocol test that calls a withheld name is what holds
+  that to the SDK across an upgrade. The
   server instructions say the same thing up front, in the sessions where the
   toggle is off. Withholding the schema rather than only the call is what makes
   the toggle free: those tools are ~40% of the tool payload
@@ -1907,8 +1955,8 @@ configurable in **Settings → MCP** and persisted.
   at most 8 issuers at once - and the per-tool switch below.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list`, and calling its
-  name is answered with `Tool <name> not found` - it is unregistered, so the SDK
-  rejects the name before any Vayu code runs. (The write toggle's refusal above
+  name is rejected as invalid params (`-32602`, `Tool <name> not found`) - it is
+  unregistered, so the SDK rejects the name before any Vayu code runs. (The write toggle's refusal above
   is the deliberate exception, and it does not claim a tool the user switched
   off: that tool would still be off after enabling writes. The rejection in
   `dispatchTool` is what any other caller of it gets.) Settings lists every tool
@@ -1922,8 +1970,8 @@ configurable in **Settings → MCP** and persisted.
   flips one switch and sees no change has nothing else to go on.
 - **Server on/off** - the whole server can be disabled; while off the endpoint
   does not accept connections. Persists across restarts.
-- **Transport hardening** - loopback bind, Host-header (DNS-rebinding) validation,
-  `POST`-only, 4 MB body cap.
+- **Transport hardening** - loopback bind, Host- and Origin-header
+  (DNS-rebinding) validation, `POST`-only, 4 MB body cap.
 
 **Why no auth token on the endpoint:** any local process could already reach the
 engine's REST API on `:9876` (or its fallback); the MCP endpoint proxies the same capability behind
@@ -2057,7 +2105,7 @@ secrets; see the write toggle.
 | `allowlist`          | `[]`    | -           | Permitted hostnames (empty = deny all).                    |
 | `allowAll`           | `false` | -           | Bypass the allowlist for any resolvable host.              |
 | `maxRps`             | `1000`  | `1000000`   | Cap on `targetRps`, which only `constant_rps` carries.     |
-| `maxConcurrency`     | `200`   | `10000`     | Cap on `concurrency` and `startConcurrency` (closed-loop). |
+| `maxConcurrency`     | `200`   | `10000`     | Cap on virtual users: `concurrency` and `startConcurrency` (closed-loop). |
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
@@ -2083,7 +2131,7 @@ copy is tied to the renderer constant by `config.test.ts`, the way
 
 `maxRps` and `maxConcurrency` bound **different runs**, which is why neither is a
 general "load cap": `targetRps` exists only in `constant_rps`, so `maxRps` is
-inert against a closed-loop run, and `maxConcurrency` bounds the concurrency a
+inert against a closed-loop run, and `maxConcurrency` bounds the virtual users a
 closed-loop run holds (or a ramp starts from, or a capacity search climbs to) -
 not the in-flight requests of a rate-paced run, which `maxInFlight` governs.
 
@@ -2102,15 +2150,16 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext`, `ToolResult`), the elicitation seam and `MCP_DATA_ENTITIES`. |
-| `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` marks dispatch reads. |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. |
+| `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
-| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
-| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
+| `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
+| `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
-| `cli.ts`           | Standalone stdio server (env-configured).                                   |
+| `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
@@ -2244,7 +2293,7 @@ from environment variables:
 | `VAYU_MCP_ALLOWLIST`            | (empty)                 | Comma-separated hostnames.             |
 | `VAYU_MCP_ALLOW_ALL`            | `false`                 | `true` bypasses the allowlist.         |
 | `VAYU_MCP_MAX_RPS`              | `1000`                  | RPS cap.                               |
-| `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Concurrency cap.                       |
+| `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Virtual-user cap.                      |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
@@ -2292,22 +2341,25 @@ absorbs that churn, Node is already the Electron runtime, and the engine stays
 untouched (keeping it AGPL-clean). The accepted tradeoff: MCP is up when the
 **app** is open, not engine-only - covered later by the stdio CLI for headless use.
 
-### Stateless HTTP, and the server→client push gap
+### A fresh server per request, and how the push gap closed
 
-The HTTP host is stateless (fresh server per request), which keeps Settings
-changes live for free and aligns with the spec RC that removed protocol sessions
-and the GET stream. The cost is that `tools/list_changed` and elicitation can't be
-**pushed** over HTTP (no held-open stream), so they fall back as described in
-[Transports](#what-is-live-on-each-transport). Making them live would require a
-stateful server (real `sessionIdGenerator`, SSE responses, a GET stream per
-session, persistent per-session servers mutated on toggle) - deferred, since it
-builds on the mechanism the spec is deprecating and the payoff is client-dependent.
+The HTTP host builds a fresh server per request, which keeps Settings changes
+live for free. Under the 2025-era protocol that cost the host its server→client
+channel: no held-open stream, so a confirmation question and `tools/list_changed`
+could not reach an HTTP client. The 2026-07-28 revision is built for per-request
+serving and closes the gap without sessions: a question travels in-band as an
+`input_required` result that the client retries with the answer, and change
+notices travel on a `subscriptions/listen` stream the client opens. `createMcpHandler`
+serves both eras from one factory, so a 2025-era client keeps what it had and a
+2026-07-28 client gets both (see
+[What is live on each transport](#what-is-live-on-each-transport)). A stateful
+2025-era server - real sessions, a GET stream each, servers mutated on toggle -
+is not built: it would grow the mechanism the spec retired.
 
 ## Deferred
 
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command
   ([#693](https://github.com/athrvk/vayu/issues/693)).
-- **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 
 ## References
