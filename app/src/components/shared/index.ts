@@ -34,6 +34,9 @@ export * from "./ExternalChangeCallout";
 // "12 requests cancelled by Stop" - outside every error and request count
 export * from "./CancelledRequestsNote";
 
+// "17 errors (17.00%)", by type and by status code - the history Overview and the dashboard
+export * from "./ErrorSummary";
+
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 
