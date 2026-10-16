@@ -42,6 +42,25 @@ describe("ImportModal", () => {
 	});
 
 	/**
+	 * The Paste tab reads collection documents only; a curl command goes into a
+	 * request's URL bar (#2196). The hint says where, without the tab claiming to
+	 * take curl itself.
+	 */
+	it("points a curl command at the URL bar from the Paste tab", () => {
+		renderModal();
+		selectTab(/Paste JSON/i);
+
+		const hint = screen.getByText(/A curl command\? Paste it into a request's URL bar\./i);
+		expect(hint.tagName).toBe("P");
+		// The hint is prose beside the field, not a second placeholder: the field
+		// stays the one `getByPlaceholderText(/Paste/i)` finds, and says nothing of curl.
+		expect(screen.getByPlaceholderText(/Paste/i).getAttribute("placeholder")).not.toMatch(
+			/curl/i
+		);
+		expect(screen.getByPlaceholderText(/Paste/i).contains(hint)).toBe(false);
+	});
+
+	/**
 	 * The preview used to print the parser's counter slug - "1 file_body" - which
 	 * names the code's bookkeeping rather than what the reader lost. It matters
 	 * more since issue #393: multipart file parts now import, so a remaining

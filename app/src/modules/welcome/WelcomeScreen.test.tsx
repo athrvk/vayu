@@ -106,6 +106,14 @@ describe("WelcomeScreen", () => {
 		});
 	});
 
+	// A Postman user looks for curl under Import and concludes it is unsupported
+	// (#2196); the empty-workspace tile is the first place that can say otherwise.
+	it("says on the New request tile that a curl command can be pasted", () => {
+		renderScreen();
+		const tile = screen.getByRole("button", { name: /New request/i });
+		expect(tile).toHaveTextContent(/paste a curl command/i);
+	});
+
 	describe("connecting a coding agent (issue #2122)", () => {
 		afterEach(() => {
 			vi.unstubAllGlobals();

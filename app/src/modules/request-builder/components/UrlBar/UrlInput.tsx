@@ -95,10 +95,9 @@ export default function UrlInput({ className }: UrlInputProps) {
 			value={request.url}
 			onChange={handleUrlChange}
 			onPaste={handlePaste}
-			placeholder="https://api.example.com/endpoint?key={{variable}}"
-			// Explicit, because the placeholder here is a sample URL - it would
-			// make a poor spoken name, and it is withheld entirely once the URL
-			// contains a variable.
+			placeholder="Paste a URL or a curl command"
+			// Explicit, because the placeholder is an instruction, not the field's
+			// name, and it is withheld entirely once the URL contains a variable.
 			aria-label="Request URL"
 			// So ⌘L can find it from the Shell, which is outside this subtree.
 			id={REQUEST_URL_INPUT_ID}
