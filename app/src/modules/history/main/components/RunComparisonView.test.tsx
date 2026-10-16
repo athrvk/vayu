@@ -24,6 +24,8 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import RunComparisonView from "./RunComparisonView";
 import { withQueryClient } from "@/test/query-wrapper";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { formatInstant } from "@/lib/time-value";
@@ -363,6 +365,31 @@ describe("RunComparisonView", () => {
 		expect(await screen.findByText("This run no longer exists")).toBeInTheDocument();
 		expect(picker()).toBeInTheDocument();
 		expect(screen.queryByRole("row", { name: /P50 latency/ })).not.toBeInTheDocument();
+	});
+
+	it("falls back to the default when the chosen run is deleted", async () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+		});
+		render(
+			<QueryClientProvider client={client}>
+				<RunComparisonView
+					report={OPEN}
+					runId="run_open"
+					requestId="req_1"
+					onClose={vi.fn()}
+				/>
+			</QueryClientProvider>
+		);
+		await screen.findByRole("row", { name: /P50 latency/ });
+		fireEvent.click(picker());
+		fireEvent.click(screen.getByRole("option", { name: /Stopped/ }));
+		await waitFor(() => expect(picker()).toHaveTextContent("Stopped"));
+
+		serve(POOL.filter((r) => r.id !== "run_old"));
+		await client.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
+
+		await waitFor(() => expect(picker()).toHaveTextContent("Baseline"));
 	});
 
 	it("offers the way back to the report", async () => {

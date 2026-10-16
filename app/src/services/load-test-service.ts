@@ -562,6 +562,7 @@ class LoadTestService {
 		// are stale until the next 5s poll - and once the user has paged History,
 		// that poll is off.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		this.invalidateRunData(runId);
 	}
 

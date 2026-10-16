@@ -252,7 +252,9 @@ export default function RunComparisonView({
 	const [chosenId, setChosenId] = useState<string | null>(null);
 	const defaultId =
 		candidates.find((run) => run.id === baselineRun?.id)?.id ?? candidates[0]?.id ?? null;
-	const comparedId = chosenId ?? defaultId;
+	// A chosen run that left the list (deleted) falls back to the default.
+	const comparedId =
+		chosenId && candidates.some((run) => run.id === chosenId) ? chosenId : defaultId;
 
 	return (
 		<div className="flex flex-col flex-1 min-h-0">
