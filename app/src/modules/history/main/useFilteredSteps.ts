@@ -268,10 +268,12 @@ export function useFilteredSteps(
 	 * Longer than the window only when `visible` was reset under rows that stay
 	 * valid, which takes `listKey` moving while the filter and `appendKey` hold
 	 * still - the window's key carries the filter, so every other reset comes
-	 * with a cache this cannot reuse anyway. That is reachable: `HistoryDetail`
-	 * renders `ScenarioRunView` without a per-run key, so switching the open run
-	 * changes `run.id` without remounting, and two runs that are both idle with
-	 * no stored rows share an `appendKey` (`0`, and the one `EMPTY_STEPS`).
+	 * with a cache this cannot reuse anyway. `HistoryDetail` keys
+	 * `ScenarioRunView` on the run, so its one caller no longer reaches this;
+	 * it stays because `listKey` is a parameter, and a caller that moved it
+	 * without remounting would otherwise show a window longer than it asked for
+	 * (two idle lists with no stored rows share an `appendKey`: `0`, and the one
+	 * `EMPTY_STEPS`).
 	 *
 	 * What was found stays found - the cache keeps it, and a sentinel that grows
 	 * `visible` again asks for none of it twice - while the view is handed the

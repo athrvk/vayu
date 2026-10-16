@@ -65,15 +65,30 @@ vi.mock("@/queries", async () => {
 
 // The detail routers render heavy chart trees that are irrelevant here; the
 // question is only which of the three panes HistoryDetail chooses.
-vi.mock("./LoadTestDetail", () => ({
-	default: () => <div data-testid="load-test-detail" />,
-}));
-vi.mock("./DesignRunView", () => ({
-	default: () => <div data-testid="design-run-view" />,
-}));
-vi.mock("./ScenarioRunView", () => ({
-	default: () => <div data-testid="scenario-run-view" />,
-}));
+//
+// Each stub holds one piece of local state, as the real views do (an active
+// tab, a filter), and shows it in `data-picked`: a pane that is re-used across
+// runs keeps the pick, a remounted one starts back at "none".
+async function statefulView(testId: string) {
+	const { useState } = await import("react");
+	function StatefulView() {
+		const [picked, setPicked] = useState("none");
+		return (
+			<button
+				type="button"
+				data-testid={testId}
+				data-picked={picked}
+				onClick={() => setPicked("steps")}
+			>
+				view
+			</button>
+		);
+	}
+	return { default: StatefulView };
+}
+vi.mock("./LoadTestDetail", () => statefulView("load-test-detail"));
+vi.mock("./DesignRunView", () => statefulView("design-run-view"));
+vi.mock("./ScenarioRunView", () => statefulView("scenario-run-view"));
 
 beforeEach(() => {
 	refetch.mockClear();
@@ -242,6 +257,51 @@ describe("HistoryDetail routing", () => {
 		expect(pill!.className).not.toContain("bg-primary-fill");
 		const spinning = pill!.querySelector("svg")!.getAttribute("class") ?? "";
 		expect(spinning.includes("animate-spin")).toBe(status === "running");
+	});
+});
+
+/**
+ * The report views keep local state (the load report's active tab, the
+ * collection run's filters), so a pane that is not remounted on a run switch
+ * carries the last run's picks into the next one - a Steps tab with no panel
+ * left to show it, a blank pane (#2148).
+ *
+ * Mutation check: drop the `key` from a view and its case reddens.
+ */
+describe("HistoryDetail switching between runs", () => {
+	function openRun(entityId: string) {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "run", entityId, title: "Run" } as never],
+			activeTabId: "t1",
+		});
+	}
+
+	it.each([
+		["load", "load-test-detail"],
+		["scenario", "scenario-run-view"],
+		["design", "design-run-view"],
+	])("starts a %s run's view afresh rather than reusing the last run's", (type, testId) => {
+		runQuery.data = { id: "run-1", type, status: "completed" };
+		reportQuery.data = { metadata: { runType: "load" } };
+		const { rerender } = render(<HistoryDetail />);
+		fireEvent.click(screen.getByTestId(testId));
+		expect(screen.getByTestId(testId).getAttribute("data-picked")).toBe("steps");
+
+		openRun("run-2");
+		runQuery.data = { id: "run-2", type, status: "completed" };
+		rerender(<HistoryDetail />);
+
+		expect(screen.getByTestId(testId).getAttribute("data-picked")).toBe("none");
+	});
+
+	it("keeps the view's state while the same run re-renders", () => {
+		reportQuery.data = { metadata: { runType: "load" } };
+		const { rerender } = render(<HistoryDetail />);
+		fireEvent.click(screen.getByTestId("load-test-detail"));
+
+		rerender(<HistoryDetail />);
+
+		expect(screen.getByTestId("load-test-detail").getAttribute("data-picked")).toBe("steps");
 	});
 });
 

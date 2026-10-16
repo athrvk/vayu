@@ -95,6 +95,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	 */
 	const scenarioSteps = report.scenario?.steps;
 	const isScenarioLoad = !!scenarioSteps?.length;
+	// A selection the rendered tabs no longer include (Steps, when the report
+	// changes to a single-request run) would match no panel and leave the pane blank.
+	const availableTabs = new Set(["overview", "performance", "samples"]);
+	if (isScenarioLoad) availableTabs.add("steps");
+	const tab = availableTabs.has(activeTab) ? activeTab : "overview";
 	// `TruncatedText` measures one string, so the sentence is built rather than
 	// composed out of nodes it would have to flatten.
 	const virtualUsers = report.scenario?.virtualUsers;
@@ -439,11 +444,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			</div>
 
 			{/* Tabbed Content */}
-			<Tabs
-				value={activeTab}
-				onValueChange={setActiveTab}
-				className="flex-1 flex flex-col min-h-0"
-			>
+			<Tabs value={tab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
 				<TabsList variant="inset" className="mx-4 mt-3">
 					<TabsTrigger value="overview">
 						<BarChart3 className="size-icon-sm" />
