@@ -57,7 +57,11 @@ export const SAVE_CHORD: Chord = { mod: true, key: "S", label: "Save the active 
 export const CLOSE_TAB_CHORD: Chord = { mod: true, key: "W", label: "Close tab" };
 
 /** Show/hide the left drawer. */
-export const TOGGLE_DRAWER_CHORD: Chord = { mod: true, key: "B", label: "Show or hide the drawer" };
+export const TOGGLE_DRAWER_CHORD: Chord = {
+	mod: true,
+	key: "B",
+	label: "Show or hide the sidebar",
+};
 
 /** Show/hide the right context bar. */
 export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
@@ -400,7 +404,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 	},
 	{
 		id: "drawer",
-		title: "Drawer views",
+		title: "Sidebar views",
 		chords: Object.values(DRAWER_VIEW_CHORDS).filter((chord) => chord !== SETTINGS_CHORD),
 	},
 	{

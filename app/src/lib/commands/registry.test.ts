@@ -24,7 +24,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
-import { SEND_CHORD } from "@/constants/shortcuts";
+import { SEND_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
 import { useImportModalStore, useTabsStore, useSaveStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -407,6 +407,14 @@ describe("performing", () => {
 		};
 		commandById("run-collection").perform(ctx);
 		expect(runs).toEqual([COLLECTION]);
+	});
+});
+
+describe("the sidebar toggle", () => {
+	it("is titled in the user's word, matching its chord's label", () => {
+		const title = commandTitle(commandById("toggle-drawer"), fullContext());
+		expect(title).toBe("Show or hide the sidebar");
+		expect(title).toBe(TOGGLE_DRAWER_CHORD.label);
 	});
 });
 

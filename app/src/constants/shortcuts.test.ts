@@ -30,6 +30,7 @@ import {
 	LEAVE_EDITOR_CHORD,
 	DRAWER_VIEW_CHORDS,
 	TAB_CHORDS,
+	SHORTCUT_GROUPS,
 	matchesChord,
 } from "./shortcuts";
 
@@ -205,5 +206,15 @@ describe("no press matches two chords", () => {
 		// Deliberate, and the reason the Shell answers ⌘, before it walks the
 		// drawer table: opening the Settings tab brings its drawer view along.
 		expect(DRAWER_VIEW_CHORDS.settings).toBe(SETTINGS_CHORD);
+	});
+});
+
+describe("the sidebar's user-facing copy", () => {
+	// `drawer` is the identifier (`TOGGLE_DRAWER_CHORD`, `DRAWER_VIEW_CHORDS`);
+	// the word a user reads is "sidebar" (docs/ux-writing.md).
+	it("labels the toggle chord and its group in the user's word", () => {
+		expect(TOGGLE_DRAWER_CHORD.label).toBe("Show or hide the sidebar");
+		const group = SHORTCUT_GROUPS.find((g) => g.id === "drawer");
+		expect(group?.title).toBe("Sidebar views");
 	});
 });

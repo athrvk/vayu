@@ -322,7 +322,7 @@ const ACTION_COMMANDS: readonly Command[] = [
 	},
 	{
 		id: "toggle-drawer",
-		title: "Show or hide the drawer",
+		title: "Show or hide the sidebar",
 		keywords: ["sidebar", "panel", "left", "collapse", "expand"],
 		group: "action",
 		icon: PanelLeft,
