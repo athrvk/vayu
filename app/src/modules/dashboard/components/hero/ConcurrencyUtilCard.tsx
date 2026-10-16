@@ -10,28 +10,10 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
- * Utilisation tier coloring: ≥95% success, ≥80% warning, else destructive.
- * Split text vs fill for the same reason as RateFidelityCard - the number is
- * text and needs the accessible pair; the MiniBar is a fill and keeps the
- * saturated one.
- */
-function utilTextColor(util: number | undefined): string {
-	if (util === undefined) return "hsl(var(--muted-foreground))";
-	if (util >= 95) return "hsl(var(--success-text))";
-	if (util >= 80) return "hsl(var(--warning-text))";
-	return "hsl(var(--destructive-text))";
-}
-
-function utilFillColor(util: number | undefined): string {
-	if (util === undefined) return "hsl(var(--muted-foreground))";
-	if (util >= 95) return "hsl(var(--success))";
-	if (util >= 80) return "hsl(var(--warning))";
-	return "hsl(var(--destructive))";
-}
-
-/**
  * constant_concurrency hero card #2 - how many of the configured N virtual
- * users were actually in-flight on average. Below 100% means idle virtual users.
+ * users were actually in-flight on average. Below 100% means idle virtual users,
+ * which describes the run's shape rather than a failure, so the number and the
+ * bar carry no tier colour (#2245).
  */
 export function ConcurrencyUtilCard({
 	currentConcurrency,
@@ -44,14 +26,11 @@ export function ConcurrencyUtilCard({
 		configuredConcurrency && configuredConcurrency > 0
 			? (currentConcurrency / configuredConcurrency) * 100
 			: undefined;
-	const textColor = utilTextColor(util);
-	const fillColor = utilFillColor(util);
 
 	return (
 		<HeroCardShell label="Virtual user utilisation" tip={TOOLTIPS.concurrencyUtil}>
 			<HeroValue
 				value={currentConcurrency}
-				color={textColor}
 				unit={
 					<>
 						of{" "}
@@ -66,7 +45,11 @@ export function ConcurrencyUtilCard({
 				<span className="text-foreground font-semibold">{fmt(util, 0)}</span>% utilisation
 			</p>
 			{util !== undefined && (
-				<MiniBar pct={Math.min(100, util)} color={fillColor} showTarget />
+				<MiniBar
+					pct={Math.min(100, util)}
+					color="hsl(var(--muted-foreground))"
+					showTarget
+				/>
 			)}
 		</HeroCardShell>
 	);

@@ -194,3 +194,36 @@ describe("HeroRow latency card", () => {
 		}
 	);
 });
+
+describe("ConcurrencyUtilCard carries no verdict colour (#2245)", () => {
+	// Idle virtual users are a fact about the run's shape, not a failure; the
+	// card's own tooltip says as much. The tier is read off the rendered style
+	// because it arrives as an inline colour, not a class.
+	const STATUS_TOKEN = /--(success|warning|destructive)/;
+
+	it.each([40, 79, 90, 100])("paints utilisation of %i percent with no status colour", (pct) => {
+		const { container } = render(
+			<TooltipProvider>
+				<ConcurrencyUtilCard currentConcurrency={pct} configuredConcurrency={100} />
+			</TooltipProvider>
+		);
+
+		// Non-empty: a card that rendered nothing would pass the absence check.
+		expect(container.textContent).toContain(`${pct}% utilisation`);
+		expect(container.innerHTML).not.toMatch(STATUS_TOKEN);
+		expect(container.innerHTML).not.toMatch(/text-(success|warning|destructive)/);
+	});
+
+	it("keeps the number neutral and the bar at its length", () => {
+		const { container } = render(
+			<TooltipProvider>
+				<ConcurrencyUtilCard currentConcurrency={40} configuredConcurrency={100} />
+			</TooltipProvider>
+		);
+
+		expect(screen.getByText("40", { selector: "span.text-hero" }).className).toContain(
+			"text-foreground"
+		);
+		expect(container.querySelector<HTMLElement>("[style*='width: 40%']")).not.toBeNull();
+	});
+});

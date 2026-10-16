@@ -105,10 +105,13 @@ export function LatencyPercentilesChart({
 			bucketSeconds
 		);
 		const aligned: uPlot.AlignedData = [times, ...cols];
+		// Which percentile a line is carries no verdict, so none of these takes a
+		// status role: a healthy 3 ms p99 drawn red reads as failing (#2245).
+		// p99 keeps the violet it has on the scatter.
 		const spec: UPlotSeriesSpec[] = [
-			{ label: "p50", role: "success", format: fmtMs },
-			{ label: "p95", role: "warning", format: fmtMs },
-			{ label: "p99", role: "destructive", width: 1.8, format: fmtMs },
+			{ label: "p50", role: "muted", format: fmtMs },
+			{ label: "p95", role: "categorical-2", format: fmtMs },
+			{ label: "p99", role: "categorical", width: 1.8, format: fmtMs },
 		];
 		return { data: aligned, series: spec };
 	}, [history, bucketSeconds]);
