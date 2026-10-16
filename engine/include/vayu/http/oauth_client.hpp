@@ -76,11 +76,16 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * provider issues a new one, deleting the row on refresh rejection); otherwise
  * performs a fresh grant. `authorization_code` requires `interactive` and
  * fails with 409 oauth2_interactive_required without it.
+ *
+ * @param network_ms When non-null, the milliseconds this call spent waiting on
+ *        the provider's token endpoint are added to it (a refresh and the fresh
+ *        grant after a rejected refresh both count); a cache hit adds nothing.
  */
 std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
 const nlohmann::json& config,
 bool force_refresh,
-const std::optional<InteractiveExchange>& interactive);
+const std::optional<InteractiveExchange>& interactive,
+double* network_ms = nullptr);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token

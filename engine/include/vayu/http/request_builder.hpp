@@ -53,6 +53,9 @@ struct RequestBuild {
     vayu::ErrorCode error_code = vayu::ErrorCode::None;
     std::string error_message;
     std::string detail_code;
+    /// Time auth resolution spent waiting on an OAuth 2.0 token endpoint; see
+    /// `AuthApplyResult::token_fetch_ms`.
+    double auth_fetch_ms = 0.0;
 };
 
 /**

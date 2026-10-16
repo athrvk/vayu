@@ -132,12 +132,16 @@ void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
  *
  * `ok == false` carries an ErrorCode (AuthRequired / AuthFailed) plus a
  * machine-readable detail_code for the client.
+ *
+ * `token_fetch_ms` is the time resolution spent waiting on an OAuth 2.0
+ * provider's token endpoint - zero for every other mode and for a cached token.
  */
 struct AuthApplyResult {
     bool ok              = true;
     vayu::ErrorCode code = vayu::ErrorCode::None;
     std::string message;
     std::string detail_code;
+    double token_fetch_ms = 0.0;
 };
 
 /**

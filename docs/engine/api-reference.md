@@ -6040,16 +6040,16 @@ body written against that dialect must switch to the `*Ms` names.
 **`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
 the ninth key and the only one a buffered `/execute` alone carries. It is the
 time from the handler receiving the request to the answer being assembled,
-less the transfer (`wireMs`) and the pre- and post-request scripts
-(`pm.sendRequest` inside them included). What it counts is request
-composition, auth resolution (an OAuth 2.0 token fetched on first use is
-counted: the engine waits on the identity provider there, and no clock
-separates that wait from the rest), the cookie jar, residual `{{token}}` resolution,
-the element pipeline other than the user's scripts (extractors, assertions,
-metrics) and building the response; `queueWaitMs`, the sliver between the
-engine's stopwatch and libcurl, is part of it. A design send blocks on no
-timer, so there is no timer wait to leave out. It does **not** count the wire,
-scripts, the hop from the Electron shell to the engine, persisting the run row
+less the transfer (`wireMs`), the pre- and post-request scripts
+(`pm.sendRequest` inside them included) and the time spent waiting on an
+OAuth 2.0 identity provider's token endpoint (a token fetched on first use, or
+refreshed because it expired; a cached token costs a lookup and stays in). What
+it counts is request composition, the rest of auth resolution, the cookie jar,
+residual `{{token}}` resolution, the element pipeline other than the user's
+scripts (extractors, assertions, metrics) and building the response;
+`queueWaitMs`, the sliver between the engine's stopwatch and libcurl, is part
+of it. A design send blocks on no timer, so there is no timer wait to leave
+out. It does **not** count the wire, scripts, the token endpoint, the hop from the Electron shell to the engine, persisting the run row
 and trace, serialising the body, or the renderer drawing it: the figure is
 taken once, before the write, and that same value is both returned and stored
 on the trace as a flat `engineMs`, so a restored response shows what the live

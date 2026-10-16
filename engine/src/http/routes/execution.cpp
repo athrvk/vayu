@@ -1390,6 +1390,9 @@ struct DesignSend {
     StreamFlag stream;
     /// Copied from the payload; both paths hand it to `persist_send_variables`.
     bool persist_variables = true;
+    /// What the build waited on an OAuth 2.0 provider for; `engine_cost_ms`
+    /// leaves it out of Vayu's own cost.
+    double auth_fetch_ms = 0.0;
 };
 
 
@@ -2030,9 +2033,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
 /**
  * Vayu's own cost for one buffered exchange (issue #2132): the handler's
  * elapsed time since @p handler_start less what Vayu waited on someone else
- * for - the transfer (`wireMs`) and the user's scripts, `pm.sendRequest`
- * included. What remains is request composition, auth, cookies, residual
- * token resolution, the element pipeline and assembling the answer.
+ * for - the transfer (`wireMs`), the user's scripts (`pm.sendRequest`
+ * included) and the OAuth 2.0 provider's token endpoint on a first-use or
+ * expired-token fetch (@p auth_fetch_ms; a cached token costs the engine only
+ * a lookup and stays in). What remains is request composition, auth, cookies,
+ * the element pipeline and assembling the answer.
  *
  * `queueWaitMs` is deliberately left inside it: that is the sliver between
  * the engine's stopwatch and libcurl, engine-side by construction. A design
@@ -2043,11 +2048,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
  */
 double engine_cost_ms (std::chrono::steady_clock::time_point handler_start,
 const vayu::Response& response,
-double script_ms) {
+double script_ms,
+double auth_fetch_ms) {
     const double elapsed_ms = std::chrono::duration<double, std::milli> (
     std::chrono::steady_clock::now () - handler_start)
                               .count ();
-    return std::max (0.0, elapsed_ms - response.timing.wire_ms - script_ms);
+    return std::max (0.0, elapsed_ms - response.timing.wire_ms - script_ms - auth_fetch_ms);
 }
 
 /**
@@ -2121,8 +2127,8 @@ std::chrono::steady_clock::time_point handler_start) {
     // Taken before the write below and stored *and* returned, so the live
     // body and the restored trace carry one value. Persistence and the final
     // serialisation therefore fall outside it, by construction.
-    const double engine_ms =
-    engine_cost_ms (handler_start, exchange.response, exchange.script_ms);
+    const double engine_ms = engine_cost_ms (
+    handler_start, exchange.response, exchange.script_ms, send.auth_fetch_ms);
 
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
@@ -2176,7 +2182,8 @@ httplib::Response& res) {
     // the row - so pm.request reflects the real outgoing set - and because the
     // pre-request script runs after that and writes back into this same object,
     // a script-set Authorization header wins over the engine-applied one.
-    send.request = std::move (payload.built.request);
+    send.request       = std::move (payload.built.request);
+    send.auth_fetch_ms = payload.built.auth_fetch_ms;
 
     // Auth failure: record a failed result against the run and return the
     // error in the body (engine returns 200; the status lives in the body).
