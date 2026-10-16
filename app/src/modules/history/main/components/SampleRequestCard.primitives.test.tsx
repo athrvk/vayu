@@ -189,3 +189,30 @@ describe("SampleRequestCard captured exchange (#174)", () => {
 		expect(screen.getByText("Body not captured")).toBeTruthy();
 	});
 });
+
+describe("SampleRequestCard status text (#2219)", () => {
+	it("shows the status text beside the code when the report carries it", () => {
+		render(
+			<SampleRequestCard
+				sample={makeSample({ statusCode: 429, statusText: "Too Many Requests" })}
+				index={0}
+				isExpanded={false}
+				onToggle={() => {}}
+			/>
+		);
+		expect(screen.getByText(/429\s+Too Many Requests/)).toBeTruthy();
+	});
+
+	it("shows the code alone when the sample has no status text", () => {
+		render(
+			<SampleRequestCard
+				sample={makeSample({ statusCode: 429 })}
+				index={0}
+				isExpanded={false}
+				onToggle={() => {}}
+			/>
+		);
+		expect(screen.getByText("429")).toBeTruthy();
+		expect(screen.queryByText(/Too Many Requests/)).toBeNull();
+	});
+});
