@@ -22,12 +22,12 @@
 import type { ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
+import { formatErrorRate } from "@/components/shared/run-outcome";
 import {
 	RunErrorRateTrendChart,
 	RunP95TrendChart,
 	RunThroughputTrendChart,
 	fmtMs,
-	fmtPct,
 	fmtRate,
 	type RunTrendPoint,
 } from "@/modules/dashboard/components/charts/uplot";
@@ -122,7 +122,7 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 			<TrendPanel
 				key="error"
 				title="Error rate"
-				label={describeTrend("Error rate", points, "errorRate", fmtPct)}
+				label={describeTrend("Error rate", points, "errorRate", formatErrorRate)}
 			>
 				<RunErrorRateTrendChart points={points} />
 			</TrendPanel>
@@ -137,6 +137,7 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 				<CardTitle>This request across runs</CardTitle>
 				<CardDescription>
 					The last {points.length} runs, oldest first.
+					{!points.some((p) => p.isOpen) && " This run is not among them."}
 					{hasStopped &&
 						" Stopped runs are included and marked with a dashed line: they ran for less time than planned."}
 				</CardDescription>

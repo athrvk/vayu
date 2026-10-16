@@ -1,4 +1,11 @@
 /**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
  * @vitest-environment jsdom
  */
 
@@ -202,6 +209,25 @@ describe("RunTrend", () => {
 			"Throughput across 3 runs, oldest to newest, newest 30/s",
 			"Error rate across 3 runs, oldest to newest, newest 3.0%",
 		]);
+	});
+
+	it("says so when the open run is older than the plotted window", async () => {
+		answerWith(runs(25));
+		renderTrend("req-1", "run-1");
+
+		await screen.findByText(/This run is not among them/);
+	});
+
+	it("reads a tiny error rate the way the History row does, never as 0.0%", async () => {
+		answerWith([
+			loadRun(2, { rps: 20, p95Ms: 200, errorRate: 0.04 }),
+			loadRun(1, { rps: 10, p95Ms: 100, errorRate: 0.02 }),
+		]);
+		renderTrend();
+
+		await waitFor(() => expect(charts).toHaveLength(3));
+		const labels = screen.getAllByRole("img").map((el) => el.getAttribute("aria-label"));
+		expect(labels[2]).toBe("Error rate across 2 runs, oldest to newest, newest <0.1%");
 	});
 
 	it("shows a retryable error when the run list fails", async () => {

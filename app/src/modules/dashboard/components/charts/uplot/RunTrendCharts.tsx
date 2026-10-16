@@ -23,6 +23,7 @@
 import { useMemo } from "react";
 import type uPlot from "uplot";
 import { formatInstant } from "@/lib/time-value";
+import { formatErrorRate } from "@/components/shared/run-outcome";
 import { UPlotChart, type Annotation, type Marker, type UPlotSeriesSpec } from "./UPlotChart";
 import { axisMs, axisRate, fmtMs, fmtPct, fmtRate } from "./formatters";
 import type { ColorRole } from "./uplotTheme";
@@ -152,7 +153,7 @@ export function RunErrorRateTrendChart(props: RunTrendChartProps) {
 			metric="errorRate"
 			label="error rate"
 			seriesRole="destructive"
-			format={fmtPct}
+			format={(v) => (v == null ? "-" : formatErrorRate(v))}
 			yFormat={fmtPct}
 		/>
 	);
