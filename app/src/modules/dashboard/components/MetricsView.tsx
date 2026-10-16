@@ -24,7 +24,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatNumber } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
@@ -47,6 +47,7 @@ import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { errorBreakdown } from "../utils/errorBreakdown";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
+import { LatencyStat } from "./stats/LatencyStat";
 import {
 	RequestRateChart,
 	LatencyBreakdownChart,
@@ -621,18 +622,6 @@ function MetricsView({
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />
 		</div>
-	);
-}
-
-function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
-	return (
-		<span>
-			<span className="text-muted-foreground">{k}</span>{" "}
-			<span className="text-foreground font-semibold">
-				{v === undefined ? "-" : formatMs(v)}
-			</span>
-			<span className="text-muted-foreground">{v === undefined ? "" : "ms"}</span>
-		</span>
 	);
 }
 
