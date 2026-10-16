@@ -35,6 +35,7 @@ import {
 import { TimeValue } from "@/components/shared/TimeValue";
 import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
 import { runSampleReference } from "@/lib/agent-reference";
+import { isSlowSample } from "../sample-filter";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
 
@@ -82,6 +83,7 @@ export default function SampleRequestCard({
 			latencyMs={sample.latencyMs}
 			timestamp={<TimeValue value={sample.timestamp} />}
 			error={sample.error}
+			isSlow={isSlowSample(sample)}
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
