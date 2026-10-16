@@ -289,6 +289,7 @@ jobs:
               - 'engine/tests/fixtures/import-conformance.json'
               - 'engine/tests/fixtures/element-kinds.json'
               - 'engine/tests/fixtures/log-redaction-conformance.json'
+              - 'engine/tests/fixtures/run-compare-conformance.json'
             # The files at the repository root that a suite in `app/` reads.
             # Same defect again, by a third route (#1130): each of these holds
             # one half of a value the app cannot share a constant with - the

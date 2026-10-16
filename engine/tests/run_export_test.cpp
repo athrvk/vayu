@@ -18,14 +18,16 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "temp_database.hpp"
+#include "vayu/core/run_compare.hpp"
 #include "vayu/core/run_export.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -177,7 +179,9 @@ class RunExportTest : public ::testing::Test {
         return { envelope, document };
     }
 
-    void expect_refusal (const json& body, int status, std::string_view code) {
+    // A `const char*`, not a `std::string_view`: MSVC finds `json == string_view`
+    // ambiguous (C2666) between json's operator and string_view's.
+    void expect_refusal (const json& body, int status, const char* code) {
         auto [got, envelope] = export_run_report_response (*db_, body);
         EXPECT_EQ (got, status) << body.dump () << " -> " << envelope.dump ();
         EXPECT_EQ (envelope["error"]["code"], code) << envelope.dump ();
@@ -310,12 +314,45 @@ TEST_F (RunExportTest, RefusesWhatIsNotAFinishedLoadRun) {
     409, "run_in_progress");
 }
 
-TEST_F (RunExportTest, AcceptsAFinishedLoadBase) {
+TEST_F (RunExportTest, ComparesWithAFinishedLoadBase) {
+    seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed,
+    json{ { "url", "https://x.test/a" }, { "method", "GET" } },
+    json{ { "total_requests", 200 }, { "test_duration", 60.0 },
+    { "status_codes", { { "200", 200 } } } });
+    seed_run ("run_base", vayu::RunType::Load, vayu::RunStatus::Stopped,
+    json{ { "url", "https://x.test/a" }, { "method", "GET" } },
+    json{ { "total_requests", 100 }, { "test_duration", 6.0 },
+    { "status_codes", { { "200", 90 }, { "503", 10 } } } });
+    const json document =
+    export_ok (json{ { "runId", "run_load" }, { "baseRunId", "run_base" } }).second;
+    const json& comparison = document["comparison"];
+    ASSERT_TRUE (comparison.is_object ()) << document.dump (2);
+    EXPECT_EQ (comparison["baseRunId"], "run_base");
+    EXPECT_EQ (comparison["baseReference"], "Vayu run \"GET /a\" (run_base) - load test, GET /a, 2026-10-05T08:10:00Z, stopped");
+    EXPECT_EQ (comparison["differences"], json::parse (R"([{"field":"duration","base":"6 s, stopped","target":"60 s"},
+        {"field":"status","base":"Stopped","target":"Completed"}])"));
+    ASSERT_EQ (comparison["deltas"].size (), vayu::core::COMPARED_METRICS.size ());
+    EXPECT_EQ (comparison["deltas"][9], json::parse (R"({"metric":"summary.totalRequests","base":100,"target":200,
+        "delta":100.0,"pctChange":100.0,"direction":"neutral"})"));
+    EXPECT_EQ (comparison["statusCodes"],
+    json::parse (R"({"200":{"base":90,"target":200},"503":{"base":10,"target":0}})"));
+}
+
+TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {
+    seed_leak_run ("run_leak");
     seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
-    seed_run ("run_base", vayu::RunType::Load, vayu::RunStatus::Completed);
     auto [envelope, document] =
-    export_ok (json{ { "runId", "run_load" }, { "baseRunId", "run_base" } });
-    EXPECT_TRUE (document.contains ("comparison"));
+    export_ok (json{ { "runId", "run_load" }, { "baseRunId", "run_leak" } });
+    const std::string text = envelope["text"].get<std::string> ();
+    for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY", "LEAKTRACE",
+         "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+        EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
+                                                          << text;
+    }
+    // The base differs in its request, so its URL is shown - cut to its path.
+    EXPECT_EQ (document["comparison"]["differences"][0],
+    (json{ { "field", "request" }, { "base", "POST https://h/x" },
+    { "target", "GET https://x.test/a" } }));
 }
 
 TEST_F (RunExportTest, LaterFormatsAreNamedNotAvailable) {
@@ -439,6 +476,54 @@ TEST (RunExportBuilder, CarriesOnlyWhatItNames) {
                                                           << text;
     }
     EXPECT_NE (text.find ("\"p99\":2.0"), std::string::npos) << text;
+}
+
+// --- the comparison against the app's ---------------------------------------
+
+/// `engine/tests/fixtures/run-compare-conformance.json`, shared with the app's
+/// `compare.conformance.test.ts`, which replays it through both of the app's
+/// `compareReports`: a case added there fails whichever side answers it
+/// differently.
+json load_compare_fixture () {
+    const auto path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
+    "fixtures" / "run-compare-conformance.json";
+    std::ifstream in (path);
+    if (!in.good ()) {
+        ADD_FAILURE () << "fixture missing: " << path;
+        return json::object ();
+    }
+    return json::parse (in);
+}
+
+/// What the engine writes for `compareReports`' @p expected: the three metric
+/// groups as one `deltas[]`, and `comparability` as `{field, base, target}`.
+json engine_shape (const json& expected) {
+    json deltas = json::array ();
+    for (const char* group : { "latency", "throughput", "reliability" }) {
+        for (const json& metric : expected.at (group)) {
+            deltas.push_back (metric);
+        }
+    }
+    json differences = json::array ();
+    for (const json& warning : expected.at ("comparability")) {
+        differences.push_back ({ { "field", warning.at ("code") },
+        { "base", warning.at ("base") }, { "target", warning.at ("target") } });
+    }
+    return { { "differences", differences }, { "deltas", deltas },
+        { "statusCodes", expected.at ("statusCodes") } };
+}
+
+TEST (RunCompareConformance, EveryCaseDiffsAsTheAppDiffsIt) {
+    const json fixture = load_compare_fixture ();
+    ASSERT_TRUE (fixture.contains ("cases"));
+    ASSERT_FALSE (fixture.at ("cases").empty ());
+    for (const json& c : fixture.at ("cases")) {
+        const json got =
+        json (vayu::core::compare_run_reports (c.at ("base"), c.at ("target")));
+        EXPECT_EQ (got, engine_shape (c.at ("expected")))
+        << c.at ("name").get<std::string> () << "\n"
+        << got.dump (2);
+    }
 }
 
 } // namespace

@@ -530,8 +530,78 @@
       }
     },
     "comparison": {
-      "description": "The comparison against baseRunId is not written yet (#2127); null.",
-      "type": "null"
+      "description": "Null without baseRunId. Otherwise the run diffed against its base the way the app's compareReports diffs two reports (engine/tests/fixtures/run-compare-conformance.json pins the three implementations together).",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseRunId", "baseReference", "differences", "deltas", "statusCodes"],
+          "properties": {
+            "baseRunId": {"type": "string"},
+            "baseReference": {
+              "description": "The base run's Copy for agent run line, as run.reference is written.",
+              "type": "string",
+              "pattern": "^Vayu run \""
+            },
+            "differences": {
+              "description": "Every way the two runs were not the same experiment, in this order; a field only one report carries is unknown, not a difference (a data file excepted). base and target are formatted as the app shows them.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["field", "base", "target"],
+                "properties": {
+                  "field": {
+                    "enum": [
+                      "mode", "concurrency", "target_rps", "duration", "status", "http_version",
+                      "data_file", "request", "compression"
+                    ]
+                  },
+                  "base": {"type": "string"},
+                  "target": {"type": "string"}
+                }
+              }
+            },
+            "deltas": {
+              "description": "One entry per compared metric, in this order. A value a report lacks is null, and so is every figure computed from it; pctChange is null against a zero base.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["metric", "base", "target", "delta", "pctChange", "direction"],
+                "properties": {
+                  "metric": {
+                    "enum": [
+                      "latency.p50", "latency.p90", "latency.p95", "latency.p99", "latency.avg",
+                      "latency.max", "summary.avgRps", "summary.throughput", "summary.errorRate",
+                      "summary.totalRequests"
+                    ]
+                  },
+                  "base": {"type": ["number", "null"]},
+                  "target": {"type": ["number", "null"]},
+                  "delta": {"type": ["number", "null"]},
+                  "pctChange": {"type": ["number", "null"]},
+                  "direction": {"enum": ["lower-is-better", "higher-is-better", "neutral"]}
+                }
+              }
+            },
+            "statusCodes": {
+              "description": "Every code either run saw, a code one run never saw counting 0.",
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^-?[0-9]+$": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["base", "target"],
+                  "properties": {"base": {"type": "number"}, "target": {"type": "number"}}
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "notCarried": {
       "type": "array",

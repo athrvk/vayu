@@ -575,6 +575,7 @@ add_library(vayu_core STATIC
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
     src/core/postman_export.cpp
+    src/core/run_compare.cpp
     src/core/run_export.cpp
     src/core/vayu_extensions.cpp
     src/core/path_template.cpp

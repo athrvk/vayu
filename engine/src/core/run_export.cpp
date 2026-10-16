@@ -15,6 +15,7 @@
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/postman_export.hpp"
+#include "vayu/core/run_compare.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -630,6 +631,22 @@ ordered time_series (const json& ticks) {
     return out;
 }
 
+// --- comparison ------------------------------------------------------------------
+
+/// `null` without a base; otherwise the base run's reference line and the
+/// report diffed as the app diffs it (`core/run_compare.hpp`).
+ordered comparison_section (const RunExportInput& input) {
+    const std::optional<RunExportRun>& base = input.base;
+    if (!base) {
+        return nullptr;
+    }
+    ordered out          = ordered::object ();
+    out["baseRunId"]     = base->id;
+    out["baseReference"] = run_reference (*base);
+    out.update (compare_run_reports (base->report, input.run.report));
+    return out;
+}
+
 // --- not carried -------------------------------------------------------------------
 
 bool has_number_above_zero (const json& value) {
@@ -713,9 +730,7 @@ build_run_export_document (const RunExportInput& input, RunExportNotes& notes) {
     if (input.ticks) {
         document["timeSeries"] = time_series (*input.ticks);
     }
-    // #2127: the base run is read and validated already; the comparison block
-    // built from it lands with the shared run-compare conformance fixture.
-    document["comparison"] = nullptr;
+    document["comparison"] = comparison_section (input);
     document["notCarried"] = not_carried (run, document["config"]);
     return document;
 }

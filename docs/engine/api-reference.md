@@ -3948,8 +3948,8 @@ format_not_available` naming the issue that adds each (#2131, #2135). The
 formats are one table (`RUN_EXPORT_FORMATS`), so each adds a row and its
 renderer. `series: "none"` leaves `timeSeries` out; `full` reads every tick of
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics), paged at its 50000-tick
-maximum to the end. `baseRunId` is checked like `runId` (below); the document's
-`comparison` is `null` until the comparison against it is written.
+maximum to the end. `baseRunId` is checked like `runId` (below) and fills the
+document's `comparison`; without it `comparison` is `null`.
 
 **Response:**
 ```json
@@ -4004,7 +4004,7 @@ breaking change bumps the integer and is noted here):
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`; absent for `series: "none"` |
-| `comparison` | `null` |
+| `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
 `statusCodes`, `errors.byStatusCode` and a tick's `status_codes` are objects,
@@ -4033,6 +4033,42 @@ file and the screen it came from agree. It adds no rule of its own:
 | No budget declared | `not_judged` | `no_budgets` |
 
 `stoppedEarly` is `status == "stopped"`.
+
+`comparison` diffs the run (the target) against `baseRunId` the way the app's
+vs-baseline strip and the MCP `compare_runs` tool do (`compareReports`): the
+engine's copy is `core/run_compare.hpp`, and
+`engine/tests/fixtures/run-compare-conformance.json` pins all three to the same
+answers. Its members:
+
+- `baseRunId`, and `baseReference`, the base run's line written as
+  `run.reference` is.
+- `differences[]`: `{field, base, target}` for every way the two runs were not
+  the same experiment, in the order `mode`, `concurrency` (virtual users; for a
+  ramp the start level and ramp time too), `target_rps`, `duration` (only past
+  a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
+  `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
+  the first 8 characters of its hash; none against one *is* a difference),
+  `request` (method and URL with the query, fragment and userinfo cut) and
+  `compression`. The two values are strings formatted as the app shows them. A
+  field only one report carries is unknown and not listed. Read these before
+  the deltas: a short stopped run against a long one always looks like a
+  regression.
+- `deltas[]`: `{metric, base, target, delta, pctChange, direction}`, one per
+  metric in this order:
+
+  | `metric` | `direction` |
+  |----------|-------------|
+  | `latency.p50`, `latency.p90`, `latency.p95`, `latency.p99`, `latency.avg`, `latency.max` | `lower-is-better` |
+  | `summary.avgRps`, `summary.throughput` | `higher-is-better` |
+  | `summary.errorRate` | `lower-is-better` |
+  | `summary.totalRequests` | `neutral` - it moves with how long a run was told to run |
+
+  `delta` is `target - base` and `pctChange` is `delta / base * 100`. A value a
+  report lacks is `null`, and so is every figure computed from it; `pctChange`
+  is `null` against a zero base. The base's own headline numbers are the
+  entries' `base` values.
+- `statusCodes`: `{code: {base, target}}` over every code either run saw, a
+  code one run never saw counting `0`.
 
 **Errors:**
 

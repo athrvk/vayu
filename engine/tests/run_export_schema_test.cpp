@@ -283,9 +283,16 @@ TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
 }
 
 TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
-    seed ("run_healthy", vayu::RunStatus::Completed, healthy_summary ());
+    seed ("run_healthy", vayu::RunStatus::Stopped, healthy_summary ());
     seed ("run_failing", vayu::RunStatus::Completed, failing_summary ());
+    json document =
     expect_valid (json{ { "runId", "run_failing" }, { "baseRunId", "run_healthy" } });
+    // Validating an empty comparison proves nothing about its members' shapes.
+    const json& comparison = document["comparison"];
+    ASSERT_TRUE (comparison.is_object ()) << document.dump (2);
+    EXPECT_FALSE (comparison["differences"].empty ());
+    EXPECT_FALSE (comparison["deltas"].empty ());
+    EXPECT_FALSE (comparison["statusCodes"].empty ());
 }
 
 TEST_F (RunExportSchemaTest, TheSchemaRefusesAMemberItDoesNotName) {
