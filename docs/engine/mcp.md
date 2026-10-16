@@ -480,7 +480,9 @@ Notes:
   `GET /runs/:id/samples`, which has always truncated and disclosed this way.
 - **The traces are bounded as a set, not only one at a time** (issue #769).
   Capping each node does not cap the report: `/runs/:id/report` returns up to
-  100 rows and each may keep 32 KB on each of three nodes, so a 100-step
+  100 rows for a single-request run (every stored step for a scenario run,
+  bounded by `maxScenarioStoredSteps`) and each may keep 32 KB on each of three
+  nodes, so a 100-step
   scenario measured **3.3 M characters** with every node honestly flagged as
   truncated - 2.5x the size that failed in #767. At that row count truncation is
   no longer the binding constraint: 100 steps of an 8 KB body, under the
@@ -1401,8 +1403,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     **pre-request** scripts, and repeat once per `data` row with
     `{{data.column}}` bound and `pm.iterationData` set. It returns the run id
     immediately - the run continues engine-side - along with the plan's step
-    count and the note that `get_run_report`'s `results` carries **at most 100**
-    step rows. Each of those rows carries that step's request and response
+    count and a note on reading `get_run_report`: its `results` carries every
+    stored step row (`stepsStored`; `resultsStored` / `resultsCap` say the same
+    of any run). Each of those rows carries that step's request and response
     bodies inline, under `trace` (`build_result_trace`, the same node a
     single design-mode send stores) - not behind `GET /runs/:id/samples`, which
     is the load-run capture route - so a long plan against large responses
