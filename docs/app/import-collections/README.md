@@ -419,6 +419,17 @@ instead. A path whose folder is still a `{{variable}}` names no folder and is le
 `binary` body that arrived with no path at all is counted beside `unattachedFileParts` as
 "N file bodies need files", the whole-body counterpart of that line.
 
+**What came along.** Under the counts the single-file Preview adds one line saying what the
+import carried beyond names and URLs - `Carried over: 12 variables · auth on 40 requests ·
+scripts on 8 requests` - so a user does not have to open requests to learn that variables, auth
+and scripts survived. It is read off the drafts like the file references above
+(`describeCarriedOver`, `import-notices.ts`): the keys of every collection's `variables` across
+the whole tree; the requests whose own auth mode is anything but `none`, `noauth` or `inherit`
+(a request that inherits is not counted); and the requests with at least one enabled,
+non-blank `script.pre` or `script.post` element. A segment that is zero is left out, and a file
+with none of the three shows no line at all. Environments and globals are not counted here;
+they already have their own segments in the count line.
+
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |

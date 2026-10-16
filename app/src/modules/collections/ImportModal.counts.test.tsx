@@ -14,6 +14,9 @@
  * `describeCounts`, so neither can drift back to "1 requests" or to a
  * "collections" count that is really folders.
  *
+ * The single-file preview adds a second line for what came along - variables,
+ * auth, scripts (#2249) - and none when there is nothing to say.
+ *
  * Mutation check: restore an inline template in either site and the
  * matching case fails.
  */
@@ -45,6 +48,17 @@ function stubPostmanFile() {
 	);
 }
 
+function previewPastedFile() {
+	renderModal();
+	const tab = screen.getByRole("tab", { name: /Paste JSON/i });
+	fireEvent.mouseDown(tab);
+	fireEvent.click(tab);
+	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
+		target: { value: JSON.stringify({ any: "document" }) },
+	});
+	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
+}
+
 describe("the import preview's count line", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -53,14 +67,7 @@ describe("the import preview's count line", () => {
 
 	it("describes a single file with plurals and no environment segments", async () => {
 		stubPostmanFile();
-		renderModal();
-		const tab = screen.getByRole("tab", { name: /Paste JSON/i });
-		fireEvent.mouseDown(tab);
-		fireEvent.click(tab);
-		fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
-			target: { value: JSON.stringify({ any: "document" }) },
-		});
-		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
+		previewPastedFile();
 
 		await waitFor(() => expect(screen.getByText(POSTMAN_FILE_LINE)).toBeInTheDocument());
 		expect(screen.queryByText(/·.*(environment|global)/i)).not.toBeInTheDocument();
@@ -81,5 +88,54 @@ describe("the import preview's count line", () => {
 			const row = screen.getByLabelText(name).closest("label")!;
 			expect(within(row).getByText(POSTMAN_FILE_LINE)).toBeInTheDocument();
 		}
+	});
+
+	it("says what came along under the counts, and nothing when nothing did", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({
+						name: "Pets",
+						variables: { baseUrl: { value: "https://x.test", enabled: true } },
+						children: [
+							collection({
+								requests: [
+									request({ auth: { mode: "bearer", token: "t" } }),
+									request({
+										elements: [
+											{
+												kind: "script.pre",
+												enabled: true,
+												config: { script: "a()" },
+											},
+										],
+									}),
+								],
+							}),
+						],
+					}),
+				],
+			})
+		);
+		previewPastedFile();
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					"Carried over: 1 variable · auth on 1 request · scripts on 1 request"
+				)
+			).toBeInTheDocument()
+		);
+	});
+
+	it("renders no second line for a file with nothing to carry over", async () => {
+		stubPostmanFile();
+		previewPastedFile();
+
+		const counts = await screen.findByText(POSTMAN_FILE_LINE);
+		expect(screen.queryByText(/Carried over/)).not.toBeInTheDocument();
+		const lines = [...counts.parentElement!.querySelectorAll("p")];
+		expect(lines.length).toBeGreaterThan(0);
+		expect(lines.every((line) => line.textContent !== "")).toBe(true);
 	});
 });
