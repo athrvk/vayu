@@ -75,6 +75,24 @@ describe("SampleRequestCard shared-primitive adoption (#60)", () => {
 		expect(chip.className).toContain("bg-status-no-response-fill");
 	});
 
+	it.each([
+		[200, false],
+		[500, true],
+	] as const)("reads a stored %i row as an error: %s (#2211)", (statusCode, isError) => {
+		// The card passes no `state`, so the shell's status rule is what a
+		// history reader sees: a 5xx must not carry the success tick.
+		const { container } = render(
+			<SampleRequestCard
+				sample={makeSample({ statusCode })}
+				index={0}
+				isExpanded={false}
+				onToggle={() => {}}
+			/>
+		);
+		expect(container.querySelector(".text-destructive-text") !== null).toBe(isError);
+		expect(container.querySelector(".text-status-success-text") !== null).toBe(!isError);
+	});
+
 	it("renders captured response headers through the shared viewer, not a hand-rolled list", () => {
 		const { container } = render(
 			<SampleRequestCard

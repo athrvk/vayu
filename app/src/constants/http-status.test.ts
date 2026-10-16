@@ -23,6 +23,7 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	httpStatusClass,
+	isErrorStatus,
 	statusCodeLabel,
 	STATUS_CLASS_STYLE,
 	type HttpStatusClass,
@@ -64,6 +65,28 @@ describe("httpStatusClass", () => {
 		for (const code of [NaN, Infinity, -Infinity, -1, 99, 600, 999]) {
 			expect(httpStatusClass(code), String(code)).toBe("no-response");
 		}
+	});
+});
+
+describe("isErrorStatus", () => {
+	it.each([
+		[200, false],
+		[204, false],
+		[399, false],
+		[301, false],
+		[400, true],
+		[404, true],
+		[429, true],
+		[500, true],
+		[0, true],
+		[100, true],
+		[101, true],
+		[600, true],
+		[NaN, true],
+	] as const)("%s is an error: %s", (code, expected) => {
+		// Mirrors the engine's `is_success_status` (200-399 succeeds): 1xx and 0
+		// are errors there too, unlike `httpStatusClass`'s colour grouping.
+		expect(isErrorStatus(code)).toBe(expected);
 	});
 });
 

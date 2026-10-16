@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 
 import { Button, Collapsible, CollapsibleContent } from "@/components/ui";
+import { isErrorStatus } from "@/constants/http-status";
 import { cn } from "@/lib/utils";
 
 import { StatusCodeBadge } from "./StatusCodeBadge";
@@ -143,10 +144,12 @@ export function SampledExchange({
 	children,
 	className,
 }: SampledExchangeProps) {
-	// A connection failure has no status code to show, so the row's icon is the
-	// only thing that says "this one did not come back".
+	// A status outside 200-399 is an error by the engine's definition (#2124), so
+	// a 500 or a 429 does not wear the success tick. A connection failure
+	// (status 0) has no code to show, so the icon is the only thing that says
+	// "this one did not come back".
 	const derived: ExchangeState =
-		error || statusCode === 0 ? "error" : isSlow ? "slow" : "success";
+		error || isErrorStatus(statusCode) ? "error" : isSlow ? "slow" : "success";
 	const resolved = state ?? derived;
 	const isError = resolved === "error";
 	const StatusIcon = STATE_ICON[resolved];

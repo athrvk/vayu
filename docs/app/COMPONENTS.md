@@ -2198,6 +2198,11 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > placing a sample inside a seconds-old run wants milliseconds where a stored
 > row dating a run wants the day.
 >
+> Its icon reads **error** for a transport `error` or any status outside
+> 200-399 (`isErrorStatus` in `constants/http-status.ts`, the renderer's copy of
+> the engine's `is_success_status`, #2124), so a 404 or a 500 does not wear the
+> success tick; a caller that knows better passes `state`.
+>
 > Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
 > sentinel, so a view that hand-rolls a row again fails) and
 > `SampledExchange.test.tsx` (the shell's own behaviour).
