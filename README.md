@@ -121,13 +121,17 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
 winget install athrvk.Vayu
 ```
 
+Vayu is not code-signed, so running the downloaded installer can show "Windows protected your PC": choose **More info**, then **Run anyway**. winget skips it.
+
 **macOS** and **Linux** - the same command on both:
 
 ```sh
 bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
-Re-run it to update. Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage and .deb routes, FUSE 2 on Linux - is on the site:
+Re-run it to update. A .dmg or .zip downloaded from the release page is reported as "damaged" because Vayu is not code-signed; the command above avoids that.
+
+Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage and .deb routes, FUSE 2 on Linux - is on the site:
 **[Install Vayu →](https://athrvk.github.io/vayu/#install)**
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
