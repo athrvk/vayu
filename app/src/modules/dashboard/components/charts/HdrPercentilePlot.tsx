@@ -12,6 +12,7 @@
  */
 
 import { HDR_DIMS } from "../../utils/chartGeometry";
+import { pctToX } from "./uplot/hdrMarkers";
 
 const HDR_X_MARKS: Array<{ pct: number; label: string }> = [
 	{ pct: 0, label: "0%" },
@@ -21,13 +22,6 @@ const HDR_X_MARKS: Array<{ pct: number; label: string }> = [
 	{ pct: 99, label: "99%" },
 	{ pct: 99.9, label: "99.9%" },
 ];
-
-/** Log-scale percentile mapping: 0% → 0, 99.99% → 1 (tail dominates). */
-function pctToX(pct: number): number {
-	const p = Math.min(99.99, Math.max(0, pct));
-	if (p === 0) return 0;
-	return Math.log10(1 / (1 - p / 100)) / Math.log10(1 / (1 - 99.99 / 100));
-}
 
 export function SkeletonHdrPlot({ message }: { message: string }) {
 	const { VW, VH, PL, PR, PT, PB } = HDR_DIMS;

@@ -644,7 +644,8 @@ read as de-emphasised rather than as an outcome of its own.
 The history latency tiles are neutral and use `status-stopped` (P95) or
 `status-error` (P99, P999) only when the value exceeds the user's SLO
 (`LatencyMetric.tsx`, #2245); the percentile lines in the time-series chart take
-no status role at all.
+no status role at all, and the HDR distribution's p95 / p99 markers take
+`warning` / `destructive` only past the SLO (`hdrMarkers.ts`, #2263).
 
 ### Decorative categorical palettes (the one token exception)
 

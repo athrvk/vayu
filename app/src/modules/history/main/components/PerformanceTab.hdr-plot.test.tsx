@@ -20,19 +20,22 @@
  *
  * Mutation-check: drop the card from `PerformanceTab.tsx` and every case
  * fails; feed the footer `report.latency.p50` for the max and the footer case
- * fails.
+ * fails; drop `sloMs` from the plot in `PerformanceTab` and the SLO case fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { useClientSettingsStore } from "@/stores";
 import type { RunReport } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 
 vi.mock("@/modules/dashboard/components/charts/uplot", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/modules/dashboard/components/charts/uplot")>()),
-	HdrPercentileChart: ({ report }: { report: RunReport }) => (
-		<div data-testid="hdr-plot">{report.metadata?.runId}</div>
+	HdrPercentileChart: ({ report, sloMs }: { report: RunReport; sloMs?: number }) => (
+		<div data-testid="hdr-plot" data-slo-ms={sloMs}>
+			{report.metadata?.runId}
+		</div>
 	),
 }));
 
@@ -74,6 +77,18 @@ describe("PerformanceTab HDR percentile plot", () => {
 		expect(screen.getByText(/^HDR percentile plot/)).toBeInTheDocument();
 		expect(screen.getByTestId("hdr-plot")).toHaveTextContent("run_1");
 		expect(screen.getByText("from HdrHistogram")).toBeInTheDocument();
+	});
+
+	it("hands the plot the user's SLO so its markers judge against it (#2263)", () => {
+		const before = useClientSettingsStore.getState().sloThresholdMs;
+		useClientSettingsStore.setState({ sloThresholdMs: 37 });
+		try {
+			renderTab(makeReport({ min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 70 }));
+
+			expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "37");
+		} finally {
+			useClientSettingsStore.setState({ sloThresholdMs: before });
+		}
 	});
 
 	it("prints min, mean, p50, p95, p99 and max beneath it", () => {

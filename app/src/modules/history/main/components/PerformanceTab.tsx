@@ -197,7 +197,7 @@ export default function PerformanceTab({
 					</div>
 				</CardHeader>
 				<CardContent>
-					<HdrPercentileChart report={report} />
+					<HdrPercentileChart report={report} sloMs={sloMs} />
 					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
 						<LatencyStat k="min" v={report.latency.min} />
 						<LatencyStat k="mean" v={report.latency.avg} />
