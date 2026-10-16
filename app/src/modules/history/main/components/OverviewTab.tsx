@@ -11,6 +11,7 @@
  * Displays test configuration, summary statistics, status codes, and errors.
  */
 
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
@@ -19,6 +20,7 @@ import {
 	ContractCoverage,
 	CustomMetricsSummary,
 	ErrorSummary,
+	type ErrorRowTarget,
 	RequestElementsSummary,
 	RunWarnings,
 	SampledSchemaValidation,
@@ -32,12 +34,27 @@ import {
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
-import { extractTestFailures } from "../test-validation";
+import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
+import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
-export default function OverviewTab({ report, runId, derived, anomalies }: TabProps) {
+interface OverviewTabProps extends TabProps {
+	/**
+	 * Opens the Samples tab at the first loaded sample an error row counts (#2213).
+	 * Absent, the error rows are plain text.
+	 */
+	onOpenSample?: (destination: SampleDestination) => void;
+}
+
+export default function OverviewTab({
+	report,
+	runId,
+	derived,
+	anomalies,
+	onOpenSample,
+}: OverviewTabProps) {
 	// Read by run id rather than passed down: `PerformanceTab` reads the same
 	// list for the chart marks, and one prop drilled through `LoadTestDetail`
 	// for two independent readers is a copy waiting to disagree (#1357).
@@ -46,6 +63,16 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 	// lifted here so the Overview says which assertions failed while the Samples
 	// tab drops the row rather than drawing it as a request that never ran.
 	const testFailures = extractTestFailures(report.results);
+	// The rows the Samples tab will show, numbered the way it numbers them, so a
+	// destination's row number names the same sample there.
+	const sampleRows = useMemo(
+		() => numberByTime(sampleResultsWithoutValidationRow(report.results)),
+		[report.results]
+	);
+	const openSample = (target: ErrorRowTarget) => {
+		const destination = locateSample(sampleRows, target);
+		if (destination) onOpenSample?.(destination);
+	};
 
 	return (
 		<>
@@ -190,6 +217,11 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 				errorRate={report.summary.errorRate}
 				httpErrors={derived.httpErrors}
 				noResponse={derived.noResponse}
+				onSelectStatus={onOpenSample && ((code) => openSample({ kind: "status", code }))}
+				onSelectErrorType={
+					onOpenSample && ((key) => openSample({ kind: "errorType", key }))
+				}
+				hasSamples={(target) => locateSample(sampleRows, target) !== null}
 			/>
 		</>
 	);

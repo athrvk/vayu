@@ -16,8 +16,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
-import { ErrorSummary, type ErrorSummaryProps } from "./ErrorSummary";
+import { screen, fireEvent, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { ErrorSummary, type ErrorRowTarget, type ErrorSummaryProps } from "./ErrorSummary";
 
 const props = (over: Partial<ErrorSummaryProps> = {}): ErrorSummaryProps => ({
 	errors: { total: 0, withDetails: 0, types: {} },
@@ -161,6 +162,104 @@ describe("ErrorSummary", () => {
 			render(<ErrorSummary {...withStatuses} />);
 			expect(screen.queryAllByRole("button")).toHaveLength(0);
 			expect(screen.getByText("HTTP 500")).toBeTruthy();
+		});
+	});
+
+	describe("onSelectErrorType", () => {
+		const withTypes = props({
+			errors: {
+				total: 17,
+				withDetails: 2,
+				types: { timeout: 2, dns_failed: 1 },
+				byStatusCode: { "500": 15 },
+			},
+		});
+
+		it("makes each type row a button that reports its key, not its label", () => {
+			const onSelectErrorType = vi.fn();
+			render(<ErrorSummary {...withTypes} onSelectErrorType={onSelectErrorType} />);
+
+			fireEvent.click(screen.getByRole("button", { name: /DNS failed/ }));
+			expect(onSelectErrorType).toHaveBeenLastCalledWith("dns_failed");
+
+			fireEvent.click(screen.getByRole("button", { name: /Timeout/ }));
+			expect(onSelectErrorType).toHaveBeenLastCalledWith("timeout");
+			expect(screen.getAllByRole("button")).toHaveLength(2);
+		});
+
+		it("leaves the status rows as plain text", () => {
+			render(<ErrorSummary {...withTypes} onSelectErrorType={vi.fn()} />);
+			expect(screen.queryByRole("button", { name: /HTTP 500/ })).toBeNull();
+		});
+
+		it("draws no buttons when the caller gave no handler", () => {
+			render(<ErrorSummary {...withTypes} />);
+			expect(screen.queryAllByRole("button")).toHaveLength(0);
+		});
+	});
+
+	describe("hasSamples", () => {
+		const both = props({
+			errors: {
+				total: 17,
+				withDetails: 2,
+				types: { timeout: 2, dns_failed: 1 },
+				byStatusCode: { "500": 15, "0": 2 },
+			},
+		});
+
+		it("disables only the rows it refuses, and says why", () => {
+			const onSelectStatus = vi.fn();
+			const onSelectErrorType = vi.fn();
+			const hasSamples = vi.fn(
+				(t: ErrorRowTarget) =>
+					!(t.kind === "status" && t.code === "500") && t.kind !== "errorType"
+			);
+			render(
+				<ErrorSummary
+					{...both}
+					onSelectStatus={onSelectStatus}
+					onSelectErrorType={onSelectErrorType}
+					hasSamples={hasSamples}
+				/>
+			);
+
+			const refused = screen.getByRole("button", { name: /HTTP 500/ });
+			expect(refused).toBeDisabled();
+			expect(refused).toHaveTextContent("No sample of this was kept");
+			// The reason is reachable by hover and Tab through DisabledHint's tab stop.
+			expect(refused.closest("[data-slot=disabled-hint]")).toHaveAttribute("tabindex", "0");
+			expect(screen.getByRole("button", { name: /Timeout/ })).toBeDisabled();
+			expect(screen.getByRole("button", { name: /DNS failed/ })).toBeDisabled();
+
+			const open = screen.getByRole("button", { name: /No response \(status 0\)/ });
+			expect(open).toBeEnabled();
+			expect(open).not.toHaveTextContent("No sample of this was kept");
+			fireEvent.click(open);
+			expect(onSelectStatus).toHaveBeenCalledWith("0");
+			fireEvent.click(refused);
+			expect(onSelectStatus).toHaveBeenCalledTimes(1);
+		});
+
+		it("asks about the key each row would report", () => {
+			const hasSamples = vi.fn(() => true);
+			render(
+				<ErrorSummary
+					{...both}
+					onSelectStatus={vi.fn()}
+					onSelectErrorType={vi.fn()}
+					hasSamples={hasSamples}
+				/>
+			);
+
+			expect(hasSamples).toHaveBeenCalledWith({ kind: "errorType", key: "dns_failed" });
+			expect(hasSamples).toHaveBeenCalledWith({ kind: "status", code: "500" });
+		});
+
+		it("is not consulted for rows without a handler", () => {
+			render(<ErrorSummary {...both} hasSamples={() => false} />);
+			expect(screen.queryAllByRole("button")).toHaveLength(0);
+			expect(screen.queryByText("No sample of this was kept")).toBeNull();
 		});
 	});
 });

@@ -16,13 +16,15 @@
  * omitted By status code, which left a run whose errors were all HTTP 500
  * showing an empty list under a non-zero total.
  *
- * Absent for a run with no errors. `onSelectStatus` turns each By status code
- * row into a button that reports its code; without it the rows are plain text.
+ * Absent for a run with no errors. `onSelectStatus` / `onSelectErrorType` turn
+ * the By status code / By error type rows into buttons that report their key;
+ * without them the rows are plain text. `hasSamples` disables a row the run kept
+ * no example of (#2213).
  */
 
 import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, DisabledHint } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { formatErrorPercent } from "@/modules/dashboard/utils/format";
@@ -60,36 +62,43 @@ function errorTypeLabel(errorType: string): string {
 
 const ROW_CLASS = "flex justify-between items-center p-2 bg-muted rounded-md text-sm";
 
-function CountRow({ label, count, mono }: { label: string; count: number; mono?: boolean }) {
-	return (
-		<div className={ROW_CLASS}>
-			<span className={cn(mono && "font-mono")}>{label}</span>
-			<span className="font-medium">{formatNumber(count)}</span>
-		</div>
-	);
+const NO_SAMPLE_REASON = "No sample of this was kept";
+
+interface CountRowProps {
+	label: string;
+	count: number;
+	mono?: boolean;
+	/** Makes the row a button. Absent, the row is plain text. */
+	onSelect?: () => void;
+	/** With `onSelect`: the run kept nothing to open, so the button is disabled and says why. */
+	unavailable?: boolean;
 }
 
-function StatusCodeRow({
-	code,
-	count,
-	onSelect,
-}: {
-	code: string;
-	count: number;
-	onSelect?: (code: string) => void;
-}) {
-	const label = code === "0" ? "No response (status 0)" : `HTTP ${code}`;
-	if (!onSelect) return <CountRow label={label} count={count} mono />;
-	return (
-		<Button
-			type="button"
-			variant="listRow"
-			className={cn(ROW_CLASS, "justify-between font-normal hover:bg-accent")}
-			onClick={() => onSelect(code)}
-		>
-			<span className="font-mono">{label}</span>
+function CountRow({ label, count, mono, onSelect, unavailable }: CountRowProps) {
+	const text = (
+		<>
+			<span className={cn(mono && "font-mono")}>{label}</span>
 			<span className="font-medium">{formatNumber(count)}</span>
-		</Button>
+		</>
+	);
+	if (!onSelect) return <div className={ROW_CLASS}>{text}</div>;
+
+	// DisabledHint's wrapper is inline-flex; the row has to stay full width.
+	return (
+		<div className="[&>[data-slot=disabled-hint]]:flex [&>[data-slot=disabled-hint]]:w-full">
+			<DisabledHint reason={unavailable && NO_SAMPLE_REASON}>
+				<Button
+					type="button"
+					variant="listRow"
+					className={cn(ROW_CLASS, "justify-between font-normal hover:bg-accent")}
+					disabled={unavailable}
+					onClick={onSelect}
+				>
+					{text}
+					{unavailable && <span className="sr-only">{NO_SAMPLE_REASON}</span>}
+				</Button>
+			</DisabledHint>
+		</div>
 	);
 }
 
@@ -102,6 +111,9 @@ function Breakdown({ title, children }: { title: string; children: ReactNode }) 
 	);
 }
 
+/** A row of the card, named the way a caller needs to look it up. */
+export type ErrorRowTarget = { kind: "status"; code: string } | { kind: "errorType"; key: string };
+
 export interface ErrorSummaryProps {
 	errors: RunReport["errors"] | undefined;
 	/** The run's error rate as a percent (`summary.errorRate`), not a fraction. */
@@ -109,6 +121,13 @@ export interface ErrorSummaryProps {
 	httpErrors: number;
 	noResponse: number;
 	onSelectStatus?: (code: string) => void;
+	onSelectErrorType?: (errorType: string) => void;
+	/**
+	 * Whether a row has anything to open. A row with a handler that it refuses is
+	 * drawn disabled; a row without a handler is plain text whatever it says.
+	 * Absent, every such row is open-able.
+	 */
+	hasSamples?: (target: ErrorRowTarget) => boolean;
 }
 
 export function ErrorSummary({
@@ -117,11 +136,14 @@ export function ErrorSummary({
 	httpErrors,
 	noResponse,
 	onSelectStatus,
+	onSelectErrorType,
+	hasSamples,
 }: ErrorSummaryProps) {
 	if (!errors || errors.total <= 0) return null;
 
 	const types = Object.entries(errors.types ?? {});
 	const statusCodes = Object.entries(errors.byStatusCode ?? {});
+	const unavailable = (target: ErrorRowTarget) => hasSamples?.(target) === false;
 
 	return (
 		<Card className="enter-fade border-destructive/30">
@@ -151,6 +173,8 @@ export function ErrorSummary({
 								key={errorType}
 								label={errorTypeLabel(errorType)}
 								count={count}
+								onSelect={onSelectErrorType && (() => onSelectErrorType(errorType))}
+								unavailable={unavailable({ kind: "errorType", key: errorType })}
 							/>
 						))}
 					</Breakdown>
@@ -159,11 +183,13 @@ export function ErrorSummary({
 				{statusCodes.length > 0 && (
 					<Breakdown title="By status code">
 						{statusCodes.map(([code, count]) => (
-							<StatusCodeRow
+							<CountRow
 								key={code}
-								code={code}
+								label={code === "0" ? "No response (status 0)" : `HTTP ${code}`}
 								count={count}
-								onSelect={onSelectStatus}
+								mono
+								onSelect={onSelectStatus && (() => onSelectStatus(code))}
+								unavailable={unavailable({ kind: "status", code })}
 							/>
 						))}
 					</Breakdown>

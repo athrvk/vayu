@@ -11,7 +11,8 @@
  * Pure, so the chip definitions and the order are pinned without a DOM.
  */
 
-import { httpStatusClass, isErrorStatus } from "@/constants/http-status";
+import { httpStatusClass, isErrorStatus, type HttpStatusClass } from "@/constants/http-status";
+import type { ErrorRowTarget } from "@/components/shared";
 import type { SampleResult } from "../types";
 
 export const SAMPLE_FILTERS = ["all", "errors", "4xx", "5xx", "no-response", "slow"] as const;
@@ -86,6 +87,45 @@ export function countByFilter(rows: NumberedSample[]): Record<SampleFilter, numb
 		}
 	}
 	return counts;
+}
+
+/** The chip that shows every sample of a class; a class with no chip falls back to All. */
+const CHIP_FOR_STATUS_CLASS: Partial<Record<HttpStatusClass, SampleFilter>> = {
+	"client-error": "4xx",
+	"server-error": "5xx",
+	"no-response": "no-response",
+};
+
+/** Where an Overview error row lands in the Samples tab: a chip, and the row to open (#2213). */
+export interface SampleDestination {
+	filter: SampleFilter;
+	number: number;
+}
+
+function matchesTarget(sample: SampleResult, target: ErrorRowTarget): boolean {
+	if (target.kind === "status") return sample.statusCode === Number(target.code);
+	return sample.trace?.error_type === target.key;
+}
+
+/**
+ * The first loaded sample, oldest first, that an Overview error row counts, with
+ * the chip that shows it - or null when the run kept none (the report's `results`
+ * is a selection, so a row can name errors no sample of which was stored).
+ *
+ * A status row matches on the exact code and lands on the chip of its class (a
+ * 3xx has no chip, so All). An error-type row matches the sample's trace and lands
+ * on Errors, which is a superset of it; a sample with no trace never matches.
+ */
+export function locateSample(
+	rows: NumberedSample[],
+	target: ErrorRowTarget
+): SampleDestination | null {
+	const filter =
+		target.kind === "status"
+			? (CHIP_FOR_STATUS_CLASS[httpStatusClass(Number(target.code))] ?? "all")
+			: "errors";
+	const hit = filterSamples(rows, filter).find((row) => matchesTarget(row.sample, target));
+	return hit ? { filter, number: hit.number } : null;
 }
 
 export function isSampleFilter(value: string): value is SampleFilter {
