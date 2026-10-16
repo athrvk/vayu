@@ -51,6 +51,28 @@ function virtualUsers(n: number): string {
 	return plural(n, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT);
 }
 
+/** `6000` → `"6,000 requests"`. */
+export function requestsPhrase(n: number): string {
+	return plural(n, "request");
+}
+
+/**
+ * How many requests the run sends, or null for a mode whose count is the
+ * target's answer rather than a number on this form. The one place the
+ * `iterations` and `constant_rps` arithmetic lives: the summary sentence and
+ * the off-network advisory both read it.
+ */
+export function totalRequests({
+	mode,
+	iterations,
+	rps,
+	duration,
+}: Pick<SummaryInput, "mode" | "iterations" | "rps" | "duration">): number | null {
+	if (mode === "iterations") return iterations;
+	if (mode === "constant_rps") return rps * duration;
+	return null;
+}
+
 /**
  * What one unit of work is. A single-request run counts requests; a collection
  * run counts passes through the sequence, and calling a pass a request would
@@ -92,18 +114,20 @@ export function summarise(
 		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${virtualUsers(concurrency)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
 	}
 
+	const total = totalRequests(input);
+
 	if (mode === "iterations" && subject === "sequence") {
 		return `Runs the sequence ${plural(iterations, "time")} across ${virtualUsers(concurrency)}, then stops.`;
 	}
 
-	if (mode === "iterations") {
-		return `Sends exactly ${plural(iterations, "request")} using ${virtualUsers(concurrency)}, then stops.`;
+	if (mode === "iterations" && total !== null) {
+		return `Sends exactly ${requestsPhrase(total)} using ${virtualUsers(concurrency)}, then stops.`;
 	}
 
-	if (mode === "constant_rps") {
+	if (mode === "constant_rps" && total !== null) {
 		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
-		return `${shape} - about ${plural(rps * duration, "request")} in total.`;
+		return `${shape} - about ${requestsPhrase(total)} in total.`;
 	}
 
 	if (mode === "constant_concurrency" && subject === "sequence") {
