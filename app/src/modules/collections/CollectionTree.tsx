@@ -376,11 +376,15 @@ export default function CollectionTree() {
 						<EmptyState
 							icon={Folder}
 							title="No collections yet"
-							description="Group related requests and share variables across them."
+							description="Requests live in collections; your first one is created for you."
 							action={
 								<div className="flex gap-2">
-									<Button size="sm" onClick={panel.openNewCollectionForm}>
-										New collection
+									<Button
+										size="sm"
+										onClick={() => newRequest()}
+										disabled={isAddingRequest}
+									>
+										New request
 									</Button>
 									<Button variant="outline" size="sm" onClick={openImport}>
 										Import

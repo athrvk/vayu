@@ -14,7 +14,7 @@
  * `useCollectionsQuery` is destructured as `{ data: collections = [] }`, and
  * nothing sets `throwOnError`, so a query that settles as an error never
  * reaches the ErrorBoundary - it just resolves to `[]`. The tree then rendered
- * "No collections yet" with a "New collection" button, which is
+ * "No collections yet" with a empty state, which is
  * worse than merely wrong: it invites a user whose collections exist but could
  * not be loaded to create a duplicate.
  *
@@ -30,6 +30,17 @@ import { useImportModalStore } from "@/stores";
 import CollectionTree from "./CollectionTree";
 
 const refetch = vi.fn();
+const newRequest = vi.fn();
+
+// The real hook resolves a destination collection; this file only needs to
+// see that the empty state's action calls it.
+vi.mock("@/hooks/useNewRequest", () => ({
+	useNewRequest: () => ({
+		newRequest,
+		isCreating: false,
+		pickerProps: { open: false, onOpenChange: vi.fn(), collections: [], onSelect: vi.fn() },
+	}),
+}));
 const queryState = {
 	collections: {
 		data: [] as unknown[],
@@ -70,6 +81,7 @@ function renderTree() {
 beforeEach(() => {
 	useImportModalStore.setState({ isOpen: false, pendingPath: null });
 	refetch.mockReset();
+	newRequest.mockReset();
 	queryState.collections = {
 		data: [],
 		isLoading: false,
@@ -137,12 +149,12 @@ describe("CollectionTree when the collections query fails", () => {
 });
 
 describe("CollectionTree empty workspace", () => {
-	it("offers New collection and Import beside each other", () => {
+	it("offers New request and Import beside each other", () => {
 		renderTree();
 
 		// Exact names: the toolbar's icon buttons are "Add collection" and
 		// "Import collection", so these are the empty state's own.
-		expect(screen.getByRole("button", { name: "New collection" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "New request" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Import" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Import collection" })).toBeInTheDocument();
 	});
@@ -156,15 +168,22 @@ describe("CollectionTree empty workspace", () => {
 		expect(useImportModalStore.getState().isOpen).toBe(true);
 	});
 
-	it("opens the new-collection form from New collection, not the import dialog", () => {
+	it("creates a request from New request, which makes the collection itself", () => {
 		renderTree();
-		expect(screen.queryByPlaceholderText("Collection name")).not.toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("button", { name: "New collection" }));
+		fireEvent.click(screen.getByRole("button", { name: "New request" }));
 
-		expect(screen.getByPlaceholderText("Collection name")).toBeInTheDocument();
+		expect(newRequest).toHaveBeenCalledTimes(1);
 		expect(useImportModalStore.getState().isOpen).toBe(false);
-		// The form replaces the empty state rather than stacking on it.
-		expect(screen.queryByText("No collections yet")).not.toBeInTheDocument();
+		// Step one is not "create a collection first".
+		expect(screen.queryByPlaceholderText("Collection name")).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "New collection" })).not.toBeInTheDocument();
+	});
+
+	it("says the first collection is created for the user", () => {
+		renderTree();
+		expect(
+			screen.getByText("Requests live in collections; your first one is created for you.")
+		).toBeInTheDocument();
 	});
 });
