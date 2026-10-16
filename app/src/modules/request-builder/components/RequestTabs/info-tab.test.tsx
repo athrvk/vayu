@@ -29,10 +29,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
-import type { RequestBuilderContextValue } from "../../types";
+import type { RequestBuilderContextValue, RequestState } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import RequestTabs from "./index";
+import { expectNoMark, expectPresenceDot } from "./tab-mark.testkit";
 
 // The panels pull in Monaco, the variable inputs and the auth editors; none of
 // that is what this guards.
@@ -53,13 +54,19 @@ vi.mock("./panels/BodyPanel", () => ({ default: () => null }));
 vi.mock("./panels/AuthPanel", () => ({ default: () => null }));
 vi.mock("./panels/SettingsPanel", () => ({ default: () => null }));
 
-function renderTabs(description?: string, params?: KeyValueItem[], url?: string) {
+function renderTabs(
+	description?: string,
+	params?: KeyValueItem[],
+	url?: string,
+	overrides: Partial<RequestState> = {}
+) {
 	const value = {
 		request: {
 			...createDefaultRequestState(),
 			description,
 			...(params ? { params } : {}),
 			...(url ? { url } : {}),
+			...overrides,
 		},
 		activeTab: "info",
 		setActiveTab: vi.fn(),
@@ -83,10 +90,10 @@ const labelOf = (tab: HTMLElement) =>
 const tabNames = () => screen.getAllByRole("tab").map(labelOf);
 
 /** The count superscript, which is a sibling of the label, not part of it. */
-// `|| null`, not `?? null`: the count's `sup` is always in the DOM - it
-// reserves the badge's width so one appearing cannot shift the tabs beside it
-// (`MARK_SLOT` in `ui/tabs.tsx`) - and reads `""` when there is nothing to
-// show. "No count" is the empty slot, not a missing element.
+// `|| null`, not `?? null`: the count's `sup` is always in the DOM, collapsed
+// to a zero-width track (`MARK_TRACK` in `ui/tabs.tsx`) so one appearing cannot
+// shift the tabs beside it - and reads `""` when there is nothing to show.
+// "No count" is the empty slot, not a missing element.
 const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent || null;
 
 describe("the Info tab", () => {
@@ -109,19 +116,45 @@ describe("the Info tab", () => {
 		expect(screen.queryByRole("tab", { name: /Docs/ })).not.toBeInTheDocument();
 	});
 
-	it("badges presence, not a count, like Body and Auth do", () => {
+	it("marks presence with a dot, not a count, like Body and Auth do", () => {
 		renderTabs("Returns settled payouts.");
-		expect(countOf(screen.getAllByRole("tab")[0])).toBe("1");
+		expectPresenceDot(screen.getByRole("tab", { name: "Info" }), "Info");
 	});
 
 	it("stays quiet when there is no description", () => {
 		renderTabs();
-		expect(countOf(screen.getAllByRole("tab")[0])).toBeNull();
+		expectNoMark(screen.getByRole("tab", { name: "Info" }), "Info");
 	});
 
 	it("treats a whitespace-only description as none", () => {
 		renderTabs("   \n  ");
-		expect(countOf(screen.getAllByRole("tab")[0])).toBeNull();
+		expectNoMark(screen.getByRole("tab", { name: "Info" }), "Info");
+	});
+});
+
+/*
+ * Body and Auth say "something is here", not "this many" (#2199): a dot, and
+ * the accessible name stays the bare label - "Body", not "Body 1".
+ */
+describe("the Body and Auth tabs mark presence with a dot", () => {
+	it("marks Body once a body mode is chosen", () => {
+		renderTabs(undefined, undefined, undefined, { bodyMode: "json" });
+		expectPresenceDot(screen.getByRole("tab", { name: "Body" }), "Body");
+	});
+
+	it("leaves Body quiet with no body", () => {
+		renderTabs(undefined, undefined, undefined, { bodyMode: "none" });
+		expectNoMark(screen.getByRole("tab", { name: "Body" }), "Body");
+	});
+
+	it("marks Auth once an auth mode is chosen", () => {
+		renderTabs(undefined, undefined, undefined, { auth: { mode: "bearer", token: "t" } });
+		expectPresenceDot(screen.getByRole("tab", { name: "Auth" }), "Auth");
+	});
+
+	it("leaves Auth quiet with no auth", () => {
+		renderTabs(undefined, undefined, undefined, { auth: { mode: "none" } });
+		expectNoMark(screen.getByRole("tab", { name: "Auth" }), "Auth");
 	});
 });
 

@@ -80,7 +80,7 @@ export default function RequestTabs() {
 			 */
 			id: "info",
 			label: "Info",
-			badge: request.description?.trim() ? 1 : undefined,
+			badge: request.description?.trim() ? true : undefined,
 		},
 		{
 			id: "params",
@@ -102,12 +102,12 @@ export default function RequestTabs() {
 		{
 			id: "body",
 			label: "Body",
-			badge: request.bodyMode !== "none" ? 1 : undefined,
+			badge: request.bodyMode !== "none" ? true : undefined,
 		},
 		{
 			id: "auth",
 			label: "Auth",
-			badge: request.auth.mode !== "none" ? 1 : undefined,
+			badge: request.auth.mode !== "none" ? true : undefined,
 		},
 		{
 			id: "elements",
@@ -134,7 +134,7 @@ export default function RequestTabs() {
 			label: "Settings",
 			// Badges only when the request departs from the engine defaults, so
 			// the tab stays quiet for the requests that never touch it.
-			badge: isRequestSettingsNonDefault(request) ? 1 : undefined,
+			badge: isRequestSettingsNonDefault(request) ? true : undefined,
 		},
 	];
 

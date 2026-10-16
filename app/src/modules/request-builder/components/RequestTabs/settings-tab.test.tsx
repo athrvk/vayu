@@ -30,6 +30,7 @@ import type { RequestBuilderContextValue, RequestState } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
 import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, HTTP_VERSIONS } from "@/constants/request";
 import RequestTabs from "./index";
+import { expectNoMark, expectPresenceDot } from "./tab-mark.testkit";
 
 // The Settings tab reads the engine's declared defaults for its automatic
 // header list (issue #1765); no engine answers here, which is the
@@ -85,17 +86,17 @@ describe("Settings tab", () => {
 		// twin of the label to reserve the active state's width, so textContent
 		// is "SettingsSettings" by design. The twin is aria-hidden, so the name
 		// stays exact - and the name is what a badge would actually change.
-		expect(settingsTab()).toHaveAccessibleName("Settings");
+		expectNoMark(settingsTab(), "Settings");
 	});
 
-	it("badges when following is turned off", () => {
+	it("badges with a dot, never a count, when following is turned off", () => {
 		renderTabs({ followRedirects: false });
-		expect(settingsTab().textContent).toContain("1");
+		expectPresenceDot(settingsTab(), "Settings");
 	});
 
 	it("badges when the hop limit differs from the default", () => {
 		renderTabs({ maxRedirects: DEFAULT_MAX_REDIRECTS + 5 });
-		expect(settingsTab().textContent).toContain("1");
+		expectPresenceDot(settingsTab(), "Settings");
 	});
 
 	it("badges when TLS verification is off, even with everything else default", () => {
@@ -103,7 +104,7 @@ describe("Settings tab", () => {
 		// accepts any certificate is indistinguishable from one that does not
 		// until a surface says so, and the tab strip is the first one visible.
 		renderTabs({ verifySSL: false });
-		expect(settingsTab().textContent).toContain("1");
+		expectPresenceDot(settingsTab(), "Settings");
 	});
 
 	it("badges when the protocol differs from the default, even with default redirects", () => {
@@ -112,7 +113,7 @@ describe("Settings tab", () => {
 		// badge - this is the case the rename to isRequestSettingsNonDefault
 		// exists for.
 		renderTabs({ httpVersion: "http2" });
-		expect(settingsTab().textContent).toContain("1");
+		expectPresenceDot(settingsTab(), "Settings");
 	});
 
 	it("badges for each of Postman's protocol switches on its own (#1765)", () => {
@@ -125,7 +126,7 @@ describe("Settings tab", () => {
 			{ disableUrlEncoding: true },
 		] satisfies Partial<RequestState>[]) {
 			const view = renderTabsView(overrides);
-			expect(settingsTab().textContent).toContain("1");
+			expectPresenceDot(settingsTab(), "Settings");
 			view.unmount();
 		}
 	});

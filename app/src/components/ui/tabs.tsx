@@ -289,11 +289,17 @@ const MARK_TRACK =
  * the moment its gating was removed and it always rendered - a `0` beside a tab
  * whose panel says "No console output".
  *
- * Handled here rather than at each call site because the call sites were
- * already working around it by hand: `RequestTabs` passed `badge: undefined`
- * and guarded with `tab.badge !== undefined`, which is the same remembering
- * problem one level up. A caller that genuinely wants to show a zero can pass
+ * Handled here rather than at each call site, which would otherwise have to
+ * remember it each time. A caller that genuinely wants to show a zero can pass
  * the string `"0"`.
+ *
+ * **`true` is presence, not a count (#2199).** A tab whose panel holds
+ * "something" rather than "this many" (Info, Body, Auth, Settings) passes
+ * `true` and gets a 5px dot in the count's own track, so it grows in, fades
+ * out and costs nothing at rest exactly as a number does. It was a `1` before,
+ * which read as a count of one beside Params and Headers' real counts. The dot
+ * is `aria-hidden` and carries no text, so the trigger's accessible name stays
+ * the bare label. `false` is as quiet as `undefined`.
  *
  * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
  * `<sup>` is always here, at a `grid-cols-[0fr]` track (see `MARK_TRACK`);
@@ -316,8 +322,14 @@ const MARK_TRACK =
  * gating the element is what reintroduces the shift. A tab that can never
  * carry one renders no `TabCount` at all and pays no width, ever.
  */
-function TabCount({ value, className }: { value?: number | string | null; className?: string }) {
-	const live = value === 0 || value === undefined || value === null ? null : value;
+function TabCount({
+	value,
+	className,
+}: {
+	value?: number | string | boolean | null;
+	className?: string;
+}) {
+	const live = value === 0 || value === false || value === undefined ? null : (value ?? null);
 	/*
 	 * The track reads `live`, the text reads `shown`: the collapse starts on
 	 * time while the digit it is collapsing around is still there to fade. The
@@ -352,7 +364,15 @@ function TabCount({ value, className }: { value?: number | string | null; classN
 					className
 				)}
 			>
-				{shown}
+				{shown === true ? (
+					<span
+						data-slot="tab-presence-dot"
+						aria-hidden="true"
+						className="block size-[5px] rounded-full bg-primary-text"
+					/>
+				) : (
+					shown
+				)}
 			</span>
 		</sup>
 	);

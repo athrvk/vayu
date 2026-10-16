@@ -578,3 +578,104 @@ describe("a count going away fades rather than being cut", () => {
 		expect(slotIn(container).textContent).toBe("7");
 	});
 });
+
+/*
+ * `value={true}` is presence (#2199): "something is here", drawn as a dot in
+ * the count's own track rather than as a `1` that reads as a count of one.
+ *
+ * The dot adds no text, so the accessible name is the bare label with or
+ * without it; `aria-hidden` is asserted on the node itself because an empty
+ * span would not change a name either way.
+ *
+ * Mutation check (confirmed): render `shown` unconditionally instead of the
+ * dot branch and "draws a dot…" fails on the missing dot; drop the `aria-hidden`
+ * attribute and "hides the dot from assistive tech" fails.
+ */
+describe("a presence mark is a dot, not a number", () => {
+	const slotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-count']")!;
+	const dotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-presence-dot']");
+
+	function Marked({ value }: { value?: number | boolean }) {
+		return (
+			<Tabs defaultValue="one">
+				<TabsList variant="inset">
+					<TabsTrigger value="one">
+						<TabLabel>Body</TabLabel>
+						<TabCount value={value} />
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("draws a dot in an open track, with no text", () => {
+		const { container } = render(<TabCount value={true} />);
+		expect(dotIn(container)).not.toBeNull();
+		expect(slotIn(container).className).toContain("grid-cols-[1fr]");
+		expect(slotIn(container).textContent).toBe("");
+		expect(dotIn(container)!.className).toContain("rounded-full");
+	});
+
+	it("hides the dot from assistive tech, so the trigger's name is the bare label", () => {
+		render(<Marked value={true} />);
+		expect(dotIn(document.body)).toHaveAttribute("aria-hidden", "true");
+		expect(screen.getByRole("tab")).toHaveAccessibleName("Body");
+	});
+
+	it("names the trigger by its count when it carries a number", () => {
+		render(<Marked value={3} />);
+		expect(dotIn(document.body)).toBeNull();
+		expect(screen.getByRole("tab")).toHaveAccessibleName(/^Body\s*3$/);
+	});
+
+	it.each<[string, boolean | undefined]>([
+		["undefined", undefined],
+		["false", false],
+	])("draws nothing for %s", (_name, value) => {
+		const { container } = render(<TabCount value={value} />);
+		expect(dotIn(container)).toBeNull();
+		expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+		expect(slotIn(container).textContent).toBe("");
+	});
+
+	it("holds the dot through its fade, then clears it", () => {
+		const { container, rerender } = render(<TabCount value={true} />);
+		const cell = slotIn(container).querySelector("span")!;
+		expect(cell.className).toContain("opacity-100");
+
+		rerender(<TabCount value={undefined} />);
+		// The track collapses on the live value; the dot stays to be faded out.
+		expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+		expect(cell.className).toContain("opacity-0");
+		expect(dotIn(container)).not.toBeNull();
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 1);
+		});
+		expect(dotIn(container)).not.toBeNull();
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(dotIn(container)).toBeNull();
+	});
+
+	it("swaps a count for the dot without leaving a digit behind", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		rerender(<TabCount value={true} />);
+		expect(dotIn(container)).not.toBeNull();
+		expect(slotIn(container).textContent).toBe("");
+	});
+});

@@ -70,7 +70,9 @@ export interface TabInfo {
 	id: RequestTab;
 	label: string;
 	/**
-	 * The count beside the label, or `undefined` for "nothing to show".
+	 * The mark beside the label: a count, `true` for "something is here" (drawn
+	 * as a dot, never a number - see `TabCount`), or `undefined` for "nothing
+	 * to show".
 	 *
 	 * Whether the key is *present* is what says the tab can carry a count at
 	 * all, and `RequestTabs` reads it with `"badge" in tab`: a present-but-
@@ -81,7 +83,7 @@ export interface TabInfo {
 	 * takes it. Setting it to `undefined` and omitting it are therefore *not*
 	 * the same thing here.
 	 */
-	badge?: number;
+	badge?: number | true;
 }
 
 /** The response pane's own tab strip - see `ResponseViewer`. */

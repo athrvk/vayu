@@ -58,7 +58,7 @@ export interface HeldValue<T> {
  * clear whenever the value changes again before it fires, which is the whole
  * mechanism.
  */
-export function useHeldValue<T extends string | number>(
+export function useHeldValue<T extends string | number | boolean>(
 	value: T | null,
 	holdMs: number
 ): HeldValue<T> {
