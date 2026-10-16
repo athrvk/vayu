@@ -86,6 +86,8 @@ import type {
 	PostmanExportResponse,
 	PostmanEnvironmentExportRequest,
 	PostmanEnvironmentExportResponse,
+	RunReportExportRequest,
+	RunReportExportResponse,
 	SpecDescribeRequest,
 	SpecDescribeResponse,
 	SpecDiffRequest,
@@ -424,6 +426,19 @@ export const apiService = {
 	): Promise<PostmanEnvironmentExportResponse> {
 		return await httpClient.post<PostmanEnvironmentExportResponse>(
 			API_ENDPOINTS.POSTMAN_ENVIRONMENT_EXPORT,
+			payload
+		);
+	},
+
+	/**
+	 * A finished load run as a document to share (issue #2127), built engine-side
+	 * so an agent over MCP gets the file the app downloads. Nothing that could
+	 * carry a credential or a payload is in it; `notes.urlCredentialsOmitted`
+	 * counts what the URL lost.
+	 */
+	async exportRunReport(payload: RunReportExportRequest): Promise<RunReportExportResponse> {
+		return await httpClient.post<RunReportExportResponse>(
+			API_ENDPOINTS.RUN_REPORT_EXPORT,
 			payload
 		);
 	},
