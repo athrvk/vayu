@@ -47,6 +47,7 @@ import {
 	RunNotFoundError,
 	isRunNotFound,
 	useBaselineRunQuery,
+	useRequestRunsQuery,
 	runsListInfiniteOptions,
 } from "./runs";
 import { queryKeys } from "./keys";
@@ -54,6 +55,7 @@ import { ApiError } from "@/services";
 import { EngineUnreachableError } from "@/services/http-client";
 import { useEngineStore } from "@/stores/engine-store";
 import { QUERY_CACHE } from "@/config/cache";
+import { RUNS_PAGE_LIMIT } from "@/config/network";
 import type { RunListResponse } from "@/types";
 
 const listRuns = vi.fn();
@@ -185,6 +187,54 @@ describe("useBaselineRunQuery", () => {
 		await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(1));
 		expect(listRuns).toHaveBeenCalledWith(
 			expect.objectContaining({ baseline: true, type: "load" })
+		);
+	});
+});
+
+describe("useRequestRunsQuery", () => {
+	it("asks for one page of this request's load runs, with no status filter", async () => {
+		listRuns.mockResolvedValue(page([runRow("run_7")]));
+
+		const { result } = renderHook(() => useRequestRunsQuery("req_1"), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.data?.data[0].id).toBe("run_7"));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		expect(listRuns).toHaveBeenCalledWith({
+			requestId: "req_1",
+			type: "load",
+			limit: RUNS_PAGE_LIMIT,
+		});
+	});
+
+	it("does not fetch when there is no request id", () => {
+		renderHook(() => useRequestRunsQuery(null), { wrapper: wrapper(makeClient()) });
+		expect(listRuns).not.toHaveBeenCalled();
+	});
+
+	it("keys itself outside the infinite-list prefix but inside its own invalidated family", () => {
+		// A plain `RunListResponse` under `lists()` is what the delete-run patch
+		// threw on for `lastDesign`.
+		const lists = queryKeys.runs.lists() as readonly unknown[];
+		const key = queryKeys.runs.requestRun("req_1") as readonly unknown[];
+		expect(key.slice(0, lists.length)).not.toEqual([...lists]);
+		const family = queryKeys.runs.requestRuns() as readonly unknown[];
+		expect(key.slice(0, family.length)).toEqual([...family]);
+	});
+
+	it("is invalidated by a delete, so a deleted run leaves the picker", async () => {
+		const client = makeClient();
+		client.setQueryData(queryKeys.runs.requestRun("req_1"), page([runRow("r1")]));
+		deleteRun.mockResolvedValue(undefined);
+
+		const { result } = renderHook(() => useDeleteRunMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync("r1");
+
+		await waitFor(() =>
+			expect(client.getQueryState(queryKeys.runs.requestRun("req_1"))?.isInvalidated).toBe(
+				true
+			)
 		);
 	});
 });
@@ -653,6 +703,7 @@ describe("useInvalidateRuns", () => {
 			queryKeys.runs.recentDesigns(),
 			queryKeys.runs.lastCollectionRuns(),
 			queryKeys.runs.baselines(),
+			queryKeys.runs.requestRuns(),
 			queryKeys.runs.lastDesigns(),
 		]) {
 			expect(keys).toContainEqual(key);

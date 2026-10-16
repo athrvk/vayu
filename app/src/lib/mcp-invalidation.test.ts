@@ -303,6 +303,12 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.runs.allRuns());
 	});
 
+	test("a run invalidates the compare picker's per-request lists", () => {
+		// Its own family (a plain `RunListResponse`), unreachable through `lists()`.
+		const { keys } = keysFor({ entity: "run" });
+		expect(keys).toContainEqual(queryKeys.runs.requestRuns());
+	});
+
 	test("a run invalidates the baseline, Recent sends and Last run families", () => {
 		// None of the three is polled, and each answers something a run write can
 		// move - the pin, the newest send, the collection's last run. Their

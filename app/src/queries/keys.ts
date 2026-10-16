@@ -98,6 +98,12 @@ export const queryKeys = {
 		// moves, or when the run set changes without a known request.
 		baselines: () => [...queryKeys.runs.all, "baseline"] as const,
 		baseline: (requestId: string) => [...queryKeys.runs.baselines(), requestId] as const,
+		// The load runs of one request, for the compare picker. Its own family:
+		// it caches a plain `RunListResponse`, and the delete-run patch walks
+		// everything under `lists()` as `InfiniteData`. `requestRuns()` is the
+		// prefix to invalidate when a run ends, is deleted or is pinned.
+		requestRuns: () => [...queryKeys.runs.all, "requestRun"] as const,
+		requestRun: (requestId: string) => [...queryKeys.runs.requestRuns(), requestId] as const,
 		// One small page of runs matching a palette query. Its own family for the
 		// fifth time and the same reason as the four above: it caches a plain
 		// `RunListResponse`, and the delete-run patch walks everything under
