@@ -32,6 +32,7 @@ import MonitorSummary from "./MonitorSummary";
 import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import { useHostSleeps } from "@/stores/host-sleep-store";
+import { useClientSettingsStore } from "@/stores";
 import type { PerformanceTabProps } from "../../types";
 
 export default function PerformanceTab({
@@ -51,6 +52,7 @@ export default function PerformanceTab({
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
 	// this tab marks them, and neither derives anything the other must match.
 	const hostSleeps = useHostSleeps(runId);
+	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	// Windowed per-tick percentiles now persist for completed runs (W1), so the
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
@@ -149,22 +151,29 @@ export default function PerformanceTab({
 				<CardContent>
 					<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
 						<LatencyMetric label="Average" value={report.latency.avg} />
-						<LatencyMetric
-							label="P50 (Median)"
-							value={report.latency.p50}
-							variant="primary"
-						/>
+						<LatencyMetric label="P50 (Median)" value={report.latency.p50} />
 						{report.latency.p75 !== undefined && (
 							<LatencyMetric label="P75" value={report.latency.p75} />
 						)}
 						<LatencyMetric label="P90" value={report.latency.p90} />
-						<LatencyMetric label="P95" value={report.latency.p95} variant="warning" />
-						<LatencyMetric label="P99" value={report.latency.p99} variant="danger" />
+						<LatencyMetric
+							label="P95"
+							value={report.latency.p95}
+							sloMs={sloMs}
+							severity="warning"
+						/>
+						<LatencyMetric
+							label="P99"
+							value={report.latency.p99}
+							sloMs={sloMs}
+							severity="danger"
+						/>
 						{report.latency.p999 !== undefined && (
 							<LatencyMetric
 								label="P999"
 								value={report.latency.p999}
-								variant="danger"
+								sloMs={sloMs}
+								severity="danger"
 							/>
 						)}
 					</div>

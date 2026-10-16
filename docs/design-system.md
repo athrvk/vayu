@@ -625,9 +625,11 @@ squeezed from both ends, which is a property of the hue, not a mistake.
 **The status-code chart uses this family too**, through dedicated
 `status-*` roles in `uplotTheme`. The other charts keep the generic
 `success` / `warning` / `destructive` roles, and must: those are a *series*
-palette wearing semantic names, and the same three also paint p50 / p95 / p99
-and the error-rate area. Repointing them would recolour the latency charts,
-which have nothing to do with HTTP status.
+palette wearing semantic names, and `success` / `warning` also paint the
+rate charts' achieved and configured-band series, `destructive` the error-rate
+area. They do not paint p50 / p95 / p99: a percentile's name is not a verdict
+(#2245). Repointing them at `--status-*` would recolour the rate and
+error-rate charts, which have nothing to do with HTTP status.
 
 That distinction was got wrong first time round. The status chart borrowed
 `categorical` for 3xx and `muted` for a failed connection, and this document
@@ -639,8 +641,10 @@ not learn the association from a dashboard where violet is throughput one chart
 higher. `muted` had the same problem in reverse - it made "nothing came back"
 read as de-emphasised rather than as an outcome of its own.
 
-Latency uses `status-running` → `status-stopped` → `status-error` for normal →
-slow → danger (`LatencyMetric.tsx`).
+The history latency tiles are neutral and use `status-stopped` (P95) or
+`status-error` (P99, P999) only when the value exceeds the user's SLO
+(`LatencyMetric.tsx`, #2245); the percentile lines in the time-series chart take
+no status role at all.
 
 ### Decorative categorical palettes (the one token exception)
 
