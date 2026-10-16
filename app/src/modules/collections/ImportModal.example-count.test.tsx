@@ -19,8 +19,8 @@
  * tree: it lands *inside* a request, so the count is the only place a user
  * learns their saved responses survived the import.
  *
- * Mutation check: delete `{meta.exampleCount} examples` from `PreviewView` and
- * the first case fails.
+ * Mutation check: drop the examples segment from `describeCounts` and the
+ * first case fails.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -83,8 +83,9 @@ describe("the import preview's example count", () => {
 		await preview();
 
 		// Beside the other counts, in the one line that summarises the import.
-		await waitFor(() => expect(screen.getByText(/2 examples/i)).toBeInTheDocument());
-		expect(screen.getByText(/1 requests/i)).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByText("1 request · 0 folders · 2 examples")).toBeInTheDocument()
+		);
 	});
 
 	it("says zero rather than going silent for a file that carried none", async () => {

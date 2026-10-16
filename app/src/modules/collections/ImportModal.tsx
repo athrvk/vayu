@@ -51,7 +51,7 @@ import {
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type ImportResult } from "@/services/importers/types";
-import { importNotices } from "./import-notices";
+import { describeCounts, importNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
@@ -1164,17 +1164,9 @@ function PreviewView({
 					</div>
 				)}
 			</div>
-			{/* `exampleCount` is here rather than only in the tree because a saved
-			    example is the one thing in an import with no row of its own to
-			    look at - it lands inside a request, and until this line the count
-			    every parser computed was rendered nowhere at all (issue #481,
-			    acceptance criterion 1). Unconditional like the other four: "0
-			    examples" is the answer for a file that carried none, which is
-			    different from a preview that does not mention them. */}
-			<p className="text-label text-muted-foreground">
-				{meta.requestCount} requests · {meta.folderCount} collections · {meta.exampleCount}{" "}
-				examples · {meta.environmentCount} environments · {meta.globalCount} globals
-			</p>
+			{/* The examples count is here rather than only in the tree because a
+			    saved example lands inside a request with no row of its own (#481). */}
+			<p className="text-label text-muted-foreground">{describeCounts(meta)}</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
 				<FieldError icon={AlertTriangle}>
 					{importEnvironments
@@ -1284,9 +1276,7 @@ function BatchRow({
 				</span>
 				{result && (
 					<span className="block text-label text-muted-foreground">
-						{result.meta.requestCount} requests · {result.meta.folderCount} collections
-						· {result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
-						environments · {result.meta.globalCount} globals
+						{describeCounts(result.meta)}
 					</span>
 				)}
 				{bundledInto && (

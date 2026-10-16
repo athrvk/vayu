@@ -123,9 +123,8 @@ describe("ImportModal with a Postman environment export", () => {
 		expect(screen.getByText("Postman Environment")).toBeVisible();
 		expect(screen.getByText("Sample Staging")).toBeVisible();
 		expect(screen.getByText("5 variables")).toBeVisible();
-		expect(
-			screen.getByText(/0 requests · 0 collections · 0 examples · 1 environments/)
-		).toBeVisible();
+		// An environment file has no requests to count, so the line is its one segment.
+		expect(screen.getByText("1 environment")).toBeVisible();
 	});
 
 	it("keeps Import enabled - an environment-only import is a real import", async () => {
@@ -182,7 +181,7 @@ describe("ImportModal with a Postman globals export", () => {
 		expect(screen.getByText("Globals")).toBeVisible();
 		expect(screen.queryByText("Sample Workspace Globals")).toBeNull();
 		expect(screen.getByText("4 variables")).toBeVisible();
-		expect(screen.getByText(/0 environments · 4 globals/)).toBeVisible();
+		expect(screen.getByText("4 globals")).toBeVisible();
 	});
 
 	it("keeps Import enabled - a globals-only import is a real import", async () => {
