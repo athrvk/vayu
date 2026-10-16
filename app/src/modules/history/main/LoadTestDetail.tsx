@@ -21,9 +21,11 @@ import {
 	AlertTriangle,
 	ListOrdered,
 	KeyRound,
+	GitCompareArrows,
 } from "lucide-react";
 import {
 	Badge,
+	Button,
 	Tabs,
 	TabsContent,
 	TabsList,
@@ -50,12 +52,13 @@ import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
-import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
-import { useClientSettingsStore, useLayoutStore } from "@/stores";
+import { useRunMonitorSeriesQuery, useRunQuery, useRunTimeSeriesQuery } from "@/queries/runs";
+import { useClientSettingsStore, useLayoutStore, useTabsStore } from "@/stores";
 import {
 	BaselineComparison,
 	OverviewTab,
 	PerformanceTab,
+	RunComparisonView,
 	SamplesTab,
 	ScenarioStepsTab,
 } from "./components";
@@ -69,6 +72,7 @@ import type {
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
+	const [comparing, setComparing] = useState(false);
 	const config = report.metadata?.configuration;
 	// Requested protocol, not the negotiated one (`RunResultTrace.response.httpVersion`
 	// is per-exchange and has no single value across a load run's many requests).
@@ -223,6 +227,26 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// say how the run ended, which draws nothing.
 	const judgement = useMemo(() => reportOutcome(report), [report]);
 
+	// Only a run of a saved request has "the same request" to compare against.
+	// The run row is the cache the pane above already filled.
+	const { data: run } = useRunQuery(runId || null);
+	const compareRequestId = run?.requestId ?? null;
+
+	/*
+	 * A "Compare with..." chosen on this run's History row (#2164) lands here as
+	 * a store target, because `openTab` can only name the run. Handed over once
+	 * and cleared, so reopening the tab later opens on the report. The tab may
+	 * already be open, so this cannot be a mount-time initial state.
+	 */
+	const compareRequested = useTabsStore((s) => s.compareRunTarget === runId);
+	const clearCompareRunTarget = useTabsStore((s) => s.clearCompareRunTarget);
+	useEffect(() => {
+		if (!compareRequested) return;
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+		setComparing(true);
+		clearCompareRunTarget();
+	}, [compareRequested, clearCompareRunTarget]);
+
 	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
 	const crumbs = useMemo(
 		() => [
@@ -250,11 +274,24 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				 * list it names. The run's own crumb is inert - you are already on it,
 				 * and its url and method are the bar right below.
 				 */}
-				<TabBreadcrumb
-					label="Run location"
-					crumbs={crumbs}
-					className="mb-2 bg-transparent px-0 pt-0"
-				/>
+				<div className="mb-2 flex items-center gap-2">
+					<TabBreadcrumb
+						label="Run location"
+						crumbs={crumbs}
+						className="min-w-0 flex-1 bg-transparent px-0 pt-0"
+					/>
+					{compareRequestId && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-control-sm shrink-0 gap-1.5 px-2 text-xs"
+							onClick={() => setComparing(true)}
+						>
+							<GitCompareArrows className="size-icon-sm" aria-hidden="true" />
+							Compare
+						</Button>
+					)}
+				</div>
 
 				{/* Request Info Bar. A scenario load run has no single method or URL -
 				    its target is a sequence - so it says what the sequence was instead
@@ -443,77 +480,90 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				</div>
 			</div>
 
-			{/* Tabbed Content */}
-			<Tabs value={tab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-				<TabsList variant="inset" className="mx-4 mt-3">
-					<TabsTrigger value="overview">
-						<BarChart3 className="size-icon-sm" />
-						<TabLabel>Overview</TabLabel>
-					</TabsTrigger>
-					<TabsTrigger value="performance">
-						<TrendingUp className="size-icon-sm" />
-						<TabLabel>Performance</TabLabel>
-					</TabsTrigger>
-					{/* Only for a run that has a sequence. A single-request load run
+			{comparing && compareRequestId ? (
+				<RunComparisonView
+					report={report}
+					runId={runId}
+					requestId={compareRequestId}
+					onClose={() => setComparing(false)}
+				/>
+			) : (
+				/* Tabbed Content */
+				<Tabs
+					value={tab}
+					onValueChange={setActiveTab}
+					className="flex-1 flex flex-col min-h-0"
+				>
+					<TabsList variant="inset" className="mx-4 mt-3">
+						<TabsTrigger value="overview">
+							<BarChart3 className="size-icon-sm" />
+							<TabLabel>Overview</TabLabel>
+						</TabsTrigger>
+						<TabsTrigger value="performance">
+							<TrendingUp className="size-icon-sm" />
+							<TabLabel>Performance</TabLabel>
+						</TabsTrigger>
+						{/* Only for a run that has a sequence. A single-request load run
 					    would get an empty tab, and the breakdown is the *only* place a
 					    scenario load run says what each step did - it stores no
 					    per-step results rows. */}
-					{isScenarioLoad && (
-						<TabsTrigger value="steps">
-							<ListOrdered className="size-icon-sm" />
-							<TabLabel>Steps</TabLabel>
-						</TabsTrigger>
-					)}
-					<TabsTrigger value="samples">
-						<Activity className="size-icon-sm" />
-						<TabLabel>Sampled requests</TabLabel>
-					</TabsTrigger>
-				</TabsList>
-
-				<ScrollArea className="flex-1">
-					<div className="p-6">
-						<TabsContent value="overview" className="mt-0 space-y-4">
-							<OverviewTab
-								report={report}
-								runId={runId}
-								derived={derived}
-								anomalies={anomalies}
-							/>
-						</TabsContent>
-
-						<TabsContent value="performance" className="mt-0 space-y-4">
-							<PerformanceTab
-								report={report}
-								runId={runId}
-								derived={derived}
-								anomalies={anomalies}
-								timeSeries={timeSeries}
-								seriesFailure={seriesFailure}
-								monitorSamples={monitorSamples}
-								monitorFailure={monitorFailure}
-								isLoadingSeries={isLoadingSeries}
-								isFetchingMore={isFetchingNextPage}
-								progress={seriesProgress}
-							/>
-						</TabsContent>
-
 						{isScenarioLoad && (
-							<TabsContent value="steps" className="mt-0 space-y-4">
-								<ScenarioStepsTab
-									steps={scenarioSteps}
-									virtualUsers={report.scenario?.virtualUsers}
-									iterationsCompleted={report.scenario?.iterationsCompleted}
-									iterationsAbandoned={report.scenario?.iterationsAbandoned}
+							<TabsTrigger value="steps">
+								<ListOrdered className="size-icon-sm" />
+								<TabLabel>Steps</TabLabel>
+							</TabsTrigger>
+						)}
+						<TabsTrigger value="samples">
+							<Activity className="size-icon-sm" />
+							<TabLabel>Sampled requests</TabLabel>
+						</TabsTrigger>
+					</TabsList>
+
+					<ScrollArea className="flex-1">
+						<div className="p-6">
+							<TabsContent value="overview" className="mt-0 space-y-4">
+								<OverviewTab
+									report={report}
+									runId={runId}
+									derived={derived}
+									anomalies={anomalies}
 								/>
 							</TabsContent>
-						)}
 
-						<TabsContent value="samples" className="mt-0 space-y-4">
-							<SamplesTab report={report} derived={derived} />
-						</TabsContent>
-					</div>
-				</ScrollArea>
-			</Tabs>
+							<TabsContent value="performance" className="mt-0 space-y-4">
+								<PerformanceTab
+									report={report}
+									runId={runId}
+									derived={derived}
+									anomalies={anomalies}
+									timeSeries={timeSeries}
+									seriesFailure={seriesFailure}
+									monitorSamples={monitorSamples}
+									monitorFailure={monitorFailure}
+									isLoadingSeries={isLoadingSeries}
+									isFetchingMore={isFetchingNextPage}
+									progress={seriesProgress}
+								/>
+							</TabsContent>
+
+							{isScenarioLoad && (
+								<TabsContent value="steps" className="mt-0 space-y-4">
+									<ScenarioStepsTab
+										steps={scenarioSteps}
+										virtualUsers={report.scenario?.virtualUsers}
+										iterationsCompleted={report.scenario?.iterationsCompleted}
+										iterationsAbandoned={report.scenario?.iterationsAbandoned}
+									/>
+								</TabsContent>
+							)}
+
+							<TabsContent value="samples" className="mt-0 space-y-4">
+								<SamplesTab report={report} derived={derived} />
+							</TabsContent>
+						</div>
+					</ScrollArea>
+				</Tabs>
+			)}
 		</div>
 	);
 }

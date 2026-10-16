@@ -117,7 +117,7 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		min: 0,
 		minInclusive: true,
 		max: 100,
-		hint: "Counts every assert.* element and pm.test call this run made, inline or replayed.",
+		hint: "Counts every assert.* element on every response, and pm.test calls in the responses the script ran on.",
 	},
 ];
 

@@ -55,6 +55,8 @@ export interface ImportApplied {
 	idMap: Record<string, string>;
 	/** Each root collection's temp id -> real id, in the order the file listed them. */
 	rootIds: Record<string, string>;
+	/** Each environment the apply created, temp id -> real id. Empty when environments were left out. */
+	environmentIds: Record<string, string>;
 }
 
 /** The real id of every temp-id-stamped item in `items`, keyed by its temp id. */
@@ -102,6 +104,7 @@ export function useImportMutation() {
 			return {
 				idMap,
 				rootIds: realIds(withTempIds.collections, idMap),
+				environmentIds: realIds(withTempIds.environments, idMap),
 			};
 		},
 		// Settled, not success: `run()` can throw *after* the tree is committed (the

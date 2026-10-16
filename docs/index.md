@@ -14,6 +14,11 @@ hide:
 engine to Claude Code, Cursor, VS Code, or Codex. One app instead of three, all
 of it on your machine: no account, no cloud sync, no telemetry.
 
+MCP ([Model Context Protocol](engine/mcp.md)) is the open standard that lets
+coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine
+as one, so an agent can send the request it just wrote, load test it and read
+the report without leaving your editor.
+
 [Download Vayu](#install){ .md-button .md-button--primary }
 [Use it from your agent](#drive-vayu-from-your-coding-agent){ .md-button }
 [See what it does](#what-you-can-do){ .md-button }
@@ -24,7 +29,7 @@ Coming from another tool? Read the honest comparison:
 [k6](compare/vayu-vs-k6.md) &middot;
 [JMeter](compare/vayu-vs-jmeter.md)
 
-![The load-test dashboard at 52,738 req/s and 738,406 requests with a 100% success rate: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest2.png){ .shot }
+![The load-test run view: rate fidelity, throughput, error counters and the pass/fail budget verdict, with the run in the history sidebar.](images/vayu-loadtest2.png){ .shot }
 
 ## Install
 
@@ -283,6 +288,11 @@ engine saturates a target - and why the engine can be driven on its own, from th
 [How it works in full](architecture.md){ .md-button }
 
 ## Drive Vayu from your coding agent
+
+MCP ([Model Context Protocol](engine/mcp.md)) is the open standard that lets
+coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine
+as one, so an agent can send the request it just wrote, load test it and read
+the report without leaving your editor.
 
 Vayu ships an **MCP server**, so an agent can use the same engine the UI does -
 send a request, start a load run, read the report, compare two runs. It runs

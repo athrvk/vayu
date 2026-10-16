@@ -10,7 +10,7 @@
  * component - mixing the two breaks fast refresh, which the linter flags.
  *
  * The array order is the sort order: a notice that stops the run has to render
- * above one that merely warns. With up to four notices stacked, position is the
+ * above one that merely warns. With several notices stacked, position is the
  * only thing distinguishing them.
  */
 export const SEVERITY_ORDER = ["blocking", "warning", "info"] as const;

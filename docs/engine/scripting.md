@@ -2550,6 +2550,9 @@ The **language** is current; what is missing is the **host environment**:
   response displaces a uniformly chosen incumbent, so a target that starts
   failing halfway through is graded on those failures rather than on the healthy
   window before them
+- The app tells the user this before Start: the load-test dialog's "Tests run
+  afterwards, on a sample" notice names the defaults (1 in 100 responses, at most
+  1,000) and that `assert.*` elements still check every response
 - A second bound applies to the same store: `max_response_sample_bytes`
   (`maxResponseSampleBytes`, 256 MiB by default) is the whole-run budget for the
   retained bodies, because each is kept **whole** and a target answering 1 MiB

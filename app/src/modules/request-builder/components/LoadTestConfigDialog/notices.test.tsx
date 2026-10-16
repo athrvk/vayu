@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Copyright (c) 2026 Atharva Kusumbia
  *
  * This source code is licensed under the Apache 2.0 license found in the
@@ -6,6 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { render } from "@testing-library/react";
 import { buildNotices, type NoticeInputs } from "./notices";
 
 const CLEAN: NoticeInputs = {
@@ -16,6 +20,7 @@ const CLEAN: NoticeInputs = {
 	budgetsError: null,
 	monitoringError: null,
 	hasPreRequestScript: false,
+	hasPostRequestScript: false,
 	scriptsOverride: "asMarked",
 	defaultHeaderDifference: null,
 };
@@ -53,5 +58,60 @@ describe("buildNotices", () => {
 
 	it("says nothing about scripts when the request has no pre-request script", () => {
 		expect(keys({ hasPreRequestScript: false, scriptsOverride: "asMarked" })).toEqual([]);
+	});
+
+	describe("the post-request sampling notice", () => {
+		it("is included as an info notice for a replayed post-request script", () => {
+			expect(keys({ hasPostRequestScript: true, scriptsOverride: "asMarked" })).toEqual([
+				"post-script",
+			]);
+			expect(keys({ hasPostRequestScript: true, scriptsOverride: "allDeferred" })).toEqual([
+				"post-script",
+			]);
+			const [notice] = buildNotices({ ...CLEAN, hasPostRequestScript: true });
+			expect(notice.severity).toBe("info");
+		});
+
+		it("sorts below a blocking notice and the pre-request warning", () => {
+			expect(
+				keys({
+					hasPostRequestScript: true,
+					hasPreRequestScript: true,
+					budgetsError: "p99 is out of range",
+				})
+			).toEqual(["budgets", "pre-script", "post-script"]);
+		});
+
+		it("is omitted once Scripts is All inline", () => {
+			expect(keys({ hasPostRequestScript: true, scriptsOverride: "allInline" })).toEqual([]);
+		});
+
+		it("is omitted when no post-request script would be replayed", () => {
+			expect(keys({ hasPostRequestScript: false, scriptsOverride: "asMarked" })).toEqual([]);
+		});
+
+		it("states the engine's sample period and cap, never a percentage", () => {
+			const { container } = render(
+				<>{buildNotices({ ...CLEAN, hasPostRequestScript: true }).map((n) => n.node)}</>
+			);
+			const text = container.textContent ?? "";
+			expect(text.length).toBeGreaterThan(0);
+			expect(text).toContain("about 1 in 100 responses (at most 1,000)");
+			expect(text).toContain("assert.* elements check every response");
+			expect(text).not.toContain("%");
+		});
+	});
+
+	it("states the post-request sample once, not again in the pre-request warning", () => {
+		const { container } = render(
+			<>
+				{buildNotices({ ...CLEAN, hasPreRequestScript: true }).map((n) => (
+					<div key={n.key}>{n.node}</div>
+				))}
+			</>
+		);
+		const text = container.textContent ?? "";
+		expect(text).toContain("Pre-request script won't run");
+		expect(text).not.toMatch(/post-request/i);
 	});
 });

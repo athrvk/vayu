@@ -130,6 +130,20 @@ interface TabsState {
 	 */
 	dataRowTarget: { requestId: string; rowIndex: number } | null;
 	/**
+	 * A load run whose report something outside it has asked to open on its
+	 * comparison with another run, or `null` (issue #2164).
+	 *
+	 * The same shape of navigation as `specTabTarget`: `openTab` can only name
+	 * the run, and whether its report opens on the compare view is state
+	 * `LoadTestDetail` holds. The History row's "Compare with..." is the caller.
+	 * `LoadTestDetail` acts on it when that run is on screen and clears it.
+	 *
+	 * Session-scoped (absent from `partialize`): one navigation in flight, and
+	 * a persisted copy would open yesterday's report on a comparison nobody asked
+	 * for today.
+	 */
+	compareRunTarget: string | null;
+	/**
 	 * Every place the user has been in this session, oldest first, with
 	 * `navIndex` marking where they are in it (issue #1245).
 	 *
@@ -177,6 +191,10 @@ interface TabsState {
 	openRequestWithDataRow: (requestId: string, rowIndex: number) => void;
 	/** Consume `dataRowTarget`, once the request builder has acted on it. */
 	clearDataRowTarget: () => void;
+	/** Show a load run's report on its comparison view - see `compareRunTarget`. */
+	openRunComparison: (runId: string) => void;
+	/** Consume `compareRunTarget`, once the run's report has acted on it. */
+	clearCompareRunTarget: () => void;
 	closeTab: (tabId: string) => void;
 	/**
 	 * Close every tab except one - the strip's "Close Others".
@@ -605,6 +623,7 @@ export const useTabsStore = create<TabsState>()(
 			tabFocusedAt: {},
 			specTabTarget: null,
 			dataRowTarget: null,
+			compareRunTarget: null,
 			navHistory: [],
 			navIndex: -1,
 
@@ -691,6 +710,15 @@ export const useTabsStore = create<TabsState>()(
 			},
 
 			clearDataRowTarget: () => set({ dataRowTarget: null }),
+
+			// Target first, tab second, for the reason `openCollectionSpecTab` sets
+			// its own.
+			openRunComparison: (runId) => {
+				set({ compareRunTarget: runId });
+				get().openTab({ type: "run", entityId: runId });
+			},
+
+			clearCompareRunTarget: () => set({ compareRunTarget: null }),
 
 			// A dirty tab with nowhere for its unmount flush to land is a silent
 			// loss (#1489): `useSaveManager`'s cleanup fires the save anyway, its

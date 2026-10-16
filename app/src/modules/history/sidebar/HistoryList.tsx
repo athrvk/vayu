@@ -77,6 +77,7 @@ function deleteRunErrorMessage(error: unknown): string {
 
 export default function HistoryList() {
 	const openTab = useTabsStore((s) => s.openTab);
+	const openRunComparison = useTabsStore((s) => s.openRunComparison);
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
@@ -512,6 +513,7 @@ export default function HistoryList() {
 											onSelect={navigateToRunDetail}
 											onDelete={handleDeleteClick}
 											onToggleBaseline={handleToggleBaseline}
+											onCompare={openRunComparison}
 											isDeleting={deletingId === run.id}
 											isTogglingBaseline={pinningId === run.id}
 											isSelected={selectedRunId === run.id}
