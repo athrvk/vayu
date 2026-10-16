@@ -32,6 +32,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -61,6 +63,7 @@ import {
 	EngineSidecar,
 	EngineNotReadyError,
 	EnginePortInUseError,
+	defaultSidecarSystem,
 	type SidecarSystem,
 } from "./sidecar";
 import {
@@ -878,6 +881,85 @@ describe("EngineSidecar - restart racing quit", () => {
 		await sidecar.shutdown();
 
 		await expect(sidecar.restart(0)).rejects.toThrow(/shutting down/i);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * #2153: `{"status":"ok"}` is what any service's health route says. The
+ * default probes read real sockets, because the fakes above would "pass" a
+ * probe that trusts `status` alone.
+ */
+describe("defaultSidecarSystem - recognising a Vayu engine", () => {
+	const VAYU_HEALTH = { status: "ok", version: "0.0.0-test", workers: 8 };
+	const servers: Server[] = [];
+
+	/** A listener on a free loopback port answering `GET /health` with `body`. */
+	async function serveHealth(body: unknown): Promise<number> {
+		const server = createServer((_request, response) => {
+			response.setHeader("Content-Type", "application/json");
+			response.end(JSON.stringify(body));
+		});
+		servers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		return (server.address() as AddressInfo).port;
+	}
+
+	afterEach(async () => {
+		await Promise.all(
+			servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))
+		);
+	});
+
+	it.each([
+		["status alone", { status: "ok" }],
+		["no workers", { status: "ok", version: "0.0.0-test" }],
+		["no version", { status: "ok", workers: 8 }],
+		["a numeric version", { status: "ok", version: 1, workers: 8 }],
+		["a string workers", { status: "ok", version: "0.0.0-test", workers: "8" }],
+		["a status other than ok", { ...VAYU_HEALTH, status: "starting" }],
+	])("does not take a reply with %s for an engine", async (_name, body) => {
+		const port = await serveHealth(body);
+
+		expect(await defaultSidecarSystem.probeHealth(port)).toBe(false);
+	});
+
+	it("takes status, a string version and a numeric workers for an engine", async () => {
+		const port = await serveHealth(VAYU_HEALTH);
+
+		expect(await defaultSidecarSystem.probeHealth(port)).toBe(true);
+	});
+
+	it("skips a marker-less listener as held and adopts the Vayu engine on the next candidate", async () => {
+		const foreignPort = await serveHealth({ status: "ok" });
+		const enginePort = await serveHealth(VAYU_HEALTH);
+		const { system } = fakeSystem({
+			probeHealth: defaultSidecarSystem.probeHealth,
+			probeVersion: defaultSidecarSystem.probeVersion,
+			isPortFree: defaultSidecarSystem.isPortFree,
+		});
+		const sidecar = new EngineSidecar([foreignPort, enginePort], system);
+
+		await sidecar.start();
+
+		expect(sidecar.getApiUrl()).toBe(`http://127.0.0.1:${enginePort}`);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		await sidecar.stop();
+		expect(vi.mocked(system.requestShutdown).mock.calls).toEqual([[enginePort]]);
+	});
+
+	it("never shuts down a marker-less listener, even when it is the only candidate", async () => {
+		const foreignPort = await serveHealth({ status: "ok" });
+		const { system } = fakeSystem({
+			probeHealth: defaultSidecarSystem.probeHealth,
+			probeVersion: defaultSidecarSystem.probeVersion,
+			isPortFree: defaultSidecarSystem.isPortFree,
+		});
+		const sidecar = new EngineSidecar([foreignPort], system);
+
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EnginePortInUseError);
+
+		expect(system.requestShutdown).not.toHaveBeenCalled();
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 	});
 });
