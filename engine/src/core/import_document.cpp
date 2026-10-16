@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <set>
@@ -2225,7 +2226,8 @@ json resource_name (const json* resource, const char* fallback) {
 }
 
 /**
- * One Insomnia v4 export's resource tree, indexed by parent.
+ * An Insomnia export's resource tree - a v4 resource list, or the flattened
+ * list a v5 document becomes - indexed by parent.
  *
  * The walk is a member function rather than a recursive lambda so each step of
  * it - a request, a folder, the environments - reads as its own thing; the
@@ -2462,28 +2464,33 @@ class InsomniaTree {
     }
 };
 
-json parse_insomnia (const json& parsed, const ImportOptions& options) {
-    const json* declared = prop (&parsed, "resources");
-    if (declared != nullptr && !declared->is_null () && !declared->is_array ()) {
-        throw MalformedImport ("`resources` must be an array");
-    }
-    const json empty = json::array ();
-    const json& resources = declared == nullptr || declared->is_null () ? empty : *declared;
+/// Which Insomnia document a resource list was read from: what `meta.format`
+/// says, and whether it holds collections at all.
+enum class InsomniaExport : std::uint8_t { V4, V5Collection, V5Environment };
 
+/**
+ * A v4-shaped resource list (`_id`, `parentId`, `_type`) as the import tree.
+ * Both export versions end here - v5 through `InsomniaV5Flattener` - so a
+ * mapping rule is written once and both read it.
+ */
+json parse_insomnia_resources (const json& resources, const ImportOptions& options, InsomniaExport kind) {
     InsomniaTree tree (resources, options);
-    json collections  = tree.collections ();
+    // An environment document's workspace is only the parent its environments
+    // hang off, not a collection the user exported.
+    json collections =
+    kind == InsomniaExport::V5Environment ? json::array () : tree.collections ();
     json environments = tree.environments ();
 
     tree.tally ().add ("file_body", tree.counts ().file_body);
     tree.name_counted ();
 
     json meta;
-    meta["format"]           = "Insomnia Export v4";
+    meta["format"] = kind == InsomniaExport::V4 ? "Insomnia Export v4" : "Insomnia Export v5";
     meta["requestCount"]     = tree.counts ().requests;
     meta["folderCount"]      = tree.counts ().folders;
     meta["environmentCount"] = static_cast<int> (environments.size ());
     meta["globalCount"]      = 0;
-    // Insomnia v4 exports carry no saved responses - the format has no concept
+    // Insomnia exports carry no saved responses - neither format has a concept
     // of one, so this is 0 by absence rather than by drop.
     meta["exampleCount"]      = 0;
     meta["skipped"]           = tree.tally ().items ();
@@ -2498,6 +2505,221 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
         // Insomnia has no globals scope; workspace envs map to environments.
         { "globals", json::object () }, { "meta", std::move (meta) } };
 }
+
+json parse_insomnia (const json& parsed, const ImportOptions& options) {
+    const json* declared = prop (&parsed, "resources");
+    if (declared != nullptr && !declared->is_null () && !declared->is_array ()) {
+        throw MalformedImport ("`resources` must be an array");
+    }
+    const json empty = json::array ();
+    const json& resources = declared == nullptr || declared->is_null () ? empty : *declared;
+    return parse_insomnia_resources (resources, options, InsomniaExport::V4);
+}
+
+// ---------------------------------------------------------------------------
+// Insomnia v5 - the v4 mapping, reached through v4's resource list
+// ---------------------------------------------------------------------------
+
+/**
+ * What a v5 `collection[]` item is. v5 writes no type per item, so the shape
+ * decides: a `children` member makes a folder (an empty folder may be written
+ * without one, so a `fld_` id with no `url` or `method` is one too), a gRPC or
+ * WebSocket request is told apart by its proto members, its `ws(s)://` URL or
+ * the id prefix Insomnia mints for it, and anything else with a `url` or
+ * `method` is HTTP.
+ */
+enum class V5Item : std::uint8_t { Folder, Request, WebSocket, Grpc, Unknown };
+
+V5Item v5_item_kind (const json& item) {
+    if (prop (&item, "children") != nullptr) {
+        return V5Item::Folder;
+    }
+    const std::string id = as_string (prop (as_record (prop (&item, "meta")), "id"));
+    if (prop (&item, "protoFileId") != nullptr ||
+    prop (&item, "protoMethodName") != nullptr || id.starts_with ("greq_")) {
+        return V5Item::Grpc;
+    }
+    const std::string url = vayu::utils::ascii_lower (as_string (prop (&item, "url")));
+    if (url.starts_with ("ws://") || url.starts_with ("wss://") || id.starts_with ("ws-req_")) {
+        return V5Item::WebSocket;
+    }
+    if (prop (&item, "url") != nullptr || prop (&item, "method") != nullptr) {
+        return V5Item::Request;
+    }
+    return id.starts_with ("fld_") ? V5Item::Folder : V5Item::Unknown;
+}
+
+/// Each member @p keys names, copied when @p from states it - the members v5
+/// still spells the way v4 did.
+void carry_members (const json& from, json& to, std::initializer_list<const char*> keys) {
+    for (const char* key : keys) {
+        if (const json* value = prop (&from, key)) {
+            to[key] = *value;
+        }
+    }
+}
+
+/// `description`, or `meta.description`, where v5 moved it.
+void carry_description (const json& item, json& resource) {
+    const json* own = prop (&item, "description");
+    if (own == nullptr || own->is_null ()) {
+        own = prop (as_record (prop (&item, "meta")), "description");
+    }
+    if (own != nullptr) {
+        resource["description"] = *own;
+    }
+}
+
+/// v5's `scripts.preRequest` / `.afterResponse` as v4's two flat members.
+void carry_scripts (const json& item, json& resource) {
+    const json* scripts = as_record (prop (&item, "scripts"));
+    if (const json* before = prop (scripts, "preRequest")) {
+        resource["preRequestScript"] = *before;
+    }
+    if (const json* after = prop (scripts, "afterResponse")) {
+        resource["afterResponseScript"] = *after;
+    }
+}
+
+/// `settings.followRedirects` as v4's `settingFollowRedirects`. A boolean is
+/// read as `"on"` / `"off"`, because `insomnia_redirects` compares strings and
+/// would read a `true` as "global" - that is, as nothing.
+void carry_redirects (const json& item, json& resource) {
+    const json* follow = prop (as_record (prop (&item, "settings")), "followRedirects");
+    if (follow == nullptr) {
+        return;
+    }
+    resource["settingFollowRedirects"] =
+    follow->is_boolean () ? json (follow->get<bool> () ? "on" : "off") : *follow;
+}
+
+/**
+ * One Insomnia v5 document flattened into the v4 resource list (#2119), so
+ * `parse_insomnia_resources` reads both versions and a mapping rule is never
+ * written twice.
+ *
+ * Member spellings are assumed from Insomnia's v5 schema; a differently
+ * spelled member reads as absent.
+ *
+ * Ids are minted from a counter rather than taken from `meta.id`: the tree
+ * keys every edge by id, and nothing makes a hand-edited file's ids unique.
+ */
+class InsomniaV5Flattener {
+    public:
+    explicit InsomniaV5Flattener (InsomniaExport kind) : kind_ (kind) {
+    }
+
+    /// Spends the flattener: the list it built is moved out.
+    json flatten (const json& document) && {
+        const std::string workspace = mint ();
+        json root{ { "_id", workspace }, { "_type", "workspace" } };
+        carry_members (document, root, { "name" });
+        carry_description (document, root);
+        resources_.push_back (std::move (root));
+        if (kind_ == InsomniaExport::V5Collection) {
+            add_items (prop (&document, "collection"), workspace, "collection");
+        }
+        add_environments (prop (&document, "environments"), workspace);
+        return std::move (resources_);
+    }
+
+    private:
+    std::string mint () {
+        return "v5_" + std::to_string (++minted_);
+    }
+
+    void add_items (const json* items, const std::string& parent, const std::string& where) {
+        if (items == nullptr || items->is_null ()) {
+            return;
+        }
+        if (!items->is_array ()) {
+            throw MalformedImport ("`" + where + "` must be an array");
+        }
+        for (size_t at = 0; at < items->size (); ++at) {
+            const std::string path = where + "[" + std::to_string (at) + "]";
+            if (!(*items)[at].is_object ()) {
+                throw MalformedImport ("`" + path + "` must be an object");
+            }
+            add_item ((*items)[at], parent, path);
+        }
+    }
+
+    void add_item (const json& item, const std::string& parent, const std::string& where) {
+        const V5Item kind = v5_item_kind (item);
+        if (kind == V5Item::Unknown) {
+            return;
+        }
+        const std::string id = mint ();
+        json resource{ { "_id", id }, { "parentId", parent } };
+        carry_members (item, resource, { "name" });
+        if (kind == V5Item::Grpc || kind == V5Item::WebSocket) {
+            // Named only, so the tally can say which one did not come across.
+            resource["_type"] = kind == V5Item::Grpc ? "grpc_request" : "websocket_request";
+            resources_.push_back (std::move (resource));
+            return;
+        }
+        carry_description (item, resource);
+        carry_scripts (item, resource);
+        carry_members (item, resource, { "authentication" });
+        if (kind == V5Item::Folder) {
+            // A folder's `headers` and `environment` are not carried: the v4
+            // reading has no place for either on a folder.
+            resource["_type"] = "request_group";
+            resources_.push_back (std::move (resource));
+            add_items (prop (&item, "children"), id, where + ".children");
+            return;
+        }
+        resource["_type"] = "request";
+        carry_members (item, resource,
+        { "url", "method", "body", "parameters", "pathParameters", "headers" });
+        carry_redirects (item, resource);
+        resources_.push_back (std::move (resource));
+    }
+
+    /**
+     * The base environment and its sub-environments, as v4 parented them. In
+     * an environment document the base's own name is ignored, so the tree
+     * names the environment after the document's `name`.
+     */
+    void add_environments (const json* environments, const std::string& workspace) {
+        if (environments == nullptr || environments->is_null ()) {
+            return;
+        }
+        if (!environments->is_object ()) {
+            throw MalformedImport ("`environments` must be an object");
+        }
+        const std::string base_id = mint ();
+        json base{ { "_id", base_id }, { "_type", "environment" }, { "parentId", workspace } };
+        carry_members (*environments, base, { "data" });
+        if (kind_ == InsomniaExport::V5Collection) {
+            carry_members (*environments, base, { "name" });
+        }
+        resources_.push_back (std::move (base));
+
+        const json* subs = prop (environments, "subEnvironments");
+        if (subs == nullptr || subs->is_null ()) {
+            return;
+        }
+        if (!subs->is_array ()) {
+            throw MalformedImport (
+            "`environments.subEnvironments` must be an array");
+        }
+        for (size_t at = 0; at < subs->size (); ++at) {
+            if (!(*subs)[at].is_object ()) {
+                throw MalformedImport ("`environments.subEnvironments[" +
+                std::to_string (at) + "]` must be an object");
+            }
+            json sub{ { "_id", mint () }, { "_type", "environment" },
+                { "parentId", base_id } };
+            carry_members ((*subs)[at], sub, { "name", "data" });
+            resources_.push_back (std::move (sub));
+        }
+    }
+
+    InsomniaExport kind_;
+    json resources_ = json::array ();
+    int minted_     = 0;
+};
 
 // ---------------------------------------------------------------------------
 // OpenAPI 2.0 / 3.x - the collection around `core::import_drafts_of`
@@ -3734,6 +3956,63 @@ bool is_insomnia_v4 (const json& parsed) {
     format->is_number () && format->get<double> () == 4.0;
 }
 
+/// An Insomnia 11+ document's `type`, `<kind>.insomnia.rest/<version>`, split
+/// into its two halves.
+struct InsomniaType {
+    std::string kind;
+    std::string version;
+};
+
+std::optional<InsomniaType> insomnia_type (const json& parsed) {
+    constexpr std::string_view MARKER = ".insomnia.rest/";
+    const std::string* type           = as_str (prop (&parsed, "type"));
+    if (type == nullptr) {
+        return std::nullopt;
+    }
+    const size_t at = type->find (MARKER);
+    if (at == std::string::npos || at == 0 || at + MARKER.size () == type->size ()) {
+        return std::nullopt;
+    }
+    return InsomniaType{ type->substr (0, at), type->substr (at + MARKER.size ()) };
+}
+
+/// The two v5 documents Vayu reads. Any 5.x reads, so a minor revision of the
+/// format is not refused for its number alone.
+std::optional<InsomniaExport> insomnia_v5_export (const InsomniaType& type) {
+    if (type.version != "5" && !type.version.starts_with ("5.")) {
+        return std::nullopt;
+    }
+    if (type.kind == "collection") {
+        return InsomniaExport::V5Collection;
+    }
+    if (type.kind == "environment") {
+        return InsomniaExport::V5Environment;
+    }
+    return std::nullopt;
+}
+
+/**
+ * The sentence refusing an Insomnia document Vayu does not read. It says what
+ * the file is, which "Unrecognised format" would not: a design document or a
+ * mock server export is a file the user may well have picked believing it to
+ * be their collection.
+ */
+std::string insomnia_refusal (const InsomniaType& type) {
+    const std::string lead =
+    "Could not read the document: this is an Insomnia ";
+    if (type.kind == "collection" || type.kind == "environment") {
+        return lead + type.kind + " export in format " + type.version +
+        ", which this version of Vayu does not read. It reads format 5.";
+    }
+    std::string what = type.kind;
+    if (type.kind == "spec") {
+        what = "design document (spec)";
+    } else if (type.kind == "mock") {
+        what = "mock server";
+    }
+    return lead + what + " export, which Vayu does not read. Export the collection instead.";
+}
+
 /// One params row as `js::query_string` joins it.
 struct JoinedRow {
     std::string key;
@@ -4022,6 +4301,17 @@ const ImportSource& source) {
             parsed.result = parse_postman_variables (document, options, *globals);
         } else if (is_insomnia_v4 (document)) {
             parsed.result = parse_insomnia (document, options);
+        } else if (const std::optional<InsomniaType> insomnia = insomnia_type (document)) {
+            const std::optional<InsomniaExport> kind = insomnia_v5_export (*insomnia);
+            if (!kind) {
+                // Claimed by name, so not "unrecognised": the sentence says
+                // what the file is and is shown as written.
+                parsed.error = insomnia_refusal (*insomnia);
+                return parsed;
+            }
+            const nlohmann::ordered_json resources =
+            InsomniaV5Flattener (*kind).flatten (document);
+            parsed.result = parse_insomnia_resources (resources, options, *kind);
         } else if (const walk::Dialect dialect = walk::spec_dialect (document);
         dialect != walk::Dialect::None) {
             parsed.result = parse_openapi (document, text, source, dialect);

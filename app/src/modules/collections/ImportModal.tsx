@@ -100,6 +100,7 @@ const FORMAT_BADGES = [
 	"Postman Env",
 	"Postman Globals",
 	"Insomnia v4",
+	"Insomnia v5",
 	"OpenAPI 3.0",
 	"OpenAPI 2.0",
 	"JMeter .jmx",

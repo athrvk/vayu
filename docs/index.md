@@ -360,7 +360,7 @@ persists.
     Yes - v2.0 and v2.1 exports, including folders, collection variables, auth,
     and pre/post-request scripts. Postman environments are a separate export;
     import that file too and it becomes a Vayu environment, and a globals export
-    merges into Vayu's globals scope. Insomnia v4,
+    merges into Vayu's globals scope. Insomnia v4 and v5,
     OpenAPI 3.1/3.0 and Swagger 2.0 import too; see
     [what carries over](#bring-your-existing-collections).
 

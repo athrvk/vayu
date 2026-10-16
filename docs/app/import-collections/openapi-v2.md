@@ -367,3 +367,4 @@ Beyond `count_examples`, this parser does **not** use the Postman/Insomnia helpe
 - [OpenAPI v3 (OpenAPI 3.0)](./openapi-v3.md)
 - [Postman Collection v2.1 / v2.0](./postman.md)
 - [Insomnia v4](./insomnia-v4.md)
+- [Insomnia v5](./insomnia-v5.md)

@@ -1041,7 +1041,7 @@ export const apiService = {
 	 *
 	 * **The app holds no parser any more.** Every format it accepts - OpenAPI
 	 * 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export,
-	 * Insomnia v4 - is read here, by the same reader that answers what a stored
+	 * Insomnia v4 or v5 - is read here, by the same reader that answers what a stored
 	 * document declares. That is what makes "exactly one parser has an opinion"
 	 * true (#853): before this the renderer's `services/importers/` stack was
 	 * the second reader, and an agent over MCP could bind, diff, sync and export

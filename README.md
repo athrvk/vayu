@@ -83,7 +83,7 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments - from an Insomnia workspace, or from the separate file Postman exports them as.
 
 - **Postman** - Collection v2.0 and v2.1 JSON exports, plus environment and globals exports
-- **Insomnia** - v4 exports
+- **Insomnia** - v4 JSON and v5 YAML exports (collections, and v5 environments)
 - **OpenAPI / Swagger** - 3.1, 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
 
 ---
@@ -96,7 +96,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
 - **Scenario collection runs** - run a collection as an ordered scenario, in design mode or under load, with per-step results and threshold verdicts
 - **Data-driven runs** - drive a collection from a CSV, TSV, JSON or JSONL file; columns arrive as `{{data.column}}` tokens and `pm.iterationData`, declared up front on the collection's Data tab
-- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.1/3.0, Swagger 2.0
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4 and v5, OpenAPI 3.1/3.0, Swagger 2.0
 - **Saved response examples** - capture a real response against a request and keep it as a named example
 - **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
 - **MCP server for coding agents** - 77 typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off (and withholds the write tools until it is on)
