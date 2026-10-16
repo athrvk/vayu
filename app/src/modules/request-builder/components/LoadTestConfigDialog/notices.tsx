@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { MAX_RESPONSE_SAMPLES, RESPONSE_SAMPLE_PERIOD } from "@/constants/load-test";
 import type { DraftErrors } from "./validation";
 
@@ -24,6 +25,11 @@ export interface NoticeInputs extends DraftErrors {
 	scriptsOverride: string;
 	/** What differs between the design and load default headers, or null. */
 	defaultHeaderDifference: string | null;
+	/**
+	 * Budgets the dialog opened with that the user did not type this time
+	 * (issue #2194): the sentence naming them, and what clears exactly those.
+	 */
+	carriedBudgets?: { summary: string; onClear: () => void } | null;
 }
 
 /**
@@ -42,6 +48,7 @@ export function buildNotices({
 	hasPostRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
+	carriedBudgets,
 }: NoticeInputs): Notice[] {
 	const list: Notice[] = [];
 
@@ -157,6 +164,25 @@ export function buildNotices({
 			node: (
 				<Callout severity="info" title="This load run's default headers differ">
 					{defaultHeaderDifference}
+				</Callout>
+			),
+		});
+	}
+
+	if (carriedBudgets) {
+		list.push({
+			key: "carried-budgets",
+			severity: "info",
+			node: (
+				<Callout
+					severity="info"
+					action={
+						<Button size="sm" variant="outline" onClick={carriedBudgets.onClear}>
+							Clear carried-over budgets
+						</Button>
+					}
+				>
+					{carriedBudgets.summary}
 				</Callout>
 			),
 		});

@@ -78,9 +78,6 @@ import {
 	DialogTitle,
 	DialogDescription,
 	Button,
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
 	Input,
 	Label,
 	Switch,
@@ -101,7 +98,9 @@ import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
 import {
+	BUDGETS_EXPLAINER,
 	BUDGET_FIELDS,
+	summariseBudgets,
 	type BudgetDraft,
 	type CustomBudgetDraft,
 	budgetError,
@@ -109,6 +108,7 @@ import {
 	customBudgetsError,
 	emptyBudgetDraft,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
+import { DisclosureCard } from "@/modules/request-builder/components/LoadTestConfigDialog/DisclosureCard";
 import {
 	CustomBudgetHint,
 	CustomBudgetRows,
@@ -651,85 +651,76 @@ export default function RunCollectionDialog({
 					 * revealed loose fields on the dialog background would read
 					 * as unrelated to what disclosed them.
 					 */}
-					<Collapsible
+					<DisclosureCard
 						open={budgetsOpen}
 						onOpenChange={setBudgetsOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+						title="Pass/fail budgets"
+						summary={summariseBudgets(budgets, customBudgets)}
 					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-							<span>Pass/fail budgets</span>
-							<span className="text-label font-normal text-muted-foreground">
-								{budgetsOpen ? "Hide" : "Show"}
-							</span>
-						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-label leading-relaxed text-muted-foreground">
-								The run is judged against whatever you declare here and reports a
-								verdict. Leave a field blank to skip that budget; leave them all
-								blank and the run is measured but not judged, as before.
-							</p>
-							{BUDGET_FIELDS.map((field) => (
-								<NumberField
-									key={field.key}
-									id={`run-collection-${field.id}`}
-									label={field.label}
-									unit={field.unit}
-									optional
-									value={budgets[field.key]}
-									onChange={(raw) =>
-										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-									}
-									min={field.min}
-									max={field.max}
-									placeholder="No budget"
-									hint={field.hint}
-								/>
-							))}
+						<p className="text-label leading-relaxed text-muted-foreground">
+							{BUDGETS_EXPLAINER}
+						</p>
+						{BUDGET_FIELDS.map((field) => (
+							<NumberField
+								key={field.key}
+								id={`run-collection-${field.id}`}
+								label={field.label}
+								unit={field.unit}
+								optional
+								value={budgets[field.key]}
+								onChange={(raw) =>
+									setBudgets((prev) => ({ ...prev, [field.key]: raw }))
+								}
+								min={field.min}
+								max={field.max}
+								placeholder="No budget"
+								hint={field.hint}
+							/>
+						))}
 
-							{/*
-							 * Custom metric budgets - not gated by `loadTest`,
-							 * same as the six fixed budgets above and for the same
-							 * reason: `custom.<name>.<stat>` is judged for a
-							 * design-mode collection run exactly as it is for a
-							 * load run (`execute_scenario_run`, #1564's own
-							 * every-run-mode rule extends to #1500's custom
-							 * metrics too).
-							 */}
-							<div className="space-y-1.5">
-								<Label className="text-xs">
-									Custom metric budgets
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<CustomBudgetHint />
-								<CustomBudgetRows
-									rows={customBudgets}
-									onChange={setCustomBudgets}
-									idPrefix="run-collection"
-									disabled={startRun.isPending}
-								/>
-							</div>
+						{/*
+						 * Custom metric budgets - not gated by `loadTest`,
+						 * same as the six fixed budgets above and for the same
+						 * reason: `custom.<name>.<stat>` is judged for a
+						 * design-mode collection run exactly as it is for a
+						 * load run (`execute_scenario_run`, #1564's own
+						 * every-run-mode rule extends to #1500's custom
+						 * metrics too).
+						 */}
+						<div className="space-y-1.5">
+							<Label className="text-xs">
+								Custom metric budgets
+								<span className="ml-1 font-normal text-muted-foreground">
+									(optional)
+								</span>
+							</Label>
+							<CustomBudgetHint />
+							<CustomBudgetRows
+								rows={customBudgets}
+								onChange={setCustomBudgets}
+								idPrefix="run-collection"
+								disabled={startRun.isPending}
+							/>
+						</div>
 
-							<div className="flex items-start justify-between gap-3">
-								<Label
-									htmlFor="run-collection-fail-run"
-									className="text-xs font-normal leading-snug"
-								>
-									Fail the run when a budget is missed
-									<span className="block text-label text-muted-foreground">
-										Otherwise a missed budget is reported but the run still ends
-										Completed.
-									</span>
-								</Label>
-								<Switch
-									id="run-collection-fail-run"
-									checked={failRun}
-									onCheckedChange={setFailRun}
-								/>
-							</div>
-						</CollapsibleContent>
-					</Collapsible>
+						<div className="flex items-start justify-between gap-3">
+							<Label
+								htmlFor="run-collection-fail-run"
+								className="text-xs font-normal leading-snug"
+							>
+								Fail the run when a budget is missed
+								<span className="block text-label text-muted-foreground">
+									Otherwise a missed budget is reported but the run still ends
+									Completed.
+								</span>
+							</Label>
+							<Switch
+								id="run-collection-fail-run"
+								checked={failRun}
+								onCheckedChange={setFailRun}
+							/>
+						</div>
+					</DisclosureCard>
 
 					{budgetsError && (
 						<Callout severity="blocking" title="A budget is out of range">

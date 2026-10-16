@@ -60,7 +60,7 @@ describe("useSavedLoadTestConfig", () => {
 
 	it("round-trips a saved memo", () => {
 		const { initial: first, save } = restore();
-		const { profile, ...rest } = first;
+		const { profile, carried: _carried, ...rest } = first;
 		save({ ...profile, ...rest, rps: 77, maxInFlight: 5 } satisfies SavedLoadTestConfig);
 		const { initial } = restore();
 		expect(initial.profile.rps).toBe(77);
@@ -72,7 +72,52 @@ describe("useSavedLoadTestConfig", () => {
 			throw new Error("quota");
 		});
 		const { initial, save } = restore();
-		const { profile, ...rest } = initial;
+		const { profile, carried: _carried, ...rest } = initial;
 		expect(() => save({ ...profile, ...rest, maxInFlight: null })).not.toThrow();
+	});
+
+	describe("carried budgets (#2194)", () => {
+		const memo = (value: Record<string, unknown>) =>
+			localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(value));
+
+		it("marks the p99 as the SLO seed on a first run", () => {
+			expect(restore().initial.carried).toEqual({
+				fixed: { latencyP99Ms: "slo" },
+				customIds: [],
+			});
+		});
+
+		it("marks non-blank memo budgets and custom rows as carried from the memo", () => {
+			memo({
+				budgets: { latencyP99Ms: "", maxErrorRatePct: "2" },
+				customBudgets: [{ id: "c1", name: "cart", stat: "p95", value: "5" }],
+			});
+			expect(restore().initial.carried).toEqual({
+				fixed: { maxErrorRatePct: "memo" },
+				customIds: ["c1"],
+			});
+		});
+
+		it("round-trips the origin a Start wrote, and ignores a malformed one", () => {
+			const { initial: first, save } = restore();
+			const { profile, carried: _carried, ...rest } = first;
+			save({
+				...profile,
+				...rest,
+				maxInFlight: null,
+				budgetsFrom: { requestName: "Orders" },
+			});
+			expect(restore().initial.budgetsFrom).toEqual({ requestName: "Orders" });
+
+			memo({ budgetsFrom: { requestName: 7 } });
+			expect(restore().initial.budgetsFrom).toBeUndefined();
+			memo({ budgetsFrom: "Orders" });
+			expect(restore().initial.budgetsFrom).toBeUndefined();
+		});
+
+		it("restores no origin from a memo that predates the field", () => {
+			memo({ budgets: { latencyP99Ms: "150" } });
+			expect(restore().initial.budgetsFrom).toBeUndefined();
+		});
 	});
 });

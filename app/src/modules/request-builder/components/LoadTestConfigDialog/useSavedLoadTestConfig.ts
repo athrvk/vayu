@@ -11,6 +11,12 @@ import { LOAD_TEST_DEFAULTS, clampToRange, type LoadTestLimits } from "@/constan
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { type BudgetDraft, type CustomBudgetDraft, emptyBudgetDraft } from "./budgets";
 import { type MonitorDraft, emptyMonitorDraft } from "./monitor";
+import {
+	SLO_SEEDED_KEY,
+	findCarriedBudgets,
+	type BudgetsOrigin,
+	type CarriedBudgets,
+} from "./carried-budgets";
 
 export interface SavedLoadTestConfig {
 	mode: LoadTestConfig["mode"];
@@ -42,6 +48,14 @@ export interface SavedLoadTestConfig {
 	 * undone by the next dialog open.
 	 */
 	budgets: BudgetDraft;
+	/**
+	 * The request whose Start last changed the budgets above, so the next dialog
+	 * can say where carried-over budgets came from (issue #2194). Provenance for
+	 * the one global memo, not per-request storage. Absent from a memo written
+	 * before this field existed, and when the budgets were written without a
+	 * saved request to name.
+	 */
+	budgetsFrom?: BudgetsOrigin;
 	/**
 	 * The `custom.<name>.<stat>` rows (issue #1579), memoed for the same reason
 	 * and in the same shape as the fixed budgets above: a metric name is a
@@ -91,6 +105,8 @@ export type RestoredLoadTestConfig = Omit<
 > & {
 	profile: LoadTestProfile;
 	maxInFlight: string;
+	/** Which budget fields were filled by the memo or the SLO seed, not the user. */
+	carried: CarriedBudgets;
 };
 
 /** Defaults that come from settings rather than from `LOAD_TEST_DEFAULTS`. */
@@ -99,6 +115,12 @@ interface RestoreSeeds {
 	sloThresholdMs: number;
 	/** `monitorIntervalMs`: the scrape cadence a first run starts with. */
 	monitorIntervalMs: number;
+}
+
+/** A memo is JSON from disk: only a well-formed origin is trusted. */
+function restoreBudgetsOrigin(saved: Partial<SavedLoadTestConfig>): BudgetsOrigin | undefined {
+	const name = saved.budgetsFrom?.requestName;
+	return typeof name === "string" && name !== "" ? { requestName: name } : undefined;
 }
 
 function loadSavedConfig(): Partial<SavedLoadTestConfig> {
@@ -172,6 +194,8 @@ function restoreConfig(
 		sloMs: restore(saved.sloMs, seeds.sloThresholdMs, "SLO_MS"),
 	};
 
+	const customBudgets = saved.customBudgets ?? [];
+
 	return {
 		profile,
 		maxInFlight: saved.maxInFlight != null ? String(saved.maxInFlight) : "",
@@ -195,10 +219,12 @@ function restoreConfig(
 		// once a draft has been memoed, a cleared p99 stays cleared.
 		budgets: {
 			...emptyBudgetDraft(),
-			latencyP99Ms: String(seeds.sloThresholdMs),
+			[SLO_SEEDED_KEY]: String(seeds.sloThresholdMs),
 			...saved.budgets,
 		},
-		customBudgets: saved.customBudgets ?? [],
+		budgetsFrom: restoreBudgetsOrigin(saved),
+		carried: findCarriedBudgets(saved.budgets, customBudgets),
+		customBudgets,
 		failRun: saved.failRun ?? false,
 		// The scrape cadence is likewise seeded only on a first run: once a draft
 		// has been memoed, the interval the user set stays set.

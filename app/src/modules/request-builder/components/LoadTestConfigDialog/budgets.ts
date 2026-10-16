@@ -52,6 +52,12 @@ export interface BudgetField {
 	minInclusive: boolean;
 	max: number;
 	hint?: string;
+	/**
+	 * Replaces `hint` in the dialog that seeds this field from a setting. The
+	 * collection runner seeds nothing, so a hint saying the value was seeded
+	 * would be false there.
+	 */
+	seededHint?: string;
 }
 
 /** A day. Past it no request completes, so no ceiling above it is a budget. */
@@ -84,7 +90,8 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		min: 0,
 		minInclusive: false,
 		max: MAX_LATENCY_MS,
-		hint: "Prefilled from the capacity SLO in Settings - clear it to run without a latency budget.",
+		seededHint:
+			"Starts from Settings > Dashboard > SLO threshold. Clear it to run without a latency budget.",
 	},
 	{
 		key: "maxErrorRatePct",
@@ -134,6 +141,10 @@ export function emptyBudgetDraft(): BudgetDraft {
 		maxAssertionFailureRatePct: "",
 	};
 }
+
+/** The card's explainer, shared so the two dialogs that show it cannot drift apart. */
+export const BUDGETS_EXPLAINER =
+	"The run is judged against the budgets set here. Blank fields are skipped; with every field blank the run is measured but not judged.";
 
 /**
  * The first budget the engine would reject, phrased for the dialog.
@@ -301,4 +312,41 @@ export function buildThresholds(
 	if (Object.keys(thresholds).length === 0) return undefined;
 	if (failRun) thresholds.failRun = true;
 	return thresholds;
+}
+
+/** One fixed budget as it reads in a sentence: "p99 latency at most 200 ms". */
+export function describeFixedBudget(field: BudgetField, raw: string): string {
+	const value = raw.trim();
+	return `${field.label} ${value}${field.unit === "%" ? "%" : ` ${field.unit}`}`;
+}
+
+/** One custom row as it reads in a sentence: "custom.cart.p95 at most 5". */
+export function describeCustomBudget(row: CustomBudgetDraft): string {
+	return `${customBudgetKey(row.name.trim(), row.stat)} at most ${row.value.trim()}`;
+}
+
+/** A custom row the payload would carry: both halves filled, as `buildThresholds` requires. */
+export function isDeclaredCustomBudget(row: CustomBudgetDraft): boolean {
+	return row.name.trim() !== "" && row.value.trim() !== "";
+}
+
+/**
+ * What the collapsed card says about its contents, so a closed card is not
+ * silent about the budgets that will judge the run: a count, and the budget
+ * itself when there is only one. Counts what the payload would carry - a fixed
+ * field with a value plus the custom rows with both halves filled.
+ */
+export function summariseBudgets(
+	draft: BudgetDraft,
+	customBudgets: readonly CustomBudgetDraft[] = []
+): string {
+	const declared = [
+		...BUDGET_FIELDS.filter((field) => draft[field.key].trim() !== "").map((field) =>
+			describeFixedBudget(field, draft[field.key])
+		),
+		...customBudgets.filter(isDeclaredCustomBudget).map(describeCustomBudget),
+	];
+	if (declared.length === 0) return "No budgets";
+	if (declared.length === 1) return `1 budget active - ${declared[0]}`;
+	return `${declared.length} budgets active`;
 }

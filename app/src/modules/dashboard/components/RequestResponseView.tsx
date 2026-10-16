@@ -36,6 +36,7 @@ import {
 	CapturedDataWarning,
 	CustomMetricsSummary,
 	ThresholdVerdict,
+	stoppedRunOf,
 	TestValidationSummary,
 	Callout,
 	CancelledRequestsNote,
@@ -240,7 +241,11 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 
 			{/* The whole-run verdict, above the per-response one: a run can meet
 			    every assertion and still miss the budget it was run to check. */}
-			<ThresholdVerdict verdict={report.thresholdValidation} runId={report.metadata?.runId} />
+			<ThresholdVerdict
+				verdict={report.thresholdValidation}
+				runId={report.metadata?.runId}
+				stopped={stoppedRunOf(report)}
+			/>
 
 			{/* The run's own named trends, counters and rates (issue #1500),
 			    reported rather than judged - absent for a run that never called

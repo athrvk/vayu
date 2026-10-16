@@ -15,7 +15,11 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
+	BUDGETS_EXPLAINER,
 	BUDGET_FIELDS,
 	CUSTOM_BUDGET_STATS,
 	MAX_CUSTOM_METRIC_NAME_LENGTH,
@@ -25,6 +29,7 @@ import {
 	customBudgetsError,
 	emptyBudgetDraft,
 	emptyCustomBudgetRow,
+	summariseBudgets,
 	type BudgetDraft,
 	type CustomBudgetDraft,
 } from "./budgets";
@@ -279,5 +284,79 @@ describe("the payload the dialog builds", () => {
 			draft(Object.fromEntries(BUDGET_FIELDS.map((f) => [f.key, "1"])) as BudgetDraft)
 		);
 		expect(Object.keys(built ?? {})).toHaveLength(BUDGET_FIELDS.length);
+	});
+});
+
+describe("summariseBudgets", () => {
+	it("says no budget is active for an empty draft", () => {
+		expect(summariseBudgets(emptyBudgetDraft())).toBe("No budgets");
+	});
+
+	it("names a lone fixed budget, with its unit", () => {
+		expect(summariseBudgets(draft({ latencyP99Ms: "200" }))).toBe(
+			"1 budget active - p99 latency at most 200 ms"
+		);
+		expect(summariseBudgets(draft({ maxErrorRatePct: "0.5" }))).toBe(
+			"1 budget active - Error rate at most 0.5%"
+		);
+	});
+
+	it("names a lone custom budget by its engine key", () => {
+		expect(
+			summariseBudgets(emptyBudgetDraft(), [
+				customRow({ name: "cart", stat: "p95", value: "5" }),
+			])
+		).toBe("1 budget active - custom.cart.p95 at most 5");
+	});
+
+	it("counts fixed fields and custom rows together", () => {
+		expect(
+			summariseBudgets(draft({ latencyP99Ms: "200", maxErrorRatePct: "1" }), [
+				customRow({ name: "cart", value: "5" }),
+			])
+		).toBe("3 budgets active");
+	});
+
+	it("ignores blank fields and custom rows the payload would drop", () => {
+		expect(
+			summariseBudgets(draft({ latencyP99Ms: "  " }), [
+				customRow({ name: "cart" }),
+				customRow({ value: "5" }),
+			])
+		).toBe("No budgets");
+	});
+
+	it("counts exactly what buildThresholds would send", () => {
+		const fixed = draft({ latencyP50Ms: "10", minThroughputRps: "5" });
+		const rows = [customRow({ name: "a", value: "1" }), customRow({ name: "b" })];
+		expect(Object.keys(buildThresholds(fixed, false, rows) ?? {})).toHaveLength(3);
+		expect(summariseBudgets(fixed, rows)).toBe("3 budgets active");
+	});
+});
+
+describe("the budgets explainer", () => {
+	const here = dirname(fileURLToPath(import.meta.url));
+	const sources = [
+		join(here, "BudgetsSection.tsx"),
+		join(here, "../../../collections/RunCollectionDialog.tsx"),
+	].map((path) => ({ path, text: readFileSync(path, "utf8") }));
+
+	it("does not refer to a history the user may not have", () => {
+		expect(BUDGETS_EXPLAINER.length).toBeGreaterThan(0);
+		expect(BUDGETS_EXPLAINER).not.toMatch(/as before/i);
+	});
+
+	it("is the one copy both dialogs render", () => {
+		for (const { path, text } of sources) {
+			expect(text.length, `${path} was read empty`).toBeGreaterThan(0);
+			expect(text, path).toContain("{BUDGETS_EXPLAINER}");
+			expect(text, path).not.toMatch(/judged against whatever you declare/i);
+		}
+	});
+
+	it("tells the user where the p99 value comes from and what clearing it does", () => {
+		const p99 = BUDGET_FIELDS.find((field) => field.key === "latencyP99Ms");
+		expect(p99?.seededHint).toContain("Settings > Dashboard > SLO threshold");
+		expect(p99?.seededHint).toMatch(/clear it to run without a latency budget/i);
 	});
 });

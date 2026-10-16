@@ -12,6 +12,8 @@ interface DisclosureCardProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	title: string;
+	/** What the card holds, readable while it is closed (a count, a lone value). */
+	summary?: ReactNode;
 	children: ReactNode;
 }
 
@@ -24,7 +26,13 @@ interface DisclosureCardProps {
  * `overflow-hidden` that keeps the trigger's hover fill inside the rounded
  * corners - it tucks focus rings inward so the clip cannot eat them.
  */
-export function DisclosureCard({ open, onOpenChange, title, children }: DisclosureCardProps) {
+export function DisclosureCard({
+	open,
+	onOpenChange,
+	title,
+	summary,
+	children,
+}: DisclosureCardProps) {
 	return (
 		<Collapsible
 			open={open}
@@ -32,8 +40,15 @@ export function DisclosureCard({ open, onOpenChange, title, children }: Disclosu
 			className="panel-clip overflow-hidden rounded-md border border-border surface-card"
 		>
 			<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
-				<span>{title}</span>
-				<span className="text-label font-normal text-muted-foreground">
+				<span className="flex min-w-0 items-baseline gap-2">
+					<span className="shrink-0">{title}</span>
+					{summary && (
+						<span className="truncate text-label font-normal text-muted-foreground">
+							{summary}
+						</span>
+					)}
+				</span>
+				<span className="ml-3 shrink-0 text-label font-normal text-muted-foreground">
 					{open ? "Hide" : "Show"}
 				</span>
 			</CollapsibleTrigger>
