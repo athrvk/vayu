@@ -82,6 +82,12 @@ export interface TabInfo {
 	 * the same thing here.
 	 */
 	badge?: number;
+	/**
+	 * Draw the badge as a dot rather than the number: for a tab that has
+	 * "something here" but nothing to count (#2199). `badge` is then only the
+	 * present/absent signal, so a tab sets it to `1` or `undefined`.
+	 */
+	presence?: boolean;
 }
 
 /** The response pane's own tab strip - see `ResponseViewer`. */

@@ -74,13 +74,13 @@ export default function RequestTabs() {
 			/*
 			 * First, deliberately. A description is the first thing you want to
 			 * read about a request and the last thing you find at the end of a
-			 * tab row. The badge is `1` for "there is something here" rather than
-			 * a count, which is exactly what Body, Auth, Pre-request, Tests and
-			 * Settings already do - so it needs no new primitive.
+			 * tab row. Its badge is a presence dot, not a count: Params and
+			 * Headers carry real numbers, and a `1` here read as one of something.
 			 */
 			id: "info",
 			label: "Info",
 			badge: request.description?.trim() ? 1 : undefined,
+			presence: true,
 		},
 		{
 			id: "params",
@@ -103,11 +103,13 @@ export default function RequestTabs() {
 			id: "body",
 			label: "Body",
 			badge: request.bodyMode !== "none" ? 1 : undefined,
+			presence: true,
 		},
 		{
 			id: "auth",
 			label: "Auth",
 			badge: request.auth.mode !== "none" ? 1 : undefined,
+			presence: true,
 		},
 		{
 			id: "elements",
@@ -132,9 +134,10 @@ export default function RequestTabs() {
 		{
 			id: "settings",
 			label: "Settings",
-			// Badges only when the request departs from the engine defaults, so
+			// Marked only when the request departs from the engine defaults, so
 			// the tab stays quiet for the requests that never touch it.
 			badge: isRequestSettingsNonDefault(request) ? 1 : undefined,
+			presence: true,
 		},
 	];
 
@@ -163,7 +166,7 @@ export default function RequestTabs() {
 						 * and pays no width at all, ever - which is why this asks
 						 * whether the key is *there*, not whether its value is set.
 						 */}
-						{"badge" in tab && <TabCount value={tab.badge} />}
+						{"badge" in tab && <TabCount value={tab.badge} presence={tab.presence} />}
 					</TabsTrigger>
 				))}
 			</TabsList>
