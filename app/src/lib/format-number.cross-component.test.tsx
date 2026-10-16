@@ -10,7 +10,8 @@
 
 /**
  * One p99 reads the same wherever the app draws it (#2217): the History
- * header tile, the run-detail latency tile and the live dashboard's stat card.
+ * header tile, the run-detail latency tile and the live dashboard's hero latency
+ * card (which holds the p99 for the throughput-led modes).
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -37,8 +38,7 @@ import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import LatencyMetric from "@/modules/history/main/components/LatencyMetric";
-import { P99StatCard } from "@/modules/dashboard/components/stats/ModeStatsRow";
-import type { DashboardDerived } from "@/modules/dashboard/types";
+import { LatencyPercentilesCard } from "@/modules/dashboard/components/hero/LatencyPercentilesCard";
 import type { RunReport } from "@/types";
 
 function report(p99: number): RunReport {
@@ -99,13 +99,11 @@ function latencyMetric(p99: number): string {
 	return text ?? "";
 }
 
-function modeStatsCard(p99: number): string {
-	const d = { p99Latency: p99, meanLatency: p99, medianLatency: p99 } as DashboardDerived;
-	const { unmount } = render(<P99StatCard d={d} />);
-	const text = screen
-		.getByText("p99 latency")
-		.closest("div")
-		?.querySelector(".flex")?.textContent;
+function heroLatencyCard(p99: number): string {
+	const { unmount } = render(
+		<LatencyPercentilesCard p95={p99} p99={p99} meanLatency={p99} medianLatency={p99} />
+	);
+	const text = screen.getByText("p99").previousElementSibling?.textContent;
 	unmount();
 	return text ?? "";
 }
@@ -119,6 +117,6 @@ describe("a p99 reads the same across the app", () => {
 	])("%s", (p99, expected) => {
 		expect(historyHeaderTile(p99)).toBe(expected);
 		expect(latencyMetric(p99)).toBe(expected);
-		expect(modeStatsCard(p99)).toBe(expected);
+		expect(heroLatencyCard(p99)).toBe(expected);
 	});
 });

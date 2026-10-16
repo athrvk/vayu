@@ -100,7 +100,10 @@ scattered strings land the same way.
   own (`999ms`, then `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), which takes its decimals from the tick
   spacing so no two neighbouring ticks print alike. Do not `toFixed` a new
-  latency, rate or percentage for display.
+  latency, rate or percentage for display. Name a latency series for what it
+  measures: the average that includes generator queue wait is "average latency
+  (incl. queue wait)" and the time on the wire is "wire time", never a bare
+  "latency" or "wire".
 - **Truncation.**
   - URLs truncate in the middle, keeping the host and the last path segment.
   - Variable names and file paths truncate keeping the final segment (never

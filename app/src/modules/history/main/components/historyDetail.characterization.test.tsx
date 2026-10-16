@@ -7,7 +7,25 @@
  * refactors stay byte-identical. The default (Overview) tab renders the
  * mode-adaptive HeroRow + ModeStatsRow without the query-backed Performance tab.
  */
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect, vi } from "vitest";
+
+// The formatters build their Intl.NumberFormat at module load, so the locale is
+// pinned before the imports below run rather than left to the host.
+const restoreIntl = vi.hoisted(() => {
+	const Real = Intl.NumberFormat;
+	class EnUsNumberFormat extends Real {
+		constructor(_locale?: string | string[], options?: Intl.NumberFormatOptions) {
+			super("en-US", options);
+		}
+	}
+	Intl.NumberFormat = EnUsNumberFormat as typeof Intl.NumberFormat;
+	return () => {
+		Intl.NumberFormat = Real;
+	};
+});
+
+afterAll(restoreIntl);
+
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

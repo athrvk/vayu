@@ -10,12 +10,13 @@
  *
  * Reads the run mode (useMode), computes a single memoized {@link DashboardDerived}
  * bundle, and composes the rows:
- *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate)
+ *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate; the
+ *                             throughput-led modes add a p95/p99 latency card)
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
- *   Row 2.5 - Latency over time      (perceived vs wire, queue-wait gap)
+ *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
  *   Row 3   - HDR percentile plot + Avg request timing waterfall
- *   Row 4   - ModeStatsRow   (mode-adaptive: 4 stat cards)
+ *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
  *
  * Card/chart variants live in hero/, charts/, stats/. This file routes and
  * derives - it does not render metric chrome inline.

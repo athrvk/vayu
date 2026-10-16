@@ -10,7 +10,18 @@
  * re-exports components: a module holding both cannot be hot-reloaded.
  */
 
+import { formatRate } from "@/lib/format-number";
+
 /** Format a possibly-undefined number, falling back to a dash. */
 export function fmt(v: number | undefined, digits = 1): string {
 	return v !== undefined ? v.toFixed(digits) : "-";
+}
+
+/**
+ * A per-second rate through `formatRate` (grouped, locale-aware). A missing
+ * value draws "-" here because `formatRate` would print it as "0", a measured
+ * zero.
+ */
+export function fmtRate(v: number | undefined): string {
+	return v !== undefined ? formatRate(v) : "-";
 }

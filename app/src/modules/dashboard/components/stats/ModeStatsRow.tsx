@@ -6,27 +6,27 @@
  */
 
 /**
- * ModeStatsRow - the mode-adaptive Row 4 router. Four stat cards swap on d.mode.
- * For three of the four modes the 4th card is the universal p99 latency stat;
- * the first three switch per mode. This table is the authority for which cards
- * a mode shows - add a mode here, beside the branch that renders it:
+ * ModeStatsRow - the mode-adaptive Row 4 router. The stat cards swap on d.mode.
+ * This table is the authority for which cards a mode shows - add a mode here,
+ * beside the branch that renders it:
  *
- *   constant_rps         Duration · Total requests · Peak in-flight requests · p99
- *   constant_concurrency Duration · Total requests · Throughput per virtual user · p99
- *   iterations           Elapsed  · Remaining (ETA) · Mean iter time   · p99
+ *   constant_rps         Duration · Total requests · Peak in-flight requests
+ *   constant_concurrency Duration · Total requests · Throughput per virtual user
+ *   iterations           Elapsed  · Remaining (ETA) · Mean iter time
  *   ramp_up              Peak virtual users · Breakpoint · p99 at peak · Total requests
  *   capacity             Peak virtual users · Breakpoint · p99 at peak · Total requests
  *
- * ramp_up and capacity are the exception: their 4th stat is Total requests, not p99, so
- * that branch renders all four cards itself. Shared cards (Duration / Total /
- * Peak) and the universal p99 card live here; the mode-only cards live in
+ * The three throughput-led modes show three cards: their p99 sits in the hero
+ * row's latency card (`LatencyPercentilesCard`, beside p95), so it is not drawn
+ * twice. ramp_up and capacity keep p99 here, as p99 at peak. Shared cards
+ * (Duration / Total / Peak) live here; the mode-only cards live in
  * ModeStatCards.tsx. Consumes {@link DashboardDerived}; never re-derives from
  * raw metrics. All InfoChip copy via TOOLTIPS.
  */
 
 import { cn } from "@/lib/utils";
 import { CONCURRENCY_UNIT, isClosedLoopMode } from "@/constants/load-test-modes";
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
@@ -48,7 +48,7 @@ export function ModeStatsRow({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** First-three (or, for ramp_up, all four) stats per mode + the universal p99. */
+/** The stat cards for each mode. */
 function renderModeStats(d: DashboardDerived) {
 	switch (d.mode) {
 		case "constant_concurrency":
@@ -57,7 +57,6 @@ function renderModeStats(d: DashboardDerived) {
 					<DurationStat d={d} />
 					<TotalRequestsStat d={d} />
 					<ThroughputPerVuStat d={d} />
-					<P99StatCard d={d} />
 				</>
 			);
 		case "iterations":
@@ -66,7 +65,6 @@ function renderModeStats(d: DashboardDerived) {
 					<ElapsedStat d={d} />
 					<RemainingEtaStat d={d} />
 					<MeanIterTimeStat d={d} />
-					<P99StatCard d={d} />
 				</>
 			);
 		// Capacity discovery asks the same four questions `ramp_up` does - how
@@ -89,7 +87,6 @@ function renderModeStats(d: DashboardDerived) {
 					<DurationStat d={d} />
 					<TotalRequestsStat d={d} />
 					<PeakConcurrencyStat d={d} />
-					<P99StatCard d={d} />
 				</>
 			);
 	}
@@ -159,36 +156,6 @@ function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 				</>
 			}
 			infoTip={closedLoop ? TOOLTIPS.peakVirtualUsers : TOOLTIPS.peakInFlight}
-		/>
-	);
-}
-
-/** The universal 4th stat - p99 latency with mean/median sub-text. */
-export function P99StatCard({ d }: { d: DashboardDerived }) {
-	return (
-		<StatCard
-			label="p99 latency"
-			value={formatMs(d.p99Latency)}
-			unit="ms"
-			sub={
-				d.p99Latency > 0 ? (
-					<>
-						mean{" "}
-						<span className="text-muted-foreground">{formatMs(d.meanLatency)} ms</span>
-						{d.medianLatency > 0 && (
-							<>
-								{" · "}median{" "}
-								<span className="text-muted-foreground">
-									{formatMs(d.medianLatency)} ms
-								</span>
-							</>
-						)}
-					</>
-				) : (
-					<span className="text-muted-foreground italic">awaiting samples</span>
-				)
-			}
-			infoTip={TOOLTIPS.p99Latency}
 		/>
 	);
 }

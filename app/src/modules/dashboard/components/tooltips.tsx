@@ -55,6 +55,8 @@ export const TOOLTIPS = {
 		"Of your configured N virtual users, how many were actually active on average. Below 100% means some virtual users were idle - usually because the load test was completing requests faster than it could re-fire (rare) or because the server occasionally returned errors that aborted iterations.",
 	throughput:
 		"Average requests per second across the run so far. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
+	latencyPercentiles:
+		"Tail latency - 95 (p95) or 99 (p99) of every 100 requests completed in this time or less. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:
 		"Whether the server has reached its capacity ceiling. 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'degrading' means p99 has crossed the threshold or errors started - the call-out shows the number of virtual users at which the degradation began (the breakpoint).",
 
@@ -73,8 +75,6 @@ export const TOOLTIPS = {
 		"Most virtual users active at any point during the run, counting one a think timer is still holding. Backpressure shown beneath is the in-flight count right now: requests sent but not yet answered, plus any think-timer slots.",
 	peakInFlight:
 		"Maximum simultaneously in-flight requests at any point during the run, counting a slot a think timer is still holding. A Constant RPS run sends on a clock rather than from a fixed set of users, so this is requests, not virtual users. Backpressure shown beneath is that same in-flight count right now: requests sent but not yet answered, plus any think-timer slots.",
-	p99Latency:
-		"Tail latency - 99 of every 100 requests completed in this time or less. Real user-impact lives at p99, not the mean; mean (sub-text) is misleading on heavy-tailed distributions.",
 	throughputPerVu:
 		"Achieved throughput divided by the configured number of virtual users - the average req/sec each one produced. A useful capacity number when planning for N real users.",
 	remainingEta:

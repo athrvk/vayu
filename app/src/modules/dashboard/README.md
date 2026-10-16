@@ -79,9 +79,12 @@ consumes it.
   rendering one, and the scatter - one dot per tick, up to the 50,000-tick cap -
   was the one chart that argument did not cover (#1152).
 - **The per-mode stat-card table lives with its router.**
-  `components/stats/ModeStatsRow.tsx` decides which four cards each mode shows,
-  and its file comment tabulates them. Add a mode there, next to the branch that
-  renders it.
+  `components/stats/ModeStatsRow.tsx` decides which cards each mode shows, and
+  its file comment tabulates them. Add a mode there, next to the branch that
+  renders it. The throughput-led modes (`constant_rps`, `constant_concurrency`,
+  `iterations`) show three stats: their p99 is in the hero row's
+  `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
+  the stats row as p99 at peak.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 

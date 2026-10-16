@@ -7,8 +7,9 @@
 
 /**
  * HeroRow - the mode-adaptive Row 1. Two cards swap per mode; the Error Rate
- * card is universal. This is the single place that maps mode → hero cards
- * (consume {@link DashboardDerived}; never re-derive from raw metrics).
+ * card is universal, and the throughput-led modes add a latency card. This is
+ * the single place that maps mode → hero cards (consume
+ * {@link DashboardDerived}; never re-derive from raw metrics).
  */
 
 import type { DashboardDerived } from "../../types";
@@ -22,11 +23,13 @@ import { ProgressCard } from "./ProgressCard";
 import { ThroughputCard } from "./ThroughputCard";
 import { CurrentConcurrencyCard } from "./CurrentConcurrencyCard";
 import { SaturationCard } from "./SaturationCard";
+import { LatencyPercentilesCard } from "./LatencyPercentilesCard";
 
 export function HeroRow({ d }: { d: DashboardDerived }) {
 	return (
 		<div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
 			{renderModeCards(d)}
+			{hasThroughputHero(d.mode) && <LatencyCard d={d} />}
 			<ErrorRateCard
 				totalRequests={d.totalRequests}
 				failedRequests={d.failedRequests}
@@ -35,6 +38,25 @@ export function HeroRow({ d }: { d: DashboardDerived }) {
 				statusCodes={d.statusCodes}
 			/>
 		</div>
+	);
+}
+
+/**
+ * The modes whose hero leads with throughput. ramp_up and capacity put their
+ * p99 in the stats row (`P99AtPeakStat`), so they take no latency card here.
+ */
+function hasThroughputHero(mode: DashboardDerived["mode"]): boolean {
+	return mode !== "ramp_up" && mode !== "capacity";
+}
+
+function LatencyCard({ d }: { d: DashboardDerived }) {
+	return (
+		<LatencyPercentilesCard
+			p95={d.p95Latency}
+			p99={d.p99Latency}
+			meanLatency={d.meanLatency}
+			medianLatency={d.medianLatency}
+		/>
 	);
 }
 
