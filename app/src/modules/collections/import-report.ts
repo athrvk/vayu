@@ -16,6 +16,11 @@
  */
 
 import { useCollectionsStore } from "./collections-store";
+import {
+	environmentAction,
+	environmentClause,
+	type EnvironmentOutcome,
+} from "./import-environment";
 import { fileReferenceNeeds, importNotices } from "./import-notices";
 import {
 	hasReport,
@@ -72,15 +77,22 @@ function countsPhrase({ counts }: ImportReport): string {
 	return parts.length > 0 ? parts.join(", ") : "0 requests";
 }
 
-/** One sentence for the whole apply: the file by name, or the files by count. */
-export function importToastMessage(reports: readonly ImportReport[]): string {
+/**
+ * One sentence for the whole apply: the file by name, or the files by count,
+ * then what became of the active environment, if the import touched it.
+ */
+export function importToastMessage(
+	reports: readonly ImportReport[],
+	environment?: EnvironmentOutcome
+): string {
 	const imported =
 		reports.length === 1
 			? `Imported "${reports[0].title}" - ${countsPhrase(reports[0])}`
 			: `Imported ${reports.length} files`;
 	const toFinish = reports.reduce((sum, report) => sum + thingsToFinish(report), 0);
 	const finish = toFinish > 0 ? `; ${toFinish} ${pluralize(toFinish, "thing")} to finish` : "";
-	return `${imported}${finish}.`;
+	const activation = environment ? `; ${environmentClause(environment)}` : "";
+	return `${imported}${finish}${activation}.`;
 }
 
 /** Open a collection on its Info tab, where the report it carries is shown. */
@@ -94,10 +106,16 @@ function openImportNotes(rootId: string): void {
  *
  * The first new collection becomes the active tab - two imports are not two
  * things to look at - while every new root is expanded so the sidebar shows
- * all of them. The toast's one action is offered only when there is a report to
- * read, and opens the collection that carries it.
+ * all of them.
+ *
+ * The toast has one action slot. "Review import notes" holds it whenever there
+ * is a report to read, and the environment outcome (#2115) then rides in the
+ * message alone; otherwise the outcome's own action, if it has one, takes it.
  */
-export function announceImport(reports: readonly ImportReport[]): void {
+export function announceImport(
+	reports: readonly ImportReport[],
+	environment?: EnvironmentOutcome
+): void {
 	if (reports.length === 0) return;
 	for (const report of reports) useImportReportStore.getState().record(report);
 
@@ -108,16 +126,12 @@ export function announceImport(reports: readonly ImportReport[]): void {
 	}
 
 	const noted = reports.find((report) => hasReport(report) && report.rootIds.length > 0);
+	const action = noted
+		? { label: "Review import notes", onClick: () => openImportNotes(noted.rootIds[0]) }
+		: environment && environmentAction(environment);
 	useToastStore.getState().showToast({
-		message: importToastMessage(reports),
+		message: importToastMessage(reports, environment),
 		variant: "success",
-		...(noted
-			? {
-					action: {
-						label: "Review import notes",
-						onClick: () => openImportNotes(noted.rootIds[0]),
-					},
-				}
-			: {}),
+		...(action ? { action } : {}),
 	});
 }

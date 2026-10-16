@@ -156,6 +156,7 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
+			hasPostRequestScript={false}
 			isStreamingRequest={false}
 			{...props}
 		/>
@@ -608,6 +609,56 @@ describe("notices", () => {
 		);
 
 		expect(screen.queryByText("Pre-request script won't run")).toBeNull();
+	});
+
+	it("explains the post-request sample for a request with only a post-request script", () => {
+		open({ hasPreRequestScript: false, hasPostRequestScript: true });
+		expect(screen.getByText("Tests run afterwards, on a sample")).toBeInTheDocument();
+		expect(
+			screen.getByText(/replayed after the run on about 1 in 100 responses/)
+		).toBeInTheDocument();
+		expect(screen.queryByText("Pre-request script won't run")).toBeNull();
+	});
+
+	it("says nothing about sampling when no post-request script would be replayed", () => {
+		open({ hasPostRequestScript: false });
+		expect(screen.queryByText("Tests run afterwards, on a sample")).toBeNull();
+	});
+
+	it("hides the sampling notice once Scripts is set to All inline", () => {
+		open({ hasPostRequestScript: true });
+		expect(screen.getByText("Tests run afterwards, on a sample")).toBeInTheDocument();
+
+		fireEvent.click(
+			within(screen.getByRole("radiogroup", { name: /^scripts$/i })).getByRole("radio", {
+				name: "All inline",
+			})
+		);
+
+		expect(screen.queryByText("Tests run afterwards, on a sample")).toBeNull();
+	});
+
+	it("keeps the sampling notice from gating Start", () => {
+		open({ hasPostRequestScript: true });
+		expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
+	});
+
+	it("describes the test sample in no hint or notice as a percentage of responses", () => {
+		// The success-sample slider legitimately reads "10%", so the guard reads
+		// the three texts about test sampling rather than the whole dialog.
+		open({ hasPostRequestScript: true });
+		fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+
+		const texts = [
+			/replayed after the run on about 1 in 100 responses/,
+			/Post-request tests are sampled separately/,
+			/Tests in a post-request script run on a sample/,
+		].map((pattern) => screen.getByText(pattern).textContent ?? "");
+
+		for (const text of texts) {
+			expect(text.length).toBeGreaterThan(0);
+			expect(text).not.toContain("10%");
+		}
 	});
 
 	it("disables Start while a blocking notice is live", () => {

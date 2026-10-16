@@ -37,6 +37,7 @@ export function useStopRun(runId: string): { stop: () => Promise<void>; isStoppi
 			await queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) });
 			await queryClient.invalidateQueries({ queryKey: queryKeys.runs.report(runId) });
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		} catch (error) {
 			// The run keeps executing and the button comes back, so without this
 			// a click that failed is indistinguishable from one that did nothing.

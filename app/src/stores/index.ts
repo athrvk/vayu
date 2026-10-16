@@ -13,6 +13,7 @@ export { useDashboardStore, deriveRunProgress } from "./dashboard-store";
 export { useScenarioRunStore } from "./scenario-run-store";
 export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";
+export { useEnvSwitcherStore } from "./env-switcher-store";
 export {
 	useImportReportStore,
 	selectImportReport,
