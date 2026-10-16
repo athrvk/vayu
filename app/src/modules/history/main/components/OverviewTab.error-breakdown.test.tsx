@@ -69,12 +69,35 @@ describe("report error summary", () => {
 		expect(summary.textContent).toContain("17 (17.00%)");
 	});
 
-	it("Request/Response view prints the same split", () => {
+	it("Request/Response view prints the same card", () => {
 		render(withQueryClient(<RequestResponseView report={report} />));
 
-		expect(screen.getByText("Total errors:").nextSibling?.textContent).toBe("17");
-		expect(screen.getByText("HTTP errors:").nextSibling?.textContent).toBe("15");
-		expect(screen.getByText("No response:").nextSibling?.textContent).toBe("2");
+		const summary = screen.getByText("Error summary").closest<HTMLElement>(".enter-fade")!;
+		expect(summary.textContent).toContain("17 (17.00%)");
+		expect(within(summary).getByText("HTTP errors").nextSibling?.textContent).toBe("15");
+		expect(within(summary).getByText("No response").nextSibling?.textContent).toBe("2");
+		expect(within(summary).getByText("Timeout").nextSibling?.textContent).toBe("2");
+	});
+
+	it("Request/Response view lists the status codes an HTTP-only run failed with", () => {
+		render(
+			withQueryClient(
+				<RequestResponseView
+					report={{
+						...report,
+						errors: {
+							total: 15,
+							withDetails: 0,
+							types: {},
+							byStatusCode: { "500": 15 },
+						},
+					}}
+				/>
+			)
+		);
+
+		const summary = screen.getByText("Error summary").closest<HTMLElement>(".enter-fade")!;
+		expect(within(summary).getByText("HTTP 500").nextSibling?.textContent).toBe("15");
 	});
 });
 

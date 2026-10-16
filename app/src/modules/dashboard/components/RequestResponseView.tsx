@@ -35,6 +35,7 @@ import {
 	SampleRetentionNote,
 	CapturedDataWarning,
 	CustomMetricsSummary,
+	ErrorSummary,
 	ThresholdVerdict,
 	stoppedRunOf,
 	TestValidationSummary,
@@ -130,38 +131,12 @@ function RequestResponseView({ report }: RequestResponseViewProps) {
 			{/* Outside every count above and below; a stopped run can have this and no errors. */}
 			<CancelledRequestsNote count={report.summary.cancelledRequests} />
 
-			{/* Error Details */}
-			{report.errors && report.errors.total > 0 && (
-				<Card>
-					<CardHeader>
-						<CardTitle>Error summary</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<div className="space-y-3">
-							<div className="flex justify-between">
-								<span className="text-muted-foreground">Total errors:</span>
-								<span className="font-semibold text-destructive-text">
-									{report.errors.total}
-								</span>
-							</div>
-							<div className="flex justify-between text-sm">
-								<span className="text-muted-foreground">HTTP errors:</span>
-								<span className="font-medium">{errors.httpErrors}</span>
-							</div>
-							<div className="flex justify-between text-sm">
-								<span className="text-muted-foreground">No response:</span>
-								<span className="font-medium">{errors.noResponse}</span>
-							</div>
-							{Object.entries(report.errors.types || {}).map(([type, count]) => (
-								<div key={type} className="flex justify-between text-sm">
-									<span className="text-muted-foreground">{type}:</span>
-									<span className="font-medium">{String(count)}</span>
-								</div>
-							))}
-						</div>
-					</CardContent>
-				</Card>
-			)}
+			<ErrorSummary
+				errors={report.errors}
+				errorRate={report.summary.errorRate}
+				httpErrors={errors.httpErrors}
+				noResponse={errors.noResponse}
+			/>
 
 			{/* Timing Breakdown. Gated on the averages themselves, not on the
 			    object: `timingBreakdown` also carries the per-phase percentiles,
