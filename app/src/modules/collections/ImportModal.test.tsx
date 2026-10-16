@@ -107,6 +107,12 @@ describe("ImportModal", () => {
 		expect(screen.getByText(/Drop files here/i)).toBeInTheDocument();
 	});
 
+	it("lists both Insomnia versions among the formats it accepts", () => {
+		renderModal();
+		expect(screen.getByText("Insomnia v4")).toBeInTheDocument();
+		expect(screen.getByText("Insomnia v5")).toBeInTheDocument();
+	});
+
 	it("previews a pasted Postman collection with detection badge + stats", async () => {
 		stubParse(() =>
 			result({
